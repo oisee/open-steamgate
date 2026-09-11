@@ -122,6 +122,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - Every SAP-vs-open-abap discrepancy goes into `ANORMALIES.md` before any
   workaround. Known: no implicit MANDT; `sy-mandt = 123`.
 - Closure audit of a real DPC: `npm run probe -- <folder> [--lib <stubs>]`.
+- `STG_DB=duckdb` runs everything on DuckDB (`tools/duckdb-client.mjs`,
+  autocommit, literals trimmed); `npm run unit:duckdb`, `start:duckdb`.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

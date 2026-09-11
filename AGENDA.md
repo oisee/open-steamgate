@@ -32,6 +32,22 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## DuckDB as the store, 2026-09-12 (night run)
+
+`tools/duckdb-client.mjs` implements the transpiler's `DatabaseClient` over
+`@duckdb/node-api` (in-process, columnar). `STG_DB=duckdb` makes
+`test/setup.mjs` load the PostgreSQL DDL the transpiler already emits
+(`NCHAR` → `VARCHAR`), the seed rows and the CDS views into DuckDB instead of
+SQLite. **All 69 ABAP Unit tests and the HTTP suite pass unchanged on DuckDB**
+(`npm run unit:duckdb`, `npm run integration:duckdb`, `npm run start:duckdb`),
+including the SADL cube's `GROUP BY`. Two adaptations were needed: trailing
+blanks in string literals are trimmed (ABAP CHAR semantics; SQLite tolerated
+the padded literals, VARCHAR does not), and the adapter runs in autocommit
+because a failed statement aborts a DuckDB transaction and there are no
+savepoints to fence it the way the PG client does. Open: a LUW bracket
+(retry-based), DECIMAL/DATE column types instead of NCHAR, and the transpiler
+package (`@abaplint/database-duckdb`) this could become upstream.
+
 ## SADL-lite, 2026-09-12 (night run)
 
 Reference-data-source services run now, read-only, with analytics.
@@ -218,13 +234,8 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
 
 ## Ideas parked (2026-09-11)
 
-- **DuckDB (or ClickHouse) as the analytical store.** The transpiler's DB
-  layer is a `DatabaseClient` per package (`database-sqlite`, `database-pg`,
-  `database-snowflake`) plus a schema generator; Snowflake proves a non-PG
-  dialect works. A `database-duckdb` package the size of the Snowflake one
-  would run every DPC `SELECT … GROUP BY` on a columnar engine unchanged.
-  DuckDB over ClickHouse: embedded, transactional, UPDATE/DELETE, PG-like SQL.
-  Pairs with an analytical list page once `$apply`/aggregation is on the wire.
+- **DuckDB: done as a spike 2026-09-12** (section above). ClickHouse would
+  be the same adapter shape without UPDATE/DELETE semantics; not started.
 - **SADL-lite: done 2026-09-12** (see the section above); joins and writes
   remain.
 - **SAP GUI front (DIAG) for reports and dynpros.** Orthogonal to OData: the

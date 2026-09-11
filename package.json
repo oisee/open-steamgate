@@ -15,7 +15,10 @@
     "probe": "node tools/closure-probe.mjs",
     "e2e": "npm run transpile && playwright test",
     "e2e:install": "playwright install chromium",
-    "cds": "node tools/cds2ddic.mjs"
+    "cds": "node tools/cds2ddic.mjs",
+    "unit:duckdb": "npm run transpile && echo RUNNING on DuckDB && STG_DB=duckdb node --expose-gc output/index.mjs && echo OK",
+    "integration:duckdb": "STG_DB=duckdb mocha test/mocha.mjs",
+    "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
@@ -23,6 +26,7 @@
     "@abaplint/database-sqlite": "^2.13.83",
     "@abaplint/runtime": "^2.13.85",
     "@abaplint/transpiler-cli": "^2.13.85",
+    "@duckdb/node-api": "^1.5.5-r.4",
     "@playwright/test": "^1.62.1",
     "chai": "^5.3.3",
     "express": "^4.22.2",
