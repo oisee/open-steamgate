@@ -1,7 +1,8 @@
 {
   "global": {
     "files": "/{src,test}/**/*.*",
-    "errorOnDuplicateFilenames": true
+    "errorOnDuplicateFilenames": true,
+    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$"]
   },
   "dependencies": [
     {

@@ -1,4 +1,5 @@
 import express from "express";
+import {fileURLToPath} from "node:url";
 import {initializeABAP} from "../output/init.mjs";
 import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
 import {zcl_oao_registry} from "../output/zcl_oao_registry.clas.mjs";
@@ -21,8 +22,11 @@ export function startServer(quiet) {
   app.use(express.raw({type: "*/*"}));
 
   app.get("/", function (req, res) {
-    res.send("open-steamgate: OData v2 services live under /sap/opu/odata/sap/");
+    res.send('open-steamgate: OData v2 services live under /sap/opu/odata/sap/, the demo Fiori app under <a href="/app/index.html">/app/</a>');
   });
+
+  // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
+  app.use("/app", express.static(fileURLToPath(new URL("../webapp", import.meta.url))));
 
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
     await cl_express_icf_shim.run({

@@ -32,6 +32,16 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Phase 4 demo — Fiori Elements list report, 2026-09-11
+
+`webapp/` is a Fiori Elements V2 list report (SAPUI5 1.120 from the CDN,
+annotations file, no controller code) served by the same Express process at
+`/app/`, so no proxy and no CORS. The exact SmartTable requests
+(`$select`, `$skip/$top`, `$inlinecount=allpages`, `$filter`, `$metadata`
+with `sap-language`) are answered by the dispatcher. `npm run e2e` runs the
+Playwright check; it needs `playwright install-deps chromium` once (sudo) on
+a bare machine. Browser-level verification is still pending on this box.
+
 ## Phase 1+2 — read path incl. `$filter` done 2026-09-11
 
 `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$filter=Status eq 'A' and TravelId ge 'T0002'&$top=2&$inlinecount=allpages`

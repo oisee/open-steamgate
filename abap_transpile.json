@@ -32,5 +32,10 @@
       "filename": "../test/setup.mjs",
       "preFunction": "setup"
     }
-  }
+  },
+  "exclude_filter": [
+    "/test/e2e/",
+    "\\.mjs$",
+    "\\.cjs$"
+  ]
 }
