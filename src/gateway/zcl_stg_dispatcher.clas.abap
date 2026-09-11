@@ -57,6 +57,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         iv_base_url        TYPE string
         it_navigation_path TYPE /iwbep/t_mgw_navigation_path OPTIONAL
         it_key_tab         TYPE /iwbep/t_mgw_name_value_pair OPTIONAL
+        iv_source_set      TYPE string OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -71,6 +72,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         iv_base_url        TYPE string
         it_navigation_path TYPE /iwbep/t_mgw_navigation_path OPTIONAL
         it_key_tab         TYPE /iwbep/t_mgw_name_value_pair OPTIONAL
+        iv_source_set      TYPE string OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -653,6 +655,9 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ro_context->mv_entity_type = is_set-entity_type.
     ro_context->ms_set         = is_set.
     ro_context->mv_count       = is_request-is_count.
+    ro_context->mv_aggregate   = is_set-aggregate.
+    ro_context->mv_select      = zcl_stg_url=>option( is_request = is_request
+                                                      iv_name    = '$select' ).
 
     lv_value = zcl_stg_url=>option( is_request = is_request
                                     iv_name    = '$top' ).
@@ -711,6 +716,10 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       lo_context->mt_key_tab = it_key_tab.
     ENDIF.
     lt_nav_path = it_navigation_path.
+    lo_context->mt_navigation_path   = it_navigation_path.
+    lo_context->mv_source_entity_set = iv_source_set.
+    lo_context->mt_navigation_path   = it_navigation_path.
+    lo_context->mv_source_entity_set = iv_source_set.
     IF is_request-is_count = abap_false.
       ls_paging = lo_context->get_paging( ).
     ENDIF.
@@ -824,6 +833,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       lo_context->mt_key_tab = it_key_tab.
     ENDIF.
     lt_nav_path = it_navigation_path.
+    lo_context->mt_navigation_path   = it_navigation_path.
+    lo_context->mv_source_entity_set = iv_source_set.
 
     lt_expand = expand_list( is_request ).
     IF lt_expand IS INITIAL.
@@ -1030,10 +1041,12 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       APPEND ls_path TO lt_path.
 
       CREATE OBJECT lo_context.
-      lo_context->mv_entity_set  = ls_target-name.
-      lo_context->mv_entity_type = ls_target-entity_type.
-      lo_context->ms_set         = ls_target.
-      lo_context->mt_key_tab     = lt_keys.
+      lo_context->mv_entity_set        = ls_target-name.
+      lo_context->mv_entity_type       = ls_target-entity_type.
+      lo_context->ms_set               = ls_target.
+      lo_context->mt_key_tab           = lt_keys.
+      lo_context->mt_navigation_path   = lt_path.
+      lo_context->mv_source_entity_set = is_set-name.
 
       CLEAR ls_nav_json.
       ls_nav_json-name = ls_nav-name.
@@ -1149,7 +1162,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                      is_request         = ls_request
                                      iv_base_url        = iv_base_url
                                      it_navigation_path = lt_path
-                                     it_key_tab         = lt_keys ).
+                                     it_key_tab         = lt_keys
+                                     iv_source_set      = is_set-name ).
     ELSEIF is_request-nav_key_string IS INITIAL.
 * to-one: the source keys identify the target (foreign key)
       rs_response = read_entity( is_service         = is_service
@@ -1157,13 +1171,15 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                  is_request         = ls_request
                                  iv_base_url        = iv_base_url
                                  it_navigation_path = lt_path
-                                 it_key_tab         = lt_keys ).
+                                 it_key_tab         = lt_keys
+                                 iv_source_set      = is_set-name ).
     ELSE.
       rs_response = read_entity( is_service         = is_service
                                  is_set             = ls_target
                                  is_request         = ls_request
                                  iv_base_url        = iv_base_url
-                                 it_navigation_path = lt_path ).
+                                 it_navigation_path = lt_path
+                                 iv_source_set      = is_set-name ).
     ENDIF.
   ENDMETHOD.
 

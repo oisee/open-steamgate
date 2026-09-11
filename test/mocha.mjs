@@ -105,6 +105,30 @@ describe("wire", () => {
     res = await fetch(BASE + "/CancelTravel?TravelId='T0009'", {method: "POST", headers: {"x-csrf-token": "open-steamgate"}});
     expect(res.status).to.equal(200);
     expect((await res.json()).d.Status).to.equal("X");
+    // put the seed row back for the tests that follow
+    res = await fetch(BASE + "/TravelSet('T0009')", {method: "PUT", headers: {"content-type": "application/json", "x-csrf-token": "open-steamgate"}, body: JSON.stringify({Description: "Other client, must not leak", Status: "A", Seats: 9})});
+    expect(res.status).to.equal(204);
+  });
+
+  it("SADL service over CDS views: read, navigate, aggregate", async () => {
+    const S = "http://localhost:3030/sap/opu/odata/sap/ZSTG_SADL_SRV";
+    let res = await fetch(S + "/$metadata");
+    expect(res.status).to.equal(200);
+    const xml = await res.text();
+    expect(xml).to.contain('<EntitySet Name="Zc_Stg_TravelcubeSet"');
+    expect(xml).to.contain('sap:semantics="aggregate"');
+    expect(xml).to.contain('Term="com.sap.vocabularies.UI.v1.LineItem"');
+
+    res = await fetch(S + "/Zc_Stg_TravelSet?$filter=STATUS eq 'A'&$orderby=TRAVELID desc");
+    expect(res.status).to.equal(200);
+    expect((await res.json()).d.results.map((r) => r.TRAVELID)).to.deep.equal(["T0009", "T0002", "T0001"]);
+
+    res = await fetch(S + "/Zc_Stg_TravelSet('T0001')/TO_BOOKINGS");
+    expect((await res.json()).d.results.map((r) => r.BOOKINGID)).to.deep.equal(["B001", "B002"]);
+
+    res = await fetch(S + "/Zc_Stg_TravelcubeSet?$select=STATUS,SEATS&$orderby=STATUS");
+    const rows = (await res.json()).d.results.map((r) => [r.STATUS, r.SEATS]);
+    expect(rows).to.deep.equal([["A", 12], ["X", 4]]);
   });
 
   it("$count", async () => {

@@ -25,6 +25,7 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
              entity_type TYPE string,
              properties  TYPE ty_properties,
              navs        TYPE ty_navs,
+             aggregate   TYPE abap_bool,
            END OF ty_entity_set.
     TYPES ty_entity_sets TYPE STANDARD TABLE OF ty_entity_set WITH DEFAULT KEY.
 
@@ -166,6 +167,8 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
     DATA lo_action      TYPE REF TO zcl_oao_action.
     DATA lo_parameter   TYPE REF TO zcl_oao_parameter.
     DATA ls_action      TYPE ty_action.
+    DATA lt_annotations TYPE zcl_oao_annotation=>ty_annotations.
+    DATA ls_annotation  TYPE zcl_oao_annotation=>ty_annotation.
     FIELD-SYMBOLS <ls_set> TYPE ty_entity_set.
 
     rs_service-name = iv_service.
@@ -222,6 +225,13 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
         ls_set-name        = ls_entity_set-name.
         ls_set-entity_type = lv_type_name.
         ls_set-properties  = lt_info.
+        IF ls_entity_set-entity_set->mo_annotation IS BOUND.
+          lt_annotations = ls_entity_set-entity_set->mo_annotation->get_all( ).
+          READ TABLE lt_annotations INTO ls_annotation WITH KEY key = 'semantics'.
+          IF sy-subrc = 0 AND ls_annotation-value = 'aggregate'.
+            ls_set-aggregate = abap_true.
+          ENDIF.
+        ENDIF.
         APPEND ls_set TO rs_service-entity_sets.
       ENDLOOP.
     ENDLOOP.

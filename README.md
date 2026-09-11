@@ -12,7 +12,9 @@ Deploy back through abapGit when you want to.
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
 
-> **Status: CRUD, `$batch`, navigation and `$expand` work end to end.** `npm test`
+> **Status: CRUD, `$batch`, navigation, `$expand`, deep insert, function
+> imports and read-only SADL over CDS projections (with analytics
+> annotations) work end to end.** `npm test`
 > serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
 > as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as
 > SELECT-OPTIONS, `$top/$skip/$orderby/$inlinecount/$count`, POST/PUT/DELETE

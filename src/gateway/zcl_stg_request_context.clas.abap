@@ -21,6 +21,10 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
     DATA mv_filter_string TYPE string.
     DATA mt_key_tab       TYPE /iwbep/t_mgw_name_value_pair.
     DATA ms_set           TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA mt_navigation_path TYPE /iwbep/t_mgw_navigation_path.
+    DATA mv_source_entity_set TYPE string.
+    DATA mv_select        TYPE string.
+    DATA mv_aggregate     TYPE abap_bool.
 
     METHODS get_sorting_order
       RETURNING
@@ -258,7 +262,11 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entity~get_source_entity_set_name.
-    rv_entity_set = mv_entity_set.
+    IF mv_source_entity_set IS NOT INITIAL.
+      rv_entity_set = mv_source_entity_set.
+    ELSE.
+      rv_entity_set = mv_entity_set.
+    ENDIF.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entity~get_converted_keys.
@@ -274,7 +282,11 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entity_c~get_source_entity_set_name.
-    rv_entity_set = mv_entity_set.
+    IF mv_source_entity_set IS NOT INITIAL.
+      rv_entity_set = mv_source_entity_set.
+    ELSE.
+      rv_entity_set = mv_entity_set.
+    ENDIF.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entity_c~get_entity_type_name.

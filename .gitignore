@@ -27,3 +27,6 @@ coverage/
 # Playwright
 test-results/
 playwright-report/
+
+# generated from src/cds by tools/cds2ddic.mjs
+gen/

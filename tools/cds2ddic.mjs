@@ -1,0 +1,353 @@
+#!/usr/bin/env node
+// CDS (DDLS) -> what the transpiler and the SADL runtime need.
+//
+// For every src/cds/*.ddls.asddls that is a projection of one table or DDIC
+// view (no joins yet) this writes into gen/cds/:
+//   <SQLVIEW>.view.xml            DDIC view in abapGit form: the transpiler
+//                                 creates the SQLite view from it and ABAP can
+//                                 SELECT FROM it with typed fields
+//   zcl_stg_cds_<sqlview>.clas.abap  a zif_stg_cds_source over that view
+//                                 (static FROM; WHERE/ORDER BY/field list and
+//                                 GROUP BY dynamic)
+//   zcl_stg_cds_registry.clas.abap  entity metadata for the SADL exposure:
+//                                 fields with EDM types, keys, labels, all
+//                                 annotations, associations with their ON
+//                                 pairs and cardinality
+// The DDLS objects themselves stay out of the transpiler input (it rejects
+// the object type); abaplint lints them.
+import * as abaplint from "@abaplint/core";
+import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, statSync} from "node:fs";
+import {join} from "node:path";
+
+const OUT = "gen/cds";
+const LIBS = [".local/lars/open-abap-core/src", ".local/fork/open-abap-odata/src"];
+
+function walk(dir, out = []) {
+  for (const e of readdirSync(dir, {withFileTypes: true})) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) { if (!["node_modules", "output", ".git"].includes(e.name)) walk(p, out); }
+    else if (/\.(abap|xml|asddls)$/.test(e.name) && !e.name.endsWith(".clas.testclasses.abap")) out.push(p);
+  }
+  return out;
+}
+const mem = (paths) => paths.map((p) => new abaplint.MemoryFile(p, readFileSync(p, "utf8")));
+
+function tokensOf(node) { return node?.concatTokens?.() ?? ""; }
+function nodeName(node) { return node.get?.().constructor?.name ?? ""; }
+function children(node) { return node.getChildren?.() ?? []; }
+function find(node, name) { const out = []; const rec = (n) => { if (nodeName(n) === name) out.push(n); for (const c of children(n)) rec(c); }; rec(node); return out; }
+function firstDirect(node, name) { return children(node).find((c) => nodeName(c) === name); }
+function normAnno(text) { return text.replace(/\s*\.\s*/g, ".").replace(/\s*:\s*/g, ": ").replace(/@\s+/g, "@").trim(); }
+
+function edmOf(type) {
+  const n = type?.constructor?.name ?? "VoidType";
+  const len = type?.getLength?.() ?? 0;
+  switch (n) {
+    case "CharacterType": return {edm: "Edm.String", maxlength: len};
+    case "NumericType": return {edm: "Edm.String", maxlength: len};
+    case "StringType": return {edm: "Edm.String", maxlength: 0};
+    case "IntegerType": case "Integer8Type": return {edm: "Edm.Int32", maxlength: 0};
+    case "PackedType": return {edm: "Edm.Decimal", precision: len * 2 - 1, scale: type.getDecimals?.() ?? 0};
+    case "FloatType": case "DecFloat16Type": case "DecFloat34Type": return {edm: "Edm.Decimal", precision: 34, scale: 0};
+    case "DateType": return {edm: "Edm.DateTime", precision: 0};
+    case "TimeType": return {edm: "Edm.Time", precision: 0};
+    default: return {edm: "Edm.String", maxlength: len};
+  }
+}
+
+function parseDDLS(obj, reg) {
+  const p = obj.getParsedData();
+  const tree = p?.tree;
+  if (!tree) return undefined;
+  const name = obj.getName();
+  const sqlView = (p.sqlViewName ?? name).toUpperCase();
+  const viewAnnotations = children(tree).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
+  const select = firstDirect(tree, "CDSSelect");
+  if (!select) return {name, skip: "no select"};
+  const sources = find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
+  if (find(select, "CDSJoin").length > 0 || sources.length !== 1) return {name, skip: "joins are not supported yet"};
+  const source = sources[0].replace(/\s+/g, "");
+  const table = reg.getObject("TABL", source) ?? reg.getObject("VIEW", source);
+  const comps = new Map();
+  for (const c of table?.parseType(reg)?.getComponents?.() ?? []) comps.set(c.name.toUpperCase(), c.type);
+
+  const fields = [];
+  const exposedAssociations = [];
+  for (const el of find(select, "CDSElement")) {
+    const annos = children(el).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
+    const isKey = children(el).some((c) => nodeName(c) === "Identifier" && tokensOf(c).toLowerCase() === "key");
+    const as = firstDirect(el, "CDSAs");
+    const alias = as ? tokensOf(firstDirect(as, "CDSName")) : undefined;
+    const src = children(el).find((c) => nodeName(c) === "CDSName" || nodeName(c) === "CDSPrefixedName");
+    const srcName = src ? tokensOf(src).replace(/\s+/g, "") : undefined;
+    if (!srcName) continue;
+    if (srcName.startsWith("_")) { exposedAssociations.push(srcName); continue; }
+    if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
+    const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
+    const baseField = srcName.split(".").pop().toUpperCase();
+    const t = edmOf(comps.get(baseField));
+    const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean);
+    fields.push({name: fieldName, base: baseField, key: isKey, ...t, label: label ?? fieldName, annotations: annos});
+  }
+
+  const associations = [];
+  for (const a of find(select, "CDSAssociation")) {
+    const card = tokensOf(firstDirect(a, "CDSCardinality")).replace(/\s+/g, "");
+    const m = /\[(\d+)\.\.(\d+|\*)\]/.exec(card);
+    const toks = tokensOf(a);
+    const target = /\bto\s+(\S+)/i.exec(toks)?.[1]?.toUpperCase();
+    const alias = /\bas\s+(\S+)\s+on\b/i.exec(toks)?.[1] ?? target;
+    const cond = tokensOf(firstDirect(a, "CDSCondition")) ?? "";
+    const pairs = [];
+    for (const part of cond.split(/\s+and\s+/i)) {
+      const pm = /\$projection\s*\.\s*(\w+)\s*=\s*\w+\s*\.\s*(\w+)|(\w+)\s*\.\s*(\w+)\s*=\s*\$projection\s*\.\s*(\w+)/i.exec(part);
+      if (pm) pairs.push(pm[1] ? {source: pm[1].toUpperCase(), target: pm[2].toUpperCase()} : {source: pm[5].toUpperCase(), target: pm[4].toUpperCase()});
+    }
+    associations.push({alias, target, min: m?.[1] ?? "0", max: m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias)});
+  }
+  const label = viewAnnotations.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? name;
+  return {name, sqlView, source, fields, associations, viewAnnotations, label};
+}
+
+function viewXml(e) {
+  const dd27 = e.fields.map((f) => `    <DD27P>
+     <VIEWFIELD>${f.name}</VIEWFIELD>
+     <TABNAME>${e.source}</TABNAME>
+     <FIELDNAME>${f.base}</FIELDNAME>${f.key ? "\n     <KEYFLAG>X</KEYFLAG>" : ""}
+    </DD27P>`).join("\n");
+  return `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_VIEW" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD25V>
+    <VIEWNAME>${e.sqlView}</VIEWNAME>
+    <AS4LOCAL>A</AS4LOCAL>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <AGGTYPE>V</AGGTYPE>
+    <ROOTTAB>${e.source}</ROOTTAB>
+    <DDTEXT>${e.label.replace(/[<>&]/g, "")}</DDTEXT>
+    <VIEWCLASS>D</VIEWCLASS>
+    <VIEWGRANT>R</VIEWGRANT>
+   </DD25V>
+   <DD26V_TABLE>
+    <DD26V>
+     <VIEWNAME>${e.sqlView}</VIEWNAME>
+     <TABNAME>${e.source}</TABNAME>
+     <TABPOS>0001</TABPOS>
+     <FORTABNAME>${e.source}</FORTABNAME>
+    </DD26V>
+   </DD26V_TABLE>
+   <DD27P_TABLE>
+${dd27}
+   </DD27P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+}
+
+function sourceClass(e) {
+  const cls = "zcl_stg_cds_" + e.sqlView.toLowerCase();
+  const view = e.sqlView.toLowerCase();
+  return `CLASS ${cls} DEFINITION PUBLIC CREATE PUBLIC.
+* generated by tools/cds2ddic.mjs from ${e.name} - do not edit
+  PUBLIC SECTION.
+    INTERFACES zif_stg_cds_source.
+
+    TYPES ty_line  TYPE ${view}.
+    TYPES ty_table TYPE STANDARD TABLE OF ty_line WITH DEFAULT KEY.
+ENDCLASS.
+
+CLASS ${cls} IMPLEMENTATION.
+
+  METHOD zif_stg_cds_source~read.
+    DATA lv_where TYPE string.
+    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
+
+    CREATE DATA rr_data TYPE ty_table.
+    ASSIGN rr_data->* TO <lt_data>.
+
+    lv_where = iv_where.
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+
+    IF it_fields IS INITIAL.
+      SELECT * FROM ${view}
+        INTO TABLE <lt_data>
+        WHERE (lv_where)
+        ORDER BY (it_orderby).
+    ELSE.
+      SELECT (it_fields) FROM ${view}
+        INTO CORRESPONDING FIELDS OF TABLE <lt_data>
+        WHERE (lv_where)
+        GROUP BY (it_groupby)
+        ORDER BY (it_orderby).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD zif_stg_cds_source~create_line.
+    CREATE DATA rr_line TYPE ty_line.
+  ENDMETHOD.
+
+ENDCLASS.
+`;
+}
+
+function q(s) { return "'" + String(s ?? "").replaceAll("'", "''") + "'"; }
+function bt(s) { return "`" + String(s ?? "").replaceAll("`", "``") + "`"; }
+
+function registryClass(entities) {
+  let body = "";
+  for (const e of entities) {
+    body += `
+    CLEAR ls_entity.
+    ls_entity-name         = ${q(e.name)}.
+    ls_entity-sql_view     = ${q(e.sqlView)}.
+    ls_entity-source_class = ${q("ZCL_STG_CDS_" + e.sqlView)}.
+    ls_entity-label        = ${bt(e.label)}.
+`;
+    for (const a of e.viewAnnotations) body += `    APPEND ${bt(a)} TO ls_entity-annotations.\n`;
+    for (const f of e.fields) {
+      body += `    CLEAR ls_field.
+    ls_field-name      = ${q(f.name)}.
+    ls_field-is_key    = ${f.key ? "abap_true" : "abap_false"}.
+    ls_field-edm_type  = ${q(f.edm)}.
+    ls_field-maxlength = ${f.maxlength ?? 0}.
+    ls_field-precision = ${f.precision ?? 0}.
+    ls_field-scale     = ${f.scale ?? 0}.
+    ls_field-label     = ${bt(f.label)}.
+`;
+      for (const a of f.annotations) body += `    APPEND ${bt(a)} TO ls_field-annotations.\n`;
+      body += `    APPEND ls_field TO ls_entity-fields.\n`;
+    }
+    for (const a of e.associations) {
+      body += `    CLEAR ls_assoc.
+    ls_assoc-name    = ${q(a.alias)}.
+    ls_assoc-target  = ${q(a.target)}.
+    ls_assoc-min     = ${q(a.min)}.
+    ls_assoc-max     = ${q(a.max)}.
+    ls_assoc-exposed = ${a.exposed ? "abap_true" : "abap_false"}.
+`;
+      for (const p of a.pairs) body += `    CLEAR ls_pair.
+    ls_pair-source = ${q(p.source)}.
+    ls_pair-target = ${q(p.target)}.
+    APPEND ls_pair TO ls_assoc-pairs.
+`;
+      body += `    APPEND ls_assoc TO ls_entity-associations.\n`;
+    }
+    body += `    APPEND ls_entity TO gt_entities.\n`;
+  }
+  return `CLASS zcl_stg_cds_registry DEFINITION PUBLIC CREATE PUBLIC.
+* generated by tools/cds2ddic.mjs - do not edit. What the SADL exposure and
+* DPC know about every CDS entity of this build.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_field,
+             name        TYPE string,
+             is_key      TYPE abap_bool,
+             edm_type    TYPE string,
+             maxlength   TYPE i,
+             precision   TYPE i,
+             scale       TYPE i,
+             label       TYPE string,
+             annotations TYPE string_table,
+           END OF ty_field.
+    TYPES tt_field TYPE STANDARD TABLE OF ty_field WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_pair,
+             source TYPE string,
+             target TYPE string,
+           END OF ty_pair.
+    TYPES tt_pair TYPE STANDARD TABLE OF ty_pair WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_assoc,
+             name    TYPE string,
+             target  TYPE string,
+             min     TYPE string,
+             max     TYPE string,
+             exposed TYPE abap_bool,
+             pairs   TYPE tt_pair,
+           END OF ty_assoc.
+    TYPES tt_assoc TYPE STANDARD TABLE OF ty_assoc WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_entity,
+             name         TYPE string,
+             sql_view     TYPE string,
+             source_class TYPE string,
+             label        TYPE string,
+             annotations  TYPE string_table,
+             fields       TYPE tt_field,
+             associations TYPE tt_assoc,
+           END OF ty_entity.
+    TYPES tt_entity TYPE STANDARD TABLE OF ty_entity WITH DEFAULT KEY.
+
+    CLASS-METHODS entities
+      RETURNING
+        VALUE(rt_entities) TYPE tt_entity.
+
+    CLASS-METHODS get
+      IMPORTING
+        iv_name          TYPE string
+      RETURNING
+        VALUE(rs_entity) TYPE ty_entity.
+  PRIVATE SECTION.
+    CLASS-DATA gt_entities TYPE tt_entity.
+    CLASS-METHODS build.
+ENDCLASS.
+
+CLASS zcl_stg_cds_registry IMPLEMENTATION.
+
+  METHOD entities.
+    IF gt_entities IS INITIAL.
+      build( ).
+    ENDIF.
+    rt_entities = gt_entities.
+  ENDMETHOD.
+
+  METHOD get.
+    IF gt_entities IS INITIAL.
+      build( ).
+    ENDIF.
+    READ TABLE gt_entities INTO rs_entity WITH KEY name = to_upper( iv_name ).
+    IF sy-subrc <> 0.
+      CLEAR rs_entity.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD build.
+    DATA ls_entity TYPE ty_entity.
+    DATA ls_field  TYPE ty_field.
+    DATA ls_assoc  TYPE ty_assoc.
+    DATA ls_pair   TYPE ty_pair.
+${body}
+  ENDMETHOD.
+
+ENDCLASS.
+`;
+}
+
+function main() {
+  const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+    global: {files: "/**/*.*"}, syntax: {version: "open-abap", errorNamespace: "."}, rules: {},
+  })));
+  const mains = [];
+  if (existsSync("src/cds")) mains.push(...walk("src/cds"));
+  if (existsSync("src/ddic")) mains.push(...walk("src/ddic"));
+  reg.addFiles(mem(mains));
+  reg.addDependencies(mem(LIBS.filter(existsSync).flatMap((l) => walk(l))));
+  reg.parse();
+
+  mkdirSync(OUT, {recursive: true});
+  const entities = [];
+  for (const obj of reg.getObjectsByType("DDLS")) {
+    const e = parseDDLS(obj, reg);
+    if (!e) continue;
+    if (e.skip) { console.log(`cds2ddic: ${e.name}: skipped (${e.skip})`); continue; }
+    entities.push(e);
+    writeFileSync(join(OUT, e.sqlView.toLowerCase() + ".view.xml"), viewXml(e));
+    writeFileSync(join(OUT, "zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap"), sourceClass(e));
+    console.log(`cds2ddic: ${e.name} -> ${e.sqlView} (${e.fields.length} fields, ${e.associations.length} associations)`);
+  }
+  writeFileSync(join(OUT, "zcl_stg_cds_registry.clas.abap"), registryClass(entities));
+}
+main();

@@ -1,5 +1,9 @@
 {
-  "input_folder": "{src,test}",
+  "input_folder": [
+    "src",
+    "test",
+    "gen"
+  ],
   "output_folder": "output",
   "write_unit_tests": true,
   "write_source_map": true,
@@ -36,6 +40,7 @@
   "exclude_filter": [
     "/test/e2e/",
     "\\.mjs$",
-    "\\.cjs$"
+    "\\.cjs$",
+    "\\.ddls\\."
   ]
 }

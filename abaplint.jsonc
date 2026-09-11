@@ -1,6 +1,6 @@
 {
   "global": {
-    "files": "/{src,test}/**/*.*",
+    "files": "/{src,test,gen}/**/*.*",
     "errorOnDuplicateFilenames": true,
     "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$"]
   },

@@ -117,6 +117,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-12-create-data-ddic-view — CREATE DATA with a DDIC view type is unknown at runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-12`
+- Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
+- Affected ABAP statement, runtime API or adapter: `CREATE DATA rr TYPE STANDARD TABLE OF <ddic view>` (VIEW object)
+- Minimal ABAP reproducer: `tools/cds2ddic.mjs` generated source classes before this entry's workaround
+- Exact command used to run it: `npm run unit`
+- Expected SAP behaviour: a table of the view's line type
+- Actual open-abap behaviour: `Error: CREATE DATA, unknown type ZVSTGTRAVEL` (the transpiler resolves the view statically for SELECT, but the runtime DDIC lookup has no entry for views)
+- Impact on open-steamgate: generic code that creates data by a view name fails
+- Smallest safe workaround: declare `TYPES ty_line TYPE <view>` in the class and `CREATE DATA ... TYPE ty_line` / a local table type (applied in the generator)
+- Upstream issue: not reported yet
+- Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_sadl->entity_set_with_filter`
+- Upstream version containing a fix: `unknown`
+
 ## Resolved anomalies
 
 (none yet)

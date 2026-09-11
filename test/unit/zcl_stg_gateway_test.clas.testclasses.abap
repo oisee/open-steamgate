@@ -1149,3 +1149,186 @@ CLASS ltcl_function_import IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_sadl DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS registry_from_cds FOR TESTING RAISING cx_static_check.
+    METHODS sadl_definition_parses FOR TESTING RAISING cx_static_check.
+    METHODS metadata_from_cds FOR TESTING RAISING cx_static_check.
+    METHODS entity_set_with_filter FOR TESTING RAISING cx_static_check.
+    METHODS entity_by_key_and_navigation FOR TESTING RAISING cx_static_check.
+    METHODS expand FOR TESTING RAISING cx_static_check.
+    METHODS analytics_group_by FOR TESTING RAISING cx_static_check.
+
+    METHODS get
+      IMPORTING
+        iv_path            TYPE string
+        iv_query           TYPE string OPTIONAL
+      RETURNING
+        VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
+ENDCLASS.
+
+CLASS ltcl_sadl IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_SADL_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_SADL_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_SADL_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD get.
+    DATA lt_options TYPE tihttpnvp.
+
+    IF iv_query IS NOT INITIAL.
+      lt_options = cl_http_utility=>string_to_fields( iv_query ).
+    ENDIF.
+    rs_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = iv_path
+                                                it_options = lt_options ).
+  ENDMETHOD.
+
+  METHOD registry_from_cds.
+    DATA ls_entity TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA ls_field  TYPE zcl_stg_cds_registry=>ty_field.
+    DATA ls_assoc  TYPE zcl_stg_cds_registry=>ty_assoc.
+
+    ls_entity = zcl_stg_cds_registry=>get( 'ZC_STG_TRAVEL' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_entity-sql_view
+                                        exp = 'ZVSTGTRAVEL' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_entity-fields )
+                                        exp = 4 ).
+    READ TABLE ls_entity-fields INTO ls_field WITH KEY name = 'SEATS'.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_field-edm_type
+                                        exp = 'Edm.Int32' ).
+    READ TABLE ls_entity-fields INTO ls_field WITH KEY name = 'TRAVELID'.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_field-is_key
+                                        exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = ls_field-label
+                                        exp = 'Travel' ).
+    READ TABLE ls_entity-associations INTO ls_assoc INDEX 1.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_assoc-name
+                                        exp = '_Bookings' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_assoc-target
+                                        exp = 'ZC_STG_BOOKING' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_assoc-pairs )
+                                        exp = 1 ).
+  ENDMETHOD.
+
+  METHOD sadl_definition_parses.
+    DATA lo_def TYPE REF TO zcl_stg_sadl_def.
+    DATA ls_structure TYPE zcl_stg_sadl_def=>ty_structure.
+    DATA ls_assoc     TYPE zcl_stg_sadl_def=>ty_association.
+
+    CREATE OBJECT lo_def
+      EXPORTING
+        iv_sadl_xml = `<sadl:definition><sadl:dataSource type="CDS" name="A" binding="A" /><sadl:resultSet>` &&
+                      `<sadl:structure name="Head" dataSource="A" maxEditMode="RO" exposure="TRUE" ><sadl:query name="Q" ></sadl:query>` &&
+                      `<sadl:association name="TO_ITEMS" binding="_ITEMS" target="Item" cardinality="many" /></sadl:structure>` &&
+                      `<sadl:structure name="Item" dataSource="B" exposure="TRUE" /></sadl:resultSet></sadl:definition>`.
+    cl_abap_unit_assert=>assert_equals( act = lines( lo_def->mt_structures )
+                                        exp = 2 ).
+    ls_structure = lo_def->structure_by_set( 'HeadSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_structure-data_source
+                                        exp = 'A' ).
+    READ TABLE ls_structure-associations INTO ls_assoc INDEX 1.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_assoc-binding
+                                        exp = '_ITEMS' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_assoc-target
+                                        exp = 'Item' ).
+  ENDMETHOD.
+
+  METHOD metadata_from_cds.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_SADL_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntityType Name="Zc_Stg_Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Property Name="TRAVELID" Type="Edm.String" Nullable="false" MaxLength="8" sap:unicode="false" sap:label="Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Property Name="SEATS" Type="Edm.Int32"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<NavigationProperty Name="TO_BOOKINGS" Relationship="ZSTG_SADL_SRV.Zc_Stg_Travel_TO_BOOKINGS"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntitySet Name="Zc_Stg_TravelSet" EntityType="ZSTG_SADL_SRV.Zc_Stg_Travel" sap:creatable="false"' ) ).
+* analytics: the cube is an aggregate set with dimensions and a measure
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntitySet Name="Zc_Stg_TravelcubeSet" EntityType="ZSTG_SADL_SRV.Zc_Stg_Travelcube" sap:creatable="false" sap:updatable="false" sap:deletable="false" sap:pageable="true" sap:semantics="aggregate"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'sap:label="Seats" sap:creatable="false" sap:updatable="false" sap:sortable="true" sap:filterable="true" sap:aggregation-role="measure"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'sap:label="Status" sap:creatable="false" sap:updatable="false" sap:sortable="true" sap:filterable="true" sap:aggregation-role="dimension"' ) ).
+* UI vocabulary from @UI.lineItem / @UI.selectionField
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotations xmlns="http://docs.oasis-open.org/odata/ns/edm" Target="ZSTG_SADL_SRV.Zc_Stg_Travelcube">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotation Term="com.sap.vocabularies.UI.v1.LineItem">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<PropertyPath>STATUS</PropertyPath>' ) ).
+  ENDMETHOD.
+
+  METHOD entity_set_with_filter.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_SADL_SRV.Zc_Stg_Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TRAVELID":"T0001","DESCRIPTION":"Berlin to Copenhagen","STATUS":"A","SEATS":2' ) ).
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet'
+                       iv_query = `$filter=STATUS%20eq%20'A'%20and%20SEATS%20ge%202&$orderby=TRAVELID%20desc&$top=1&$inlinecount=allpages` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TRAVELID":"T0009"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TRAVELID":"T0001"' ) ).
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet/$count' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '4' ).
+  ENDMETHOD.
+
+  METHOD entity_by_key_and_navigation.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet('T0002')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"DESCRIPTION":"Copenhagen to Aarhus"' ) ).
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet('T0001')/TO_BOOKINGS` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"BOOKINGID":"B001","CUSTOMER":"Ada Lovelace"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"BOOKINGID":"B002"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Dijkstra' ) ).
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_BookingSet(TRAVELID='T0002',BOOKINGID='B001')/TO_TRAVEL` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"DESCRIPTION":"Copenhagen to Aarhus"' ) ).
+  ENDMETHOD.
+
+  METHOD expand.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet'
+                       iv_query = '$expand=TO_BOOKINGS&$top=1' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"SEATS":2,"TO_BOOKINGS":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"CUSTOMER":"Grace Hopper"' ) ).
+  ENDMETHOD.
+
+  METHOD analytics_group_by.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* an aggregate entity with $select: dimensions group, measures sum
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelcubeSet'
+                       iv_query = '$select=STATUS,SEATS&$orderby=STATUS' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"STATUS":"A","SEATS":12' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"STATUS":"X","SEATS":4' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TRAVELID":"T0001"' ) ).
+  ENDMETHOD.
+
+ENDCLASS.

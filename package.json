@@ -7,14 +7,15 @@
   "type": "module",
   "scripts": {
     "lint": "abaplint",
-    "transpile": "rm -rf output && abap_transpile",
+    "transpile": "rm -rf output && node tools/cds2ddic.mjs && abap_transpile",
     "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
     "integration": "mocha test/mocha.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "probe": "node tools/closure-probe.mjs",
     "e2e": "npm run transpile && playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "cds": "node tools/cds2ddic.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",

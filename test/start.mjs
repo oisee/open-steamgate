@@ -12,6 +12,12 @@ await zcl_oao_registry.register({
   iv_mpc: new abap.types.String().set("ZCL_ZSTG_DEMO_MPC_EXT"),
   iv_dpc: new abap.types.String().set("ZCL_ZSTG_DEMO_DPC_EXT"),
 });
+// the reference-data-source (SADL) demo service over the CDS views
+await zcl_oao_registry.register({
+  iv_service: new abap.types.String().set("ZSTG_SADL_SRV"),
+  iv_mpc: new abap.types.String().set("ZCL_ZSTG_SADL_MPC_EXT"),
+  iv_dpc: new abap.types.String().set("ZCL_ZSTG_SADL_DPC_EXT"),
+});
 
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
