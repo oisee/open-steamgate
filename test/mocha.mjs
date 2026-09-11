@@ -55,6 +55,13 @@ describe("wire", () => {
     expect(body.d.__metadata.type).to.equal("ZSTG_DEMO_SRV.Travel");
   });
 
+  it("$filter reaches the DPC as select-options", async () => {
+    const res = await fetch(BASE + "/TravelSet?$filter=" + encodeURIComponent("Status eq 'X' or Status eq 'Z'"));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.d.results.map((r) => r.TravelId)).to.deep.equal(["T0003"]);
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);

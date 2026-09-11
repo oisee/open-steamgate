@@ -32,11 +32,15 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
-## Phase 1 — GET path done 2026-09-11
+## Phase 1+2 — read path incl. `$filter` done 2026-09-11
 
-`/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$top=2&$skip=1&$inlinecount=allpages`
-answers real OData v2 JSON from the transpiled DPC over SQLite. `$filter`
-reaches the DPC as `iv_filter_string` only until QW4. Writes answer 501.
+`/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$filter=Status eq 'A' and TravelId ge 'T0002'&$top=2&$inlinecount=allpages`
+answers real OData v2 JSON from the transpiled DPC over SQLite, with the
+filter delivered as `it_filter_select_options` and through
+`io_tech_request_context->get_filter( )`. 35 ABAP Unit + 9 mocha. Writes
+answer 501: next is Phase 1b (POST/PUT/PATCH/DELETE with body
+deserialization, `/iwbep/if_mgw_entry_provider`), then `$expand` and
+navigation, then Phase 3/4 (fe-mockserver front, Fiori Elements).
 
 ## Phase 0 — done 2026-09-11
 
@@ -94,7 +98,11 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       `zcl_stg_dispatcher` (GET entity set / entity / `$count` / `$metadata` /
       service document, `$top/$skip/$orderby/$inlinecount`, OData error
       bodies, 501 for writes). 24 ABAP Unit + 8 mocha. 2026-09-11.
-- [ ] **QW4** `$filter` → SELECT-OPTIONS (the crux, timeboxed).
+- [x] **QW4** `$filter` → SELECT-OPTIONS: `zcl_stg_filter` (tokenizer,
+      recursive-descent parser, range converter). Per-property ORs joined by
+      AND, ge/le → BT, ne / not-eq → E EQ, startswith/endswith/substringof →
+      CP, datetime/guid/bool literals; inexpressible filters leave the table
+      empty and pass the raw string. Unknown property → 400. 2026-09-11.
 
 ## Cheap checks that could shrink the plan
 

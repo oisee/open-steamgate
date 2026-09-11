@@ -294,3 +294,251 @@ CLASS ltcl_dispatch IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_filter DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    DATA ms_set TYPE zcl_stg_model_info=>ty_entity_set.
+
+    METHODS setup.
+    METHODS eq_string FOR TESTING RAISING cx_static_check.
+    METHODS and_two_properties FOR TESTING RAISING cx_static_check.
+    METHODS or_same_property FOR TESTING RAISING cx_static_check.
+    METHODS ge_le_to_bt FOR TESTING RAISING cx_static_check.
+    METHODS functions FOR TESTING RAISING cx_static_check.
+    METHODS ne_and_not FOR TESTING RAISING cx_static_check.
+    METHODS quotes_in_value FOR TESTING RAISING cx_static_check.
+    METHODS not_expressible FOR TESTING RAISING cx_static_check.
+    METHODS unknown_property FOR TESTING RAISING cx_static_check.
+    METHODS typed_literals FOR TESTING RAISING cx_static_check.
+    METHODS through_dispatcher FOR TESTING RAISING cx_static_check.
+
+    METHODS parse
+      IMPORTING
+        iv_filter        TYPE string
+      RETURNING
+        VALUE(rt_filter) TYPE /iwbep/t_mgw_select_option
+      RAISING
+        cx_static_check.
+
+    METHODS option
+      IMPORTING
+        it_filter        TYPE /iwbep/t_mgw_select_option
+        iv_property      TYPE string
+        iv_index         TYPE i DEFAULT 1
+      RETURNING
+        VALUE(rs_option) TYPE /iwbep/s_cod_select_option.
+ENDCLASS.
+
+CLASS ltcl_filter IMPLEMENTATION.
+
+  METHOD setup.
+    DATA ls_service TYPE zcl_stg_model_info=>ty_service.
+
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+    ls_service = zcl_stg_model_info=>get( 'ZSTG_DEMO_SRV' ).
+    ms_set = zcl_stg_model_info=>find_set( is_service    = ls_service
+                                           iv_entity_set = 'TravelSet' ).
+  ENDMETHOD.
+
+  METHOD parse.
+    rt_filter = zcl_stg_filter=>parse( iv_filter = iv_filter
+                                       is_set    = ms_set ).
+  ENDMETHOD.
+
+  METHOD option.
+    DATA ls_filter LIKE LINE OF it_filter.
+
+    READ TABLE it_filter INTO ls_filter WITH KEY property = iv_property.
+    cl_abap_unit_assert=>assert_subrc( msg = |property { iv_property } missing| ).
+    READ TABLE ls_filter-select_options INDEX iv_index INTO rs_option.
+    cl_abap_unit_assert=>assert_subrc( msg = |option { iv_index } of { iv_property } missing| ).
+  ENDMETHOD.
+
+  METHOD eq_string.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Status eq 'A'` ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_filter )
+                                        exp = 1 ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Status' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-sign
+                                        exp = 'I' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-option
+                                        exp = 'EQ' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'A' ).
+  ENDMETHOD.
+
+  METHOD and_two_properties.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Status eq 'A' and TravelId ge 'T0002'` ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_filter )
+                                        exp = 2 ).
+    ls_option = option( it_filter = lt_filter iv_property = 'TravelId' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-option
+                                        exp = 'GE' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'T0002' ).
+  ENDMETHOD.
+
+  METHOD or_same_property.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `(TravelId eq 'T0001') or (TravelId eq 'T0003') or TravelId eq 'T0009'` ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_filter )
+                                        exp = 1 ).
+    ls_option = option( it_filter = lt_filter iv_property = 'TravelId' iv_index = 3 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'T0009' ).
+  ENDMETHOD.
+
+  METHOD ge_le_to_bt.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Seats ge 2 and Seats le 4` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Seats' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-option
+                                        exp = 'BT' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = '2' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-high
+                                        exp = '4' ).
+
+    lt_filter = parse( `Seats le 4 and Seats ge 2` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Seats' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-option
+                                        exp = 'BT' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = '2' ).
+  ENDMETHOD.
+
+  METHOD functions.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `startswith(Description,'Berlin')` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-option
+                                        exp = 'CP' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'Berlin*' ).
+
+    lt_filter = parse( `substringof('to',Description) and endswith(TravelId,'3')` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = '*to*' ).
+    ls_option = option( it_filter = lt_filter iv_property = 'TravelId' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = '*3' ).
+
+    lt_filter = parse( `tolower(Status) eq 'a'` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Status' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'a' ).
+  ENDMETHOD.
+
+  METHOD ne_and_not.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Status ne 'X' and not (Status eq 'Y')` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Status' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-sign
+                                        exp = 'E' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'X' ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Status' iv_index = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-sign
+                                        exp = 'E' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'Y' ).
+  ENDMETHOD.
+
+  METHOD quotes_in_value.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Description eq 'O''Brien (and co)'` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = `O'Brien (and co)` ).
+  ENDMETHOD.
+
+  METHOD not_expressible.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+
+* OR across properties: no range can say this
+    lt_filter = parse( `Status eq 'A' or Seats gt 3` ).
+    cl_abap_unit_assert=>assert_initial( lt_filter ).
+
+* two inclusive conditions on one property that are not a BT pair
+    lt_filter = parse( `startswith(Description,'B') and endswith(Description,'n')` ).
+    cl_abap_unit_assert=>assert_initial( lt_filter ).
+  ENDMETHOD.
+
+  METHOD unknown_property.
+    DATA lx_error TYPE REF TO zcx_stg_error.
+
+    TRY.
+        parse( `Nope eq 1` ).
+        cl_abap_unit_assert=>fail( 'expected zcx_stg_error' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status
+                                            exp = 400 ).
+    ENDTRY.
+
+    TRY.
+        parse( `Status eq` ).
+        cl_abap_unit_assert=>fail( 'expected zcx_stg_error' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->code
+                                            exp = 'STG/BAD_FILTER' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD typed_literals.
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `Description ge datetime'2024-01-02T10:20:30' and Status eq true` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = '20240102102030' ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Status' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low
+                                        exp = 'X' ).
+  ENDMETHOD.
+
+  METHOD through_dispatcher.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Status%20eq%20'A'%20and%20TravelId%20ge%20'T0002'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0009"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Nope%20eq%201` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+  ENDMETHOD.
+
+ENDCLASS.
