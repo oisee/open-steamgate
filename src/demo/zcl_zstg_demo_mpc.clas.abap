@@ -17,6 +17,13 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
            END OF ts_booking.
     TYPES tt_booking TYPE STANDARD TABLE OF ts_booking WITH DEFAULT KEY.
 
+* deep structure for a Travel with its bookings, the SEGW convention:
+* one component per navigation property, named like it
+    TYPES: BEGIN OF ts_travel_deep.
+        INCLUDE TYPE ts_travel.
+    TYPES: to_bookings TYPE tt_booking,
+           END OF ts_travel_deep.
+
     CONSTANTS gc_travel TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Travel' ##NO_TEXT.
     CONSTANTS gc_travel_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'TravelSet' ##NO_TEXT.
     CONSTANTS gc_booking TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Booking' ##NO_TEXT.

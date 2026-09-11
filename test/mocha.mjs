@@ -83,6 +83,20 @@ describe("wire", () => {
     expect(body.d.to_Bookings.__deferred.uri).to.equal(BASE + "/TravelSet('T0002')/to_Bookings");
   });
 
+  it("deep insert: a travel with its bookings in one POST", async () => {
+    const headers = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
+    let res = await fetch(BASE + "/TravelSet", {method: "POST", headers, body: JSON.stringify({
+      TravelId: "T0700", Description: "Deep over the wire", Status: "A", Seats: 1,
+      to_Bookings: [{BookingId: "B001", Customer: "Barbara Liskov"}],
+    })});
+    expect(res.status).to.equal(201);
+    const body = await res.json();
+    expect(body.d.to_Bookings.results[0].Customer).to.equal("Barbara Liskov");
+    res = await fetch(BASE + "/TravelSet('T0700')/to_Bookings");
+    expect((await res.json()).d.results).to.have.length(1);
+    await fetch(BASE + "/TravelSet('T0700')", {method: "DELETE", headers});
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);

@@ -130,6 +130,12 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
 
+    CLASS-METHODS expand_tree
+      IMPORTING
+        it_nested      TYPE tihttpnvp
+      RETURNING
+        VALUE(ro_tree) TYPE REF TO zcl_stg_expand_node.
+
     CLASS-METHODS service_document
       IMPORTING
         is_service         TYPE zcl_stg_model_info=>ty_service
@@ -222,6 +228,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ls_request = zcl_stg_url=>parse( iv_path    = iv_path
                                      it_options = it_options ).
     ls_service = zcl_stg_model_info=>get( ls_request-service ).
+    zcl_stg_json=>register_sets( ls_service-entity_sets ).
     lv_base    = |http://{ iv_host }/sap/opu/odata/sap/{ ls_service-name }|.
     lv_method  = to_upper( iv_method ).
 
@@ -302,6 +309,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lt_nav_path TYPE /iwbep/t_mgw_navigation_path.
     DATA lr_entity   TYPE REF TO data.
     DATA ls_header   TYPE ihttpnvp.
+    DATA lt_values   TYPE tihttpnvp.
+    DATA lt_nested   TYPE tihttpnvp.
     FIELD-SYMBOLS <ls_data> TYPE any.
 
     lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
@@ -317,21 +326,41 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
               code    = 'STG/METHOD_NOT_ALLOWED'
               message = 'POST goes to the entity set, not to an entity'.
         ENDIF.
+        lt_values = zcl_stg_json=>parse_object( EXPORTING iv_json   = iv_body
+                                                IMPORTING et_nested = lt_nested ).
         CREATE OBJECT lo_provider
           EXPORTING
-            it_values = zcl_stg_json=>parse_object( iv_body )
-            is_set    = is_set.
-        lo_dpc->create_entity(
-          EXPORTING
-            iv_entity_name          = is_set-entity_type
-            iv_entity_set_name      = is_set-name
-            iv_source_name          = ''
-            io_data_provider        = lo_provider
-            it_key_tab              = lo_context->mt_key_tab
-            it_navigation_path      = lt_nav_path
-            io_tech_request_context = lo_context
-          IMPORTING
-            er_entity               = lr_entity ).
+            it_values  = lt_values
+            it_nested  = lt_nested
+            is_set     = is_set
+            is_service = is_service.
+        IF lt_nested IS NOT INITIAL.
+* navigation payload inside the body: a deep insert
+          lo_dpc->create_deep_entity(
+            EXPORTING
+              iv_entity_name          = is_set-entity_type
+              iv_entity_set_name      = is_set-name
+              iv_source_name          = ''
+              io_data_provider        = lo_provider
+              it_key_tab              = lo_context->mt_key_tab
+              it_navigation_path      = lt_nav_path
+              io_expand               = expand_tree( lt_nested )
+              io_tech_request_context = lo_context
+            IMPORTING
+              er_deep_entity          = lr_entity ).
+        ELSE.
+          lo_dpc->create_entity(
+            EXPORTING
+              iv_entity_name          = is_set-entity_type
+              iv_entity_set_name      = is_set-name
+              iv_source_name          = ''
+              io_data_provider        = lo_provider
+              it_key_tab              = lo_context->mt_key_tab
+              it_navigation_path      = lt_nav_path
+              io_tech_request_context = lo_context
+            IMPORTING
+              er_entity               = lr_entity ).
+        ENDIF.
         IF lr_entity IS NOT BOUND.
           RAISE EXCEPTION TYPE zcx_stg_error
             EXPORTING
@@ -357,10 +386,14 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
               code    = 'STG/METHOD_NOT_ALLOWED'
               message = |{ iv_method } needs an entity key|.
         ENDIF.
+        lt_values = zcl_stg_json=>parse_object( EXPORTING iv_json   = iv_body
+                                                IMPORTING et_nested = lt_nested ).
         CREATE OBJECT lo_provider
           EXPORTING
-            it_values = zcl_stg_json=>parse_object( iv_body )
-            is_set    = is_set.
+            it_values  = lt_values
+            it_nested  = lt_nested
+            is_set     = is_set
+            is_service = is_service.
         lo_dpc->update_entity(
           EXPORTING
             iv_entity_name          = is_set-entity_type
@@ -400,6 +433,18 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
             code    = 'STG/VERB_NOT_IMPLEMENTED'
             message = |{ iv_method } is not implemented|.
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD expand_tree.
+    DATA ls_nested LIKE LINE OF it_nested.
+    DATA lo_child  TYPE REF TO zcl_stg_expand_node.
+
+    CREATE OBJECT ro_tree.
+    LOOP AT it_nested INTO ls_nested.
+      CREATE OBJECT lo_child.
+      ro_tree->add_child( iv_name = ls_nested-name
+                          io_node = lo_child ).
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD service_document.

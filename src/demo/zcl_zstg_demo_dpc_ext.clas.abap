@@ -2,6 +2,7 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
 * The hand-written part a developer owns on a real system. Reads the
 * select-options the Gateway hands over, runs Open SQL, applies paging.
   PUBLIC SECTION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~create_deep_entity REDEFINITION.
   PROTECTED SECTION.
     METHODS travelset_get_entityset REDEFINITION.
     METHODS travelset_get_entity REDEFINITION.
@@ -159,6 +160,54 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
         EXPORTING
           message = |Travel { lv_travel_id } does not exist|.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
+* Travel with bookings in one request. The deep structure is read from the
+* provider, the header inserted, the items inserted with the header key.
+    DATA ls_deep    TYPE zcl_zstg_demo_mpc=>ts_travel_deep.
+    DATA ls_travel  TYPE zstg_demo.
+    DATA ls_booking TYPE zstg_demo_bk.
+    FIELD-SYMBOLS <ls_item> TYPE zcl_zstg_demo_mpc=>ts_booking.
+
+    IF iv_entity_set_name <> 'TravelSet'.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+        EXPORTING
+          textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+          method = 'CREATE_DEEP_ENTITY'.
+    ENDIF.
+
+    io_data_provider->read_entry_data( IMPORTING es_data = ls_deep ).
+    IF ls_deep-travel_id IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = 'TravelId is required'.
+    ENDIF.
+
+    ls_travel-mandt = sy-mandt.
+    MOVE-CORRESPONDING ls_deep TO ls_travel.
+    INSERT zstg_demo FROM ls_travel.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Travel { ls_deep-travel_id } already exists|.
+    ENDIF.
+
+    LOOP AT ls_deep-to_bookings ASSIGNING <ls_item>.
+      <ls_item>-travel_id = ls_deep-travel_id.
+      CLEAR ls_booking.
+      ls_booking-mandt = sy-mandt.
+      MOVE-CORRESPONDING <ls_item> TO ls_booking.
+      INSERT zstg_demo_bk FROM ls_booking.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING
+            message = |Booking { <ls_item>-booking_id } already exists|.
+      ENDIF.
+    ENDLOOP.
+
+    copy_data_to_ref( EXPORTING is_data = ls_deep
+                      CHANGING  cr_data = er_deep_entity ).
   ENDMETHOD.
 
   METHOD key_value.

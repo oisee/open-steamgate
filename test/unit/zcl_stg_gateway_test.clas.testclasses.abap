@@ -980,3 +980,69 @@ CLASS ltcl_navigation IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_deep_insert DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS parse_nested FOR TESTING RAISING cx_static_check.
+    METHODS travel_with_bookings FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_deep_insert IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD parse_nested.
+    DATA lt_values   TYPE tihttpnvp.
+    DATA lt_nested   TYPE tihttpnvp.
+    DATA ls_nested   TYPE ihttpnvp.
+    DATA lt_elements TYPE string_table.
+
+    lt_values = zcl_stg_json=>parse_object(
+      EXPORTING iv_json   = `{"d":{"TravelId":"T1","to_Bookings":[{"BookingId":"B1"},{"BookingId":"B2","Customer":"x, y"}],"to_Travel":{"__deferred":{"uri":"u"}},"Seats":1}}`
+      IMPORTING et_nested = lt_nested ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_values )
+                                        exp = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_nested )
+                                        exp = 1 ).
+    READ TABLE lt_nested INDEX 1 INTO ls_nested.
+    cl_abap_unit_assert=>assert_equals( act = ls_nested-name
+                                        exp = 'to_Bookings' ).
+    lt_elements = zcl_stg_json=>parse_array( ls_nested-value ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_elements )
+                                        exp = 2 ).
+  ENDMETHOD.
+
+  METHOD travel_with_bookings.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch(
+      iv_method = 'POST'
+      iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+      iv_body   = `{"TravelId":"T0600","Description":"Deep","Status":"A","Seats":2,` &&
+                  `"to_Bookings":[{"BookingId":"B001","Customer":"Alan Turing","FlightDate":"\/Date(1789171200000)\/"},{"BookingId":"B002","Customer":"John von Neumann"}]}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 201 ).
+* the deep entity comes back with its bookings inline
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0600","Description":"Deep","Status":"A","Seats":2,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Alan Turing","FlightDate":"\/Date(1789171200000)\/"' ) ).
+
+* and it is really in the database, reachable through navigation
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0600')/to_Bookings/$count` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '2' ).
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'DELETE'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0600')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
+  ENDMETHOD.
+
+ENDCLASS.

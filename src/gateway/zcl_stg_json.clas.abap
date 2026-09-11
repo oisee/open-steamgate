@@ -8,6 +8,12 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_nav_json.
     TYPES ty_nav_jsons TYPE STANDARD TABLE OF ty_nav_json WITH DEFAULT KEY.
 
+* The serializer needs the other entity sets of the service to inline
+* nested components; the dispatcher hands them over once per request.
+    CLASS-METHODS register_sets
+      IMPORTING
+        it_sets TYPE zcl_stg_model_info=>ty_entity_sets.
+
     CLASS-METHODS feed_of
       IMPORTING
         it_entities    TYPE string_table
@@ -72,17 +78,41 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_json) TYPE string.
 
-* One flat JSON object -> name/value pairs. Accepts the v2 {"d":{...}}
-* wrapper, skips __metadata and nested objects/arrays, keeps numbers,
-* booleans and null as their literal text.
+* One JSON object -> name/value pairs. Accepts the v2 {"d":{...}} wrapper,
+* skips __metadata, keeps numbers, booleans and null as their literal text.
+* A nested object or array (deep insert, navigation payload) is kept as its
+* raw JSON text and listed in et_nested by name.
     CLASS-METHODS parse_object
       IMPORTING
         iv_json          TYPE string
+      EXPORTING
+        et_nested        TYPE tihttpnvp
       RETURNING
         VALUE(rt_values) TYPE tihttpnvp
       RAISING
         zcx_stg_error.
+
+* A JSON array of objects -> one raw JSON text per element.
+    CLASS-METHODS parse_array
+      IMPORTING
+        iv_json            TYPE string
+      RETURNING
+        VALUE(rt_elements) TYPE string_table
+      RAISING
+        zcx_stg_error.
   PRIVATE SECTION.
+    CLASS-DATA gt_sets TYPE zcl_stg_model_info=>ty_entity_sets.
+
+    CLASS-METHODS nested
+      IMPORTING
+        is_data        TYPE any
+        is_nav         TYPE zcl_stg_model_info=>ty_nav
+        is_set         TYPE zcl_stg_model_info=>ty_entity_set
+        iv_namespace   TYPE string
+        iv_base_url    TYPE string
+      RETURNING
+        VALUE(rv_json) TYPE string.
+
     CLASS-METHODS read_string
       IMPORTING
         iv_json         TYPE string
@@ -126,6 +156,47 @@ CLASS zcl_stg_json IMPLEMENTATION.
 
   METHOD error.
     rv_json = |\{"error":\{"code":"{ escape( iv_code ) }","message":\{"lang":"en","value":"{ escape( iv_message ) }"\}\}\}|.
+  ENDMETHOD.
+
+  METHOD nested.
+    DATA ls_target TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lv_kind   TYPE c LENGTH 1.
+    FIELD-SYMBOLS <lv_comp>  TYPE any.
+    FIELD-SYMBOLS <lt_table> TYPE ANY TABLE.
+
+    ASSIGN COMPONENT is_nav-name OF STRUCTURE is_data TO <lv_comp>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+* the target set's shape comes from the same service the caller resolved
+    READ TABLE gt_sets INTO ls_target WITH KEY name = is_nav-target_set.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    DESCRIBE FIELD <lv_comp> TYPE lv_kind.
+    IF lv_kind = 'h'.
+      ASSIGN <lv_comp> TO <lt_table>.
+      rv_json = feed( it_data      = <lt_table>
+                      is_set       = ls_target
+                      iv_namespace = iv_namespace
+                      iv_base_url  = iv_base_url ).
+      rv_json = substring( val = rv_json
+                           off = 5
+                           len = strlen( rv_json ) - 6 ).
+    ELSEIF lv_kind = 'u' OR lv_kind = 'v'.
+      IF <lv_comp> IS INITIAL.
+        RETURN.
+      ENDIF.
+      rv_json = entity( is_data      = <lv_comp>
+                        is_set       = ls_target
+                        iv_namespace = iv_namespace
+                        iv_base_url  = iv_base_url ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD register_sets.
+    gt_sets = it_sets.
   ENDMETHOD.
 
   METHOD skip_blanks.
@@ -213,6 +284,54 @@ CLASS zcl_stg_json IMPLEMENTATION.
     ENDWHILE.
   ENDMETHOD.
 
+  METHOD parse_array.
+    DATA lv_off   TYPE i.
+    DATA lv_len   TYPE i.
+    DATA lv_char  TYPE string.
+    DATA lv_start TYPE i.
+    DATA lv_count TYPE i.
+    DATA lv_elem  TYPE string.
+
+    lv_len = strlen( iv_json ).
+    skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+    IF lv_off >= lv_len OR iv_json+lv_off(1) <> '['.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 400
+          code    = 'STG/BAD_JSON'
+          message = 'Expected a JSON array'.
+    ENDIF.
+    lv_off = lv_off + 1.
+    DO.
+      skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      IF lv_off >= lv_len.
+        EXIT.
+      ENDIF.
+      lv_char = iv_json+lv_off(1).
+      IF lv_char = ']'.
+        EXIT.
+      ELSEIF lv_char = ','.
+        lv_off = lv_off + 1.
+        CONTINUE.
+      ENDIF.
+      lv_start = lv_off.
+* skip_value counts the brackets itself and stops on the , or ] that ends
+* this element
+      skip_value( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      IF lv_off = lv_start.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 400
+            code    = 'STG/BAD_JSON'
+            message = |Unexpected { lv_char } at { lv_off } in array|.
+      ENDIF.
+      lv_count = lv_off - lv_start.
+      lv_elem = iv_json+lv_start(lv_count).
+      CONDENSE lv_elem.
+      APPEND lv_elem TO rt_elements.
+    ENDDO.
+  ENDMETHOD.
+
   METHOD parse_object.
     DATA lv_off   TYPE i.
     DATA lv_len   TYPE i.
@@ -222,6 +341,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_count TYPE i.
     DATA ls_pair  TYPE ihttpnvp.
 
+    CLEAR et_nested.
     lv_len = strlen( iv_json ).
     skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
     IF lv_off >= lv_len OR iv_json+lv_off(1) <> '{'.
@@ -276,10 +396,18 @@ CLASS zcl_stg_json IMPLEMENTATION.
       IF lv_char = '"'.
         ls_pair-value = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
       ELSEIF lv_char = '{' OR lv_char = '['.
-* nested (__metadata, deferred navigation, deep insert): skipped for now
-        lv_off = lv_off + 1.
+* nested object or array: __metadata and deferred links are dropped,
+* everything else is a navigation payload for a deep insert
+        lv_start = lv_off.
         skip_value( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
-        lv_off = lv_off + 1.
+        IF lv_name <> '__metadata'.
+          lv_count = lv_off - lv_start.
+          ls_pair-value = iv_json+lv_start(lv_count).
+          IF ls_pair-value CS '"__deferred"'.
+            CONTINUE.
+          ENDIF.
+          APPEND ls_pair TO et_nested.
+        ENDIF.
         CONTINUE.
       ELSE.
         lv_start = lv_off.
@@ -414,6 +542,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_fields   TYPE string.
     DATA ls_nav      LIKE LINE OF is_set-navs.
     DATA ls_nav_json LIKE LINE OF it_nav_json.
+    DATA lv_nested   TYPE string.
     FIELD-SYMBOLS <lv_field> TYPE any.
 
     lv_uri = |{ iv_base_url }/{ is_set-name }({ key_predicate( is_data = is_data is_set = is_set ) })|.
@@ -427,12 +556,23 @@ CLASS zcl_stg_json IMPLEMENTATION.
                                                                  iv_edm_type = ls_property-edm_type ) }|.
     ENDLOOP.
 
-* navigation properties: expanded content when the caller supplies it,
-* the v2 deferred link otherwise
+* navigation properties: expanded content when the caller supplies it, a
+* nested component of a deep structure (what a DPC returns from
+* create_deep_entity / get_expanded_*) when the data carries one, the v2
+* deferred link otherwise
     LOOP AT is_set-navs INTO ls_nav.
       READ TABLE it_nav_json INTO ls_nav_json WITH KEY name = ls_nav-name.
       IF sy-subrc = 0.
         lv_fields = |{ lv_fields },"{ ls_nav-name }":{ ls_nav_json-json }|.
+        CONTINUE.
+      ENDIF.
+      lv_nested = nested( is_data      = is_data
+                          is_nav       = ls_nav
+                          is_set       = is_set
+                          iv_namespace = iv_namespace
+                          iv_base_url  = iv_base_url ).
+      IF lv_nested IS NOT INITIAL.
+        lv_fields = |{ lv_fields },"{ ls_nav-name }":{ lv_nested }|.
       ELSE.
         lv_fields = |{ lv_fields },"{ ls_nav-name }":\{"__deferred":\{"uri":"{ lv_uri }/{ ls_nav-name }"\}\}|.
       ENDIF.
