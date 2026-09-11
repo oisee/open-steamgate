@@ -16,6 +16,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         it_options         TYPE tihttpnvp OPTIONAL
         iv_host            TYPE string DEFAULT 'localhost'
         iv_body            TYPE string OPTIONAL
+        iv_content_type    TYPE string OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response.
   PRIVATE SECTION.
@@ -26,6 +27,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         it_options         TYPE tihttpnvp
         iv_host            TYPE string
         iv_body            TYPE string
+        iv_content_type    TYPE string
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -114,7 +116,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                            iv_path    = iv_path
                            it_options = it_options
                            iv_host    = iv_host
-                           iv_body    = iv_body ).
+                           iv_body    = iv_body
+                           iv_content_type = iv_content_type ).
       CATCH zcx_stg_error INTO lx_stg.
         rs_response = json_response( iv_status = lx_stg->status
                                      iv_body   = zcl_stg_json=>error( iv_code    = lx_stg->code
@@ -190,6 +193,21 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     IF ls_request-is_service_root = abap_true.
       rs_response = service_document( is_service  = ls_service
                                       iv_base_url = lv_base ).
+      RETURN.
+    ENDIF.
+
+    IF ls_request-is_batch = abap_true.
+      IF lv_method <> 'POST'.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 405
+            code    = 'STG/METHOD_NOT_ALLOWED'
+            message = '$batch takes POST'.
+      ENDIF.
+      rs_response = zcl_stg_batch=>handle( iv_body         = iv_body
+                                           iv_content_type = iv_content_type
+                                           iv_service_path = |/sap/opu/odata/sap/{ ls_service-name }|
+                                           iv_host         = iv_host ).
       RETURN.
     ENDIF.
 

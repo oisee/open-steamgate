@@ -38,7 +38,8 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
                                                 iv_path    = lv_path
                                                 it_options = lt_options
                                                 iv_host    = lv_host
-                                                iv_body    = lv_body ).
+                                                iv_body    = lv_body
+                                                iv_content_type = server->request->get_header_field( 'content-type' ) ).
 
     LOOP AT ls_response-headers INTO ls_header.
       server->response->set_header_field( name  = ls_header-name

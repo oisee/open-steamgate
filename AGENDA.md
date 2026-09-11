@@ -32,6 +32,17 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## `$batch` done 2026-09-11
+
+`zcl_stg_batch`: multipart/mixed in and out, retrieve parts dispatched one by
+one, changesets in order and answered as a whole (first failure becomes the
+changeset's single error part, later requests are not run; no rollback of the
+earlier ones yet, the local SQLite has no transaction bracket). The Fiori
+Elements app runs with `useBatch: true` now; Playwright covers list, filter and
+**Delete from the list report** (DELETE inside a changeset, then the refresh
+GET in the same batch). Keyboard-driven in the test: pointer clicks never pass
+Playwright's stability check under the WSL headless compositor.
+
 ## Phase 1b — writes done 2026-09-11
 
 POST / PUT / PATCH / MERGE / DELETE reach `create_entity`, `update_entity`,
@@ -39,9 +50,9 @@ POST / PUT / PATCH / MERGE / DELETE reach `create_entity`, `update_entity`,
 (`zcl_stg_entry_provider`: request body parsed by `zcl_stg_json=>parse_object`,
 mapped through the model, EDM-typed conversion). 201 + Location, 204, business
 exceptions as 400 with the DPC's message. CSRF fetch answered. The demo DPC
-does real INSERT / UPDATE / DELETE on SQLite. Still open for Fiori writes:
-`$batch` (FE V2 transaction controller insists), deep insert, `$expand`,
-navigation properties, function imports.
+does real INSERT / UPDATE / DELETE on SQLite. Still open: deep insert, `$expand`,
+navigation properties, function imports, a transaction bracket around
+changesets.
 
 ## Phase 4 demo — Fiori Elements list report, 2026-09-11
 

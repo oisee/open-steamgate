@@ -687,3 +687,143 @@ CLASS ltcl_writes IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_batch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS parse_retrieve_and_changeset FOR TESTING RAISING cx_static_check.
+    METHODS retrieve_parts FOR TESTING RAISING cx_static_check.
+    METHODS changeset_ok FOR TESTING RAISING cx_static_check.
+    METHODS changeset_fails_as_a_whole FOR TESTING RAISING cx_static_check.
+    METHODS boundary_missing_is_400 FOR TESTING RAISING cx_static_check.
+
+    METHODS crlf
+      IMPORTING
+        iv_text        TYPE string
+      RETURNING
+        VALUE(rv_text) TYPE string.
+ENDCLASS.
+
+CLASS ltcl_batch IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD crlf.
+    rv_text = iv_text.
+    REPLACE ALL OCCURRENCES OF '|' IN rv_text WITH cl_abap_char_utilities=>cr_lf.
+  ENDMETHOD.
+
+  METHOD parse_retrieve_and_changeset.
+    DATA lt_parts   TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part    TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    DATA lv_body    TYPE string.
+
+    lv_body = crlf( `--batch_1|Content-Type: application/http|Content-Transfer-Encoding: binary||GET TravelSet?$top=1 HTTP/1.1|Accept: application/json|||` &&
+                    `--batch_1|Content-Type: multipart/mixed; boundary=changeset_2||--changeset_2|Content-Type: application/http|Content-Transfer-Encoding: binary||` &&
+                    `POST TravelSet HTTP/1.1|Content-Type: application/json|Content-Length: 20||{"TravelId":"T0300"}|--changeset_2--||--batch_1--|` ).
+
+    lt_parts = zcl_stg_batch=>parse( iv_body     = lv_body
+                                     iv_boundary = 'batch_1' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_parts )
+                                        exp = 2 ).
+
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    cl_abap_unit_assert=>assert_equals( act = ls_part-changeset
+                                        exp = abap_false ).
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-method
+                                        exp = 'GET' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-url
+                                        exp = 'TravelSet?$top=1' ).
+
+    READ TABLE lt_parts INDEX 2 INTO ls_part.
+    cl_abap_unit_assert=>assert_equals( act = ls_part-changeset
+                                        exp = abap_true ).
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-method
+                                        exp = 'POST' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-body
+                                        exp = '{"TravelId":"T0300"}' ).
+  ENDMETHOD.
+
+  METHOD retrieve_parts.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+    lv_body = crlf( `--b|Content-Type: application/http|Content-Transfer-Encoding: binary||GET TravelSet?$top=1&$inlinecount=allpages HTTP/1.1||` &&
+                    `--b|Content-Type: application/http|Content-Transfer-Encoding: binary||GET TravelSet('T0003') HTTP/1.1||--b--|` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'POST'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch'
+                                                iv_body         = lv_body
+                                                iv_content_type = 'multipart/mixed; boundary=b' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 202 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-content_type CP 'multipart/mixed; boundary=batchresponse_stg_*' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 200 OK' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"__count":"1"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Aarhus to Odense"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'DataServiceVersion: 2.0' ) ).
+  ENDMETHOD.
+
+  METHOD changeset_ok.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+    lv_body = crlf( `--b|Content-Type: multipart/mixed; boundary=cs||--cs|Content-Type: application/http|Content-Transfer-Encoding: binary||` &&
+                    `POST TravelSet HTTP/1.1|Content-Type: application/json||{"TravelId":"T0301","Description":"batch","Seats":1}|` &&
+                    `--cs|Content-Type: application/http|Content-Transfer-Encoding: binary||DELETE TravelSet('T0301') HTTP/1.1||--cs--||--b--|` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'POST'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch'
+                                                iv_body         = lv_body
+                                                iv_content_type = 'multipart/mixed; boundary=b' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 202 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'Content-Type: multipart/mixed; boundary=changesetresponse_stg_' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 201 Created' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 204 No Content' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `location: http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0301')` ) ).
+  ENDMETHOD.
+
+  METHOD changeset_fails_as_a_whole.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+    lv_body = crlf( `--b|Content-Type: multipart/mixed; boundary=cs||--cs|Content-Type: application/http|Content-Transfer-Encoding: binary||` &&
+                    `DELETE TravelSet('NOPE') HTTP/1.1||--cs|Content-Type: application/http|Content-Transfer-Encoding: binary||` &&
+                    `POST TravelSet HTTP/1.1||{"TravelId":"T0302"}|--cs--||--b--|` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'POST'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch'
+                                                iv_body         = lv_body
+                                                iv_content_type = 'multipart/mixed; boundary=b' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 202 ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'changesetresponse' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 400 Bad Request' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '201 Created' ) ).
+
+* the request after the failure was not run
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0302')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 404 ).
+  ENDMETHOD.
+
+  METHOD boundary_missing_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'POST'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch'
+                                                iv_body         = 'x'
+                                                iv_content_type = 'text/plain' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+  ENDMETHOD.
+
+ENDCLASS.

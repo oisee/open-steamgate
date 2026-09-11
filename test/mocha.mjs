@@ -75,6 +75,29 @@ describe("wire", () => {
     expect(body.error.code).to.equal("STG/ENTITY_NOT_FOUND");
   });
 
+  it("$batch with a retrieve part and a changeset", async () => {
+    const crlf = "\r\n";
+    const body = [
+      "--b", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "GET TravelSet?$top=2&$inlinecount=allpages HTTP/1.1", "Accept: application/json", "", "",
+      "--b", "Content-Type: multipart/mixed; boundary=cs", "",
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "POST TravelSet HTTP/1.1", "Content-Type: application/json", "", JSON.stringify({TravelId: "T0400", Description: "via batch", Seats: 1}),
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "DELETE TravelSet('T0400') HTTP/1.1", "", "",
+      "--cs--", "", "--b--", "",
+    ].join(crlf);
+    const res = await fetch(BASE + "/$batch", {method: "POST", headers: {"content-type": "multipart/mixed; boundary=b", "x-csrf-token": "open-steamgate"}, body});
+    expect(res.status).to.equal(202);
+    expect(res.headers.get("content-type")).to.match(/^multipart\/mixed; boundary=batchresponse_stg_/);
+    const text = await res.text();
+    expect(text).to.contain("HTTP/1.1 200 OK");
+    expect(text).to.contain('"__count":"2"');
+    expect(text).to.contain("HTTP/1.1 201 Created");
+    expect(text).to.contain("HTTP/1.1 204 No Content");
+    expect((text.match(/--batchresponse_stg_\d+--/g) || []).length).to.equal(1);
+  });
+
   it("CSRF token fetch is answered", async () => {
     const res = await fetch(BASE + "/", {headers: {"x-csrf-token": "Fetch"}});
     expect(res.status).to.equal(200);

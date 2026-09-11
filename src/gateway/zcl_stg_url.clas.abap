@@ -7,6 +7,7 @@ CLASS zcl_stg_url DEFINITION PUBLIC CREATE PUBLIC.
              key_string      TYPE string,
              is_service_root TYPE abap_bool,
              is_metadata     TYPE abap_bool,
+             is_batch        TYPE abap_bool,
              is_count        TYPE abap_bool,
              options         TYPE tihttpnvp,
            END OF ty_request.
@@ -67,6 +68,11 @@ CLASS zcl_stg_url IMPLEMENTATION.
 
     IF lv_rest CP '/$metadata*'.
       rs_request-is_metadata = abap_true.
+      RETURN.
+    ENDIF.
+
+    IF lv_rest CP '/$batch*'.
+      rs_request-is_batch = abap_true.
       RETURN.
     ENDIF.
 

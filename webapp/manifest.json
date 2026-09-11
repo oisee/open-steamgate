@@ -47,7 +47,7 @@
         "dataSource": "mainService",
         "preload": true,
         "settings": {
-          "useBatch": false,
+          "useBatch": true,
           "defaultCountMode": "Inline",
           "defaultBindingMode": "TwoWay",
           "refreshAfterChange": false
