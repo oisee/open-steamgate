@@ -79,7 +79,8 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       gateway exception constructors: `oisee/open-abap-odata` main at
       4c2c301 (2026-09-11). Upstream #33 not PR'd by decision; open-steamgate
       now consumes the fork without `exclude_filter`.
-- [ ] **QW5** Truthful `$metadata` (keys, entity sets, the 11 EDM setters).
+- [x] **QW5** Truthful `$metadata`: keys, entity sets, all EDM setters,
+      facets, labels. Fork main (2026-09-11).
 - [ ] **QW2** Generic entity serializer via RTTI.
 - [ ] **QW3** URL + `$top/$skip/$orderby/$count/keys` into a populated
       request context.

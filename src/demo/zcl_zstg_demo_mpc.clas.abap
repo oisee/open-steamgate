@@ -66,11 +66,9 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
 
-* Seats is Edm.Int32 on a real system. set_type_edm_int32 is a todo-assert in
-* open-abap-odata today (QW5); typed as string until that lands.
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Seats'
                                                    iv_abap_fieldname = 'SEATS' ).
-    lo_property->set_type_edm_string( ).
+    lo_property->set_type_edm_int32( ).
     lo_property->set_creatable( abap_true ).
     lo_property->set_updatable( abap_true ).
     lo_property->set_sortable( abap_true ).
