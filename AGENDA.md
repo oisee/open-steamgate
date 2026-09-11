@@ -22,11 +22,11 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   and the `$filter` → SELECT-OPTIONS / `io_tech_request_context` bridge (the
   crux). See gap-list in `docs/prior-art.md`.
 
-- **Gateway lives here; `open-abap-odata` is a dependency for its interface
-  and DDIC transcription only** (decided 2026-09-11). Pulled in as a transpiler
-  lib by URL with `files` limited to `src/{oo,ddic,exceptions,internal}` and
-  `zcl_oao_http_handler` excluded. Upstream PRs only for interface-level fixes
-  (issue #33, the EDM setters). The dispatcher, request context, serializer and
+- **Gateway lives here; the interface/DDIC layer lives in our fork
+  `oisee/open-abap-odata`** (decided 2026-09-11, refined the same day: **no
+  PRs upstream, we work in the fork**). Pulled in as a transpiler lib with
+  `files` limited to `src/{oo,ddic,exceptions,internal}`. Upstream contact is
+  issue #39 (license) only. The dispatcher, request context, serializer and
   `$filter` bridge are open-steamgate code. **Working assumption (Alice,
   2026-09-11): treat open-abap-odata as MIT until issue #39 says otherwise.**
   If the answer is "no", reimplement the ~50 signatures from SAP's public
@@ -75,10 +75,10 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
 - [x] **QW7** Closure probe: `tools/closure-probe.mjs` (static, abaplint
       registry with libs as dependencies). The dynamic complement is
       `"unknownTypes": "runtimeError"` in `abap_transpile.json`. Done 2026-09-11.
-- [ ] **QW1** Fix upstream issue #33: done on the fork, branch
-      `oisee/open-abap-odata:registry-instead-of-hardcoded-dpc` (4c2c301),
-      upstream tests + Steampunk lint green, also fixes the todo-assert
-      exception constructors. PR text in `.local/qw1-pr.md`, waiting for a go.
+- [x] **QW1** Registry instead of the hardcoded test DPC, plus working
+      gateway exception constructors: `oisee/open-abap-odata` main at
+      4c2c301 (2026-09-11). Upstream #33 not PR'd by decision; open-steamgate
+      now consumes the fork without `exclude_filter`.
 - [ ] **QW5** Truthful `$metadata` (keys, entity sets, the 11 EDM setters).
 - [ ] **QW2** Generic entity serializer via RTTI.
 - [ ] **QW3** URL + `$top/$skip/$orderby/$count/keys` into a populated

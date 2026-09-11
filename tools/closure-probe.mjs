@@ -11,7 +11,7 @@
 //                                [--no-default-libs] [--json]
 //
 // Default libs: .local/lars/{open-abap-core,express-icf-shim}/src,
-// .local/lars/open-abap-odata/src/{oo,ddic,exceptions,internal}, and this
+// .local/fork/open-abap-odata/src/{oo,ddic,exceptions,internal}, and this
 // repo's src/. Pass --lib to add e.g. abaplint/deps or a folder of stubs you
 // are building up; re-run until the table is empty.
 //
@@ -79,10 +79,10 @@ function parseArgs(argv) {
 const DEFAULT_LIBS = [
   ".local/lars/open-abap-core/src",
   ".local/lars/express-icf-shim/src",
-  ".local/lars/open-abap-odata/src/oo",
-  ".local/lars/open-abap-odata/src/ddic",
-  ".local/lars/open-abap-odata/src/exceptions",
-  ".local/lars/open-abap-odata/src/internal",
+  ".local/fork/open-abap-odata/src/oo",
+  ".local/fork/open-abap-odata/src/ddic",
+  ".local/fork/open-abap-odata/src/exceptions",
+  ".local/fork/open-abap-odata/src/internal",
   "src",
 ];
 

@@ -108,9 +108,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - `npm test` = `abaplint` + transpile + ABAP Unit (inside `output/index.mjs`)
   + mocha wire tests. `npm start` serves `/sap/opu/odata/sap/` on port 3030.
 - `abap_transpile.json` pulls open-abap-core, express-icf-shim and the
-  interface part of open-abap-odata as libs. `folder` points at `.local/lars/`
-  clones when present, else the URL is cloned. `zcl_oao_http_handler` is
-  excluded on purpose (upstream issue #33).
+  interface part of **our fork** `oisee/open-abap-odata` as libs. `folder`
+  points at `.local/lars/` / `.local/fork/` clones when present, else the URL
+  is cloned. Interface-layer changes go into the fork, never as PRs upstream
+  (decision 2026-09-11).
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).

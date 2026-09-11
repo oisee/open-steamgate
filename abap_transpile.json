@@ -13,16 +13,13 @@
       "folder": "/.local/lars/express-icf-shim"
     },
     {
-      "url": "https://github.com/open-abap/open-abap-odata",
-      "folder": "/.local/lars/open-abap-odata",
+      "url": "https://github.com/oisee/open-abap-odata",
+      "folder": "/.local/fork/open-abap-odata",
       "files": [
         "/src/oo/**",
         "/src/ddic/**",
         "/src/exceptions/**",
         "/src/internal/**"
-      ],
-      "exclude_filter": [
-        "zcl_oao_http_handler"
       ]
     }
   ],
