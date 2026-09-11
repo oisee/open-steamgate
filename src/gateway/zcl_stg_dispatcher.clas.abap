@@ -55,6 +55,8 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         is_set             TYPE zcl_stg_model_info=>ty_entity_set
         is_request         TYPE zcl_stg_url=>ty_request
         iv_base_url        TYPE string
+        it_navigation_path TYPE /iwbep/t_mgw_navigation_path OPTIONAL
+        it_key_tab         TYPE /iwbep/t_mgw_name_value_pair OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -67,8 +69,49 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         is_set             TYPE zcl_stg_model_info=>ty_entity_set
         is_request         TYPE zcl_stg_url=>ty_request
         iv_base_url        TYPE string
+        it_navigation_path TYPE /iwbep/t_mgw_navigation_path OPTIONAL
+        it_key_tab         TYPE /iwbep/t_mgw_name_value_pair OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
+    CLASS-METHODS read_navigation
+      IMPORTING
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_set             TYPE zcl_stg_model_info=>ty_entity_set
+        is_request         TYPE zcl_stg_url=>ty_request
+        iv_base_url        TYPE string
+      RETURNING
+        VALUE(rs_response) TYPE ty_response
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
+    CLASS-METHODS expand_list
+      IMPORTING
+        is_request     TYPE zcl_stg_url=>ty_request
+      RETURNING
+        VALUE(rt_navs) TYPE string_table.
+
+    CLASS-METHODS row_keys
+      IMPORTING
+        is_row            TYPE any
+        is_set            TYPE zcl_stg_model_info=>ty_entity_set
+      RETURNING
+        VALUE(rt_key_tab) TYPE /iwbep/t_mgw_name_value_pair.
+
+    CLASS-METHODS expand_row
+      IMPORTING
+        io_dpc             TYPE REF TO /iwbep/if_mgw_appl_srv_runtime
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_set             TYPE zcl_stg_model_info=>ty_entity_set
+        is_row             TYPE any
+        it_expand          TYPE string_table
+        iv_base_url        TYPE string
+      RETURNING
+        VALUE(rt_nav_json) TYPE zcl_stg_json=>ty_nav_jsons
       RAISING
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
@@ -213,6 +256,21 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
 
     ls_set = zcl_stg_model_info=>find_set( is_service    = ls_service
                                            iv_entity_set = ls_request-entity_set ).
+
+    IF ls_request-nav_prop IS NOT INITIAL.
+      IF lv_method <> 'GET'.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 501
+            code    = 'STG/NOT_IMPLEMENTED'
+            message = 'Writes through a navigation property are not implemented'.
+      ENDIF.
+      rs_response = read_navigation( is_service  = ls_service
+                                     is_set      = ls_set
+                                     is_request  = ls_request
+                                     iv_base_url = lv_base ).
+      RETURN.
+    ENDIF.
 
     IF lv_method <> 'GET'.
       rs_response = write_entity( iv_method   = lv_method
@@ -438,11 +496,18 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lr_entityset TYPE REF TO data.
     DATA ls_context   TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_context.
     DATA lv_count     TYPE string.
+    DATA lt_expand    TYPE string_table.
+    DATA lt_entities  TYPE string_table.
     FIELD-SYMBOLS <lt_data> TYPE ANY TABLE.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
 
     lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
     lo_context = build_context( is_request = is_request
                                 is_set     = is_set ).
+    IF it_key_tab IS SUPPLIED.
+      lo_context->mt_key_tab = it_key_tab.
+    ENDIF.
+    lt_nav_path = it_navigation_path.
     IF is_request-is_count = abap_false.
       ls_paging = lo_context->get_paging( ).
     ENDIF.
@@ -491,7 +556,24 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ENDIF.
     ENDIF.
 
-    IF <lt_data> IS ASSIGNED.
+    lt_expand = expand_list( is_request ).
+    IF <lt_data> IS ASSIGNED AND lt_expand IS NOT INITIAL.
+      LOOP AT <lt_data> ASSIGNING <ls_row>.
+        APPEND zcl_stg_json=>entity( is_data      = <ls_row>
+                                     is_set       = is_set
+                                     iv_namespace = is_service-namespace
+                                     iv_base_url  = iv_base_url
+                                     it_nav_json  = expand_row( io_dpc      = lo_dpc
+                                                                is_service  = is_service
+                                                                is_set      = is_set
+                                                                is_row      = <ls_row>
+                                                                it_expand   = lt_expand
+                                                                iv_base_url = iv_base_url ) ) TO lt_entities.
+      ENDLOOP.
+      rs_response = json_response( iv_status = 200
+                                   iv_body   = zcl_stg_json=>feed_of( it_entities    = lt_entities
+                                                                      iv_inlinecount = lv_count ) ).
+    ELSEIF <lt_data> IS ASSIGNED.
       rs_response = json_response( iv_status = 200
                                    iv_body   = zcl_stg_json=>feed( it_data        = <lt_data>
                                                                    is_set         = is_set
@@ -509,11 +591,17 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lo_context  TYPE REF TO zcl_stg_request_context.
     DATA lt_nav_path TYPE /iwbep/t_mgw_navigation_path.
     DATA lr_entity   TYPE REF TO data.
+    DATA lt_expand   TYPE string_table.
+    DATA lt_nav_json TYPE zcl_stg_json=>ty_nav_jsons.
     FIELD-SYMBOLS <ls_data> TYPE any.
 
     lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
     lo_context = build_context( is_request = is_request
                                 is_set     = is_set ).
+    IF it_key_tab IS SUPPLIED.
+      lo_context->mt_key_tab = it_key_tab.
+    ENDIF.
+    lt_nav_path = it_navigation_path.
 
     lo_dpc->get_entity(
       EXPORTING
@@ -535,11 +623,226 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ENDIF.
     ASSIGN lr_entity->* TO <ls_data>.
 
+    lt_expand = expand_list( is_request ).
+    IF lt_expand IS NOT INITIAL.
+      lt_nav_json = expand_row( io_dpc      = lo_dpc
+                                is_service  = is_service
+                                is_set      = is_set
+                                is_row      = <ls_data>
+                                it_expand   = lt_expand
+                                iv_base_url = iv_base_url ).
+    ENDIF.
+
     rs_response = json_response( iv_status = 200
                                  iv_body   = zcl_stg_json=>entry( is_data      = <ls_data>
                                                                   is_set       = is_set
                                                                   iv_namespace = is_service-namespace
-                                                                  iv_base_url  = iv_base_url ) ).
+                                                                  iv_base_url  = iv_base_url
+                                                                  it_nav_json  = lt_nav_json ) ).
+  ENDMETHOD.
+
+  METHOD expand_list.
+    DATA lv_expand TYPE string.
+    DATA lt_parts  TYPE string_table.
+    DATA lv_part   TYPE string.
+    DATA lv_first  TYPE string.
+    DATA lv_rest   TYPE string.
+
+    lv_expand = zcl_stg_url=>option( is_request = is_request
+                                     iv_name    = '$expand' ).
+    IF lv_expand IS INITIAL.
+      RETURN.
+    ENDIF.
+    SPLIT lv_expand AT ',' INTO TABLE lt_parts.
+    LOOP AT lt_parts INTO lv_part.
+      CONDENSE lv_part.
+* only the first level for now: a/b expands a
+      SPLIT lv_part AT '/' INTO lv_first lv_rest.
+      IF lv_first IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      READ TABLE rt_navs WITH KEY table_line = lv_first TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND lv_first TO rt_navs.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD row_keys.
+    DATA ls_property LIKE LINE OF is_set-properties.
+    DATA ls_key      TYPE /iwbep/s_mgw_name_value_pair.
+    FIELD-SYMBOLS <lv_field> TYPE any.
+
+    LOOP AT is_set-properties INTO ls_property WHERE is_key = abap_true.
+      ASSIGN COMPONENT ls_property-fieldname OF STRUCTURE is_row TO <lv_field>.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      CLEAR ls_key.
+      ls_key-name  = ls_property-name.
+      ls_key-value = <lv_field>.
+      APPEND ls_key TO rt_key_tab.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD expand_row.
+    DATA lv_nav      TYPE string.
+    DATA ls_nav      TYPE zcl_stg_model_info=>ty_nav.
+    DATA ls_target   TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lt_keys     TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_path     TYPE /iwbep/s_mgw_navigation_path.
+    DATA lt_path     TYPE /iwbep/t_mgw_navigation_path.
+    DATA lo_context  TYPE REF TO zcl_stg_request_context.
+    DATA lt_filter   TYPE /iwbep/t_mgw_select_option.
+    DATA ls_paging   TYPE /iwbep/s_mgw_paging.
+    DATA lt_order    TYPE /iwbep/t_mgw_sorting_order.
+    DATA lr_data     TYPE REF TO data.
+    DATA ls_nav_json TYPE zcl_stg_json=>ty_nav_json.
+    FIELD-SYMBOLS <lt_rows> TYPE ANY TABLE.
+    FIELD-SYMBOLS <ls_one>  TYPE any.
+
+    lt_keys = row_keys( is_row = is_row
+                        is_set = is_set ).
+
+    LOOP AT it_expand INTO lv_nav.
+      ls_nav    = zcl_stg_model_info=>find_nav( is_set  = is_set
+                                                iv_name = lv_nav ).
+      ls_target = zcl_stg_model_info=>find_set( is_service    = is_service
+                                                iv_entity_set = ls_nav-target_set ).
+
+      CLEAR lt_path.
+      CLEAR ls_path.
+      ls_path-nav_prop              = ls_nav-name.
+      ls_path-key_tab               = lt_keys.
+      ls_path-target_type           = ls_nav-target_type.
+      ls_path-target_type_namespace = is_service-namespace.
+      IF ls_nav-to_many = abap_true.
+        ls_path-multiplicity = '*'.
+      ELSE.
+        ls_path-multiplicity = '1'.
+      ENDIF.
+      APPEND ls_path TO lt_path.
+
+      CREATE OBJECT lo_context.
+      lo_context->mv_entity_set  = ls_target-name.
+      lo_context->mv_entity_type = ls_target-entity_type.
+      lo_context->ms_set         = ls_target.
+      lo_context->mt_key_tab     = lt_keys.
+
+      CLEAR ls_nav_json.
+      ls_nav_json-name = ls_nav-name.
+      CLEAR lr_data.
+
+      IF ls_nav-to_many = abap_true.
+        io_dpc->get_entityset(
+          EXPORTING
+            iv_entity_name           = ls_target-entity_type
+            iv_entity_set_name       = ls_target-name
+            iv_source_name           = is_set-entity_type
+            it_filter_select_options = lt_filter
+            is_paging                = ls_paging
+            it_key_tab               = lt_keys
+            it_navigation_path       = lt_path
+            it_order                 = lt_order
+            iv_filter_string         = ''
+            iv_search_string         = ''
+            io_tech_request_context  = lo_context
+          IMPORTING
+            er_entityset             = lr_data ).
+        IF lr_data IS BOUND.
+          ASSIGN lr_data->* TO <lt_rows>.
+          ls_nav_json-json = zcl_stg_json=>feed( it_data      = <lt_rows>
+                                                 is_set       = ls_target
+                                                 iv_namespace = is_service-namespace
+                                                 iv_base_url  = iv_base_url ).
+* strip the {"d": ... } envelope: inside an entity the feed is {"results":[...]}
+          ls_nav_json-json = substring( val = ls_nav_json-json
+                                        off = 5
+                                        len = strlen( ls_nav_json-json ) - 6 ).
+        ELSE.
+          ls_nav_json-json = '{"results":[]}'.
+        ENDIF.
+      ELSE.
+        io_dpc->get_entity(
+          EXPORTING
+            iv_entity_name          = ls_target-entity_type
+            iv_entity_set_name      = ls_target-name
+            iv_source_name          = is_set-entity_type
+            it_key_tab              = lt_keys
+            it_navigation_path      = lt_path
+            io_tech_request_context = lo_context
+          IMPORTING
+            er_entity               = lr_data ).
+        IF lr_data IS BOUND.
+          ASSIGN lr_data->* TO <ls_one>.
+          ls_nav_json-json = zcl_stg_json=>entity( is_data      = <ls_one>
+                                                   is_set       = ls_target
+                                                   iv_namespace = is_service-namespace
+                                                   iv_base_url  = iv_base_url ).
+        ELSE.
+          ls_nav_json-json = 'null'.
+        ENDIF.
+      ENDIF.
+      APPEND ls_nav_json TO rt_nav_json.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD read_navigation.
+    DATA ls_nav     TYPE zcl_stg_model_info=>ty_nav.
+    DATA ls_target  TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lt_keys    TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_path    TYPE /iwbep/s_mgw_navigation_path.
+    DATA lt_path    TYPE /iwbep/t_mgw_navigation_path.
+    DATA ls_request TYPE zcl_stg_url=>ty_request.
+
+    ls_nav    = zcl_stg_model_info=>find_nav( is_set  = is_set
+                                              iv_name = is_request-nav_prop ).
+    ls_target = zcl_stg_model_info=>find_set( is_service    = is_service
+                                              iv_entity_set = ls_nav-target_set ).
+    lt_keys   = zcl_stg_url=>parse_keys( iv_key_string = is_request-key_string
+                                         it_key_names  = zcl_stg_model_info=>key_names( is_set ) ).
+
+    ls_path-nav_prop              = ls_nav-name.
+    ls_path-key                   = is_request-key_string.
+    ls_path-key_tab               = lt_keys.
+    ls_path-target_type           = ls_nav-target_type.
+    ls_path-target_type_namespace = is_service-namespace.
+    IF ls_nav-to_many = abap_true.
+      ls_path-multiplicity = '*'.
+    ELSE.
+      ls_path-multiplicity = '1'.
+    ENDIF.
+    APPEND ls_path TO lt_path.
+
+* the rest of the request now addresses the target set
+    ls_request = is_request.
+    ls_request-entity_set = ls_target-name.
+    ls_request-key_string = is_request-nav_key_string.
+    CLEAR ls_request-nav_prop.
+    CLEAR ls_request-nav_key_string.
+
+    IF ls_nav-to_many = abap_true AND is_request-nav_key_string IS INITIAL.
+      rs_response = read_entity_set( is_service         = is_service
+                                     is_set             = ls_target
+                                     is_request         = ls_request
+                                     iv_base_url        = iv_base_url
+                                     it_navigation_path = lt_path
+                                     it_key_tab         = lt_keys ).
+    ELSEIF is_request-nav_key_string IS INITIAL.
+* to-one: the source keys identify the target (foreign key)
+      rs_response = read_entity( is_service         = is_service
+                                 is_set             = ls_target
+                                 is_request         = ls_request
+                                 iv_base_url        = iv_base_url
+                                 it_navigation_path = lt_path
+                                 it_key_tab         = lt_keys ).
+    ELSE.
+      rs_response = read_entity( is_service         = is_service
+                                 is_set             = ls_target
+                                 is_request         = ls_request
+                                 iv_base_url        = iv_base_url
+                                 it_navigation_path = lt_path ).
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

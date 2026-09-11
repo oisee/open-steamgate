@@ -11,17 +11,41 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_property.
     TYPES ty_properties TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
 
+    TYPES: BEGIN OF ty_nav,
+             name        TYPE string,
+             association TYPE string,
+             target_type TYPE string,
+             target_set  TYPE string,
+             to_many     TYPE abap_bool,
+           END OF ty_nav.
+    TYPES ty_navs TYPE STANDARD TABLE OF ty_nav WITH DEFAULT KEY.
+
     TYPES: BEGIN OF ty_entity_set,
              name        TYPE string,
              entity_type TYPE string,
              properties  TYPE ty_properties,
+             navs        TYPE ty_navs,
            END OF ty_entity_set.
     TYPES ty_entity_sets TYPE STANDARD TABLE OF ty_entity_set WITH DEFAULT KEY.
 
+    TYPES: BEGIN OF ty_association,
+             name              TYPE string,
+             left_type         TYPE string,
+             right_type        TYPE string,
+             left_card         TYPE string,
+             right_card        TYPE string,
+             left_set          TYPE string,
+             right_set         TYPE string,
+             principal_is_left TYPE abap_bool,
+             pairs             TYPE zcl_oao_ref_constraint=>ty_pairs,
+           END OF ty_association.
+    TYPES ty_associations TYPE STANDARD TABLE OF ty_association WITH DEFAULT KEY.
+
     TYPES: BEGIN OF ty_service,
-             name        TYPE string,
-             namespace   TYPE string,
-             entity_sets TYPE ty_entity_sets,
+             name         TYPE string,
+             namespace    TYPE string,
+             entity_sets  TYPE ty_entity_sets,
+             associations TYPE ty_associations,
            END OF ty_service.
 
     CLASS-METHODS get
@@ -53,6 +77,15 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
         iv_name            TYPE string
       RETURNING
         VALUE(rs_property) TYPE ty_property
+      RAISING
+        zcx_stg_error.
+
+    CLASS-METHODS find_nav
+      IMPORTING
+        is_set        TYPE ty_entity_set
+        iv_name       TYPE string
+      RETURNING
+        VALUE(rs_nav) TYPE ty_nav
       RAISING
         zcx_stg_error.
 
@@ -101,6 +134,16 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
     DATA ls_entity_set  LIKE LINE OF lt_entity_sets.
     DATA ls_set         TYPE ty_entity_set.
     DATA lx_gateway     TYPE REF TO /iwbep/cx_mgw_base_exception.
+    DATA lt_assocs      TYPE zcl_oao_model=>ty_associations.
+    DATA lo_assoc       TYPE REF TO zcl_oao_association.
+    DATA lt_assoc_sets  TYPE zcl_oao_model=>ty_assoc_sets.
+    DATA lo_assoc_set   TYPE REF TO zcl_oao_assoc_set.
+    DATA ls_association TYPE ty_association.
+    DATA lt_navs        TYPE zcl_oao_entity_typ=>ty_nav_props.
+    DATA lo_nav         TYPE REF TO zcl_oao_nav_prop.
+    DATA ls_nav         TYPE ty_nav.
+    DATA ls_other       TYPE ty_entity_set.
+    FIELD-SYMBOLS <ls_set> TYPE ty_entity_set.
 
     rs_service-name = iv_service.
     TRY.
@@ -159,6 +202,80 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
         APPEND ls_set TO rs_service-entity_sets.
       ENDLOOP.
     ENDLOOP.
+
+* associations and their sets
+    lt_assocs     = lo_model->get_associations( ).
+    lt_assoc_sets = lo_model->get_association_sets( ).
+    LOOP AT lt_assocs INTO lo_assoc.
+      CLEAR ls_association.
+      ls_association-name       = lo_assoc->mv_name.
+      ls_association-left_type  = lo_assoc->mv_left_type.
+      ls_association-right_type = lo_assoc->mv_right_type.
+      ls_association-left_card  = lo_assoc->mv_left_card.
+      ls_association-right_card = lo_assoc->mv_right_card.
+      IF lo_assoc->mo_ref_constraint IS BOUND.
+        ls_association-principal_is_left = lo_assoc->mo_ref_constraint->mv_principal_is_left.
+        ls_association-pairs             = lo_assoc->mo_ref_constraint->mt_pairs.
+      ENDIF.
+      LOOP AT lt_assoc_sets INTO lo_assoc_set.
+        IF lo_assoc_set->mv_association = lo_assoc->mv_name.
+          ls_association-left_set  = lo_assoc_set->mv_left_set.
+          ls_association-right_set = lo_assoc_set->mv_right_set.
+        ENDIF.
+      ENDLOOP.
+      APPEND ls_association TO rs_service-associations.
+    ENDLOOP.
+
+* navigation properties, resolved to a target set per entity set
+    LOOP AT rs_service-entity_sets ASSIGNING <ls_set>.
+      lv_type_name = <ls_set>-entity_type.
+      TRY.
+          lo_entity ?= lo_model->/iwbep/if_mgw_odata_model~get_entity_type( lv_type_name ).
+        CATCH /iwbep/cx_mgw_med_exception.
+          CONTINUE.
+      ENDTRY.
+      lt_navs = lo_entity->get_navigation_properties( ).
+      LOOP AT lt_navs INTO lo_nav.
+        CLEAR ls_nav.
+        ls_nav-name        = lo_nav->mv_name.
+        ls_nav-association = lo_nav->mv_association.
+        READ TABLE rs_service-associations INTO ls_association WITH KEY name = lo_nav->mv_association.
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
+        IF ls_association-left_type = <ls_set>-entity_type.
+          ls_nav-target_type = ls_association-right_type.
+          ls_nav-target_set  = ls_association-right_set.
+          IF ls_association-right_card <> '1' AND ls_association-right_card <> '0'.
+            ls_nav-to_many = abap_true.
+          ENDIF.
+        ELSE.
+          ls_nav-target_type = ls_association-left_type.
+          ls_nav-target_set  = ls_association-left_set.
+          IF ls_association-left_card <> '1' AND ls_association-left_card <> '0'.
+            ls_nav-to_many = abap_true.
+          ENDIF.
+        ENDIF.
+        IF ls_nav-target_set IS INITIAL.
+          LOOP AT rs_service-entity_sets INTO ls_other WHERE entity_type = ls_nav-target_type.
+            ls_nav-target_set = ls_other-name.
+            EXIT.
+          ENDLOOP.
+        ENDIF.
+        APPEND ls_nav TO <ls_set>-navs.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD find_nav.
+    READ TABLE is_set-navs INTO rs_nav WITH KEY name = iv_name.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 404
+          code    = 'STG/NAVIGATION_NOT_FOUND'
+          message = |{ is_set-entity_type } has no navigation property { iv_name }|.
+    ENDIF.
   ENDMETHOD.
 
   METHOD find_set.

@@ -8,6 +8,8 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
     METHODS travelset_create_entity REDEFINITION.
     METHODS travelset_update_entity REDEFINITION.
     METHODS travelset_delete_entity REDEFINITION.
+    METHODS bookingset_get_entityset REDEFINITION.
+    METHODS bookingset_get_entity REDEFINITION.
   PRIVATE SECTION.
     TYPES ty_travel_id TYPE c LENGTH 8.
     TYPES: BEGIN OF ty_range,
@@ -25,6 +27,13 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
         VALUE(rv_travel_id) TYPE ty_travel_id
       RAISING
         /iwbep/cx_mgw_busi_exception.
+
+    METHODS key_value
+      IMPORTING
+        it_key_tab      TYPE /iwbep/t_mgw_name_value_pair
+        iv_name         TYPE string
+      RETURNING
+        VALUE(rv_value) TYPE string.
 
     METHODS ranges_for
       IMPORTING
@@ -150,6 +159,58 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
         EXPORTING
           message = |Travel { lv_travel_id } does not exist|.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD key_value.
+    DATA ls_key TYPE /iwbep/s_mgw_name_value_pair.
+
+    READ TABLE it_key_tab INTO ls_key WITH KEY name = iv_name.
+    IF sy-subrc = 0.
+      rv_value = ls_key-value.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD bookingset_get_entityset.
+    DATA lt_travel_id TYPE ty_ranges.
+    DATA ls_range     TYPE ty_range.
+    DATA lv_parent    TYPE string.
+
+    lt_travel_id = ranges_for( iv_property = 'TravelId'
+                               it_filter   = it_filter_select_options ).
+
+* navigation TravelSet('x')/to_Bookings: the source keys arrive in it_key_tab
+    IF it_navigation_path IS NOT INITIAL.
+      lv_parent = key_value( it_key_tab = it_key_tab
+                             iv_name    = 'TravelId' ).
+      IF lv_parent IS NOT INITIAL.
+        ls_range-sign   = 'I'.
+        ls_range-option = 'EQ'.
+        ls_range-low    = lv_parent.
+        APPEND ls_range TO lt_travel_id.
+      ENDIF.
+    ENDIF.
+
+    SELECT travel_id booking_id customer flight_date
+      FROM zstg_demo_bk
+      INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE travel_id IN lt_travel_id
+      ORDER BY travel_id booking_id.
+  ENDMETHOD.
+
+  METHOD bookingset_get_entity.
+    DATA lv_travel_id  TYPE c LENGTH 8.
+    DATA lv_booking_id TYPE c LENGTH 4.
+
+    lv_travel_id  = key_value( it_key_tab = it_key_tab
+                               iv_name    = 'TravelId' ).
+    lv_booking_id = key_value( it_key_tab = it_key_tab
+                               iv_name    = 'BookingId' ).
+
+    SELECT SINGLE travel_id booking_id customer flight_date
+      FROM zstg_demo_bk
+      INTO CORRESPONDING FIELDS OF er_entity
+      WHERE travel_id = lv_travel_id
+        AND booking_id = lv_booking_id.
   ENDMETHOD.
 
   METHOD travelset_get_entity.

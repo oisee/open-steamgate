@@ -62,6 +62,27 @@ describe("wire", () => {
     expect(body.d.results.map((r) => r.TravelId)).to.deep.equal(["T0003"]);
   });
 
+  it("navigation and $expand", async () => {
+    let res = await fetch(BASE + "/TravelSet('T0001')/to_Bookings");
+    expect(res.status).to.equal(200);
+    let body = await res.json();
+    expect(body.d.results.map((b) => b.BookingId)).to.deep.equal(["B001", "B002"]);
+    expect(body.d.results[0].FlightDate).to.match(/^\/Date\(\d+\)\/$/);
+
+    res = await fetch(BASE + "/TravelSet?$expand=to_Bookings&$top=1");
+    body = await res.json();
+    expect(body.d.results[0].to_Bookings.results).to.have.length(2);
+    expect(body.d.results[0].to_Bookings.results[1].Customer).to.equal("Grace Hopper");
+
+    res = await fetch(BASE + "/BookingSet(TravelId='T0002',BookingId='B001')?$expand=to_Travel");
+    body = await res.json();
+    expect(body.d.to_Travel.Description).to.equal("Copenhagen to Aarhus");
+
+    res = await fetch(BASE + "/TravelSet('T0002')");
+    body = await res.json();
+    expect(body.d.to_Bookings.__deferred.uri).to.equal(BASE + "/TravelSet('T0002')/to_Bookings");
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);

@@ -198,7 +198,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
                                         exp = 'application/json' ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '{"d":{"results":[{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_DEMO_SRV.Travel"' ) ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2}' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"__deferred"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'TravelSet(''T0009'')' ) ).
   ENDMETHOD.
 
@@ -255,7 +255,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
 
     ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-body
-                                        exp = '{"d":{"EntitySets":["TravelSet"]}}' ).
+                                        exp = '{"d":{"EntitySets":["TravelSet","BookingSet"]}}' ).
   ENDMETHOD.
 
   METHOD unknown_set.
@@ -824,6 +824,159 @@ CLASS ltcl_batch IMPLEMENTATION.
                                                 iv_content_type = 'text/plain' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 400 ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_navigation DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS url_with_navigation FOR TESTING RAISING cx_static_check.
+    METHODS metadata_has_association FOR TESTING RAISING cx_static_check.
+    METHODS to_many_navigation FOR TESTING RAISING cx_static_check.
+    METHODS to_one_navigation FOR TESTING RAISING cx_static_check.
+    METHODS deferred_links FOR TESTING RAISING cx_static_check.
+    METHODS expand_entity_set FOR TESTING RAISING cx_static_check.
+    METHODS expand_single_entity FOR TESTING RAISING cx_static_check.
+    METHODS unknown_navigation FOR TESTING RAISING cx_static_check.
+
+    METHODS get
+      IMPORTING
+        iv_path            TYPE string
+        iv_query           TYPE string OPTIONAL
+      RETURNING
+        VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
+ENDCLASS.
+
+CLASS ltcl_navigation IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD get.
+    DATA lt_options TYPE tihttpnvp.
+
+    IF iv_query IS NOT INITIAL.
+      lt_options = cl_http_utility=>string_to_fields( iv_query ).
+    ENDIF.
+    rs_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = iv_path
+                                                it_options = lt_options ).
+  ENDMETHOD.
+
+  METHOD url_with_navigation.
+    DATA ls_request TYPE zcl_stg_url=>ty_request.
+
+    ls_request = zcl_stg_url=>parse( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Bookings` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-entity_set
+                                        exp = 'TravelSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-key_string
+                                        exp = `'T0001'` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-nav_prop
+                                        exp = 'to_Bookings' ).
+
+    ls_request = zcl_stg_url=>parse( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Bookings/$count` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-nav_prop
+                                        exp = 'to_Bookings' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_count
+                                        exp = abap_true ).
+
+    ls_request = zcl_stg_url=>parse( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Bookings(TravelId='T0001',BookingId='B001')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-nav_key_string
+                                        exp = `TravelId='T0001',BookingId='B001'` ).
+  ENDMETHOD.
+
+  METHOD metadata_has_association.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<NavigationProperty Name="to_Bookings" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="FromRole_TravelToBookings" ToRole="ToRole_TravelToBookings"/>' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<NavigationProperty Name="to_Travel" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="ToRole_TravelToBookings" ToRole="FromRole_TravelToBookings"/>' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Association Name="TravelToBookings"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<End Type="ZSTG_DEMO_SRV.Booking" Multiplicity="*" Role="ToRole_TravelToBookings"/>' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<AssociationSet Name="TravelToBookingsSet" Association="ZSTG_DEMO_SRV.TravelToBookings"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Property Name="FlightDate" Type="Edm.DateTime" Nullable="true" Precision="0"' ) ).
+  ENDMETHOD.
+
+  METHOD to_many_navigation.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Bookings` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_DEMO_SRV.Booking"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"BookingId":"B001","Customer":"Ada Lovelace","FlightDate":"\/Date(' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"BookingId":"B002"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Dijkstra' ) ).
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Bookings/$count` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '2' ).
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')/to_Bookings` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '{"d":{"results":[]}}' ).
+  ENDMETHOD.
+
+  METHOD to_one_navigation.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet(TravelId='T0002',BookingId='B001')/to_Travel` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '{"d":{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0002'')"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Copenhagen to Aarhus"' ) ).
+  ENDMETHOD.
+
+  METHOD deferred_links.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')` ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Bookings":{"__deferred":{"uri":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')/to_Bookings"}}' ) ).
+  ENDMETHOD.
+
+  METHOD expand_entity_set.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = '$expand=to_Bookings&$top=2' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
+* the expanded navigation is inline; the bookings' own to_Travel stays deferred
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"to_Bookings":{"__deferred"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Travel":{"__deferred"' ) ).
+  ENDMETHOD.
+
+  METHOD expand_single_entity.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( iv_path  = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet(TravelId='T0001',BookingId='B002')`
+                       iv_query = '$expand=to_Travel' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Travel":{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen"' ) ).
+
+    ls_response = get( iv_path  = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')`
+                       iv_query = '$expand=to_Bookings' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Bookings":{"results":[]}' ) ).
+  ENDMETHOD.
+
+  METHOD unknown_navigation.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')/to_Nowhere` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 404 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'STG/NAVIGATION_NOT_FOUND' ) ).
   ENDMETHOD.
 
 ENDCLASS.

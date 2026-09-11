@@ -32,6 +32,20 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Navigation and `$expand` done 2026-09-11
+
+Fork: `create_association` / `create_association_set` /
+`create_navigation_property` / referential constraints are real, `$metadata`
+emits them. open-steamgate: `Set(key)/nav`, `Set(key)/nav/$count`,
+`Set(key)/nav(key)`, to-many and to-one, `$expand=a,b` (first level) on
+entity sets and single entities by the generic route a real Gateway takes when
+the DPC has no `get_expanded_*`: `get_entityset` / `get_entity` of the target
+set with `it_navigation_path` and the source keys in `it_key_tab`. Navigation
+properties not expanded are `__deferred` links. Demo grew a `Booking` entity
+(DATS field → `Edm.DateTime`) with a 1:N association. Still open: deep insert,
+writes through navigation, `get_expanded_entityset` when a DPC implements it,
+nested `$expand`.
+
 ## `$batch` done 2026-09-11
 
 `zcl_stg_batch`: multipart/mixed in and out, retrieve parts dispatched one by
@@ -50,8 +64,7 @@ POST / PUT / PATCH / MERGE / DELETE reach `create_entity`, `update_entity`,
 (`zcl_stg_entry_provider`: request body parsed by `zcl_stg_json=>parse_object`,
 mapped through the model, EDM-typed conversion). 201 + Location, 204, business
 exceptions as 400 with the DPC's message. CSRF fetch answered. The demo DPC
-does real INSERT / UPDATE / DELETE on SQLite. Still open: deep insert, `$expand`,
-navigation properties, function imports, a transaction bracket around
+does real INSERT / UPDATE / DELETE on SQLite. Still open: deep insert, function imports, a transaction bracket around
 changesets.
 
 ## Phase 4 demo — Fiori Elements list report, 2026-09-11

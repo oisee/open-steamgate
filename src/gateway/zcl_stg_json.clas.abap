@@ -2,6 +2,19 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
 * OData v2 JSON (verbose format, the one SEGW services speak) from typed
 * ABAP data, driven by the model: property names, EDM types, keys.
   PUBLIC SECTION.
+    TYPES: BEGIN OF ty_nav_json,
+             name TYPE string,
+             json TYPE string,
+           END OF ty_nav_json.
+    TYPES ty_nav_jsons TYPE STANDARD TABLE OF ty_nav_json WITH DEFAULT KEY.
+
+    CLASS-METHODS feed_of
+      IMPORTING
+        it_entities    TYPE string_table
+        iv_inlinecount TYPE string OPTIONAL
+      RETURNING
+        VALUE(rv_json) TYPE string.
+
     CLASS-METHODS feed
       IMPORTING
         it_data        TYPE ANY TABLE
@@ -18,6 +31,7 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
         is_set         TYPE zcl_stg_model_info=>ty_entity_set
         iv_namespace   TYPE string
         iv_base_url    TYPE string
+        it_nav_json    TYPE ty_nav_jsons OPTIONAL
       RETURNING
         VALUE(rv_json) TYPE string.
 
@@ -27,6 +41,7 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
         is_set         TYPE zcl_stg_model_info=>ty_entity_set
         iv_namespace   TYPE string
         iv_base_url    TYPE string
+        it_nav_json    TYPE ty_nav_jsons OPTIONAL
       RETURNING
         VALUE(rv_json) TYPE string.
 
@@ -397,6 +412,8 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA ls_property LIKE LINE OF is_set-properties.
     DATA lv_uri      TYPE string.
     DATA lv_fields   TYPE string.
+    DATA ls_nav      LIKE LINE OF is_set-navs.
+    DATA ls_nav_json LIKE LINE OF it_nav_json.
     FIELD-SYMBOLS <lv_field> TYPE any.
 
     lv_uri = |{ iv_base_url }/{ is_set-name }({ key_predicate( is_data = is_data is_set = is_set ) })|.
@@ -410,6 +427,17 @@ CLASS zcl_stg_json IMPLEMENTATION.
                                                                  iv_edm_type = ls_property-edm_type ) }|.
     ENDLOOP.
 
+* navigation properties: expanded content when the caller supplies it,
+* the v2 deferred link otherwise
+    LOOP AT is_set-navs INTO ls_nav.
+      READ TABLE it_nav_json INTO ls_nav_json WITH KEY name = ls_nav-name.
+      IF sy-subrc = 0.
+        lv_fields = |{ lv_fields },"{ ls_nav-name }":{ ls_nav_json-json }|.
+      ELSE.
+        lv_fields = |{ lv_fields },"{ ls_nav-name }":\{"__deferred":\{"uri":"{ lv_uri }/{ ls_nav-name }"\}\}|.
+      ENDIF.
+    ENDLOOP.
+
     rv_json = |\{"__metadata":\{"id":"{ lv_uri }","uri":"{ lv_uri }","type":"{ iv_namespace }.{ is_set-entity_type }"\}{ lv_fields }\}|.
   ENDMETHOD.
 
@@ -417,19 +445,15 @@ CLASS zcl_stg_json IMPLEMENTATION.
     rv_json = |\{"d":{ entity( is_data      = is_data
                                 is_set       = is_set
                                 iv_namespace = iv_namespace
-                                iv_base_url  = iv_base_url ) }\}|.
+                                iv_base_url  = iv_base_url
+                                it_nav_json  = it_nav_json ) }\}|.
   ENDMETHOD.
 
-  METHOD feed.
+  METHOD feed_of.
     DATA lv_rows TYPE string.
     DATA lv_row  TYPE string.
-    FIELD-SYMBOLS <ls_row> TYPE any.
 
-    LOOP AT it_data ASSIGNING <ls_row>.
-      lv_row = entity( is_data      = <ls_row>
-                       is_set       = is_set
-                       iv_namespace = iv_namespace
-                       iv_base_url  = iv_base_url ).
+    LOOP AT it_entities INTO lv_row.
       IF lv_rows IS INITIAL.
         lv_rows = lv_row.
       ELSE.
@@ -442,6 +466,20 @@ CLASS zcl_stg_json IMPLEMENTATION.
       rv_json = |{ rv_json },"__count":"{ iv_inlinecount }"|.
     ENDIF.
     rv_json = |{ rv_json }\}\}|.
+  ENDMETHOD.
+
+  METHOD feed.
+    DATA lt_entities TYPE string_table.
+    FIELD-SYMBOLS <ls_row> TYPE any.
+
+    LOOP AT it_data ASSIGNING <ls_row>.
+      APPEND entity( is_data      = <ls_row>
+                     is_set       = is_set
+                     iv_namespace = iv_namespace
+                     iv_base_url  = iv_base_url ) TO lt_entities.
+    ENDLOOP.
+    rv_json = feed_of( it_entities    = lt_entities
+                       iv_inlinecount = iv_inlinecount ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -5,6 +5,8 @@ CLASS zcl_stg_url DEFINITION PUBLIC CREATE PUBLIC.
              service         TYPE string,
              entity_set      TYPE string,
              key_string      TYPE string,
+             nav_prop        TYPE string,
+             nav_key_string  TYPE string,
              is_service_root TYPE abap_bool,
              is_metadata     TYPE abap_bool,
              is_batch        TYPE abap_bool,
@@ -76,9 +78,9 @@ CLASS zcl_stg_url IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-* /<EntitySet>(<keys>)/$count
-    FIND REGEX '^/([^/(]+)(?:\(([^)]*)\))?(/\$count)?/?$' IN lv_rest
-      SUBMATCHES lv_segment rs_request-key_string lv_tail.
+* /<EntitySet>(<keys>)/<NavigationProperty>(<keys>)/$count
+    FIND REGEX '^/([^/(]+)(?:\(([^)]*)\))?(?:/([^/($]+)(?:\(([^)]*)\))?)?(/\$count)?/?$' IN lv_rest
+      SUBMATCHES lv_segment rs_request-key_string rs_request-nav_prop rs_request-nav_key_string lv_tail.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING
@@ -88,6 +90,8 @@ CLASS zcl_stg_url IMPLEMENTATION.
     ENDIF.
     rs_request-entity_set = cl_http_utility=>unescape_url( lv_segment ).
     rs_request-key_string = cl_http_utility=>unescape_url( rs_request-key_string ).
+    rs_request-nav_prop = cl_http_utility=>unescape_url( rs_request-nav_prop ).
+    rs_request-nav_key_string = cl_http_utility=>unescape_url( rs_request-nav_key_string ).
     IF lv_tail IS NOT INITIAL.
       rs_request-is_count = abap_true.
     ENDIF.

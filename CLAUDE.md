@@ -12,7 +12,7 @@ OData → Fiori), deploying back through abapGit.
 
 ## Where this repo is
 
-**CRUD and `$batch` work end to end (2026-09-11); `$expand`, navigation next.**
+**CRUD, `$batch`, navigation and `$expand` work end to end (2026-09-11).**
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2
 over `src/gateway/` (URL parser, `$filter` → select-options, request context,
 entry provider, model info, JSON (de)serializer, dispatcher). A Fiori Elements
