@@ -165,6 +165,27 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
   would run every DPC `SELECT … GROUP BY` on a columnar engine unchanged.
   DuckDB over ClickHouse: embedded, transactional, UPDATE/DELETE, PG-like SQL.
   Pairs with an analytical list page once `$apply`/aggregation is on the wire.
+- **SADL-lite (v2 candidate).** Two of eight corpus repos were SADL-mapped.
+  Clean-room route: the `if_sadl_gw_*` interfaces are already transcribed
+  in the fork (`if_sadl_gw_dpc`, `_dpc_util`, `_query_control`,
+  `_query_options`, `_extension_control`, `if_sadl_public_types`); a
+  `cl_sadl_gw_dpc_factory` reimplementation would take the SEGW mapping
+  (entity → CDS view or table + field mapping) and execute reads generically:
+  our dispatcher already carries `$filter`/`$orderby`/`$top`/`$skip` as ranges
+  and paging, so the executor is "SELECT from the mapped source WHERE ranges".
+  Prerequisite: CDS DDL subset → `CREATE VIEW` in SQLite (abaplint parses
+  DDLS; the transpiler already has `buildVIEW` for DDIC views). Knowledge
+  sources that stay clean-room: SAP Press "OData and SAP NetWeaver Gateway",
+  "Core Data Services for ABAP", "ABAP RESTful Application Programming
+  Model" (on the netdisk), public interface signatures, observing request
+  shapes on a sandbox system. No SAP source.
+- **SAP GUI front (DIAG) for reports and dynpros.** Orthogonal to OData: the
+  DIAG sibling already has the protocol reverse-engineered (SAP-LZH writer
+  included). open-abap-gui models a classic report / dynpro / selection screen
+  through host interfaces (`zif_gg_report_v1`, dynpro builders) and renders
+  HTML; a DIAG renderer behind the same host interfaces would let a real SAP
+  GUI log on to the local runtime. Separate project, shares the transpiled
+  runtime and the DDIC capture with this one.
 - **`capture` tool:** probe JSON → abapGit data config for exactly the
   DTEL/DOMA/TABL/TTYP + TABU rows a DPC needs → `.local/capture/<system>/`
   as a lib. See the closure doc.
