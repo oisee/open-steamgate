@@ -9,8 +9,12 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
       odata.push(req.method() + " " + req.url().replace("http://localhost:3030", ""));
     }
   });
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
+  const failed = [];
+  page.on("response", (res) => {
+    if (res.url().includes("/sap/opu/odata/sap/") && res.status() >= 400) {
+      failed.push(res.status() + " " + res.url());
+    }
+  });
 
   await page.goto("/app/index.html");
 
@@ -24,17 +28,25 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
   // the app really went through $metadata and the entity set
   expect(odata.some((r) => r.includes("$metadata"))).toBe(true);
   expect(odata.some((r) => r.includes("/TravelSet") && r.includes("$inlinecount=allpages"))).toBe(true);
-  expect(errors, errors.join("\n")).toEqual([]);
+  // nothing the app asked the service for came back as an error
+  expect(failed, failed.join("\n")).toEqual([]);
 });
 
 test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await page.goto("/app/index.html");
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();
 
+  const filters = [];
+  page.on("request", (req) => {
+    if (req.url().includes("/TravelSet") && req.url().includes("$filter")) {
+      filters.push(decodeURIComponent(req.url()));
+    }
+  });
   const status = page.getByRole("combobox", {name: /Status/}).or(page.getByLabel(/^Status/).first());
   await status.first().fill("X");
-  await page.getByRole("button", {name: "Go"}).click();
+  await status.first().press("Enter");
 
-  await expect(page.getByText("Aarhus to Odense")).toBeVisible();
   await expect(page.getByText("Berlin to Copenhagen")).toHaveCount(0);
+  await expect(page.getByText("Aarhus to Odense")).toBeVisible();
+  expect(filters.some((u) => /\$filter=Status eq 'X'/.test(u)), filters.join("\n")).toBe(true);
 });

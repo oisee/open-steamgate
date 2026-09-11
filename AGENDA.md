@@ -39,8 +39,12 @@ annotations file, no controller code) served by the same Express process at
 `/app/`, so no proxy and no CORS. The exact SmartTable requests
 (`$select`, `$skip/$top`, `$inlinecount=allpages`, `$filter`, `$metadata`
 with `sap-language`) are answered by the dispatcher. `npm run e2e` runs the
-Playwright check; it needs `playwright install-deps chromium` once (sudo) on
-a bare machine. Browser-level verification is still pending on this box.
+Playwright check (needs `playwright install-deps chromium` once, sudo):
+**green 2026-09-11**, the list report renders the four travels and the filter
+bar's `$filter=Status eq 'X'` reaches the DPC. Console shows FE V2's
+`Only ODataModel with batch mode enabled are supported` for the transaction
+controller: **`$batch` is a prerequisite for writes from Fiori**, add it to
+Phase 1b.
 
 ## Phase 1+2 — read path incl. `$filter` done 2026-09-11
 

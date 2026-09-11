@@ -56,7 +56,40 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
         iv_message     TYPE string
       RETURNING
         VALUE(rv_json) TYPE string.
+
+* One flat JSON object -> name/value pairs. Accepts the v2 {"d":{...}}
+* wrapper, skips __metadata and nested objects/arrays, keeps numbers,
+* booleans and null as their literal text.
+    CLASS-METHODS parse_object
+      IMPORTING
+        iv_json          TYPE string
+      RETURNING
+        VALUE(rt_values) TYPE tihttpnvp
+      RAISING
+        zcx_stg_error.
   PRIVATE SECTION.
+    CLASS-METHODS read_string
+      IMPORTING
+        iv_json         TYPE string
+      CHANGING
+        cv_off          TYPE i
+      RETURNING
+        VALUE(rv_value) TYPE string
+      RAISING
+        zcx_stg_error.
+
+    CLASS-METHODS skip_value
+      IMPORTING
+        iv_json TYPE string
+      CHANGING
+        cv_off  TYPE i.
+
+    CLASS-METHODS skip_blanks
+      IMPORTING
+        iv_json TYPE string
+      CHANGING
+        cv_off  TYPE i.
+
     CLASS-METHODS epoch_ms
       IMPORTING
         iv_date      TYPE d
@@ -78,6 +111,172 @@ CLASS zcl_stg_json IMPLEMENTATION.
 
   METHOD error.
     rv_json = |\{"error":\{"code":"{ escape( iv_code ) }","message":\{"lang":"en","value":"{ escape( iv_message ) }"\}\}\}|.
+  ENDMETHOD.
+
+  METHOD skip_blanks.
+    DATA lv_len TYPE i.
+
+    lv_len = strlen( iv_json ).
+    WHILE cv_off < lv_len AND iv_json+cv_off(1) IS INITIAL.
+      cv_off = cv_off + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD read_string.
+    DATA lv_len   TYPE i.
+    DATA lv_piece TYPE string.
+    DATA lv_hex   TYPE string.
+    DATA lv_x     TYPE x LENGTH 2.
+
+    lv_len = strlen( iv_json ).
+* cv_off is on the opening quote
+    cv_off = cv_off + 1.
+    WHILE cv_off < lv_len.
+      lv_piece = iv_json+cv_off(1).
+      IF lv_piece = '"'.
+        cv_off = cv_off + 1.
+        RETURN.
+      ELSEIF lv_piece = '\\'.
+        cv_off = cv_off + 1.
+        lv_piece = iv_json+cv_off(1).
+        CASE lv_piece.
+          WHEN 'n'.
+            lv_piece = cl_abap_char_utilities=>newline.
+          WHEN 'r'.
+            lv_piece = cl_abap_char_utilities=>cr_lf(1).
+          WHEN 't'.
+            lv_piece = cl_abap_char_utilities=>horizontal_tab.
+          WHEN 'u'.
+            cv_off = cv_off + 1.
+            lv_hex = iv_json+cv_off(4).
+            lv_x = lv_hex.
+            lv_piece = cl_abap_conv_in_ce=>uccp( lv_x ).
+            cv_off = cv_off + 3.
+          WHEN OTHERS.
+* \" \\ \/ and anything else: the character itself
+            lv_piece = iv_json+cv_off(1).
+        ENDCASE.
+      ENDIF.
+      rv_value = rv_value && lv_piece.
+      cv_off = cv_off + 1.
+    ENDWHILE.
+    RAISE EXCEPTION TYPE zcx_stg_error
+      EXPORTING
+        status  = 400
+        code    = 'STG/BAD_JSON'
+        message = 'Unterminated string in request body'.
+  ENDMETHOD.
+
+  METHOD skip_value.
+    DATA lv_len   TYPE i.
+    DATA lv_depth TYPE i.
+    DATA lv_char  TYPE string.
+    DATA lv_in    TYPE abap_bool.
+
+    lv_len = strlen( iv_json ).
+    WHILE cv_off < lv_len.
+      lv_char = iv_json+cv_off(1).
+      IF lv_in = abap_true.
+        IF lv_char = '\\'.
+          cv_off = cv_off + 1.
+        ELSEIF lv_char = '"'.
+          lv_in = abap_false.
+        ENDIF.
+      ELSEIF lv_char = '"'.
+        lv_in = abap_true.
+      ELSEIF lv_char = '{' OR lv_char = '['.
+        lv_depth = lv_depth + 1.
+      ELSEIF lv_char = '}' OR lv_char = ']'.
+        IF lv_depth = 0.
+          RETURN.
+        ENDIF.
+        lv_depth = lv_depth - 1.
+      ELSEIF lv_char = ',' AND lv_depth = 0.
+        RETURN.
+      ENDIF.
+      cv_off = cv_off + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD parse_object.
+    DATA lv_off   TYPE i.
+    DATA lv_len   TYPE i.
+    DATA lv_char  TYPE string.
+    DATA lv_name  TYPE string.
+    DATA lv_start TYPE i.
+    DATA lv_count TYPE i.
+    DATA ls_pair  TYPE ihttpnvp.
+
+    lv_len = strlen( iv_json ).
+    skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+    IF lv_off >= lv_len OR iv_json+lv_off(1) <> '{'.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 400
+          code    = 'STG/BAD_JSON'
+          message = 'Request body must be a JSON object'.
+    ENDIF.
+    lv_off = lv_off + 1.
+
+    DO.
+      skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      IF lv_off >= lv_len.
+        EXIT.
+      ENDIF.
+      lv_char = iv_json+lv_off(1).
+      IF lv_char = '}'.
+        EXIT.
+      ELSEIF lv_char = ','.
+        lv_off = lv_off + 1.
+        CONTINUE.
+      ELSEIF lv_char <> '"'.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 400
+            code    = 'STG/BAD_JSON'
+            message = |Unexpected { lv_char } at { lv_off } in request body|.
+      ENDIF.
+
+      lv_name = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      IF lv_off >= lv_len OR iv_json+lv_off(1) <> ':'.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 400
+            code    = 'STG/BAD_JSON'
+            message = |Expected : after { lv_name } in request body|.
+      ENDIF.
+      lv_off = lv_off + 1.
+      skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      lv_char = iv_json+lv_off(1).
+
+      IF lv_name = 'd' AND lv_char = '{'.
+* v2 wrapper: descend
+        lv_off = lv_off + 1.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_pair.
+      ls_pair-name = lv_name.
+      IF lv_char = '"'.
+        ls_pair-value = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+      ELSEIF lv_char = '{' OR lv_char = '['.
+* nested (__metadata, deferred navigation, deep insert): skipped for now
+        lv_off = lv_off + 1.
+        skip_value( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+        lv_off = lv_off + 1.
+        CONTINUE.
+      ELSE.
+        lv_start = lv_off.
+        skip_value( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+        lv_count = lv_off - lv_start.
+        ls_pair-value = iv_json+lv_start(lv_count).
+        CONDENSE ls_pair-value.
+      ENDIF.
+      IF lv_name <> '__metadata'.
+        APPEND ls_pair TO rt_values.
+      ENDIF.
+    ENDDO.
   ENDMETHOD.
 
   METHOD epoch_ms.
