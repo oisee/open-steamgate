@@ -27,8 +27,10 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   lib by URL with `files` limited to `src/{oo,ddic,exceptions,internal}` and
   `zcl_oao_http_handler` excluded. Upstream PRs only for interface-level fixes
   (issue #33, the EDM setters). The dispatcher, request context, serializer and
-  `$filter` bridge are open-steamgate code. If the license question (QW0) is
-  answered "no", reimplement the ~50 signatures from SAP's public contract.
+  `$filter` bridge are open-steamgate code. **Working assumption (Alice,
+  2026-09-11): treat open-abap-odata as MIT until issue #39 says otherwise.**
+  If the answer is "no", reimplement the ~50 signatures from SAP's public
+  contract.
 
 ## Phase 0 — done 2026-09-11
 
