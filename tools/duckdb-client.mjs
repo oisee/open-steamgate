@@ -27,6 +27,9 @@ export class DuckDBDatabaseClient {
     this.instance = undefined;
     this.connection = undefined;
     this.inTransaction = false;
+    // successful modifying statements of the open LUW, replayed when a
+    // failed statement aborts the DuckDB transaction (savepoint emulation)
+    this.luw = [];
   }
 
   async connect() {
@@ -42,6 +45,12 @@ export class DuckDBDatabaseClient {
     this.instance = undefined;
   }
 
+  // a persisted file already carries the schema and the seed
+  async hasSchema() {
+    const rows = await this.query("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_name = 'zstg_demo'");
+    return Number(rows[0]?.n ?? 0) > 0;
+  }
+
   async execute(sql) {
     if (Array.isArray(sql)) {
       for (const s of sql) await this.execute(s);
@@ -53,26 +62,52 @@ export class DuckDBDatabaseClient {
     await this.connection.run(sql);
   }
 
-  // Autocommit. A failed statement (duplicate key -> subrc 4) aborts a DuckDB
-  // transaction and there are no savepoints to fence it the way the PG
-  // client does, so the ABAP LUW is not bracketed here: COMMIT WORK and
-  // ROLLBACK WORK are no-ops. Fine for reads and analytics, a known gap for
-  // transactional flows (see AGENDA).
+  // The ABAP LUW: INSERT/UPDATE/DELETE open a transaction, COMMIT WORK and
+  // ROLLBACK WORK end it. A statement that fails (duplicate key -> subrc 4)
+  // aborts a DuckDB transaction and there are no savepoints to fence it the
+  // way the PG client does, so the successful statements of the LUW are kept
+  // and replayed into a fresh transaction after a failure. Deterministic SQL
+  // makes the replay equivalent to a ROLLBACK TO SAVEPOINT.
   async beginTransaction() {
-    return;
+    if (this.inTransaction) return;
+    await this.connection.run("BEGIN TRANSACTION");
+    this.inTransaction = true;
+    this.luw = [];
   }
 
   async commit() {
-    return;
+    if (!this.inTransaction) return;
+    await this.connection.run("COMMIT");
+    this.inTransaction = false;
+    this.luw = [];
   }
 
   async rollback() {
-    return;
+    if (!this.inTransaction) return;
+    await this.connection.run("ROLLBACK");
+    this.inTransaction = false;
+    this.luw = [];
+  }
+
+  async replayAfterFailure() {
+    await this.connection.run("ROLLBACK");
+    await this.connection.run("BEGIN TRANSACTION");
+    for (const sql of this.luw) {
+      await this.connection.run(sql);
+    }
   }
 
   async modifying(sql) {
+    await this.beginTransaction();
     if (this.trace) console.log(sql);
-    const result = await this.connection.runAndReadAll(sql);
+    let result;
+    try {
+      result = await this.connection.runAndReadAll(sql);
+    } catch (error) {
+      await this.replayAfterFailure();
+      throw error;
+    }
+    this.luw.push(sql);
     const rows = result.getRowObjects();
     // DuckDB reports the affected row count as a single-row result
     const n = rows.length > 0 ? Number(Object.values(rows[0])[0] ?? 0) : 0;

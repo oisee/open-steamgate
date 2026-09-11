@@ -1332,3 +1332,70 @@ CLASS ltcl_sadl IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_luw DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* The ABAP LUW on whichever database is behind the runtime: a failed
+* statement must not lose the successful ones before it, ROLLBACK WORK
+* must undo them, COMMIT WORK must keep them.
+  PRIVATE SECTION.
+    METHODS rollback_work_undoes FOR TESTING RAISING cx_static_check.
+    METHODS failure_keeps_the_luw FOR TESTING RAISING cx_static_check.
+
+    METHODS count_travels
+      RETURNING
+        VALUE(rv_count) TYPE i.
+ENDCLASS.
+
+CLASS ltcl_luw IMPLEMENTATION.
+
+  METHOD count_travels.
+    SELECT COUNT( * ) FROM zstg_demo INTO rv_count.
+  ENDMETHOD.
+
+  METHOD rollback_work_undoes.
+    DATA ls_row   TYPE zstg_demo.
+    DATA lv_before TYPE i.
+
+    lv_before = count_travels( ).
+    ls_row-mandt = sy-mandt.
+    ls_row-travel_id = 'T0900'.
+    ls_row-description = 'rolled back'.
+    INSERT zstg_demo FROM ls_row.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = count_travels( )
+                                        exp = lv_before + 1 ).
+    ROLLBACK WORK.
+    cl_abap_unit_assert=>assert_equals( act = count_travels( )
+                                        exp = lv_before ).
+  ENDMETHOD.
+
+  METHOD failure_keeps_the_luw.
+    DATA ls_row    TYPE zstg_demo.
+    DATA lv_before TYPE i.
+
+    lv_before = count_travels( ).
+    ls_row-mandt = sy-mandt.
+    ls_row-travel_id = 'T0901'.
+    ls_row-description = 'kept'.
+    INSERT zstg_demo FROM ls_row.
+    cl_abap_unit_assert=>assert_subrc( ).
+
+* duplicate key: subrc 4, the LUW must survive
+    INSERT zstg_demo FROM ls_row.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc
+                                        exp = 4 ).
+    cl_abap_unit_assert=>assert_equals( act = count_travels( )
+                                        exp = lv_before + 1 ).
+
+    COMMIT WORK.
+    cl_abap_unit_assert=>assert_equals( act = count_travels( )
+                                        exp = lv_before + 1 ).
+
+    DELETE FROM zstg_demo WHERE travel_id = 'T0901'.
+    COMMIT WORK.
+    cl_abap_unit_assert=>assert_equals( act = count_travels( )
+                                        exp = lv_before ).
+  ENDMETHOD.
+
+ENDCLASS.

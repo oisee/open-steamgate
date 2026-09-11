@@ -40,13 +40,15 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 (`NCHAR` → `VARCHAR`), the seed rows and the CDS views into DuckDB instead of
 SQLite. **All 69 ABAP Unit tests and the HTTP suite pass unchanged on DuckDB**
 (`npm run unit:duckdb`, `npm run integration:duckdb`, `npm run start:duckdb`),
-including the SADL cube's `GROUP BY`. Two adaptations were needed: trailing
-blanks in string literals are trimmed (ABAP CHAR semantics; SQLite tolerated
-the padded literals, VARCHAR does not), and the adapter runs in autocommit
-because a failed statement aborts a DuckDB transaction and there are no
-savepoints to fence it the way the PG client does. Open: a LUW bracket
-(retry-based), DECIMAL/DATE column types instead of NCHAR, and the transpiler
-package (`@abaplint/database-duckdb`) this could become upstream.
+including the SADL cube's `GROUP BY`. Adaptations: trailing blanks in
+string literals are trimmed (ABAP CHAR semantics; SQLite tolerated the padded
+literals, VARCHAR does not); the ABAP LUW is real (INSERT/UPDATE/DELETE open
+a transaction, `COMMIT WORK` / `ROLLBACK WORK` end it) and a failed statement,
+which aborts a DuckDB transaction, is fenced by replaying the LUW's
+successful statements into a fresh transaction (savepoint emulation; test
+`ltcl_luw` runs on both stores); `STG_DB_PATH=file.duckdb` persists schema,
+seed and data between runs. Open: DECIMAL/DATE column types instead of
+NCHAR, and packaging as `@abaplint/database-duckdb`.
 
 ## SADL-lite, 2026-09-12 (night run)
 

@@ -9,12 +9,17 @@ export async function setup(abap, schemas, insert) {
   let db;
   if (process.env.STG_DB === "duckdb") {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
-    db = new DuckDBDatabaseClient({trace: process.env.STG_DB_TRACE === "1"});
+    // STG_DB_PATH=some.duckdb keeps the data between runs
+    db = new DuckDBDatabaseClient({trace: process.env.STG_DB_TRACE === "1", path: process.env.STG_DB_PATH ?? ":memory:"});
     abap.context.databaseConnections["DEFAULT"] = db;
     await db.connect();
+    if (process.env.STG_DB_PATH && await db.hasSchema()) {
+      return;
+    }
     await db.execute(duckdbSchema(schemas));
     await db.execute(duckdbInserts(insert));
     await db.execute(seedStatements());
+    await db.commit();
     return;
   }
   db = new SQLiteDatabaseClient();
