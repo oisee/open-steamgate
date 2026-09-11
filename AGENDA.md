@@ -32,6 +32,17 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Phase 1b — writes done 2026-09-11
+
+POST / PUT / PATCH / MERGE / DELETE reach `create_entity`, `update_entity`,
+`delete_entity` of the DPC with an `io_data_provider`
+(`zcl_stg_entry_provider`: request body parsed by `zcl_stg_json=>parse_object`,
+mapped through the model, EDM-typed conversion). 201 + Location, 204, business
+exceptions as 400 with the DPC's message. CSRF fetch answered. The demo DPC
+does real INSERT / UPDATE / DELETE on SQLite. Still open for Fiori writes:
+`$batch` (FE V2 transaction controller insists), deep insert, `$expand`,
+navigation properties, function imports.
+
 ## Phase 4 demo — Fiori Elements list report, 2026-09-11
 
 `webapp/` is a Fiori Elements V2 list report (SAPUI5 1.120 from the CDN,

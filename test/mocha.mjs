@@ -75,8 +75,34 @@ describe("wire", () => {
     expect(body.error.code).to.equal("STG/ENTITY_NOT_FOUND");
   });
 
-  it("501 for writes, honestly", async () => {
-    const res = await fetch(BASE + "/TravelSet", {method: "POST", body: "{}", headers: {"content-type": "application/json"}});
-    expect(res.status).to.equal(501);
+  it("CSRF token fetch is answered", async () => {
+    const res = await fetch(BASE + "/", {headers: {"x-csrf-token": "Fetch"}});
+    expect(res.status).to.equal(200);
+    expect(res.headers.get("x-csrf-token")).to.equal("open-steamgate");
+  });
+
+  it("POST, PUT, DELETE round trip through the DPC", async () => {
+    const headers = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
+    let res = await fetch(BASE + "/TravelSet", {method: "POST", headers, body: JSON.stringify({TravelId: "T0200", Description: "Wire created", Status: "A", Seats: 1})});
+    expect(res.status).to.equal(201);
+    expect(res.headers.get("location")).to.equal("http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0200')");
+    expect((await res.json()).d.Description).to.equal("Wire created");
+
+    res = await fetch(BASE + "/TravelSet('T0200')", {method: "PUT", headers, body: JSON.stringify({d: {Description: "Wire updated", Status: "X", Seats: 2}})});
+    expect(res.status).to.equal(204);
+
+    res = await fetch(BASE + "/TravelSet('T0200')");
+    const body = await res.json();
+    expect(body.d.Description).to.equal("Wire updated");
+    expect(body.d.Seats).to.equal(2);
+
+    res = await fetch(BASE + "/TravelSet('T0200')", {method: "DELETE", headers});
+    expect(res.status).to.equal(204);
+    res = await fetch(BASE + "/TravelSet('T0200')");
+    expect(res.status).to.equal(404);
+
+    res = await fetch(BASE + "/TravelSet", {method: "POST", headers, body: JSON.stringify({TravelId: "T0001"})});
+    expect(res.status).to.equal(400);
+    expect((await res.json()).error.code).to.equal("STG/BUSINESS");
   });
 });

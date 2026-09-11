@@ -6,6 +6,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
              reason       TYPE string,
              content_type TYPE string,
              body         TYPE string,
+             headers      TYPE tihttpnvp,
            END OF ty_response.
 
     CLASS-METHODS dispatch
@@ -14,6 +15,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         iv_path            TYPE string
         it_options         TYPE tihttpnvp OPTIONAL
         iv_host            TYPE string DEFAULT 'localhost'
+        iv_body            TYPE string OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response.
   PRIVATE SECTION.
@@ -23,6 +25,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         iv_path            TYPE string
         it_options         TYPE tihttpnvp
         iv_host            TYPE string
+        iv_body            TYPE string
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -68,6 +71,20 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
 
+    CLASS-METHODS write_entity
+      IMPORTING
+        iv_method          TYPE string
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_set             TYPE zcl_stg_model_info=>ty_entity_set
+        is_request         TYPE zcl_stg_url=>ty_request
+        iv_base_url        TYPE string
+        iv_body            TYPE string
+      RETURNING
+        VALUE(rs_response) TYPE ty_response
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
     CLASS-METHODS service_document
       IMPORTING
         is_service         TYPE zcl_stg_model_info=>ty_service
@@ -96,7 +113,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         rs_response = run( iv_method  = iv_method
                            iv_path    = iv_path
                            it_options = it_options
-                           iv_host    = iv_host ).
+                           iv_host    = iv_host
+                           iv_body    = iv_body ).
       CATCH zcx_stg_error INTO lx_stg.
         rs_response = json_response( iv_status = lx_stg->status
                                      iv_body   = zcl_stg_json=>error( iv_code    = lx_stg->code
@@ -130,6 +148,11 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     CASE iv_status.
       WHEN 200.
         rs_response-reason = 'OK'.
+      WHEN 201.
+        rs_response-reason = 'Created'.
+      WHEN 204.
+        rs_response-reason = 'No Content'.
+        CLEAR rs_response-content_type.
       WHEN 400.
         rs_response-reason = 'Bad Request'.
       WHEN 404.
@@ -174,11 +197,13 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                            iv_entity_set = ls_request-entity_set ).
 
     IF lv_method <> 'GET'.
-      RAISE EXCEPTION TYPE zcx_stg_error
-        EXPORTING
-          status  = 501
-          code    = 'STG/VERB_NOT_IMPLEMENTED'
-          message = |{ lv_method } is not implemented yet|.
+      rs_response = write_entity( iv_method   = lv_method
+                                  is_service  = ls_service
+                                  is_set      = ls_set
+                                  is_request  = ls_request
+                                  iv_base_url = lv_base
+                                  iv_body     = iv_body ).
+      RETURN.
     ENDIF.
 
     IF ls_request-key_string IS INITIAL.
@@ -192,6 +217,113 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                  is_request  = ls_request
                                  iv_base_url = lv_base ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD write_entity.
+    DATA lo_dpc      TYPE REF TO /iwbep/if_mgw_appl_srv_runtime.
+    DATA lo_context  TYPE REF TO zcl_stg_request_context.
+    DATA lo_provider TYPE REF TO zcl_stg_entry_provider.
+    DATA lt_nav_path TYPE /iwbep/t_mgw_navigation_path.
+    DATA lr_entity   TYPE REF TO data.
+    DATA ls_header   TYPE ihttpnvp.
+    FIELD-SYMBOLS <ls_data> TYPE any.
+
+    lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
+    lo_context = build_context( is_request = is_request
+                                is_set     = is_set ).
+
+    CASE iv_method.
+      WHEN 'POST'.
+        IF is_request-key_string IS NOT INITIAL.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status  = 405
+              code    = 'STG/METHOD_NOT_ALLOWED'
+              message = 'POST goes to the entity set, not to an entity'.
+        ENDIF.
+        CREATE OBJECT lo_provider
+          EXPORTING
+            it_values = zcl_stg_json=>parse_object( iv_body )
+            is_set    = is_set.
+        lo_dpc->create_entity(
+          EXPORTING
+            iv_entity_name          = is_set-entity_type
+            iv_entity_set_name      = is_set-name
+            iv_source_name          = ''
+            io_data_provider        = lo_provider
+            it_key_tab              = lo_context->mt_key_tab
+            it_navigation_path      = lt_nav_path
+            io_tech_request_context = lo_context
+          IMPORTING
+            er_entity               = lr_entity ).
+        IF lr_entity IS NOT BOUND.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status  = 500
+              code    = 'STG/NO_ENTITY'
+              message = 'The data provider created nothing'.
+        ENDIF.
+        ASSIGN lr_entity->* TO <ls_data>.
+        rs_response = json_response( iv_status = 201
+                                     iv_body   = zcl_stg_json=>entry( is_data      = <ls_data>
+                                                                      is_set       = is_set
+                                                                      iv_namespace = is_service-namespace
+                                                                      iv_base_url  = iv_base_url ) ).
+        ls_header-name  = 'location'.
+        ls_header-value = |{ iv_base_url }/{ is_set-name }({ zcl_stg_json=>key_predicate( is_data = <ls_data> is_set = is_set ) })|.
+        APPEND ls_header TO rs_response-headers.
+
+      WHEN 'PUT' OR 'PATCH' OR 'MERGE'.
+        IF is_request-key_string IS INITIAL.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status  = 405
+              code    = 'STG/METHOD_NOT_ALLOWED'
+              message = |{ iv_method } needs an entity key|.
+        ENDIF.
+        CREATE OBJECT lo_provider
+          EXPORTING
+            it_values = zcl_stg_json=>parse_object( iv_body )
+            is_set    = is_set.
+        lo_dpc->update_entity(
+          EXPORTING
+            iv_entity_name          = is_set-entity_type
+            iv_entity_set_name      = is_set-name
+            iv_source_name          = ''
+            io_data_provider        = lo_provider
+            it_key_tab              = lo_context->mt_key_tab
+            it_navigation_path      = lt_nav_path
+            io_tech_request_context = lo_context
+          IMPORTING
+            er_entity               = lr_entity ).
+        rs_response = json_response( iv_status = 204
+                                     iv_body   = '' ).
+
+      WHEN 'DELETE'.
+        IF is_request-key_string IS INITIAL.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status  = 405
+              code    = 'STG/METHOD_NOT_ALLOWED'
+              message = 'DELETE needs an entity key'.
+        ENDIF.
+        lo_dpc->delete_entity(
+          iv_entity_name          = is_set-entity_type
+          iv_entity_set_name      = is_set-name
+          iv_source_name          = ''
+          it_key_tab              = lo_context->mt_key_tab
+          it_navigation_path      = lt_nav_path
+          io_tech_request_context = lo_context ).
+        rs_response = json_response( iv_status = 204
+                                     iv_body   = '' ).
+
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 501
+            code    = 'STG/VERB_NOT_IMPLEMENTED'
+            message = |{ iv_method } is not implemented|.
+    ENDCASE.
   ENDMETHOD.
 
   METHOD service_document.

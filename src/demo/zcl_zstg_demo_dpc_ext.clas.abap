@@ -5,7 +5,11 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
   PROTECTED SECTION.
     METHODS travelset_get_entityset REDEFINITION.
     METHODS travelset_get_entity REDEFINITION.
+    METHODS travelset_create_entity REDEFINITION.
+    METHODS travelset_update_entity REDEFINITION.
+    METHODS travelset_delete_entity REDEFINITION.
   PRIVATE SECTION.
+    TYPES ty_travel_id TYPE c LENGTH 8.
     TYPES: BEGIN OF ty_range,
              sign   TYPE c LENGTH 1,
              option TYPE c LENGTH 2,
@@ -13,6 +17,14 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
              high   TYPE c LENGTH 8,
            END OF ty_range.
     TYPES ty_ranges TYPE STANDARD TABLE OF ty_range WITH DEFAULT KEY.
+
+    METHODS key_from
+      IMPORTING
+        it_key_tab          TYPE /iwbep/t_mgw_name_value_pair
+      RETURNING
+        VALUE(rv_travel_id) TYPE ty_travel_id
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
 
     METHODS ranges_for
       IMPORTING
@@ -78,15 +90,72 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD travelset_get_entity.
-    DATA ls_key       TYPE /iwbep/s_mgw_name_value_pair.
-    DATA lv_travel_id TYPE c LENGTH 8.
+  METHOD key_from.
+    DATA ls_key TYPE /iwbep/s_mgw_name_value_pair.
 
     READ TABLE it_key_tab INTO ls_key WITH KEY name = 'TravelId'.
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = 'Key TravelId missing'.
     ENDIF.
-    lv_travel_id = ls_key-value.
+    rv_travel_id = ls_key-value.
+  ENDMETHOD.
+
+  METHOD travelset_create_entity.
+    DATA ls_row TYPE zstg_demo.
+
+    io_data_provider->read_entry_data( IMPORTING es_data = er_entity ).
+    IF er_entity-travel_id IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = 'TravelId is required'.
+    ENDIF.
+
+    ls_row-mandt = sy-mandt.
+    MOVE-CORRESPONDING er_entity TO ls_row.
+    INSERT zstg_demo FROM ls_row.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Travel { er_entity-travel_id } already exists|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD travelset_update_entity.
+    DATA lv_travel_id TYPE c LENGTH 8.
+    DATA ls_row       TYPE zstg_demo.
+
+    lv_travel_id = key_from( it_key_tab ).
+    io_data_provider->read_entry_data( IMPORTING es_data = er_entity ).
+    er_entity-travel_id = lv_travel_id.
+
+    SELECT SINGLE * FROM zstg_demo INTO ls_row WHERE travel_id = lv_travel_id.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Travel { lv_travel_id } does not exist|.
+    ENDIF.
+    MOVE-CORRESPONDING er_entity TO ls_row.
+    UPDATE zstg_demo FROM ls_row.
+  ENDMETHOD.
+
+  METHOD travelset_delete_entity.
+    DATA lv_travel_id TYPE c LENGTH 8.
+
+    lv_travel_id = key_from( it_key_tab ).
+    DELETE FROM zstg_demo WHERE travel_id = lv_travel_id.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Travel { lv_travel_id } does not exist|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD travelset_get_entity.
+    DATA lv_travel_id TYPE c LENGTH 8.
+
+    lv_travel_id = key_from( it_key_tab ).
 
     SELECT SINGLE travel_id description status seats
       FROM zstg_demo

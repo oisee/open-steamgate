@@ -287,7 +287,8 @@ CLASS ltcl_dispatch IMPLEMENTATION.
   METHOD post_not_implemented.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
 
-    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'POST'
+* a verb the dispatcher does not know stays an honest 501
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'OPTIONS'
                                                 iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 501 ).
@@ -539,6 +540,150 @@ CLASS ltcl_filter IMPLEMENTATION.
                                                 it_options = lt_options ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 400 ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_writes DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS parse_body FOR TESTING RAISING cx_static_check.
+    METHODS create_read_update_delete FOR TESTING RAISING cx_static_check.
+    METHODS create_duplicate_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS create_without_key_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS delete_unknown_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS bad_json_is_400 FOR TESTING RAISING cx_static_check.
+
+    METHODS call
+      IMPORTING
+        iv_method          TYPE string
+        iv_path            TYPE string
+        iv_body            TYPE string OPTIONAL
+      RETURNING
+        VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
+ENDCLASS.
+
+CLASS ltcl_writes IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD call.
+    rs_response = zcl_stg_dispatcher=>dispatch( iv_method = iv_method
+                                                iv_path   = iv_path
+                                                iv_body   = iv_body ).
+  ENDMETHOD.
+
+  METHOD parse_body.
+    DATA lt_values TYPE tihttpnvp.
+    DATA ls_value  LIKE LINE OF lt_values.
+
+    lt_values = zcl_stg_json=>parse_object(
+      `{"d":{"__metadata":{"type":"x"},"TravelId":"T0007","Description":"O\"Brien \\ co","Seats":3,"Flag":true,"Gone":null,"Nested":{"a":[1,2]},"Last":"z"}}` ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_values )
+                                        exp = 6 ).
+    READ TABLE lt_values INTO ls_value WITH KEY name = 'Description'.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value
+                                        exp = `O"Brien \ co` ).
+    READ TABLE lt_values INTO ls_value WITH KEY name = 'Seats'.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value
+                                        exp = '3' ).
+    READ TABLE lt_values INTO ls_value WITH KEY name = 'Flag'.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value
+                                        exp = 'true' ).
+    READ TABLE lt_values INTO ls_value WITH KEY name = 'Last'.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value
+                                        exp = 'z' ).
+  ENDMETHOD.
+
+  METHOD create_read_update_delete.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA ls_header   TYPE ihttpnvp.
+
+    ls_response = call( iv_method = 'POST'
+                        iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                        iv_body   = `{"TravelId":"T0100","Description":"Odense to Berlin","Status":"A","Seats":3}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 201 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `{"d":{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')"` ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"Seats":3` ) ).
+    READ TABLE ls_response-headers INTO ls_header WITH KEY name = 'location'.
+    cl_abap_unit_assert=>assert_equals( act = ls_header-value
+                                        exp = `http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+
+    ls_response = call( iv_method = 'GET'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"Description":"Odense to Berlin"` ) ).
+
+    ls_response = call( iv_method = 'PUT'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')`
+                        iv_body   = `{"d":{"TravelId":"T0100","Description":"Odense to Berlin, updated","Status":"X","Seats":"5"}}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
+    cl_abap_unit_assert=>assert_initial( ls_response-body ).
+
+    ls_response = call( iv_method = 'GET'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"Description":"Odense to Berlin, updated","Status":"X","Seats":5` ) ).
+
+    ls_response = call( iv_method = 'DELETE'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
+
+    ls_response = call( iv_method = 'GET'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 404 ).
+  ENDMETHOD.
+
+  METHOD create_duplicate_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = call( iv_method = 'POST'
+                        iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                        iv_body   = `{"TravelId":"T0001","Description":"dup"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'already exists' ) ).
+  ENDMETHOD.
+
+  METHOD create_without_key_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = call( iv_method = 'POST'
+                        iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                        iv_body   = `{"Description":"no key"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'TravelId is required' ) ).
+  ENDMETHOD.
+
+  METHOD delete_unknown_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = call( iv_method = 'DELETE'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('NOPE')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+  ENDMETHOD.
+
+  METHOD bad_json_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = call( iv_method = 'POST'
+                        iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                        iv_body   = `not json` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'STG/BAD_JSON' ) ).
   ENDMETHOD.
 
 ENDCLASS.

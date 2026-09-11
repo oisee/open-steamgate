@@ -12,10 +12,11 @@ OData → Fiori), deploying back through abapGit.
 
 ## Where this repo is
 
-**Read path done incl. `$filter` (2026-09-11); writes, `$expand`, Fiori next.**
+**CRUD works end to end (2026-09-11); `$batch`, `$expand`, navigation next.**
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2
 over `src/gateway/` (URL parser, `$filter` → select-options, request context,
-model info, JSON serializer, dispatcher). Writes are 501. The research that
+entry provider, model info, JSON (de)serializer, dispatcher). A Fiori Elements
+V2 list report in `webapp/` renders it (`npm run e2e`). The research that
 scopes the work lives in:
 - [`docs/prior-art.md`](docs/prior-art.md) — verified reuse-vs-build matrix,
   gap-list, phased build order, source list (verified-in-repo vs claimed).

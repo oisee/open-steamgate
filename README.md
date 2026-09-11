@@ -12,10 +12,12 @@ Deploy back through abapGit when you want to.
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
 
-> **Status: reads work end to end, writes next.** `npm test` serves a
-> SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite, as OData
-> v2: `$metadata`, entity sets, keys, `$filter` delivered as SELECT-OPTIONS,
-> `$top/$skip/$orderby/$inlinecount/$count`.
+> **Status: CRUD works end to end; `$batch` and `$expand` next.** `npm test`
+> serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
+> as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as
+> SELECT-OPTIONS, `$top/$skip/$orderby/$inlinecount/$count`, POST/PUT/DELETE
+> through the DPC's create/update/delete. A Fiori Elements list report in
+> `webapp/` renders it (`npm run e2e`).
 > See `AGENDA.md`. This repo also holds the
 > research that scopes the work — a verified prior-art matrix, a gap-list of the
 > genuinely-novel pieces, and a phased build order. See

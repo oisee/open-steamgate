@@ -5,7 +5,52 @@ CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
   PUBLIC SECTION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~get_entityset REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~get_entity REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~create_entity REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~update_entity REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~delete_entity REDEFINITION.
   PROTECTED SECTION.
+    METHODS travelset_create_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_c OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+        io_data_provider        TYPE REF TO /iwbep/if_mgw_entry_provider OPTIONAL
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_travel
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS travelset_update_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_u OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+        io_data_provider        TYPE REF TO /iwbep/if_mgw_entry_provider OPTIONAL
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_travel
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS travelset_delete_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_d OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
     METHODS travelset_get_entityset
       IMPORTING
         iv_entity_name           TYPE string
@@ -134,6 +179,132 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
           IMPORTING
             er_entity          = er_entity ).
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_entity.
+    DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA lv_entityset_name TYPE string.
+
+    lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
+
+    CASE lv_entityset_name.
+      WHEN 'TravelSet'.
+        travelset_create_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            io_data_provider        = io_data_provider
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_travel ).
+        copy_data_to_ref(
+          EXPORTING
+            is_data = ls_travel
+          CHANGING
+            cr_data = er_entity ).
+      WHEN OTHERS.
+        super->/iwbep/if_mgw_appl_srv_runtime~create_entity(
+          EXPORTING
+            iv_entity_name     = iv_entity_name
+            iv_entity_set_name = iv_entity_set_name
+            iv_source_name     = iv_source_name
+            io_data_provider   = io_data_provider
+            it_key_tab         = it_key_tab
+            it_navigation_path = it_navigation_path
+          IMPORTING
+            er_entity          = er_entity ).
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~update_entity.
+    DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA lv_entityset_name TYPE string.
+    DATA lr_entity         TYPE REF TO data.
+
+    lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
+
+    CASE lv_entityset_name.
+      WHEN 'TravelSet'.
+        travelset_update_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            io_data_provider        = io_data_provider
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_travel ).
+        IF ls_travel IS NOT INITIAL.
+          copy_data_to_ref(
+            EXPORTING
+              is_data = ls_travel
+            CHANGING
+              cr_data = er_entity ).
+        ELSE.
+          er_entity = lr_entity.
+        ENDIF.
+      WHEN OTHERS.
+        super->/iwbep/if_mgw_appl_srv_runtime~update_entity(
+          EXPORTING
+            iv_entity_name     = iv_entity_name
+            iv_entity_set_name = iv_entity_set_name
+            iv_source_name     = iv_source_name
+            io_data_provider   = io_data_provider
+            it_key_tab         = it_key_tab
+            it_navigation_path = it_navigation_path
+          IMPORTING
+            er_entity          = er_entity ).
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~delete_entity.
+    DATA lv_entityset_name TYPE string.
+
+    lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
+
+    CASE lv_entityset_name.
+      WHEN 'TravelSet'.
+        travelset_delete_entity(
+          iv_entity_name          = iv_entity_name
+          iv_entity_set_name      = iv_entity_set_name
+          iv_source_name          = iv_source_name
+          it_key_tab              = it_key_tab
+          it_navigation_path      = it_navigation_path
+          io_tech_request_context = io_tech_request_context ).
+      WHEN OTHERS.
+        super->/iwbep/if_mgw_appl_srv_runtime~delete_entity(
+          iv_entity_name     = iv_entity_name
+          iv_entity_set_name = iv_entity_set_name
+          iv_source_name     = iv_source_name
+          it_key_tab         = it_key_tab
+          it_navigation_path = it_navigation_path ).
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD travelset_create_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'TRAVELSET_CREATE_ENTITY'.
+  ENDMETHOD.
+
+  METHOD travelset_update_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'TRAVELSET_UPDATE_ENTITY'.
+  ENDMETHOD.
+
+  METHOD travelset_delete_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'TRAVELSET_DELETE_ENTITY'.
   ENDMETHOD.
 
   METHOD travelset_get_entityset.

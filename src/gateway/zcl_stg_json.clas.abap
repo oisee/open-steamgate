@@ -136,7 +136,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
       IF lv_piece = '"'.
         cv_off = cv_off + 1.
         RETURN.
-      ELSEIF lv_piece = '\\'.
+      ELSEIF lv_piece = '\'.
         cv_off = cv_off + 1.
         lv_piece = iv_json+cv_off(1).
         CASE lv_piece.
@@ -177,7 +177,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
     WHILE cv_off < lv_len.
       lv_char = iv_json+cv_off(1).
       IF lv_in = abap_true.
-        IF lv_char = '\\'.
+        IF lv_char = '\'.
           cv_off = cv_off + 1.
         ELSEIF lv_char = '"'.
           lv_in = abap_false.
