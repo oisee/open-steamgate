@@ -54,15 +54,18 @@ against SQLite seeded from an abapGit TABU capture (`data/`), honours
 
 Do this before any architectural commitment.
 
-- [ ] **Dependency-closure probe.** Pick 3–5 representative real `_DPC_EXT`
-      classes; compute their actual dependency closure (base classes, BAPIs,
-      `CL_*` utils, auth-checks, message classes) against what `open-abap-core`
-      + `abaplint/deps` implement. Critic's finding: this likely dwarfs Phase 2
-      and is the real long pole. **Tool ready:** `npm run probe -- <folder>`
-      (`tools/closure-probe.mjs`); iterate, adding stubs via `--lib`, until the
-      table is empty. Needs the real classes under `.local/` (never tracked).
+- [x] **Dependency-closure probe.** Measured 2026-09-11 on eight public SEGW
+      repos, see `docs/2026-09-11-closure-probe.md`. The closure of a classic
+      hand-written DPC is DDIC (data elements, domains, tables), not code:
+      1–65 standard objects, 0–2 standard classes. It is capturable via
+      abapGit per user, not something to shim. Framework-bound services
+      (SADL, BOPF, CRM) are flagged mechanically. Tool:
+      `npm run probe -- --closure <repo>`.
 - [ ] **Corpus check.** Confirm the target services are classic code-based SEGW,
       not SADL-/RAP-generated (which have no transpilable `GET_ENTITYSET`).
+      Mechanical now: `npm run probe -- --closure <repo>` and grep the output
+      for `CL_SADL_GW_DPC_FACTORY` / `/BOBF/`. Still to run on the real
+      target corpus.
 - [ ] **Accessor grep.** Which `io_tech_request_context` methods do the target
       DPCs actually call (`get_filter` / `get_filter_select_options` / read
       `it_filter_select_options`)? Build for the shapes that exist.
@@ -103,6 +106,19 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       AND, ge/le → BT, ne / not-eq → E EQ, startswith/endswith/substringof →
       CP, datetime/guid/bool literals; inexpressible filters leave the table
       empty and pass the raw string. Unknown property → 400. 2026-09-11.
+
+## Ideas parked (2026-09-11)
+
+- **DuckDB (or ClickHouse) as the analytical store.** The transpiler's DB
+  layer is a `DatabaseClient` per package (`database-sqlite`, `database-pg`,
+  `database-snowflake`) plus a schema generator; Snowflake proves a non-PG
+  dialect works. A `database-duckdb` package the size of the Snowflake one
+  would run every DPC `SELECT … GROUP BY` on a columnar engine unchanged.
+  DuckDB over ClickHouse: embedded, transactional, UPDATE/DELETE, PG-like SQL.
+  Pairs with an analytical list page once `$apply`/aggregation is on the wire.
+- **`capture` tool:** probe JSON → abapGit data config for exactly the
+  DTEL/DOMA/TABL/TTYP + TABU rows a DPC needs → `.local/capture/<system>/`
+  as a lib. See the closure doc.
 
 ## Cheap checks that could shrink the plan
 
