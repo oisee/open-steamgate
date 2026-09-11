@@ -22,6 +22,22 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   and the `$filter` → SELECT-OPTIONS / `io_tech_request_context` bridge (the
   crux). See gap-list in `docs/prior-art.md`.
 
+- **Gateway lives here; `open-abap-odata` is a dependency for its interface
+  and DDIC transcription only** (decided 2026-09-11). Pulled in as a transpiler
+  lib by URL with `files` limited to `src/{oo,ddic,exceptions,internal}` and
+  `zcl_oao_http_handler` excluded. Upstream PRs only for interface-level fixes
+  (issue #33, the EDM setters). The dispatcher, request context, serializer and
+  `$filter` bridge are open-steamgate code. If the license question (QW0) is
+  answered "no", reimplement the ~50 signatures from SAP's public contract.
+
+## Phase 0 — done 2026-09-11
+
+`npm test` is green: abaplint, transpile, 6 ABAP Unit tests, 2 mocha wire
+tests. A hand-written SEGW-shaped MPC/DPC (`src/demo/`) runs its Open SQL
+against SQLite seeded from an abapGit TABU capture (`data/`), honours
+`it_filter_select_options`, paging and `it_key_tab`. The ICF handler answers
+501 until the dispatcher exists. First two entries in `ANORMALIES.md`.
+
 ## Sprint 0 — audit before building (highest priority)
 
 Do this before any architectural commitment.
@@ -30,7 +46,9 @@ Do this before any architectural commitment.
       classes; compute their actual dependency closure (base classes, BAPIs,
       `CL_*` utils, auth-checks, message classes) against what `open-abap-core`
       + `abaplint/deps` implement. Critic's finding: this likely dwarfs Phase 2
-      and is the real long pole.
+      and is the real long pole. **Tool ready:** `npm run probe -- <folder>`
+      (`tools/closure-probe.mjs`); iterate, adding stubs via `--lib`, until the
+      table is empty. Needs the real classes under `.local/` (never tracked).
 - [ ] **Corpus check.** Confirm the target services are classic code-based SEGW,
       not SADL-/RAP-generated (which have no transpilable `GET_ENTITYSET`).
 - [ ] **Accessor grep.** Which `io_tech_request_context` methods do the target
@@ -49,12 +67,12 @@ Do this before any architectural commitment.
 Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
 
 - [ ] **QW0** Ask upstream for an MIT grant on `open-abap-odata` (1 h). Do
-      not block on the answer.
-- [ ] **QW6** Scaffold Phase 0 in the open-abap house style (`abap_transpile.json`
-      with libs by URL, `setup.mjs`, `start.mjs`, `ANORMALIES.md` template).
-- [ ] **QW7** Closure probe as a script: transpile each candidate `_DPC_EXT`
-      with `unknownTypes=runtimeError`, run, log the first missing type.
-      This is how Sprint 0's first checkbox gets measured.
+      not block on the answer. Draft ready in `.local/qw0-license-issue.md`,
+      waiting for a go to post.
+- [x] **QW6** Scaffold Phase 0 in the open-abap house style. Done 2026-09-11.
+- [x] **QW7** Closure probe: `tools/closure-probe.mjs` (static, abaplint
+      registry with libs as dependencies). The dynamic complement is
+      `"unknownTypes": "runtimeError"` in `abap_transpile.json`. Done 2026-09-11.
 - [ ] **QW1** Fix upstream issue #33 (registry instead of hardcoded test DPC).
 - [ ] **QW5** Truthful `$metadata` (keys, entity sets, the 11 EDM setters).
 - [ ] **QW2** Generic entity serializer via RTTI.

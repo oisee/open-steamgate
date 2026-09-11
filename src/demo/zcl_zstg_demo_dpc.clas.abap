@@ -1,0 +1,153 @@
+CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_data ABSTRACT CREATE PUBLIC.
+* Hand-written in the shape SEGW generates for the DPC base class:
+* dispatch on the entity-set name, delegate to <set>_get_entityset etc.,
+* copy the typed result into the untyped reference. Clean-room.
+  PUBLIC SECTION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~get_entityset REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~get_entity REDEFINITION.
+  PROTECTED SECTION.
+    METHODS travelset_get_entityset
+      IMPORTING
+        iv_entity_name           TYPE string
+        iv_entity_set_name       TYPE string
+        iv_source_name           TYPE string
+        it_filter_select_options TYPE /iwbep/t_mgw_select_option
+        is_paging                TYPE /iwbep/s_mgw_paging
+        it_key_tab               TYPE /iwbep/t_mgw_name_value_pair
+        it_navigation_path       TYPE /iwbep/t_mgw_navigation_path
+        it_order                 TYPE /iwbep/t_mgw_sorting_order
+        iv_filter_string         TYPE string
+        iv_search_string         TYPE string
+        io_tech_request_context  TYPE REF TO /iwbep/if_mgw_req_entityset OPTIONAL
+      EXPORTING
+        et_entityset             TYPE zcl_zstg_demo_mpc=>tt_travel
+        es_response_context      TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_context
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS travelset_get_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_request_object       TYPE REF TO /iwbep/if_mgw_req_entity OPTIONAL
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_travel
+        es_response_context     TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_entity_cntxt
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_entityset.
+    DATA lt_travel         TYPE zcl_zstg_demo_mpc=>tt_travel.
+    DATA lv_entityset_name TYPE string.
+
+    lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
+
+    CASE lv_entityset_name.
+      WHEN 'TravelSet'.
+        travelset_get_entityset(
+          EXPORTING
+            iv_entity_name           = iv_entity_name
+            iv_entity_set_name       = iv_entity_set_name
+            iv_source_name           = iv_source_name
+            it_filter_select_options = it_filter_select_options
+            it_order                 = it_order
+            is_paging                = is_paging
+            it_navigation_path       = it_navigation_path
+            it_key_tab               = it_key_tab
+            iv_filter_string         = iv_filter_string
+            iv_search_string         = iv_search_string
+            io_tech_request_context  = io_tech_request_context
+          IMPORTING
+            et_entityset             = lt_travel
+            es_response_context      = es_response_context ).
+        copy_data_to_ref(
+          EXPORTING
+            is_data = lt_travel
+          CHANGING
+            cr_data = er_entityset ).
+      WHEN OTHERS.
+        super->/iwbep/if_mgw_appl_srv_runtime~get_entityset(
+          EXPORTING
+            iv_entity_name           = iv_entity_name
+            iv_entity_set_name       = iv_entity_set_name
+            iv_source_name           = iv_source_name
+            it_filter_select_options = it_filter_select_options
+            it_order                 = it_order
+            is_paging                = is_paging
+            it_navigation_path       = it_navigation_path
+            it_key_tab               = it_key_tab
+            iv_filter_string         = iv_filter_string
+            iv_search_string         = iv_search_string
+            io_tech_request_context  = io_tech_request_context
+          IMPORTING
+            er_entityset             = er_entityset ).
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_entity.
+    DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA lv_entityset_name TYPE string.
+    DATA lr_entity         TYPE REF TO data.
+
+    lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
+
+    CASE lv_entityset_name.
+      WHEN 'TravelSet'.
+        travelset_get_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_travel
+            es_response_context     = es_response_context ).
+        IF ls_travel IS NOT INITIAL.
+          copy_data_to_ref(
+            EXPORTING
+              is_data = ls_travel
+            CHANGING
+              cr_data = er_entity ).
+        ELSE.
+          er_entity = lr_entity.
+        ENDIF.
+      WHEN OTHERS.
+        super->/iwbep/if_mgw_appl_srv_runtime~get_entity(
+          EXPORTING
+            iv_entity_name     = iv_entity_name
+            iv_entity_set_name = iv_entity_set_name
+            iv_source_name     = iv_source_name
+            it_key_tab         = it_key_tab
+            it_navigation_path = it_navigation_path
+          IMPORTING
+            er_entity          = er_entity ).
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD travelset_get_entityset.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'TRAVELSET_GET_ENTITYSET'.
+  ENDMETHOD.
+
+  METHOD travelset_get_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'TRAVELSET_GET_ENTITY'.
+  ENDMETHOD.
+
+ENDCLASS.

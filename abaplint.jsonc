@@ -1,0 +1,65 @@
+{
+  "global": {
+    "files": "/{src,test}/**/*.*",
+    "errorOnDuplicateFilenames": true
+  },
+  "dependencies": [
+    {
+      "url": "https://github.com/open-abap/open-abap-core",
+      "folder": "/.local/lars/open-abap-core",
+      "files": "/src/**/*.*"
+    },
+    {
+      "url": "https://github.com/open-abap/express-icf-shim",
+      "folder": "/.local/lars/express-icf-shim",
+      "files": "/src/**/*.*"
+    },
+    {
+      "url": "https://github.com/open-abap/open-abap-odata",
+      "folder": "/.local/lars/open-abap-odata",
+      "files": "/src/{oo,ddic,exceptions,internal}/**/*.*"
+    }
+  ],
+  "syntax": {
+    "version": "open-abap",
+    "errorNamespace": "."
+  },
+  "rules": {
+    "parser_error": true,
+    "check_syntax": true,
+    "unknown_types": true,
+    "implement_methods": true,
+    "method_implemented_twice": true,
+    "check_ddic": true,
+    "check_abstract": true,
+    "begin_end_names": true,
+    "unreachable_code": true,
+    "contains_tab": true,
+    "whitespace_end": true,
+    "keyword_case": {
+      "style": "upper",
+      "ignoreExceptions": true,
+      "ignoreLowerClassImplmentationStatement": true,
+      "ignoreGlobalClassDefinition": false,
+      "ignoreGlobalInterface": false
+    },
+    "indentation": {
+      "ignoreExceptions": true,
+      "alignTryCatch": false
+    },
+    "downport": true,
+    "sql_escape_host_variables": false,
+    "strict_sql": true,
+    "when_others_last": true,
+    "line_only_punc": true,
+    "empty_statement": true,
+    "space_before_dot": true,
+    "max_one_statement": true,
+    "definitions_top": true,
+    "local_class_naming": {
+      "local": "^LCL_.+$",
+      "exception": "^LCX_.+$",
+      "test": "^LTCL_.+$"
+    }
+  }
+}

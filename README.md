@@ -12,7 +12,9 @@ Deploy back through abapGit when you want to.
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
 
-> **Status: design + prior-art, pre-code.** This repo currently holds the
+> **Status: Phase 0 done, Gateway not started.** `npm test` runs a SEGW-shaped
+> demo DPC through the abaplint transpiler against SQLite; the OData wire
+> answers 501 until the dispatcher lands. See `AGENDA.md`. This repo also holds the
 > research that scopes the work — a verified prior-art matrix, a gap-list of the
 > genuinely-novel pieces, and a phased build order. See
 > [`docs/prior-art.md`](docs/prior-art.md). The layers we have already

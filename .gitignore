@@ -11,6 +11,8 @@ captures/
 
 # Node / transpiler substrate
 node_modules/
+output/
+deps/
 dist/
 build/
 *.sqlite

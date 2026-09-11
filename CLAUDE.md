@@ -12,8 +12,10 @@ OData → Fiori), deploying back through abapGit.
 
 ## Where this repo is
 
-**Design + prior-art, pre-code.** No runtime exists yet. The research that
-scopes the work is done and lives in:
+**Phase 0 done (2026-09-11), Phase 1 next.** `npm test` transpiles a
+SEGW-shaped demo MPC/DPC and runs it against SQLite. The Gateway itself
+(dispatcher, request context, serializer, `$filter`) does not exist yet: the
+ICF handler answers 501. The research that scopes the work lives in:
 - [`docs/prior-art.md`](docs/prior-art.md) — verified reuse-vs-build matrix,
   gap-list, phased build order, source list (verified-in-repo vs claimed).
 - [`docs/layers-we-own.md`](docs/layers-we-own.md) — the SAP-protocol layers
@@ -100,6 +102,23 @@ their URLs in tracked files): a DIAG-protocol project (carries the SAP-LZH
 
 Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 `abapGit`, `SAP/open-ux-odata` — see `docs/prior-art.md`.
+
+## Working in the tree
+
+- `npm test` = `abaplint` + transpile + ABAP Unit (inside `output/index.mjs`)
+  + mocha wire tests. `npm start` serves `/sap/opu/odata/sap/` on port 3030.
+- `abap_transpile.json` pulls open-abap-core, express-icf-shim and the
+  interface part of open-abap-odata as libs. `folder` points at `.local/lars/`
+  clones when present, else the URL is cloned. `zcl_oao_http_handler` is
+  excluded on purpose (upstream issue #33).
+- ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
+  tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
+  as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).
+- Every SAP-vs-open-abap discrepancy goes into `ANORMALIES.md` before any
+  workaround. Known: no implicit MANDT; `sy-mandt = 123`.
+- Closure audit of a real DPC: `npm run probe -- <folder> [--lib <stubs>]`.
+- Never put real `_DPC_EXT` sources or captures under a tracked path; use
+  `.local/`.
 
 ## Local clones
 

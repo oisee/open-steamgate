@@ -1,0 +1,30 @@
+[
+  {
+    "mandt": "123",
+    "travel_id": "T0001",
+    "description": "Berlin to Copenhagen",
+    "status": "A",
+    "seats": 2
+  },
+  {
+    "mandt": "123",
+    "travel_id": "T0002",
+    "description": "Copenhagen to Aarhus",
+    "status": "A",
+    "seats": 1
+  },
+  {
+    "mandt": "123",
+    "travel_id": "T0003",
+    "description": "Aarhus to Odense",
+    "status": "X",
+    "seats": 4
+  },
+  {
+    "mandt": "001",
+    "travel_id": "T0009",
+    "description": "Other client, must not leak",
+    "status": "A",
+    "seats": 9
+  }
+]

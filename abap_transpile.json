@@ -1,0 +1,39 @@
+{
+  "input_folder": "{src,test}",
+  "output_folder": "output",
+  "write_unit_tests": true,
+  "write_source_map": true,
+  "libs": [
+    {
+      "url": "https://github.com/open-abap/open-abap-core",
+      "folder": "/.local/lars/open-abap-core"
+    },
+    {
+      "url": "https://github.com/open-abap/express-icf-shim",
+      "folder": "/.local/lars/express-icf-shim"
+    },
+    {
+      "url": "https://github.com/open-abap/open-abap-odata",
+      "folder": "/.local/lars/open-abap-odata",
+      "files": [
+        "/src/oo/**",
+        "/src/ddic/**",
+        "/src/exceptions/**",
+        "/src/internal/**"
+      ],
+      "exclude_filter": [
+        "zcl_oao_http_handler"
+      ]
+    }
+  ],
+  "options": {
+    "ignoreSyntaxCheck": false,
+    "addFilenames": true,
+    "addCommonJS": true,
+    "unknownTypes": "compileError",
+    "setup": {
+      "filename": "../test/setup.mjs",
+      "preFunction": "setup"
+    }
+  }
+}
