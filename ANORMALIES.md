@@ -85,6 +85,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_url->keys_named`
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-12-fae-dedupe-by-db-key — FOR ALL ENTRIES de-duplicates by the DB key on the target table
+
+- Status: `workaround`
+- Discovery date: `2026-09-12`
+- Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
+- Affected ABAP statement, runtime API or adapter: `SELECT <fields> FROM tab INTO CORRESPONDING FIELDS OF TABLE lt FOR ALL ENTRIES IN ...` where the target line type lacks a key field of `tab` (typically MANDT)
+- Minimal ABAP reproducer: `src/demo/zcl_zstg_demo_dpc_ext.clas.abap` `get_expanded_entityset` before this entry's workaround
+- Exact command used to run it: `npm run unit`
+- Expected SAP behaviour: the union of the per-entry selects with duplicates removed, target fields filled by name
+- Actual open-abap behaviour: the generated code runs `SORT lt BY mandt travel_id booking_id` + `DELETE ADJACENT DUPLICATES` with the DB key's component names on the *target* table: `Error: sort compare, wrong component name, mandt`
+- Impact on open-steamgate: any DPC that FAE-selects into a projection structure crashes the request; very common in hand-written DPCs
+- Smallest safe workaround: select into a table typed like the DB table (`TYPE STANDARD TABLE OF tab`) and MOVE-CORRESPONDING afterwards (applied in the demo)
+- Upstream issue: not reported yet
+- Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_navigation->expand_by_the_dpc`
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-12-fae-empty-driver — FOR ALL ENTRIES with an empty driving table throws
+
+- Status: `open`
+- Discovery date: `2026-09-12`
+- Affected versions: `@abaplint/transpiler-cli 2.13.85`
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN lt` with `lt` empty
+- Minimal ABAP reproducer: the same SELECT as above with an empty `lt_travel` (guarded by `IF lt_travel IS NOT INITIAL` in the demo)
+- Exact command used to run it: `npm run unit` without the guard
+- Expected SAP behaviour: the WHERE condition with the FAE table is dropped, all rows are selected (the classic FAE trap)
+- Actual open-abap behaviour: `throw new Error("FAE, todo, empty table")` in the generated code
+- Impact on open-steamgate: a DPC that relies on the SAP behaviour (or forgets the guard) crashes instead of over-selecting
+- Smallest safe workaround: guard every FAE with `IF lt IS NOT INITIAL`, as good ABAP does anyway
+- Upstream issue: not reported yet
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
 ## Resolved anomalies
 
 (none yet)

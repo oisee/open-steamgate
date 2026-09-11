@@ -32,6 +32,18 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## `$expand` round two, 2026-09-12 (night run)
+
+Nested paths (`$expand=to_Travel/to_Bookings`) recurse per level. With
+`$expand` present the dispatcher calls `get_expanded_entityset` /
+`get_expanded_entity` with an `io_expand` tree; a DPC that fills deep rows
+itself lists them in `et_expanded_tech_clauses` and the serializer inlines
+those components, the rest is expanded generically. The framework base in
+the fork (fc5ce3d) delegates to the plain reads, as SAP's does. Demo DPC has
+the fast path for `TravelSet?$expand=to_Bookings` (two SELECTs). Two more
+transpiler anomalies logged (FAE de-dup by DB key, FAE with empty driver).
+Express route answers 500 on a kernel error instead of hanging.
+
 ## Deep insert and function imports done 2026-09-11 (night run)
 
 Deep insert: nested navigation payloads in a POST reach `create_deep_entity`

@@ -110,8 +110,45 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         is_row             TYPE any
         it_expand          TYPE string_table
         iv_base_url        TYPE string
+        it_tech_clauses    TYPE string_table OPTIONAL
       RETURNING
         VALUE(rt_nav_json) TYPE zcl_stg_json=>ty_nav_jsons
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
+* first-level navigation names of the expand paths, and the remaining
+* paths below one of them
+    CLASS-METHODS expand_levels
+      IMPORTING
+        it_expand      TYPE string_table
+      RETURNING
+        VALUE(rt_navs) TYPE string_table.
+
+    CLASS-METHODS expand_below
+      IMPORTING
+        it_expand      TYPE string_table
+        iv_nav         TYPE string
+      RETURNING
+        VALUE(rt_rest) TYPE string_table.
+
+    CLASS-METHODS expand_tree_of
+      IMPORTING
+        it_expand      TYPE string_table
+      RETURNING
+        VALUE(ro_tree) TYPE REF TO zcl_stg_expand_node.
+
+    CLASS-METHODS entities_with_expand
+      IMPORTING
+        io_dpc             TYPE REF TO /iwbep/if_mgw_appl_srv_runtime
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_set             TYPE zcl_stg_model_info=>ty_entity_set
+        it_rows            TYPE ANY TABLE
+        it_expand          TYPE string_table
+        iv_base_url        TYPE string
+        it_tech_clauses    TYPE string_table OPTIONAL
+      RETURNING
+        VALUE(rt_entities) TYPE string_table
       RAISING
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
@@ -664,8 +701,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lv_count     TYPE string.
     DATA lt_expand    TYPE string_table.
     DATA lt_entities  TYPE string_table.
+    DATA lt_tech_clauses TYPE string_table.
     FIELD-SYMBOLS <lt_data> TYPE ANY TABLE.
-    FIELD-SYMBOLS <ls_row>  TYPE any.
 
     lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
     lo_context = build_context( is_request = is_request
@@ -678,22 +715,46 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ls_paging = lo_context->get_paging( ).
     ENDIF.
 
-    lo_dpc->get_entityset(
-      EXPORTING
-        iv_entity_name           = is_set-entity_type
-        iv_entity_set_name       = is_set-name
-        iv_source_name           = ''
-        it_filter_select_options = lo_context->mt_filter
-        is_paging                = ls_paging
-        it_key_tab               = lo_context->mt_key_tab
-        it_navigation_path       = lt_nav_path
-        it_order                 = lo_context->get_sorting_order( )
-        iv_filter_string         = lo_context->mv_filter_string
-        iv_search_string         = ''
-        io_tech_request_context  = lo_context
-      IMPORTING
-        er_entityset             = lr_entityset
-        es_response_context      = ls_context ).
+    lt_expand = expand_list( is_request ).
+    IF lt_expand IS INITIAL OR is_request-is_count = abap_true.
+      lo_dpc->get_entityset(
+        EXPORTING
+          iv_entity_name           = is_set-entity_type
+          iv_entity_set_name       = is_set-name
+          iv_source_name           = ''
+          it_filter_select_options = lo_context->mt_filter
+          is_paging                = ls_paging
+          it_key_tab               = lo_context->mt_key_tab
+          it_navigation_path       = lt_nav_path
+          it_order                 = lo_context->get_sorting_order( )
+          iv_filter_string         = lo_context->mv_filter_string
+          iv_search_string         = ''
+          io_tech_request_context  = lo_context
+        IMPORTING
+          er_entityset             = lr_entityset
+          es_response_context      = ls_context ).
+    ELSE.
+* a DPC may expand itself (deep structures + et_expanded_tech_clauses);
+* the framework base falls back to get_entityset and leaves the rest to us
+      lo_dpc->get_expanded_entityset(
+        EXPORTING
+          iv_entity_name           = is_set-entity_type
+          iv_entity_set_name       = is_set-name
+          iv_source_name           = ''
+          it_filter_select_options = lo_context->mt_filter
+          is_paging                = ls_paging
+          it_key_tab               = lo_context->mt_key_tab
+          it_navigation_path       = lt_nav_path
+          it_order                 = lo_context->get_sorting_order( )
+          iv_filter_string         = lo_context->mv_filter_string
+          iv_search_string         = ''
+          io_expand                = expand_tree_of( lt_expand )
+          io_tech_request_context  = lo_context
+        IMPORTING
+          er_entityset             = lr_entityset
+          et_expanded_tech_clauses = lt_tech_clauses
+          es_response_context      = ls_context ).
+    ENDIF.
 
     IF lr_entityset IS BOUND.
       ASSIGN lr_entityset->* TO <lt_data>.
@@ -722,20 +783,14 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ENDIF.
     ENDIF.
 
-    lt_expand = expand_list( is_request ).
     IF <lt_data> IS ASSIGNED AND lt_expand IS NOT INITIAL.
-      LOOP AT <lt_data> ASSIGNING <ls_row>.
-        APPEND zcl_stg_json=>entity( is_data      = <ls_row>
-                                     is_set       = is_set
-                                     iv_namespace = is_service-namespace
-                                     iv_base_url  = iv_base_url
-                                     it_nav_json  = expand_row( io_dpc      = lo_dpc
-                                                                is_service  = is_service
-                                                                is_set      = is_set
-                                                                is_row      = <ls_row>
-                                                                it_expand   = lt_expand
-                                                                iv_base_url = iv_base_url ) ) TO lt_entities.
-      ENDLOOP.
+      lt_entities = entities_with_expand( io_dpc          = lo_dpc
+                                          is_service      = is_service
+                                          is_set          = is_set
+                                          it_rows         = <lt_data>
+                                          it_expand       = lt_expand
+                                          iv_base_url     = iv_base_url
+                                          it_tech_clauses = lt_tech_clauses ).
       rs_response = json_response( iv_status = 200
                                    iv_body   = zcl_stg_json=>feed_of( it_entities    = lt_entities
                                                                       iv_inlinecount = lv_count ) ).
@@ -759,6 +814,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lr_entity   TYPE REF TO data.
     DATA lt_expand   TYPE string_table.
     DATA lt_nav_json TYPE zcl_stg_json=>ty_nav_jsons.
+    DATA lt_tech_clauses TYPE string_table.
     FIELD-SYMBOLS <ls_data> TYPE any.
 
     lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
@@ -769,16 +825,32 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ENDIF.
     lt_nav_path = it_navigation_path.
 
-    lo_dpc->get_entity(
-      EXPORTING
-        iv_entity_name          = is_set-entity_type
-        iv_entity_set_name      = is_set-name
-        iv_source_name          = ''
-        it_key_tab              = lo_context->mt_key_tab
-        it_navigation_path      = lt_nav_path
-        io_tech_request_context = lo_context
-      IMPORTING
-        er_entity               = lr_entity ).
+    lt_expand = expand_list( is_request ).
+    IF lt_expand IS INITIAL.
+      lo_dpc->get_entity(
+        EXPORTING
+          iv_entity_name          = is_set-entity_type
+          iv_entity_set_name      = is_set-name
+          iv_source_name          = ''
+          it_key_tab              = lo_context->mt_key_tab
+          it_navigation_path      = lt_nav_path
+          io_tech_request_context = lo_context
+        IMPORTING
+          er_entity               = lr_entity ).
+    ELSE.
+      lo_dpc->get_expanded_entity(
+        EXPORTING
+          iv_entity_name          = is_set-entity_type
+          iv_entity_set_name      = is_set-name
+          iv_source_name          = ''
+          it_key_tab              = lo_context->mt_key_tab
+          it_navigation_path      = lt_nav_path
+          io_expand               = expand_tree_of( lt_expand )
+          io_tech_request_context = lo_context
+        IMPORTING
+          er_entity               = lr_entity
+          et_expanded_tech_clauses = lt_tech_clauses ).
+    ENDIF.
 
     IF lr_entity IS NOT BOUND.
       RAISE EXCEPTION TYPE zcx_stg_error
@@ -789,14 +861,14 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ENDIF.
     ASSIGN lr_entity->* TO <ls_data>.
 
-    lt_expand = expand_list( is_request ).
     IF lt_expand IS NOT INITIAL.
-      lt_nav_json = expand_row( io_dpc      = lo_dpc
-                                is_service  = is_service
-                                is_set      = is_set
-                                is_row      = <ls_data>
-                                it_expand   = lt_expand
-                                iv_base_url = iv_base_url ).
+      lt_nav_json = expand_row( io_dpc          = lo_dpc
+                                is_service      = is_service
+                                is_set          = is_set
+                                is_row          = <ls_data>
+                                it_expand       = lt_expand
+                                iv_base_url     = iv_base_url
+                                it_tech_clauses = lt_tech_clauses ).
     ENDIF.
 
     rs_response = json_response( iv_status = 200
@@ -811,8 +883,6 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lv_expand TYPE string.
     DATA lt_parts  TYPE string_table.
     DATA lv_part   TYPE string.
-    DATA lv_first  TYPE string.
-    DATA lv_rest   TYPE string.
 
     lv_expand = zcl_stg_url=>option( is_request = is_request
                                      iv_name    = '$expand' ).
@@ -822,14 +892,13 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     SPLIT lv_expand AT ',' INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_part.
       CONDENSE lv_part.
-* only the first level for now: a/b expands a
-      SPLIT lv_part AT '/' INTO lv_first lv_rest.
-      IF lv_first IS INITIAL.
+      IF lv_part IS INITIAL.
         CONTINUE.
       ENDIF.
-      READ TABLE rt_navs WITH KEY table_line = lv_first TRANSPORTING NO FIELDS.
+* full paths, a/b included; expand_row splits them per level
+      READ TABLE rt_navs WITH KEY table_line = lv_part TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
-        APPEND lv_first TO rt_navs.
+        APPEND lv_part TO rt_navs.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
@@ -851,8 +920,69 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD expand_levels.
+    DATA lv_path  TYPE string.
+    DATA lv_first TYPE string.
+    DATA lv_rest  TYPE string.
+
+    LOOP AT it_expand INTO lv_path.
+      SPLIT lv_path AT '/' INTO lv_first lv_rest.
+      READ TABLE rt_navs WITH KEY table_line = lv_first TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND lv_first TO rt_navs.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD expand_below.
+    DATA lv_path  TYPE string.
+    DATA lv_first TYPE string.
+    DATA lv_rest  TYPE string.
+
+    LOOP AT it_expand INTO lv_path.
+      SPLIT lv_path AT '/' INTO lv_first lv_rest.
+      IF lv_first = iv_nav AND lv_rest IS NOT INITIAL.
+        APPEND lv_rest TO rt_rest.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD expand_tree_of.
+    DATA lt_navs TYPE string_table.
+    DATA lv_nav  TYPE string.
+
+    CREATE OBJECT ro_tree.
+    lt_navs = expand_levels( it_expand ).
+    LOOP AT lt_navs INTO lv_nav.
+      ro_tree->add_child( iv_name = lv_nav
+                          io_node = expand_tree_of( expand_below( it_expand = it_expand
+                                                                  iv_nav    = lv_nav ) ) ).
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD entities_with_expand.
+    FIELD-SYMBOLS <ls_row> TYPE any.
+
+    LOOP AT it_rows ASSIGNING <ls_row>.
+      APPEND zcl_stg_json=>entity( is_data      = <ls_row>
+                                   is_set       = is_set
+                                   iv_namespace = is_service-namespace
+                                   iv_base_url  = iv_base_url
+                                   it_nav_json  = expand_row( io_dpc          = io_dpc
+                                                              is_service      = is_service
+                                                              is_set          = is_set
+                                                              is_row          = <ls_row>
+                                                              it_expand       = it_expand
+                                                              iv_base_url     = iv_base_url
+                                                              it_tech_clauses = it_tech_clauses ) ) TO rt_entities.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD expand_row.
+    DATA lt_navs     TYPE string_table.
     DATA lv_nav      TYPE string.
+    DATA lt_below    TYPE string_table.
+    DATA lv_upper    TYPE string.
     DATA ls_nav      TYPE zcl_stg_model_info=>ty_nav.
     DATA ls_target   TYPE zcl_stg_model_info=>ty_entity_set.
     DATA lt_keys     TYPE /iwbep/t_mgw_name_value_pair.
@@ -869,10 +999,20 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
 
     lt_keys = row_keys( is_row = is_row
                         is_set = is_set ).
+    lt_navs = expand_levels( it_expand ).
 
-    LOOP AT it_expand INTO lv_nav.
+    LOOP AT lt_navs INTO lv_nav.
       ls_nav    = zcl_stg_model_info=>find_nav( is_set  = is_set
                                                 iv_name = lv_nav ).
+      lt_below  = expand_below( it_expand = it_expand
+                                iv_nav    = lv_nav ).
+* the DPC already delivered this navigation inside the row (tech clause):
+* the serializer inlines the component, nothing to fetch here
+      lv_upper = to_upper( lv_nav ).
+      READ TABLE it_tech_clauses WITH KEY table_line = lv_upper TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
       ls_target = zcl_stg_model_info=>find_set( is_service    = is_service
                                                 iv_entity_set = ls_nav-target_set ).
 
@@ -917,10 +1057,20 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
             er_entityset             = lr_data ).
         IF lr_data IS BOUND.
           ASSIGN lr_data->* TO <lt_rows>.
-          ls_nav_json-json = zcl_stg_json=>feed( it_data      = <lt_rows>
-                                                 is_set       = ls_target
-                                                 iv_namespace = is_service-namespace
-                                                 iv_base_url  = iv_base_url ).
+          IF lt_below IS INITIAL.
+            ls_nav_json-json = zcl_stg_json=>feed( it_data      = <lt_rows>
+                                                   is_set       = ls_target
+                                                   iv_namespace = is_service-namespace
+                                                   iv_base_url  = iv_base_url ).
+          ELSE.
+* deeper levels: expand each target row in turn
+            ls_nav_json-json = zcl_stg_json=>feed_of( entities_with_expand( io_dpc      = io_dpc
+                                                                            is_service  = is_service
+                                                                            is_set      = ls_target
+                                                                            it_rows     = <lt_rows>
+                                                                            it_expand   = lt_below
+                                                                            iv_base_url = iv_base_url ) ).
+          ENDIF.
 * strip the {"d": ... } envelope: inside an entity the feed is {"results":[...]}
           ls_nav_json-json = substring( val = ls_nav_json-json
                                         off = 5
@@ -944,7 +1094,13 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
           ls_nav_json-json = zcl_stg_json=>entity( is_data      = <ls_one>
                                                    is_set       = ls_target
                                                    iv_namespace = is_service-namespace
-                                                   iv_base_url  = iv_base_url ).
+                                                   iv_base_url  = iv_base_url
+                                                   it_nav_json  = expand_row( io_dpc      = io_dpc
+                                                                              is_service  = is_service
+                                                                              is_set      = ls_target
+                                                                              is_row      = <ls_one>
+                                                                              it_expand   = lt_below
+                                                                              iv_base_url = iv_base_url ) ).
         ELSE.
           ls_nav_json-json = 'null'.
         ENDIF.

@@ -839,6 +839,8 @@ CLASS ltcl_navigation DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS 
     METHODS deferred_links FOR TESTING RAISING cx_static_check.
     METHODS expand_entity_set FOR TESTING RAISING cx_static_check.
     METHODS expand_single_entity FOR TESTING RAISING cx_static_check.
+    METHODS expand_nested FOR TESTING RAISING cx_static_check.
+    METHODS expand_by_the_dpc FOR TESTING RAISING cx_static_check.
     METHODS unknown_navigation FOR TESTING RAISING cx_static_check.
 
     METHODS get
@@ -968,6 +970,33 @@ CLASS ltcl_navigation IMPLEMENTATION.
     ls_response = get( iv_path  = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')`
                        iv_query = '$expand=to_Bookings' ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Bookings":{"results":[]}' ) ).
+  ENDMETHOD.
+
+  METHOD expand_nested.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* Booking -> Travel -> Bookings: two levels
+    ls_response = get( iv_path  = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet(TravelId='T0001',BookingId='B001')`
+                       iv_query = '$expand=to_Travel/to_Bookings' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Travel":{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"results":[' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
+  ENDMETHOD.
+
+  METHOD expand_by_the_dpc.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* TravelSet?$expand=to_Bookings is served by the DPC's own
+* get_expanded_entityset (tech clause TO_BOOKINGS), result is the same shape
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = '$expand=to_Bookings&$filter=TravelId%20eq%20''T0002''' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002","Description":"Copenhagen to Aarhus","Status":"A","Seats":1,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Ada Lovelace' ) ).
   ENDMETHOD.
 
   METHOD unknown_navigation.

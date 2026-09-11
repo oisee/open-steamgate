@@ -4,6 +4,7 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
   PUBLIC SECTION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~create_deep_entity REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~get_expanded_entityset REDEFINITION.
   PROTECTED SECTION.
     METHODS travelset_get_entityset REDEFINITION.
     METHODS travelset_get_entity REDEFINITION.
@@ -209,6 +210,95 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
 
     copy_data_to_ref( EXPORTING is_data = ls_deep
                       CHANGING  cr_data = er_deep_entity ).
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_expanded_entityset.
+* The fast path a hand-written DPC takes for $expand=to_Bookings: two
+* SELECTs instead of one per travel, deep rows, and the tech clause that
+* tells the framework this navigation is already filled.
+    DATA lt_children TYPE /iwbep/if_mgw_odata_expand=>ty_t_node_children.
+    DATA ls_child    LIKE LINE OF lt_children.
+    DATA lt_travel   TYPE zcl_zstg_demo_mpc=>tt_travel.
+    DATA lt_deep     TYPE STANDARD TABLE OF zcl_zstg_demo_mpc=>ts_travel_deep WITH DEFAULT KEY.
+    DATA ls_deep     TYPE zcl_zstg_demo_mpc=>ts_travel_deep.
+    DATA lt_booking  TYPE STANDARD TABLE OF zstg_demo_bk WITH DEFAULT KEY.
+    DATA ls_travel   TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA ls_booking  TYPE zstg_demo_bk.
+    DATA ls_item     TYPE zcl_zstg_demo_mpc=>ts_booking.
+    DATA lv_wants    TYPE abap_bool.
+
+    IF io_expand IS BOUND.
+      lt_children = io_expand->get_children( ).
+      LOOP AT lt_children INTO ls_child.
+        IF to_upper( ls_child-tech_nav_prop_name ) = 'TO_BOOKINGS'.
+          lv_wants = abap_true.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    IF iv_entity_set_name <> 'TravelSet' OR lv_wants = abap_false.
+      super->/iwbep/if_mgw_appl_srv_runtime~get_expanded_entityset(
+        EXPORTING
+          iv_entity_name           = iv_entity_name
+          iv_entity_set_name       = iv_entity_set_name
+          iv_source_name           = iv_source_name
+          it_filter_select_options = it_filter_select_options
+          it_order                 = it_order
+          is_paging                = is_paging
+          it_navigation_path       = it_navigation_path
+          it_key_tab               = it_key_tab
+          iv_filter_string         = iv_filter_string
+          iv_search_string         = iv_search_string
+          io_expand                = io_expand
+          io_tech_request_context  = io_tech_request_context
+        IMPORTING
+          er_entityset             = er_entityset
+          et_expanded_tech_clauses = et_expanded_tech_clauses
+          es_response_context      = es_response_context ).
+      RETURN.
+    ENDIF.
+
+    travelset_get_entityset(
+      EXPORTING
+        iv_entity_name           = iv_entity_name
+        iv_entity_set_name       = iv_entity_set_name
+        iv_source_name           = iv_source_name
+        it_filter_select_options = it_filter_select_options
+        it_order                 = it_order
+        is_paging                = is_paging
+        it_navigation_path       = it_navigation_path
+        it_key_tab               = it_key_tab
+        iv_filter_string         = iv_filter_string
+        iv_search_string         = iv_search_string
+        io_tech_request_context  = io_tech_request_context
+      IMPORTING
+        et_entityset             = lt_travel
+        es_response_context      = es_response_context ).
+
+* FOR ALL ENTRIES into a table typed like the DB table: the transpiler
+* de-duplicates the result by the DB key incl. MANDT (ANORMALIES.md)
+    IF lt_travel IS NOT INITIAL.
+      SELECT * FROM zstg_demo_bk
+        INTO TABLE lt_booking
+        FOR ALL ENTRIES IN lt_travel
+        WHERE travel_id = lt_travel-travel_id.
+      SORT lt_booking BY travel_id booking_id.
+    ENDIF.
+
+    LOOP AT lt_travel INTO ls_travel.
+      CLEAR ls_deep.
+      MOVE-CORRESPONDING ls_travel TO ls_deep.
+      LOOP AT lt_booking INTO ls_booking WHERE travel_id = ls_travel-travel_id.
+        CLEAR ls_item.
+        MOVE-CORRESPONDING ls_booking TO ls_item.
+        APPEND ls_item TO ls_deep-to_bookings.
+      ENDLOOP.
+      APPEND ls_deep TO lt_deep.
+    ENDLOOP.
+
+    APPEND 'TO_BOOKINGS' TO et_expanded_tech_clauses.
+    copy_data_to_ref( EXPORTING is_data = lt_deep
+                      CHANGING  cr_data = er_entityset ).
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.

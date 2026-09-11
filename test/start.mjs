@@ -29,12 +29,21 @@ export function startServer(quiet) {
   app.use("/app", express.static(fileURLToPath(new URL("../webapp", import.meta.url))));
 
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
-    await cl_express_icf_shim.run({
-      req,
-      res,
-      class: "ZCL_STG_HTTP_HANDLER",
-      base: new abap.types.String().set("/sap/opu/odata/sap"),
-    });
+    try {
+      await cl_express_icf_shim.run({
+        req,
+        res,
+        class: "ZCL_STG_HTTP_HANDLER",
+        base: new abap.types.String().set("/sap/opu/odata/sap"),
+      });
+    } catch (e) {
+      // a runtime (kernel) error is not an ABAP exception the dispatcher can
+      // catch; answer instead of leaving the client hanging
+      if (!res.headersSent) {
+        res.status(500).type("application/json").send(JSON.stringify({error: {code: "STG/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
+      }
+      console.error("runtime error:", e);
+    }
   });
 
   const server = app.listen(PORT);
