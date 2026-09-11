@@ -1,0 +1,23 @@
+# Local, never committed
+.local/
+.env
+cookies.txt
+.mcp.json
+
+# Captures carry real logons / session GUIDs / credentials — never commit
+*.pcap
+*.jsonl
+captures/
+
+# Node / transpiler substrate
+node_modules/
+dist/
+build/
+*.sqlite
+*.db
+coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
