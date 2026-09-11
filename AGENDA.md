@@ -75,7 +75,10 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
 - [x] **QW7** Closure probe: `tools/closure-probe.mjs` (static, abaplint
       registry with libs as dependencies). The dynamic complement is
       `"unknownTypes": "runtimeError"` in `abap_transpile.json`. Done 2026-09-11.
-- [ ] **QW1** Fix upstream issue #33 (registry instead of hardcoded test DPC).
+- [ ] **QW1** Fix upstream issue #33: done on the fork, branch
+      `oisee/open-abap-odata:registry-instead-of-hardcoded-dpc` (4c2c301),
+      upstream tests + Steampunk lint green, also fixes the todo-assert
+      exception constructors. PR text in `.local/qw1-pr.md`, waiting for a go.
 - [ ] **QW5** Truthful `$metadata` (keys, entity sets, the 11 EDM setters).
 - [ ] **QW2** Generic entity serializer via RTTI.
 - [ ] **QW3** URL + `$top/$skip/$orderby/$count/keys` into a populated
