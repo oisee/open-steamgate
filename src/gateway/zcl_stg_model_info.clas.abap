@@ -1,0 +1,199 @@
+CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
+* Runs the registered MPC once per service and keeps what the dispatcher and
+* the serializer need: entity sets, their types, properties, keys.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_property,
+             name      TYPE string,
+             fieldname TYPE string,
+             edm_type  TYPE string,
+             is_key    TYPE abap_bool,
+             nullable  TYPE abap_bool,
+           END OF ty_property.
+    TYPES ty_properties TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_entity_set,
+             name        TYPE string,
+             entity_type TYPE string,
+             properties  TYPE ty_properties,
+           END OF ty_entity_set.
+    TYPES ty_entity_sets TYPE STANDARD TABLE OF ty_entity_set WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_service,
+             name        TYPE string,
+             namespace   TYPE string,
+             entity_sets TYPE ty_entity_sets,
+           END OF ty_service.
+
+    CLASS-METHODS get
+      IMPORTING
+        iv_service        TYPE string
+      RETURNING
+        VALUE(rs_service) TYPE ty_service
+      RAISING
+        zcx_stg_error.
+
+    CLASS-METHODS find_set
+      IMPORTING
+        is_service    TYPE ty_service
+        iv_entity_set TYPE string
+      RETURNING
+        VALUE(rs_set) TYPE ty_entity_set
+      RAISING
+        zcx_stg_error.
+
+    CLASS-METHODS key_names
+      IMPORTING
+        is_set          TYPE ty_entity_set
+      RETURNING
+        VALUE(rt_names) TYPE string_table.
+
+    CLASS-METHODS find_property
+      IMPORTING
+        is_set             TYPE ty_entity_set
+        iv_name            TYPE string
+      RETURNING
+        VALUE(rs_property) TYPE ty_property
+      RAISING
+        zcx_stg_error.
+
+    CLASS-METHODS clear.
+  PRIVATE SECTION.
+    CLASS-DATA gt_services TYPE HASHED TABLE OF ty_service WITH UNIQUE KEY name.
+
+    CLASS-METHODS build
+      IMPORTING
+        iv_service        TYPE string
+      RETURNING
+        VALUE(rs_service) TYPE ty_service
+      RAISING
+        zcx_stg_error.
+ENDCLASS.
+
+CLASS zcl_stg_model_info IMPLEMENTATION.
+
+  METHOD get.
+    DATA lv_service TYPE string.
+
+    lv_service = to_upper( iv_service ).
+    READ TABLE gt_services INTO rs_service WITH TABLE KEY name = lv_service.
+    IF sy-subrc <> 0.
+      rs_service = build( lv_service ).
+      INSERT rs_service INTO TABLE gt_services.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD clear.
+    CLEAR gt_services.
+  ENDMETHOD.
+
+  METHOD build.
+    DATA lo_mpc         TYPE REF TO /iwbep/cl_mgw_push_abs_model.
+    DATA lo_model       TYPE REF TO zcl_oao_model.
+    DATA lt_type_names  TYPE zcl_oao_model=>ty_entity_names.
+    DATA lv_type_name   LIKE LINE OF lt_type_names.
+    DATA lo_entity      TYPE REF TO zcl_oao_entity_typ.
+    DATA lt_properties  TYPE /iwbep/if_mgw_med_odata_types=>ty_t_mgw_odata_properties.
+    DATA ls_property    LIKE LINE OF lt_properties.
+    DATA lo_property    TYPE REF TO zcl_oao_property.
+    DATA ls_info        TYPE ty_property.
+    DATA lt_info        TYPE ty_properties.
+    DATA lt_entity_sets TYPE zcl_oao_entity_typ=>ty_entity_sets.
+    DATA ls_entity_set  LIKE LINE OF lt_entity_sets.
+    DATA ls_set         TYPE ty_entity_set.
+    DATA lx_gateway     TYPE REF TO /iwbep/cx_mgw_base_exception.
+
+    rs_service-name = iv_service.
+    TRY.
+        lo_mpc = zcl_oao_registry=>create_mpc( iv_service ).
+        lo_mpc->define( ).
+      CATCH /iwbep/cx_mgw_base_exception INTO lx_gateway.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status   = 404
+            code     = 'STG/SERVICE_NOT_FOUND'
+            message  = |Service { iv_service } is not registered|
+            previous = lx_gateway.
+    ENDTRY.
+
+    lo_model ?= lo_mpc->model.
+    lo_model->/iwbep/if_mgw_odata_model~get_schema_namespace( IMPORTING ev_namespace = rs_service-namespace ).
+    lt_type_names = lo_model->get_entity_type_names( ).
+
+    LOOP AT lt_type_names INTO lv_type_name.
+      TRY.
+          lo_entity ?= lo_model->/iwbep/if_mgw_odata_model~get_entity_type( lv_type_name ).
+        CATCH /iwbep/cx_mgw_med_exception INTO lx_gateway.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status   = 500
+              code     = 'STG/MODEL'
+              message  = |Entity type { lv_type_name } vanished from the model|
+              previous = lx_gateway.
+      ENDTRY.
+
+      CLEAR lt_info.
+      lt_properties = lo_entity->/iwbep/if_mgw_odata_entity_typ~get_properties( ).
+      LOOP AT lt_properties INTO ls_property.
+        lo_property ?= ls_property-property.
+        CLEAR ls_info.
+        ls_info-name      = ls_property-name.
+        ls_info-fieldname = to_upper( lo_property->mv_abap_fieldname ).
+        IF ls_info-fieldname IS INITIAL.
+          ls_info-fieldname = to_upper( ls_property-name ).
+        ENDIF.
+        ls_info-edm_type = lo_property->mv_edm_type.
+        IF ls_info-edm_type IS INITIAL.
+          ls_info-edm_type = /iwbep/if_mgw_med_odata_types=>gcs_edm_data_types-string.
+        ENDIF.
+        ls_info-is_key   = lo_property->mv_is_key.
+        ls_info-nullable = lo_property->mv_nullable.
+        APPEND ls_info TO lt_info.
+      ENDLOOP.
+
+      lt_entity_sets = lo_entity->get_entity_sets( ).
+      LOOP AT lt_entity_sets INTO ls_entity_set.
+        CLEAR ls_set.
+        ls_set-name        = ls_entity_set-name.
+        ls_set-entity_type = lv_type_name.
+        ls_set-properties  = lt_info.
+        APPEND ls_set TO rs_service-entity_sets.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD find_set.
+    READ TABLE is_service-entity_sets INTO rs_set WITH KEY name = iv_entity_set.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 404
+          code    = 'STG/ENTITY_SET_NOT_FOUND'
+          message = |Entity set { iv_entity_set } does not exist in { is_service-name }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD key_names.
+    DATA ls_property LIKE LINE OF is_set-properties.
+
+    LOOP AT is_set-properties INTO ls_property WHERE is_key = abap_true.
+      APPEND ls_property-name TO rt_names.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD find_property.
+    DATA ls_property LIKE LINE OF is_set-properties.
+
+    LOOP AT is_set-properties INTO ls_property.
+      IF to_upper( ls_property-name ) = to_upper( iv_name ).
+        rs_property = ls_property.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    RAISE EXCEPTION TYPE zcx_stg_error
+      EXPORTING
+        status  = 400
+        code    = 'STG/PROPERTY_NOT_FOUND'
+        message = |Property { iv_name } does not exist in { is_set-entity_type }|.
+  ENDMETHOD.
+
+ENDCLASS.

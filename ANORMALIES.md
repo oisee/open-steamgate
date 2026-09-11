@@ -62,6 +62,29 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `npm run transpile` itself
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-11-doubled-quote-literal — A literal holding two quotes is transpiled as one character
+
+- Status: `workaround`
+- Discovery date: `2026-09-11`
+- Affected versions: `@abaplint/transpiler-cli 2.13.85`
+- Affected ABAP statement, runtime API or adapter: any character literal whose content is escaped quotes, e.g. `''''''` (two quotes) used in `REPLACE ALL OCCURRENCES OF '''''' IN lv WITH ''''`
+- Minimal ABAP reproducer (inline):
+
+  ```abap
+  rv_result = `x''y`.
+  REPLACE ALL OCCURRENCES OF '''''' IN rv_result WITH ''''.
+  " SAP: x'y   open-abap: x''y
+  ```
+
+- Exact command used to run it: `abap_transpile` + `node output/index.mjs` on a class with the two lines above in a FOR TESTING method
+- Expected SAP behaviour: `''''''` is a `c LENGTH 2` literal containing `''`; the replace yields `x'y`
+- Actual open-abap behaviour: the literal is emitted as `abap.CharacterFactory.get(1, '\'\'')`, a `c LENGTH 1`, so the pattern degenerates to a single quote and the statement is a no-op. Length is computed before the escape sequence is folded.
+- Impact on open-steamgate: OData key predicates and `$filter` literals escape quotes by doubling; un-doubling silently failed
+- Smallest safe workaround: build the two-quote string at runtime, `lv_two = |''|`, and use the variable in `REPLACE` (applied in `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_request_context`)
+- Upstream issue: not reported yet
+- Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_url->keys_named`
+- Upstream version containing a fix: `unknown`
+
 ## Resolved anomalies
 
 (none yet)

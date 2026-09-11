@@ -32,6 +32,12 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Phase 1 — GET path done 2026-09-11
+
+`/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$top=2&$skip=1&$inlinecount=allpages`
+answers real OData v2 JSON from the transpiled DPC over SQLite. `$filter`
+reaches the DPC as `iv_filter_string` only until QW4. Writes answer 501.
+
 ## Phase 0 — done 2026-09-11
 
 `npm test` is green: abaplint, transpile, 6 ABAP Unit tests, 2 mocha wire
@@ -81,9 +87,13 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       now consumes the fork without `exclude_filter`.
 - [x] **QW5** Truthful `$metadata`: keys, entity sets, all EDM setters,
       facets, labels. Fork main (2026-09-11).
-- [ ] **QW2** Generic entity serializer via RTTI.
-- [ ] **QW3** URL + `$top/$skip/$orderby/$count/keys` into a populated
-      request context.
+- [x] **QW2** Generic OData v2 JSON serializer driven by the model
+      (`zcl_stg_json`, `zcl_stg_model_info`). 2026-09-11.
+- [x] **QW3** `zcl_stg_url` + `zcl_stg_request_context` (all req facets, filter
+      facet, `get_osql_where_clause`, `convert_select_option`) +
+      `zcl_stg_dispatcher` (GET entity set / entity / `$count` / `$metadata` /
+      service document, `$top/$skip/$orderby/$inlinecount`, OData error
+      bodies, 501 for writes). 24 ABAP Unit + 8 mocha. 2026-09-11.
 - [ ] **QW4** `$filter` → SELECT-OPTIONS (the crux, timeboxed).
 
 ## Cheap checks that could shrink the plan
