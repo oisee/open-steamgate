@@ -66,9 +66,9 @@ Do this before any architectural commitment.
 
 Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
 
-- [ ] **QW0** Ask upstream for an MIT grant on `open-abap-odata` (1 h). Do
-      not block on the answer. Draft ready in `.local/qw0-license-issue.md`,
-      waiting for a go to post.
+- [x] **QW0** Asked upstream for an MIT grant on `open-abap-odata`:
+      https://github.com/open-abap/open-abap-odata/issues/39 (2026-09-11).
+      Not blocking on the answer.
 - [x] **QW6** Scaffold Phase 0 in the open-abap house style. Done 2026-09-11.
 - [x] **QW7** Closure probe: `tools/closure-probe.mjs` (static, abaplint
       registry with libs as dependencies). The dynamic complement is
