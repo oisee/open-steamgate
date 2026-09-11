@@ -18,6 +18,9 @@ scopes the work is done and lives in:
   gap-list, phased build order, source list (verified-in-repo vs claimed).
 - [`docs/layers-we-own.md`](docs/layers-we-own.md) — the SAP-protocol layers
   already reverse-engineered in the sibling projects, with reuse notes.
+- [`docs/2026-09-11-lars-ecosystem-audit.md`](docs/2026-09-11-lars-ecosystem-audit.md)
+  — hand audit of the open-abap repos (built and probed), the house style to
+  copy for Phase 0, ranked quick wins.
 - [`AGENDA.md`](AGENDA.md) — the living board: decisions, open questions, the
   Sprint-0 audit checklist.
 
@@ -97,6 +100,12 @@ their URLs in tracked files): a DIAG-protocol project (carries the SAP-LZH
 
 Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 `abapGit`, `SAP/open-ux-odata` — see `docs/prior-art.md`.
+
+## Local clones
+
+`.local/lars/` (gitignored) holds shallow clones of the abaplint / open-abap /
+larshp repos, five of them built (`npm test` green except Playwright). Use them
+for source reads instead of GitHub fetches.
 
 ## Substrate (when code starts)
 

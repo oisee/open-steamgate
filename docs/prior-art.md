@@ -20,6 +20,11 @@ artifact — `open-abap/open-abap-odata` — and are reconciled below.
 > tooling) have **no code connecting an OData request to a transpiled DPC
 > method.**
 
+> **Update 2026-09-11:** the hand audit prescribed below has been done. See
+> `2026-09-11-lars-ecosystem-audit.md` for the verified-by-run state of
+> `open-abap-odata`, the open-abap house style to adopt, and a ranked quick-win
+> list. Its §7 lists the corrections to this document.
+
 ## Reconciling the two passes
 
 Both passes independently identified `open-abap/open-abap-odata` as the crucial
