@@ -1046,3 +1046,77 @@ CLASS ltcl_deep_insert IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS ltcl_function_import DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS metadata_has_function_imports FOR TESTING RAISING cx_static_check.
+    METHODS entity_returning_action FOR TESTING RAISING cx_static_check.
+    METHODS primitive_returning_action FOR TESTING RAISING cx_static_check.
+    METHODS wrong_verb_is_405 FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_function_import IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD metadata_has_function_imports.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<FunctionImport Name="CancelTravel" ReturnType="ZSTG_DEMO_SRV.Travel" EntitySet="TravelSet" m:HttpMethod="POST" sap:action-for="ZSTG_DEMO_SRV.Travel">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Parameter Name="TravelId" Type="Edm.String" Mode="In" MaxLength="8"/>' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<FunctionImport Name="TravelCount" m:HttpMethod="GET">' ) ).
+  ENDMETHOD.
+
+  METHOD entity_returning_action.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `TravelId='T0002'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'POST'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/CancelTravel'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '{"d":{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0002'')"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Status":"X"' ) ).
+
+* undo for the other tests
+    lt_options = cl_http_utility=>string_to_fields( `x=1` ).
+    zcl_stg_dispatcher=>dispatch( iv_method = 'PUT'
+                                  iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0002')`
+                                  iv_body   = '{"Description":"Copenhagen to Aarhus","Status":"A","Seats":1}' ).
+  ENDMETHOD.
+
+  METHOD primitive_returning_action.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `Status='A'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelCount'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '{"d":{"TravelCount":3}}' ).
+  ENDMETHOD.
+
+  METHOD wrong_verb_is_405.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/CancelTravel' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 405 ).
+  ENDMETHOD.
+
+ENDCLASS.

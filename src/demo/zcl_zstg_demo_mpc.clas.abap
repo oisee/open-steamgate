@@ -43,6 +43,10 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
     METHODS define_associations
       RAISING
         /iwbep/cx_mgw_med_exception.
+
+    METHODS define_actions
+      RAISING
+        /iwbep/cx_mgw_med_exception.
 ENDCLASS.
 
 CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
@@ -52,6 +56,30 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     define_travel( ).
     define_booking( ).
     define_associations( ).
+    define_actions( ).
+  ENDMETHOD.
+
+  METHOD define_actions.
+    DATA lo_action    TYPE REF TO /iwbep/if_mgw_odata_action.
+    DATA lo_parameter TYPE REF TO /iwbep/if_mgw_odata_parameter.
+
+    lo_action = model->create_action( 'CancelTravel' ).
+    lo_action->set_return_entity_type( gc_travel ).
+    lo_action->set_return_entity_set( gc_travel_set ).
+    lo_action->set_return_multiplicity( '1' ).
+    lo_action->set_http_method( 'POST' ).
+    lo_action->set_action_for( gc_travel ).
+    lo_parameter = lo_action->create_input_parameter( iv_parameter_name = 'TravelId'
+                                                      iv_abap_fieldname = 'TRAVEL_ID' ).
+    lo_parameter->set_type_edm_string( ).
+    lo_parameter->set_maxlength( 8 ).
+
+    lo_action = model->create_action( 'TravelCount' ).
+    lo_action->set_http_method( 'GET' ).
+    lo_parameter = lo_action->create_input_parameter( iv_parameter_name = 'Status'
+                                                      iv_abap_fieldname = 'STATUS' ).
+    lo_parameter->set_type_edm_string( ).
+    lo_parameter->set_maxlength( 1 ).
   ENDMETHOD.
 
   METHOD define_booking.

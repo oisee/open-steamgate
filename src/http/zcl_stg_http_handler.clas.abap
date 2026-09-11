@@ -24,7 +24,7 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     IF lv_host IS INITIAL.
       lv_host = 'localhost'.
     ENDIF.
-    server->request->get_form_fields( CHANGING fields = lt_options ).
+    server->request->get_form_fields_cs( CHANGING fields = lt_options ).
     lv_body = server->request->get_cdata( ).
 
 * CSRF: UI5 fetches a token with a GET and sends it back on writes. There is

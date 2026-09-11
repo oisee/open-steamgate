@@ -3,6 +3,7 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
 * select-options the Gateway hands over, runs Open SQL, applies paging.
   PUBLIC SECTION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~create_deep_entity REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
   PROTECTED SECTION.
     METHODS travelset_get_entityset REDEFINITION.
     METHODS travelset_get_entity REDEFINITION.
@@ -208,6 +209,46 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
 
     copy_data_to_ref( EXPORTING is_data = ls_deep
                       CHANGING  cr_data = er_deep_entity ).
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.
+    DATA ls_travel TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA lv_id     TYPE c LENGTH 8.
+    DATA lv_status TYPE c LENGTH 1.
+    DATA lv_count  TYPE i.
+
+    CASE iv_action_name.
+      WHEN 'CancelTravel'.
+        lv_id = key_value( it_key_tab = it_parameter
+                           iv_name    = 'TravelId' ).
+        UPDATE zstg_demo SET status = 'X' WHERE travel_id = lv_id.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+            EXPORTING
+              message = |Travel { lv_id } does not exist|.
+        ENDIF.
+        SELECT SINGLE travel_id description status seats
+          FROM zstg_demo
+          INTO CORRESPONDING FIELDS OF ls_travel
+          WHERE travel_id = lv_id.
+        copy_data_to_ref( EXPORTING is_data = ls_travel
+                          CHANGING  cr_data = er_data ).
+      WHEN 'TravelCount'.
+        lv_status = key_value( it_key_tab = it_parameter
+                               iv_name    = 'Status' ).
+        IF lv_status IS INITIAL.
+          SELECT COUNT( * ) FROM zstg_demo INTO lv_count.
+        ELSE.
+          SELECT COUNT( * ) FROM zstg_demo INTO lv_count WHERE status = lv_status.
+        ENDIF.
+        copy_data_to_ref( EXPORTING is_data = lv_count
+                          CHANGING  cr_data = er_data ).
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+          EXPORTING
+            textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+            method = iv_action_name.
+    ENDCASE.
   ENDMETHOD.
 
   METHOD key_value.

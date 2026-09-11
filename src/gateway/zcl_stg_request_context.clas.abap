@@ -8,6 +8,7 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
     INTERFACES /iwbep/if_mgw_req_entity_d.
     INTERFACES /iwbep/if_mgw_req_entity_u.
     INTERFACES /iwbep/if_mgw_req_filter.
+    INTERFACES /iwbep/if_mgw_req_func_import.
 
     DATA mv_entity_set    TYPE string.
     DATA mv_entity_type   TYPE string.

@@ -41,11 +41,23 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_association.
     TYPES ty_associations TYPE STANDARD TABLE OF ty_association WITH DEFAULT KEY.
 
+    TYPES: BEGIN OF ty_action,
+             name                TYPE string,
+             http_method         TYPE string,
+             return_entity_type  TYPE string,
+             return_entity_set   TYPE string,
+             return_complex_type TYPE string,
+             return_many         TYPE abap_bool,
+             parameters          TYPE ty_properties,
+           END OF ty_action.
+    TYPES ty_actions TYPE STANDARD TABLE OF ty_action WITH DEFAULT KEY.
+
     TYPES: BEGIN OF ty_service,
              name         TYPE string,
              namespace    TYPE string,
              entity_sets  TYPE ty_entity_sets,
              associations TYPE ty_associations,
+             actions      TYPE ty_actions,
            END OF ty_service.
 
     CLASS-METHODS get
@@ -79,6 +91,13 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
         VALUE(rs_property) TYPE ty_property
       RAISING
         zcx_stg_error.
+
+    CLASS-METHODS find_action
+      IMPORTING
+        is_service       TYPE ty_service
+        iv_name          TYPE string
+      RETURNING
+        VALUE(rs_action) TYPE ty_action.
 
     CLASS-METHODS find_nav
       IMPORTING
@@ -143,6 +162,10 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
     DATA lo_nav         TYPE REF TO zcl_oao_nav_prop.
     DATA ls_nav         TYPE ty_nav.
     DATA ls_other       TYPE ty_entity_set.
+    DATA lt_actions     TYPE zcl_oao_model=>ty_actions.
+    DATA lo_action      TYPE REF TO zcl_oao_action.
+    DATA lo_parameter   TYPE REF TO zcl_oao_parameter.
+    DATA ls_action      TYPE ty_action.
     FIELD-SYMBOLS <ls_set> TYPE ty_entity_set.
 
     rs_service-name = iv_service.
@@ -226,6 +249,34 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
       APPEND ls_association TO rs_service-associations.
     ENDLOOP.
 
+* function imports
+    lt_actions = lo_model->get_actions( ).
+    LOOP AT lt_actions INTO lo_action.
+      CLEAR ls_action.
+      ls_action-name                = lo_action->mv_name.
+      ls_action-http_method         = to_upper( lo_action->mv_http_method ).
+      ls_action-return_entity_type  = lo_action->mv_return_entity_type.
+      ls_action-return_entity_set   = lo_action->mv_return_entity_set.
+      ls_action-return_complex_type = lo_action->mv_return_complex_type.
+      IF lo_action->mv_return_multiplicity <> '1' AND lo_action->mv_return_multiplicity <> '0'.
+        ls_action-return_many = abap_true.
+      ENDIF.
+      LOOP AT lo_action->mt_parameters INTO lo_parameter.
+        CLEAR ls_info.
+        ls_info-name      = lo_parameter->mv_name.
+        ls_info-fieldname = to_upper( lo_parameter->mv_abap_fieldname ).
+        IF ls_info-fieldname IS INITIAL.
+          ls_info-fieldname = to_upper( lo_parameter->mv_name ).
+        ENDIF.
+        ls_info-edm_type = lo_parameter->mv_edm_type.
+        IF ls_info-edm_type IS INITIAL.
+          ls_info-edm_type = /iwbep/if_mgw_med_odata_types=>gcs_edm_data_types-string.
+        ENDIF.
+        APPEND ls_info TO ls_action-parameters.
+      ENDLOOP.
+      APPEND ls_action TO rs_service-actions.
+    ENDLOOP.
+
 * navigation properties, resolved to a target set per entity set
     LOOP AT rs_service-entity_sets ASSIGNING <ls_set>.
       lv_type_name = <ls_set>-entity_type.
@@ -265,6 +316,13 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
         APPEND ls_nav TO <ls_set>-navs.
       ENDLOOP.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD find_action.
+    READ TABLE is_service-actions INTO rs_action WITH KEY name = iv_name.
+    IF sy-subrc <> 0.
+      CLEAR rs_action.
+    ENDIF.
   ENDMETHOD.
 
   METHOD find_nav.

@@ -130,6 +130,19 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
 
+    CLASS-METHODS function_import
+      IMPORTING
+        iv_method          TYPE string
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_action          TYPE zcl_stg_model_info=>ty_action
+        is_request         TYPE zcl_stg_url=>ty_request
+        iv_base_url        TYPE string
+      RETURNING
+        VALUE(rs_response) TYPE ty_response
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
     CLASS-METHODS expand_tree
       IMPORTING
         it_nested      TYPE tihttpnvp
@@ -222,6 +235,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA ls_request TYPE zcl_stg_url=>ty_request.
     DATA ls_service TYPE zcl_stg_model_info=>ty_service.
     DATA ls_set     TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA ls_action  TYPE zcl_stg_model_info=>ty_action.
     DATA lv_base    TYPE string.
     DATA lv_method  TYPE string.
 
@@ -259,6 +273,21 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                            iv_service_path = |/sap/opu/odata/sap/{ ls_service-name }|
                                            iv_host         = iv_host ).
       RETURN.
+    ENDIF.
+
+* a segment that is not an entity set may be a function import
+    READ TABLE ls_service-entity_sets TRANSPORTING NO FIELDS WITH KEY name = ls_request-entity_set.
+    IF sy-subrc <> 0.
+      ls_action = zcl_stg_model_info=>find_action( is_service = ls_service
+                                                   iv_name    = ls_request-entity_set ).
+      IF ls_action-name IS NOT INITIAL.
+        rs_response = function_import( iv_method   = lv_method
+                                       is_service  = ls_service
+                                       is_action   = ls_action
+                                       is_request  = ls_request
+                                       iv_base_url = lv_base ).
+        RETURN.
+      ENDIF.
     ENDIF.
 
     ls_set = zcl_stg_model_info=>find_set( is_service    = ls_service
@@ -433,6 +462,98 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
             code    = 'STG/VERB_NOT_IMPLEMENTED'
             message = |{ iv_method } is not implemented|.
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD function_import.
+    DATA lo_dpc       TYPE REF TO /iwbep/if_mgw_appl_srv_runtime.
+    DATA lo_context   TYPE REF TO zcl_stg_request_context.
+    DATA lt_parameter TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_parameter TYPE /iwbep/s_mgw_name_value_pair.
+    DATA ls_property  TYPE zcl_stg_model_info=>ty_property.
+    DATA ls_option    TYPE ihttpnvp.
+    DATA lr_data      TYPE REF TO data.
+    DATA ls_set       TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lv_kind      TYPE c LENGTH 1.
+    DATA lv_value     TYPE string.
+    FIELD-SYMBOLS <lt_data> TYPE ANY TABLE.
+    FIELD-SYMBOLS <ls_data> TYPE any.
+    FIELD-SYMBOLS <lv_data> TYPE any.
+
+    IF iv_method <> is_action-http_method.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 405
+          code    = 'STG/METHOD_NOT_ALLOWED'
+          message = |Function import { is_action-name } takes { is_action-http_method }|.
+    ENDIF.
+
+* parameters come as query options, quoted like key values
+    LOOP AT is_action-parameters INTO ls_property.
+      CLEAR ls_parameter.
+      ls_parameter-name = ls_property-name.
+      LOOP AT is_request-options INTO ls_option.
+        IF to_lower( ls_option-name ) = to_lower( ls_property-name ).
+          ls_parameter-value = zcl_stg_url=>unquote( ls_option-value ).
+        ENDIF.
+      ENDLOOP.
+      APPEND ls_parameter TO lt_parameter.
+    ENDLOOP.
+
+    lo_dpc = zcl_oao_registry=>create_dpc( is_service-name ).
+    CREATE OBJECT lo_context.
+    lo_context->mv_entity_set  = is_action-return_entity_set.
+    lo_context->mv_entity_type = is_action-return_entity_type.
+
+    lo_dpc->execute_action(
+      EXPORTING
+        iv_action_name          = is_action-name
+        it_parameter            = lt_parameter
+        io_tech_request_context = lo_context
+      IMPORTING
+        er_data                 = lr_data ).
+
+    IF lr_data IS NOT BOUND.
+      rs_response = json_response( iv_status = 204
+                                   iv_body   = '' ).
+      RETURN.
+    ENDIF.
+
+    IF is_action-return_entity_set IS NOT INITIAL.
+      ls_set = zcl_stg_model_info=>find_set( is_service    = is_service
+                                             iv_entity_set = is_action-return_entity_set ).
+    ELSEIF is_action-return_entity_type IS NOT INITIAL.
+      LOOP AT is_service-entity_sets INTO ls_set WHERE entity_type = is_action-return_entity_type.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
+
+    ASSIGN lr_data->* TO <lv_data>.
+    DESCRIBE FIELD <lv_data> TYPE lv_kind.
+    IF lv_kind = 'h'.
+      ASSIGN lr_data->* TO <lt_data>.
+      rs_response = json_response( iv_status = 200
+                                   iv_body   = zcl_stg_json=>feed( it_data      = <lt_data>
+                                                                   is_set       = ls_set
+                                                                   iv_namespace = is_service-namespace
+                                                                   iv_base_url  = iv_base_url ) ).
+    ELSEIF lv_kind = 'u' OR lv_kind = 'v'.
+      ASSIGN lr_data->* TO <ls_data>.
+      rs_response = json_response( iv_status = 200
+                                   iv_body   = zcl_stg_json=>entry( is_data      = <ls_data>
+                                                                    is_set       = ls_set
+                                                                    iv_namespace = is_service-namespace
+                                                                    iv_base_url  = iv_base_url ) ).
+    ELSE.
+* primitive return: {"d":{"<Name>":value}}
+      lv_value = zcl_stg_json=>value( iv_value    = <lv_data>
+                                      iv_edm_type = 'Edm.String' ).
+      IF lv_kind = 'I' OR lv_kind = 'P' OR lv_kind = 'F' OR lv_kind = 'b' OR lv_kind = 's' OR lv_kind = '8'.
+        lv_value = zcl_stg_json=>value( iv_value    = <lv_data>
+                                        iv_edm_type = 'Edm.Int32' ).
+      ENDIF.
+      rs_response = json_response( iv_status = 200
+                                   iv_body   = |\{"d":\{"{ is_action-name }":{ lv_value }\}\}| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD expand_tree.

@@ -32,6 +32,18 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Deep insert and function imports done 2026-09-11 (night run)
+
+Deep insert: nested navigation payloads in a POST reach `create_deep_entity`
+with an `io_expand` tree; the entry provider fills the SEGW deep structure
+(one component per navigation property) recursively; the 201 response inlines
+what the DPC returned. Function imports: `model->create_action` with input
+parameters, return entity type/set or primitive, HTTP method, `sap:action-for`;
+`<FunctionImport>` in `$metadata`; `/Service/Action?Param='v'` dispatched to
+`execute_action`, result serialized as entity, feed or `{"d":{"Name":v}}`.
+Fork: `oisee/open-abap-odata` a5272e8. Lesson kept in code: SAP's
+`get_form_fields` lowercases names, the handler uses `get_form_fields_cs`.
+
 ## Navigation and `$expand` done 2026-09-11
 
 Fork: `create_association` / `create_association_set` /
@@ -64,8 +76,8 @@ POST / PUT / PATCH / MERGE / DELETE reach `create_entity`, `update_entity`,
 (`zcl_stg_entry_provider`: request body parsed by `zcl_stg_json=>parse_object`,
 mapped through the model, EDM-typed conversion). 201 + Location, 204, business
 exceptions as 400 with the DPC's message. CSRF fetch answered. The demo DPC
-does real INSERT / UPDATE / DELETE on SQLite. Still open: deep insert, function imports, a transaction bracket around
-changesets.
+does real INSERT / UPDATE / DELETE on SQLite. Still open: a transaction bracket around changesets, complex types,
+media resources/streams.
 
 ## Phase 4 demo — Fiori Elements list report, 2026-09-11
 

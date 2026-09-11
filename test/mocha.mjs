@@ -97,6 +97,16 @@ describe("wire", () => {
     await fetch(BASE + "/TravelSet('T0700')", {method: "DELETE", headers});
   });
 
+  it("function imports", async () => {
+    let res = await fetch(BASE + "/TravelCount?Status='A'");
+    expect(res.status).to.equal(200);
+    expect((await res.json()).d.TravelCount).to.equal(3);
+
+    res = await fetch(BASE + "/CancelTravel?TravelId='T0009'", {method: "POST", headers: {"x-csrf-token": "open-steamgate"}});
+    expect(res.status).to.equal(200);
+    expect((await res.json()).d.Status).to.equal("X");
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);
