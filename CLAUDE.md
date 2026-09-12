@@ -225,6 +225,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `src/segw/`, kept by `stg-compile --all`), GET per set for the pull. `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
+- The SEGW editor is `webapp/segw/` (`docs/segw-editor.md`): freestyle
+  SAPUI5 over `ZSTG_SEGW_SRV`, the project tree in SEGW's shape, every
+  node edited in place (MERGE), Add property / Delete, Import IWPR through
+  `ImportSet`; Export IWPR and Generate go through dev routes of
+  `test/start.mjs` (`/segw/export/<P>`, `POST /segw/generate/<P>`,
+  `tools/segw-editor.mjs`, output in `gen/segw-editor/`, which the
+  transpiler and abaplint skip). Launchpad tile "SEGW"
+  (`SegwProject-manage`); `test/e2e/segw.spec.mjs`. Tests and the
+  Playwright config read `STG_PORT` like `test/start.mjs`, so two sessions
+  can run their suites side by side on different ports.
 - `npm run web:preview` bundles the gateway into a service worker (`build/`,
   sql.js, no server); `npm run e2e:preview` checks it in Chromium; the
   `preview deployment` workflow publishes `main/` and `pr-<n>/` to GitHub

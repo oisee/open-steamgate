@@ -51,6 +51,14 @@
           applicationType: "URL",
           url: "./analytics/",
           navigationMode: "embedded"
+        },
+        "SegwProject-manage": {
+          title: "SEGW",
+          description: "the Service Builder as an app",
+          additionalInformation: "SAPUI5.Component=stg.segw",
+          applicationType: "URL",
+          url: "./segw/",
+          navigationMode: "embedded"
         }
       },
       services: {
@@ -97,6 +105,17 @@
                         icon: "sap-icon://bar-chart",
                         targetURL: "#Flight-analyze"
                       }
+                    },
+                    {
+                      id: "segw",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "SEGW",
+                        subtitle: "Service Builder",
+                        info: "ZSTG_SEGW_SRV",
+                        icon: "sap-icon://tree",
+                        targetURL: "#SegwProject-manage"
+                      }
                     }
                   ]
                 }
@@ -123,7 +142,7 @@
     data-sap-ui-frameOptions="allow"
     data-sap-ui-xx-componentPreload="off"
     data-sap-ui-flexibilityServices=""
-    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking", "stg.analytics": "./analytics"}'
+    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking", "stg.analytics": "./analytics", "stg.segw": "./segw"}'
     data-sap-ui-oninit="module:stg/launchpad"></script>
 </head>
 <body class="sapUiBody" id="content">

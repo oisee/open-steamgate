@@ -1,4 +1,6 @@
 import {test, expect} from "@playwright/test";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
 // A Fiori Elements V2 Analytical List Page over the flight cube: the chart
 // and the table are $select requests on dimensions and measures, which the
@@ -7,7 +9,7 @@ test("analytical list page: chart and table over the flight cube", async ({page}
   const odata = [];
   page.on("request", (req) => {
     if (req.url().includes("/sap/opu/odata/sap/")) {
-      odata.push(req.method() + " " + decodeURIComponent(req.url().replace("http://localhost:3030", "")) + " " + decodeURIComponent(req.postData() || ""));
+      odata.push(req.method() + " " + decodeURIComponent(req.url().replace(`http://localhost:${PORT}`, "")) + " " + decodeURIComponent(req.postData() || ""));
     }
   });
   const failed = [];

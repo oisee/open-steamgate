@@ -1,7 +1,9 @@
 import {expect} from "chai";
 import {startServer} from "./start.mjs";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
-const BASE = "http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV";
+const BASE = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_DEMO_SRV`;
 
 describe("wire", () => {
   let server;
@@ -15,7 +17,7 @@ describe("wire", () => {
   });
 
   it("root answers", async () => {
-    const res = await fetch("http://localhost:3030/");
+    const res = await fetch(`http://localhost:${PORT}/`);
     expect(res.status).to.equal(200);
   });
 
@@ -37,7 +39,7 @@ describe("wire", () => {
     expect(body.d.results[0].TravelId).to.equal("T0001");
     expect(body.d.results[0].Seats).to.equal(2);
     expect(body.d.results[0].__metadata.uri).to.equal(
-      "http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')");
+      `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')`);
   });
 
   it("$top/$skip/$inlinecount", async () => {
@@ -111,7 +113,7 @@ describe("wire", () => {
   });
 
   it("SADL service over CDS views: read, navigate, aggregate", async () => {
-    const S = "http://localhost:3030/sap/opu/odata/sap/ZSTG_SADL_SRV";
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV`;
     let res = await fetch(S + "/$metadata");
     expect(res.status).to.equal(200);
     const xml = await res.text();
@@ -177,7 +179,7 @@ describe("wire", () => {
     const headers = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
     let res = await fetch(BASE + "/TravelSet", {method: "POST", headers, body: JSON.stringify({TravelId: "T0200", Description: "Wire created", Status: "A", Seats: 1})});
     expect(res.status).to.equal(201);
-    expect(res.headers.get("location")).to.equal("http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0200')");
+    expect(res.headers.get("location")).to.equal(`http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0200')`);
     expect((await res.json()).d.Description).to.equal("Wire created");
 
     res = await fetch(BASE + "/TravelSet('T0200')", {method: "PUT", headers, body: JSON.stringify({d: {Description: "Wire updated", Status: "X", Seats: 2}})});

@@ -94,7 +94,10 @@ Bottom up, every layer is real, nothing is mocked:
    `Common.ValueList`, `Common.Text`, `UI.DataFieldForIntentBasedNavigation`
    and `UI.DataFieldWithIntentBasedNavigation` link them by intent;
    `webapp/flp.html` is the launchpad sandbox (`sap.ushell` from the same
-   CDN) that resolves `Travel-manage` and `Booking-display`. SAPUI5 1.120 from
+   CDN) that resolves `Travel-manage` and `Booking-display`. The fourth tile
+   is SEGW itself: `webapp/segw/`, the Service Builder's project tree over
+   `ZSTG_SEGW_SRV`, every node edited in place, Import / Export of the
+   abapGit IWPR, Generate through segw-gen (`docs/segw-editor.md`). SAPUI5 1.120 from
    SAP's CDN: Fiori Elements, the smart controls and the launchpad are not
    part of OpenUI5, and the point is that real Fiori apps run unchanged.
    SAPUI5 is SAP's, not part of this project.

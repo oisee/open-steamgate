@@ -1,4 +1,6 @@
 import {test, expect} from "@playwright/test";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
 // A Fiori Elements V2 list report (SAPUI5 from the CDN) against the
 // transpiled DPC. Needs network access for the UI5 runtime.
@@ -6,7 +8,7 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
   const odata = [];
   page.on("request", (req) => {
     if (req.url().includes("/sap/opu/odata/sap/")) {
-      odata.push(req.method() + " " + req.url().replace("http://localhost:3030", "") + " " + (req.postData() || ""));
+      odata.push(req.method() + " " + req.url().replace(`http://localhost:${PORT}`, "") + " " + (req.postData() || ""));
     }
   });
   const failed = [];
@@ -219,7 +221,7 @@ test("Delete in the list report goes through a $batch changeset to the DPC", asy
   await expect(page.locator("table tbody tr.sapMListTblRow")).toHaveCount(3);
   expect(deletes.some((t) => /DELETE TravelSet\('T0003'\)/.test(t)), deletes.join("\n")).toBe(true);
 
-  const res = await fetch("http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')");
+  const res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')`);
   expect(res.status).toBe(404);
 });
 

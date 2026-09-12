@@ -50,7 +50,7 @@
 //       returns: {entity: Travel, set: TravelSet, multiplicity: "1"}   # or {complex: CT_X}
 //       for: Travel
 //       parameters: {TravelId: String(8)}
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
@@ -891,6 +891,11 @@ export function compileAll(root = "src", out = "gen/stg", libs = []) {
         continue; // the tree itself is not ABAP; --out writes it
       }
       if (existing.has(objectOf(name))) {
+        // and a copy generated before src/ got the object goes, or the
+        // transpiler would see the object twice and may take the stale one
+        if (existsSync(join(target, name))) {
+          rmSync(join(target, name));
+        }
         kept.push(name);
         continue;
       }

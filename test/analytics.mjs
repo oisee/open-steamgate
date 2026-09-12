@@ -1,7 +1,9 @@
 import {expect} from "chai";
 import {startServer} from "./start.mjs";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
-const S = "http://localhost:3030/sap/opu/odata/sap/ZSTG_SADL_SRV";
+const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV`;
 
 // the analytical cube over the flight facts, the way an Analytical List Page
 // asks: $select on dimensions and measures, $orderby, $top, $inlinecount, $filter

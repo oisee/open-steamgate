@@ -430,8 +430,15 @@ the generator, the editor is the file.
    and stg-compile's output do not, because they write fields and orders
    SEGW does not (list in the doc, for the stg-compile owner). Cloud pass
    `npm run segw:cloud`: 155 issues, 133 of them the 7.02 SELECT form the
-   downport rule asks for. Next: the editor app over `ZSTG_SEGW_SRV`,
-   import through the service, stg-compile writing SEGW's field set.
+   downport rule asks for. Then: stg-compile writes SEGW's field set and
+   order (6c78bf9), push / pull and `ImportSet` through the service
+   (ef500bc, 19f9a0e), and the editor app `webapp/segw/`
+   (`docs/segw-editor.md`): the tree of a project over `ZSTG_SEGW_SRV`,
+   nodes edited in place (MERGE), Add property / Delete, Import IWPR via
+   `ImportSet`, Export and Generate through dev routes of `test/start.mjs`
+   (`tools/segw-editor.mjs`, output in `gen/segw-editor/`), launchpad tile
+   `SegwProject-manage`, `test/e2e/segw.spec.mjs`. Next: `ExportSet`,
+   adding other node kinds, subtree delete, Generate into `src/`.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the

@@ -11,6 +11,8 @@
 // and best of 5 runs per query after one warm-up.
 import {spawn} from "node:child_process";
 import {fileURLToPath} from "node:url";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
 const QUERIES = {
   total: "$select=SEATS,REVENUE",
@@ -24,7 +26,7 @@ async function child() {
   const {startServer} = await import("../test/start.mjs");
   const load = Date.now() - loadStart;
   const server = startServer(true);
-  const S = "http://localhost:3030/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_FlightcubeSet?";
+  const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_FlightcubeSet?`;
   const out = {store: process.env.STG_DB ?? "sqlite", rows: Number(process.env.STG_DATA_SCALE ?? 0), load_ms: load, queries: {}};
   for (const [name, q] of Object.entries(QUERIES)) {
     const times = [];

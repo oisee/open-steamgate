@@ -42,6 +42,7 @@
     "\\.mjs$",
     "\\.cjs$",
     "\\.ddls\\.",
-    "\\.stg\\.yaml$"
+    "\\.stg\\.yaml$",
+    "/gen/segw-editor/"
   ]
 }

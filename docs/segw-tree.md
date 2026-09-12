@@ -144,10 +144,8 @@ of the narrowed file list, not language findings.
 
 ## Next
 
-- The editor: the SEGW project tree as a Fiori app over `ZSTG_SEGW_SRV`
-  (list of projects, the tree of a project, property sheets), and a
-  `Generate` action that runs stg-compile / segw-gen over the tables
-  instead of a file.
+- The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
+  lacks is listed there.
 - Export as a read of the service (`GET ExportSet('ZSTG_DEMO')` with the
   IWPR as `Content`), the mirror of `ImportSet`, so the editor can hand a
   project back as a file.

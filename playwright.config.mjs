@@ -1,4 +1,6 @@
 import {defineConfig} from "@playwright/test";
+// the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
+const PORT = process.env.STG_PORT ?? 3030;
 
 export default defineConfig({
   testDir: "test/e2e",
@@ -8,13 +10,13 @@ export default defineConfig({
   expect: {timeout: 30_000},
   retries: 0,
   use: {
-    baseURL: "http://localhost:3030",
+    baseURL: `http://localhost:${PORT}`,
     headless: true,
     screenshot: "only-on-failure",
   },
   webServer: {
     command: "node test/run.mjs",
-    url: "http://localhost:3030/",
+    url: `http://localhost:${PORT}/`,
     reuseExistingServer: false,
     timeout: 60_000,
   },
