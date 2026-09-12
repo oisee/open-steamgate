@@ -175,6 +175,22 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     }
   });
 
+  // DELETE NodeSet: the operation op-1, its mapping header mh-2, the header's
+  // properties mp-4..mp-7 and the rules that share mp-4's NODE_UUID (SBD_MR)
+  it("DELETE NodeSet takes a node with its subtree, the way SEGW deletes", async () => {
+    const xml = readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8");
+    await pushFile(DEFAULT_URL, xml);
+    const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/NodeSet(Project='ZSTG_MAPPED',NodeUuid='op-1')`, {method: "DELETE"});
+    expect(res.status).to.equal(204);
+    const gone = new Set(["op-1", "mh-2", "mp-4", "mp-5", "mp-6", "mp-7"]);
+    const expected = new Map([...importIwpr(xml, spec)].map(([tag, rows]) => [tag, rows.filter((r) => !gone.has(r.node_uuid))]));
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MAPPED", spec), "ZSTG_MAPPED", spec)).to.equal(exportIwpr(expected, "ZSTG_MAPPED", spec));
+    expect(expected.get("SBD_MR").length).to.equal(0);
+    // put the seeded project back for the tests after this one
+    await pushFile(DEFAULT_URL, xml);
+    expect(await pullFile(DEFAULT_URL, "ZSTG_MAPPED")).to.equal(xml);
+  });
+
   it("GET ExportSet of a project nobody imported is 400", async () => {
     const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/ExportSet('NOBODY')`);
     expect(res.status).to.equal(400);

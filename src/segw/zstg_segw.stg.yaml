@@ -886,6 +886,15 @@ entities:
       Tables: {type: Int32}
     updatable: false
     deletable: false
+  Node:
+    set: NodeSet
+    description: "DELETE NodeSet(Project='P',NodeUuid='x'): the node and its subtree, as SEGW deletes"
+    keys: [Project, NodeUuid]
+    properties:
+      Project: {type: String(30)}
+      NodeUuid: {type: String(32)}
+    creatable: false
+    updatable: false
   Export:
     set: ExportSet
     description: "GET ExportSet('P'): the project as an IWPR file in Content"

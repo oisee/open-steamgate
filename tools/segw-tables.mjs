@@ -302,7 +302,8 @@ entities:
   }
   // the import: POST an IWPR file as Content, the project's rows are
   // replaced (zcl_stg_segw_import through zcl_zstg_segw_dpc_ext); the
-  // export: GET ExportSet('P'), the project as a file (zcl_stg_segw_export)
+  // export: GET ExportSet('P'), the project as a file (zcl_stg_segw_export);
+  // DELETE NodeSet(P, uuid): a node with its subtree (zcl_stg_segw_tree)
   s += `  Import:
     set: ImportSet
     description: "POST an IWPR file as Content; the project's rows in every table are replaced"
@@ -314,6 +315,15 @@ entities:
       Tables: {type: Int32}
     updatable: false
     deletable: false
+  Node:
+    set: NodeSet
+    description: "DELETE NodeSet(Project='P',NodeUuid='x'): the node and its subtree, as SEGW deletes"
+    keys: [Project, NodeUuid]
+    properties:
+      Project: {type: String(30)}
+      NodeUuid: {type: String(32)}
+    creatable: false
+    updatable: false
   Export:
     set: ExportSet
     description: "GET ExportSet('P'): the project as an IWPR file in Content"

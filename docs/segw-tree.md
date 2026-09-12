@@ -133,6 +133,20 @@ does not double). One gateway bug surfaced on the way: a key value with a backsl
 (`DS_ATT_PATH`, `IT_TRAVEL_ID_RANGE\HIGH`) reached `__metadata.uri`
 unescaped and broke the JSON; `zcl_stg_json` now escapes the URI.
 
+## Deleting a node
+
+`DELETE NodeSet(Project='P',NodeUuid='x')` takes the node with its subtree,
+the way SEGW deletes: the rows whose `PARENT_UUID` (`SBD_*`, `SBO_PR`),
+`ENTITY_GUID` (`SBO_NP`), `ASSOCIATION_GUID` (`SBO_RC`, `SBO_AT`) or
+`FUNCTION_IMPORT` (`SBO_FP`) is the node, their subtrees in turn, and every
+row sharing the node's `NODE_UUID` (its text rows, the `SBD_MR` rules of a
+mapping property). `zcl_stg_segw_tree` finds the parent columns of every
+`ZSTG_SB*` table through RTTI, so a new table joins the cascade by having
+one of those columns. `ENTITY_TYPE` of an entity set is a reference, not a
+parent: deleting an entity type leaves its sets. The generic `DELETE` on
+the table sets stays one row, as the editor's property form expects; the
+tree's Delete goes to `NodeSet`. A node nobody has is a 400.
+
 ## The Cloud pass
 
 `npm run segw:cloud` runs abaplint over `src/`, the generated table sources
@@ -151,4 +165,7 @@ of the narrowed file list, not language findings.
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
 - Generate as an operation of the service: segw-gen in ABAP over the
-  tables, so the editor's Generate button stops needing a Node route.
+  tables (`GenerateSet('P')` with the files as rows), staged MPC → DPC
+  base → mapped methods, each stage checked byte for byte against
+  `tools/segw-gen.mjs` over the corpus, so the editor's Generate button
+  stops needing a Node route.

@@ -214,6 +214,9 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
     METHODS unknown_field_is_400_untouched FOR TESTING.
     METHODS export_gives_the_file_back FOR TESTING.
     METHODS export_of_nobody_is_400 FOR TESTING.
+    METHODS delete_node_takes_its_subtree FOR TESTING.
+    METHODS delete_unknown_node_is_400 FOR TESTING.
+    METHODS count IMPORTING iv_set TYPE string iv_needle TYPE string RETURNING VALUE(rv_count) TYPE i.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
     METHODS entity_types RETURNING VALUE(rv_body) TYPE string.
@@ -229,6 +232,8 @@ CLASS ltcl_import IMPLEMENTATION.
     DELETE FROM zstg_sbd_pr WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbd_prt WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbo_et WHERE project = 'ZUT_IMP'.
+    DELETE FROM zstg_sbo_pr WHERE project = 'ZUT_IMP'.
+    DELETE FROM zstg_sbo_prt WHERE project = 'ZUT_IMP'.
   ENDMETHOD.
 
   METHOD iwpr.
@@ -269,6 +274,28 @@ CLASS ltcl_import IMPLEMENTATION.
     ENDIF.
     rv_xml = rv_xml
       && `   </_-IWBEP_-I_SBO_ET>` && lv_nl
+      && `   <_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `    <_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>pp-1</NODE_UUID>` && lv_nl
+      && `     <PARENT_UUID>et-1</PARENT_UUID>` && lv_nl
+      && `     <NAME>TravelId</NAME>` && lv_nl
+      && `    </_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `    <_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>pp-2</NODE_UUID>` && lv_nl
+      && `     <PARENT_UUID>et-2</PARENT_UUID>` && lv_nl
+      && `     <NAME>BookingId</NAME>` && lv_nl
+      && `    </_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `   </_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `   <_-IWBEP_-I_SBO_PRT>` && lv_nl
+      && `    <_-IWBEP_-I_SBO_PRT>` && lv_nl
+      && `     <SYLANGU>E</SYLANGU>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>pp-1</NODE_UUID>` && lv_nl
+      && `     <PROP_LABEL>Travel</PROP_LABEL>` && lv_nl
+      && `    </_-IWBEP_-I_SBO_PRT>` && lv_nl
+      && `   </_-IWBEP_-I_SBO_PRT>` && lv_nl
       && `  </asx:values>` && lv_nl
       && ` </asx:abap>` && lv_nl
       && `</abapGit>` && lv_nl.
@@ -299,8 +326,8 @@ CLASS ltcl_import IMPLEMENTATION.
     ls_response = post( iwpr( ) ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Project":"ZUT_IMP"' ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":4' ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Tables":3' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":7' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Tables":5' ) ).
 
     lv_body = entity_types( ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
@@ -322,7 +349,7 @@ CLASS ltcl_import IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
     ls_response = post( iwpr( abap_false ) ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":3' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":6' ) ).
 
     lv_body = entity_types( ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
@@ -373,6 +400,46 @@ CLASS ltcl_import IMPLEMENTATION.
                                                 iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/ExportSet('ZUT_NOBODY')` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'no project ZUT_NOBODY' ) ).
+  ENDMETHOD.
+
+  METHOD count.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZUT_IMP'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = |/sap/opu/odata/sap/ZSTG_SEGW_SRV/{ iv_set }|
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    FIND ALL OCCURRENCES OF iv_needle IN ls_response-body MATCH COUNT rv_count.
+  ENDMETHOD.
+
+  METHOD delete_node_takes_its_subtree.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'PropertySet' iv_needle = '"NodeUuid":"pp-' ) exp = 2 ).
+
+* the entity type, its property and the property's text go; the other type stays
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'DELETE'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/NodeSet(Project='ZUT_IMP',NodeUuid='et-1')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 204 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'EntityTypeSet' iv_needle = '"Name":"Travel"' ) exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'EntityTypeSet' iv_needle = '"Name":"Booking"' ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'PropertySet' iv_needle = '"NodeUuid":"pp-1"' ) exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'PropertySet' iv_needle = '"NodeUuid":"pp-2"' ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'PropertyTextSet' iv_needle = '"NodeUuid":"pp-1"' ) exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'ProjectSet' iv_needle = '"NodeUuid":"pr-1"' ) exp = 1 ).
+  ENDMETHOD.
+
+  METHOD delete_unknown_node_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'DELETE'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/NodeSet(Project='ZUT_IMP',NodeUuid='nobody')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'no node nobody in project ZUT_IMP' ) ).
   ENDMETHOD.
 
 ENDCLASS.
