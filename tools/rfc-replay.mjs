@@ -35,11 +35,27 @@
 //
 // Real captures live under .local/ (never committed); STG_RFC_CAPTURE points
 // at the folder, default .local/capture/a4h/rfc.
+//
+// A capture's result may carry placeholders, filled at replay time, so a
+// read after a create finds what was created:
+//   {{param:IV_X}}        the call's input by name (dotted path into a structure)
+//   {{now:YYYYMMDD}}      today; also HHMMSS and YYYYMMDDHHMMSS
+//   {{seq:NAME}}          a counter per name, {{seq:NAME:8}} zero-padded to 8
+//   {{sql:SELECT ...}}    a row of our database (the transpiler's client):
+//                         one column -> the value, several -> an object; when
+//                         the placeholder is the whole value, all rows -> array
+//
+// Which destination does what comes from .local/rfc-destinations.json (or
+// STG_RFC_DESTINATIONS), kinds local | replay | live | record | fallback,
+// see installRfcDestinations; without the file: 'NONE' and '' local, every
+// other name replays.
 
 import {existsSync, readdirSync, readFileSync} from "node:fs";
+import {homedir} from "node:os";
 import {join} from "node:path";
 
 export const DEFAULT_CAPTURE_FOLDER = ".local/capture/a4h/rfc";
+export const DEFAULT_DESTINATIONS_FILE = ".local/rfc-destinations.json";
 
 // ---------------------------------------------------------------- values
 
@@ -187,6 +203,127 @@ export function pickCapture(captures, input) {
   return captures[0];
 }
 
+// ---------------------------------------------------------------- placeholders
+
+const sequences = new Map();
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function nowText(format) {
+  const d = new Date();
+  const date = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+  const time = `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+  switch (format.toUpperCase()) {
+    case "YYYYMMDD": return date;
+    case "HHMMSS": return time;
+    case "YYYYMMDDHHMMSS": return date + time;
+    default: throw new Error(`RFC replay: unknown now format ${format}`);
+  }
+}
+
+function paramText(input, path) {
+  let value = input;
+  for (const part of path.split(".")) {
+    if (value === null || typeof value !== "object") {
+      return undefined;
+    }
+    const key = Object.keys(value).find((k) => k.toUpperCase() === part.toUpperCase());
+    value = key === undefined ? undefined : value[key];
+  }
+  return value;
+}
+
+async function sqlRows(select) {
+  const db = globalThis.abap?.context?.databaseConnections?.["DEFAULT"];
+  if (db === undefined) {
+    throw new Error("RFC replay: {{sql:}} needs the runtime's database connection");
+  }
+  const result = await db.select({select});
+  return result.rows.map((row) => {
+    const out = {};
+    for (const [k, v] of Object.entries(row)) {
+      out[k.toUpperCase()] = v;
+    }
+    return out;
+  });
+}
+
+const PLACEHOLDER = /\{\{(param|now|seq|sql):(.*?)\}\}/gs;
+
+/** one placeholder's value, as JSON (string, object or array) */
+async function placeholderValue(kind, arg, input) {
+  switch (kind) {
+    case "param": return paramText(input, arg.trim()) ?? "";
+    case "now": return nowText(arg.trim());
+    case "seq": {
+      const [name, width] = arg.split(":").map((x) => x.trim());
+      const n = (sequences.get(name) ?? 0) + 1;
+      sequences.set(name, n);
+      return width ? String(n).padStart(parseInt(width, 10), "0") : String(n);
+    }
+    case "sql": {
+      const rows = await sqlRows(arg.trim());
+      return rows;
+    }
+    default: return "";
+  }
+}
+
+const scalarOf = (value) => {
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "" : scalarOf(value[0]);
+  }
+  if (value !== null && typeof value === "object") {
+    const values = Object.values(value);
+    return values.length === 1 ? scalarOf(values[0]) : value;
+  }
+  return value;
+};
+
+/** the capture's result with every placeholder filled */
+export async function substitute(json, input) {
+  if (Array.isArray(json)) {
+    const out = [];
+    for (const item of json) {
+      out.push(await substitute(item, input));
+    }
+    return out;
+  }
+  if (json !== null && typeof json === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(json)) {
+      out[k] = await substitute(v, input);
+    }
+    return out;
+  }
+  if (typeof json !== "string" || !json.includes("{{")) {
+    return json;
+  }
+  const matches = [...json.matchAll(PLACEHOLDER)];
+  const whole = matches.length === 1 && matches[0][0] === json ? matches[0] : undefined;
+  if (whole) {
+    const value = await placeholderValue(whole[1], whole[2], input);
+    if (whole[1] === "sql") {
+      // the whole value: all rows as an array, or one row's value / object
+      return value.length === 1 ? scalarOf(value) : value;
+    }
+    return value;
+  }
+  let text = json;
+  for (const m of matches) {
+    const value = await placeholderValue(m[1], m[2], input);
+    text = text.replace(m[0], String(scalarOf(value) ?? ""));
+  }
+  return text;
+}
+
+/** counters of {{seq:}} start again (tests) */
+export function resetSequences() {
+  sequences.clear();
+}
+
 // ---------------------------------------------------------------- clients
 
 /** the function modules of this process, what DESTINATION 'NONE' means */
@@ -225,9 +362,10 @@ export class RfcReplayClient {
     if (this.trace) {
       console.log(`RFC replay: ${fm} <- ${capture.file}`);
     }
+    const result = await substitute(capture.result, input);
     for (const direction of ["importing", "tables", "changing"]) {
       for (const [param, value] of Object.entries(signature[direction] ?? {})) {
-        const out = capture.result[param.toUpperCase()];
+        const out = result[param.toUpperCase()];
         if (out !== undefined) {
           fromJson(value, out);
         }
@@ -247,28 +385,81 @@ export class RfcReplayClient {
   }
 }
 
+/** the destinations file, {} when there is none */
+export function loadDestinations(file) {
+  const path = file ?? process.env.STG_RFC_DESTINATIONS ?? DEFAULT_DESTINATIONS_FILE;
+  const expanded = path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+  if (!existsSync(expanded)) {
+    return {};
+  }
+  const config = JSON.parse(readFileSync(expanded, "utf8"));
+  for (const [name, entry] of Object.entries(config)) {
+    if (!["local", "replay", "live", "record", "fallback"].includes(entry.kind)) {
+      throw new Error(`RFC destinations: ${name} has kind '${entry.kind}', expected local, replay, live, record or fallback`);
+    }
+  }
+  return config;
+}
+
+/** the client a destinations entry describes */
+export async function clientFor(name, entry, options = {}) {
+  const local = options.local ?? localClient();
+  const folder = options.folder ?? DEFAULT_CAPTURE_FOLDER;
+  const trace = options.trace;
+  switch (entry.kind) {
+    case "local":
+      return local;
+    case "replay":
+      return new RfcReplayClient({folder: entry.capture ?? folder, destination: name, trace});
+    case "live":
+    case "record":
+    case "fallback": {
+      if (options.noLive) {
+        console.warn(`RFC destinations: ${name} is ${entry.kind}, not available here, replaying from ${entry.capture ?? folder}`);
+        return new RfcReplayClient({folder: entry.capture ?? folder, destination: name, trace});
+      }
+      const {RfcLiveClient, RfcFallbackClient} = await import("./rfc-live.mjs");
+      const live = new RfcLiveClient({
+        destination: name, connection: entry.connection, trace,
+        record: entry.kind === "record" ? (entry.capture ?? folder) : undefined,
+        clientFactory: options.clientFactory,
+      });
+      return entry.kind === "fallback" ? new RfcFallbackClient(local, live) : live;
+    }
+    default:
+      throw new Error(`RFC destinations: ${name}: unknown kind ${entry.kind}`);
+  }
+}
+
 /**
- * 'NONE' and '' run locally, every other destination replays from the capture
- * folder; the runtime looks destinations up by name, so a Proxy answers for
- * names nobody registered.
+ * Installs the destinations on abap.context.RFCDestinations: the entries of
+ * the destinations file (see loadDestinations), plus 'NONE' and '' as local
+ * unless the file says otherwise; every name nobody configured replays from
+ * the capture folder. The runtime looks destinations up by name, so a Proxy
+ * answers for names nobody registered.
  */
-export function installRfcDestinations(abap, options = {}) {
+export async function installRfcDestinations(abap, options = {}) {
   const folder = options.folder ?? process.env.STG_RFC_CAPTURE ?? DEFAULT_CAPTURE_FOLDER;
   const local = localClient();
+  const config = options.destinations ?? loadDestinations(options.config);
   const known = {...abap.context.RFCDestinations, "NONE": local, "": local};
+  for (const [name, entry] of Object.entries(config)) {
+    known[name.toUpperCase()] = await clientFor(name.toUpperCase(), entry, {...options, folder, local});
+  }
   const replays = new Map();
   abap.context.RFCDestinations = new Proxy(known, {
     get: (target, key) => {
       if (typeof key !== "string") {
         return target[key];
       }
-      if (target[key] !== undefined) {
-        return target[key];
+      const name = key.toUpperCase();
+      if (target[name] !== undefined) {
+        return target[name];
       }
-      if (!replays.has(key)) {
-        replays.set(key, new RfcReplayClient({folder, destination: key, trace: options.trace}));
+      if (!replays.has(name)) {
+        replays.set(name, new RfcReplayClient({folder, destination: name, trace: options.trace}));
       }
-      return replays.get(key);
+      return replays.get(name);
     },
     has: () => true,
   });

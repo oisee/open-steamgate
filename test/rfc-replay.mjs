@@ -83,7 +83,7 @@ describe("tools/rfc-replay: CALL FUNCTION DESTINATION from captured calls", () =
   });
 
   it("installs NONE and '' as local, every other name as replay", async () => {
-    const destinations = installRfcDestinations(abap, {folder: FOLDER});
+    const destinations = await installRfcDestinations(abap, {folder: FOLDER, destinations: {}});
     abap.FunctionModules["Z_LOCAL_PING"] = async (input) => {
       input.importing.echo.set("pong");
     };

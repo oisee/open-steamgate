@@ -470,6 +470,24 @@ Decision pending (Alice): which of these enters the plan and in what
 order; the composition layer and RFC shims are the cheapest, draft the
 most visible for Fiori people.
 
+**Live and record (2026-09-12, later the same day).** `tools/rfc-live.mjs`:
+a live client on the `open-rfc` npm package (SDK-free TypeScript, node
+22.14+, zero dependencies; loads on node 26 too), one session per
+destination opened on the first call and closed when the process ends,
+same runtime signature in and the same JSON convention out as the replay
+(`toJson`/`fromJson` shared), classic exceptions mapped to `sy-subrc`
+through the caller's EXCEPTIONS, anything else thrown. `record` is live
+plus a capture file per call in the replay format, so a captured dataset
+comes out of an end-to-end run. `.local/rfc-destinations.json` (never
+committed; `docs/rfc-destinations.example.json`) maps destination names to
+kinds `local | replay | live | record | fallback`; `connection` is an
+object in the node-rfc convention or a path to an open-rfc-go `.rfc.json`
+(`~/.rfc.json#A4H`). Replay results take placeholders (`{{param:IV_X}}`,
+`{{now:YYYYMMDD}}`, `{{seq:NAME:8}}`, `{{sql:SELECT ...}}` against our
+database) so a read after a create finds what was created. Live is node
+only; the preview keeps local and replay. Tests fake the open-rfc client;
+a run against A4H is by hand, on Alice's say-so, never in CI.
+
 ## DDIC routing rule (Lars, chat 2026-09-12 evening)
 
 - **open-abap-core takes only released data elements** (C1 contract); he

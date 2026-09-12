@@ -143,11 +143,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
   `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
   call. `npm run segw -- <folder> --list` shows what a repo would register.
-- RFC replay: `CALL FUNCTION ... DESTINATION` runs locally for `'NONE'`/`''`
-  and otherwise replays `STG_RFC_CAPTURE` (`.local/capture/a4h/rfc`) through
-  `tools/rfc-replay.mjs`; capture files are the `rfc call` JSON of
-  open-rfc-go (`params` + `result`), see AGENDA "RFC replay". Synthetic
-  fixtures in `test/fixtures/rfc/`, `mocha test/rfc-replay.mjs`.
+- RFC destinations: `.local/rfc-destinations.json` (example in
+  `docs/rfc-destinations.example.json`) says per `DESTINATION` name whether
+  it is `local`, `replay` (capture folder), `live` (open-rfc, node only),
+  `record` (live + capture written) or `fallback` (local FM if transpiled,
+  else live); without the file `'NONE'`/`''` run locally and every other name
+  replays `STG_RFC_CAPTURE` (`.local/capture/a4h/rfc`). Capture files are the
+  `rfc call` JSON of open-rfc-go (`params` + `result`) and may carry
+  `{{param:}}`, `{{now:}}`, `{{seq:}}`, `{{sql:}}` placeholders; see AGENDA
+  "RFC replay". `tools/rfc-replay.mjs`, `tools/rfc-live.mjs`; tests
+  `test/rfc-replay.mjs`, `test/rfc-live.mjs` (live is faked, A4H only by hand).
 - Search helps serve themselves: `<name>.shlp.xml` in `src/` (DD30V selection
   table, DD32P parameters) becomes a `zcl_oao_shlp_ddic` provider through
   `tools/segw-shlp.mjs` (part of `transpile`, writes

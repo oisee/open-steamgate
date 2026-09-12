@@ -1,0 +1,7 @@
+{
+  "NONE": {"kind": "local"},
+  "ERP": {"kind": "replay", "capture": "test/fixtures/rfc"},
+  "A4H": {"kind": "live", "connection": {"ashost": "a4h.example", "sysnr": "00", "client": "001", "user": "DEVELOPER", "passwd": "secret"}},
+  "A4H_REC": {"kind": "record", "connection": {"ashost": "a4h.example", "client": "001", "user": "DEVELOPER", "passwd": "secret"}},
+  "MIXED": {"kind": "fallback", "connection": {"ashost": "a4h.example", "client": "001", "user": "DEVELOPER", "passwd": "secret"}}
+}

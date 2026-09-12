@@ -1,0 +1,7 @@
+{
+  "NONE": {"kind": "local"},
+  "A4H": {"kind": "live", "connection": "~/.rfc.json#A4H"},
+  "A4H_REC": {"kind": "record", "connection": "~/.rfc.json#A4H", "capture": ".local/capture/a4h/rfc"},
+  "ERP": {"kind": "replay", "capture": ".local/capture/erp/rfc"},
+  "MIXED": {"kind": "fallback", "connection": "~/.rfc.json"}
+}

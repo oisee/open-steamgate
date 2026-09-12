@@ -9,7 +9,7 @@
     "lint": "abaplint",
     "transpile": "rm -rf output && node tools/cds2ddic.mjs && node tools/segw-registry.mjs && node tools/segw-shlp.mjs && abap_transpile",
     "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
-    "integration": "mocha test/mocha.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/segw-shlp.mjs",
+    "integration": "mocha test/mocha.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/rfc-live.mjs test/segw-shlp.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "probe": "node tools/closure-probe.mjs",
@@ -57,5 +57,8 @@
     "util": "^0.12.5",
     "vm-browserify": "^1.1.2",
     "webpack": "^5.110.3"
+  },
+  "dependencies": {
+    "open-rfc": "^0.2.3"
   }
 }
