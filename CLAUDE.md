@@ -146,7 +146,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `_DPC` classes in the folder; `--out <dir>` writes them (and the `_EXT`
   pair if missing). Corpus projects under `.local/corpus/` are the oracle;
   `npm run segw:closure` generates every corpus project and lints it
-  against open-abap-odata (`docs/segw-closure.md`), skips without corpus.
+  against open-abap-odata (`docs/segw-closure.md`), skips without corpus;
+  it also uses `.local/lars/s4-private-2022-doma-and-dtel` (abapedia's
+  S/4 DOMA/DTEL dump) when cloned. DDIC upstream rule: released data
+  elements → open-abap-core, the rest → open-abap-deprecated.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

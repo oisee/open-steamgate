@@ -419,6 +419,22 @@ Decision pending (Alice): which of these enters the plan and in what
 order; the composition layer and RFC shims are the cheapest, draft the
 most visible for Fiori people.
 
+## DDIC routing rule (Lars, chat 2026-09-12 evening)
+
+- **open-abap-core takes only released data elements** (C1 contract); he
+  wants core small.
+- Everything not released goes to **open-abap/open-abap-deprecated**
+  ("deprecated artifacts", MIT, empty as of today): PRs there for what the
+  on-prem corpus needs (`/IWFND/SU_ERRLOG`, CRM/BOPF/LXE structures).
+- **abapedia/s4-private-2022-doma-and-dtel**: released + deprecated DOMA/DTEL
+  of S/4 2022 in abapGit form (23,661 DTEL, 189 DOMA, 2.5 MB, **no license
+  file**): cloned into `.local/lars/`, picked up by `segw:closure` as an
+  optional library; not vendored, not a transpiler lib until the license is
+  clear. With it the missing-DDIC bucket of the corpus went from 1143 to
+  947 issues (abap_simple_odata_service to 0); what remains is mostly the
+  repositories' own Z/Y structures (TABL) and CRM/BOPF pieces.
+- The transpiler session re-sorts its core PRs #1213–#1215 by this rule.
+
 ## Backlog: Gateway extension points the corpus really uses (2026-09-12)
 
 Counted over the corpus DPC/MPC classes. Have: `sap:` annotations and

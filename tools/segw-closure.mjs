@@ -37,6 +37,9 @@ const DEFAULT_ODATA = ".local/lars/open-abap-odata";
 // (cl_sadl_gw_model_exposure, cl_sadl_gw_dpc_factory: what a DDIC- or
 // CDS-mapped DPC calls; the interfaces come from open-abap-odata)
 const LIBS = [".local/lars/open-abap-core/src", ".local/lars/express-icf-shim/src", "src/sadl", "src/cds"];
+// released + deprecated S/4 DOMA/DTEL dump (abapedia), used when cloned:
+// what Lars would rather not carry in open-abap-core comes from here
+const OPTIONAL_LIBS = [".local/lars/s4-private-2022-doma-and-dtel/src"];
 const ODATA_FOLDERS = ["src/oo", "src/ddic", "src/exceptions", "src/internal"];
 const DDIC_EXT = /\.(tabl|ttyp|dtel|doma|view|shlp|enqu)\.(xml|abap)$/i;
 const GEN_MARK = "/__segw_gen__/";
@@ -148,7 +151,7 @@ function main(argv) {
     console.log(`segw-closure: no ${CORPUS}, skip`);
     return 0;
   }
-  const libDirs = [...LIBS, ...ODATA_FOLDERS.map((f) => join(odata, f))];
+  const libDirs = [...LIBS, ...OPTIONAL_LIBS.filter((d) => existsSync(d)), ...ODATA_FOLDERS.map((f) => join(odata, f))];
   const missing = libDirs.filter((d) => !existsSync(d));
   if (missing.length > 0) {
     console.log(`segw-closure: libs not cloned (${missing.join(", ")}), skip`);
