@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>open-steamgate demo: Travels</title>
+  <script>
+    // preview deployment: the OData service is answered by a service worker,
+    // so it has to control this page before UI5 asks for $metadata
+    (async () => {
+      if ("serviceWorker" in navigator && !navigator.serviceWorker.controller) {
+        try {
+          await navigator.serviceWorker.register("../sw.js", {scope: "../"});
+          await navigator.serviceWorker.ready;
+          if (!navigator.serviceWorker.controller) {
+            await new Promise((done) => navigator.serviceWorker.addEventListener("controllerchange", done, {once: true}));
+          }
+        } catch (error) {
+          console.error("preview: service worker not installed", error);
+        }
+      }
+      const boot = document.createElement("script");
+      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-resourceroots":"{\"stg.travel\": \"./\"}","data-sap-ui-oninit":"module:sap/ui/core/ComponentSupport"};
+      for (const name of Object.keys(attributes)) {
+        boot.setAttribute(name, attributes[name]);
+      }
+      document.head.appendChild(boot);
+    })();
+  </script>
+</head>
+<body class="sapUiBody" id="content">
+  <div data-sap-ui-component data-name="stg.travel" data-id="container" data-settings='{"id": "stg.travel"}'></div>
+</body>
+</html>
