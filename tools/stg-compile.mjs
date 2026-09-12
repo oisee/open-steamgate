@@ -699,7 +699,8 @@ export function iwprXml(m, opts = {}) {
     rows.SBO_EST.push(text(esId(e), "ESET_LABEL", e.set));
     // the design side: the entity set's node, one operation node per method
     const seId = id("DSET", e.set);
-    rows.SBD_SE.push({PROJECT: P, NODE_UUID: seId, PARENT_UUID: id("DSETS"), NAME: e.set, ENTITY_SET_UUID: esId(e)});
+    // the service implementation node of the set hangs below the service node (SBD_SV), as SEGW writes it
+    rows.SBD_SE.push({PROJECT: P, NODE_UUID: seId, PARENT_UUID: serviceId, NAME: e.set, ENTITY_SET_UUID: esId(e)});
     rows.SBD_SET.push(text(seId));
     for (const op of ["C", "R", "U", "D", "Q"].map((o) => e.operations.find((x) => x.type === o)).filter(Boolean)) {
       const opId = id("OPER", e.set, op.type);

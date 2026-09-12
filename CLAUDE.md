@@ -239,8 +239,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
 - The SEGW editor is `webapp/segw/` (`docs/segw-editor.md`): freestyle
   SAPUI5 over `ZSTG_SEGW_SRV`, the project tree in SEGW's shape, every
-  node edited in place (MERGE), Add property, Delete = `NodeSet` subtree
-  delete, Import IWPR through
+  node edited in place (MERGE), Create for entity types, sets (with their
+  operations), associations, navigation properties, function imports,
+  parameters and properties, Delete = `NodeSet` subtree delete, Import IWPR through
   `ImportSet` (a `*.fugr.xml` through `FunctionGroupSet`), Export IWPR
   through `ExportSet`, Generate through `GenerateSet` (segw-gen in ABAP);
   "Save to gen/" is the one dev route of `test/start.mjs`

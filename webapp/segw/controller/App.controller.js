@@ -12,9 +12,11 @@ sap.ui.define([
   "sap/m/List",
   "sap/m/StandardListItem",
   "sap/m/TextArea",
+  "sap/m/Select",
+  "sap/ui/core/Item",
   "sap/m/MessageToast",
   "sap/m/MessageBox",
-], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, MessageToast, MessageBox) {
+], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, Select, Item, MessageToast, MessageBox) {
   "use strict";
 
   // The tree SEGW shows, in terms of the entity sets of ZSTG_SEGW_SRV (one
@@ -68,6 +70,128 @@ sap.ui.define([
     return row.Name || row.TechnicalName || row.TrobjName || row.DsGroup || row.NodeUuid;
   };
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^0-9a-f]/gi, "").toUpperCase().padEnd(32, "0").slice(0, 32);
+
+  // What SEGW's "Create" on a node makes, as rows: a folder (the set it
+  // lists) or a row (its entity) offers the adds below; `fields` is the
+  // dialog, `rows(v, c)` the [set, row] pairs POSTed in one $batch. c gives
+  // the project, the model and service node ids, the rows of the tree
+  // (c.rows[set]), the selected row (c.row), fresh ids (c.id()) and the next
+  // STG_SEQ (c.seq()). The shapes are stg-compile's (tools/stg-compile.mjs,
+  // iwprXml), i.e. what SEGW writes.
+  const OPERATIONS = [["C", "Create", "CREATE_ENTITY"], ["R", "GetEntity (Read)", "GET_ENTITY"], ["U", "Update", "UPDATE_ENTITY"], ["D", "Delete", "DELETE_ENTITY"], ["Q", "GetEntitySet (Query)", "GET_ENTITYSET"]];
+  const key = (c, id) => ({Project: c.project, NodeUuid: id});
+  // the text row of a node: SEGW's label field, or the key alone
+  const textRow = (c, set, id, field, value) => [set, {Language: "E", Project: c.project, NodeUuid: id, ...(field ? {[field]: value} : {}), StgSeq: c.seq()}];
+  const typeOptions = (c) => (c.rows.EntityTypeSet || []).map((r) => ({key: r.NodeUuid, text: r.Name}));
+  const firstSetOf = (c, typeUuid) => (c.rows.EntitySetSet || []).find((r) => r.EntityType === typeUuid);
+  const ADDS = {
+    entityType: {
+      label: "Add entity type", fields: [{key: "Name", label: "Name", placeholder: "e.g. Plane"}],
+      rows: (v, c) => {
+        const id = c.id();
+        return [
+          ["EntityTypeSet", {...key(c, id), Name: v.Name, Model: c.model, RefType: "T", TechName: v.Name.toUpperCase(), DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "EntityTypeTextSet", id, "EtLabel", v.Name),
+        ];
+      },
+    },
+    entitySet: {
+      label: "Add entity set", fields: [{key: "Name", label: "Name", placeholder: "e.g. PlaneSet"}, {key: "EntityType", label: "Entity type", options: typeOptions}],
+      rows: (v, c) => {
+        const es = c.id();
+        const se = c.id();
+        const rows = [
+          ["EntitySetSet", {...key(c, es), Model: c.model, Name: v.Name, EntityType: v.EntityType, Creatable: "X", Updatable: "X", Deletable: "X", Pageable: "X", Addressable: "X", RefType: "T", TechName: v.Name.toUpperCase(), DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "EntitySetTextSet", es, "EsetLabel", v.Name),
+          // the service implementation node of the set and its five operations
+          ["ServiceEntitySet", {...key(c, se), ParentUuid: c.service, Name: v.Name, EntitySetUuid: es, StgSeq: c.seq()}],
+          textRow(c, "ServiceEntityTextSet", se),
+        ];
+        for (const [type, name, suffix] of OPERATIONS) {
+          const op = c.id();
+          rows.push(["OperationSet", {...key(c, op), ParentUuid: se, Name: name, OperationType: type, ImpMethod: `${v.Name.toUpperCase().slice(0, 16)}_${suffix}`, StgSeq: c.seq()}]);
+          rows.push(textRow(c, "OperationTextSet", op));
+        }
+        return rows;
+      },
+    },
+    association: {
+      label: "Add association",
+      fields: [
+        {key: "Name", label: "Name", placeholder: "e.g. PlaneToSeats"},
+        {key: "Left", label: "Left entity type", options: typeOptions}, {key: "LeftCard", label: "Left cardinality", options: () => [{key: "1", text: "1"}, {key: "0", text: "0..1"}, {key: "N", text: "N"}]},
+        {key: "Right", label: "Right entity type", options: typeOptions}, {key: "RightCard", label: "Right cardinality", options: () => [{key: "N", text: "N"}, {key: "1", text: "1"}, {key: "0", text: "0..1"}]},
+      ],
+      rows: (v, c) => {
+        const aso = c.id();
+        const rows = [
+          ["AssociationSet", {...key(c, aso), Name: v.Name, ModelGuid: c.model, LeftEndGuid: v.Left, RightEndGuid: v.Right, LeftEndCard: v.LeftCard, RightEndCard: v.RightCard, RefType: "T", DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "SboAstSet", aso, "AssocLabel", v.Name),
+        ];
+        // the association set between the first sets of the two types, when both have one
+        const left = firstSetOf(c, v.Left);
+        const right = firstSetOf(c, v.Right);
+        if (left && right) {
+          const at = c.id();
+          rows.push(["AssociationSetSet", {...key(c, at), Name: v.Name + "Set", ModelGuid: c.model, LeftEndGuid: left.NodeUuid, RightEndGuid: right.NodeUuid, AssociationGuid: aso, RefType: "T", DescriptionXu: "X", StgSeq: c.seq()}]);
+          rows.push(textRow(c, "AssociationSetTextSet", at, "AsstLabel", v.Name + "Set"));
+        }
+        return rows;
+      },
+    },
+    navigationProperty: {
+      label: "Add navigation property",
+      fields: [{key: "Name", label: "Name", placeholder: "e.g. to_Seats"}, {key: "Association", label: "Association", options: (c) => (c.rows.AssociationSet || []).map((r) => ({key: r.NodeUuid, text: r.Name}))}],
+      rows: (v, c) => {
+        const np = c.id();
+        return [
+          ["NavPropertySet", {...key(c, np), Name: v.Name, RelationGuid: v.Association, EntityGuid: c.row.NodeUuid, RefType: "T", TechName: v.Name.toUpperCase(), DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "NavPropertyTextSet", np, "NavpLabel", v.Name),
+        ];
+      },
+    },
+    functionImport: {
+      label: "Add function import",
+      fields: [
+        {key: "Name", label: "Name", placeholder: "e.g. Refuel"},
+        {key: "HttpMethod", label: "HTTP method", options: () => [{key: "POST", text: "POST"}, {key: "GET", text: "GET"}]},
+        {key: "ReturnType", label: "Returns entity type", options: (c) => [{key: "", text: "(nothing)"}, ...typeOptions(c)]},
+      ],
+      rows: (v, c) => {
+        const fi = c.id();
+        const set = v.ReturnType ? firstSetOf(c, v.ReturnType) : undefined;
+        return [
+          ["FunctionImportSet", {...key(c, fi), Model: c.model, Name: v.Name, HttpMethod: v.HttpMethod, ReturnCard: v.ReturnType ? "1" : "", ReturnRefType: v.ReturnType, ReturnTypeKind: v.ReturnType ? "ETYP" : "", ReturnEntityset: set ? set.NodeUuid : "", RefType: "T", DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "FunctionImportTextSet", fi, "FiLabel", v.Name),
+        ];
+      },
+    },
+    parameter: {
+      label: "Add parameter", fields: [{key: "Name", label: "Name", placeholder: "e.g. PlaneId"}],
+      rows: (v, c) => {
+        const fp = c.id();
+        return [
+          ["FunctionParamSet", {...key(c, fp), Name: v.Name, FunctionImport: c.row.NodeUuid, AbapField: v.Name.toUpperCase(), EdmCoreType: "Edm.String", MaxLength: "10", RefType: "T", AbtyXu: "X", DescriptionXu: "X", StgSeq: c.seq()}],
+          textRow(c, "FunctionParamTextSet", fp, "FiParamLabel", v.Name),
+        ];
+      },
+    },
+    property: {
+      label: "Add property", fields: [{key: "Name", label: "Name", placeholder: "e.g. Price"}],
+      rows: (v, c) => {
+        const pr = c.id();
+        const siblings = (c.rows.PropertySet || []).filter((r) => r.ParentUuid === c.row.NodeUuid);
+        return [
+          ["PropertySet", {...key(c, pr), ParentUuid: c.row.NodeUuid, Name: v.Name, EdmCoreType: "Edm.String", MaxLength: "10", Creatable: "X", Updatable: "X", Sortable: "X", Filterable: "X", IsNullable: "X",
+            RefType: "T", AbapField: v.Name.toUpperCase(), AbtyXu: "X", SortOrder: String(siblings.length + 1), StgSeq: c.seq()}],
+          textRow(c, "PropertyTextSet", pr, "PropLabel", v.Name),
+        ];
+      },
+    },
+  };
+  // which adds a folder (by the set it lists) or a row (by its entity) offers
+  const FOLDER_ADDS = {EntityTypeSet: ["entityType"], EntitySetSet: ["entitySet"], AssociationSet: ["association"], FunctionImportSet: ["functionImport"]};
+  const ROW_ADDS = {EntityType: ["property", "navigationProperty"], ComplexType: ["property"], FunctionImport: ["parameter"]};
 
   return Controller.extend("stg.segw.controller.App", {
     onInit() {
@@ -168,7 +292,7 @@ sap.ui.define([
           path: "/" + model.createKey(spec.set, {Project: r.Project, NodeUuid: r.NodeUuid}),
           nodes: (spec.children || []).map((c) => folder(c, r, true)).filter((n) => n.nodes.length > 0 || n.text !== ""),
         }));
-        return indexFolder && spec.text === "" ? {text: "", nodes} : {text: spec.text, icon: spec.icon, nodes};
+        return indexFolder && spec.text === "" ? {text: "", nodes} : {text: spec.text, icon: spec.icon, nodes, folder: spec.set};
       };
       const build = (spec, parent) => {
         if (spec.set) {
@@ -179,6 +303,10 @@ sap.ui.define([
         return {text: spec.text, icon: spec.icon, nodes: spec.children.map((c) => build(c, parent))};
       };
       const projectRow = (await this.read(model, "ProjectSet", project))[0] || {Project: project};
+      // the ids the adds hang new rows on: the model node, the service node
+      this.rows = rows;
+      this.modelUuid = ((await this.read(model, "ModelSet", project))[0] || {}).NodeUuid || "";
+      this.serviceUuid = ((rows.ServiceSet || [])[0] || {}).NodeUuid || "";
       const root = {
         text: project, icon: "sap-icon://folder-blank", entity: "Project", set: "ProjectSet", row: projectRow,
         path: "/" + model.createKey("ProjectSet", {Project: projectRow.Project, NodeUuid: projectRow.NodeUuid}),
@@ -210,7 +338,7 @@ sap.ui.define([
     onSelect(event) {
       const item = event.getParameter("listItem");
       const node = item && item.getBindingContext("tree").getObject();
-      this.select(node && node.path ? node : null);
+      this.select(node || null);
     },
 
     // the detail: a form with one field per property of the node's entity
@@ -224,11 +352,13 @@ sap.ui.define([
       textForm.setVisible(false);
       form.unbindElement();
       textForm.unbindElement();
-      if (!node) {
-        nodeModel.setData({});
+      const adds = (keys) => keys.map((k) => ({key: k, label: ADDS[k].label}));
+      if (!node || !node.path) {
+        // a folder: nothing to edit, the adds it offers
+        nodeModel.setData(node && node.folder ? {folder: node.folder, title: node.text, adds: adds(FOLDER_ADDS[node.folder] || [])} : {});
         return;
       }
-      nodeModel.setData({path: node.path, entity: node.entity, set: node.set, title: node.entity + ": " + node.text, row: node.row});
+      nodeModel.setData({path: node.path, entity: node.entity, set: node.set, title: node.entity + ": " + node.text, row: node.row, adds: adds(ROW_ADDS[node.entity] || [])});
       const model = this.getOwnerComponent().getModel();
       this.fields(form, node.entity, [], node.entity);
       form.bindElement({path: node.path});
@@ -294,31 +424,41 @@ sap.ui.define([
       });
     },
 
-    onAddProperty() {
+    onAdd(event) {
+      const which = event.getSource().data("add");
+      const spec = ADDS[which];
       const node = this.getView().getModel("node").getData();
       const model = this.getOwnerComponent().getModel();
-      const input = new Input({placeholder: "Name, e.g. Price"});
+      let seq = this.maxSeq();
+      const c = {project: this.project, model: this.modelUuid, service: this.serviceUuid, rows: this.rows, row: node.row, id: uuid, seq: () => ++seq};
+      const controls = {};
+      const content = [];
+      for (const f of spec.fields) {
+        const control = f.options
+          ? new Select({items: f.options(c).map((o) => new Item({key: o.key, text: o.text})), width: "100%"})
+          : new Input({placeholder: f.placeholder || ""});
+        controls[f.key] = control;
+        content.push(new Label({text: f.label, labelFor: control}), control);
+      }
       const dialog = new Dialog({
-        title: "Add property to " + node.row.Name,
-        content: [new Label({text: "Name", labelFor: input}), input],
+        title: spec.label + (node.row ? " to " + (node.row.Name || node.title) : ""),
+        contentWidth: "24rem",
+        content,
         beginButton: new Button({
           text: "Add", type: "Emphasized",
           press: () => {
-            const name = input.getValue().trim();
-            if (!name) {
+            const v = {};
+            for (const f of spec.fields) {
+              v[f.key] = f.options ? controls[f.key].getSelectedKey() : controls[f.key].getValue().trim();
+            }
+            if (!v.Name) {
               return;
             }
             dialog.close();
-            const siblings = this.byId("tree").getItems().map((i) => i.getBindingContext("tree").getObject()).filter((n) => n.row && n.set === "PropertySet" && n.row.ParentUuid === node.row.NodeUuid);
-            const seq = Math.max(0, ...this.getView().getModel("tree").getData().nodes.map(() => 0)) + this.maxSeq() + 1;
-            model.create("/PropertySet", {
-              Project: node.row.Project, NodeUuid: uuid(), ParentUuid: node.row.NodeUuid, Name: name,
-              EdmCoreType: "Edm.String", MaxLength: "10", Creatable: "X", Updatable: "X", Sortable: "X", Filterable: "X", IsNullable: "X",
-              RefType: "T", AbapField: name.toUpperCase(), AbtyXu: "X", SortOrder: String(siblings.length + 1), StgSeq: seq,
-            }, {
-              success: () => { MessageToast.show("Property " + name + " added"); this.loadProject(this.project); },
-              error: (e) => MessageBox.error(String(e && (e.message || e.responseText))),
-            });
+            const rows = spec.rows(v, c);
+            Promise.all(rows.map(([set, data]) => new Promise((resolve, reject) => model.create("/" + set, data, {success: resolve, error: reject}))))
+              .then(() => { MessageToast.show(spec.label.replace(/^Add /, "") + " " + v.Name + " added"); this.loadProject(this.project); })
+              .catch((e) => { MessageBox.error(String(e && (e.responseText || e.message))); this.loadProject(this.project); });
             model.submitChanges();
           },
         }),

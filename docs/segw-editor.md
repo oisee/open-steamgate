@@ -32,10 +32,21 @@ the entity type from `$metadata`, the keys read-only, and below it the row
 of the text table where SEGW keeps the label (`PropertyTextSet`,
 `EntityTypeTextSet`...), when there is one. Save is the OData model's
 `submitChanges`: a MERGE with the changed fields, in a `$batch` changeset.
-Add property (on an entity type or a complex type) POSTs a `PropertySet`
-row with a fresh 32-character node id, `StgSeq` after the project's last
-row and SEGW's defaults (`Edm.String`, length 10, creatable / updatable /
-sortable / filterable / nullable); Delete is `DELETE NodeSet(P, uuid)`, the
+What SEGW's Create makes is a button on the folder or the row it belongs
+to (`ADDS` in the controller: the dialog's fields and the rows they
+become, POSTed in one `$batch`, every row with a fresh 32-character node
+id and `StgSeq` after the project's last row): an entity type (`SBO_ET` +
+text), an entity set (`SBO_ES` + text, its service implementation node
+`SBD_SE` below the service node and the five `SBD_OP` operations with
+SEGW's method names), an association (`SBO_ASO` with the cardinalities
+and, when both types have a set, its association set), a navigation
+property on an entity type (`SBO_NP` on an association), a function import
+(`SBO_FI`, method, optional return entity type) and its parameters
+(`SBO_FP`), a property on an entity or complex type (`SBO_PR` with SEGW's
+defaults: `Edm.String`, length 10, creatable / updatable / sortable /
+filterable / nullable). The row shapes are the ones `stg-compile` writes,
+so a project made in the editor exports as SEGW would write it and
+generates like one. Delete is `DELETE NodeSet(P, uuid)`, the
 service's subtree delete (`zcl_stg_segw_tree`: the rows below the node in
 every table, its text rows, the mapping rules), the way SEGW deletes; an
 entity type still used by an entity set is refused in the app first.
@@ -72,7 +83,10 @@ entity type still used by an entity set is refused in the app first.
 `test/e2e/segw.spec.mjs` over the seeded `ZSTG_MAPPED` (the generator
 fixture): the tree with its properties and mapping rows, a property's
 `MaxLength` edited and saved (MERGE, then read back), a property added
-(POST below `et-1`) and deleted (`DELETE NodeSet`, an entity type with
+(POST below `et-1`), an entity type, an entity set with its operations, a
+function import returning it, an association with its set and a
+navigation property created from the folders and rows (all of them in the
+generated MPC/DPC afterwards), the property deleted (`DELETE NodeSet`, an entity type with
 sets refused), the fixture's function group imported through
 `FunctionGroupSet`, Generate listing `GenerateSet`'s files, the MPC source
 with the new property, Save to gen/ landing them (the DPC with the RFC
@@ -82,9 +96,9 @@ call of the mapped operation), Export downloading the IWPR through
 
 ## Not yet
 
-Adding nodes other than properties (entity types, sets, associations,
-operations) and the wizards SEGW has for them (import from DDIC structure,
-map to data source), drag order (`StgSeq`), the label
+The wizards SEGW has (import from DDIC structure, map to data source,
+referential constraints, complex types, data sources), drag order
+(`StgSeq`), the label
 row created when there is none, and a Generate that lands the classes in
 `src/` and registers the service without a restart (or, on a system, in
 the class builder).
