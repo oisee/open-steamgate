@@ -376,8 +376,10 @@ the generator, the editor is the file.
    `--check` identical, IWSV/IWMO byte-identical to the demo's, compiled
    classes lint clean. Same night: `stg-compile --all` in transpile
    (`gen/stg/`, `src/` wins by object name) and `service:`+`set:` = local
-   ODC through `zcl_stg_odata_client` (`src/demo_odc/`, `ltcl_odc`). Not
-   yet: complex types, `function:` (RFC) in the YAML, Include, annotations.
+   ODC through `zcl_stg_odata_client` (`src/demo_odc/`, `ltcl_odc`), and
+   per-operation `function:`/`searchhelp:` mappings (the YAML twin of the
+   mapped fixture gives segw-gen's methods method for method). Not yet:
+   complex types, Include, annotations, function imports over a module.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
@@ -413,7 +415,7 @@ a launchpad) and `UI.DataFieldWithIntentBasedNavigation` back. Both keys
 travel with the intent, so the target app lands on the object page. Not
 done, by choice: draft, inline create in the table (draft-only in FE V2).
 
-Order after this: ~~`stg-compile`~~, ~~ODC-local~~ (both done, step 3 above), then `function:` in the YAML, annotations in the file, draft last; the
+Order after this: ~~`stg-compile`~~, ~~ODC-local~~, ~~`function:` in the YAML~~ (done, step 3 above), then annotations in the file, draft last; the
 search-help provider is with the transpiler session; the live RFC client
 (open-rfc npm, record mode, replay substitutions) waits for a go.
 

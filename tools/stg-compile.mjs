@@ -118,6 +118,70 @@ function cardinality(text) {
   return {left: card(m[1]), right: card(m[2])};
 }
 
+const OP_CODE = {create: "C", read: "R", update: "U", delete: "D", query: "Q", c: "C", r: "R", u: "U", d: "D", q: "Q"};
+const RANGE_COMPONENTS = {H: "HIGH", L: "LOW", O: "OPTION", S: "SIGN"};
+
+// `operations` is either the list of what the DPC gets ([C, R, U, D, Q]) or a
+// map operation -> data-source mapping (SEGW's "Map to Data Source"):
+//   query:
+//     function: SEPM_GWS_PRODUCTS_GET       # RFC/BOR module...
+//     group: SEPM_GATEWAY_SERVICES          #   its function group (optional)
+//     destination: NONE                     #   RFC destination (optional)
+//     log: ET_RETURN                        #   the BAPIRET2 table (optional)
+//     in: {ProductId: IV_PRODUCT_ID}        # property -> parameter path, request side
+//     ranges: {Name: IT_NAME_RANGE}         # property -> range table (HIGH/LOW/OPTION/SIGN)
+//     constants: {"IT_CONTROL\\VALUE": "'X'"}  # parameter path -> literal
+//     out: {ProductId: "ET_LIST\\PRODUCT_ID"}  # property <- parameter path, response side
+//   read:
+//     searchhelp: ZSTG_STATUS_SH            # ...or a search help
+//     in: {Status: STATUS}                  # property -> search help field
+//     out: {Status: "RESULT_LIST\\STATUS"}
+function operationsOf(spec, entity, props, file) {
+  if (spec === undefined || Array.isArray(spec)) {
+    return (spec ?? ["C", "R", "U", "D", "Q"]).map((o) => ({type: String(o).toUpperCase()}));
+  }
+  const propertyOf = (name) => {
+    const p = props.find((x) => x.name === name);
+    if (!p) {
+      throw new Error(`${file}: ${entity}: mapping names property ${name}, which is not there`);
+    }
+    return p;
+  };
+  const pairs = (m, direction) => Object.entries(m ?? {}).map(([property, path]) => ({property: propertyOf(property).name, direction, path: String(path)}));
+  return Object.entries(spec).map(([key, m]) => {
+    const type = OP_CODE[String(key).toLowerCase()];
+    if (!type) {
+      throw new Error(`${file}: ${entity}: operation ${key}: use create, read, update, delete or query`);
+    }
+    const op = {type};
+    if (m === null || m === undefined || m === true) {
+      return op;
+    }
+    if (m.function && m.searchhelp) {
+      throw new Error(`${file}: ${entity}.${key}: function or searchhelp, not both`);
+    }
+    if (m.function) {
+      op.mapping = {
+        kind: "RFC", function: String(m.function).toUpperCase(), group: m.group ? String(m.group).toUpperCase() : "",
+        destination: m.destination ? String(m.destination).toUpperCase() : "", log: m.log ? String(m.log).toUpperCase() : "",
+      };
+    } else if (m.searchhelp) {
+      op.mapping = {kind: "SHLP", searchhelp: String(m.searchhelp).toUpperCase(), maxHits: m.maxhits ? String(m.maxhits).toUpperCase() : "MAX_HITS"};
+    } else {
+      throw new Error(`${file}: ${entity}.${key}: a mapping needs function: or searchhelp:`);
+    }
+    op.mapping.in = pairs(m.in, "I");
+    op.mapping.ranges = Object.entries(m.ranges ?? {}).map(([property, r]) => {
+      const table = typeof r === "string" ? r : r.table;
+      const components = Object.entries(RANGE_COMPONENTS).map(([sem, name]) => ({semantics: sem, component: typeof r === "string" ? name : String(r[name.toLowerCase()] ?? name).toUpperCase()}));
+      return {property: propertyOf(property).name, table: String(table).toUpperCase(), components};
+    });
+    op.mapping.constants = Object.entries(m.constants ?? {}).map(([path, value]) => ({path: String(path), value: String(value)}));
+    op.mapping.out = pairs(m.out, "O");
+    return op;
+  });
+}
+
 // the YAML, checked and defaulted
 export function readModel(text, file = "stg.yaml") {
   const y = yaml.load(text) ?? {};
@@ -164,7 +228,7 @@ export function readModel(text, file = "stg.yaml") {
       creatable: flag("creatable", true), updatable: flag("updatable", true), deletable: flag("deletable", true),
       pageable: flag("pageable", true), addressable: flag("addressable", true), searchable: flag("searchable", false),
       subscribable: flag("subscribable", false), filterRequired: flag("filterRequired", false),
-      operations: (spec.operations ?? ["C", "R", "U", "D", "Q"]).map((o) => String(o).toUpperCase()),
+      operations: operationsOf(spec.operations, name, props, file),
     };
   });
   const entity = (n) => {
@@ -243,7 +307,7 @@ export function iwprXml(m, opts = {}) {
   const serviceId = id("SRVC");
   const dataSourcesId = id("DSRC");
   const rows = {
-    SBD_AT: [], SBD_DS: [], SBD_DST: [], SBD_GA: [], SBD_GAT: [], SBD_MD: [], SBD_MDT: [], SBD_MH: [], SBD_OP: [], SBD_OPT: [], SBD_PR: [], SBD_PRT: [],
+    SBD_AT: [], SBD_DS: [], SBD_DST: [], SBD_GA: [], SBD_GAT: [], SBD_MD: [], SBD_MDT: [], SBD_MH: [], SBD_MP: [], SBD_MR: [], SBD_OP: [], SBD_OPT: [], SBD_PR: [], SBD_PRT: [],
     SBD_SE: [], SBD_SET: [], SBD_SV: [], SBD_SVT: [], SBO_ASO: [], SBO_AST: [], SBO_AT: [], SBO_ATT: [], SBO_ES: [], SBO_EST: [], SBO_ET: [], SBO_ETT: [],
     SBO_FI: [], SBO_FIT: [], SBO_FP: [], SBO_FPT: [], SBO_NP: [], SBO_NPT: [], SBO_PR: [], SBO_PRT: [], SBO_RC: [], SBO_RCT: [],
   };
@@ -288,10 +352,45 @@ export function iwprXml(m, opts = {}) {
     const seId = id("DSET", e.set);
     rows.SBD_SE.push({PROJECT: P, NODE_UUID: seId, PARENT_UUID: id("DSETS"), NAME: e.set, ENTITY_SET_UUID: esId(e)});
     rows.SBD_SET.push(text(seId, e.set));
-    for (const op of ["C", "R", "U", "D", "Q"].filter((o) => e.operations.includes(o))) {
-      const opId = id("OPER", e.set, op);
-      rows.SBD_OP.push({PROJECT: P, NODE_UUID: opId, PARENT_UUID: seId, NAME: OPERATIONS[op], OPERATION_TYPE: op, IMP_METHOD: `${e.set.toUpperCase().slice(0, 16)}_${OP_SUFFIX[op]}`});
-      rows.SBD_OPT.push(text(opId, OPERATIONS[op]));
+    for (const op of ["C", "R", "U", "D", "Q"].map((o) => e.operations.find((x) => x.type === o)).filter(Boolean)) {
+      const opId = id("OPER", e.set, op.type);
+      rows.SBD_OP.push({PROJECT: P, NODE_UUID: opId, PARENT_UUID: seId, NAME: OPERATIONS[op.type], OPERATION_TYPE: op.type, IMP_METHOD: `${e.set.toUpperCase().slice(0, 16)}_${OP_SUFFIX[op.type]}`});
+      rows.SBD_OPT.push(text(opId, OPERATIONS[op.type]));
+      if (!op.mapping) {
+        continue;
+      }
+      // one data-source node per module / search help, shared by the operations that use it
+      const mp = op.mapping;
+      const dsName = mp.kind === "RFC" ? mp.function : mp.searchhelp;
+      const dsId = id("DSRC", mp.kind, dsName);
+      if (!rows.SBD_DS.some((r) => r.NODE_UUID === dsId)) {
+        if (mp.kind === "RFC") {
+          rows.SBD_DS.push({PROJECT: P, NODE_UUID: dsId, PARENT_UUID: dataSourcesId, NAME: mp.function, DS_GROUP: mp.group, DS_TYPE: "2", RFC_DEST: mp.destination, FUNCTION_NAME: mp.function, LOG_DS_ATTR: mp.log});
+        } else {
+          rows.SBD_DS.push({PROJECT: P, NODE_UUID: dsId, PARENT_UUID: dataSourcesId, NAME: mp.searchhelp, DS_TYPE: "6", MAX_HITS_DS_ATTR: mp.maxHits});
+        }
+        rows.SBD_DST.push(text(dsId, dsName));
+      }
+      const mhId = id("MAPH", e.set, op.type);
+      rows.SBD_MH.push({PROJECT: P, NODE_UUID: mhId, PARENT_UUID: opId, NAME: "Mapping", DS_UUID: dsId});
+      const mpRow = (n, fields) => ({PROJECT: P, NODE_UUID: id("MAPP", e.set, op.type, String(n)), PARENT_UUID: mhId, ...fields});
+      let n = 0;
+      for (const x of mp.in) {
+        rows.SBD_MP.push(mpRow(n++, {PROPERTY_UUID: prId(e, e.properties.find((p) => p.name === x.property)), PROPERTY_PATH: x.property, DIRECTION: "I", DS_ATT_PATH: x.path}));
+      }
+      for (const r of mp.ranges) {
+        const row = mpRow(n++, {PROPERTY_UUID: prId(e, e.properties.find((p) => p.name === r.property)), PROPERTY_PATH: r.property, DIRECTION: "I", DS_ATT_PATH: r.table});
+        rows.SBD_MP.push(row);
+        for (const c of r.components) {
+          rows.SBD_MR.push({PROJECT: P, NODE_UUID: row.NODE_UUID, DS_ATT_PATH: `${r.table}\\${c.component}`, SEMANTICS: c.semantics});
+        }
+      }
+      for (const c of mp.constants) {
+        rows.SBD_MP.push(mpRow(n++, {CONSTANT_VAL: c.value, DIRECTION: "I", DS_ATT_PATH: c.path}));
+      }
+      for (const x of mp.out) {
+        rows.SBD_MP.push(mpRow(n++, {PROPERTY_UUID: prId(e, e.properties.find((p) => p.name === x.property)), PROPERTY_PATH: x.property, DIRECTION: "O", DS_ATT_PATH: x.path}));
+      }
     }
     if (e.sadl) {
       const dsId = id("DSRC", e.name);

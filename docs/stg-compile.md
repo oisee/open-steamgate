@@ -50,6 +50,21 @@ entities:
     creatable: true             # set flags: creatable updatable deletable pageable
     searchable: true            # addressable searchable subscribable filterRequired
     operations: [C, R, U, D, Q] # the DPC methods SEGW writes; default all five
+    operations:                 # ...or, per operation, SEGW's "Map to Data Source"
+      query:
+        function: SEPM_GWS_PRODUCTS_GET      # an RFC/BOR module
+        group: SEPM_GATEWAY_SERVICES         # its function group (optional)
+        destination: NONE                    # RFC destination (optional)
+        log: ET_RETURN                       # the BAPIRET2 table (optional)
+        ranges: {ProductId: IT_PRODUCT_ID_RANGE}   # $filter -> range table (HIGH/LOW/OPTION/SIGN)
+        constants: {"IT_CONTROL\VALUE": "'X'"}     # parameter path -> literal
+        out: {ProductId: "ET_LIST\PRODUCT_ID"}     # response side: property <- parameter path
+      read:
+        function: SEPM_GWS_PRODUCT_GET_DETAIL
+        in: {ProductId: IV_PRODUCT_ID}             # request side: property -> parameter path
+        out: {ProductId: "ES_PRODUCT\PRODUCT_ID"}
+      # or a search help instead of a module:
+      #   query: {searchhelp: ZSTG_STATUS_SH, in: {Status: STATUS}, out: {Status: "RESULT_LIST\STATUS"}}
 
 associations:
   TravelToBookings:
@@ -85,6 +100,19 @@ the compiled classes lint clean against the libraries. The hand-written
 demo classes stay as they are: they are the showcase of real DPC code; the
 YAML is the same model in the form a system-less workflow edits.
 
+## Operations mapped to a module or a search help
+
+A map under `operations` is SEGW's "Map to Data Source" per operation
+(`docs/segw-mapping.md` has what the tree stores and what the DPC gets):
+`function:` writes a data source of type 2, `searchhelp:` one of type 6,
+`in`/`out`/`ranges`/`constants` become the `SBD_MP`/`SBD_MR` rows, and
+segw-gen writes the RFC or search-help method for it. The module's
+signature has to be at hand: an abapGit `*.fugr.xml` next to the YAML or
+in a `--lib` folder; without it the method is a stub and the compiler
+warns. `test/fixtures/segw/zstg_mapped.stg.yaml` is the YAML twin of the
+hand-made `zstg_mapped.iwpr.xml`; the test expects the same DPC methods
+from both.
+
 ## A service consumed from another one (`service:`)
 
 `source: {service: X, set: S}` is SEGW's "external service" (ODC) in a local
@@ -112,7 +140,6 @@ registry reads `gen/` too, so a YAML-only service registers itself.
 
 ## Not yet
 
-Complex types, `function:` (RFC-mapped entities: the mapping rows exist in
-segw-gen, the YAML side does not), Include (merging another service's
-model), annotations in the file (`set_value_list`, vocabulary
-annotations), text elements.
+Complex types, Include (merging another service's model), annotations in
+the file (`set_value_list`, vocabulary annotations), text elements,
+function imports mapped to a module.

@@ -1,0 +1,51 @@
+# The same service as zstg_mapped.iwpr.xml, written by hand: TravelSet read
+# and query mapped to the two modules of zstg_rfc.fugr.xml, StatusVHSet
+# query mapped to a search help. test/stg-compile.mjs compiles it and
+# expects the DPC segw-gen writes for the IWPR, method for method.
+project: ZSTG_MAPPED
+service: ZSTG_MAPPED_SRV
+description: open-steamgate generator fixture
+
+entities:
+  Travel:
+    set: TravelSet
+    keys: [TravelId]
+    creatable: false
+    updatable: false
+    deletable: false
+    pageable: true
+    searchable: true
+    properties:
+      TravelId: {type: String(8), field: TRAVEL_ID, updatable: true}
+      Seats: {type: Int32, nullable: true}
+    operations:
+      query:
+        function: Z_STG_TRAVEL_LIST
+        group: ZSTG_RFC
+        log: ET_RETURN
+        ranges: {TravelId: IT_TRAVEL_ID_RANGE}
+        constants: {IV_WITH_TEXTS: "'X'"}
+        out: {TravelId: "ET_TRAVEL\\TRAVEL_ID", Seats: "ET_TRAVEL\\SEATS"}
+      read:
+        function: Z_STG_TRAVEL_GET
+        group: ZSTG_RFC
+        destination: NONE
+        log: ET_RETURN
+        in: {TravelId: IV_TRAVEL_ID}
+        out: {TravelId: "ES_TRAVEL\\TRAVEL_ID", Seats: "ES_TRAVEL\\SEATS"}
+
+  StatusVH:
+    set: StatusVHSet
+    keys: [Status]
+    creatable: false
+    updatable: false
+    deletable: false
+    pageable: false
+    properties:
+      Status: {type: String(1), updatable: true, filterable: true}
+      Text: {type: String(40), filterable: false, sortable: true}
+    operations:
+      query:
+        searchhelp: ZSTG_STATUS_SH
+        in: {Status: STATUS}
+        out: {Status: "RESULT_LIST\\STATUS", Text: "RESULT_LIST\\TEXT"}

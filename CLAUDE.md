@@ -182,7 +182,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   with the hand-written classes. Sources per entity: none, `struct:`,
   `table:`/`cds:` (SADL), `service:`+`set:` (another service of the
   registry, consumed in-process through `zcl_stg_odata_client`; the local
-  ODC, `src/demo_odc/` is a YAML-only example). `stg-compile --all` runs in
+  ODC, `src/demo_odc/` is a YAML-only example); per operation
+  `function:`/`searchhelp:` with `in`/`out`/`ranges`/`constants` = SEGW's
+  data-source mapping (module signature from a `*.fugr.xml` next to the
+  YAML or `--lib`). `stg-compile --all` runs in
   `transpile`: YAML under `src/` compiles into `gen/stg/` unless `src/`
   already holds the object.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`

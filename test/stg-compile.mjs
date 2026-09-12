@@ -1,6 +1,8 @@
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {compile, readModel} from "../tools/stg-compile.mjs";
+import {generate} from "../tools/segw-gen.mjs";
+import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {buildModel, parseIwpr} from "../tools/segw-gen.mjs";
 
 // stg-compile: the YAML of the demo service becomes the SEGW project tree,
@@ -20,7 +22,7 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     expect(travel.properties[0]).to.include({isKey: true, type: "Edm.String", length: "8", creatable: true, updatable: false, nullable: false});
     expect(travel.properties[4]).to.include({creatable: false, updatable: false, sortable: false, filterable: false, field: "STATUS_TEXT"});
     expect(m.entities[2]).to.include({set: "StatusVHSet", creatable: false, searchable: true});
-    expect(m.entities[2].operations).to.deep.equal(["R", "Q"]);
+    expect(m.entities[2].operations.map((o) => o.type)).to.deep.equal(["R", "Q"]);
     expect(m.associations[0].card).to.deep.equal({left: "1", right: "N"});
     expect(m.functions.map((f) => `${f.name}:${f.method}:${f.multiplicity}`)).to.deep.equal(["CancelTravel:POST:1", "TravelCount:GET:"]);
   });
@@ -124,5 +126,46 @@ describe("tools/stg-compile: a service consumed from another one (local ODC)", (
     expect(dpc).to.contain("        iv_local_service        = 'ZSTG_ODC_SRV'\n        iv_local_set            = iv_entity_set_name");
     expect(dpc).to.contain("    lo_client->get_entity(\n      EXPORTING\n        it_key_tab       = it_key_tab");
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    source: {service: Z}\n    properties: {Id: String}\n")).to.throw("source.service needs source.set");
+  });
+});
+
+// Operations mapped to a function module or a search help: the YAML twin of
+// test/fixtures/segw/zstg_mapped.iwpr.xml must give the same DPC methods
+describe("tools/stg-compile: operations mapped to function modules and search helps", () => {
+  const fms = loadFunctionGroups(["test/fixtures/segw"]);
+  const fromYaml = compile(readFileSync("test/fixtures/segw/zstg_mapped.stg.yaml", "utf8"), {file: "zstg_mapped.stg.yaml", functionModules: fms});
+  const fromTree = generate(readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"), {functionModules: fms, warnings: []});
+  const method = (source, name) => {
+    const at = source.indexOf(`  method ${name}.`);
+    expect(at, name).to.be.greaterThan(-1);
+    return source.slice(at, source.indexOf("  endmethod.", at));
+  };
+
+  it("carries the mapping rows in the tree", () => {
+    const m = buildModel(parseIwpr(fromYaml.iwpr));
+    const travel = m.entityTypes[0].entitySets[0];
+    const query = travel.operations.find((o) => o.type === "Q").mapping;
+    expect(query).to.include({kind: "RFC", functionName: "Z_STG_TRAVEL_LIST", functionGroup: "ZSTG_RFC", logAttr: "ET_RETURN"});
+    expect(query.props.map((x) => `${x.direction} ${x.property || x.constant} ${x.dsAttPath}`)).to.deep.equal(["I TravelId IT_TRAVEL_ID_RANGE", "I 'X' IV_WITH_TEXTS", "O TravelId ET_TRAVEL\\TRAVEL_ID", "O Seats ET_TRAVEL\\SEATS"]);
+    expect(query.ranges.map((r) => `${r.semantics}:${r.component}`)).to.deep.equal(["H:HIGH", "L:LOW", "O:OPTION", "S:SIGN"]);
+    const read = travel.operations.find((o) => o.type === "R").mapping;
+    expect(read).to.include({kind: "RFC", functionName: "Z_STG_TRAVEL_GET", destination: "NONE"});
+    expect(m.entityTypes[1].entitySets[0].operations[0].mapping).to.include({kind: "SHLP", shlpName: "ZSTG_STATUS_SH", maxHitsAttr: "MAX_HITS"});
+    expect(fromYaml.warnings).to.deep.equal([]);
+  });
+
+  it("gives the DPC methods segw-gen writes for the hand-made tree", () => {
+    const yamlDpc = fromYaml.classes["zcl_zstg_mapped_dpc.clas.abap"];
+    const treeDpc = fromTree.files["zcl_zstg_mapped_dpc.clas.abap"];
+    for (const name of ["TRAVELSET_GET_ENTITY", "TRAVELSET_GET_ENTITYSET", "STATUSVHSET_GET_ENTITYSET"]) {
+      expect(method(yamlDpc, name), name).to.equal(method(treeDpc, name));
+    }
+    expect(yamlDpc).to.contain("  interfaces /IWBEP/IF_SB_GENDPC_SHLP_DATA .");
+  });
+
+  it("says what is wrong with a mapping", () => {
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      fetch: {function: Z}\n")).to.throw("use create, read, update, delete or query");
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      read: {function: Z, in: {Nope: IV_X}}\n")).to.throw("names property Nope");
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      read: {in: {Id: IV_X}}\n")).to.throw("needs function: or searchhelp:");
   });
 });
