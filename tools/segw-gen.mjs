@@ -54,6 +54,7 @@ export function parseIwpr(xml) {
     service: t("SBD_SV")[0] ?? {},
     artifacts: t("SBD_GA"),
     dataSources: t("SBD_DS"),
+    mappings: t("SBD_MH"),
     operations: t("SBD_OP"),
     designSets: t("SBD_SE"),
     entityTypes: t("SBO_ET"),
@@ -119,6 +120,17 @@ export function buildModel(p) {
       operations: p.operations
         .filter((op) => p.designSets.find((d) => d.NODE_UUID === op.PARENT_UUID)?.ENTITY_SET_UUID === es.NODE_UUID)
         .map((op) => ({type: op.OPERATION_TYPE, method: op.IMP_METHOD})),
+      // "Map to data source" on a DDIC table or view (DS_TYPE 4): SEGW lets
+      // SADL serve the set, the DPC delegates every operation to it
+      sadl: (() => {
+        const design = p.designSets.find((d) => d.ENTITY_SET_UUID === es.NODE_UUID);
+        const mapping = design && p.mappings.find((mh) => mh.PARENT_UUID === design.NODE_UUID);
+        const ds = mapping && p.dataSources.find((d) => d.NODE_UUID === mapping.DS_UUID);
+        if (ds && ds.DS_TYPE === "4" && /^DDIC~/.test(ds.DS_GROUP ?? "")) {
+          return {type: "DDIC", binding: ds.DS_GROUP.replace(/^DDIC~/, "")};
+        }
+        return undefined;
+      })(),
     }));
     return {
       // the suffix of GC_/DEFINE_/TS_/TT_ is the entity name in upper case, not
@@ -1056,11 +1068,119 @@ lo_logger = /iwbep/if_mgw_conv_srv_runtime~get_logger( ).
   endmethod.
 `;
 
+const SADL_DELEGATION = {
+  C: `    if_sadl_gw_dpc_util~get_dpc( )->create_entity( EXPORTING io_data_provider        = io_data_provider
+                                                             io_tech_request_context = io_tech_request_context
+                                                   IMPORTING es_data                 = er_entity ).`,
+  D: `    if_sadl_gw_dpc_util~get_dpc( )->delete_entity( io_tech_request_context ).`,
+  R: `    if_sadl_gw_dpc_util~get_dpc( )->get_entity( EXPORTING io_tech_request_context = io_tech_request_context
+                                                IMPORTING es_data                 = er_entity ).`,
+  Q: `    if_sadl_gw_dpc_util~get_dpc( )->get_entityset( EXPORTING io_tech_request_context = io_tech_request_context
+                                                   IMPORTING et_data                 = et_entityset
+                                                             es_response_context     = es_response_context ).`,
+  U: `    if_sadl_gw_dpc_util~get_dpc( )->update_entity( EXPORTING io_tech_request_context = io_tech_request_context
+                                                             io_data_provider        = io_data_provider
+                                                   IMPORTING es_data                 = er_entity ).`,
+};
+
+function sadlMethods(m, opts) {
+  const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl).map((es) => ({...es, entity: et})));
+  const refs = sets.map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
+  const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
+  const structures = [...sets].reverse().map((es) => [
+    `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="RO" >| &`,
+    `               | <sadl:query name="EntitySetDefault">| &`,
+    `               | </sadl:query>| &`,
+    ...es.entity.properties.map((pr) => `               | <sadl:attribute name="${pr.abapField}" binding="${pr.abapField}" isOutput="TRUE" isKey="${pr.isKey ? "TRUE" : "FALSE"}" />| &`),
+    `               |</sadl:structure>| &`,
+  ].join("\n")).join("\n");
+  return {
+    "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY.
+    CAST /iwbep/if_mgw_appl_srv_runtime( if_sadl_gw_dpc_util~get_dpc( ) )->create_deep_entity(
+                   EXPORTING io_tech_request_context = io_tech_request_context
+                             io_data_provider        = io_data_provider
+                             io_expand               = io_expand
+                   IMPORTING er_deep_entity          = er_deep_entity ).
+  endmethod.
+`,
+    "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~EXECUTE_ACTION": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~EXECUTE_ACTION.
+    if_sadl_gw_dpc_util~get_dpc( )->execute_action( EXPORTING io_tech_request_context = io_tech_request_context
+                                                    IMPORTING er_data                 = er_data ).
+  endmethod.
+`,
+    "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_IS_CONDITIONAL_IMPLEMENTED": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_IS_CONDITIONAL_IMPLEMENTED.
+    TRY.
+        rv_conditional_active = if_sadl_gw_dpc_util~get_dpc( )->get_is_conditional_implemented(
+                                               iv_operation_type  = iv_operation_type
+                                               iv_entity_set_name = iv_entity_set_name ).
+      CATCH /iwbep/cx_mgw_tech_exception /iwbep/cx_mgw_busi_exception.
+        rv_conditional_active = super->/iwbep/if_mgw_appl_srv_runtime~get_is_conditional_implemented(
+                                       iv_operation_type     = iv_operation_type
+                                       iv_entity_set_name    = iv_entity_set_name ).
+    ENDTRY.
+  endmethod.
+`,
+    "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_IS_CONDI_IMPLE_FOR_ACTION": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_IS_CONDI_IMPLE_FOR_ACTION.
+    TRY.
+        rv_conditional_active = if_sadl_gw_dpc_util~get_dpc( )->get_is_condi_imple_for_action( iv_action_name ).
+      CATCH /iwbep/cx_mgw_tech_exception /iwbep/cx_mgw_busi_exception.
+        rv_conditional_active = super->/iwbep/if_mgw_appl_srv_runtime~get_is_condi_imple_for_action( iv_action_name ).
+    ENDTRY.
+  endmethod.
+`,
+    "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~PATCH_ENTITY": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~PATCH_ENTITY.
+        super->/iwbep/if_mgw_appl_srv_runtime~patch_entity(
+                       EXPORTING io_tech_request_context = io_tech_request_context
+                                 io_data_provider        = io_data_provider
+                                 iv_entity_name          = iv_entity_name
+                                 iv_entity_set_name      = iv_entity_set_name
+                                 iv_source_name          = iv_source_name
+                                 it_key_tab              = it_key_tab
+                                 it_navigation_path      = it_navigation_path
+                       IMPORTING er_entity               = er_entity  ).
+  endmethod.
+`,
+    "IF_SADL_GW_DPC_UTIL~GET_DPC": `  method IF_SADL_GW_DPC_UTIL~GET_DPC.
+${refs.join("\n")}
+
+    DATA(lv_sadl_xml) =
+               |<?xml version="1.0" encoding="utf-16"?>| &
+               |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| &
+${dataSources.join("\n")}
+               |<sadl:resultSet>| &
+${structures}
+               |</sadl:resultSet>| &
+               |</sadl:definition>| .
+    ro_dpc = cl_sadl_gw_dpc_factory=>create_for_sadl( iv_sadl_xml   = lv_sadl_xml
+               iv_timestamp         = ${opts.generatedAt}
+               iv_uuid              = '${m.project}'
+               io_query_control     = me
+               io_extension_control = me
+               io_context           = me->mo_context ).
+  endmethod.
+`,
+    "IF_SADL_GW_EXTENSION_CONTROL~SET_EXTENSION_MAPPING": `  method IF_SADL_GW_EXTENSION_CONTROL~SET_EXTENSION_MAPPING.
+" Intended to be overwritten
+RETURN.
+  endmethod.
+`,
+    "IF_SADL_GW_QUERY_CONTROL~SET_QUERY_OPTIONS": `  method IF_SADL_GW_QUERY_CONTROL~SET_QUERY_OPTIONS.
+" Intended to be overwritten
+RETURN.
+  endmethod.
+`,
+  };
+}
+
 export function dpcSource(m, opts = {}) {
   const cls = m.classes.dpc;
   const ops = operations(m);
   const kinds = [...new Set(ops.map((o) => o.type))];
-  const redefs = [["Q", "GET_ENTITYSET"], ["R", "GET_ENTITY"], ["U", "UPDATE_ENTITY"], ["C", "CREATE_ENTITY"], ["D", "DELETE_ENTITY"]].filter(([k]) => kinds.includes(k));
+  const hasSadl = m.entityTypes.some((et) => et.entitySets.some((es) => es.sadl));
+  const redefs = [["Q", "GET_ENTITYSET"], ["R", "GET_ENTITY"], ["U", "UPDATE_ENTITY"], ["C", "CREATE_ENTITY"], ["D", "DELETE_ENTITY"]].filter(([k]) => kinds.includes(k)).map(([, n]) => n);
+  if (hasSadl) {
+    redefs.push("CREATE_DEEP_ENTITY", "EXECUTE_ACTION", "GET_IS_CONDITIONAL_IMPLEMENTED", "GET_IS_CONDI_IMPLE_FOR_ACTION", "PATCH_ENTITY");
+  }
   let s = `class ${cls} definition
   public
   inheriting from /IWBEP/CL_MGW_PUSH_ABS_DATA
@@ -1071,9 +1191,9 @@ public section.
 
   interfaces /IWBEP/IF_SB_DPC_COMM_SERVICES .
   interfaces /IWBEP/IF_SB_GEN_DPC_INJECTION .
-
+${hasSadl ? "  interfaces IF_SADL_GW_DPC_UTIL .\n  interfaces IF_SADL_GW_EXTENSION_CONTROL .\n  interfaces IF_SADL_GW_QUERY_CONTROL .\n" : ""}
 `;
-  for (const [, name] of redefs) {
+  for (const name of redefs) {
     s += `  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~${name}\n    redefinition .\n`;
   }
   s += `protected section.
@@ -1096,17 +1216,25 @@ ENDCLASS.
 CLASS ${cls} IMPLEMENTATION.
 
 `;
-  const impls = [];
+  // the class editor keeps the implementations in alphabetical order of
+  // the method name (interface methods sort under their interface)
+  const impls = {};
+  const dispatchName = {C: "CREATE_ENTITY", D: "DELETE_ENTITY", R: "GET_ENTITY", Q: "GET_ENTITYSET", U: "UPDATE_ENTITY"};
   for (const k of ["C", "D", "R", "Q", "U"]) {
     if (kinds.includes(k)) {
-      impls.push(dispatch(k, m, opts));
+      impls[`/IWBEP/IF_MGW_APPL_SRV_RUNTIME~${dispatchName[k]}`] = dispatch(k, m, opts);
     }
   }
-  s += "\n" + impls.join("\n\n") + "\n\n" + COMM_SERVICES;
+  for (const block of COMM_SERVICES.split(/\n\n\n(?=  method )/)) {
+    impls[/^  method ([^.]+)\./.exec(block)[1]] = block.endsWith("\n") ? block : block + "\n";
+  }
+  if (hasSadl) {
+    Object.assign(impls, sadlMethods(m, opts));
+  }
   for (const o of sorted) {
-    s += `
-
-  method ${o.method}.
+    impls[o.method] = o.set.sadl
+      ? `  method ${o.method}.\n${SADL_DELEGATION[o.type]}\n  endmethod.\n`
+      : `  method ${o.method}.
   RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
     EXPORTING
       textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
@@ -1114,6 +1242,7 @@ CLASS ${cls} IMPLEMENTATION.
   endmethod.
 `;
   }
+  s += "\n" + Object.keys(impls).sort().map((k) => impls[k]).join("\n\n");
   s += "ENDCLASS.\n";
   return s;
 }
@@ -1301,6 +1430,19 @@ if (process.argv[1] && /segw-gen\.mjs$/.test(process.argv[1])) {
         }
         bad++;
         console.log(`  ${name}: differs (first difference after formatting, line ${i + 1} of ${a.length} vs ${b.length})\n    have: ${JSON.stringify(a[i] ?? "")}\n    want: ${JSON.stringify(b[i] ?? "")}`);
+        // and, order aside, what only one side has
+        const count = (lines) => lines.reduce((m, l) => m.set(l, (m.get(l) ?? 0) + 1), new Map());
+        const ca = count(a);
+        const cb = count(b);
+        const onlyA = [...ca].filter(([l, n]) => (cb.get(l) ?? 0) < n).map(([l]) => l);
+        const onlyB = [...cb].filter(([l, n]) => (ca.get(l) ?? 0) < n).map(([l]) => l);
+        for (const l of onlyA.slice(0, 4)) {
+          console.log(`    only in the folder: ${JSON.stringify(l)}`);
+        }
+        for (const l of onlyB.slice(0, 4)) {
+          console.log(`    only generated:     ${JSON.stringify(l)}`);
+        }
+        console.log(`    (${onlyA.length} lines only in the folder, ${onlyB.length} only generated)`);
       } else {
         bad++;
         const a = have.split("\n");
