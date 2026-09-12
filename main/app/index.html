@@ -70,7 +70,7 @@
         return;
       }
       const boot = document.createElement("script");
-      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-resourceroots":"{\"stg.travel\": \"./\"}","data-sap-ui-oninit":"module:sap/ui/core/ComponentSupport"};
+      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg.travel\": \"./\"}","data-sap-ui-oninit":"module:sap/ui/core/ComponentSupport"};
       for (const name of Object.keys(attributes)) {
         boot.setAttribute(name, attributes[name]);
       }
