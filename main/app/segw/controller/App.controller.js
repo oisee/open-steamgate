@@ -9,9 +9,12 @@ sap.ui.define([
   "sap/m/Input",
   "sap/m/Dialog",
   "sap/m/Button",
+  "sap/m/List",
+  "sap/m/StandardListItem",
+  "sap/m/TextArea",
   "sap/m/MessageToast",
   "sap/m/MessageBox",
-], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, MessageToast, MessageBox) {
+], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, MessageToast, MessageBox) {
   "use strict";
 
   // The tree SEGW shows, in terms of the entity sets of ZSTG_SEGW_SRV (one
@@ -115,6 +118,16 @@ sap.ui.define([
 
     importIwpr(content, name) {
       const model = this.getOwnerComponent().getModel();
+      // an abapGit function group: its module signatures go to ZSTG_FM_PARAM
+      // (FunctionGroupSet), which Generate reads for the RFC-mapped operations
+      if (content.includes('serializer="LCL_OBJECT_FUGR"')) {
+        model.create("/FunctionGroupSet", {Name: name.slice(0, 30), Content: content}, {
+          success: (data) => MessageToast.show(name + ": " + data.Modules + " modules, " + data.Rows + " parameters"),
+          error: (e) => MessageBox.error(String(e && (e.responseText || e.message))),
+        });
+        model.submitChanges();
+        return;
+      }
       model.create("/ImportSet", {Content: content}, {
         success: (data) => {
           MessageToast.show(name + ": " + data.Rows + " rows in " + data.Tables + " tables of " + data.Project);
@@ -183,11 +196,11 @@ sap.ui.define([
       this.byId("tree").expandToLevel(9);
     },
 
-    read(model, set, project) {
+    read(model, set, project, sorted = true) {
       return new Promise((resolve, reject) => {
         model.read("/" + set, {
           filters: [new Filter("Project", FilterOperator.EQ, project)],
-          sorters: [new Sorter("StgSeq")],
+          sorters: sorted ? [new Sorter("StgSeq")] : [],
           success: (data) => resolve(data.results),
           error: reject,
         });
@@ -352,33 +365,68 @@ sap.ui.define([
       });
     },
 
-    // the dev-time seam of the local runtime: test/start.mjs pulls the
-    // project's rows back into an IWPR and runs segw-gen over it (on A4H the
-    // same button is SEGW's own Generate); Generate is the one button that
-    // still needs Node behind the service
+    // Generate is the service's: GET GenerateSet?$filter=Project eq 'P'
+    // gives the classes as files (segw-gen in ABAP: zcl_stg_segw_gen); the
+    // dialog lists them, shows a source, and "Save to gen/" asks the local
+    // runtime (test/start.mjs) to write them to gen/segw-editor/<project>/,
+    // which the browser preview cannot (no Node behind the service worker).
+    // On a system this button is SEGW's own Generate.
     serverBase() {
       const model = this.getOwnerComponent().getModel();
       return new URL(model.sServiceUrl, document.baseURI).href.replace(/\/sap\/opu\/odata\/sap\/.*$/, "");
     },
 
     async onGenerate() {
+      const model = this.getOwnerComponent().getModel();
       const project = this.project;
+      let files;
       try {
-        const res = await fetch(this.serverBase() + "/segw/generate/" + encodeURIComponent(project), {method: "POST"});
-        if (!res.ok) {
-          throw new Error(res.status === 404 ? "Generate needs the local runtime (npm start); the browser preview has no generator." : await res.text());
-        }
-        const result = await res.json();
-        const lines = [];
-        if (result.skipped) {
-          lines.push("Skipped: " + result.skipped);
-        }
-        lines.push(...Object.keys(result.files));
-        lines.push(...result.warnings.map((w) => "Warning: " + w));
-        MessageBox.information(lines.join("\n"), {title: "Generated " + project + " into " + result.folder, styleClass: "sapUiSizeCompact"});
+        files = await this.read(model, "GenerateSet", project, false);
       } catch (e) {
-        MessageBox.error(String(e.message || e));
+        MessageBox.error(String(e && (e.responseText || e.message)));
+        return;
       }
+      const list = new List({
+        items: files.map((f) => new StandardListItem({
+          title: f.Name, description: f.Content.length + " characters", type: "Active", icon: "sap-icon://syntax",
+          press: () => this.showSource(f.Name, f.Content),
+        })),
+      });
+      const dialog = new Dialog({
+        title: "Generated " + project + ": " + files.length + " files",
+        contentWidth: "40rem",
+        content: [list],
+        beginButton: new Button({
+          text: "Save to gen/", icon: "sap-icon://save", type: "Emphasized",
+          press: async () => {
+            try {
+              const res = await fetch(this.serverBase() + "/segw/generate/" + encodeURIComponent(project), {method: "POST"});
+              if (!res.ok) {
+                throw new Error(res.status === 404 ? "Saving needs the local runtime (npm start); the browser preview has no file system." : await res.text());
+              }
+              const result = await res.json();
+              MessageToast.show(Object.keys(result.files).length + " files in " + result.folder);
+            } catch (e) {
+              MessageBox.error(String(e.message || e));
+            }
+          },
+        }),
+        endButton: new Button({text: "Close", press: () => dialog.close()}),
+        afterClose: () => dialog.destroy(),
+      });
+      dialog.open();
+    },
+
+    showSource(name, content) {
+      const dialog = new Dialog({
+        title: name,
+        contentWidth: "60rem",
+        contentHeight: "70%",
+        content: [new TextArea({value: content, editable: false, width: "100%", height: "100%", wrapping: "Off"})],
+        endButton: new Button({text: "Close", press: () => dialog.close()}),
+        afterClose: () => dialog.destroy(),
+      });
+      dialog.open();
     },
 
     // the project as an abapGit file: GET ExportSet('P'), Content is the
