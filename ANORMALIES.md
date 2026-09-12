@@ -58,13 +58,13 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: `Error: CreateObjectTranspiler, target variable "lo_dpc" not a object reference`
 - Impact on open-steamgate: blocks using the interface transcription as a lib
 - Smallest safe workaround: `"exclude_filter": ["zcl_oao_http_handler"]` on the lib entry (applied)
-- Upstream issue: https://github.com/open-abap/open-abap-odata/issues/33 (open, same crash); QW1 in `AGENDA.md` is the fix, sent upstream as https://github.com/open-abap/open-abap-odata/pull/40 (2026-09-12, waiting on CLA signature)
+- Upstream issue: https://github.com/open-abap/open-abap-odata/issues/33 (open, same crash); QW1 in `AGENDA.md` is the fix, sent upstream as https://github.com/open-abap/open-abap-odata/pull/40 (merged 2026-09-12)
 - Regression-test location: `npm run transpile` itself
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: open-abap-odata main from 5467424 (2026-09-12)
 
 ### ANOMALY-2026-09-11-doubled-quote-literal — A literal holding two quotes is transpiled as one character
 
-- Status: `reported` (workaround kept until the fix ships)
+- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
 - Discovery date: `2026-09-11`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`
 - Affected ABAP statement, runtime API or adapter: any character literal whose content is escaped quotes, e.g. `''''''` (two quotes) used in `REPLACE ALL OCCURRENCES OF '''''' IN lv WITH ''''`
@@ -83,11 +83,11 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: build the two-quote string at runtime, `lv_two = |''|`, and use the variable in `REPLACE` (applied in `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_request_context`)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1829 (fix + test, open 2026-09-12)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_url->keys_named`
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
 
 ### ANOMALY-2026-09-12-fae-dedupe-by-db-key — FOR ALL ENTRIES de-duplicates by the DB key on the target table
 
-- Status: `reported` (workaround kept until the fix ships)
+- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `SELECT <fields> FROM tab INTO CORRESPONDING FIELDS OF TABLE lt FOR ALL ENTRIES IN ...` where the target line type lacks a key field of `tab` (typically MANDT)
@@ -99,11 +99,11 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: select into a table typed like the DB table (`TYPE STANDARD TABLE OF tab`) and MOVE-CORRESPONDING afterwards (applied in the demo)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1830 (fix + test, open 2026-09-12)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_navigation->expand_by_the_dpc`
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
 
 ### ANOMALY-2026-09-12-fae-empty-driver — FOR ALL ENTRIES with an empty driving table throws
 
-- Status: `reported`
+- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN lt` with `lt` empty
@@ -115,11 +115,11 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: guard every FAE with `IF lt IS NOT INITIAL`, as good ABAP does anyway
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1832 (SAP semantics: empty driver ignores the WHERE; Lars may prefer an option, offered in the PR)
 - Regression-test location: none
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
 
 ### ANOMALY-2026-09-12-create-data-ddic-view — CREATE DATA with a DDIC view type is unknown at runtime
 
-- Status: `reported` (workaround kept until the fix ships)
+- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `CREATE DATA rr TYPE STANDARD TABLE OF <ddic view>` (VIEW object)
@@ -131,7 +131,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: declare `TYPES ty_line TYPE <view>` in the class and `CREATE DATA ... TYPE ty_line` / a local table type (applied in the generator)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1831 (two fixes: views were never imported by the init script, and the runtime ignored the TABLE flag for static DDIC names, so plain `CREATE DATA ... TYPE STANDARD TABLE OF t100` was broken too)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_sadl->entity_set_with_filter`
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
 
 ## Resolved anomalies
 
