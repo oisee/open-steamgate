@@ -121,7 +121,9 @@ export function buildModel(p) {
         .map((op) => ({type: op.OPERATION_TYPE, method: op.IMP_METHOD})),
     }));
     return {
-      name: et.NAME, techName: (et.TECH_NAME || et.NAME).toUpperCase(), abapStruct: et.ABAP_STRUCT ?? "",
+      // the suffix of GC_/DEFINE_/TS_/TT_ is the entity name in upper case, not
+      // TECH_NAME: copied or renamed entities keep a stale TECH_NAME in the tree
+      name: et.NAME, techName: et.NAME.toUpperCase(), abapStruct: et.ABAP_STRUCT ?? "",
       properties: props, entitySets: sets, uuid: et.NODE_UUID,
     };
   });
