@@ -60,9 +60,13 @@ Concretely, build order (weeks-scale, critical path = Phase 2):
 - **Clean-room.** Reimplement the `/IWBEP/` *interfaces*; bundle no SAP source,
   no standard DDIC. The interface signatures are the contract; the
   implementation is greenfield MIT.
-- **No SAP API is called by the agent.** abapGit is the blessed last mile for
-  code and for the one-time seed-data capture. Deploy-back stays SAP-side and is
-  already the vsp sibling's territory.
+- **SAP systems: only the A4H sandbox, only when Alice asks.** The agent may
+  use the A4H MCP server (vsp, `.mcp.json`, gitignored) to build reference
+  objects (SEGW sample projects, captures) on explicit request; never a
+  productive or customer system, never unasked. The A4H host lives only in
+  `.mcp.json`. abapGit stays the last mile for code and for seed-data
+  captures; deploy-back is the vsp sibling's territory. (Rule revised
+  2026-09-12 by Alice; before that no SAP API was called at all.)
 - **Never commit captures** (`*.pcap`, `*.jsonl`) — they carry real logons,
   session GUIDs, credentials. Only protocol facts belong here.
 - **Public repo — no live identifiers.** No real hostnames, usernames, IPs,
