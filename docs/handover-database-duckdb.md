@@ -80,10 +80,12 @@ Smaller facts:
 - CI: `.github/workflows/ci.yml` provides Postgres as a service; DuckDB is
   embedded, needs nothing, so its tests can run on every PR (an argument
   for Lars: coverage PG cannot give him for free).
-- Git: `~/dev/transpiler` has `origin` = `abaplint/transpiler`. Add
-  `oisee` (`https://github.com/oisee/transpiler`), branch from
-  `origin/main` (2.13.86 = `422319a5`), push to `oisee`, PR to upstream.
-  `oisee` is a collaborator on `abaplint/transpiler`, but Lars merges there.
+- Git: `~/dev/transpiler` has `origin` = `abaplint/transpiler` and `oisee`
+  is a collaborator there, so the PR branch lives in upstream itself:
+  branch `feat/database-duckdb` from `origin/main` (2.13.86 = `422319a5`),
+  push to `origin`, open the PR from it, delete the branch after the merge.
+  **Do not touch `oisee/transpiler`** (a fork kept for other purposes, its
+  `main` is not upstream's) and never push to `origin/main`; Lars merges.
 - Git identity for commits in that clone: Alice Vinogradova
   <ooisee@gmail.com>. Commit trailer used today:
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
