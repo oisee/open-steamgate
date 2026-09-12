@@ -1,16 +1,16 @@
 {
   "_version": "1.59.0",
   "sap.app": {
-    "id": "stg.travel",
+    "id": "stg.booking",
     "type": "application",
-    "title": "Travels",
-    "description": "open-steamgate demo list report over ZSTG_DEMO_SRV",
+    "title": "Bookings",
+    "description": "open-steamgate demo list report over BookingSet",
     "applicationVersion": {
       "version": "0.0.1"
     },
     "dataSources": {
       "mainService": {
-        "uri": "../sap/opu/odata/sap/ZSTG_DEMO_SRV/",
+        "uri": "../../sap/opu/odata/sap/ZSTG_DEMO_SRV/",
         "type": "OData",
         "settings": {
           "odataVersion": "2.0",
@@ -29,9 +29,9 @@
     },
     "crossNavigation": {
       "inbounds": {
-        "Travel-manage": {
-          "semanticObject": "Travel",
-          "action": "manage",
+        "Booking-display": {
+          "semanticObject": "Booking",
+          "action": "display",
           "signature": {
             "parameters": {},
             "additionalParameters": "allowed"
@@ -39,9 +39,9 @@
         }
       },
       "outbounds": {
-        "BookingDisplay": {
-          "semanticObject": "Booking",
-          "action": "display"
+        "TravelManage": {
+          "semanticObject": "Travel",
+          "action": "manage"
         }
       }
     }
@@ -73,7 +73,7 @@
       "i18n": {
         "type": "sap.ui.model.resource.ResourceModel",
         "settings": {
-          "bundleName": "stg.travel.i18n.i18n",
+          "bundleName": "stg.booking.i18n.i18n",
           "supportedLocales": [
             ""
           ],
@@ -98,8 +98,8 @@
       "flexibilityEnabled": false
     },
     "pages": {
-      "ListReport|Travel": {
-        "entitySet": "TravelSet",
+      "ListReport|Booking": {
+        "entitySet": "BookingSet",
         "component": {
           "name": "sap.suite.ui.generic.template.ListReport",
           "list": true,
@@ -112,24 +112,12 @@
           }
         },
         "pages": {
-          "ObjectPage|Travel": {
-            "entitySet": "TravelSet",
+          "ObjectPage|Booking": {
+            "entitySet": "BookingSet",
             "component": {
               "name": "sap.suite.ui.generic.template.ObjectPage",
               "settings": {
                 "editableHeaderContent": false
-              }
-            },
-            "pages": {
-              "ObjectPage|to_Bookings": {
-                "navigationProperty": "to_Bookings",
-                "entitySet": "BookingSet",
-                "component": {
-                  "name": "sap.suite.ui.generic.template.ObjectPage",
-                  "settings": {
-                    "editableHeaderContent": false
-                  }
-                }
               }
             }
           }

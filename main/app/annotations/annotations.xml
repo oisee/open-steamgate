@@ -92,10 +92,52 @@
                 <PropertyValue Property="Value" Path="Customer"/>
               </Record>
             </PropertyValue>
+            <PropertyValue Property="Description">
+              <Record Type="UI.DataField">
+                <PropertyValue Property="Value" Path="BookingId"/>
+              </Record>
+            </PropertyValue>
+          </Record>
+        </Annotation>
+        <!-- the booking's own object page below the travel: Create on the
+             bookings table opens it, Save posts to TravelSet('..')/to_Bookings -->
+        <Annotation Term="UI.Facets">
+          <Collection>
+            <Record Type="UI.ReferenceFacet">
+              <PropertyValue Property="ID" String="BookingGeneral"/>
+              <PropertyValue Property="Label" String="General"/>
+              <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#General"/>
+            </Record>
+          </Collection>
+        </Annotation>
+        <Annotation Term="UI.FieldGroup" Qualifier="General">
+          <Record Type="UI.FieldGroupType">
+            <PropertyValue Property="Data">
+              <Collection>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="BookingId"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="Customer"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="FlightDate"/>
+                </Record>
+              </Collection>
+            </PropertyValue>
           </Record>
         </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
+            <!-- cross-app: with a launchpad around (flp.html) the bookings
+                 table gets a button that opens the selected booking in the
+                 Bookings app (intent Booking-display); standalone it hides -->
+            <Record Type="UI.DataFieldForIntentBasedNavigation">
+              <PropertyValue Property="Label" String="Open in Bookings"/>
+              <PropertyValue Property="SemanticObject" String="Booking"/>
+              <PropertyValue Property="Action" String="display"/>
+              <PropertyValue Property="RequiresContext" Bool="true"/>
+            </Record>
             <Record Type="UI.DataField">
               <PropertyValue Property="Value" Path="BookingId"/>
               <PropertyValue Property="Label" String="Booking"/>

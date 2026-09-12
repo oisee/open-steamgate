@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>open-steamgate demo: launchpad</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+  </style>
+  <script>
+    // The Fiori launchpad sandbox: two apps over the same transpiled service,
+    // Travels (stg.travel) and Bookings (stg.booking), reachable by intent so
+    // that cross-app navigation (UI.DataFieldForIntentBasedNavigation,
+    // UI.DataFieldWithIntentBasedNavigation) has somewhere to go. Nothing
+    // here is specific to open-steamgate: it is the sandbox any Fiori
+    // developer runs locally.
+    window["sap-ushell-config"] = {
+      defaultRenderer: "fiori2",
+      renderers: {
+        fiori2: {
+          componentData: {
+            config: {
+              enableSearch: false,
+              enablePersonalization: false,
+              rootIntent: "Shell-home"
+            }
+          }
+        }
+      },
+      applications: {
+        "Travel-manage": {
+          title: "Travels",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.travel",
+          applicationType: "URL",
+          url: "./",
+          navigationMode: "embedded"
+        },
+        "Booking-display": {
+          title: "Bookings",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.booking",
+          applicationType: "URL",
+          url: "./booking/",
+          navigationMode: "embedded"
+        }
+      },
+      services: {
+        LaunchPage: {
+          adapter: {
+            config: {
+              groups: [
+                {
+                  id: "demo",
+                  title: "open-steamgate",
+                  isPreset: true,
+                  isVisible: true,
+                  isGroupLocked: false,
+                  tiles: [
+                    {
+                      id: "travels",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Travels",
+                        subtitle: "list report, object page",
+                        info: "ZSTG_DEMO_SRV",
+                        icon: "sap-icon://travel-itinerary",
+                        targetURL: "#Travel-manage"
+                      }
+                    },
+                    {
+                      id: "bookings",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Bookings",
+                        subtitle: "list report",
+                        info: "ZSTG_DEMO_SRV",
+                        icon: "sap-icon://flight",
+                        targetURL: "#Booking-display"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        NavTargetResolution: {
+          config: {
+            enableClientSideTargetResolution: true
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://ui5.sap.com/1.120.50/test-resources/sap/ushell/bootstrap/sandbox.js"
+    id="sap-ushell-bootstrap"></script>
+  <script>
+    // preview deployment: the OData service is answered by a service worker,
+    // so it has to control this page before UI5 asks for $metadata. When it
+    // cannot, say so instead of booting into a blank list report.
+    (async () => {
+      const explain = (title, detail) => {
+        document.body.innerHTML = "";
+        const main = document.createElement("main");
+        main.style.cssText = "max-width:40rem;margin:3rem auto;padding:0 1rem;font:16px/1.5 system-ui,sans-serif";
+        const h = document.createElement("h1");
+        h.style.fontSize = "1.3rem";
+        h.textContent = title;
+        const p = document.createElement("pre");
+        p.style.whiteSpace = "pre-wrap";
+        p.textContent = detail;
+        const a = document.createElement("p");
+        a.innerHTML = 'The gateway runs in a service worker. <a href="../">Install it again</a>, try another browser, or check that service workers and site data are allowed for this site.';
+        main.append(h, p, a);
+        document.body.append(main);
+      };
+      if (!("serviceWorker" in navigator)) {
+        explain("This browser cannot run the preview", "navigator.serviceWorker is not available (private window, or service workers turned off).");
+        return;
+      }
+      if (!navigator.serviceWorker.controller) {
+        try {
+          await navigator.serviceWorker.register("../sw.js", {scope: "../"});
+          await navigator.serviceWorker.ready;
+          // clients.claim() in the worker makes this page controlled a moment
+          // after ready; the event for it may already have fired, so poll
+          for (let waited = 0; !navigator.serviceWorker.controller && waited < 5000; waited += 100) {
+            await new Promise((tick) => setTimeout(tick, 100));
+          }
+          if (!navigator.serviceWorker.controller) {
+            // a navigation after the registration is controlled for sure; once
+            const key = "stg-preview-reload";
+            if (!sessionStorage.getItem(key)) {
+              sessionStorage.setItem(key, "1");
+              location.reload();
+              return;
+            }
+            sessionStorage.removeItem(key);
+            throw new Error("the service worker was installed but does not control this page");
+          }
+        } catch (error) {
+          explain("The preview could not start", String(error && error.stack || error));
+          return;
+        }
+      }
+      // one round trip before UI5: the worker must be the one answering
+      try {
+        const probe = await fetch("../sap/opu/odata/sap/ZSTG_DEMO_SRV/", {headers: {accept: "application/json"}});
+        if (!probe.ok) {
+          explain("The gateway did not answer", "GET ../sap/opu/odata/sap/ZSTG_DEMO_SRV/ returned " + probe.status + "\n\n" + (await probe.text()).slice(0, 2000));
+          return;
+        }
+      } catch (error) {
+        explain("The gateway did not answer", String(error));
+        return;
+      }
+      const boot = document.createElement("script");
+      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg\": \"./\", \"stg.travel\": \"./\", \"stg.booking\": \"./booking\"}","data-sap-ui-oninit":"module:stg/launchpad"};
+      for (const name of Object.keys(attributes)) {
+        boot.setAttribute(name, attributes[name]);
+      }
+      document.head.appendChild(boot);
+    })();
+  </script>
+</head>
+<body class="sapUiBody" id="content">
+</body>
+</html>
