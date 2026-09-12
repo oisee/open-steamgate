@@ -9,14 +9,22 @@
 // out, XML-escaped as abapGit does. check: import into memory, export,
 // compare with the file byte for byte.
 //
+// push / pull do the same through a running gateway (npm start) and
+// ZSTG_SEGW_SRV: push deletes the project's rows in every table and POSTs
+// the file's rows, pull GETs them ordered by StgSeq and writes the IWPR.
+//
 // Usage: node tools/segw-tree.mjs import <file.iwpr.xml> [--data data]
 //        node tools/segw-tree.mjs export <PROJECT> [--data data] [--out <file>]
 //        node tools/segw-tree.mjs check <file.iwpr.xml>... (exit 1 on a difference)
+//        node tools/segw-tree.mjs push <file.iwpr.xml> [--url http://localhost:3030]
+//        node tools/segw-tree.mjs pull <PROJECT> [--url http://localhost:3030] [--out <file>]
 import {existsSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
-import {CLIENT, SEQ_FIELD, escape, iwprTables, readSpec, tableName} from "./segw-tables.mjs";
+import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
 
 export const DATA_DIR = "data";
+export const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
+export const DEFAULT_URL = "http://localhost:3030";
 
 const dataFile = (dir, tag) => join(dir, `${tableName(tag).toLowerCase()}.tabu.json`);
 
@@ -117,6 +125,82 @@ export function writeData(dir, tables, project, spec) {
   return written;
 }
 
+// ------------------------------------------------------ through the service
+
+async function odata(base, method, path, body) {
+  const res = await fetch(base + SERVICE + path, {
+    method,
+    headers: body === undefined ? {} : {"content-type": "application/json"},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (res.status >= 300) {
+    throw new Error(`${method} ${path}: ${res.status} ${text.slice(0, 300)}`);
+  }
+  return text === "" ? undefined : JSON.parse(text);
+}
+
+// the rows of one table and project, as the service returns them
+async function fetchRows(base, tag, project, spec) {
+  const set = `${spec[tag].entity}Set`;
+  const query = `?$filter=${encodeURIComponent(`Project eq '${project}'`)}&$orderby=StgSeq&$format=json`;
+  const json = await odata(base, "GET", `/${set}${query}`);
+  return json.d.results;
+}
+
+// a result of the service -> a row with lower-case field names, as data/ has them
+function rowOf(result, tag, spec) {
+  const row = {mandt: CLIENT};
+  for (const f of Object.keys(spec[tag].fields)) {
+    const v = result[propertyName(f)];
+    if (v !== undefined && v !== null && v !== "") {
+      row[f.toLowerCase()] = String(v);
+    }
+  }
+  row[SEQ_FIELD.toLowerCase()] = Number(result[propertyName(SEQ_FIELD)]);
+  return row;
+}
+
+function keyOf(result, tag, spec) {
+  return spec[tag].keys.map((k) => `${propertyName(k)}='${encodeURIComponent(String(result[propertyName(k)] ?? "")).replaceAll("'", "''")}'`).join(",");
+}
+
+// replace the project's rows in every table with the file's
+export async function push(base, tables, project, spec) {
+  let deleted = 0;
+  let posted = 0;
+  for (const tag of Object.keys(spec)) {
+    const set = `${spec[tag].entity}Set`;
+    for (const result of await fetchRows(base, tag, project, spec)) {
+      await odata(base, "DELETE", `/${set}(${keyOf(result, tag, spec)})`);
+      deleted++;
+    }
+    for (const row of tables.get(tag) ?? []) {
+      const body = {};
+      for (const f of Object.keys(spec[tag].fields)) {
+        if (row[f.toLowerCase()] !== undefined) {
+          body[propertyName(f)] = row[f.toLowerCase()];
+        }
+      }
+      body[propertyName(SEQ_FIELD)] = Number(row[SEQ_FIELD.toLowerCase()]);
+      await odata(base, "POST", `/${set}`, body);
+      posted++;
+    }
+  }
+  return {deleted, posted};
+}
+
+export async function pull(base, project, spec) {
+  const tables = new Map();
+  for (const tag of Object.keys(spec)) {
+    const rows = (await fetchRows(base, tag, project, spec)).map((r) => rowOf(r, tag, spec));
+    if (rows.length > 0) {
+      tables.set(tag, rows);
+    }
+  }
+  return tables;
+}
+
 // first differing line, for the report
 export function firstDifference(a, b) {
   const la = a.split("\n");
@@ -129,7 +213,7 @@ export function firstDifference(a, b) {
   return undefined;
 }
 
-function main(args) {
+async function main(args) {
   const spec = readSpec();
   const opt = (name, fallback) => {
     const at = args.indexOf(name);
@@ -172,10 +256,31 @@ function main(args) {
     }
     return bad === 0 ? 0 : 1;
   }
-  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>...  [--data dir]");
+  const url = opt("--url", DEFAULT_URL);
+  if (cmd === "push") {
+    const tables = importIwpr(readFileSync(rest[0], "utf8").replace(/^\uFEFF/, ""), spec);
+    const project = projectOf(tables);
+    const {deleted, posted} = await push(url, tables, project, spec);
+    console.log(`${project}: ${posted} rows posted to ${url}${SERVICE}, ${deleted} old rows deleted`);
+    return 0;
+  }
+  if (cmd === "pull") {
+    const xml = exportIwpr(await pull(url, rest[0], spec), rest[0], spec);
+    const out = opt("--out");
+    if (out) {
+      writeFileSync(out, xml);
+    } else {
+      process.stdout.write(xml);
+    }
+    return 0;
+  }
+  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>... [--data dir] | push <file> | pull <PROJECT> [--out f] [--url u]");
   return 2;
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
-  process.exit(main(process.argv.slice(2)));
+  main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
+    console.error(e.message);
+    process.exit(1);
+  });
 }

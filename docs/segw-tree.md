@@ -37,8 +37,9 @@ projects exported from A4H (`/IWBEP/GWSAMPLE_BASIC`, `EPM_DEVELOPER_SCENARIO`,
 `S_EPM_SADL_GW_DEV_SCEN_TX`, `S_ESH_SEARCH_ODATA`, `UCONHTTP`) and one project
 from the Lars clones. 53 tables, `src/segw/segw-tables.json`.
 
-The two hand-written fixtures under `test/fixtures/segw/` are not a source:
-their table blocks and some rows are not in SEGW's order (below).
+The two hand-written fixtures under `test/fixtures/segw/` and stg-compile's
+output are not a source: they are written from the spec, not the other way
+round.
 
 ## What is generated
 
@@ -102,6 +103,21 @@ imports and exports byte-identically as well (`test/stg-compile.mjs` checks
 the demo; `npm run segw:tree check` any compiled file). Everything segw-gen
 reads is unaffected: it parses the file and does not care about order.
 
+## Through the service
+
+`segw-tree push <file.iwpr.xml> [--url http://localhost:3030]` does the
+import against a running gateway (`npm start`): for every table it GETs the
+project's rows from `ZSTG_SEGW_SRV`, DELETEs them by key and POSTs the
+file's rows (`StgSeq` included); `pull <PROJECT>` GETs every set with
+`$filter=Project eq '...'&$orderby=StgSeq` and writes the IWPR. The round
+trip then goes through the database and the generic CRUD of
+`zcl_stg_sadl_dpc`, not through JSON files: the test pulls the seeded
+`ZSTG_MAPPED` and gets the fixture's bytes, pushes `zstg_mini` twice and
+pulls it back byte for byte both times (a push replaces, it does not
+double). One gateway bug surfaced on the way: a key value with a backslash
+(`DS_ATT_PATH`, `IT_TRAVEL_ID_RANGE\HIGH`) reached `__metadata.uri`
+unescaped and broke the JSON; `zcl_stg_json` now escapes the URI.
+
 ## The Cloud pass
 
 `npm run segw:cloud` runs abaplint over `src/`, the generated table sources
@@ -121,6 +137,5 @@ of the narrowed file list, not language findings.
   (list of projects, the tree of a project, property sheets), and a
   `Generate` action that runs stg-compile / segw-gen over the tables
   instead of a file.
-- Import through the service instead of the data folder: POST the rows of a
-  file, export through GET; the round trip then goes through the database
-  and the generic CRUD, not only through JSON.
+- `push` as an action of the service itself (upload a file, the DPC
+  imports it), so the editor can take an IWPR without a command line.

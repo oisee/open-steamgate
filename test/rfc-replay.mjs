@@ -22,8 +22,16 @@ const returnRow = () => new abap.types.Structure({
 });
 
 describe("tools/rfc-replay: CALL FUNCTION DESTINATION from captured calls", () => {
+  // a bare runtime for these tests; the gateway's own (test/start.mjs, loaded
+  // at import time) is put back for the suites that follow
+  let saved;
   before(() => {
+    saved = globalThis.abap;
     globalThis.abap = new ABAP({console: new MemoryConsole()});
+  });
+
+  after(() => {
+    globalThis.abap = saved;
   });
 
   it("picks the capture whose input matches, padding ignored, and fills the tables", async () => {

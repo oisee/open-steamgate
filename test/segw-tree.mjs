@@ -3,7 +3,8 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {exportIwpr, importIwpr, projectOf, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, push, readData, writeData} from "../tools/segw-tree.mjs";
+import {startServer} from "./start.mjs";
 
 // The SEGW project tree as our tables: the spec derived from real SEGW
 // projects, the tables and the service generated from it, and the IWPR
@@ -123,5 +124,40 @@ describe("tools/segw-tables + tools/segw-tree: the project tree as tables", () =
     }
     // and the spec is what those files say
     expect(derive(corpus).spec).to.deep.equal(spec);
+  });
+});
+
+// the same round trip through the gateway and the generic CRUD of
+// ZSTG_SEGW_SRV: rows in the database, not in a JSON file
+describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
+  this.timeout(120000);
+  const spec = readSpec();
+  let server;
+
+  before(() => {
+    server = startServer(true);
+  });
+
+  after(() => {
+    server.close();
+  });
+
+  it("pulls the seeded project as the file it was imported from", async () => {
+    const xml = readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8");
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MAPPED", spec), "ZSTG_MAPPED", spec)).to.equal(xml);
+  });
+
+  it("pushes a file and pulls it back byte for byte, twice, without doubling rows", async () => {
+    const xml = readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8");
+    const tables = importIwpr(xml, spec);
+    const first = await push(DEFAULT_URL, tables, "ZSTG_MINI", spec);
+    expect(first.deleted).to.equal(0);
+    expect(first.posted).to.equal([...tables.values()].reduce((n, r) => n + r.length, 0));
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MINI", spec), "ZSTG_MINI", spec)).to.equal(xml);
+    const second = await push(DEFAULT_URL, tables, "ZSTG_MINI", spec);
+    expect(second.deleted).to.equal(first.posted);
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MINI", spec), "ZSTG_MINI", spec)).to.equal(xml);
+    // the other project is untouched
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MAPPED", spec), "ZSTG_MAPPED", spec)).to.equal(readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"));
   });
 });

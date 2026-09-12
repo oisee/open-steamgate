@@ -33,8 +33,16 @@ function fakeOpenRfc(script) {
 }
 
 describe("tools/rfc-live: destinations file, live and record clients, placeholders", () => {
+  // a bare runtime for these tests; the gateway's own (test/start.mjs, loaded
+  // at import time) is put back for the suites that follow
+  let saved;
   before(() => {
+    saved = globalThis.abap;
     globalThis.abap = new ABAP({console: new MemoryConsole()});
+  });
+
+  after(() => {
+    globalThis.abap = saved;
   });
 
   it("reads the destinations file and refuses unknown kinds", () => {

@@ -580,6 +580,9 @@ CLASS zcl_stg_json IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+* the key values are part of the URI: a backslash in one (SEGW's
+* DS_ATT_PATH, IT_RANGE\HIGH) must be escaped like any other string
+    lv_uri = escape( lv_uri ).
     rv_json = |\{"__metadata":\{"id":"{ lv_uri }","uri":"{ lv_uri }","type":"{ iv_namespace }.{ is_set-entity_type }"\}{ lv_fields }\}|.
   ENDMETHOD.
 
