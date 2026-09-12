@@ -912,6 +912,7 @@ CLASS ltcl_navigation DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS 
     METHODS expand_nested FOR TESTING RAISING cx_static_check.
     METHODS expand_by_the_dpc FOR TESTING RAISING cx_static_check.
     METHODS unknown_navigation FOR TESTING RAISING cx_static_check.
+    METHODS create_below_the_parent FOR TESTING RAISING cx_static_check.
 
     METHODS get
       IMPORTING
@@ -993,6 +994,46 @@ CLASS ltcl_navigation IMPLEMENTATION.
     ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')/to_Bookings` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-body
                                         exp = '{"d":{"results":[]}}' ).
+  ENDMETHOD.
+
+  METHOD create_below_the_parent.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* POST to a to-many navigation: the DPC gets the parent key with the path,
+* the payload carries neither TravelId nor a BookingId (the DPC numbers it)
+    ls_response = zcl_stg_dispatcher=>dispatch(
+      iv_method = 'POST'
+      iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0002')/to_Bookings`
+      iv_body   = `{"Customer":"Alan Turing","FlightDate":"\/Date(1791244800000)\/"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 201
+                                        msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"TravelId":"T0002","BookingId":"B002","Customer":"Alan Turing"` ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `BookingSet(TravelId='T0002',BookingId='B002')` ) ).
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0002')/to_Bookings/$count` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body
+                                        exp = '2' ).
+
+* a to-one navigation takes no POST, an unknown parent is a business error
+    ls_response = zcl_stg_dispatcher=>dispatch(
+      iv_method = 'POST'
+      iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet(TravelId='T0002',BookingId='B002')/to_Travel`
+      iv_body   = `{"Description":"x"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 405 ).
+    ls_response = zcl_stg_dispatcher=>dispatch(
+      iv_method = 'POST'
+      iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T9999')/to_Bookings`
+      iv_body   = `{"Customer":"Nobody"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+
+    ls_response = zcl_stg_dispatcher=>dispatch(
+      iv_method = 'DELETE'
+      iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet(TravelId='T0002',BookingId='B002')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
   ENDMETHOD.
 
   METHOD to_one_navigation.

@@ -61,10 +61,17 @@ async function copyTree(from, to) {
   }
 }
 await copyTree(resolve(root, "webapp"), resolve(build, "app"));
-const index = await readFile(resolve(root, "webapp/index.html"), "utf8");
+// the two entry pages: the Travels app alone, and the launchpad sandbox with
+// both apps; each boots UI5 only once the worker answers
+for (const page of ["index.html", "flp.html"]) {
+  await deferBootstrap(page);
+}
+
+async function deferBootstrap(page) {
+const index = await readFile(resolve(root, "webapp", page), "utf8");
 const bootstrap = /<script id="sap-ui-bootstrap"[\s\S]*?<\/script>/.exec(index);
 if (bootstrap === null) {
-  throw new Error("webapp/index.html: sap-ui-bootstrap script not found");
+  throw new Error(`webapp/${page}: sap-ui-bootstrap script not found`);
 }
 // the bootstrap tag's attributes, set on a script element the loader creates
 // once the worker controls the page (the tag itself must not appear inside a
@@ -141,5 +148,6 @@ const loader = `<script>
       document.head.appendChild(boot);
     })();
   </script>`;
-await writeFile(resolve(build, "app/index.html"), index.replace(bootstrap[0], loader), "utf8");
+await writeFile(resolve(build, "app", page), index.replace(bootstrap[0], loader), "utf8");
+}
 console.log(`Preview build is in ${build}`);

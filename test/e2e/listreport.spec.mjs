@@ -222,3 +222,76 @@ test("Delete in the list report goes through a $batch changeset to the DPC", asy
   const res = await fetch("http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0003')");
   expect(res.status).toBe(404);
 });
+
+test("object page: Create on the bookings table posts to TravelSet('T0001')/to_Bookings", async ({page}) => {
+  const requests = [];
+  page.on("request", (req) => {
+    const text = req.method() + " " + req.url() + " " + (req.postData() || "");
+    if (text.includes("/sap/opu/odata/sap/")) {
+      requests.push(text.replace(/\r?\n/g, " "));
+    }
+  });
+  await page.goto("/app/index.html#/TravelSet('T0001')");
+  await expect(page.getByText("Ada Lovelace")).toBeVisible();
+
+  // the sub-object page in create mode (non-draft): keys and fields editable
+  await page.getByRole("button", {name: "Create"}).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", {name: "Unnamed Object"})).toBeVisible();
+  const bookingId = page.getByRole("textbox", {name: "Booking"});
+  await expect(bookingId).toBeEditable();
+  await bookingId.fill("B009");
+  await page.getByRole("textbox", {name: "Customer"}).fill("Alan Turing");
+  // the footer's Create (the table's is gone with the page)
+  await page.getByRole("button", {name: "Create"}).last().focus();
+  await page.keyboard.press("Enter");
+
+  // created below the travel: the POST goes through the navigation property,
+  // the parent key travels in the URL, not in the payload
+  // (inside a $batch changeset, hence the search by payload)
+  const post = requests.find((r) => r.includes('"Customer":"Alan Turing"'));
+  expect(post, requests.join("\n")).toBeDefined();
+  expect(post).toMatch(/POST TravelSet\('T0001'\)\/to_Bookings/);
+  expect(post).toContain('"BookingId":"B009"');
+  // the app moves on to the created booking's page
+  await expect(page.getByRole("heading", {name: "Alan Turing"})).toBeVisible();
+
+  // back on the travel (breadcrumb): the bookings table shows the new one with the old two
+  await page.getByRole("link", {name: "Berlin to Copenhagen"}).first().click();
+  await expect(page.getByRole("gridcell", {name: "Ada Lovelace"})).toBeVisible();
+  await expect(page.getByRole("gridcell", {name: "Alan Turing"})).toBeVisible();
+});
+
+test("launchpad: intent navigation from a booking to the Bookings app and back to the filtered Travels", async ({page}) => {
+  await page.goto("/app/flp.html");
+  // the sandbox shell with our two tiles
+  const travels = page.getByRole("link", {name: /Travels/}).or(page.locator(".sapUshellTile", {hasText: "Travels"})).first();
+  await expect(travels).toBeVisible();
+  await travels.click();
+  await expect(page).toHaveURL(/#Travel-manage/);
+  await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();
+
+  // into the object page, select the first booking, the intent button opens the Bookings app
+  const row = page.locator("tr.sapMListTblRow", {hasText: "Berlin to Copenhagen"}).first();
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Ada Lovelace")).toBeVisible();
+  // single selection: the row's radio button
+  const bookingRow = page.locator("tr.sapMListTblRow", {hasText: "Ada Lovelace"}).first();
+  await bookingRow.locator(".sapMRb, .sapMCb").first().click();
+  const open = page.getByRole("button", {name: "Open in Bookings"});
+  await expect(open).toBeEnabled();
+  await open.click();
+  await expect(page).toHaveURL(/#Booking-display/);
+  // both keys travel with the intent, so the Bookings app opens that booking's page
+  await expect(page.getByRole("heading", {name: "Ada Lovelace"})).toBeVisible();
+  await expect(page.getByText("Grace Hopper")).toHaveCount(0);
+
+  // the travel field is a link (UI.DataFieldWithIntentBasedNavigation): back
+  // to the Travels app on that travel
+  await page.getByRole("link", {name: "T0001"}).first().click();
+  await expect(page).toHaveURL(/#Travel-manage/);
+  // the key came along, so the Travels app lands on that travel's page
+  await expect(page.getByRole("heading", {name: "Berlin to Copenhagen"})).toBeVisible();
+  await expect(page.getByText("Aarhus to Odense")).toHaveCount(0);
+});

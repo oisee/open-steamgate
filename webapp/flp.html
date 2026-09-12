@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>open-steamgate demo: launchpad</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+  </style>
+  <script>
+    // The Fiori launchpad sandbox: two apps over the same transpiled service,
+    // Travels (stg.travel) and Bookings (stg.booking), reachable by intent so
+    // that cross-app navigation (UI.DataFieldForIntentBasedNavigation,
+    // UI.DataFieldWithIntentBasedNavigation) has somewhere to go. Nothing
+    // here is specific to open-steamgate: it is the sandbox any Fiori
+    // developer runs locally.
+    window["sap-ushell-config"] = {
+      defaultRenderer: "fiori2",
+      renderers: {
+        fiori2: {
+          componentData: {
+            config: {
+              enableSearch: false,
+              enablePersonalization: false,
+              rootIntent: "Shell-home"
+            }
+          }
+        }
+      },
+      applications: {
+        "Travel-manage": {
+          title: "Travels",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.travel",
+          applicationType: "URL",
+          url: "./",
+          navigationMode: "embedded"
+        },
+        "Booking-display": {
+          title: "Bookings",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.booking",
+          applicationType: "URL",
+          url: "./booking/",
+          navigationMode: "embedded"
+        }
+      },
+      services: {
+        LaunchPage: {
+          adapter: {
+            config: {
+              groups: [
+                {
+                  id: "demo",
+                  title: "open-steamgate",
+                  isPreset: true,
+                  isVisible: true,
+                  isGroupLocked: false,
+                  tiles: [
+                    {
+                      id: "travels",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Travels",
+                        subtitle: "list report, object page",
+                        info: "ZSTG_DEMO_SRV",
+                        icon: "sap-icon://travel-itinerary",
+                        targetURL: "#Travel-manage"
+                      }
+                    },
+                    {
+                      id: "bookings",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Bookings",
+                        subtitle: "list report",
+                        info: "ZSTG_DEMO_SRV",
+                        icon: "sap-icon://flight",
+                        targetURL: "#Booking-display"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        NavTargetResolution: {
+          config: {
+            enableClientSideTargetResolution: true
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://ui5.sap.com/1.120.50/test-resources/sap/ushell/bootstrap/sandbox.js"
+    id="sap-ushell-bootstrap"></script>
+  <script id="sap-ui-bootstrap"
+    src="https://ui5.sap.com/1.120.50/resources/sap-ui-core.js"
+    data-sap-ui-theme="sap_horizon"
+    data-sap-ui-libs="sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template"
+    data-sap-ui-compatVersion="edge"
+    data-sap-ui-async="true"
+    data-sap-ui-frameOptions="allow"
+    data-sap-ui-xx-componentPreload="off"
+    data-sap-ui-flexibilityServices=""
+    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking"}'
+    data-sap-ui-oninit="module:stg/launchpad"></script>
+</head>
+<body class="sapUiBody" id="content">
+</body>
+</html>

@@ -107,6 +107,48 @@ CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
         /iwbep/cx_mgw_busi_exception
         /iwbep/cx_mgw_tech_exception.
 
+    METHODS bookingset_create_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_c OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+        io_data_provider        TYPE REF TO /iwbep/if_mgw_entry_provider OPTIONAL
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_booking
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS bookingset_update_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_u OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+        io_data_provider        TYPE REF TO /iwbep/if_mgw_entry_provider OPTIONAL
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_booking
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS bookingset_delete_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity_d OPTIONAL
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
     METHODS travelset_get_entityset
       IMPORTING
         iv_entity_name           TYPE string
@@ -307,6 +349,7 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
 
   METHOD /iwbep/if_mgw_appl_srv_runtime~create_entity.
     DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA ls_booking        TYPE zcl_zstg_demo_mpc=>ts_booking.
     DATA lv_entityset_name TYPE string.
 
     lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
@@ -329,6 +372,23 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
             is_data = ls_travel
           CHANGING
             cr_data = er_entity ).
+      WHEN 'BookingSet'.
+        bookingset_create_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            io_data_provider        = io_data_provider
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_booking ).
+        copy_data_to_ref(
+          EXPORTING
+            is_data = ls_booking
+          CHANGING
+            cr_data = er_entity ).
       WHEN OTHERS.
         super->/iwbep/if_mgw_appl_srv_runtime~create_entity(
           EXPORTING
@@ -345,6 +405,7 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
 
   METHOD /iwbep/if_mgw_appl_srv_runtime~update_entity.
     DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
+    DATA ls_booking        TYPE zcl_zstg_demo_mpc=>ts_booking.
     DATA lv_entityset_name TYPE string.
     DATA lr_entity         TYPE REF TO data.
 
@@ -372,6 +433,27 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
         ELSE.
           er_entity = lr_entity.
         ENDIF.
+      WHEN 'BookingSet'.
+        bookingset_update_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            io_data_provider        = io_data_provider
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_booking ).
+        IF ls_booking IS NOT INITIAL.
+          copy_data_to_ref(
+            EXPORTING
+              is_data = ls_booking
+            CHANGING
+              cr_data = er_entity ).
+        ELSE.
+          er_entity = lr_entity.
+        ENDIF.
       WHEN OTHERS.
         super->/iwbep/if_mgw_appl_srv_runtime~update_entity(
           EXPORTING
@@ -394,6 +476,14 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
     CASE lv_entityset_name.
       WHEN 'TravelSet'.
         travelset_delete_entity(
+          iv_entity_name          = iv_entity_name
+          iv_entity_set_name      = iv_entity_set_name
+          iv_source_name          = iv_source_name
+          it_key_tab              = it_key_tab
+          it_navigation_path      = it_navigation_path
+          io_tech_request_context = io_tech_request_context ).
+      WHEN 'BookingSet'.
+        bookingset_delete_entity(
           iv_entity_name          = iv_entity_name
           iv_entity_set_name      = iv_entity_set_name
           iv_source_name          = iv_source_name
@@ -429,6 +519,27 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
       EXPORTING
         textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
         method = 'BOOKINGSET_GET_ENTITY'.
+  ENDMETHOD.
+
+  METHOD bookingset_create_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'BOOKINGSET_CREATE_ENTITY'.
+  ENDMETHOD.
+
+  METHOD bookingset_update_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'BOOKINGSET_UPDATE_ENTITY'.
+  ENDMETHOD.
+
+  METHOD bookingset_delete_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'BOOKINGSET_DELETE_ENTITY'.
   ENDMETHOD.
 
   METHOD travelset_create_entity.

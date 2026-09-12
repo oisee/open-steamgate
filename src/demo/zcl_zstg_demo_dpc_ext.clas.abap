@@ -13,9 +13,13 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
     METHODS travelset_delete_entity REDEFINITION.
     METHODS bookingset_get_entityset REDEFINITION.
     METHODS bookingset_get_entity REDEFINITION.
+    METHODS bookingset_create_entity REDEFINITION.
+    METHODS bookingset_update_entity REDEFINITION.
+    METHODS bookingset_delete_entity REDEFINITION.
     METHODS statusvhset_get_entityset REDEFINITION.
   PRIVATE SECTION.
     TYPES ty_travel_id TYPE c LENGTH 8.
+    TYPES ty_booking_id TYPE c LENGTH 4.
     TYPES: BEGIN OF ty_range,
              sign   TYPE c LENGTH 1,
              option TYPE c LENGTH 2,
@@ -472,6 +476,90 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
           DELETE et_entityset.
         ENDIF.
       ENDLOOP.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD bookingset_create_entity.
+    DATA ls_row     TYPE zstg_demo_bk.
+    DATA lt_last    TYPE STANDARD TABLE OF ty_booking_id WITH DEFAULT KEY.
+    DATA lv_last    TYPE ty_booking_id.
+    DATA lv_number  TYPE i.
+    DATA lv_parent  TYPE string.
+
+    io_data_provider->read_entry_data( IMPORTING es_data = er_entity ).
+* created below a travel (POST TravelSet('T0001')/to_Bookings): the parent
+* key comes with the navigation path, the payload need not repeat it
+    IF er_entity-travel_id IS INITIAL AND it_navigation_path IS NOT INITIAL.
+      lv_parent = key_value( it_key_tab = it_key_tab
+                             iv_name    = 'TravelId' ).
+      er_entity-travel_id = lv_parent.
+    ENDIF.
+    IF er_entity-travel_id IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = 'TravelId is required'.
+    ENDIF.
+    SELECT SINGLE travel_id FROM zstg_demo INTO lv_parent
+      WHERE travel_id = er_entity-travel_id.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Travel { er_entity-travel_id } does not exist|.
+    ENDIF.
+* no booking number given: the next one below this travel (B001, B002, ...)
+    IF er_entity-booking_id IS INITIAL.
+      SELECT booking_id FROM zstg_demo_bk INTO TABLE lt_last
+        WHERE travel_id = er_entity-travel_id
+        ORDER BY booking_id DESCENDING.
+      READ TABLE lt_last INDEX 1 INTO lv_last.
+      IF sy-subrc = 0.
+        lv_number = lv_last+1(3).
+      ENDIF.
+      lv_number = lv_number + 1.
+      er_entity-booking_id = |B{ lv_number WIDTH = 3 ALIGN = RIGHT PAD = '0' }|.
+    ENDIF.
+
+    ls_row-mandt = sy-mandt.
+    MOVE-CORRESPONDING er_entity TO ls_row.
+    INSERT zstg_demo_bk FROM ls_row.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Booking { er_entity-booking_id } already exists below { er_entity-travel_id }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD bookingset_update_entity.
+    DATA ls_row TYPE zstg_demo_bk.
+
+    io_data_provider->read_entry_data( IMPORTING es_data = er_entity ).
+    er_entity-travel_id  = key_value( it_key_tab = it_key_tab
+                                      iv_name    = 'TravelId' ).
+    er_entity-booking_id = key_value( it_key_tab = it_key_tab
+                                      iv_name    = 'BookingId' ).
+    ls_row-mandt = sy-mandt.
+    MOVE-CORRESPONDING er_entity TO ls_row.
+    UPDATE zstg_demo_bk FROM ls_row.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Booking { er_entity-booking_id } does not exist|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD bookingset_delete_entity.
+    DATA lv_travel_id  TYPE c LENGTH 8.
+    DATA lv_booking_id TYPE c LENGTH 4.
+
+    lv_travel_id  = key_value( it_key_tab = it_key_tab
+                               iv_name    = 'TravelId' ).
+    lv_booking_id = key_value( it_key_tab = it_key_tab
+                               iv_name    = 'BookingId' ).
+    DELETE FROM zstg_demo_bk WHERE travel_id = lv_travel_id AND booking_id = lv_booking_id.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |Booking { lv_booking_id } does not exist|.
     ENDIF.
   ENDMETHOD.
 
