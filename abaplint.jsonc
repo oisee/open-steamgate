@@ -1,10 +1,14 @@
 {
   "global": {
-    "files": "/{src,test,gen}/**/*.*",
+    "files": "/{src,test,gen/cds,gen/segw}/**/*.*",
     "errorOnDuplicateFilenames": true,
-    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "/gen/stg/"]
+    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
   },
   "dependencies": [
+    {
+      "folder": "/gen/stg",
+      "files": "/**/*.*"
+    },
     {
       "url": "https://github.com/open-abap/open-abap-core",
       "folder": "/.local/lars/open-abap-core",

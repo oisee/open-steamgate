@@ -351,6 +351,14 @@ function propertyCode(pr, opts) {
   if (pr.asEtag) {
     lines.push("lo_property->set_as_etag( ).");
   }
+  // SEGW takes labels from the class's text elements (set_label_from_text_element);
+  // without a text pool the label goes in as the sap:label annotation (stg-compile)
+  if (opts.labelAnnotations && pr.label && !pr.textElement) {
+    lines.push(`lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = '${pr.label.replaceAll("'", "''")}' ).`);
+  }
   return lines.join("\n");
 }
 

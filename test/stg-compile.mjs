@@ -15,7 +15,7 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
 
   it("reads the file with its defaults", () => {
     const m = result.model;
-    expect(m.classes).to.deep.equal({mpc: "ZCL_ZSTG_DEMO_MPC", mpcExt: "ZCL_ZSTG_DEMO_MPC_EXT", dpc: "ZCL_ZSTG_DEMO_DPC", dpcExt: "ZCL_ZSTG_DEMO_DPC_EXT"});
+    expect(m.classes).to.deep.equal({mpc: "ZCL_ZSTG_DEMO_MPC", mpcExt: "ZCL_ZSTG_DEMO_MPC_EXT", dpc: "ZCL_ZSTG_DEMO_DPC", dpcExt: "ZCL_ZSTG_DEMO_DPC_EXT", mpcAnn: "ZCL_ZSTG_DEMO_MPC_ANN"});
     const travel = m.entities[0];
     expect(travel.properties.map((p) => p.name)).to.deep.equal(["TravelId", "Description", "Status", "Seats", "StatusText"]);
     // a key is not nullable and not updatable unless said otherwise; readonly turns creatable/updatable off
@@ -167,5 +167,32 @@ describe("tools/stg-compile: operations mapped to function modules and search he
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      fetch: {function: Z}\n")).to.throw("use create, read, update, delete or query");
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      read: {function: Z, in: {Nope: IV_X}}\n")).to.throw("names property Nope");
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\n    operations:\n      read: {in: {Id: IV_X}}\n")).to.throw("needs function: or searchhelp:");
+  });
+});
+
+// annotations: -> ZCL_<project>_MPC_ANN through vocab_anno_model, called by the _MPC_EXT
+describe("tools/stg-compile: Fiori annotations in the model", () => {
+  const r = compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml"});
+  const ann = r.classes["zcl_zstg_demo_mpc_ann.clas.abap"];
+
+  it("writes the annotation class the way a SEGW _MPC_EXT writes vocabulary annotations", () => {
+    expect(Object.keys(r.classes)).to.include("zcl_zstg_demo_mpc_ann.clas.abap").and.include("zcl_zstg_demo_mpc_ann.clas.xml");
+    expect(ann).to.contain("lo_target = io_vocab->create_annotations_target( 'ZSTG_DEMO_SRV.Travel/Status' ).");
+    expect(ann).to.contain("lo_annotation = lo_target->create_annotation( 'com.sap.vocabularies.Common.v1.Text' ).\n    lo_annotation->create_simple_value( )->set_path( 'StatusText' ).\n    lo_nested = lo_annotation->create_annotation( 'com.sap.vocabularies.UI.v1.TextArrangement' ).\n    lo_nested->create_simple_value( )->set_enum_member_by_name( 'com.sap.vocabularies.UI.v1.TextArrangementType/TextFirst' ).");
+    expect(ann).to.contain("lo_record->create_property( 'CollectionPath' )->create_simple_value( )->set_string( 'StatusVHSet' ).\n    lo_record->create_property( 'SearchSupported' )->create_simple_value( )->set_boolean( abap_true ).");
+    expect(ann).to.contain("lo_item = lo_collection->create_record( 'com.sap.vocabularies.Common.v1.ValueListParameterInOut' ).\n    lo_item->create_property( 'LocalDataProperty' )->create_simple_value( )->set_property_path( 'Status' ).");
+    expect(ann).to.contain("lo_collection->create_simple_value( )->set_property_path( 'Status' ).");
+    expect(ann).to.contain("lo_item = lo_collection->create_record( 'com.sap.vocabularies.UI.v1.DataFieldForIntentBasedNavigation' ).");
+    expect(ann).to.contain("lo_item->create_property( 'Target' )->create_simple_value( )->set_annotation_path( 'to_Bookings/@com.sap.vocabularies.UI.v1.LineItem' ).");
+    expect(ann).to.contain("  iv_term      = 'com.sap.vocabularies.UI.v1.FieldGroup'\n      iv_qualifier = 'General' ).");
+  });
+
+  it("gives the _MPC_EXT a DEFINE that calls it, and the base class sap:label from the tree", () => {
+    expect(r.ext["zcl_zstg_demo_mpc_ext.clas.abap"]).to.contain("    super->define( ).\n    ZCL_ZSTG_DEMO_MPC_ANN=>define( vocab_anno_model ).");
+    expect(r.classes["zcl_zstg_demo_mpc.clas.abap"]).to.contain("iv_key      = 'label'\n        iv_value    = 'Travel' ).");
+  });
+
+  it("names a target that is not in the model", () => {
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\nannotations:\n  A/Nope: {label: x}\n")).to.throw("A has no property Nope");
   });
 });

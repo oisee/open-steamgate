@@ -13,17 +13,7 @@
         "uri": "../sap/opu/odata/sap/ZSTG_DEMO_SRV/",
         "type": "OData",
         "settings": {
-          "odataVersion": "2.0",
-          "annotations": [
-            "localAnnotations"
-          ]
-        }
-      },
-      "localAnnotations": {
-        "uri": "annotations/annotations.xml",
-        "type": "ODataAnnotation",
-        "settings": {
-          "localUri": "annotations/annotations.xml"
+          "odataVersion": "2.0"
         }
       }
     },

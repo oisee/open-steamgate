@@ -115,6 +115,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_false ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Status' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Text'
                                                    iv_abap_fieldname = 'STATUS_TEXT' ).
@@ -125,6 +129,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Status text' ).
 
     lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_STATUS_VH'
                                     iv_bind_conversions = abap_true ).
@@ -158,6 +166,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_false ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Travel' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'BookingId'
                                                    iv_abap_fieldname = 'BOOKING_ID' ).
@@ -169,6 +181,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_false ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Booking' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Customer'
                                                    iv_abap_fieldname = 'CUSTOMER' ).
@@ -179,6 +195,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Customer' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'FlightDate'
                                                    iv_abap_fieldname = 'FLIGHT_DATE' ).
@@ -189,6 +209,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Flight date' ).
 
     lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_BOOKING'
                                     iv_bind_conversions = abap_true ).
@@ -250,6 +274,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_false ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Travel' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Description'
                                                    iv_abap_fieldname = 'DESCRIPTION' ).
@@ -260,6 +288,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Description' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Status'
                                                    iv_abap_fieldname = 'STATUS' ).
@@ -270,6 +302,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Status' ).
 
     lo_property = lo_entity_type->create_property( iv_property_name  = 'Seats'
                                                    iv_abap_fieldname = 'SEATS' ).
@@ -279,6 +315,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Seats' ).
 
 * the status text, read-only, filled by the DPC from the value-help table
     lo_property = lo_entity_type->create_property( iv_property_name  = 'StatusText'
@@ -290,6 +330,10 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_false ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_false ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      EXPORTING
+        iv_key      = 'label'
+        iv_value    = 'Status text' ).
 
     lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_TRAVEL'
                                     iv_bind_conversions = abap_true ).

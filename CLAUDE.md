@@ -195,9 +195,12 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   ODC, `src/demo_odc/` is a YAML-only example); per operation
   `function:`/`searchhelp:` with `in`/`out`/`ranges`/`constants` = SEGW's
   data-source mapping (module signature from a `*.fugr.xml` next to the
-  YAML or `--lib`). `stg-compile --all` runs in
-  `transpile`: YAML under `src/` compiles into `gen/stg/` unless `src/`
-  already holds the object.
+  YAML or `--lib`); `annotations:` (header, selectionFields, lineItem,
+  facets, fieldGroups, label/text/valueList per property) become
+  `ZCL_<project>_MPC_ANN` over `vocab_anno_model`, called from the
+  `_MPC_EXT`, so the Fiori apps need no local annotation file.
+  `stg-compile --all` runs in `transpile`: YAML under `src/` compiles into
+  `gen/stg/` unless `src/` already holds the object.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

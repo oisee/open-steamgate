@@ -260,11 +260,288 @@ export function readModel(text, file = "stg.yaml") {
       parameters: Object.entries(spec.parameters ?? {}).map(([p, ps]) => property(p, ps, false)),
     };
   });
+  const annotations = Object.entries(y.annotations ?? {}).map(([target, a]) => {
+    const [entityName, propertyName] = String(target).split("/");
+    const e = entity(entityName);
+    if (propertyName && !e.properties.some((p) => p.name === propertyName)) {
+      throw new Error(`${file}: annotations: ${target}: ${entityName} has no property ${propertyName}`);
+    }
+    return {target, entity: e, property: propertyName ?? "", spec: a ?? {}};
+  });
   return {
     project, service, model, description: y.description ?? "", namespace: y.namespace ?? service,
-    classes: {mpc: cls("MPC"), mpcExt: cls("MPC_EXT"), dpc: cls("DPC"), dpcExt: cls("DPC_EXT")},
-    entities, associations, functions,
+    classes: {mpc: cls("MPC"), mpcExt: cls("MPC_EXT"), dpc: cls("DPC"), dpcExt: cls("DPC_EXT"), mpcAnn: cls("MPC_ANN")},
+    entities, associations, functions, annotations,
   };
+}
+
+// ------------------------------------------------- vocabulary annotations
+
+// `annotations:` -> ZCL_<project>_MPC_ANN, a class that writes the vocabulary
+// annotations through vocab_anno_model the way a SEGW-generated _MPC_EXT
+// does; the _MPC_EXT calls it from DEFINE. Terms: UI.HeaderInfo,
+// UI.SelectionFields, UI.LineItem, UI.Facets, UI.FieldGroup on an entity;
+// Common.Label, Common.Text (+UI.TextArrangement), Common.ValueList on a
+// property.
+//
+//   annotations:
+//     Travel:
+//       header: {typeName: Travel, typeNamePlural: Travels, title: Description, description: TravelId}
+//       selectionFields: [Status, TravelId]
+//       lineItem: [TravelId, {value: Description, label: Description},
+//                  {intent: {semanticObject: Booking, action: display, label: Open}}]
+//       facets: [{id: General, label: General, fieldGroup: General}, {id: Bookings, label: Bookings, lineItem: to_Bookings}]
+//       fieldGroups: {General: [TravelId, Description]}
+//     Travel/Status:
+//       label: Status
+//       text: {path: StatusText, arrangement: TextFirst}
+//       valueList: {label: Status, collection: StatusVHSet, search: true,
+//                   parameters: [{inOut: {Status: Status}}, {displayOnly: Text}]}
+const UI = "com.sap.vocabularies.UI.v1.";
+const COMMON = "com.sap.vocabularies.Common.v1.";
+const expandAlias = (path) => String(path).replaceAll("@UI.", "@" + UI).replaceAll("@Common.", "@" + COMMON);
+const lit = (v) => `'${String(v).replaceAll("'", "''")}'`;
+
+class AnnotationWriter {
+  constructor() {
+    this.lines = [];
+  }
+
+  line(text) {
+    this.lines.push(`    ${text}`);
+  }
+
+  target(name) {
+    this.line("");
+    this.line(`lo_target = io_vocab->create_annotations_target( ${lit(name)} ).`);
+  }
+
+  // an annotation with one simple value
+  simple(term, kind, value, owner = "lo_target", into = "lo_annotation") {
+    this.line(`${into} = ${owner}->create_annotation( ${lit(term)} ).`);
+    this.line(`${into}->create_simple_value( )->${kind}( ${lit(value)} ).`);
+  }
+
+  // a record's property with one simple value
+  value(record, property, kind, value) {
+    const text = kind === "set_boolean" ? (value ? "abap_true" : "abap_false") : lit(value);
+    this.line(`${record}->create_property( ${lit(property)} )->create_simple_value( )->${kind}( ${text} ).`);
+  }
+
+  // a UI.DataField-like record inside a collection
+  dataField(collection, item, into = "lo_item") {
+    if (typeof item === "string") {
+      this.line(`${into} = ${collection}->create_record( ${lit(UI + "DataField")} ).`);
+      this.value(into, "Value", "set_path", item);
+      return;
+    }
+    if (item.intent) {
+      this.line(`${into} = ${collection}->create_record( ${lit(UI + "DataFieldForIntentBasedNavigation")} ).`);
+      if (item.intent.label) {
+        this.value(into, "Label", "set_string", item.intent.label);
+      }
+      this.value(into, "SemanticObject", "set_string", item.intent.semanticObject);
+      this.value(into, "Action", "set_string", item.intent.action);
+      this.value(into, "RequiresContext", "set_boolean", item.intent.requiresContext !== false);
+      return;
+    }
+    const type = item.semanticObject ? "DataFieldWithIntentBasedNavigation" : "DataField";
+    this.line(`${into} = ${collection}->create_record( ${lit(UI + type)} ).`);
+    this.value(into, "Value", "set_path", item.value);
+    if (item.label) {
+      this.value(into, "Label", "set_string", item.label);
+    }
+    if (item.semanticObject) {
+      this.value(into, "SemanticObject", "set_string", item.semanticObject);
+      this.value(into, "Action", "set_string", item.action);
+    }
+  }
+
+  entity(a) {
+    const s = a.spec;
+    if (s.header) {
+      this.line(`lo_record = lo_target->create_annotation( ${lit(UI + "HeaderInfo")} )->create_record( ${lit(UI + "HeaderInfoType")} ).`);
+      if (s.header.typeName) {
+        this.value("lo_record", "TypeName", "set_string", s.header.typeName);
+      }
+      if (s.header.typeNamePlural) {
+        this.value("lo_record", "TypeNamePlural", "set_string", s.header.typeNamePlural);
+      }
+      for (const [key, name] of [["title", "Title"], ["description", "Description"]]) {
+        if (s.header[key]) {
+          this.line(`lo_item = lo_record->create_property( ${lit(name)} )->create_record( ${lit(UI + "DataField")} ).`);
+          this.value("lo_item", "Value", "set_path", s.header[key]);
+        }
+      }
+    }
+    if (s.selectionFields) {
+      this.line(`lo_collection = lo_target->create_annotation( ${lit(UI + "SelectionFields")} )->create_collection( ).`);
+      for (const f of s.selectionFields) {
+        this.line(`lo_collection->create_simple_value( )->set_property_path( ${lit(f)} ).`);
+      }
+    }
+    if (s.lineItem) {
+      this.line(`lo_collection = lo_target->create_annotation( ${lit(UI + "LineItem")} )->create_collection( ).`);
+      for (const item of s.lineItem) {
+        this.dataField("lo_collection", item);
+      }
+    }
+    if (s.facets) {
+      this.line(`lo_collection = lo_target->create_annotation( ${lit(UI + "Facets")} )->create_collection( ).`);
+      for (const f of s.facets) {
+        this.line(`lo_item = lo_collection->create_record( ${lit(UI + "ReferenceFacet")} ).`);
+        this.value("lo_item", "ID", "set_string", f.id);
+        if (f.label) {
+          this.value("lo_item", "Label", "set_string", f.label);
+        }
+        // $metadata declares no vocabulary aliases, so the path names the term
+        // in full, the way Gateway renders it (a target: written as given,
+        // UI./Common. aliases expanded)
+        const path = expandAlias(f.fieldGroup ? `@UI.FieldGroup#${f.fieldGroup}` : f.lineItem ? `${f.lineItem}/@UI.LineItem` : f.target);
+        this.line(`lo_item->create_property( 'Target' )->create_simple_value( )->set_annotation_path( ${lit(path)} ).`);
+      }
+    }
+    for (const [name, fields] of Object.entries(s.fieldGroups ?? {})) {
+      this.line(`lo_annotation = lo_target->create_annotation(`);
+      this.line(`  iv_term      = ${lit(UI + "FieldGroup")}`);
+      this.line(`  iv_qualifier = ${lit(name)} ).`);
+      this.line(`lo_record = lo_annotation->create_record( ${lit(UI + "FieldGroupType")} ).`);
+      this.line(`lo_collection = lo_record->create_property( 'Data' )->create_collection( ).`);
+      for (const item of fields) {
+        this.dataField("lo_collection", item);
+      }
+    }
+  }
+
+  property(a) {
+    const s = a.spec;
+    if (s.label) {
+      this.simple(COMMON + "Label", "set_string", s.label);
+    }
+    if (s.text) {
+      const t = typeof s.text === "string" ? {path: s.text} : s.text;
+      this.simple(COMMON + "Text", "set_path", t.path);
+      if (t.arrangement) {
+        this.simple(UI + "TextArrangement", "set_enum_member_by_name", `${UI}TextArrangementType/${t.arrangement}`, "lo_annotation", "lo_nested");
+      }
+    }
+    if (s.valueList) {
+      const v = s.valueList;
+      this.line(`lo_record = lo_target->create_annotation( ${lit(COMMON + "ValueList")} )->create_record( ${lit(COMMON + "ValueListType")} ).`);
+      if (v.label) {
+        this.value("lo_record", "Label", "set_string", v.label);
+      }
+      this.value("lo_record", "CollectionPath", "set_string", v.collection);
+      this.value("lo_record", "SearchSupported", "set_boolean", v.search === true);
+      this.line(`lo_collection = lo_record->create_property( 'Parameters' )->create_collection( ).`);
+      for (const p of v.parameters ?? []) {
+        const [kind, spec] = Object.entries(p)[0];
+        const type = {inOut: "ValueListParameterInOut", in: "ValueListParameterIn", out: "ValueListParameterOut", displayOnly: "ValueListParameterDisplayOnly"}[kind];
+        if (!type) {
+          throw new Error(`annotations: ${a.target}: value list parameter ${kind}: use inOut, in, out or displayOnly`);
+        }
+        this.line(`lo_item = lo_collection->create_record( ${lit(COMMON + type)} ).`);
+        if (kind === "displayOnly") {
+          this.value("lo_item", "ValueListProperty", "set_string", spec);
+        } else {
+          const [local, remote] = Object.entries(spec)[0];
+          this.value("lo_item", "LocalDataProperty", "set_property_path", local);
+          this.value("lo_item", "ValueListProperty", "set_string", remote);
+        }
+      }
+    }
+  }
+}
+
+export function annotationsClass(m) {
+  if (m.annotations.length === 0) {
+    return {};
+  }
+  const cls = m.classes.mpcAnn;
+  const w = new AnnotationWriter();
+  for (const a of m.annotations) {
+    w.target(`${m.namespace}.${a.target}`);
+    if (a.property) {
+      w.property(a);
+    } else {
+      w.entity(a);
+    }
+  }
+  const abap = `CLASS ${cls} DEFINITION PUBLIC CREATE PUBLIC.
+* generated by tools/stg-compile.mjs from the annotations of ${m.project} - do not edit
+* The vocabulary annotations of the service, written through the model's
+* vocab_anno_model the way a SEGW-generated _MPC_EXT writes them; called
+* from ${m.classes.mpcExt}->define( ) after super->define( ).
+  PUBLIC SECTION.
+    CLASS-METHODS define
+      IMPORTING
+        io_vocab TYPE REF TO /iwbep/if_mgw_vocan_model.
+ENDCLASS.
+
+CLASS ${cls} IMPLEMENTATION.
+
+  METHOD define.
+    DATA lo_target     TYPE REF TO /iwbep/if_mgw_vocan_ann_target.
+    DATA lo_annotation TYPE REF TO /iwbep/if_mgw_vocan_annotation.
+    DATA lo_nested     TYPE REF TO /iwbep/if_mgw_vocan_annotation.
+    DATA lo_record     TYPE REF TO /iwbep/if_mgw_vocan_record.
+    DATA lo_item       TYPE REF TO /iwbep/if_mgw_vocan_record.
+    DATA lo_collection TYPE REF TO /iwbep/if_mgw_vocan_collection.
+${w.lines.join("\n")}
+  ENDMETHOD.
+
+ENDCLASS.
+`;
+  return {[objectFile(cls, ".clas.abap")]: abap, [objectFile(cls, ".clas.xml")]: clasXml(cls, `Vocabulary annotations of ${m.service}`)};
+}
+
+// the _MPC_EXT of a service with annotations calls the annotation class
+function mpcExtWithAnnotations(m) {
+  const ext = m.classes.mpcExt;
+  return `class ${ext} definition
+  public
+  inheriting from ${m.classes.mpc}
+  create public .
+
+public section.
+
+  methods DEFINE
+    redefinition .
+protected section.
+private section.
+ENDCLASS.
+
+
+
+CLASS ${ext} IMPLEMENTATION.
+
+
+  METHOD define.
+    super->define( ).
+    ${m.classes.mpcAnn}=>define( vocab_anno_model ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+}
+
+function clasXml(name, description) {
+  return `\ufeff<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <VSEOCLASS>
+    <CLSNAME>${name}</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>${description}</DESCRIPT>
+    <STATE>1</STATE>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
 }
 
 // ----------------------------------------------------------------- IWPR
@@ -536,8 +813,13 @@ export function compile(text, opts = {}) {
     [versionedFile(m.model, ".iwmo.xml")]: iwmoXml(m),
   };
   const warnings = [];
-  const generated = generate(iwpr, {functionModules: opts.functionModules ?? new Map(), warnings, ...(opts.generateOptions ?? {})});
-  return {model: m, iwpr, files, classes: generated.files, ext: generated.ext, segw: generated.model, warnings};
+  const generated = generate(iwpr, {functionModules: opts.functionModules ?? new Map(), warnings, labelAnnotations: true, ...(opts.generateOptions ?? {})});
+  const classes = {...generated.files, ...annotationsClass(m)};
+  const ext = {...generated.ext};
+  if (m.annotations.length > 0) {
+    ext[objectFile(m.classes.mpcExt, ".clas.abap")] = mpcExtWithAnnotations(m);
+  }
+  return {model: m, iwpr, files, classes, ext, segw: generated.model, warnings};
 }
 
 // ---------------------------------------------------- the build step

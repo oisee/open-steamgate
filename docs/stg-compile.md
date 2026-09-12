@@ -130,6 +130,40 @@ is such a service made of one file: `ZSTG_ODC_SRV` over the CDS service,
 tested in `ltcl_odc`. An online provider (real HTTP) is the same seam with
 `cl_http_client` behind it: not done.
 
+## Fiori annotations in the file (`annotations:`)
+
+What a local annotation file (`webapp/annotations/annotations.xml`) used to
+carry lives next to the model: an `annotations:` map keyed by entity
+(`Travel`) or property (`Travel/Status`). Per entity: `header`
+(`UI.HeaderInfo`: typeName, typeNamePlural, title, description),
+`selectionFields`, `lineItem` (`value`/`label`, or `semanticObject`+`action`
+for `DataFieldWithIntentBasedNavigation`, or `intent: {label, semanticObject,
+action}` for a `DataFieldForIntentBasedNavigation` button), `facets`
+(`fieldGroup:` or `lineItem: <navigation>` become the `ReferenceFacet`
+targets) and `fieldGroups`. Per property: `label` (`Common.Label`),
+`text: {path, arrangement}` (`Common.Text` + `UI.TextArrangement`),
+`valueList` (`Common.ValueList` with `inOut`/`in`/`out`/`displayOnly`
+parameters, `search:`). Anything else is not in the grammar yet: write it
+in the `_MPC_EXT` by hand against `vocab_anno_model`.
+
+stg-compile writes them into a class of their own,
+`ZCL_<project>_MPC_ANN`, one static `define( io_vocab )` over the
+`/iwbep/if_mgw_vocan_*` object model (open-abap-odata #60/#61), and the
+generated `_MPC_EXT` calls it from `DEFINE` the way a SEGW-generated
+`_MPC_EXT` writes its vocabulary annotations. `$metadata` then carries the
+`<Annotations Target=...>` blocks and the Fiori app needs no local file.
+The terms are written fully qualified (`com.sap.vocabularies.UI.v1.…`),
+`AnnotationPath` values too, because `$metadata` declares no aliases.
+The demo does exactly this: `src/demo/zstg_demo.stg.yaml`, the generated
+`gen/stg/zstg_demo/zcl_zstg_demo_mpc_ann`, the hand-written
+`zcl_zstg_demo_mpc_ext` calling it; `webapp/annotations/` is gone.
+
+Two kinds of label: `label:` on a property under `entities:` is the model's
+label (`sap:label`, written into the `_MPC` as
+`create_annotation( 'sap' )->add( iv_key = 'label' )`, the SEGW form;
+open-abap-odata #62 lets it win over the field name), `label:` under
+`annotations:` is `Common.Label`. Fiori Elements reads both.
+
 ## In the build
 
 `stg-compile --all` runs in `npm run transpile`: every `src/**/*.stg.yaml`
@@ -140,6 +174,6 @@ registry reads `gen/` too, so a YAML-only service registers itself.
 
 ## Not yet
 
-Complex types, Include (merging another service's model), annotations in
-the file (`set_value_list`, vocabulary annotations), text elements,
-function imports mapped to a module.
+Complex types, Include (merging another service's model), annotation
+terms outside the grammar above (write them in the `_MPC_EXT`), text
+elements, function imports mapped to a module.

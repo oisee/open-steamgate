@@ -62,3 +62,56 @@ functions:
     method: GET
     parameters:
       Status: {type: String(1)}
+
+# The Fiori annotations of the demo, in the model instead of a local
+# annotation file: stg-compile writes them into ZCL_ZSTG_DEMO_MPC_ANN, the
+# hand-written _MPC_EXT calls it, $metadata carries them. (The Bookings app
+# keeps its own local file for its list report; the demo's Travels app has none.)
+annotations:
+  Travel:
+    header: {typeName: Travel, typeNamePlural: Travels, title: Description}
+    selectionFields: [Status, TravelId, Description]
+    lineItem:
+      - {value: TravelId, label: Travel}
+      - {value: Description, label: Description}
+      - {value: Status, label: Status}
+      - {value: Seats, label: Seats}
+    facets:
+      - {id: General, label: General, fieldGroup: General}
+      - {id: Bookings, label: Bookings, lineItem: to_Bookings}
+    fieldGroups:
+      General: [TravelId, Description, Status, Seats]
+  Travel/TravelId:
+    label: Travel
+    valueList:
+      label: Travels
+      collection: TravelSet
+      search: false
+      parameters: [{inOut: {TravelId: TravelId}}, {displayOnly: Description}, {displayOnly: StatusText}]
+  Travel/Description: {label: Description}
+  Travel/Status:
+    label: Status
+    text: {path: StatusText, arrangement: TextFirst}
+    valueList:
+      label: Status
+      collection: StatusVHSet
+      search: true
+      parameters: [{inOut: {Status: Status}}, {displayOnly: Text}]
+  Travel/StatusText: {label: Status text}
+  Travel/Seats: {label: Seats}
+  Booking:
+    header: {typeName: Booking, typeNamePlural: Bookings, title: Customer, description: BookingId}
+    facets:
+      - {id: BookingGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [BookingId, Customer, FlightDate]
+    lineItem:
+      - {intent: {label: Open in Bookings, semanticObject: Booking, action: display}}
+      - {value: BookingId, label: Booking}
+      - {value: Customer, label: Customer}
+      - {value: FlightDate, label: Flight date}
+  Booking/BookingId: {label: Booking}
+  Booking/Customer: {label: Customer}
+  Booking/FlightDate: {label: Flight date}
+  StatusVH/Status: {label: Status}
+  StatusVH/Text: {label: Status text}

@@ -971,6 +971,13 @@ CLASS ltcl_navigation IMPLEMENTATION.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
 
     ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata' ).
+* the Fiori annotations come from zstg_demo.stg.yaml through the generated
+* zcl_zstg_demo_mpc_ann the _MPC_EXT calls: vocabulary annotations and sap:label
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotations xmlns="http://docs.oasis-open.org/odata/ns/edm" Target="ZSTG_DEMO_SRV.Travel/Status">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotation Term="com.sap.vocabularies.Common.v1.Text" Path="StatusText">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<PropertyValue Property="CollectionPath" String="StatusVHSet"/>' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotation Term="com.sap.vocabularies.UI.v1.SelectionFields">' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Property Name="TravelId" Type="Edm.String" Nullable="false" MaxLength="8" sap:unicode="false" sap:label="Travel"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<NavigationProperty Name="to_Bookings" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="FromRole_TravelToBookings" ToRole="ToRole_TravelToBookings"/>' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<NavigationProperty Name="to_Travel" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="ToRole_TravelToBookings" ToRole="FromRole_TravelToBookings"/>' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Association Name="TravelToBookings"' ) ).

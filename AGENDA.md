@@ -410,8 +410,11 @@ the generator, the editor is the file.
    (`gen/stg/`, `src/` wins by object name) and `service:`+`set:` = local
    ODC through `zcl_stg_odata_client` (`src/demo_odc/`, `ltcl_odc`), and
    per-operation `function:`/`searchhelp:` mappings (the YAML twin of the
-   mapped fixture gives segw-gen's methods method for method). Not yet:
-   complex types, Include, annotations, function imports over a module.
+   mapped fixture gives segw-gen's methods method for method). Then
+   `annotations:` in the YAML → `ZCL_<project>_MPC_ANN` over
+   `vocab_anno_model` (open-abap-odata #61 object model, #62 `sap:label`
+   from the property annotation), the demo's `webapp/annotations/` deleted.
+   Not yet: complex types, Include, function imports over a module.
 4. **SEGW as an application. Foundation 2026-09-12 night:** generic CRUD
    over `table:` sources (`zcl_stg_tab_<table>` classes from cds2ddic,
    create / update / delete / get_entity in `zcl_stg_sadl_dpc`), the first

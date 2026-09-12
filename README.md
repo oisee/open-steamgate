@@ -88,9 +88,9 @@ Bottom up, every layer is real, nothing is mocked:
 6. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
    Open SQL runs on SQLite (Node), sql.js (browser) or DuckDB.
 7. **Front** — two Fiori Elements V2 apps with no JavaScript of their own:
-   Travels (`webapp/manifest.json`, `annotations/annotations.xml`: list
-   report, object page, the booking's page below it) and Bookings
-   (`webapp/booking/`). `UI.LineItem`, `UI.SelectionFields`,
+   Travels (`webapp/manifest.json`; its annotations come from the model,
+   `src/demo/zstg_demo.stg.yaml`: list report, object page, the booking's
+   page below it) and Bookings (`webapp/booking/`). `UI.LineItem`, `UI.SelectionFields`,
    `Common.ValueList`, `Common.Text`, `UI.DataFieldForIntentBasedNavigation`
    and `UI.DataFieldWithIntentBasedNavigation` link them by intent;
    `webapp/flp.html` is the launchpad sandbox (`sap.ushell` from the same
