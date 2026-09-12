@@ -35,8 +35,10 @@ of the text table where SEGW keeps the label (`PropertyTextSet`,
 Add property (on an entity type or a complex type) POSTs a `PropertySet`
 row with a fresh 32-character node id, `StgSeq` after the project's last
 row and SEGW's defaults (`Edm.String`, length 10, creatable / updatable /
-sortable / filterable / nullable); Delete removes the selected row (the row
-only: SEGW would take the subtree with it, this does not yet).
+sortable / filterable / nullable); Delete is `DELETE NodeSet(P, uuid)`, the
+service's subtree delete (`zcl_stg_segw_tree`: the rows below the node in
+every table, its text rows, the mapping rules), the way SEGW deletes; an
+entity type still used by an entity set is refused in the app first.
 
 ## Import, Export, Generate
 
@@ -67,7 +69,8 @@ only: SEGW would take the subtree with it, this does not yet).
 `test/e2e/segw.spec.mjs` over the seeded `ZSTG_MAPPED` (the generator
 fixture): the tree with its properties and mapping rows, a property's
 `MaxLength` edited and saved (MERGE, then read back), a property added
-(POST below `et-1`) and deleted (DELETE), Generate showing the generated
+(POST below `et-1`) and deleted (`DELETE NodeSet`, an entity type with
+sets refused), Generate showing the generated
 files and the new property in the generated MPC, Export downloading the
 IWPR with it through `ExportSet`, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
 `ZSTG_MINI`; and the launchpad tile.
@@ -76,7 +79,7 @@ IWPR with it through `ExportSet`, Import of `zstg_mini.iwpr.xml` through `Import
 
 Adding nodes other than properties (entity types, sets, associations,
 operations) and the wizards SEGW has for them (import from DDIC structure,
-map to data source), subtree delete, drag order (`StgSeq`), the label
+map to data source), drag order (`StgSeq`), the label
 row created when there is none, a Generate that lands the classes in
 `src/` and registers the service without a restart, and Generate in ABAP
 so that the last Node route goes.

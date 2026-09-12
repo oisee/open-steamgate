@@ -81,14 +81,21 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   expect(iwpr).toContain('<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR"');
   expect(requests.some((r) => r.includes("ExportSet('ZSTG_MAPPED')"))).toBe(true);
 
-  // deleted again: DELETE by key, gone from the tree
+  // an entity type with sets is refused before anything is sent
+  await page.getByRole("treeitem", {name: "Travel", exact: true}).click();
+  await page.getByRole("button", {name: "Delete"}).click();
+  await expect(page.getByRole("alertdialog")).toContainText("used by TravelSet");
+  await page.getByRole("alertdialog").getByRole("button", {name: "Close"}).click();
+
+  // the property deleted again: DELETE NodeSet (the subtree delete of the
+  // service), gone from the tree
   await page.getByRole("treeitem", {name: "Price", exact: true}).click();
   await page.getByRole("button", {name: "Delete"}).click();
   await page.getByRole("alertdialog").getByRole("button", {name: "OK"}).click();
   await expect(page.getByText("Deleted")).toBeVisible();
   await expect(page.getByRole("treeitem", {name: "Price", exact: true})).toHaveCount(0);
   // inside the $batch changeset, like the MERGE
-  expect(requests.some((r) => r.includes("DELETE PropertySet(Project='ZSTG_MAPPED',NodeUuid='"))).toBe(true);
+  expect(requests.some((r) => r.includes("DELETE NodeSet(Project='ZSTG_MAPPED',NodeUuid='"))).toBe(true);
 
   // Import IWPR: the file goes to ImportSet as one POST, the imported
   // project is selected and its tree shown

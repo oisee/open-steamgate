@@ -176,6 +176,9 @@ sap.ui.define([
         n.nodes = (n.nodes || []).flatMap((c) => (c.text === "" && !c.path ? c.nodes.map(flatten) : [flatten(c)]));
         return n;
       };
+      // a selection kept across the reload would swallow the next click on
+      // the same node (no selectionChange), so none is kept
+      this.byId("tree").removeSelections(true);
       this.getView().getModel("tree").setData({nodes: [flatten(root)]});
       this.byId("tree").expandToLevel(9);
     },
@@ -321,17 +324,28 @@ sap.ui.define([
       return max;
     },
 
-    onDelete() {
+    // DELETE NodeSet(P, uuid): the node with its subtree, as SEGW deletes
+    // (zcl_stg_segw_tree follows the parent columns of every table). An
+    // entity type that still has entity sets is refused here: the service
+    // treats ENTITY_TYPE as a reference and would leave the sets dangling.
+    async onDelete() {
       const node = this.getView().getModel("node").getData();
       const model = this.getOwnerComponent().getModel();
-      MessageBox.confirm("Delete " + node.entity + " " + node.title.replace(/^.*: /, "") + "? Rows below it in the tree stay (SEGW deletes them with it; this is the row).", {
+      if (node.entity === "EntityType") {
+        const sets = (await this.read(model, "EntitySetSet", node.row.Project)).filter((r) => r.EntityType === node.row.NodeUuid);
+        if (sets.length > 0) {
+          MessageBox.error("Entity type " + node.row.Name + " is used by " + sets.map((r) => r.Name).join(", ") + ". Delete the entity set first.");
+          return;
+        }
+      }
+      MessageBox.confirm("Delete " + node.entity + " " + node.title.replace(/^.*: /, "") + " with everything below it?", {
         onClose: (action) => {
           if (action !== MessageBox.Action.OK) {
             return;
           }
-          model.remove(node.path, {
+          model.remove("/" + model.createKey("NodeSet", {Project: node.row.Project, NodeUuid: node.row.NodeUuid}), {
             success: () => { MessageToast.show("Deleted"); this.loadProject(this.project); },
-            error: (e) => MessageBox.error(String(e && (e.message || e.responseText))),
+            error: (e) => MessageBox.error(String(e && (e.responseText || e.message))),
           });
           model.submitChanges();
         },
