@@ -32,8 +32,8 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   every merge. Steamgate first, backport what is proven). For the
   transpiler the same rule: fixes go as PRs from branches of `oisee/transpiler`
   off `upstream/main` (#1829 literal length, #1830 FAE dedupe, #1831 views +
-  CREATE DATA TABLE OF, #1832 FAE empty driver), workarounds stay here until
-  the fix is released. Pulled in as a transpiler lib with
+  CREATE DATA TABLE OF, #1832 FAE empty driver; all merged and released as
+  2.13.86 the same day, workarounds removed). Pulled in as a transpiler lib with
   `files` limited to `src/{oo,ddic,exceptions,internal}`. Upstream contact is
   issue #39 (license) only. The dispatcher, request context, serializer and
   `$filter` bridge are open-steamgate code. **Working assumption (Alice,

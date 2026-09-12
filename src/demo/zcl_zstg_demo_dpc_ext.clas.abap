@@ -221,10 +221,9 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     DATA lt_travel   TYPE zcl_zstg_demo_mpc=>tt_travel.
     DATA lt_deep     TYPE STANDARD TABLE OF zcl_zstg_demo_mpc=>ts_travel_deep WITH DEFAULT KEY.
     DATA ls_deep     TYPE zcl_zstg_demo_mpc=>ts_travel_deep.
-    DATA lt_booking  TYPE STANDARD TABLE OF zstg_demo_bk WITH DEFAULT KEY.
+    DATA lt_booking  TYPE STANDARD TABLE OF zcl_zstg_demo_mpc=>ts_booking WITH DEFAULT KEY.
     DATA ls_travel   TYPE zcl_zstg_demo_mpc=>ts_travel.
-    DATA ls_booking  TYPE zstg_demo_bk.
-    DATA ls_item     TYPE zcl_zstg_demo_mpc=>ts_booking.
+    DATA ls_booking  TYPE zcl_zstg_demo_mpc=>ts_booking.
     DATA lv_wants    TYPE abap_bool.
 
     IF io_expand IS BOUND.
@@ -275,11 +274,10 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
         et_entityset             = lt_travel
         es_response_context      = es_response_context ).
 
-* FOR ALL ENTRIES into a table typed like the DB table: the transpiler
-* de-duplicates the result by the DB key incl. MANDT (ANORMALIES.md)
+* an empty driving table would select every booking (ABAP semantics)
     IF lt_travel IS NOT INITIAL.
       SELECT * FROM zstg_demo_bk
-        INTO TABLE lt_booking
+        INTO CORRESPONDING FIELDS OF TABLE lt_booking
         FOR ALL ENTRIES IN lt_travel
         WHERE travel_id = lt_travel-travel_id.
       SORT lt_booking BY travel_id booking_id.
@@ -289,9 +287,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       CLEAR ls_deep.
       MOVE-CORRESPONDING ls_travel TO ls_deep.
       LOOP AT lt_booking INTO ls_booking WHERE travel_id = ls_travel-travel_id.
-        CLEAR ls_item.
-        MOVE-CORRESPONDING ls_booking TO ls_item.
-        APPEND ls_item TO ls_deep-to_bookings.
+        APPEND ls_booking TO ls_deep-to_bookings.
       ENDLOOP.
       APPEND ls_deep TO lt_deep.
     ENDLOOP.

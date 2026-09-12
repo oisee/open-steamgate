@@ -95,7 +95,7 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     DATA lv_two   TYPE string.
 
     lv_quote   = |'|.
-    lv_two     = |''|.
+    lv_two     = ''''''.
     rv_literal = iv_value.
     REPLACE ALL OCCURRENCES OF lv_quote IN rv_literal WITH lv_two.
     rv_literal = |'{ rv_literal }'|.

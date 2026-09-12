@@ -113,7 +113,7 @@ CLASS zcl_stg_url IMPLEMENTATION.
     DATA lv_two   TYPE string.
 
     lv_quote = |'|.
-    lv_two   = |''|.
+    lv_two   = ''''''.
     rv_value = iv_value.
     IF strlen( rv_value ) >= 2 AND rv_value(1) = lv_quote AND substring( val = rv_value
                                                                            off = strlen( rv_value ) - 1 ) = lv_quote.

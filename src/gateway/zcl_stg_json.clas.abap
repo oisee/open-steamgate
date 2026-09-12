@@ -506,7 +506,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
     FIELD-SYMBOLS <lv_field> TYPE any.
 
     lv_quote = |'|.
-    lv_two   = |''|.
+    lv_two   = ''''''.
     LOOP AT is_set-properties INTO ls_property WHERE is_key = abap_true.
       lv_keys = lv_keys + 1.
     ENDLOOP.

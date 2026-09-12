@@ -64,7 +64,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-11-doubled-quote-literal — A literal holding two quotes is transpiled as one character
 
-- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
+- Status: `fixed` in `@abaplint/transpiler` 2.13.86 (2026-09-12); workaround removed the same day
 - Discovery date: `2026-09-11`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`
 - Affected ABAP statement, runtime API or adapter: any character literal whose content is escaped quotes, e.g. `''''''` (two quotes) used in `REPLACE ALL OCCURRENCES OF '''''' IN lv WITH ''''`
@@ -80,14 +80,14 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: `''''''` is a `c LENGTH 2` literal containing `''`; the replace yields `x'y`
 - Actual open-abap behaviour: the literal is emitted as `abap.CharacterFactory.get(1, '\'\'')`, a `c LENGTH 1`, so the pattern degenerates to a single quote and the statement is a no-op. Length is computed before the escape sequence is folded.
 - Impact on open-steamgate: OData key predicates and `$filter` literals escape quotes by doubling; un-doubling silently failed
-- Smallest safe workaround: build the two-quote string at runtime, `lv_two = |''|`, and use the variable in `REPLACE` (applied in `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_request_context`)
+- Smallest safe workaround: build the two-quote string at runtime, `lv_two = |''|`, and use the variable in `REPLACE` (was applied in `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_request_context`, `zcl_stg_sadl_dpc`; the literal is back since 2.13.86)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1829 (fix + test, open 2026-09-12)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_url->keys_named`
-- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
+- Upstream version containing a fix: 2.13.86
 
 ### ANOMALY-2026-09-12-fae-dedupe-by-db-key — FOR ALL ENTRIES de-duplicates by the DB key on the target table
 
-- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
+- Status: `fixed` in `@abaplint/transpiler` 2.13.86 (2026-09-12); workaround removed the same day
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `SELECT <fields> FROM tab INTO CORRESPONDING FIELDS OF TABLE lt FOR ALL ENTRIES IN ...` where the target line type lacks a key field of `tab` (typically MANDT)
@@ -96,14 +96,14 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: the union of the per-entry selects with duplicates removed, target fields filled by name
 - Actual open-abap behaviour: the generated code runs `SORT lt BY mandt travel_id booking_id` + `DELETE ADJACENT DUPLICATES` with the DB key's component names on the *target* table: `Error: sort compare, wrong component name, mandt`
 - Impact on open-steamgate: any DPC that FAE-selects into a projection structure crashes the request; very common in hand-written DPCs
-- Smallest safe workaround: select into a table typed like the DB table (`TYPE STANDARD TABLE OF tab`) and MOVE-CORRESPONDING afterwards (applied in the demo)
+- Smallest safe workaround: select into a table typed like the DB table (`TYPE STANDARD TABLE OF tab`) and MOVE-CORRESPONDING afterwards (was applied in the demo; `INTO CORRESPONDING FIELDS` is back since 2.13.86)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1830 (fix + test, open 2026-09-12)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_navigation->expand_by_the_dpc`
-- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
+- Upstream version containing a fix: 2.13.86
 
 ### ANOMALY-2026-09-12-fae-empty-driver — FOR ALL ENTRIES with an empty driving table throws
 
-- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
+- Status: `fixed` in `@abaplint/transpiler` 2.13.86 (2026-09-12); workaround removed the same day
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN lt` with `lt` empty
@@ -112,14 +112,14 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: the WHERE condition with the FAE table is dropped, all rows are selected (the classic FAE trap)
 - Actual open-abap behaviour: `throw new Error("FAE, todo, empty table")` in the generated code
 - Impact on open-steamgate: a DPC that relies on the SAP behaviour (or forgets the guard) crashes instead of over-selecting
-- Smallest safe workaround: guard every FAE with `IF lt IS NOT INITIAL`, as good ABAP does anyway
+- Smallest safe workaround: guard every FAE with `IF lt IS NOT INITIAL`, as good ABAP does anyway (kept: since 2.13.86 an unguarded empty driver selects everything, like on SAP)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1832 (SAP semantics: empty driver ignores the WHERE; Lars may prefer an option, offered in the PR)
 - Regression-test location: none
-- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
+- Upstream version containing a fix: 2.13.86
 
 ### ANOMALY-2026-09-12-create-data-ddic-view — CREATE DATA with a DDIC view type is unknown at runtime
 
-- Status: `fixed` upstream (merged to `abaplint/transpiler` main 2026-09-12, not yet released; workaround stays until the release is on npm)
+- Status: `fixed` in `@abaplint/transpiler` 2.13.86 (2026-09-12); workaround removed the same day
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`, `@abaplint/runtime 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `CREATE DATA rr TYPE STANDARD TABLE OF <ddic view>` (VIEW object)
@@ -128,10 +128,10 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: a table of the view's line type
 - Actual open-abap behaviour: `Error: CREATE DATA, unknown type ZVSTGTRAVEL` (the transpiler resolves the view statically for SELECT, but the runtime DDIC lookup has no entry for views)
 - Impact on open-steamgate: generic code that creates data by a view name fails
-- Smallest safe workaround: declare `TYPES ty_line TYPE <view>` in the class and `CREATE DATA ... TYPE ty_line` / a local table type (applied in the generator)
+- Smallest safe workaround: declare `TYPES ty_line TYPE <view>` in the class and `CREATE DATA ... TYPE ty_line` / a local table type (was applied in the generator; `CREATE DATA ... TYPE STANDARD TABLE OF <view>` is back since 2.13.86)
 - Upstream issue: https://github.com/abaplint/transpiler/pull/1831 (two fixes: views were never imported by the init script, and the runtime ignored the TABLE flag for static DDIC names, so plain `CREATE DATA ... TYPE STANDARD TABLE OF t100` was broken too)
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_sadl->entity_set_with_filter`
-- Upstream version containing a fix: next release after 2.13.85 (merged 2026-09-12)
+- Upstream version containing a fix: 2.13.86
 
 ## Resolved anomalies
 

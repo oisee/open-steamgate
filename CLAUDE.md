@@ -117,8 +117,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   points at `.local/lars/` / `.local/fork/` clones when present, else the URL
   is cloned. Interface-layer changes go into the fork first; reusable pieces
   go upstream as PRs from fork branches (open-abap-odata #40, transpiler
-  #1829–#1832; decision revised 2026-09-12). Transpiler workarounds in `src/`
-  and `tools/` stay until the fix ships in a release.
+  #1829–#1832, all released in 2.13.86; decision revised 2026-09-12). A
+  workaround stays in `src/` or `tools/` only until the fix is on npm.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).
