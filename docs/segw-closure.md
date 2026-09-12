@@ -55,7 +55,13 @@ the `_EXT` classes are empty, exactly as on a Gateway right after generation.
 | ZUI5_CODE_SEARCH | ui5-code-search | 3 | 99 | 99 | 0 | 0 |
 
 Closed. The `ddic` counts are one line per use site of a missing type, not
-one per type; the distinct names are below. The RDS project (reference data
+one per type; the distinct names are below. With
+`abapedia/s4-private-2022-doma-and-dtel` as an optional library
+(`.local/lars/s4-private-2022-doma-and-dtel`, local only, the dump carries no
+licence) the `ddic` column becomes 195, 42, 3, 75, 46, 0, 503, 83 in the
+order of the table, 947 instead of 1143; ZFTENT_HOWTO_ODATA is then fully
+closed. What remains is mostly the repositories' own Z/Y structures they did
+not commit, and CRM/BOPF. The RDS project (reference data
 source, SADL) is skipped because the generator has no RDS templates yet.
 
 ## What the library was missing
