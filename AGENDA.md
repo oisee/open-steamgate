@@ -301,8 +301,10 @@ longer blanks the rest. Fork: `bind_structure` derives
 `sap:display-format="Date"` for DATS fields (dates render as dates).
 
 **Lars, 2026-09-12 (afternoon):** invited `oisee` as collaborator on
-`abaplint/transpiler` and `open-abap/open-abap-odata`. Still PRs, one fix at
-a time; branches can now live upstream instead of on the fork.
+`abaplint/transpiler` and `open-abap/open-abap-odata`, saw the preview
+("looks promising") and said yes to backporting the steamgate work into
+open-abap-odata. Still PRs, one at a time; #42 merged, #43 associations
+open, then function imports, expanded reads, SADL interfaces, display-format.
 
 **Done 2026-09-12: value helps.** `StatusVHSet` in the demo MPC/DPC,
 `Common.ValueList` on Status and TravelId, `Common.Text` + `TextArrangement`
