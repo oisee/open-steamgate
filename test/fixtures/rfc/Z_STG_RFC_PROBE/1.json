@@ -1,0 +1,7 @@
+{
+  "name": "Z_STG_RFC_PROBE",
+  "destination": "SYNTHETIC",
+  "exporting": {"KEY": "missing"},
+  "importing_out": {"VALUE": ""},
+  "exception": "NOT_FOUND"
+}

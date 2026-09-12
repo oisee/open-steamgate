@@ -1,0 +1,12 @@
+{
+  "name": "BAPI_FLIGHT_GETLIST",
+  "destination": "SYNTHETIC",
+  "params": {"AIRLINE": "LH"},
+  "result": {
+    "FLIGHT_LIST": [
+      {"AIRLINEID": "LH", "CONNECTID": "0400", "FLIGHTDATE": "20260901", "AIRPORTFR": "FRA", "AIRPORTTO": "JFK", "PRICE": 666.00, "CURR": "EUR"},
+      {"AIRLINEID": "LH", "CONNECTID": "0402", "FLIGHTDATE": "20260902", "AIRPORTFR": "FRA", "AIRPORTTO": "EWR", "PRICE": 555.00, "CURR": "EUR"}
+    ],
+    "RETURN": []
+  }
+}

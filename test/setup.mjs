@@ -24,6 +24,10 @@ export async function setup(abap, schemas, insert) {
     return;
   }
   const {seedStatements} = await import("./seed.mjs");
+  // CALL FUNCTION ... DESTINATION: 'NONE' and '' run here, any other name
+  // replays captures from STG_RFC_CAPTURE (tools/rfc-replay.mjs)
+  const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
+  installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
   if (process.env.STG_DB === "duckdb") {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
     // STG_DB_PATH=some.duckdb keeps the data between runs

@@ -1,0 +1,13 @@
+{
+  "name": "BAPI_FLIGHT_GETLIST",
+  "destination": "SYNTHETIC",
+  "params": {"AIRLINE": "AA"},
+  "result": {
+    "FLIGHT_LIST": [
+      {"AIRLINEID": "AA", "CONNECTID": "0017", "FLIGHTDATE": "20260903", "AIRPORTFR": "JFK", "AIRPORTTO": "SFO", "PRICE": 444.00, "CURR": "USD"}
+    ],
+    "RETURN": [
+      {"TYPE": "S", "ID": "BC_IBF", "NUMBER": "000", "MESSAGE": "one flight"}
+    ]
+  }
+}

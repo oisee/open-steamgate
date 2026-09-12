@@ -141,6 +141,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
   `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
   call. `npm run segw -- <folder> --list` shows what a repo would register.
+- RFC replay: `CALL FUNCTION ... DESTINATION` runs locally for `'NONE'`/`''`
+  and otherwise replays `STG_RFC_CAPTURE` (`.local/capture/a4h/rfc`) through
+  `tools/rfc-replay.mjs`; capture files are the `rfc call` JSON of
+  open-rfc-go (`params` + `result`), see AGENDA "RFC replay". Synthetic
+  fixtures in `test/fixtures/rfc/`, `mocha test/rfc-replay.mjs`.
 - SEGW offline: `npm run segw:gen -- <folder> --check` diffs what
   `tools/segw-gen.mjs` makes of a `<project>.iwpr.xml` against the `_MPC`/
   `_DPC` classes in the folder; `--out <dir>` writes them (and the `_EXT`

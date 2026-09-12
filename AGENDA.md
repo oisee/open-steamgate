@@ -380,6 +380,27 @@ to the transpiler session); BAPIs without source: stub FMs over SQLite,
 or capture/replay JSON through vsp (`.local/` only, 1–2 days), or the
 human-in-the-loop bridge (side project only). BOR/SWO1: dead, ignore.
 
+## RFC replay (2026-09-12, transpiler session)
+
+`CALL FUNCTION ... DESTINATION x` is served without a system:
+`tools/rfc-replay.mjs`, installed by `test/setup.mjs`. `'NONE'` and `''`
+run `abap.FunctionModules` in this process (the odata library registers
+`'NONE'` the same way from every DPC); any other destination replays a
+capture from `STG_RFC_CAPTURE` (default `.local/capture/a4h/rfc`, never
+committed): `<folder>/<FUNCNAME>/<n>.json` with `params` (the input by
+name) and `result` (the exports by name), exactly what `rfc call <FM>
+<json>` of open-rfc-go takes and prints, plus optional `exception`/`subrc`
+for classic exceptions. Direction of each name comes from the caller's
+signature at replay, so a capture needs no direction markers; the split form
+`exporting`/`tables`/`changing` + `importing_out`/`tables_out`/
+`changing_out` is accepted too. Selection: exact input match (trailing blanks
+and name case ignored), then the scalar parameters only, then the first
+capture; no capture at all is an error that names the function module and
+the `rfc call` line to record it. `test/rfc-replay.mjs` runs on synthetic
+captures in `test/fixtures/rfc/`; real captures are Alice's, made through
+open-rfc-go against A4H, and stay under `.local/`. Reference service for it:
+ZSTG_RFC (steamgate session, in A4H).
+
 **ODC / Include / Redefine.** Not in the corpus at all. Simulate: (a) a
 local "external" service = a second MPC/DPC in the registry called
 in-process through `zcl_stg_dispatcher=>dispatch` with a small
