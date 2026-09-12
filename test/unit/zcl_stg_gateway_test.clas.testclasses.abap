@@ -157,6 +157,7 @@ CLASS ltcl_dispatch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FI
     METHODS service_document FOR TESTING RAISING cx_static_check.
     METHODS unknown_set FOR TESTING RAISING cx_static_check.
     METHODS status_value_help FOR TESTING RAISING cx_static_check.
+    METHODS filter_patterns_on_description FOR TESTING RAISING cx_static_check.
     METHODS unknown_key FOR TESTING RAISING cx_static_check.
     METHODS unknown_service FOR TESTING RAISING cx_static_check.
     METHODS post_not_implemented FOR TESTING RAISING cx_static_check.
@@ -187,6 +188,30 @@ CLASS ltcl_dispatch IMPLEMENTATION.
     rs_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
                                                 iv_path    = iv_path
                                                 it_options = lt_options ).
+  ENDMETHOD.
+
+  METHOD filter_patterns_on_description.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* "Ber*" in a Fiori filter field arrives as startswith; the DPC turns the
+* CP range into LIKE
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = `$filter=startswith(Description,'Ber')&$select=TravelId` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0002"' ) ).
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = `$filter=substringof('hagen',Description)&$select=TravelId` ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = `$filter=Seats ge 4&$select=TravelId` ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
   ENDMETHOD.
 
   METHOD status_value_help.

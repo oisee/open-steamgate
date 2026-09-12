@@ -72,22 +72,32 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD travelset_get_entityset.
-    DATA lt_travel_id TYPE ty_ranges.
-    DATA lt_status    TYPE ty_ranges.
-    DATA lv_skip      TYPE i.
-    DATA lv_top       TYPE i.
-    DATA lv_index     TYPE i.
+    DATA lt_travel_id   TYPE ty_ranges.
+    DATA lt_status      TYPE ty_ranges.
+    DATA lt_description TYPE ty_ranges.
+    DATA lt_seats       TYPE ty_ranges.
+    DATA lv_skip        TYPE i.
+    DATA lv_top         TYPE i.
+    DATA lv_index       TYPE i.
 
+* every filterable property becomes a range; startswith/substringof arrive
+* as CP patterns and go to the database as LIKE
     lt_travel_id = ranges_for( iv_property = 'TravelId'
                                it_filter   = it_filter_select_options ).
     lt_status = ranges_for( iv_property = 'Status'
                             it_filter   = it_filter_select_options ).
+    lt_description = ranges_for( iv_property = 'Description'
+                                 it_filter   = it_filter_select_options ).
+    lt_seats = ranges_for( iv_property = 'Seats'
+                           it_filter   = it_filter_select_options ).
 
     SELECT travel_id description status seats
       FROM zstg_demo
       INTO CORRESPONDING FIELDS OF TABLE et_entityset
       WHERE travel_id IN lt_travel_id
         AND status IN lt_status
+        AND description IN lt_description
+        AND seats IN lt_seats
       ORDER BY travel_id.
     fill_status_text( CHANGING ct_travel = et_entityset ).
 

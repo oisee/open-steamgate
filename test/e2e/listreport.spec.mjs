@@ -127,6 +127,25 @@ test("object page: navigation reads to_Bookings, Edit + Save sends MERGE with th
   expect(travel.d.Status).toBe("A");
 });
 
+test("\"Ber*\" in Description: Fiori sends startswith, the DPC makes it LIKE", async ({page}) => {
+  const filters = [];
+  page.on("request", (req) => {
+    const text = req.url() + " " + (req.postData() || "");
+    if (text.includes("TravelSet") && text.includes("$filter")) {
+      filters.push(text);
+    }
+  });
+  await page.goto("/app/index.html");
+  await expect(page.getByText("Aarhus to Odense")).toBeVisible();
+  const description = page.getByLabel(/^Description/).first();
+  await description.fill("Ber*");
+  await description.press("Enter");
+  await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();
+  await expect(page.getByText("Aarhus to Odense")).toBeHidden();
+  await expect(page.getByText("Copenhagen to Aarhus")).toBeHidden();
+  expect(filters.some((u) => /startswith\(Description,'Ber'\)/.test(decodeURIComponent(u))), filters.join("\n")).toBe(true);
+});
+
 test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await page.goto("/app/index.html");
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();
@@ -145,6 +164,7 @@ test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await expect(page.getByText("Berlin to Copenhagen")).toHaveCount(0);
   await expect(page.getByText("Aarhus to Odense")).toBeVisible();
   expect(filters.some((u) => /\$filter=Status eq 'X'/.test(u)), filters.join("\n")).toBe(true);
+
 });
 
 test("Delete in the list report goes through a $batch changeset to the DPC", async ({page}) => {
