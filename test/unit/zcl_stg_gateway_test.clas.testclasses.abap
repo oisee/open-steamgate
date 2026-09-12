@@ -158,6 +158,7 @@ CLASS ltcl_dispatch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FI
     METHODS unknown_set FOR TESTING RAISING cx_static_check.
     METHODS status_value_help FOR TESTING RAISING cx_static_check.
     METHODS filter_patterns_on_description FOR TESTING RAISING cx_static_check.
+    METHODS list_search FOR TESTING RAISING cx_static_check.
     METHODS unknown_key FOR TESTING RAISING cx_static_check.
     METHODS unknown_service FOR TESTING RAISING cx_static_check.
     METHODS post_not_implemented FOR TESTING RAISING cx_static_check.
@@ -212,6 +213,21 @@ CLASS ltcl_dispatch IMPLEMENTATION.
                        iv_query = `$filter=Seats ge 4&$select=TravelId` ).
     cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
+  ENDMETHOD.
+
+  METHOD list_search.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* the filter bar's search field: sap:searchable on the set, "search" in the
+* URL, iv_search_string in the DPC
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntitySet Name="TravelSet"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'sap:searchable="true"' ) ).
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = 'search=odense&$select=TravelId' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
   ENDMETHOD.
 
   METHOD status_value_help.

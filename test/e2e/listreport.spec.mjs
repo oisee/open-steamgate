@@ -146,6 +146,24 @@ test("\"Ber*\" in Description: Fiori sends startswith, the DPC makes it LIKE", a
   expect(filters.some((u) => /startswith\(Description,'Ber'\)/.test(decodeURIComponent(u))), filters.join("\n")).toBe(true);
 });
 
+test("the filter bar's search field goes to the DPC as iv_search_string", async ({page}) => {
+  const searches = [];
+  page.on("request", (req) => {
+    const text = req.url() + " " + (req.postData() || "");
+    if (text.includes("TravelSet") && /[?&]search=/.test(text)) {
+      searches.push(text);
+    }
+  });
+  await page.goto("/app/index.html");
+  await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();
+  const search = page.getByRole("searchbox").or(page.getByPlaceholder("Search")).first();
+  await search.fill("odense");
+  await search.press("Enter");
+  await expect(page.getByText("Aarhus to Odense")).toBeVisible();
+  await expect(page.getByText("Berlin to Copenhagen")).toBeHidden();
+  expect(searches.some((u) => /search=odense/.test(u)), searches.join("\n")).toBe(true);
+});
+
 test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await page.goto("/app/index.html");
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();

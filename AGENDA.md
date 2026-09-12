@@ -317,6 +317,30 @@ into a service worker (sql.js), `preview.yml` deploys `main/` and `pr-<n>/`
 to GitHub Pages with screenshots; `docs/preview-deployments.md`. Visual diffs
 against `main` (hithub's `generate-screenshot-diffs.mjs`) are the next step.
 
+## Backlog: SEGW offline (decided 2026-09-12, "отличный план")
+
+SEGW is two things: an editor for the project tree and a generator. We do
+the generator, the editor is the file.
+
+1. **IWMO/IWSV → registry.** A transpiler plugin (or a `tools/` script)
+   reads `<service>.iwsv.xml` (service → `_DPC_EXT`) and `<model>.iwmo.xml`
+   (model → `_MPC_EXT`) and emits the registration, so a cloned SEGW repo
+   serves itself. The corpus has 53 IWPR/IWMO/IWSV/IWSG files. ~1 day.
+2. **IWPR → `_MPC`/`_DPC` generator.** Read the project tree (PROJ → MODL →
+   entity types, properties, associations, navigation properties, entity
+   sets, function imports, attributes), emit `define` and the CASE
+   dispatcher the way SEGW does. The corpus holds both the IWPR and what
+   SEGW generated from it: the generator is done when the diff is empty.
+   `_EXT` is created once and never touched, as in SEGW. Days.
+3. **Edit the model without a system.** No GUI: edit the IWPR (or a YAML
+   that becomes one), regenerate, deploy the IWPR back through abapGit; SEGW
+   on the system sees a normal project. "Not off-stack" for free.
+
+Order: after `$search` / console / T0009 (this list), then 1, then 2.
+Merging our own PRs upstream: technically possible now, not done unless
+Lars says so; a second session only for step 2 in its own worktree, if at
+all.
+
 ## Ideas parked (2026-09-11)
 
 - **DuckDB: done as a spike 2026-09-12** (section above). ClickHouse would

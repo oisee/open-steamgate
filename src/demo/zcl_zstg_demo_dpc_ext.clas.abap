@@ -79,6 +79,8 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     DATA lv_skip        TYPE i.
     DATA lv_top         TYPE i.
     DATA lv_index       TYPE i.
+    DATA lv_search      TYPE string.
+    FIELD-SYMBOLS <ls_travel> LIKE LINE OF et_entityset.
 
 * every filterable property becomes a range; startswith/substringof arrive
 * as CP patterns and go to the database as LIKE
@@ -99,6 +101,16 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
         AND description IN lt_description
         AND seats IN lt_seats
       ORDER BY travel_id.
+
+* the filter bar's search field (sap:searchable): id or description contains
+    IF iv_search_string IS NOT INITIAL.
+      lv_search = to_upper( iv_search_string ).
+      LOOP AT et_entityset ASSIGNING <ls_travel>.
+        IF to_upper( <ls_travel>-description ) NS lv_search AND to_upper( <ls_travel>-travel_id ) NS lv_search.
+          DELETE et_entityset.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
     fill_status_text( CHANGING ct_travel = et_entityset ).
 
 * paging the way most hand-written DPCs do it: after the SELECT

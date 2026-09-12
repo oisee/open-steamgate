@@ -300,7 +300,7 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_entity_set->set_deletable( abap_true ).
     lo_entity_set->set_pageable( abap_true ).
     lo_entity_set->set_addressable( abap_true ).
-    lo_entity_set->set_has_ftxt_search( abap_false ).
+    lo_entity_set->set_has_ftxt_search( abap_true ).
     lo_entity_set->set_subscribable( abap_false ).
     lo_entity_set->set_filter_required( abap_false ).
   ENDMETHOD.

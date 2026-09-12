@@ -84,6 +84,11 @@ Bottom up, every layer is real, nothing is mocked:
 7. **Preview** — layers 1–5 in a service worker, layer 6 as static files, on
    GitHub Pages ([`docs/preview-deployments.md`](docs/preview-deployments.md)).
 
+The row **T0009 "Other client, must not leak"** is on purpose: it is seeded
+in client 001, a real system (client 123) would not show it. The transpiler
+has no implicit MANDT yet (`ANORMALIES.md`), so it leaks through; the demo
+keeps it visible as a live reminder, and a unit test pins the behaviour.
+
 ## Why
 
 The classic way to test an ABAP OData service is to have SAP. That gates every
