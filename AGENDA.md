@@ -239,6 +239,30 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       CP, datetime/guid/bool literals; inexpressible filters leave the table
       empty and pass the raw string. Unknown property → 400. 2026-09-11.
 
+## Call with Lars, 2026-09-12 (what was agreed; the details stay off the record)
+
+- **Upstream PRs are welcome, one fix at a time, small scope.** Anomalies go
+  upstream as separate fixes, not into our workaround pile. NPM releases lag
+  the merge; plan for it (#1829–#1832 merged the same day, release pending).
+- **open-abap-odata license (#39):** no license is deliberate; Lars leans
+  towards MIT but has not decided. Issue closed after the call. Our stance
+  stays: interfaces as the spec, clean-room MIT implementation here.
+- **open-abap-odata's original goal = ours:** a full OData runtime written in
+  ABAP so old Gateway services run on Steampunk without SEGW ("replace the
+  runtime, not the services").
+- **Nothing that auto-connects to a real SAP system** goes into Lars's repos.
+  A "local runtime → real system for missing FM/class, human in the loop"
+  bridge is a side project on our side only.
+- **Tooling stance (Lars):** catch mistakes with the linter, not with LLM
+  rules; no skills/MCP; Node is enough; DDIC/standard-class scaffolds in
+  abapGit form belong in `dependencies`.
+- **Look at:** open-abap-gui (browser-only front + transpiled back on GitHub
+  Pages, visual before/after diffs in PRs; classic reports → classes).
+- **Open:** collaboration model (PRs straight into open-abap-odata vs our
+  fork as the source); abapGit REST API as the blessed deploy path; whether a
+  local SADL / V4 / RAP simulator is needed at all. RFC and a DIAG front:
+  "cool but not necessary".
+
 ## Ideas parked (2026-09-11)
 
 - **DuckDB: done as a spike 2026-09-12** (section above). ClickHouse would
