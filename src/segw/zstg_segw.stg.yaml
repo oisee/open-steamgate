@@ -875,3 +875,14 @@ entities:
       ValueNa: {type: String(32), field: VALUE_NA}
       EdmCoreType: {type: String(32), field: EDM_CORE_TYPE}
       StgSeq: {type: Int32, field: STG_SEQ}
+  Import:
+    set: ImportSet
+    description: "POST an IWPR file as Content; the project's rows in every table are replaced"
+    keys: [Project]
+    properties:
+      Project: {type: String(30)}
+      Content: {type: String}
+      Rows: {type: Int32}
+      Tables: {type: Int32}
+    updatable: false
+    deletable: false

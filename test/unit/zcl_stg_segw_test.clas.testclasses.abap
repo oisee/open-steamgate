@@ -202,3 +202,150 @@ CLASS ltcl_tree IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+* POST ImportSet with an IWPR file as Content: zcl_stg_segw_import parses
+* it and replaces the project's rows in every table
+CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+  PRIVATE SECTION.
+    CONSTANTS gc_set TYPE string VALUE '/sap/opu/odata/sap/ZSTG_SEGW_SRV/ImportSet'.
+    METHODS setup.
+    METHODS import_writes_the_rows FOR TESTING.
+    METHODS import_replaces_the_project FOR TESTING.
+    METHODS unknown_field_is_400_untouched FOR TESTING.
+    METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
+    METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
+    METHODS entity_types RETURNING VALUE(rv_body) TYPE string.
+ENDCLASS.
+
+CLASS ltcl_import IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_SEGW_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_SEGW_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_SEGW_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+    DELETE FROM zstg_sbd_pr WHERE project = 'ZUT_IMP'.
+    DELETE FROM zstg_sbd_prt WHERE project = 'ZUT_IMP'.
+    DELETE FROM zstg_sbo_et WHERE project = 'ZUT_IMP'.
+  ENDMETHOD.
+
+  METHOD iwpr.
+    DATA lv_nl TYPE string.
+    lv_nl = cl_abap_char_utilities=>newline.
+    rv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
+      && `<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">` && lv_nl
+      && ` <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">` && lv_nl
+      && `  <asx:values>` && lv_nl
+      && `   <_-IWBEP_-I_SBD_PR>` && lv_nl
+      && `    <_-IWBEP_-I_SBD_PR>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>pr-1</NODE_UUID>` && lv_nl
+      && `     <PROJECT_TYPE>1</PROJECT_TYPE>` && lv_nl
+      && `    </_-IWBEP_-I_SBD_PR>` && lv_nl
+      && `   </_-IWBEP_-I_SBD_PR>` && lv_nl
+      && `   <_-IWBEP_-I_SBD_PRT>` && lv_nl
+      && `    <_-IWBEP_-I_SBD_PRT>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <SYLANGU>E</SYLANGU>` && lv_nl
+      && `     <DESCRIPTION>A &amp; B &lt;imported&gt;</DESCRIPTION>` && lv_nl
+      && `    </_-IWBEP_-I_SBD_PRT>` && lv_nl
+      && `   </_-IWBEP_-I_SBD_PRT>` && lv_nl
+      && `   <_-IWBEP_-I_SBO_ET>` && lv_nl
+      && `    <_-IWBEP_-I_SBO_ET>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>et-1</NODE_UUID>` && lv_nl
+      && `     <NAME>Travel</NAME>` && lv_nl
+      && `     <ABAP_STRUCT>ZSTG_DEMO</ABAP_STRUCT>` && lv_nl
+      && `    </_-IWBEP_-I_SBO_ET>` && lv_nl.
+    IF iv_second_type = abap_true.
+      rv_xml = rv_xml
+        && `    <_-IWBEP_-I_SBO_ET>` && lv_nl
+        && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+        && `     <NODE_UUID>et-2</NODE_UUID>` && lv_nl
+        && `     <NAME>Booking</NAME>` && lv_nl
+        && `    </_-IWBEP_-I_SBO_ET>` && lv_nl.
+    ENDIF.
+    rv_xml = rv_xml
+      && `   </_-IWBEP_-I_SBO_ET>` && lv_nl
+      && `  </asx:values>` && lv_nl
+      && ` </asx:abap>` && lv_nl
+      && `</abapGit>` && lv_nl.
+  ENDMETHOD.
+
+  METHOD post.
+    rs_response = zcl_stg_dispatcher=>dispatch( iv_method = 'POST'
+                                                iv_path   = gc_set
+                                                iv_body   = |\{"Content":"{ zcl_stg_json=>escape( iv_xml ) }"\}| ).
+  ENDMETHOD.
+
+  METHOD entity_types.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZUT_IMP'&$orderby=StgSeq` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/EntityTypeSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    rv_body = ls_response-body.
+  ENDMETHOD.
+
+  METHOD import_writes_the_rows.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Project":"ZUT_IMP"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":4' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Tables":3' ) ).
+
+    lv_body = entity_types( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Booking"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"StgSeq":2' ) ).
+
+* entities are unescaped on the way in
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/ProjectTextSet(Project='ZUT_IMP',Language='E')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Description":"A & B <imported>"' ) ).
+  ENDMETHOD.
+
+  METHOD import_replaces_the_project.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    ls_response = post( iwpr( abap_false ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":3' ) ).
+
+    lv_body = entity_types( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_body CS '"Name":"Booking"' ) ).
+  ENDMETHOD.
+
+  METHOD unknown_field_is_400_untouched.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_xml      TYPE string.
+    DATA lv_body     TYPE string.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+
+    lv_xml = iwpr( abap_false ).
+    REPLACE '<NAME>Travel</NAME>' IN lv_xml WITH '<NAME>Flight</NAME><MADE_UP>x</MADE_UP>'.
+    ls_response = post( lv_xml ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'SBO_ET.MADE_UP: not a field of ZSTG_SBO_ET' ) ).
+
+* the earlier import is still there, untouched
+    lv_body = entity_types( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Booking"' ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( lv_body CS '"Name":"Flight"' ) ).
+  ENDMETHOD.
+
+ENDCLASS.

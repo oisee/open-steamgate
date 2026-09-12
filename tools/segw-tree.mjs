@@ -10,13 +10,16 @@
 // compare with the file byte for byte.
 //
 // push / pull do the same through a running gateway (npm start) and
-// ZSTG_SEGW_SRV: push deletes the project's rows in every table and POSTs
-// the file's rows, pull GETs them ordered by StgSeq and writes the IWPR.
+// ZSTG_SEGW_SRV: push POSTs the file to ImportSet as Content, one call,
+// and zcl_stg_segw_import replaces the project's rows in the database
+// (--rows instead: DELETE the project's rows in every table and POST the
+// file's rows one by one, the generic CRUD only); pull GETs every set
+// ordered by StgSeq and writes the IWPR.
 //
 // Usage: node tools/segw-tree.mjs import <file.iwpr.xml> [--data data]
 //        node tools/segw-tree.mjs export <PROJECT> [--data data] [--out <file>]
 //        node tools/segw-tree.mjs check <file.iwpr.xml>... (exit 1 on a difference)
-//        node tools/segw-tree.mjs push <file.iwpr.xml> [--url http://localhost:3030]
+//        node tools/segw-tree.mjs push <file.iwpr.xml> [--rows] [--url http://localhost:3030]
 //        node tools/segw-tree.mjs pull <PROJECT> [--url http://localhost:3030] [--out <file>]
 import {existsSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -165,7 +168,13 @@ function keyOf(result, tag, spec) {
   return spec[tag].keys.map((k) => `${propertyName(k)}='${encodeURIComponent(String(result[propertyName(k)] ?? "")).replaceAll("'", "''")}'`).join(",");
 }
 
-// replace the project's rows in every table with the file's
+// the file to ImportSet: the service parses it and replaces the project
+export async function pushFile(base, xml) {
+  const json = await odata(base, "POST", "/ImportSet", {Content: xml});
+  return {project: json.d.Project, posted: json.d.Rows, tables: json.d.Tables};
+}
+
+// replace the project's rows in every table with the file's, row by row
 export async function push(base, tables, project, spec) {
   let deleted = 0;
   let posted = 0;
@@ -258,10 +267,16 @@ async function main(args) {
   }
   const url = opt("--url", DEFAULT_URL);
   if (cmd === "push") {
-    const tables = importIwpr(readFileSync(rest[0], "utf8").replace(/^\uFEFF/, ""), spec);
-    const project = projectOf(tables);
-    const {deleted, posted} = await push(url, tables, project, spec);
-    console.log(`${project}: ${posted} rows posted to ${url}${SERVICE}, ${deleted} old rows deleted`);
+    const xml = readFileSync(rest[0], "utf8").replace(/^\uFEFF/, "");
+    if (args.includes("--rows")) {
+      const tables = importIwpr(xml, spec);
+      const project = projectOf(tables);
+      const {deleted, posted} = await push(url, tables, project, spec);
+      console.log(`${project}: ${posted} rows posted to ${url}${SERVICE}, ${deleted} old rows deleted`);
+    } else {
+      const {project, posted, tables} = await pushFile(url, xml);
+      console.log(`${project}: ${posted} rows into ${tables} tables through ${url}${SERVICE}/ImportSet`);
+    }
     return 0;
   }
   if (cmd === "pull") {

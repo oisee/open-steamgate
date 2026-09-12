@@ -106,15 +106,26 @@ reads is unaffected: it parses the file and does not care about order.
 ## Through the service
 
 `segw-tree push <file.iwpr.xml> [--url http://localhost:3030]` does the
-import against a running gateway (`npm start`): for every table it GETs the
-project's rows from `ZSTG_SEGW_SRV`, DELETEs them by key and POSTs the
-file's rows (`StgSeq` included); `pull <PROJECT>` GETs every set with
-`$filter=Project eq '...'&$orderby=StgSeq` and writes the IWPR. The round
-trip then goes through the database and the generic CRUD of
-`zcl_stg_sadl_dpc`, not through JSON files: the test pulls the seeded
-`ZSTG_MAPPED` and gets the fixture's bytes, pushes `zstg_mini` twice and
-pulls it back byte for byte both times (a push replaces, it does not
-double). One gateway bug surfaced on the way: a key value with a backslash
+import against a running gateway (`npm start`) in one call: `POST
+ImportSet` with the file as `Content`. `zcl_stg_segw_import` (through the
+hand-written `zcl_zstg_segw_dpc_ext`, the only ABAP of the service) reads
+the `<T><T>row</T></T>` nesting, turns every row into a line of `ZSTG_<T>`
+through the generated table source (`ASSIGN COMPONENT` per field, so a
+field SEGW never writes is a 400 with `SBO_ET.MADE_UP: not a field of
+ZSTG_SBO_ET` and nothing is written), deletes the project's rows in every
+`ZSTG_SB*` table and inserts the new ones; the response is `Project`,
+`Rows`, `Tables`. The editor sends the file the user picked the same way,
+one `$batch` entry. A function import was the first idea, but its
+parameters travel in the URL and a 30 KB file does not fit a request line.
+`push --rows` is the other route, the generic CRUD only: GET the project's
+rows per set, DELETE by key, POST the rows with `StgSeq`.
+
+`pull <PROJECT>` GETs every set with `$filter=Project eq
+'...'&$orderby=StgSeq` and writes the IWPR. The round trip goes through the
+database, not through JSON files: the test pulls the seeded `ZSTG_MAPPED`
+and gets the fixture's bytes, pushes both fixtures through `ImportSet` and
+row by row and pulls them back byte for byte, twice (a push replaces, it
+does not double). One gateway bug surfaced on the way: a key value with a backslash
 (`DS_ATT_PATH`, `IT_TRAVEL_ID_RANGE\HIGH`) reached `__metadata.uri`
 unescaped and broke the JSON; `zcl_stg_json` now escapes the URI.
 
@@ -137,5 +148,6 @@ of the narrowed file list, not language findings.
   (list of projects, the tree of a project, property sheets), and a
   `Generate` action that runs stg-compile / segw-gen over the tables
   instead of a file.
-- `push` as an action of the service itself (upload a file, the DPC
-  imports it), so the editor can take an IWPR without a command line.
+- Export as a read of the service (`GET ExportSet('ZSTG_DEMO')` with the
+  IWPR as `Content`), the mirror of `ImportSet`, so the editor can hand a
+  project back as a file.

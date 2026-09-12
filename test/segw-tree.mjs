@@ -3,7 +3,7 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, push, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
 import {startServer} from "./start.mjs";
 
 // The SEGW project tree as our tables: the spec derived from real SEGW
@@ -159,5 +159,28 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MINI", spec), "ZSTG_MINI", spec)).to.equal(xml);
     // the other project is untouched
     expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MAPPED", spec), "ZSTG_MAPPED", spec)).to.equal(readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"));
+  });
+
+  // the file as one POST to ImportSet: zcl_stg_segw_import parses it in ABAP
+  it("POST ImportSet takes the file and the pull gives it back byte for byte", async () => {
+    for (const name of ["zstg_mini", "zstg_mapped"]) {
+      const xml = readFileSync(`test/fixtures/segw/${name}.iwpr.xml`, "utf8");
+      const tables = importIwpr(xml, spec);
+      const rows = [...tables.values()].reduce((n, r) => n + r.length, 0);
+      const result = await pushFile(DEFAULT_URL, xml);
+      expect(result, name).to.deep.equal({project: projectOf(tables), posted: rows, tables: tables.size});
+      expect(exportIwpr(await pull(DEFAULT_URL, result.project, spec), result.project, spec), name).to.equal(xml);
+    }
+  });
+
+  it("POST ImportSet refuses a field SEGW never writes and leaves the tables alone", async () => {
+    const xml = readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8");
+    const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/ImportSet`, {
+      method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({Content: xml.replace("<NAME>Travel</NAME>", "<NAME>Travel</NAME>\n     <MADE_UP>x</MADE_UP>")}),
+    });
+    expect(res.status).to.equal(400);
+    expect(await res.text()).to.contain("SBO_ET.MADE_UP: not a field of ZSTG_SBO_ET");
+    expect(exportIwpr(await pull(DEFAULT_URL, "ZSTG_MINI", spec), "ZSTG_MINI", spec)).to.equal(xml);
   });
 });

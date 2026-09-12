@@ -15,7 +15,8 @@
 //
 // Without arguments the script turns the spec into src/segw/ddic/
 // zstg_<table>.tabl.xml and src/segw/zstg_segw.stg.yaml (ZSTG_SEGW_SRV, one
-// entity per table). Every field is CHAR of the size class above the
+// entity per table, plus ImportSet: POST an IWPR file as Content, served by
+// the hand-written zcl_zstg_segw_dpc_ext). Every field is CHAR of the size class above the
 // longest value seen (1, 4, 10, 32, 40, 60, 80), LANG for SYLANGU, STRING
 // above 80: SEGW's flags, counters and timestamps come back out of the
 // tables exactly as they went in, which is what a byte-identical export
@@ -298,6 +299,20 @@ entities:
     }
     s += `      ${propertyName(SEQ_FIELD)}: {type: Int32, field: ${SEQ_FIELD}}\n`;
   }
+  // the import: POST an IWPR file as Content, the project's rows are
+  // replaced (zcl_stg_segw_import through zcl_zstg_segw_dpc_ext)
+  s += `  Import:
+    set: ImportSet
+    description: "POST an IWPR file as Content; the project's rows in every table are replaced"
+    keys: [Project]
+    properties:
+      Project: {type: String(30)}
+      Content: {type: String}
+      Rows: {type: Int32}
+      Tables: {type: Int32}
+    updatable: false
+    deletable: false
+`;
   return s;
 }
 

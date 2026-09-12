@@ -219,7 +219,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `npm run segw:tree import <file.iwpr.xml>` puts a project into
   `data/zstg_sb*.tabu.json` (seeded at start), `export <PROJECT>` writes it
   back byte-identically for every SEGW-written file; `data/` holds the
-  mapped fixture. `npm run segw:cloud` is the informational abaplint pass
+  mapped fixture. `push <file>` / `pull <PROJECT>` do the same through a
+  running gateway: `POST ImportSet` with the file as `Content`
+  (`zcl_stg_segw_import` via the hand-written `zcl_zstg_segw_dpc_ext` in
+  `src/segw/`, kept by `stg-compile --all`), GET per set for the pull. `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
 - `npm run web:preview` bundles the gateway into a service worker (`build/`,
