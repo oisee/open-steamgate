@@ -49,12 +49,63 @@
       </Annotations>
       <Annotations Target="ZSTG_DEMO_SRV.Travel/TravelId">
         <Annotation Term="Common.Label" String="Travel"/>
+        <Annotation Term="Common.ValueList">
+          <Record Type="Common.ValueListType">
+            <PropertyValue Property="Label" String="Travels"/>
+            <PropertyValue Property="CollectionPath" String="TravelSet"/>
+            <PropertyValue Property="SearchSupported" Bool="false"/>
+            <PropertyValue Property="Parameters">
+              <Collection>
+                <Record Type="Common.ValueListParameterInOut">
+                  <PropertyValue Property="LocalDataProperty" PropertyPath="TravelId"/>
+                  <PropertyValue Property="ValueListProperty" String="TravelId"/>
+                </Record>
+                <Record Type="Common.ValueListParameterDisplayOnly">
+                  <PropertyValue Property="ValueListProperty" String="Description"/>
+                </Record>
+                <Record Type="Common.ValueListParameterDisplayOnly">
+                  <PropertyValue Property="ValueListProperty" String="StatusText"/>
+                </Record>
+              </Collection>
+            </PropertyValue>
+          </Record>
+        </Annotation>
       </Annotations>
       <Annotations Target="ZSTG_DEMO_SRV.Travel/Description">
         <Annotation Term="Common.Label" String="Description"/>
       </Annotations>
       <Annotations Target="ZSTG_DEMO_SRV.Travel/Status">
         <Annotation Term="Common.Label" String="Status"/>
+        <Annotation Term="Common.Text" Path="StatusText">
+          <Annotation Term="UI.TextArrangement" EnumMember="UI.TextArrangementType/TextFirst"/>
+        </Annotation>
+        <Annotation Term="Common.ValueList">
+          <Record Type="Common.ValueListType">
+            <PropertyValue Property="Label" String="Status"/>
+            <PropertyValue Property="CollectionPath" String="StatusVHSet"/>
+            <PropertyValue Property="SearchSupported" Bool="true"/>
+            <PropertyValue Property="Parameters">
+              <Collection>
+                <Record Type="Common.ValueListParameterInOut">
+                  <PropertyValue Property="LocalDataProperty" PropertyPath="Status"/>
+                  <PropertyValue Property="ValueListProperty" String="Status"/>
+                </Record>
+                <Record Type="Common.ValueListParameterDisplayOnly">
+                  <PropertyValue Property="ValueListProperty" String="Text"/>
+                </Record>
+              </Collection>
+            </PropertyValue>
+          </Record>
+        </Annotation>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Travel/StatusText">
+        <Annotation Term="Common.Label" String="Status text"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.StatusVH/Status">
+        <Annotation Term="Common.Label" String="Status"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.StatusVH/Text">
+        <Annotation Term="Common.Label" String="Status text"/>
       </Annotations>
       <Annotations Target="ZSTG_DEMO_SRV.Travel/Seats">
         <Annotation Term="Common.Label" String="Seats"/>
