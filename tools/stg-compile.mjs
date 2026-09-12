@@ -49,7 +49,7 @@
 //       returns: {entity: Travel, set: TravelSet, multiplicity: "1"}   # or {complex: CT_X}
 //       for: Travel
 //       parameters: {TravelId: String(8)}
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
@@ -434,6 +434,63 @@ export function compile(text, opts = {}) {
   return {model: m, iwpr, files, classes: generated.files, ext: generated.ext, segw: generated.model, warnings};
 }
 
+// ---------------------------------------------------- the build step
+
+function walk(dir, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) {
+      if (e !== "node_modules" && e !== ".git") {
+        walk(p, out);
+      }
+    } else {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+// `npm run transpile` step: every <name>.stg.yaml under src/ compiles into
+// gen/stg/<project>/ (the classes, IWSV and IWMO; the registry reads gen/
+// too), except the files a developer already keeps under src/ by the same
+// name: the demo's hand-written classes and registration objects win, so
+// the YAML there documents the model and is checked by test/stg-compile.mjs
+// without producing a second copy of the service.
+export function compileAll(root = "src", out = "gen/stg", libs = []) {
+  // by object, not by file: a hand-written zcl_x.clas.abap keeps the
+  // generated zcl_x.clas.xml out as well
+  const objectOf = (name) => basename(name).toLowerCase().replace(/\.(abap|xml)$/, "");
+  const existing = new Set(walk(root).map(objectOf));
+  const functionModules = loadFunctionGroups([root, ...libs]);
+  const report = [];
+  for (const file of walk(root).filter((p) => p.endsWith(".stg.yaml")).sort()) {
+    const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules});
+    const target = join(out, result.model.project.toLowerCase().replaceAll("/", "#"));
+    const written = [];
+    const kept = [];
+    for (const [name, content] of Object.entries({...result.files, ...result.classes, ...result.ext})) {
+      if (name.endsWith(".iwpr.xml")) {
+        continue; // the tree itself is not ABAP; --out writes it
+      }
+      if (existing.has(objectOf(name))) {
+        kept.push(name);
+        continue;
+      }
+      mkdirSync(target, {recursive: true});
+      writeFileSync(join(target, name), content);
+      written.push(name);
+    }
+    report.push({file, project: result.model.project, service: result.model.service, written, kept, warnings: result.warnings});
+  }
+  return report;
+}
+
 // ------------------------------------------------------------------ CLI
 
 if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
@@ -442,8 +499,17 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
   const file = args.find((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
   const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
+  if (args.includes("--all")) {
+    for (const r of compileAll("src", "gen/stg", libs)) {
+      console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} kept from src/)` : ""}`);
+      for (const w of r.warnings) {
+        console.log(`  warning: ${w}`);
+      }
+    }
+    process.exit(0);
+  }
   if (!file) {
-    console.error("usage: stg-compile.mjs <service.stg.yaml> [--out <dir>] [--lib <folder with *.fugr.xml>]...");
+    console.error("usage: stg-compile.mjs <service.stg.yaml> [--out <dir>] [--lib <folder with *.fugr.xml>]... | --all (every src/**/*.stg.yaml into gen/stg/)");
     process.exit(2);
   }
   const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules: loadFunctionGroups([dirname(file), ...libs])});
