@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>open-steamgate demo: Travels</title>
+  <style>
+    /* a Fiori Elements app fills the page; without this html/body collapse to
+       0 height and the NavContainer (overflow hidden) clips everything */
+    html, body { height: 100%; margin: 0; }
+  </style>
   <script id="sap-ui-bootstrap"
     src="https://ui5.sap.com/1.120.50/resources/sap-ui-core.js"
     data-sap-ui-theme="sap_horizon"
@@ -15,6 +20,6 @@
     data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"></script>
 </head>
 <body class="sapUiBody" id="content">
-  <div data-sap-ui-component data-name="stg.travel" data-id="container" data-settings='{"id": "stg.travel"}'></div>
+  <div data-sap-ui-component data-name="stg.travel" data-id="container" data-height="100%" data-settings='{"id": "stg.travel"}' style="height: 100%"></div>
 </body>
 </html>

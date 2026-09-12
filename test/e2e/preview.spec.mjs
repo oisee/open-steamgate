@@ -29,6 +29,14 @@ test("the list report runs against the gateway in the service worker", async () 
     await expect(page.getByText("Aarhus to Odense")).toBeVisible();
     await expect(rows).toHaveCount(4);
 
+    // painted, not only present: an ancestor with height 0 and overflow hidden
+    // would leave the row in the DOM and the page blank
+    const painted = await rows.first().evaluate((row) => {
+      const r = row.getBoundingClientRect();
+      return row.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+    });
+    expect(painted).toBe(true);
+
     expect(answered.some((r) => r.includes("$metadata") && r.startsWith("200"))).toBe(true);
     expect(answered.some((r) => r.includes("(sw)"))).toBe(true);
     expect(answered.filter((r) => !r.startsWith("2"))).toEqual([]);

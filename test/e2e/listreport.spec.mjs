@@ -25,6 +25,14 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
   await expect(page.getByText("Aarhus to Odense")).toBeVisible();
   await expect(rows).toHaveCount(4);
 
+  // painted, not only present: an ancestor with height 0 and overflow hidden
+  // would leave the row in the DOM and the page blank
+  const painted = await rows.first().evaluate((row) => {
+    const r = row.getBoundingClientRect();
+    return row.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+  expect(painted).toBe(true);
+
   // the app really went through $metadata and the entity set
   expect(odata.some((r) => r.includes("$metadata"))).toBe(true);
   // in batch mode the entity-set request travels inside the $batch body
