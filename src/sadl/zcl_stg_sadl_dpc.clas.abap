@@ -35,6 +35,7 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
     METHODS key_where
       IMPORTING
         it_key_tab      TYPE /iwbep/t_mgw_name_value_pair
+        is_set          TYPE zcl_stg_model_info=>ty_entity_set OPTIONAL
       RETURNING
         VALUE(rv_where) TYPE string.
 
@@ -60,6 +61,14 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
         it_groupby TYPE string_table
       CHANGING
         ct_data    TYPE STANDARD TABLE.
+
+* a create without its keys is refused before the database sees it
+    METHODS check_keys
+      IMPORTING
+        is_entity TYPE zcl_stg_cds_registry=>ty_entity
+        is_row    TYPE any
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
 
     METHODS sql_literal
       IMPORTING
@@ -130,11 +139,21 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD key_where.
-    DATA ls_key TYPE /iwbep/s_mgw_name_value_pair.
+* the key names are OData properties; a DDIC-mapped entity's columns are
+* the ABAP field names behind them (NodeUuid -> NODE_UUID), a CDS
+* projection's are the property names themselves
+    DATA ls_key      TYPE /iwbep/s_mgw_name_value_pair.
+    DATA ls_property TYPE zcl_stg_model_info=>ty_property.
+    DATA lv_field    TYPE string.
 
     LOOP AT it_key_tab INTO ls_key.
+      lv_field = to_upper( ls_key-name ).
+      READ TABLE is_set-properties INTO ls_property WITH KEY name = ls_key-name.
+      IF sy-subrc = 0 AND ls_property-fieldname IS NOT INITIAL.
+        lv_field = ls_property-fieldname.
+      ENDIF.
       rv_where = and_where( iv_left  = rv_where
-                            iv_right = |{ to_upper( ls_key-name ) } = { sql_literal( ls_key-value ) }| ).
+                            iv_right = |{ lv_field } = { sql_literal( ls_key-value ) }| ).
     ENDLOOP.
   ENDMETHOD.
 
@@ -360,7 +379,8 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     IF lo_context->mt_navigation_path IS NOT INITIAL.
       lv_where = navigation_where( lo_context ).
     ELSE.
-      lv_where = key_where( lo_context->mt_key_tab ).
+      lv_where = key_where( it_key_tab = lo_context->mt_key_tab
+                            is_set     = lo_context->ms_set ).
     ENDIF.
 
     lr_data = lo_source->read( iv_where   = lv_where
@@ -415,24 +435,132 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD if_sadl_gw_dpc~create_entity.
-    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
-      EXPORTING
-        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
-        method = 'SADL CREATE_ENTITY'.
+* generic create over a DDIC table: the payload becomes a row, the client
+* from sy-mandt, the keys must be in the payload
+    DATA ls_entity TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA lo_source TYPE REF TO zif_stg_cds_source.
+    DATA lr_line   TYPE REF TO data.
+    DATA lv_subrc  TYPE sy-subrc.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <lv_mandt> TYPE any.
+
+    ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
+    lo_source = source_of( ls_entity ).
+    lr_line = lo_source->create_line( ).
+    ASSIGN lr_line->* TO <ls_row>.
+    io_data_provider->read_entry_data( IMPORTING es_data = <ls_row> ).
+    ASSIGN COMPONENT 'MANDT' OF STRUCTURE <ls_row> TO <lv_mandt>.
+    IF sy-subrc = 0.
+      <lv_mandt> = sy-mandt.
+    ENDIF.
+    check_keys( EXPORTING is_entity = ls_entity
+                          is_row    = <ls_row> ).
+    lv_subrc = lo_source->insert( <ls_row> ).
+    IF lv_subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid  = /iwbep/cx_mgw_busi_exception=>business_error
+          message = |{ io_tech_request_context->get_entity_set_name( ) }: an entity with these keys exists|.
+    ENDIF.
+    es_data = <ls_row>.
   ENDMETHOD.
 
   METHOD if_sadl_gw_dpc~update_entity.
-    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
-      EXPORTING
-        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
-        method = 'SADL UPDATE_ENTITY'.
+* generic update: the keys of the request, the payload over the stored row
+    DATA ls_entity TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA lo_source TYPE REF TO zif_stg_cds_source.
+    DATA lr_line   TYPE REF TO data.
+    DATA lv_subrc  TYPE sy-subrc.
+    DATA lo_read   TYPE REF TO /iwbep/if_mgw_req_entity.
+    DATA lr_keys   TYPE REF TO data.
+    DATA ls_field  TYPE zcl_stg_cds_registry=>ty_field.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <ls_keys>  TYPE any.
+    FIELD-SYMBOLS <lv_key>   TYPE any.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+
+    ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
+    lo_source = source_of( ls_entity ).
+    lr_line = lo_source->create_line( ).
+    ASSIGN lr_line->* TO <ls_row>.
+    lo_read ?= io_tech_request_context.
+    if_sadl_gw_dpc~get_entity( EXPORTING io_tech_request_context = lo_read
+                               IMPORTING es_data                 = <ls_row> ).
+    IF <ls_row> IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid  = /iwbep/cx_mgw_busi_exception=>business_error
+          message = |{ io_tech_request_context->get_entity_set_name( ) }: no entity with these keys|.
+    ENDIF.
+    io_data_provider->read_entry_data( IMPORTING es_data = <ls_row> ).
+* the keys come from the URL, a payload cannot move the row (the context
+* clears what it fills, so the keys are read apart and copied over)
+    lr_keys = lo_source->create_line( ).
+    ASSIGN lr_keys->* TO <ls_keys>.
+    io_tech_request_context->get_converted_keys( IMPORTING es_key_values = <ls_keys> ).
+    LOOP AT ls_entity-fields INTO ls_field WHERE is_key = abap_true.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_keys> TO <lv_key>.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
+      IF sy-subrc = 0.
+        <lv_value> = <lv_key>.
+      ENDIF.
+    ENDLOOP.
+    ASSIGN COMPONENT 'MANDT' OF STRUCTURE <ls_row> TO <lv_value>.
+    IF sy-subrc = 0.
+      <lv_value> = sy-mandt.
+    ENDIF.
+    lv_subrc = lo_source->update( <ls_row> ).
+    IF lv_subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid  = /iwbep/cx_mgw_busi_exception=>business_error
+          message = |{ io_tech_request_context->get_entity_set_name( ) }: update failed|.
+    ENDIF.
+    es_data = <ls_row>.
   ENDMETHOD.
 
   METHOD if_sadl_gw_dpc~delete_entity.
-    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
-      EXPORTING
-        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
-        method = 'SADL DELETE_ENTITY'.
+    DATA ls_entity TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA lo_source TYPE REF TO zif_stg_cds_source.
+    DATA lr_line   TYPE REF TO data.
+    DATA lv_subrc  TYPE sy-subrc.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <lv_mandt> TYPE any.
+
+    ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
+    lo_source = source_of( ls_entity ).
+    lr_line = lo_source->create_line( ).
+    ASSIGN lr_line->* TO <ls_row>.
+    io_tech_request_context->get_converted_keys( IMPORTING es_key_values = <ls_row> ).
+    ASSIGN COMPONENT 'MANDT' OF STRUCTURE <ls_row> TO <lv_mandt>.
+    IF sy-subrc = 0.
+      <lv_mandt> = sy-mandt.
+    ENDIF.
+    lv_subrc = lo_source->delete( <ls_row> ).
+    IF lv_subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid  = /iwbep/cx_mgw_busi_exception=>business_error
+          message = |{ io_tech_request_context->get_entity_set_name( ) }: no entity with these keys|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD check_keys.
+    DATA ls_field TYPE zcl_stg_cds_registry=>ty_field.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+
+    LOOP AT is_entity-fields INTO ls_field WHERE is_key = abap_true.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE is_row TO <lv_value>.
+      IF sy-subrc = 0 AND <lv_value> IS INITIAL.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING
+            textid  = /iwbep/cx_mgw_busi_exception=>business_error
+            message = |{ is_entity-name }: key { ls_field-name } is missing|.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD if_sadl_gw_dpc~execute_action.

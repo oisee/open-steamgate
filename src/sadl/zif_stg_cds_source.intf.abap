@@ -15,4 +15,24 @@ INTERFACE zif_stg_cds_source PUBLIC.
     RETURNING
       VALUE(rr_line) TYPE REF TO data.
 
+* writes, for sources over one DDIC table (generated from the table): the
+* line is the table's row type, keys inside it; sy-subrc as Open SQL sets it
+  METHODS insert
+    IMPORTING
+      is_line         TYPE any
+    RETURNING
+      VALUE(rv_subrc) TYPE sy-subrc.
+
+  METHODS update
+    IMPORTING
+      is_line         TYPE any
+    RETURNING
+      VALUE(rv_subrc) TYPE sy-subrc.
+
+  METHODS delete
+    IMPORTING
+      is_line         TYPE any
+    RETURNING
+      VALUE(rv_subrc) TYPE sy-subrc.
+
 ENDINTERFACE.

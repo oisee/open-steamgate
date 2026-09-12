@@ -1,0 +1,30 @@
+project: ZSTG_SEGW
+service: ZSTG_SEGW_SRV
+description: "SEGW as an application: the project tree, served from its own tables"
+
+entities:
+  Project:
+    set: ProjectSet
+    source: {table: ZSTG_SBD_PR}
+    keys: [Project, NodeUuid]
+    properties:
+      Project: {type: String(30), field: PROJECT, label: Project}
+      NodeUuid: {type: String(32), field: NODE_UUID, label: Node}
+      LastChgTime: {type: "Decimal(21,7)", field: LAST_CHG_TIME, label: Last change}
+      ProjectType: {type: String(1), field: PROJECT_TYPE, label: Type}
+      GenDate: {type: DateTime, field: GEN_DATE, label: Generated on}
+      GenTime: {type: Time, field: GEN_TIME, label: Generated at}
+    creatable: true
+    updatable: true
+    deletable: true
+  ProjectText:
+    set: ProjectTextSet
+    source: {table: ZSTG_SBD_PRT}
+    keys: [Project, Language]
+    properties:
+      Project: {type: String(30), field: PROJECT, label: Project}
+      Language: {type: String(1), field: SYLANGU, label: Language}
+      Description: {type: String(60), field: DESCRIPTION, label: Description}
+    creatable: true
+    updatable: true
+    deletable: true

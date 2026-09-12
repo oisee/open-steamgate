@@ -201,6 +201,15 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.
+- `table:` sources are read and written generically: `tools/cds2ddic.mjs`
+  emits `gen/cds/zcl_stg_tab_<table>` (read / insert / update / delete over
+  the table, `zif_stg_cds_source`) for every TABL under `src/`, and
+  `zcl_stg_sadl_dpc` serves POST / PUT / DELETE / GET by key for the
+  generated DDIC-mapped DPCs (keys checked, MANDT set, duplicates and
+  unknown keys are 400). `src/segw/` is SEGW as an application on top of
+  that: the project tree as Z-tables (`zstg_sbd_*`, `src/segw/ddic/`) behind
+  `ZSTG_SEGW_SRV` (`src/segw/zstg_segw.stg.yaml`, compiled by `stg-compile
+  --all`); `test/unit/zcl_stg_segw_test` is the CRUD round trip.
 - `npm run web:preview` bundles the gateway into a service worker (`build/`,
   sql.js, no server); `npm run e2e:preview` checks it in Chromium; the
   `preview deployment` workflow publishes `main/` and `pr-<n>/` to GitHub

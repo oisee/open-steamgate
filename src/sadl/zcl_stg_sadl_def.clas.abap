@@ -149,8 +149,11 @@ CLASS zcl_stg_sadl_def IMPLEMENTATION.
   METHOD structure_by_set.
     DATA ls_structure TYPE ty_structure.
 
+* an RDS project names the structure after the entity type (set = name +
+* Set), a DDIC-mapped project after the entity set itself
     LOOP AT mt_structures INTO ls_structure.
-      IF to_upper( set_name_of( ls_structure-name ) ) = to_upper( iv_entity_set ).
+      IF to_upper( set_name_of( ls_structure-name ) ) = to_upper( iv_entity_set )
+          OR to_upper( ls_structure-name ) = to_upper( iv_entity_set ).
         rs_structure = ls_structure.
         RETURN.
       ENDIF.

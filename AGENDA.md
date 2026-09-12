@@ -412,6 +412,17 @@ the generator, the editor is the file.
    per-operation `function:`/`searchhelp:` mappings (the YAML twin of the
    mapped fixture gives segw-gen's methods method for method). Not yet:
    complex types, Include, annotations, function imports over a module.
+4. **SEGW as an application. Foundation 2026-09-12 night:** generic CRUD
+   over `table:` sources (`zcl_stg_tab_<table>` classes from cds2ddic,
+   create / update / delete / get_entity in `zcl_stg_sadl_dpc`), the first
+   two project-tree tables `ZSTG_SBD_PR` / `ZSTG_SBD_PRT` under
+   `src/segw/ddic/` and `ZSTG_SEGW_SRV` from `src/segw/zstg_segw.stg.yaml`
+   (`ltcl_crud`: POST 201, GET, PUT 204, `$filter`, DELETE 204, 404 after).
+   Next: the remaining `SBD_*` / `SBO_*` tables segw-gen reads (keys
+   PROJECT + NODE_UUID, texts + SYLANGU), `tools/segw-tree.mjs` import
+   (IWPR → `data/*.tabu.json`) / export (tables → IWPR) with a byte-identical
+   round trip on the mapped fixture and the demo YAML, and an informational
+   abaplint pass with `syntax.version: Cloud` over `src/segw/**`.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
