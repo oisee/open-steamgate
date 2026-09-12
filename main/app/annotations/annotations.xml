@@ -24,6 +24,7 @@
           <Collection>
             <PropertyPath>Status</PropertyPath>
             <PropertyPath>TravelId</PropertyPath>
+            <PropertyPath>Description</PropertyPath>
           </Collection>
         </Annotation>
         <Annotation Term="UI.Facets">
