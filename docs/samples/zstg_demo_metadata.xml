@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" xmlns:sap="http://www.sap.com/Protocols/SAPData" Version="1.0">
+  <edmx:DataServices m:DataServiceVersion="2.0">
+    <Schema xmlns="http://schemas.microsoft.com/ado/2008/09/edm" Namespace="ZSTG_DEMO_SRV" xml:lang="en" sap:schema-version="1">
+      <Annotation xmlns="http://docs.oasis-open.org/odata/ns/edm" Term="Core.SchemaVersion" String="1.0.0"/>
+      <EntityType Name="Travel" sap:content-version="1">
+        <Key>
+          <PropertyRef Name="TravelId"/>
+        </Key>
+        <Property Name="TravelId" Type="Edm.String" Nullable="false" MaxLength="8" sap:unicode="false" sap:label="TRAVEL_ID" sap:creatable="true" sap:updatable="false" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="Description" Type="Edm.String" Nullable="true" MaxLength="40" sap:unicode="false" sap:label="DESCRIPTION" sap:creatable="true" sap:updatable="true" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="Status" Type="Edm.String" Nullable="true" MaxLength="1" sap:unicode="false" sap:label="STATUS" sap:creatable="true" sap:updatable="true" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="Seats" Type="Edm.Int32" Nullable="true" sap:unicode="false" sap:label="SEATS" sap:creatable="true" sap:updatable="true" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="StatusText" Type="Edm.String" Nullable="true" MaxLength="40" sap:unicode="false" sap:label="STATUS_TEXT" sap:creatable="false" sap:updatable="false" sap:sortable="false" sap:filterable="false"/>
+        <NavigationProperty Name="to_Bookings" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="FromRole_TravelToBookings" ToRole="ToRole_TravelToBookings"/>
+      </EntityType>
+      <EntityType Name="Booking" sap:content-version="1">
+        <Key>
+          <PropertyRef Name="TravelId"/>
+          <PropertyRef Name="BookingId"/>
+        </Key>
+        <Property Name="TravelId" Type="Edm.String" Nullable="false" MaxLength="8" sap:unicode="false" sap:label="TRAVEL_ID" sap:creatable="true" sap:updatable="false" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="BookingId" Type="Edm.String" Nullable="false" MaxLength="4" sap:unicode="false" sap:label="BOOKING_ID" sap:creatable="true" sap:updatable="false" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="Customer" Type="Edm.String" Nullable="true" MaxLength="40" sap:unicode="false" sap:label="CUSTOMER" sap:creatable="true" sap:updatable="true" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="FlightDate" Type="Edm.DateTime" Nullable="true" Precision="0" sap:display-format="Date" sap:unicode="false" sap:label="FLIGHT_DATE" sap:creatable="true" sap:updatable="true" sap:sortable="true" sap:filterable="true"/>
+        <NavigationProperty Name="to_Travel" Relationship="ZSTG_DEMO_SRV.TravelToBookings" FromRole="ToRole_TravelToBookings" ToRole="FromRole_TravelToBookings"/>
+      </EntityType>
+      <EntityType Name="StatusVH" sap:content-version="1">
+        <Key>
+          <PropertyRef Name="Status"/>
+        </Key>
+        <Property Name="Status" Type="Edm.String" Nullable="false" MaxLength="1" sap:unicode="false" sap:label="STATUS" sap:creatable="false" sap:updatable="false" sap:sortable="true" sap:filterable="true"/>
+        <Property Name="Text" Type="Edm.String" Nullable="true" MaxLength="40" sap:unicode="false" sap:label="STATUS_TEXT" sap:creatable="false" sap:updatable="false" sap:sortable="true" sap:filterable="true"/>
+      </EntityType>
+      <Association Name="TravelToBookings" sap:content-version="1">
+        <End Type="ZSTG_DEMO_SRV.Travel" Multiplicity="1" Role="FromRole_TravelToBookings"/>
+        <End Type="ZSTG_DEMO_SRV.Booking" Multiplicity="*" Role="ToRole_TravelToBookings"/>
+        <ReferentialConstraint>
+          <Principal Role="FromRole_TravelToBookings">
+            <PropertyRef Name="TravelId"/>
+          </Principal>
+          <Dependent Role="ToRole_TravelToBookings">
+            <PropertyRef Name="TravelId"/>
+          </Dependent>
+        </ReferentialConstraint>
+      </Association>
+      <EntityContainer Name="ZSTG_DEMO_SRV_Entities" m:IsDefaultEntityContainer="true" sap:supported-formats="json">
+        <EntitySet Name="TravelSet" EntityType="ZSTG_DEMO_SRV.Travel" sap:creatable="true" sap:updatable="true" sap:deletable="true" sap:pageable="true" sap:searchable="true" sap:content-version="1"/>
+        <EntitySet Name="BookingSet" EntityType="ZSTG_DEMO_SRV.Booking" sap:creatable="true" sap:updatable="true" sap:deletable="true" sap:pageable="true" sap:content-version="1"/>
+        <EntitySet Name="StatusVHSet" EntityType="ZSTG_DEMO_SRV.StatusVH" sap:creatable="false" sap:updatable="false" sap:deletable="false" sap:pageable="true" sap:searchable="true" sap:content-version="1"/>
+        <FunctionImport Name="CancelTravel" ReturnType="ZSTG_DEMO_SRV.Travel" EntitySet="TravelSet" m:HttpMethod="POST" sap:action-for="ZSTG_DEMO_SRV.Travel">
+          <Parameter Name="TravelId" Type="Edm.String" Mode="In" MaxLength="8"/>
+        </FunctionImport>
+        <FunctionImport Name="TravelCount" m:HttpMethod="GET">
+          <Parameter Name="Status" Type="Edm.String" Mode="In" MaxLength="1"/>
+        </FunctionImport>
+        <AssociationSet Name="TravelToBookingsSet" Association="ZSTG_DEMO_SRV.TravelToBookings" sap:creatable="false" sap:updatable="false" sap:deletable="false" sap:content-version="1">
+          <End EntitySet="TravelSet" Role="FromRole_TravelToBookings"/>
+          <End EntitySet="BookingSet" Role="ToRole_TravelToBookings"/>
+        </AssociationSet>
+      </EntityContainer>
+      <atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="self" href="http://localhost:8080/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata"/>
+      <atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="latest-version" href="http://localhost:8080/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata"/>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
