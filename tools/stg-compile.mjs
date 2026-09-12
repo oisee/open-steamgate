@@ -56,6 +56,8 @@ import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
 import {generate} from "./segw-gen.mjs";
 import {loadFunctionGroups} from "./segw-gen-mapping.mjs";
+import {fileURLToPath} from "node:url";
+import {readSpec} from "./segw-tables.mjs";
 
 // ------------------------------------------------------------- the model
 
@@ -556,14 +558,33 @@ const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").re
 
 // one abapGit table block: <TAG><TAG>row</TAG>...</TAG>; rows are ordered
 // by the fields given, empty values are left out as abapGit does
+// the fields of every table in the order SEGW writes them (derived from the
+// real projects by tools/segw-tables.mjs); a field the spec does not know
+// is a mistake here, not something to write
+let spec;
+function fieldsOf(tag) {
+  spec ??= readSpec(fileURLToPath(new URL("../src/segw/segw-tables.json", import.meta.url)));
+  if (!spec[tag]) {
+    throw new Error(`${tag}: not a table of the SEGW project tree`);
+  }
+  return Object.keys(spec[tag].fields);
+}
+
 function table(tag, rows) {
   if (rows.length === 0) {
     return "";
   }
+  const fields = fieldsOf(tag);
   let s = `   <_-IWBEP_-I_${tag}>\n`;
   for (const row of rows) {
+    for (const k of Object.keys(row)) {
+      if (!fields.includes(k)) {
+        throw new Error(`${tag}.${k}: not a field SEGW writes`);
+      }
+    }
     s += `    <_-IWBEP_-I_${tag}>\n`;
-    for (const [k, v] of Object.entries(row)) {
+    for (const k of fields) {
+      const v = row[k];
       if (v !== "" && v !== undefined && v !== false) {
         s += `     <${k}>${esc(v)}</${k}>\n`;
       }
@@ -589,19 +610,22 @@ export function iwprXml(m, opts = {}) {
     SBO_FI: [], SBO_FIT: [], SBO_FP: [], SBO_FPT: [], SBO_NP: [], SBO_NPT: [], SBO_PR: [], SBO_PRT: [], SBO_RC: [], SBO_RCT: [],
   };
   const stamp = opts.timestamp ?? "20260912000000.000000";
-  const text = (uuid, description, extra = {}) => ({PROJECT: P, SYLANGU: "E", NODE_UUID: uuid, DESCRIPTION: description, ...extra});
+  // the text tables: SEGW keeps a label in some (ET_LABEL, ESET_LABEL,
+  // PROP_LABEL...), a description in SBD_DST/MDT/PRT, and nothing but the
+  // key in the rest (SBD_GAT, SBD_OPT, SBD_SET, SBD_SVT, SBO_RCT)
+  const text = (uuid, field, value) => (field ? {SYLANGU: "E", PROJECT: P, NODE_UUID: uuid, [field]: value} : {SYLANGU: "E", PROJECT: P, NODE_UUID: uuid});
 
   rows.SBD_PR.push({PROJECT: P, NODE_UUID: projectId, CREATION_USER_ID: "STEAMGATE", CREATION_TIME: stamp, LAST_CHG_USER_ID: "STEAMGATE", LAST_CHG_TIME: stamp, PLUGIN: "/IWBEP/GEN", STRAT_NAME: "0001", STRAT_VERSION: "0001", PROJECT_TYPE: "1"});
   rows.SBD_PRT.push({PROJECT: P, SYLANGU: "E", DESCRIPTION: m.description});
   rows.SBD_MD.push({PROJECT: P, NODE_UUID: modelId, NODE_UUID_PA: projectId, PLUGIN_PA: "/IWBEP/CORE", NODE_TYPE_PA: "PROJ", TECHNICAL_NAME: m.model, VERSION: "0001", MPC: m.classes.mpcExt, STATE_NS: "S", VALUE_NS: m.namespace});
-  rows.SBD_MDT.push({PROJECT: P, SYLANGU: "E", NODE_UUID: modelId, DESCRIPTION: m.description});
+  rows.SBD_MDT.push(text(modelId, "DESCRIPTION", m.description));
   rows.SBD_SV.push({PROJECT: P, NODE_UUID: serviceId, TECHNICAL_NAME: m.service, VERSION: "0001", DPC: m.classes.dpcExt, EXTERNAL_NAME: m.service});
-  rows.SBD_SVT.push({PROJECT: P, SYLANGU: "E", NODE_UUID: serviceId, DESCRIPTION: m.description});
+  rows.SBD_SVT.push(text(serviceId));
 
   const artifacts = [["MPCB", m.classes.mpc, "CLAS"], ["MPCS", m.classes.mpcExt, "CLAS"], ["DPCB", m.classes.dpc, "CLAS"], ["DPCS", m.classes.dpcExt, "CLAS"], ["MDL", m.model, "IWMO"], ["SRV", m.service, "IWSV"]];
   for (const [kind, name, type] of artifacts) {
     rows.SBD_GA.push({PROJECT: P, NODE_UUID: id("GA", kind), NAME: name, PGMID: "R3TR", TROBJ_TYPE: type, TROBJ_NAME: name, GEN_ART_TYPE: kind});
-    rows.SBD_GAT.push({PROJECT: P, SYLANGU: "E", NODE_UUID: id("GA", kind), DESCRIPTION: name});
+    rows.SBD_GAT.push(text(id("GA", kind)));
   }
 
   const etId = (e) => id("ETYP", e.name);
@@ -609,7 +633,7 @@ export function iwprXml(m, opts = {}) {
   const prId = (e, p) => id("PROP", e.name, p.name);
   for (const e of m.entities) {
     rows.SBO_ET.push({PROJECT: P, NODE_UUID: etId(e), MODEL: modelId, NAME: e.name, ABAP_STRUCT: e.abapStruct, TECH_NAME: e.name.toUpperCase(), REF_TYPE: "T", DESCRIPTION_XU: X(!e.description)});
-    rows.SBO_ETT.push(text(etId(e), e.description || e.name));
+    rows.SBO_ETT.push(text(etId(e), "ET_LABEL", e.description || e.name));
     for (const p of e.properties) {
       rows.SBO_PR.push({
         PROJECT: P, NODE_UUID: prId(e, p), PARENT_UUID: etId(e), NAME: p.name, IS_KEY: X(p.isKey), CREATABLE: X(p.creatable), UPDATABLE: X(p.updatable),
@@ -617,22 +641,22 @@ export function iwprXml(m, opts = {}) {
         SEMANTICS: p.semantics, EDM_CORE_TYPE: p.type, REF_TYPE: "T", ABAP_FIELD: p.field, ABTY_XU: "X", SORT_ORDER: String(p.order),
         IS_UNICODE_XU: X(!p.unicode), DESCRIPTION_XU: "X",
       });
-      rows.SBO_PRT.push({PROJECT: P, SYLANGU: "E", NODE_UUID: prId(e, p), PROP_LABEL: p.label});
+      rows.SBO_PRT.push(text(prId(e, p), "PROP_LABEL", p.label));
     }
     rows.SBO_ES.push({
       PROJECT: P, NODE_UUID: esId(e), MODEL: modelId, NAME: e.set, ENTITY_TYPE: etId(e), CREATABLE: X(e.creatable), UPDATABLE: X(e.updatable), DELETABLE: X(e.deletable),
-      PAGEABLE: X(e.pageable), ADDRESSABLE: X(e.addressable), SEARCHABLE: X(e.searchable), SUBSCRIBABLE: X(e.subscribable), REQUIRES_FLT: X(e.filterRequired),
+      PAGEABLE: X(e.pageable), ADDRESSABLE: X(e.addressable), SEARCHABLE: X(e.searchable), SUBSCRIBABLE: X(e.subscribable), REQUIRES_FILTER: X(e.filterRequired),
       REF_TYPE: "T", TECH_NAME: e.set.toUpperCase(), DESCRIPTION_XU: "X",
     });
-    rows.SBO_EST.push(text(esId(e), e.set));
+    rows.SBO_EST.push(text(esId(e), "ESET_LABEL", e.set));
     // the design side: the entity set's node, one operation node per method
     const seId = id("DSET", e.set);
     rows.SBD_SE.push({PROJECT: P, NODE_UUID: seId, PARENT_UUID: id("DSETS"), NAME: e.set, ENTITY_SET_UUID: esId(e)});
-    rows.SBD_SET.push(text(seId, e.set));
+    rows.SBD_SET.push(text(seId));
     for (const op of ["C", "R", "U", "D", "Q"].map((o) => e.operations.find((x) => x.type === o)).filter(Boolean)) {
       const opId = id("OPER", e.set, op.type);
       rows.SBD_OP.push({PROJECT: P, NODE_UUID: opId, PARENT_UUID: seId, NAME: OPERATIONS[op.type], OPERATION_TYPE: op.type, IMP_METHOD: `${e.set.toUpperCase().slice(0, 16)}_${OP_SUFFIX[op.type]}`});
-      rows.SBD_OPT.push(text(opId, OPERATIONS[op.type]));
+      rows.SBD_OPT.push(text(opId));
       if (!op.mapping) {
         continue;
       }
@@ -646,7 +670,7 @@ export function iwprXml(m, opts = {}) {
         } else {
           rows.SBD_DS.push({PROJECT: P, NODE_UUID: dsId, PARENT_UUID: dataSourcesId, NAME: mp.searchhelp, DS_TYPE: "6", MAX_HITS_DS_ATTR: mp.maxHits});
         }
-        rows.SBD_DST.push(text(dsId, dsName));
+        rows.SBD_DST.push(text(dsId, "DESCRIPTION", dsName));
       }
       const mhId = id("MAPH", e.set, op.type);
       rows.SBD_MH.push({PROJECT: P, NODE_UUID: mhId, PARENT_UUID: opId, NAME: "Mapping", DS_UUID: dsId});
@@ -672,7 +696,7 @@ export function iwprXml(m, opts = {}) {
     if (e.sadl) {
       const dsId = id("DSRC", e.name);
       rows.SBD_DS.push({PROJECT: P, NODE_UUID: dsId, PARENT_UUID: dataSourcesId, DS_GROUP: `${e.sadl.kind}~${e.sadl.binding}`, DS_TYPE: "4"});
-      rows.SBD_DST.push(text(dsId, `${e.sadl.kind} ${e.sadl.binding}`));
+      rows.SBD_DST.push(text(dsId, "DESCRIPTION", `${e.sadl.kind} ${e.sadl.binding}`));
       rows.SBD_MH.push({PROJECT: P, NODE_UUID: id("MAPH", e.set), PARENT_UUID: seId, NAME: "Mapping", DS_UUID: dsId});
     }
   }
@@ -680,10 +704,10 @@ export function iwprXml(m, opts = {}) {
   for (const a of m.associations) {
     const asoId = id("ASSO", a.name);
     rows.SBO_ASO.push({
-      PROJECT: P, NODE_UUID: asoId, MODEL: modelId, NAME: a.name, LEFT_END_GUID: etId(a.from), RIGHT_END_GUID: etId(a.to),
-      LEFT_END_CARD: a.card.left, RIGHT_END_CARD: a.card.right, REF_TYPE: "T", TECH_NAME: a.name.toUpperCase(), DESCRIPTION_XU: "X",
+      PROJECT: P, NODE_UUID: asoId, MODEL_GUID: modelId, NAME: a.name, LEFT_END_GUID: etId(a.from), RIGHT_END_GUID: etId(a.to),
+      LEFT_END_CARD: a.card.left, RIGHT_END_CARD: a.card.right, REF_TYPE: "T", DESCRIPTION_XU: "X",
     });
-    rows.SBO_AST.push(text(asoId, a.name));
+    rows.SBO_AST.push(text(asoId, "ASSOC_LABEL", a.name));
     for (const c of a.constraint) {
       const principal = a.from.properties.find((p) => p.name === c.principal);
       const dependent = a.to.properties.find((p) => p.name === c.dependent);
@@ -692,15 +716,15 @@ export function iwprXml(m, opts = {}) {
       }
       const rcId = id("RCON", a.name, c.principal, c.dependent);
       rows.SBO_RC.push({PROJECT: P, NODE_UUID: rcId, ASSOCIATION_GUID: asoId, NAME: c.dependent, PRINCIPAL_PROP_R: prId(a.from, principal), DEPENDENT_PROP_R: prId(a.to, dependent), REF_TYPE: "T", DESCRIPTION_XU: "X"});
-      rows.SBO_RCT.push(text(rcId, c.dependent));
+      rows.SBO_RCT.push(text(rcId));
     }
     const atId = id("ASET", a.set);
-    rows.SBO_AT.push({PROJECT: P, NODE_UUID: atId, MODEL: modelId, NAME: a.set, ASSOCIATION_GUID: asoId, LEFT_END_GUID: esId(a.from), RIGHT_END_GUID: esId(a.to), REF_TYPE: "T", TECH_NAME: a.set.toUpperCase(), DESCRIPTION_XU: "X"});
-    rows.SBO_ATT.push(text(atId, a.set));
+    rows.SBO_AT.push({PROJECT: P, NODE_UUID: atId, MODEL_GUID: modelId, NAME: a.set, ASSOCIATION_GUID: asoId, LEFT_END_GUID: esId(a.from), RIGHT_END_GUID: esId(a.to), REF_TYPE: "T", DESCRIPTION_XU: "X"});
+    rows.SBO_ATT.push(text(atId, "ASST_LABEL", a.set));
     for (const n of a.navigation) {
       const npId = id("NAVP", n.entity.name, n.name);
       rows.SBO_NP.push({PROJECT: P, NODE_UUID: npId, ENTITY_GUID: etId(n.entity), NAME: n.name, RELATION_GUID: asoId, REF_TYPE: "T", TECH_NAME: n.name.toUpperCase(), DESCRIPTION_XU: "X"});
-      rows.SBO_NPT.push(text(npId, n.name));
+      rows.SBO_NPT.push(text(npId, "NAVP_LABEL", n.name));
     }
   }
 
@@ -711,11 +735,11 @@ export function iwprXml(m, opts = {}) {
       RETURN_CARD: f.multiplicity, RETURN_REF_TYPE: f.returnEntity ? etId(f.returnEntity) : "", RETURN_TYPE_KIND: f.returnEntity ? "ETYP" : "",
       RETURN_ENTITYSET: f.returnSet ? esId(m.entities.find((e) => e.set === f.returnSet) ?? f.returnEntity) : "", REF_TYPE: "T", DESCRIPTION_XU: "X",
     });
-    rows.SBO_FIT.push(text(fiId, f.name));
+    rows.SBO_FIT.push(text(fiId, "FI_LABEL", f.name));
     for (const p of f.parameters) {
       const fpId = id("FPAR", f.name, p.name);
       rows.SBO_FP.push({PROJECT: P, NODE_UUID: fpId, NAME: p.name, FUNCTION_IMPORT: fiId, ABAP_FIELD: p.field, EDM_CORE_TYPE: p.type, MAX_LENGTH: p.length, REF_TYPE: "T", ABTY_XU: "X", DESCRIPTION_XU: "X"});
-      rows.SBO_FPT.push(text(fpId, p.name));
+      rows.SBO_FPT.push(text(fpId, "FI_PARAM_LABEL", p.name));
     }
   }
 

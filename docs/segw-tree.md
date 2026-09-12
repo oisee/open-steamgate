@@ -88,22 +88,19 @@ UTF-8 byte order mark aside (abapGit writes one, stg-compile does not; it is
 not data). The test runs this over the corpus when `.local/` has it and
 skips in CI, like the closure run.
 
-The hand-written fixture `zstg_mapped.iwpr.xml` round-trips with the same
-tables, rows and fields, but not the same bytes: its table blocks are not
-alphabetical (`SBD_MH`, `SBD_MP`, `SBD_MR` before `SBD_GA`) and its `SBO_PR`
-rows put `ABAP_FIELD` before `FILTERABLE` and `IS_NULLABLE`. The output of
-`stg-compile` deviates more: it writes `DESCRIPTION` into text tables no
-SEGW file has a text in (`SBD_GAT`, `SBD_OPT`, `SBD_SET`, `SBD_SVT`, `SBO_AST`,
-`SBO_ATT`, `SBO_EST`, `SBO_ETT`, `SBO_FIT`, `SBO_FPT`, `SBO_NPT`, `SBO_RCT`;
-SEGW keeps those labels in `ET_LABEL`, `ESET_LABEL`, `FI_LABEL`,
-`FI_PARAM_LABEL`, `NAVP_LABEL`, `ASSOC_LABEL`, `ASST_LABEL`, `PROP_LABEL`),
-`MODEL` and `TECH_NAME` into `SBO_ASO` / `SBO_AT` (no SEGW file writes
-them), `PROJECT` before `SYLANGU` in every text table, and a dozen field
-pairs of `SBO_AT`, `SBO_ET`, `SBO_NP`, `SBO_PR`, `SBO_RC` in the wrong order.
-The import refuses fields the spec does not know, so a compiled YAML cannot
-be imported until stg-compile writes what SEGW writes; the exact list is
-with the stg-compile owner. Everything segw-gen reads is unaffected: it
-parses the file and does not care about order.
+The hand-written fixtures `zstg_mapped.iwpr.xml` and `zstg_mini.iwpr.xml`
+were re-sorted to that shape (table blocks alphabetical, fields in the
+spec's order) and round trip byte for byte too. `stg-compile` writes the
+tree from the same spec: every row's fields in the order
+`src/segw/segw-tables.json` gives, a field the spec does not know refused
+at write time, SEGW's label fields in the text tables (`ET_LABEL`,
+`ESET_LABEL`, `PROP_LABEL`, `NAVP_LABEL`, `ASSOC_LABEL`, `ASST_LABEL`,
+`FI_LABEL`, `FI_PARAM_LABEL`; a `DESCRIPTION` only in `SBD_DST`, `SBD_MDT`,
+`SBD_PRT`; the key alone in `SBD_GAT`, `SBD_OPT`, `SBD_SET`, `SBD_SVT`,
+`SBO_RCT`), `MODEL_GUID` in `SBO_ASO` / `SBO_AT`. So a compiled YAML
+imports and exports byte-identically as well (`test/stg-compile.mjs` checks
+the demo; `npm run segw:tree check` any compiled file). Everything segw-gen
+reads is unaffected: it parses the file and does not care about order.
 
 ## The Cloud pass
 
@@ -127,5 +124,3 @@ of the narrowed file list, not language findings.
 - Import through the service instead of the data folder: POST the rows of a
   file, export through GET; the round trip then goes through the database
   and the generic CRUD, not only through JSON.
-- stg-compile writing SEGW's field set and order, so the compiled YAML
-  imports and exports byte-identically too.

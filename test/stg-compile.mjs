@@ -4,6 +4,8 @@ import {compile, readModel} from "../tools/stg-compile.mjs";
 import {generate} from "../tools/segw-gen.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {buildModel, parseIwpr} from "../tools/segw-gen.mjs";
+import {exportIwpr, importIwpr} from "../tools/segw-tree.mjs";
+import {readSpec} from "../tools/segw-tables.mjs";
 
 // stg-compile: the YAML of the demo service becomes the SEGW project tree,
 // the registration objects and (through segw-gen) the classes; the tree
@@ -39,6 +41,17 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
   it("is deterministic: the same file gives the same tree", () => {
     expect(compile(source).iwpr).to.equal(result.iwpr);
     expect(result.iwpr).to.match(/<NODE_UUID>[A-Za-z0-9+/]{22}==<\/NODE_UUID>/);
+  });
+
+  it("writes the tree the way SEGW does: its fields, in its order, so segw-tree imports and exports it byte for byte", () => {
+    const spec = readSpec();
+    const tables = importIwpr(result.iwpr, spec);
+    expect(exportIwpr(tables, "ZSTG_DEMO", spec)).to.equal(result.iwpr);
+    // the text tables carry SEGW's label fields, not a DESCRIPTION
+    expect(result.iwpr).to.contain("<ET_LABEL>Travel</ET_LABEL>");
+    expect(result.iwpr).to.contain("<ESET_LABEL>TravelSet</ESET_LABEL>");
+    expect(result.iwpr).to.contain("<NAVP_LABEL>to_Bookings</NAVP_LABEL>");
+    expect(result.iwpr).not.to.contain("<TECH_NAME>TRAVELTOBOOKINGS</TECH_NAME>");
   });
 
   it("reads back through segw-gen as the same model", () => {

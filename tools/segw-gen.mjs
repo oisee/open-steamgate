@@ -138,7 +138,7 @@ export function buildModel(p) {
       addressable: set(es, "ADDRESSABLE"),
       searchable: set(es, "SEARCHABLE"),
       subscribable: set(es, "SUBSCRIBABLE"),
-      filterRequired: set(es, "REQUIRES_FLT"),
+      filterRequired: set(es, "REQUIRES_FILTER"),
       uuid: es.NODE_UUID,
       operations: p.operations
         .filter((op) => p.designSets.find((d) => d.NODE_UUID === op.PARENT_UUID)?.ENTITY_SET_UUID === es.NODE_UUID)
