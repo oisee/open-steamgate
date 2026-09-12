@@ -14,7 +14,9 @@ OData → Fiori), deploying back through abapGit.
 
 **CRUD, `$batch`, navigation, `$expand`, deep insert, function imports,
 value helps (`Common.ValueList`, `search`), an object page with
-PATCH/MERGE semantics and read-only SADL (reference data source over CDS projections, with analytics
+PATCH/MERGE semantics and Create below the parent (POST through a
+navigation property), a launchpad sandbox (`webapp/flp.html`) with two apps
+and intent-based navigation, and read-only SADL (reference data source over CDS projections, with analytics
 annotations) work end to end (2026-09-12). The whole thing also runs in the
 browser as a preview deployment (service worker + sql.js, GitHub Pages).**
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2

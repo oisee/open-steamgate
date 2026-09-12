@@ -12,7 +12,7 @@ CDN and the worker leaves everything but the service path to the network.
 
 | Where | What |
 | --- | --- |
-| `https://oisee.github.io/open-steamgate/main/app/` | the default branch |
+| `https://oisee.github.io/open-steamgate/main/app/` | the default branch (`app/flp.html` for the launchpad with both apps) |
 | `https://oisee.github.io/open-steamgate/pr-<n>/app/` | every pull request, removed when it closes |
 | `.../screenshots/` next to either | what the deployment looks like |
 
@@ -39,7 +39,8 @@ CDN and the worker leaves everything but the service path to the network.
 - `scripts/build-preview.mjs` — generates `web/generated/seed.mjs`, runs
   webpack (`webpack.config.cjs`: `webworker` target, Node polyfills, `%23`
   namespace filenames mapped back to `#`, DuckDB kept out), copies `webapp/`
-  to `build/app/` with a loader that registers the worker before UI5 boots.
+  to `build/app/` with a loader that registers the worker before UI5 boots
+  (in `index.html` and in `flp.html`, the launchpad page).
 - Absolute URLs (`__metadata.uri`, `Location`) need the outside view: the
   worker sends `x-forwarded-proto` / `x-forwarded-prefix`, `zcl_stg_http_handler`
   turns them into the origin the dispatcher prints.

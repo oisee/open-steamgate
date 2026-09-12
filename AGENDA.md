@@ -392,6 +392,24 @@ to the transpiler session); BAPIs without source: stub FMs over SQLite,
 or capture/replay JSON through vsp (`.local/` only, 1–2 days), or the
 human-in-the-loop bridge (side project only). BOR/SWO1: dead, ignore.
 
+## Demo parity (2026-09-12 night)
+
+Done: Create on the object page's bookings table (`POST
+TravelSet('T0001')/to_Bookings`: the dispatcher creates in the target set
+and hands the DPC the parent keys, the navigation path and
+`iv_source_name`; a to-one navigation is 405, other writes through a
+navigation stay 501), the booking's own object page below the travel, a
+second app (`webapp/booking/`, list report + object page over
+`BookingSet`), `webapp/flp.html` = the `sap.ushell` sandbox with both apps,
+`UI.DataFieldForIntentBasedNavigation` ("Open in Bookings", hidden without
+a launchpad) and `UI.DataFieldWithIntentBasedNavigation` back. Both keys
+travel with the intent, so the target app lands on the object page. Not
+done, by choice: draft, inline create in the table (draft-only in FE V2).
+
+Order after this: `stg-compile` (composition), ODC-local, draft last; the
+search-help provider is with the transpiler session; the live RFC client
+(open-rfc npm, record mode, replay substitutions) waits for a go.
+
 ## RFC replay (2026-09-12, transpiler session)
 
 `CALL FUNCTION ... DESTINATION x` is served without a system:
