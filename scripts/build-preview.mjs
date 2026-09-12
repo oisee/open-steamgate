@@ -75,18 +75,53 @@ for (const m of bootstrap[0].replace(/^<script /, "").matchAll(/([\w-]+)="([^"]*
 }
 const loader = `<script>
     // preview deployment: the OData service is answered by a service worker,
-    // so it has to control this page before UI5 asks for $metadata
+    // so it has to control this page before UI5 asks for $metadata. When it
+    // cannot, say so instead of booting into a blank list report.
     (async () => {
-      if ("serviceWorker" in navigator && !navigator.serviceWorker.controller) {
+      const explain = (title, detail) => {
+        document.body.innerHTML = "";
+        const main = document.createElement("main");
+        main.style.cssText = "max-width:40rem;margin:3rem auto;padding:0 1rem;font:16px/1.5 system-ui,sans-serif";
+        const h = document.createElement("h1");
+        h.style.fontSize = "1.3rem";
+        h.textContent = title;
+        const p = document.createElement("pre");
+        p.style.whiteSpace = "pre-wrap";
+        p.textContent = detail;
+        const a = document.createElement("p");
+        a.innerHTML = 'The gateway runs in a service worker. <a href="../">Install it again</a>, try another browser, or check that service workers and site data are allowed for this site.';
+        main.append(h, p, a);
+        document.body.append(main);
+      };
+      if (!("serviceWorker" in navigator)) {
+        explain("This browser cannot run the preview", "navigator.serviceWorker is not available (private window, or service workers turned off).");
+        return;
+      }
+      if (!navigator.serviceWorker.controller) {
         try {
           await navigator.serviceWorker.register("../sw.js", {scope: "../"});
           await navigator.serviceWorker.ready;
           if (!navigator.serviceWorker.controller) {
-            await new Promise((done) => navigator.serviceWorker.addEventListener("controllerchange", done, {once: true}));
+            await Promise.race([
+              new Promise((done) => navigator.serviceWorker.addEventListener("controllerchange", done, {once: true})),
+              new Promise((_, no) => setTimeout(() => no(new Error("the service worker was installed but does not control this page")), 15000)),
+            ]);
           }
         } catch (error) {
-          console.error("preview: service worker not installed", error);
+          explain("The preview could not start", String(error && error.stack || error));
+          return;
         }
+      }
+      // one round trip before UI5: the worker must be the one answering
+      try {
+        const probe = await fetch("../sap/opu/odata/sap/ZSTG_DEMO_SRV/", {headers: {accept: "application/json"}});
+        if (!probe.ok) {
+          explain("The gateway did not answer", "GET ../sap/opu/odata/sap/ZSTG_DEMO_SRV/ returned " + probe.status + "\n\n" + (await probe.text()).slice(0, 2000));
+          return;
+        }
+      } catch (error) {
+        explain("The gateway did not answer", String(error));
+        return;
       }
       const boot = document.createElement("script");
       const attributes = ${JSON.stringify(attributes)};
