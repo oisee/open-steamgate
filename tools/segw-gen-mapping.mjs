@@ -458,12 +458,13 @@ ${ERROR_HANDLING}${saveLog(mapping.logAttr)}
       const scalarInputs = params.flatMap((p) => p.props.filter((x) => x.direction === "I").map((x) => ({...x, param: p, pr: entity.properties.find((y) => y.name === x.property)}))).filter((x) => x.pr);
       const rangeInputs = params.flatMap((p) => p.ranges.map((r) => ({...r, param: p, pr: entity.properties.find((y) => y.name === r.property)}))).filter((x) => x.pr);
       const navSources = scalarInputs.flatMap((i) => sourceSets(m, entity, i.pr).map((src) => ({...src, input: i})));
+      // the variable that holds the source keys is named like an operation method: 16 characters of the entity + _get_entityset
       const sourceVars = [...new Map(navSources.map((x) => [x.entity.name, x.entity])).values()];
       const filtered = [...scalarInputs, ...rangeInputs];
       s += declarations(params, intf, [" DATA lo_filter TYPE  REF TO /iwbep/if_mgw_req_filter.", " DATA lt_filter_select_options TYPE /iwbep/t_mgw_select_option.",
         " DATA lv_filter_str TYPE string.", " DATA ls_paging TYPE /iwbep/s_mgw_paging.", " DATA ls_converted_keys LIKE LINE OF et_entityset.",
         ...(navSources.length > 0 ? [" DATA lv_source_entity_set_name TYPE string."] : []),
-        ...sourceVars.map((e) => ` DATA ${lc(e.techName)}_get_entityset TYPE LINE OF ${mpc}=>tt_${lc(e.typeStem)}.`),
+        ...sourceVars.map((e) => ` DATA ${lc(e.techName).slice(0, 16)}_get_entityset TYPE LINE OF ${mpc}=>tt_${lc(e.typeStem)}.`),
         " DATA ls_filter TYPE /iwbep/s_mgw_select_option.", " DATA ls_filter_range TYPE /iwbep/s_cod_select_option.",
         ...filtered.map((i) => ` DATA lr_${lc(i.pr.abapField)} LIKE RANGE OF ls_converted_keys-${lc(i.pr.abapField)}.\n DATA ls_${lc(i.pr.abapField)} LIKE LINE OF lr_${lc(i.pr.abapField)}.`),
         ...(outTable ? [` DATA ls_gw_${lc(outTable.name)} LIKE LINE OF et_entityset.`] : []), " DATA lv_skip     TYPE int4.", " DATA lv_top      TYPE int4."]);
@@ -505,8 +506,8 @@ ${constantLines(params)}`;
      " Convert keys to appropriate entity set structure
      io_tech_request_context->get_converted_source_keys(
        IMPORTING
-         es_key_values  = ${lc(src.entity.techName)}_get_entityset ).
-     ${paramPath(src.input.param, src.input.component)} = ${lc(src.entity.techName)}_get_entityset-${lc(src.field)}.
+         es_key_values  = ${lc(src.entity.techName).slice(0, 16)}_get_entityset ).
+     ${paramPath(src.input.param, src.input.component)} = ${lc(src.entity.techName).slice(0, 16)}_get_entityset-${lc(src.field)}.
    ENDIF.
 `;
         }

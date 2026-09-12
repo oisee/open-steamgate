@@ -212,7 +212,7 @@ export function buildModel(p) {
     entity: typeName(np.ENTITY_GUID), association: typeName(np.RELATION_GUID),
   }));
   const functionImports = p.functionImports.map((fi) => ({
-    name: fi.NAME, httpMethod: fi.HTTP_METHOD, returnCard: fi.RETURN_CARD,
+    name: fi.NAME, httpMethod: fi.HTTP_METHOD ?? "", returnCard: fi.RETURN_CARD ?? "",
     returnKind: fi.RETURN_TYPE_KIND, returnType: typeName(fi.RETURN_REF_TYPE), returnSet: typeName(fi.RETURN_ENTITYSET),
     actionFor: fi.ACTION_FOR ? typeName(fi.ACTION_FOR) : "",
     parameters: p.functionParameters.filter((fp) => fp.FUNCTION_IMPORT === fi.NODE_UUID).map((fp) => ({
@@ -541,7 +541,10 @@ lo_action = model->create_action( '${fi.name}' ).  "#EC NOTEXT
     } else if (fi.returnKind === "CTYP") {
       s += `*Set return complex type\nlo_action->set_return_complex_type( '${fi.returnType}' ). "#EC NOTEXT\n`;
     }
-    s += `*Set HTTP method GET or POST\nlo_action->set_http_method( '${fi.httpMethod}' ). "#EC NOTEXT\n`;
+    // a function import without an HTTP method in the tree gets no set_http_method line (ESH_SEARCH)
+    if (fi.httpMethod) {
+      s += `*Set HTTP method GET or POST\nlo_action->set_http_method( '${fi.httpMethod}' ). "#EC NOTEXT\n`;
+    }
     s += `* Set return type multiplicity\nlo_action->set_return_multiplicity( '${fi.returnCard}' ). "#EC NOTEXT\n`;
     if (fi.actionFor) {
       s += `*Set the action for entity\nlo_action->set_action_for( '${fi.actionFor}' ). "#EC NOTEXT\n`;

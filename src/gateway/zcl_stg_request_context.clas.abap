@@ -140,6 +140,15 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     rv_entity_set = mv_entity_set.
   ENDMETHOD.
 
+  METHOD /iwbep/if_mgw_req_entityset~get_source_entity_set_name.
+    " the set a navigation started from; the set itself for a direct call
+    IF mv_source_entity_set IS NOT INITIAL.
+      rv_entity_set = mv_source_entity_set.
+    ELSE.
+      rv_entity_set = mv_entity_set.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD /iwbep/if_mgw_req_entityset~get_top.
     rv_top = mv_top.
   ENDMETHOD.
