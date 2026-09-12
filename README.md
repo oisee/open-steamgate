@@ -61,29 +61,34 @@ Bottom up, every layer is real, nothing is mocked:
 
 1. **DDIC and data** — `src/ddic/*.tabl.xml` (abapGit format), seed rows in
    `data/*.tabu.json` (`abapGit serialize` format for table contents).
-2. **SEGW-shaped classes** — `src/demo/zcl_zstg_demo_mpc` defines the model
+2. **SEGW registration objects** — `zstg_demo_srv ... 0001.iwsv.xml` (service
+   → DPC class) and `zstg_demo_mdl ... 0001.iwmo.xml` (model → MPC class), as
+   abapGit serializes them. `tools/segw-registry.mjs` reads them and generates
+   the registry, so a cloned SEGW repository registers its own services
+   (`npm run segw -- path/to/repo --list` shows what it would find).
+3. **SEGW-shaped classes** — `src/demo/zcl_zstg_demo_mpc` defines the model
    through `/iwbep/if_mgw_odata_model` (entity types, sets, associations,
    function imports, a value-help set); `zcl_zstg_demo_dpc_ext` is the data
    provider: `it_filter_select_options` → Open SQL with ranges, paging, CRUD,
    deep insert, `get_expanded_entityset`, `iv_search_string`. This is the code
    that lives in a customer system.
-3. **The `/IWBEP/` interfaces** — from `open-abap/open-abap-odata`, where the
+4. **The `/IWBEP/` interfaces** — from `open-abap/open-abap-odata`, where the
    model, `$metadata`, annotations and SADL signatures we needed went back
    upstream as PRs #40–#48.
-4. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
+5. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
    request context with every `io_tech_request_context` facet, dispatcher,
    OData v2 JSON, `$batch`, `$expand`, entry provider. The part that existed
    nowhere in open source.
-5. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
+6. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
    Open SQL runs on SQLite (Node), sql.js (browser) or DuckDB.
-6. **Front** — a Fiori Elements V2 list report and object page with no
+7. **Front** — a Fiori Elements V2 list report and object page with no
    JavaScript of their own:
    `webapp/manifest.json` and `annotations/annotations.xml` (`UI.LineItem`,
    `UI.SelectionFields`, `Common.ValueList`, `Common.Text`). SAPUI5 1.120 from
    SAP's CDN: Fiori Elements and the smart controls are not part of OpenUI5,
    and the point is that real Fiori apps run unchanged. SAPUI5 is SAP's, not
    part of this project.
-7. **Preview** — layers 1–5 in a service worker, layer 6 as static files, on
+8. **Preview** — layers 1–6 in a service worker, layer 7 as static files, on
    GitHub Pages ([`docs/preview-deployments.md`](docs/preview-deployments.md)).
 
 The row **T0009 "Other client, must not leak"** is on purpose: it is seeded

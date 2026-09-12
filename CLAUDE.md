@@ -132,6 +132,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - `STG_DB=duckdb` runs everything on DuckDB (`tools/duckdb-client.mjs`: real
   LUW with replay-based savepoints, literals trimmed); `STG_DB_PATH=x.duckdb`
   persists; `npm run unit:duckdb`, `start:duckdb`.
+- Services register themselves from the SEGW objects: `<srv>.iwsv.xml`
+  (service → `_DPC_EXT`) and `<mdl>.iwmo.xml` (model → `_MPC_EXT`) in `src/`,
+  abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
+  `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
+  call. `npm run segw -- <folder> --list` shows what a repo would register.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

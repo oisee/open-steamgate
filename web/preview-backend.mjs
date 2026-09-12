@@ -17,7 +17,7 @@ globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
 const {cl_express_icf_shim} = await import("../output/cl_express_icf_shim.clas.mjs");
-const {zcl_oao_registry} = await import("../output/zcl_oao_registry.clas.mjs");
+const {zcl_stg_segw_registry} = await import("../output/zcl_stg_segw_registry.clas.mjs");
 
 // CL_EXPRESS_ICF_SHIM keeps request and response on one static server object;
 // overlapping fetch events would answer each other's requests. Serialize.
@@ -40,9 +40,8 @@ function toBytes(value) {
 }
 
 async function registerServices() {
-  const S = (v) => new abap.types.String().set(v);
-  await zcl_oao_registry.register({iv_service: S("ZSTG_DEMO_SRV"), iv_mpc: S("ZCL_ZSTG_DEMO_MPC_EXT"), iv_dpc: S("ZCL_ZSTG_DEMO_DPC_EXT")});
-  await zcl_oao_registry.register({iv_service: S("ZSTG_SADL_SRV"), iv_mpc: S("ZCL_ZSTG_SADL_MPC_EXT"), iv_dpc: S("ZCL_ZSTG_SADL_DPC_EXT")});
+  // generated from the IWSV/IWMO objects by tools/segw-registry.mjs
+  await zcl_stg_segw_registry.register();
 }
 
 async function invoke({method, path, search = "", headers = {}, body}) {

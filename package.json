@@ -7,9 +7,9 @@
   "type": "module",
   "scripts": {
     "lint": "abaplint",
-    "transpile": "rm -rf output && node tools/cds2ddic.mjs && abap_transpile",
+    "transpile": "rm -rf output && node tools/cds2ddic.mjs && node tools/segw-registry.mjs && abap_transpile",
     "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
-    "integration": "mocha test/mocha.mjs",
+    "integration": "mocha test/mocha.mjs test/segw.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "probe": "node tools/closure-probe.mjs",
@@ -21,7 +21,8 @@
     "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",
     "web:preview": "npm run transpile && node scripts/build-preview.mjs",
     "web:serve": "node scripts/serve-build.mjs",
-    "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs"
+    "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs",
+    "segw": "node tools/segw-registry.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",

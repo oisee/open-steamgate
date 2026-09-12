@@ -325,10 +325,14 @@ against `main` (hithub's `generate-screenshot-diffs.mjs`) are the next step.
 SEGW is two things: an editor for the project tree and a generator. We do
 the generator, the editor is the file.
 
-1. **IWMO/IWSV → registry.** A transpiler plugin (or a `tools/` script)
-   reads `<service>.iwsv.xml` (service → `_DPC_EXT`) and `<model>.iwmo.xml`
-   (model → `_MPC_EXT`) and emits the registration, so a cloned SEGW repo
-   serves itself. The corpus has 53 IWPR/IWMO/IWSV/IWSG files. ~1 day.
+1. **IWMO/IWSV → registry. Done 2026-09-12 evening.** `tools/segw-registry.mjs`
+   reads `<service>.iwsv.xml` (group → model, service → DPC class) and
+   `<model>.iwmo.xml` (model → MPC class), joins them by model + version and
+   generates `gen/segw/zcl_stg_segw_registry`; the demo now carries its own
+   IWSV/IWMO and registers itself, the servers call the generated class. Over
+   the corpus it finds 11 services in 8 repos, incl. a SADL one whose DPC is
+   `CL_SADL_GTK_EXPOSURE_DPC` and a project whose classes end in `_CUST`, not
+   `_EXT`: class names must come from the objects, never from a convention.
 2. **IWPR → `_MPC`/`_DPC` generator.** Read the project tree (PROJ → MODL →
    entity types, properties, associations, navigation properties, entity
    sets, function imports, attributes), emit `define` and the CASE

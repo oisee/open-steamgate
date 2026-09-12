@@ -2,22 +2,13 @@ import express from "express";
 import {fileURLToPath} from "node:url";
 import {initializeABAP} from "../output/init.mjs";
 import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
-import {zcl_oao_registry} from "../output/zcl_oao_registry.clas.mjs";
+import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
 
 await initializeABAP();
 
-// service name -> MPC/DPC classes; the SEGW registration of a real system
-await zcl_oao_registry.register({
-  iv_service: new abap.types.String().set("ZSTG_DEMO_SRV"),
-  iv_mpc: new abap.types.String().set("ZCL_ZSTG_DEMO_MPC_EXT"),
-  iv_dpc: new abap.types.String().set("ZCL_ZSTG_DEMO_DPC_EXT"),
-});
-// the reference-data-source (SADL) demo service over the CDS views
-await zcl_oao_registry.register({
-  iv_service: new abap.types.String().set("ZSTG_SADL_SRV"),
-  iv_mpc: new abap.types.String().set("ZCL_ZSTG_SADL_MPC_EXT"),
-  iv_dpc: new abap.types.String().set("ZCL_ZSTG_SADL_DPC_EXT"),
-});
+// the SEGW registration objects (IWSV/IWMO in src/) say which service is
+// served by which MPC/DPC classes; tools/segw-registry.mjs generated this
+await zcl_stg_segw_registry.register();
 
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
