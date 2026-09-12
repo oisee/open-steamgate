@@ -14,7 +14,8 @@ OData → Fiori), deploying back through abapGit.
 
 **CRUD, `$batch`, navigation, `$expand`, deep insert, function imports and
 read-only SADL (reference data source over CDS projections, with analytics
-annotations) work end to end (2026-09-12).**
+annotations) work end to end (2026-09-12). The whole thing also runs in the
+browser as a preview deployment (service worker + sql.js, GitHub Pages).**
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2
 over `src/gateway/` (URL parser, `$filter` → select-options, request context,
 entry provider, model info, JSON (de)serializer, dispatcher). A Fiori Elements
@@ -130,6 +131,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.
+- `npm run web:preview` bundles the gateway into a service worker (`build/`,
+  sql.js, no server); `npm run e2e:preview` checks it in Chromium; the
+  `preview deployment` workflow publishes `main/` and `pr-<n>/` to GitHub
+  Pages. See `docs/preview-deployments.md`. `build/` and `web/generated/` are
+  not tracked.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 

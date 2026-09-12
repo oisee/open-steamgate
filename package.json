@@ -18,7 +18,10 @@
     "cds": "node tools/cds2ddic.mjs",
     "unit:duckdb": "npm run transpile && echo RUNNING on DuckDB && STG_DB=duckdb node --expose-gc output/index.mjs && echo OK",
     "integration:duckdb": "STG_DB=duckdb mocha test/mocha.mjs",
-    "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs"
+    "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",
+    "web:preview": "npm run transpile && node scripts/build-preview.mjs",
+    "web:serve": "node scripts/serve-build.mjs",
+    "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
@@ -28,8 +31,27 @@
     "@abaplint/transpiler-cli": "^2.13.85",
     "@duckdb/node-api": "^1.5.5-r.4",
     "@playwright/test": "^1.62.1",
+    "assert": "^2.1.0",
+    "browserify-zlib": "^0.2.0",
+    "buffer": "^6.0.3",
     "chai": "^5.3.3",
+    "constants-browserify": "^1.0.0",
+    "crypto-browserify": "^3.12.1",
+    "events": "^3.3.0",
     "express": "^4.22.2",
-    "mocha": "^11.7.6"
+    "https-browserify": "^1.0.0",
+    "mocha": "^11.7.6",
+    "os-browserify": "^0.3.0",
+    "path-browserify": "^1.0.1",
+    "process": "^0.11.10",
+    "sql.js": "^1.14.2",
+    "stream-browserify": "^3.0.0",
+    "stream-http": "^3.2.0",
+    "string_decoder": "^1.3.0",
+    "terser-webpack-plugin": "^5.6.1",
+    "url": "^0.11.4",
+    "util": "^0.12.5",
+    "vm-browserify": "^1.1.2",
+    "webpack": "^5.110.3"
   }
 }

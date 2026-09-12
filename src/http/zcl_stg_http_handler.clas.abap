@@ -13,6 +13,7 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     DATA lv_method   TYPE string.
     DATA lv_path     TYPE string.
     DATA lv_host     TYPE string.
+    DATA lv_proto    TYPE string.
     DATA lt_options  TYPE tihttpnvp.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
     DATA ls_header   TYPE ihttpnvp.
@@ -24,6 +25,13 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     IF lv_host IS INITIAL.
       lv_host = 'localhost'.
     ENDIF.
+* behind a reverse proxy, or in the browser preview where the service is
+* mounted below a path, the absolute URLs in the answers need the outside view
+    lv_proto = server->request->get_header_field( 'x-forwarded-proto' ).
+    IF lv_proto IS INITIAL.
+      lv_proto = 'http'.
+    ENDIF.
+    lv_host = |{ lv_proto }://{ lv_host }{ server->request->get_header_field( 'x-forwarded-prefix' ) }|.
     server->request->get_form_fields_cs( CHANGING fields = lt_options ).
     lv_body = server->request->get_cdata( ).
 

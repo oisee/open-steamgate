@@ -292,9 +292,10 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
   — the public prior art for DIAG (Core Security, later pysap). Citable in
   `docs/layers-we-own.md`.
 
-**Quick win this unlocks:** an open-steamgate preview build — demo service +
-Fiori list report entirely in the browser via hithub's service-worker recipe,
-deployed per PR with screenshot diffs. No server, shareable link.
+**Done 2026-09-12: the preview build.** `npm run web:preview` puts the gateway
+into a service worker (sql.js), `preview.yml` deploys `main/` and `pr-<n>/`
+to GitHub Pages with screenshots; `docs/preview-deployments.md`. Visual diffs
+against `main` (hithub's `generate-screenshot-diffs.mjs`) are the next step.
 
 ## Ideas parked (2026-09-11)
 

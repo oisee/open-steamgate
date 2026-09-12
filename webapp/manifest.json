@@ -8,7 +8,7 @@
     "applicationVersion": {"version": "0.0.1"},
     "dataSources": {
       "mainService": {
-        "uri": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/",
+        "uri": "../sap/opu/odata/sap/ZSTG_DEMO_SRV/",
         "type": "OData",
         "settings": {
           "odataVersion": "2.0",

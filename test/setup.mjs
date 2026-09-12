@@ -1,5 +1,4 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
-import {seedStatements} from "./seed.mjs";
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
 // options.setup). Same shape as every open-abap repo: one in-memory DB,
@@ -7,6 +6,24 @@ import {seedStatements} from "./seed.mjs";
 // STG_DB=duckdb swaps SQLite for DuckDB (tools/duckdb-client.mjs).
 export async function setup(abap, schemas, insert) {
   let db;
+  // the browser preview (web/preview-backend.mjs): seed rows come from the
+  // bundle, the database from cache storage when there is one
+  const preview = globalThis.__stgPreview;
+  if (preview !== undefined) {
+    preview.schemas = schemas;
+    preview.insert = insert;
+    db = new SQLiteDatabaseClient();
+    abap.context.databaseConnections["DEFAULT"] = db;
+    await db.connect(preview.stored);
+    if (preview.stored === undefined) {
+      await db.execute(schemas.sqlite);
+      await db.execute(insert);
+      await db.execute(preview.seed);
+    }
+    preview.db = db;
+    return;
+  }
+  const {seedStatements} = await import("./seed.mjs");
   if (process.env.STG_DB === "duckdb") {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
     // STG_DB_PATH=some.duckdb keeps the data between runs

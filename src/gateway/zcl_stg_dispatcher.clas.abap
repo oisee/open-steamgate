@@ -20,6 +20,11 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rs_response) TYPE ty_response.
   PRIVATE SECTION.
+    CLASS-METHODS origin
+      IMPORTING
+        iv_host          TYPE string
+      RETURNING
+        VALUE(rv_origin) TYPE string.
     CLASS-METHODS run
       IMPORTING
         iv_method          TYPE string
@@ -205,6 +210,16 @@ ENDCLASS.
 
 CLASS zcl_stg_dispatcher IMPLEMENTATION.
 
+  METHOD origin.
+* iv_host is either a bare host (tests, the express server before the
+* handler saw a request) or the outside origin incl. scheme and mount prefix
+    IF iv_host CS '://'.
+      rv_origin = iv_host.
+    ELSE.
+      rv_origin = |http://{ iv_host }|.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD dispatch.
     DATA lx_stg     TYPE REF TO zcx_stg_error.
     DATA lx_not     TYPE REF TO /iwbep/cx_mgw_not_impl_exc.
@@ -282,7 +297,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                      it_options = it_options ).
     ls_service = zcl_stg_model_info=>get( ls_request-service ).
     zcl_stg_json=>register_sets( ls_service-entity_sets ).
-    lv_base    = |http://{ iv_host }/sap/opu/odata/sap/{ ls_service-name }|.
+    lv_base    = |{ origin( iv_host ) }/sap/opu/odata/sap/{ ls_service-name }|.
     lv_method  = to_upper( iv_method ).
 
     IF ls_request-is_metadata = abap_true.

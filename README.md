@@ -21,7 +21,11 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 > through the DPC's create/update/delete, `$batch` with changesets,
 > navigation properties and `$expand`. A Fiori
 > Elements list report in `webapp/` lists, filters and deletes through it
-> (`npm run e2e`).
+> (`npm run e2e`). **Try it without installing anything:**
+> [oisee.github.io/open-steamgate/main/app/](https://oisee.github.io/open-steamgate/main/app/)
+> runs the whole gateway in your browser (a service worker over sql.js, see
+> [`docs/preview-deployments.md`](docs/preview-deployments.md)); every pull
+> request gets its own copy.
 > See `AGENDA.md`. This repo also holds the
 > research that scopes the work — a verified prior-art matrix, a gap-list of the
 > genuinely-novel pieces, and a phased build order. See

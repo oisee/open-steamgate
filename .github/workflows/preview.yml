@@ -1,0 +1,96 @@
+name: preview deployment
+
+# Every pull request and every push to main gets a copy of open-steamgate that
+# runs entirely in the browser (build/: the gateway in a service worker, the
+# Fiori demo app), published on GitHub Pages from the gh-pages branch:
+#   main         -> https://oisee.github.io/open-steamgate/main/
+#   PR <n>       -> https://oisee.github.io/open-steamgate/pr-<n>/
+# The pattern is larshp/hithub's preview-deploy workflow (MIT).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: preview-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.action != 'closed'
+      && (github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PREVIEW_DIRECTORY: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run web:preview
+      - run: npx playwright install --with-deps chromium
+      - name: Check the build in a browser
+        run: npx playwright test --config playwright.preview.config.mjs
+      - name: Screenshots
+        run: node scripts/capture-screenshots.mjs
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          destination_dir: ${{ env.PREVIEW_DIRECTORY }}
+          keep_files: true
+          commit_message: "Deploy ${{ env.PREVIEW_DIRECTORY }} from ${{ github.sha }}"
+      - name: Preview comment on the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          marker='<!-- open-steamgate-preview -->'
+          base="https://oisee.github.io/open-steamgate/pr-$PR_NUMBER"
+          body=$(printf '%s\n\nPreview: [open the Fiori app](%s/app/) - the OData gateway runs in your browser, no server.\n\n[Screenshots](%s/screenshots/) - built from `%s`' \
+            "$marker" "$base" "$base" "${GITHUB_SHA:0:7}")
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\")))][0].id // empty")
+          if [[ -n "$comment_id" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+          fi
+
+  remove:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+      - name: Remove the preview directory
+        run: |
+          set -euo pipefail
+          dir="pr-${{ github.event.pull_request.number }}"
+          if [[ -d "$dir" ]]; then
+            git rm -r -q "$dir"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -q -m "Remove $dir"
+            git push origin HEAD:gh-pages
+          fi
