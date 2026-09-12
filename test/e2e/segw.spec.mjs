@@ -18,7 +18,7 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   });
   const failed = [];
   page.on("response", (res) => {
-    if ((res.url().includes("/sap/opu/odata/sap/") || res.url().includes("/segw/export") || res.url().includes("/segw/generate")) && res.status() >= 400) {
+    if ((res.url().includes("/sap/opu/odata/sap/") || res.url().includes("/segw/generate")) && res.status() >= 400) {
       failed.push(res.status() + " " + res.url());
     }
   });
@@ -70,9 +70,16 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   const gen = await (await page.request.post("/segw/generate/ZSTG_MAPPED")).json();
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'");
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("set_maxlength( iv_max_length = 12 )");
-  // and the export is the IWPR the rows make
-  const iwpr = await (await page.request.get("/segw/export/ZSTG_MAPPED")).text();
+  // Export IWPR: GET ExportSet('ZSTG_MAPPED'), the IWPR written in ABAP,
+  // handed over as the abapGit file
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", {name: "Export IWPR"}).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("zstg_mapped.iwpr.xml");
+  const iwpr = await (await import("node:fs/promises")).readFile(await file.path(), "utf8");
   expect(iwpr).toContain("<NAME>Price</NAME>");
+  expect(iwpr).toContain('<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR"');
+  expect(requests.some((r) => r.includes("ExportSet('ZSTG_MAPPED')"))).toBe(true);
 
   // deleted again: DELETE by key, gone from the tree
   await page.getByRole("treeitem", {name: "Price", exact: true}).click();

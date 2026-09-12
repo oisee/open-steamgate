@@ -340,7 +340,8 @@ sap.ui.define([
 
     // the dev-time seam of the local runtime: test/start.mjs pulls the
     // project's rows back into an IWPR and runs segw-gen over it (on A4H the
-    // same button is SEGW's own Generate)
+    // same button is SEGW's own Generate); Generate is the one button that
+    // still needs Node behind the service
     serverBase() {
       const model = this.getOwnerComponent().getModel();
       return new URL(model.sServiceUrl, document.baseURI).href.replace(/\/sap\/opu\/odata\/sap\/.*$/, "");
@@ -366,8 +367,23 @@ sap.ui.define([
       }
     },
 
+    // the project as an abapGit file: GET ExportSet('P'), Content is the
+    // IWPR written in ABAP (zcl_stg_segw_export), handed over as a download
     onExport() {
-      window.open(this.serverBase() + "/segw/export/" + encodeURIComponent(this.project), "_blank");
+      const model = this.getOwnerComponent().getModel();
+      const project = this.project;
+      model.read("/" + model.createKey("ExportSet", {Project: project}), {
+        success: (data) => {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(new Blob([data.Content], {type: "application/xml"}));
+          link.download = project.toLowerCase() + ".iwpr.xml";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(link.href);
+        },
+        error: (e) => MessageBox.error(String(e && (e.responseText || e.message))),
+      });
     },
   });
 });

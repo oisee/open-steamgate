@@ -7,8 +7,9 @@
 //                                     gen/segw-editor/<project>/
 //
 // `base` is the gateway's own URL (the rows are read through ZSTG_SEGW_SRV,
-// as `segw-tree pull` does), so the routes in test/start.mjs call back
-// into the same process over HTTP. Function groups for RFC-mapped
+// as `segw-tree pull` does), so the route in test/start.mjs calls back
+// into the same process over HTTP. The editor's Export button does not
+// come here any more: ExportSet of the service writes the IWPR in ABAP. Function groups for RFC-mapped
 // operations come from STG_SEGW_LIBS (folders, ':'-separated).
 import {mkdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";

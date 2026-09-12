@@ -45,20 +45,22 @@ only: SEGW would take the subtree with it, this does not yet).
   project's rows in every table and the app selects the project. The whole
   file goes in the request body, so a 40 KB project is fine; a function
   import would have to carry it in the URL.
-- **Export IWPR** and **Generate** are the local runtime's seam, not the
-  service's: `test/start.mjs` serves `GET /segw/export/<PROJECT>` (the
-  project's rows pulled back through the service and written as the IWPR,
-  byte for byte what `segw-tree pull` gives) and
-  `POST /segw/generate/<PROJECT>` (the same IWPR through `segw-gen`, the
+- **Export IWPR** is `GET ExportSet('P')`: the IWPR written in ABAP by
+  `zcl_stg_segw_export` (byte for byte what `ImportSet` took in), handed
+  over as the abapGit file `<project>.iwpr.xml`.
+- **Generate** is the local runtime's seam, not the service's:
+  `test/start.mjs` serves `POST /segw/generate/<PROJECT>` (the project's
+  rows pulled back through the service, `segw-gen` over the IWPR, the
   `_MPC`/`_DPC` pair plus the `_EXT` stubs written to
   `gen/segw-editor/<project>/`, answered as JSON with the file names,
   sources and warnings; `tools/segw-editor.mjs`). Function groups for
   RFC-mapped operations come from `STG_SEGW_LIBS` (folders, `:`-separated;
   default `test/fixtures/segw`). On a system this button is SEGW's own
-  Generate; in the browser preview (no Node behind the service worker) both
-  answer with a message. `gen/segw-editor/` is excluded from the transpiler
-  and from abaplint: what the editor generates is a build product to look
-  at or to take to a system, not part of this runtime.
+  Generate; in the browser preview (no Node behind the service worker) it
+  answers with a message, until the generator exists in ABAP.
+  `gen/segw-editor/` is excluded from the transpiler and from abaplint:
+  what the editor generates is a build product to look at or to take to
+  a system, not part of this runtime.
 
 ## Tested
 
@@ -66,8 +68,8 @@ only: SEGW would take the subtree with it, this does not yet).
 fixture): the tree with its properties and mapping rows, a property's
 `MaxLength` edited and saved (MERGE, then read back), a property added
 (POST below `et-1`) and deleted (DELETE), Generate showing the generated
-files and the new property in the generated MPC, Export giving the IWPR
-with it, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
+files and the new property in the generated MPC, Export downloading the
+IWPR with it through `ExportSet`, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
 `ZSTG_MINI`; and the launchpad tile.
 
 ## Not yet
@@ -76,5 +78,5 @@ Adding nodes other than properties (entity types, sets, associations,
 operations) and the wizards SEGW has for them (import from DDIC structure,
 map to data source), subtree delete, drag order (`StgSeq`), the label
 row created when there is none, a Generate that lands the classes in
-`src/` and registers the service without a restart, and an `ExportSet`
-of the service (the mirror of `ImportSet`, so Export needs no Node route).
+`src/` and registers the service without a restart, and Generate in ABAP
+so that the last Node route goes.

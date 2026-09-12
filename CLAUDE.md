@@ -229,8 +229,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - The SEGW editor is `webapp/segw/` (`docs/segw-editor.md`): freestyle
   SAPUI5 over `ZSTG_SEGW_SRV`, the project tree in SEGW's shape, every
   node edited in place (MERGE), Add property / Delete, Import IWPR through
-  `ImportSet`; Export IWPR and Generate go through dev routes of
-  `test/start.mjs` (`/segw/export/<P>`, `POST /segw/generate/<P>`,
+  `ImportSet`, Export IWPR through `ExportSet`; Generate goes through a dev
+  route of `test/start.mjs` (`POST /segw/generate/<P>`,
   `tools/segw-editor.mjs`, output in `gen/segw-editor/`, which the
   transpiler and abaplint skip). Launchpad tile "SEGW"
   (`SegwProject-manage`); `test/e2e/segw.spec.mjs`. Tests and the

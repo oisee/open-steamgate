@@ -4,7 +4,7 @@ import {initializeABAP} from "../output/init.mjs";
 import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
 import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
 import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
-import {exportProject, generateProject} from "../tools/segw-editor.mjs";
+import {generateProject} from "../tools/segw-editor.mjs";
 
 await initializeABAP();
 
@@ -30,22 +30,11 @@ export function startServer(quiet) {
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   app.use("/app", express.static(fileURLToPath(new URL("../webapp", import.meta.url))));
 
-  // the SEGW editor's dev-time seam (webapp/segw/): a project's rows out of
-  // the ZSTG_SB* tables as an IWPR, and segw-gen over it into gen/segw-editor/
+  // the SEGW editor's dev-time seam (webapp/segw/): the project's rows out of
+  // the ZSTG_SB* tables as an IWPR and segw-gen over it into gen/segw-editor/
+  // (Export itself is the service's ExportSet; Generate still needs Node)
   const self = "http://localhost:" + PORT;
   const libs = (process.env.STG_SEGW_LIBS ?? "test/fixtures/segw").split(":").filter(Boolean);
-  app.get("/segw/export/:project", async function (req, res) {
-    try {
-      const xml = await exportProject(self, req.params.project);
-      if (xml === "") {
-        res.status(404).type("text/plain").send("no rows for project " + req.params.project);
-        return;
-      }
-      res.type("application/xml").attachment(req.params.project.toLowerCase() + ".iwpr.xml").send(xml);
-    } catch (e) {
-      res.status(500).type("text/plain").send(String(e?.message ?? e));
-    }
-  });
   app.post("/segw/generate/:project", async function (req, res) {
     try {
       res.json(await generateProject(self, req.params.project, {libs}));
