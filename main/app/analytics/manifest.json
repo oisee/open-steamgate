@@ -1,37 +1,41 @@
 {
   "_version": "1.59.0",
   "sap.app": {
-    "id": "stg.travel",
+    "id": "stg.analytics",
     "type": "application",
-    "title": "Travels",
-    "description": "open-steamgate demo list report over ZSTG_DEMO_SRV",
+    "title": "Flight analytics",
+    "description": "open-steamgate analytical list page over the flight cube (ZC_STG_FLIGHTCUBE)",
     "applicationVersion": {
       "version": "0.0.1"
     },
     "dataSources": {
       "mainService": {
-        "uri": "../sap/opu/odata/sap/ZSTG_DEMO_SRV/",
+        "uri": "../../sap/opu/odata/sap/ZSTG_SADL_SRV/",
         "type": "OData",
         "settings": {
-          "odataVersion": "2.0"
+          "odataVersion": "2.0",
+          "annotations": [
+            "localAnnotations"
+          ]
+        }
+      },
+      "localAnnotations": {
+        "uri": "annotations/annotations.xml",
+        "type": "ODataAnnotation",
+        "settings": {
+          "localUri": "annotations/annotations.xml"
         }
       }
     },
     "crossNavigation": {
       "inbounds": {
-        "Travel-manage": {
-          "semanticObject": "Travel",
-          "action": "manage",
+        "Flight-analyze": {
+          "semanticObject": "Flight",
+          "action": "analyze",
           "signature": {
             "parameters": {},
             "additionalParameters": "allowed"
           }
-        }
-      },
-      "outbounds": {
-        "BookingDisplay": {
-          "semanticObject": "Booking",
-          "action": "display"
         }
       }
     }
@@ -41,7 +45,7 @@
     "deviceTypes": {
       "desktop": true,
       "tablet": true,
-      "phone": true
+      "phone": false
     }
   },
   "sap.ui5": {
@@ -63,7 +67,7 @@
       "i18n": {
         "type": "sap.ui.model.resource.ResourceModel",
         "settings": {
-          "bundleName": "stg.travel.i18n.i18n",
+          "bundleName": "stg.analytics.i18n.i18n",
           "supportedLocales": [
             ""
           ],
@@ -88,39 +92,19 @@
       "flexibilityEnabled": false
     },
     "pages": {
-      "ListReport|Travel": {
-        "entitySet": "TravelSet",
+      "AnalyticalListPage|Zc_Stg_Flightcube": {
+        "entitySet": "Zc_Stg_FlightcubeSet",
         "component": {
-          "name": "sap.suite.ui.generic.template.ListReport",
+          "name": "sap.suite.ui.generic.template.AnalyticalListPage",
           "list": true,
           "settings": {
+            "tableType": "AnalyticalTable",
+            "defaultContentView": "charttable",
+            "showGoButton": false,
+            "condensedTableLayout": true,
+            "smartVariantManagement": false,
             "dataLoadSettings": {
               "loadDataOnAppLaunch": "always"
-            },
-            "smartVariantManagement": false,
-            "condensedTableLayout": true
-          }
-        },
-        "pages": {
-          "ObjectPage|Travel": {
-            "entitySet": "TravelSet",
-            "component": {
-              "name": "sap.suite.ui.generic.template.ObjectPage",
-              "settings": {
-                "editableHeaderContent": false
-              }
-            },
-            "pages": {
-              "ObjectPage|to_Bookings": {
-                "navigationProperty": "to_Bookings",
-                "entitySet": "BookingSet",
-                "component": {
-                  "name": "sap.suite.ui.generic.template.ObjectPage",
-                  "settings": {
-                    "editableHeaderContent": false
-                  }
-                }
-              }
             }
           }
         }

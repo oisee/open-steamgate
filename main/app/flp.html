@@ -43,6 +43,22 @@
           applicationType: "URL",
           url: "./booking/",
           navigationMode: "embedded"
+        },
+        "Flight-analyze": {
+          title: "Flight analytics",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.analytics",
+          applicationType: "URL",
+          url: "./analytics/",
+          navigationMode: "embedded"
+        },
+        "SegwProject-manage": {
+          title: "SEGW",
+          description: "the Service Builder as an app",
+          additionalInformation: "SAPUI5.Component=stg.segw",
+          applicationType: "URL",
+          url: "./segw/",
+          navigationMode: "embedded"
         }
       },
       services: {
@@ -77,6 +93,28 @@
                         info: "ZSTG_DEMO_SRV",
                         icon: "sap-icon://flight",
                         targetURL: "#Booking-display"
+                      }
+                    },
+                    {
+                      id: "analytics",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Flight analytics",
+                        subtitle: "analytical list page",
+                        info: "ZSTG_SADL_SRV",
+                        icon: "sap-icon://bar-chart",
+                        targetURL: "#Flight-analyze"
+                      }
+                    },
+                    {
+                      id: "segw",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "SEGW",
+                        subtitle: "Service Builder",
+                        info: "ZSTG_SEGW_SRV",
+                        icon: "sap-icon://tree",
+                        targetURL: "#SegwProject-manage"
                       }
                     }
                   ]
@@ -156,7 +194,7 @@
         return;
       }
       const boot = document.createElement("script");
-      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg\": \"./\", \"stg.travel\": \"./\", \"stg.booking\": \"./booking\"}","data-sap-ui-oninit":"module:stg/launchpad"};
+      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg\": \"./\", \"stg.travel\": \"./\", \"stg.booking\": \"./booking\", \"stg.analytics\": \"./analytics\", \"stg.segw\": \"./segw\"}","data-sap-ui-oninit":"module:stg/launchpad"};
       for (const name of Object.keys(attributes)) {
         boot.setAttribute(name, attributes[name]);
       }
