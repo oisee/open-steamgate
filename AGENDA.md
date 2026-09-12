@@ -365,6 +365,60 @@ Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
 queue is PR → CI → squash-merge by us. The transpiler stays his to merge. A
 second session only for step 2 in its own worktree, if at all.
 
+## Backlog: what we said we did not want, re-assessed 2026-09-12 (three research passes)
+
+**RFC/BOR mapping.** Cheaper than feared. `CALL FUNCTION` to a function
+module with source runs already (FUGR → `abap.FunctionModules`);
+`DESTINATION` goes to `abap.context.RFCDestinations[dest].call(...)`, one JS
+object, no transpiler change. Gotcha: `DESTINATION 'NONE'` is not treated
+as local, register it. The corpus has no RFC-mapped project, but every
+generated DPC carries the RFC skeleton (`COMMIT_WORK` →
+`BAPI_TRANSACTION_COMMIT`, `rfc_save_log`, `log_message`). To do: bodies
+for `/iwbep/cl_sb_gen_dpc_rt_util`, `/iwbep/cl_cos_logger`,
+`BAPI_TRANSACTION_COMMIT/ROLLBACK` as FUGR over our LUW (1–2 days, given
+to the transpiler session); BAPIs without source: stub FMs over SQLite,
+or capture/replay JSON through vsp (`.local/` only, 1–2 days), or the
+human-in-the-loop bridge (side project only). BOR/SWO1: dead, ignore.
+
+**ODC / Include / Redefine.** Not in the corpus at all. Simulate: (a) a
+local "external" service = a second MPC/DPC in the registry called
+in-process through `zcl_stg_dispatcher=>dispatch` with a small
+`zcl_stg_odata_client` (2–3 days, the core); (b) an online service through
+`cl_http_client` (real HTTP in Node via `@KERNEL`; the preview needs a
+fetch branch and CORS is not ours), +2 days; (c) an express proxy route
+(half a day, a bypass, not composition). Include = merge two model infos;
+Redefine = inherit from the other service's `_EXT`.
+
+**Our own composition layer ("CAP for SEGW").** `*.stg.yaml`: one service,
+entities from `cds:`, `table:`, `function:`, `service:` (include/ODC),
+`abap:` (hand-written DPC), annotations in one place. `tools/stg-compile`
+emits IWPR + IWSV/IWMO/IWSG (real abapGit objects → deploy into SEGW),
+`_MPC`/`_DPC` through `segw-gen`, and routes `cds:` to SADL, `table:` to a
+generic Open-SQL DPC, `service:` to the client above. First step (1 day):
+`cds:` + `abap:` only, the demo rewritten on it, `--check` against the
+demo's IWPR byte-identical. That is backlog step 3 ("edit the file").
+
+**BOPF / draft.** A Fiori Elements V2 draft app needs, on the wire: a
+compound key `DB_KEY + IsActiveEntity`, `DraftAdministrativeData` and
+`SiblingEntity` navigations, four function imports Edit/Activation/
+Preparation/Validation with `sap:action-for` and `sap:applicable-path`,
+`Common.DraftRoot`, and the request flow create → MERGE in changesets →
+Activation / DELETE draft. All of it is generic: a draft table per entity
+(generated from `@ObjectModel.writeDraftPersistence`), routing by
+`IsActiveEntity` in `zcl_stg_sadl_dpc`, the four actions implemented once,
+one shared draft-admin table. ~9 days to a working draft app (guid/boolean
+keys 1, SADL writes 2, draft metadata 2, actions 2, e2e 1, downport of
+7.40 MPC/DPC 1). What cannot be shimmed: real BOPF determinations/
+validations/actions in customer code; abapGit does not serialize the BO
+model, so `/bobf/` stubs (+5–8 days) only pay off with a second BOPF repo
+in the corpus. Every corpus SADL exposure is `maxEditMode="RO"`: writes
+have no real oracle. Locks and `DraftIsCreatedByMe` need a user, ours is
+fixed.
+
+Decision pending (Alice): which of these enters the plan and in what
+order; the composition layer and RFC shims are the cheapest, draft the
+most visible for Fiori people.
+
 ## Backlog: Gateway extension points the corpus really uses (2026-09-12)
 
 Counted over the corpus DPC/MPC classes. Have: `sap:` annotations and
