@@ -24,8 +24,12 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 
 - **Gateway lives here; the interface/DDIC layer lives in our fork
   `oisee/open-abap-odata`** (decided 2026-09-11; revised 2026-09-12: **we
-  work in the fork and send the reusable pieces upstream as PRs** — first one
-  is open-abap-odata #40, the registry + exception constructors). For the
+  work in the fork and send the reusable pieces upstream as PRs**, one at a
+  time: #40 registry + exception constructors (merged 2026-09-12), #42 EDM
+  setters + facets (open); queued behind it on fork main: associations,
+  function imports, `get_expanded_*` in the base class, SADL interfaces +
+  annotations. Fork `main` = `upstream/main` + that queue, rebased after
+  every merge. Steamgate first, backport what is proven). For the
   transpiler the same rule: fixes go as PRs from branches of `oisee/transpiler`
   off `upstream/main` (#1829 literal length, #1830 FAE dedupe, #1831 views +
   CREATE DATA TABLE OF, #1832 FAE empty driver), workarounds stay here until
