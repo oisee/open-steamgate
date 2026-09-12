@@ -183,10 +183,13 @@ const ABAP_TYPE = {
   "Edm.String": "STRING", "Edm.Guid": "SYSUUID_X", "Edm.Int32": "I", "Edm.Int16": "I", "Edm.Boolean": "XSDBOOLEAN",
   "Edm.DateTime": "TIMESTAMP", "Edm.Decimal": "P LENGTH 16 DECIMALS 3", "Edm.Time": "TIMS",
 };
+// what SEGW declares for a property without a DDIC type (from the corpus:
+// MindsetAppAnalyzerFree, abap-sap-tools); a TYPE_NAME in the tree wins
 const ABAP_INLINE = {
-  "Edm.String": "string", "Edm.Guid": "SYSUUID_X", "Edm.Int32": "INT4", "Edm.Int16": "INT2", "Edm.Boolean": "FLAG",
+  "Edm.String": "string", "Edm.Guid": "SYSUUID_X", "Edm.Int32": "i", "Edm.Int16": "/IWBEP/SB_ODATA_TY_INT2", "Edm.Boolean": "FLAG",
   "Edm.DateTime": "TIMESTAMP", "Edm.Decimal": "P LENGTH 16 DECIMALS 3", "Edm.Time": "TIMS", "Edm.Byte": "INT1",
 };
+const inlineType = (pr) => pr.typeName || (pr.edmType === "Edm.String" && pr.maxLength ? `c length ${pr.maxLength}` : (ABAP_INLINE[pr.edmType] || "string"));
 const ab = (b) => (b ? "abap_true" : "abap_false");
 
 const MPC_BANNER = `*&---------------------------------------------------------------------*
@@ -441,7 +444,7 @@ export function mpcSource(m, opts = {}) {
   const typeBlocks = [];
   for (const ct of m.complexTypes) {
     typeBlocks.push(`  types:\n        begin of ${ct.name.toUpperCase()},\n` +
-      ct.properties.map((pr) => `        ${pr.abapField} type ${pr.typeName || ABAP_INLINE[pr.edmType] || "string"},\n`).join("") +
+      ct.properties.map((pr) => `        ${pr.abapField} type ${inlineType(pr)},\n`).join("") +
       `    end of ${ct.name.toUpperCase()} .\n`);
   }
   for (const fi of m.functionImports.filter((f) => f.parameters.length > 0)) {
@@ -455,7 +458,7 @@ export function mpcSource(m, opts = {}) {
     } else {
       // no DDIC structure behind the entity: SEGW declares one from the properties
       typeBlocks.push(`  types:\n      begin of TS_${et.techName},\n` +
-        et.properties.map((pr) => `     ${pr.abapField} type ${pr.complexType ? pr.complexType.toUpperCase() : (pr.typeName || ABAP_INLINE[pr.edmType] || "string")},\n`).join("") +
+        et.properties.map((pr) => `     ${pr.abapField} type ${pr.complexType ? pr.complexType.toUpperCase() : inlineType(pr)},\n`).join("") +
         `  end of TS_${et.techName} .\n  types:\n    TT_${et.techName} type standard table of TS_${et.techName} .\n`);
     }
   }
