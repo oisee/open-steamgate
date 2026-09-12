@@ -13,6 +13,7 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
     METHODS travelset_delete_entity REDEFINITION.
     METHODS bookingset_get_entityset REDEFINITION.
     METHODS bookingset_get_entity REDEFINITION.
+    METHODS statusvhset_get_entityset REDEFINITION.
   PRIVATE SECTION.
     TYPES ty_travel_id TYPE c LENGTH 8.
     TYPES: BEGIN OF ty_range,
@@ -38,6 +39,9 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
       RETURNING
         VALUE(rv_value) TYPE string.
 
+    METHODS fill_status_text
+      CHANGING
+        ct_travel TYPE zcl_zstg_demo_mpc=>tt_travel.
     METHODS ranges_for
       IMPORTING
         iv_property      TYPE string
@@ -85,6 +89,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       WHERE travel_id IN lt_travel_id
         AND status IN lt_status
       ORDER BY travel_id.
+    fill_status_text( CHANGING ct_travel = et_entityset ).
 
 * paging the way most hand-written DPCs do it: after the SELECT
     lv_skip = is_paging-skip.
@@ -398,6 +403,54 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       FROM zstg_demo
       INTO CORRESPONDING FIELDS OF er_entity
       WHERE travel_id = lv_travel_id.
+    IF sy-subrc = 0.
+      SELECT SINGLE status_text FROM zstg_status
+        INTO er_entity-status_text
+        WHERE status = er_entity-status.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD fill_status_text.
+    DATA lt_status TYPE zcl_zstg_demo_mpc=>tt_status_vh.
+    DATA ls_status LIKE LINE OF lt_status.
+    FIELD-SYMBOLS <ls_travel> LIKE LINE OF ct_travel.
+
+    IF ct_travel IS INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT status status_text FROM zstg_status
+      INTO CORRESPONDING FIELDS OF TABLE lt_status.
+    LOOP AT ct_travel ASSIGNING <ls_travel>.
+      READ TABLE lt_status INTO ls_status WITH KEY status = <ls_travel>-status.
+      IF sy-subrc = 0.
+        <ls_travel>-status_text = ls_status-status_text.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD statusvhset_get_entityset.
+* the F4 list: $filter on the code, $search over the text, the way the
+* value help dialog asks for it
+    DATA lt_status TYPE ty_ranges.
+    DATA lv_search TYPE string.
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF et_entityset.
+
+    lt_status = ranges_for( iv_property = 'Status'
+                            it_filter   = it_filter_select_options ).
+
+    SELECT status status_text FROM zstg_status
+      INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE status IN lt_status
+      ORDER BY status.
+
+    IF iv_search_string IS NOT INITIAL.
+      lv_search = to_upper( iv_search_string ).
+      LOOP AT et_entityset ASSIGNING <ls_row>.
+        IF to_upper( <ls_row>-status_text ) NS lv_search AND to_upper( <ls_row>-status ) NS lv_search.
+          DELETE et_entityset.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

@@ -19,6 +19,8 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
     DATA mt_orderby       TYPE /iwbep/t_mgw_tech_order.
     DATA mt_filter        TYPE /iwbep/t_mgw_select_option.
     DATA mv_filter_string TYPE string.
+* the "search" URL option (Gateway's full-text search, iv_search_string)
+    DATA mv_search_string TYPE string.
     DATA mt_key_tab       TYPE /iwbep/t_mgw_name_value_pair.
     DATA ms_set           TYPE zcl_stg_model_info=>ty_entity_set.
     DATA mt_navigation_path TYPE /iwbep/t_mgw_navigation_path.

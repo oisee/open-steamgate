@@ -41,6 +41,51 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
   expect(failed, failed.join("\n")).toEqual([]);
 });
 
+test("F4 on Status: the value help dialog reads StatusVHSet, searches it, and its pick becomes $filter", async ({page}) => {
+  const requests = [];
+  page.on("request", (req) => {
+    const text = req.url() + " " + (req.postData() || "");
+    if (text.includes("/sap/opu/odata/sap/")) {
+      requests.push(text.replace(/\r?\n/g, " "));
+    }
+  });
+  await page.goto("/app/index.html");
+  // Common.Text + TextArrangement: the column shows the text first
+  await expect(page.getByText("Accepted (A)").first()).toBeVisible();
+
+  const status = page.getByLabel(/^Status/).first();
+  await status.focus();
+  await page.keyboard.press("F4");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Cancelled")).toBeVisible();
+  await expect(dialog.getByText("Accepted")).toBeVisible();
+  expect(requests.some((r) => /StatusVHSet\?/.test(r) && r.includes("$select=Status%2cText"))).toBe(true);
+
+  // the dialog's own search goes to the DPC as iv_search_string
+  const search = dialog.getByRole("searchbox").or(dialog.getByPlaceholder("Search")).first();
+  await search.fill("cancel");
+  await search.press("Enter");
+  await expect(dialog.getByText("Items (1)")).toBeVisible();
+  expect(requests.some((r) => /StatusVHSet\?/.test(r) && r.includes("search=cancel"))).toBe(true);
+
+  // pick the row (keyboard: Space on its cell toggles the selection, then OK)
+  // and the filter bar fires $filter
+  // after the search the table holds one row: Cancelled
+  const pick = dialog.getByRole("gridcell", {name: "Click to Select"}).first();
+  await pick.focus();
+  await page.keyboard.press("Space");
+  await expect(dialog.getByText("No Items or Conditions Selected")).toBeHidden();
+  await dialog.getByRole("button", {name: "OK"}).focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+  await page.getByRole("button", {name: "Go"}).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Aarhus to Odense")).toBeVisible();
+  await expect(page.getByText("Berlin to Copenhagen")).toBeHidden();
+  expect(requests.some((r) => /\$filter=Status eq 'X'/.test(decodeURIComponent(r)))).toBe(true);
+});
+
 test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await page.goto("/app/index.html");
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();

@@ -156,6 +156,7 @@ CLASS ltcl_dispatch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FI
     METHODS metadata FOR TESTING RAISING cx_static_check.
     METHODS service_document FOR TESTING RAISING cx_static_check.
     METHODS unknown_set FOR TESTING RAISING cx_static_check.
+    METHODS status_value_help FOR TESTING RAISING cx_static_check.
     METHODS unknown_key FOR TESTING RAISING cx_static_check.
     METHODS unknown_service FOR TESTING RAISING cx_static_check.
     METHODS post_not_implemented FOR TESTING RAISING cx_static_check.
@@ -188,6 +189,23 @@ CLASS ltcl_dispatch IMPLEMENTATION.
                                                 it_options = lt_options ).
   ENDMETHOD.
 
+  METHOD status_value_help.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* the F4 list as the value help dialog reads it
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/StatusVHSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Status":"A","Text":"Accepted"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Status":"X","Text":"Cancelled"' ) ).
+
+* $search over the text
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/StatusVHSet'
+                       iv_query = 'search=cancel' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Text":"Cancelled"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"Text":"Accepted"' ) ).
+  ENDMETHOD.
+
   METHOD entity_set.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
 
@@ -198,7 +216,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
                                         exp = 'application/json' ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '{"d":{"results":[{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_DEMO_SRV.Travel"' ) ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"__deferred"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"__deferred"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'TravelSet(''T0009'')' ) ).
   ENDMETHOD.
 
@@ -255,7 +273,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
 
     ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-body
-                                        exp = '{"d":{"EntitySets":["TravelSet","BookingSet"]}}' ).
+                                        exp = '{"d":{"EntitySets":["TravelSet","BookingSet","StatusVHSet"]}}' ).
   ENDMETHOD.
 
   METHOD unknown_set.
@@ -949,7 +967,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
                        iv_query = '$expand=to_Bookings&$top=2' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
 * the expanded navigation is inline; the bookings' own to_Travel stays deferred
@@ -981,7 +999,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Travel":{"__metadata"' ) ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen","Status":"A","Seats":2,"to_Bookings":{"results":[' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"results":[' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
   ENDMETHOD.
 
@@ -994,7 +1012,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
                        iv_query = '$expand=to_Bookings&$filter=TravelId%20eq%20''T0002''' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002","Description":"Copenhagen to Aarhus","Status":"A","Seats":1,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002","Description":"Copenhagen to Aarhus","Status":"A","Seats":1,"StatusText":"Accepted","to_Bookings":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
     cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Ada Lovelace' ) ).
   ENDMETHOD.
@@ -1059,7 +1077,8 @@ CLASS ltcl_deep_insert IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 201 ).
 * the deep entity comes back with its bookings inline
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0600","Description":"Deep","Status":"A","Seats":2,"to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0600","Description":"Deep","Status":"A","Seats":2,' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Bookings":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Alan Turing","FlightDate":"\/Date(1789171200000)\/"' ) ).
 
 * and it is really in the database, reachable through navigation

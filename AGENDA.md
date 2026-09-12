@@ -292,6 +292,12 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
   — the public prior art for DIAG (Core Security, later pysap). Citable in
   `docs/layers-we-own.md`.
 
+**Done 2026-09-12: value helps.** `StatusVHSet` in the demo MPC/DPC,
+`Common.ValueList` on Status and TravelId, `Common.Text` + `TextArrangement`
+(StatusText filled by the DPC), `search` → `iv_search_string`; e2e opens the
+F4 dialog, searches, picks, filters. Next in this line: object page
+(`$expand` to bookings, edit), then `$search` on the list, console cleanup.
+
 **Done 2026-09-12: the preview build.** `npm run web:preview` puts the gateway
 into a service worker (sql.js), `preview.yml` deploys `main/` and `pr-<n>/`
 to GitHub Pages with screenshots; `docs/preview-deployments.md`. Visual diffs

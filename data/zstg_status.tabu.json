@@ -1,0 +1,5 @@
+[
+  {"mandt": "123", "status": "O", "status_text": "Open"},
+  {"mandt": "123", "status": "A", "status_text": "Accepted"},
+  {"mandt": "123", "status": "X", "status_text": "Cancelled"}
+]

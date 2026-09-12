@@ -13,7 +13,8 @@ The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
 
 > **Status: CRUD, `$batch`, navigation, `$expand`, deep insert, function
-> imports and read-only SADL over CDS projections (with analytics
+> imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
+> text arrangement) and read-only SADL over CDS projections (with analytics
 > annotations) work end to end, on SQLite or DuckDB (`STG_DB=duckdb`).** `npm test`
 > serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
 > as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as
@@ -35,6 +36,51 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 > [`docs/layers-we-own.md`](docs/layers-we-own.md).
 
 ---
+
+## Run it
+
+Node 22 or 24.
+
+```sh
+git clone https://github.com/oisee/open-steamgate && cd open-steamgate
+npm ci
+npm start                    # transpile + serve: http://localhost:3030/app/index.html
+npm test                     # abaplint + ABAP Unit + mocha over the wire
+npm run e2e:install && npm run e2e         # Playwright against localhost:3030
+npm run web:preview && npm run web:serve   # the browser-only build on :3031
+npm run start:duckdb         # the same on DuckDB (STG_DB_PATH=x.duckdb persists)
+```
+
+The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
+`open-abap-odata` from GitHub unless `.local/` already holds them.
+
+## What the demo is made of
+
+Bottom up, every layer is real, nothing is mocked:
+
+1. **DDIC and data** — `src/ddic/*.tabl.xml` (abapGit format), seed rows in
+   `data/*.tabu.json` (`abapGit serialize` format for table contents).
+2. **SEGW-shaped classes** — `src/demo/zcl_zstg_demo_mpc` defines the model
+   through `/iwbep/if_mgw_odata_model` (entity types, sets, associations,
+   function imports, a value-help set); `zcl_zstg_demo_dpc_ext` is the data
+   provider: `it_filter_select_options` → Open SQL with ranges, paging, CRUD,
+   deep insert, `get_expanded_entityset`, `iv_search_string`. This is the code
+   that lives in a customer system.
+3. **The `/IWBEP/` interfaces** — from our fork of `open-abap-odata`.
+4. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
+   request context with every `io_tech_request_context` facet, dispatcher,
+   OData v2 JSON, `$batch`, `$expand`, entry provider. The part that existed
+   nowhere in open source.
+5. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
+   Open SQL runs on SQLite (Node), sql.js (browser) or DuckDB.
+6. **Front** — a Fiori Elements V2 list report with no JavaScript of its own:
+   `webapp/manifest.json` and `annotations/annotations.xml` (`UI.LineItem`,
+   `UI.SelectionFields`, `Common.ValueList`, `Common.Text`). SAPUI5 1.120 from
+   SAP's CDN: Fiori Elements and the smart controls are not part of OpenUI5,
+   and the point is that real Fiori apps run unchanged. SAPUI5 is SAP's, not
+   part of this project.
+7. **Preview** — layers 1–5 in a service worker, layer 6 as static files, on
+   GitHub Pages ([`docs/preview-deployments.md`](docs/preview-deployments.md)).
 
 ## Why
 

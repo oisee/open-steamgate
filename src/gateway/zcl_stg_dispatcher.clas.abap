@@ -698,6 +698,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ro_context->mt_orderby = parse_orderby( lv_value ).
     ENDIF.
 
+    ro_context->mv_search_string = zcl_stg_url=>option( is_request = is_request
+                                                        iv_name    = 'search' ).
     lv_value = zcl_stg_url=>option( is_request = is_request
                                     iv_name    = '$filter' ).
     IF lv_value IS NOT INITIAL.
@@ -752,7 +754,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
           it_navigation_path       = lt_nav_path
           it_order                 = lo_context->get_sorting_order( )
           iv_filter_string         = lo_context->mv_filter_string
-          iv_search_string         = ''
+          iv_search_string         = lo_context->mv_search_string
           io_tech_request_context  = lo_context
         IMPORTING
           er_entityset             = lr_entityset

@@ -6,8 +6,16 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
              description TYPE c LENGTH 40,
              status      TYPE c LENGTH 1,
              seats       TYPE i,
+             status_text TYPE c LENGTH 40,
            END OF ts_travel.
     TYPES tt_travel TYPE STANDARD TABLE OF ts_travel WITH DEFAULT KEY.
+
+* value help for Status: the code and its text
+    TYPES: BEGIN OF ts_status_vh,
+             status      TYPE c LENGTH 1,
+             status_text TYPE c LENGTH 40,
+           END OF ts_status_vh.
+    TYPES tt_status_vh TYPE STANDARD TABLE OF ts_status_vh WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ts_booking,
              travel_id   TYPE c LENGTH 8,
@@ -28,6 +36,8 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
     CONSTANTS gc_travel_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'TravelSet' ##NO_TEXT.
     CONSTANTS gc_booking TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Booking' ##NO_TEXT.
     CONSTANTS gc_booking_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'BookingSet' ##NO_TEXT.
+    CONSTANTS gc_status_vh TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'StatusVH' ##NO_TEXT.
+    CONSTANTS gc_status_vh_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'StatusVHSet' ##NO_TEXT.
 
     METHODS define REDEFINITION.
   PROTECTED SECTION.
@@ -37,6 +47,10 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
         /iwbep/cx_mgw_med_exception.
 
     METHODS define_booking
+      RAISING
+        /iwbep/cx_mgw_med_exception.
+
+    METHODS define_status_vh
       RAISING
         /iwbep/cx_mgw_med_exception.
 
@@ -55,6 +69,7 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     model->set_schema_namespace( 'ZSTG_DEMO_SRV' ).
     define_travel( ).
     define_booking( ).
+    define_status_vh( ).
     define_associations( ).
     define_actions( ).
   ENDMETHOD.
@@ -80,6 +95,49 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
                                                       iv_abap_fieldname = 'STATUS' ).
     lo_parameter->set_type_edm_string( ).
     lo_parameter->set_maxlength( 1 ).
+  ENDMETHOD.
+
+  METHOD define_status_vh.
+    DATA lo_entity_type TYPE REF TO /iwbep/if_mgw_odata_entity_typ.
+    DATA lo_property    TYPE REF TO /iwbep/if_mgw_odata_property.
+    DATA lo_entity_set  TYPE REF TO /iwbep/if_mgw_odata_entity_set.
+
+    lo_entity_type = model->create_entity_type( iv_entity_type_name = gc_status_vh
+                                                iv_def_entity_set   = abap_false ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'Status'
+                                                   iv_abap_fieldname = 'STATUS' ).
+    lo_property->set_is_key( ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 1 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_true ).
+    lo_property->set_nullable( abap_false ).
+    lo_property->set_filterable( abap_true ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'Text'
+                                                   iv_abap_fieldname = 'STATUS_TEXT' ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 40 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_true ).
+    lo_property->set_nullable( abap_true ).
+    lo_property->set_filterable( abap_true ).
+
+    lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_STATUS_VH'
+                                    iv_bind_conversions = abap_true ).
+
+    lo_entity_set = lo_entity_type->create_entity_set( gc_status_vh_set ).
+    lo_entity_set->set_creatable( abap_false ).
+    lo_entity_set->set_updatable( abap_false ).
+    lo_entity_set->set_deletable( abap_false ).
+    lo_entity_set->set_pageable( abap_true ).
+    lo_entity_set->set_addressable( abap_true ).
+    lo_entity_set->set_has_ftxt_search( abap_true ).
+    lo_entity_set->set_subscribable( abap_false ).
+    lo_entity_set->set_filter_required( abap_false ).
   ENDMETHOD.
 
   METHOD define_booking.
@@ -221,6 +279,17 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     lo_property->set_sortable( abap_true ).
     lo_property->set_nullable( abap_true ).
     lo_property->set_filterable( abap_true ).
+
+* the status text, read-only, filled by the DPC from the value-help table
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'StatusText'
+                                                   iv_abap_fieldname = 'STATUS_TEXT' ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 40 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_false ).
+    lo_property->set_nullable( abap_true ).
+    lo_property->set_filterable( abap_false ).
 
     lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_TRAVEL'
                                     iv_bind_conversions = abap_true ).

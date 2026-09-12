@@ -12,8 +12,8 @@ OData → Fiori), deploying back through abapGit.
 
 ## Where this repo is
 
-**CRUD, `$batch`, navigation, `$expand`, deep insert, function imports and
-read-only SADL (reference data source over CDS projections, with analytics
+**CRUD, `$batch`, navigation, `$expand`, deep insert, function imports,
+value helps (`Common.ValueList`, `search`) and read-only SADL (reference data source over CDS projections, with analytics
 annotations) work end to end (2026-09-12). The whole thing also runs in the
 browser as a preview deployment (service worker + sql.js, GitHub Pages).**
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2

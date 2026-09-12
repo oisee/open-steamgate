@@ -114,7 +114,7 @@ CLASS ltcl_phase0 IMPLEMENTATION.
                                         exp = 'ZSTG_DEMO_SRV' ).
     lo_entity = lo_mpc->model->get_entity_type( zcl_zstg_demo_mpc=>gc_travel ).
     cl_abap_unit_assert=>assert_equals( act = lines( lo_entity->get_properties( ) )
-                                        exp = 4 ).
+                                        exp = 5 ).
   ENDMETHOD.
 
   METHOD entityset_reads_sqlite.
