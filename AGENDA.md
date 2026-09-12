@@ -59,6 +59,38 @@ successful statements into a fresh transaction (savepoint emulation; test
 seed and data between runs. Open: DECIMAL/DATE column types instead of
 NCHAR, and packaging as `@abaplint/database-duckdb`.
 
+## Analytics on DuckDB, 2026-09-12 (evening): the cube that shows why
+
+The thesis behind DuckDB was analytics; the demo had three travels and no
+analytical app. Now: `ZSTG_FLIGHTFACT` (airline, month, status, seats,
+price, currency) with 24 seed rows and `tools/gen-data.mjs` for any number
+of synthetic facts (`STG_DATA_SCALE`), the CDS cube `ZC_STG_FLIGHTCUBE`
+(`@Analytics.dataCategory: #CUBE`, seats and revenue `@Aggregation.default:
+#SUM`) in `ZSTG_SADL_SRV`, and a Fiori Elements V2 Analytical List Page
+(`webapp/analytics/`, tile "Flight analytics"): chart per airline, table by
+airline/month/status with totals, compact filters. Every request of the
+page is a `$select` on dimensions and measures the SADL runtime turns into
+`GROUP BY`; on DuckDB that is one columnar scan.
+
+Three things the runtime needed for that, all in `src/sadl` and
+open-abap-odata #60: `sap:semantics="aggregate"` on the entity type (the
+odata library learned annotations on entity types; without the attribute
+the page does not bind analytically), synthetic keys on aggregated rows (the
+UI5 model keeps entries by their uri; with an empty key every aggregated row
+was the same entry and the table showed one airline 24 times), and
+`$inlinecount` counted before the page is cut.
+
+`npm run bench:cube -- <rows>` boots the runtime once per store with that
+many facts and times the page's four requests (median of 5). 200,000 facts
+on this machine, ms: total 21 vs 8, per airline 103 vs 12, per
+airline/month/status 220 vs 33, filtered per month 26 vs 10 (SQLite vs
+DuckDB). 1,000,000 facts: total 77 vs 10, per airline 575 vs 17, per
+airline/month/status 1098 vs 39, filtered per month 114 vs 15; loading the
+million takes 5.3 s into SQLite (multi-row INSERTs) and 6.6 s into DuckDB
+(a CSV through `read_csv`, most of it writing the CSV in JavaScript). The
+row store scans a million rows per chart; the column store reads two
+columns. That is the DuckDB thesis, measured.
+
 ## SADL-lite, 2026-09-12 (night run)
 
 Reference-data-source services run now, read-only, with analytics.

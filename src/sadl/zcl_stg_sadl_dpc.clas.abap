@@ -52,6 +52,15 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
         et_fields  TYPE string_table
         et_groupby TYPE string_table.
 
+* aggregated rows have no key of their own; the Gateway gives them one, so
+* the client can tell them apart (the UI5 model keeps entries by their uri)
+    METHODS synthetic_keys
+      IMPORTING
+        is_entity  TYPE zcl_stg_cds_registry=>ty_entity
+        it_groupby TYPE string_table
+      CHANGING
+        ct_data    TYPE STANDARD TABLE.
+
     METHODS sql_literal
       IMPORTING
         iv_value          TYPE string
@@ -218,6 +227,51 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD synthetic_keys.
+    CONSTANTS lc_alphabet TYPE string VALUE ` ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz_-./:,;|=+*#()[]{}!?@&%$'"`.
+    DATA ls_field  TYPE zcl_stg_cds_registry=>ty_field.
+    DATA lv_name   TYPE string.
+    DATA lv_text   TYPE string.
+    DATA lv_hash   TYPE p LENGTH 8 DECIMALS 0.
+    DATA lv_offset TYPE i.
+    DATA lv_index  TYPE i.
+    DATA lv_char   TYPE c LENGTH 1.
+    DATA lv_key    TYPE string.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+
+    LOOP AT ct_data ASSIGNING <ls_row>.
+      CLEAR lv_text.
+      LOOP AT it_groupby INTO lv_name.
+        ASSIGN COMPONENT to_upper( lv_name ) OF STRUCTURE <ls_row> TO <lv_value>.
+        IF sy-subrc = 0.
+          lv_text = |{ lv_text }{ lv_name }={ <lv_value> }\||.
+        ENDIF.
+      ENDLOOP.
+* a small polynomial hash over the dimension values, digits only so it
+* fits numeric as well as character keys
+      lv_hash = 7.
+      lv_index = 0.
+      WHILE lv_index < strlen( lv_text ).
+        lv_char = lv_text+lv_index(1).
+        FIND lv_char IN lc_alphabet MATCH OFFSET lv_offset.
+        IF sy-subrc <> 0.
+          lv_offset = 1.
+        ENDIF.
+        lv_hash = ( lv_hash * 97 + lv_offset + 1 ) MOD 999999937.
+        lv_index = lv_index + 1.
+      ENDWHILE.
+      lv_key = |{ lv_hash }|.
+      CONDENSE lv_key NO-GAPS.
+      LOOP AT is_entity-fields INTO ls_field WHERE is_key = abap_true.
+        ASSIGN COMPONENT to_upper( ls_field-name ) OF STRUCTURE <ls_row> TO <lv_value>.
+        IF sy-subrc = 0.
+          <lv_value> = lv_key.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD if_sadl_gw_dpc~get_entityset.
     DATA lo_context  TYPE REF TO zcl_stg_request_context.
     DATA ls_entity   TYPE zcl_stg_cds_registry=>ty_entity.
@@ -255,6 +309,17 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
                                it_fields  = lt_fields
                                it_groupby = lt_groupby ).
     ASSIGN lr_data->* TO <lt_data>.
+    IF lt_fields IS NOT INITIAL.
+      synthetic_keys( EXPORTING is_entity  = ls_entity
+                                it_groupby = lt_groupby
+                      CHANGING  ct_data    = <lt_data> ).
+    ENDIF.
+
+* $inlinecount counts before the page is cut
+    IF lo_context->mv_inlinecount = abap_true.
+      es_response_context-inlinecount = |{ lines( <lt_data> ) }|.
+      CONDENSE es_response_context-inlinecount NO-GAPS.
+    ENDIF.
 
 * paging after the read, the way SADL's own DPC does it without HANA
     lv_skip = io_tech_request_context->get_skip( ).

@@ -40,6 +40,7 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
       | <sadl:dataSource type="CDS" name="ZC_STG_TRAVEL" binding="ZC_STG_TRAVEL" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_BOOKING" binding="ZC_STG_BOOKING" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_TRAVELCUBE" binding="ZC_STG_TRAVELCUBE" />| &&
+      | <sadl:dataSource type="CDS" name="ZC_STG_FLIGHTCUBE" binding="ZC_STG_FLIGHTCUBE" />| &&
       |<sadl:resultSet>| &&
       |<sadl:structure name="Zc_Stg_Travel" dataSource="ZC_STG_TRAVEL" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
@@ -52,6 +53,10 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
       | <sadl:association name="TO_TRAVEL" binding="_TRAVEL" target="Zc_Stg_Travel" cardinality="zeroToOne" />| &&
       |</sadl:structure>| &&
       |<sadl:structure name="Zc_Stg_Travelcube" dataSource="ZC_STG_TRAVELCUBE" maxEditMode="RO" exposure="TRUE" >| &&
+      | <sadl:query name="SADL_QUERY" >| &&
+      | </sadl:query>| &&
+      |</sadl:structure>| &&
+      |<sadl:structure name="Zc_Stg_Flightcube" dataSource="ZC_STG_FLIGHTCUBE" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
       | </sadl:query>| &&
       |</sadl:structure>| &&
@@ -75,6 +80,7 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
     DATA lt_travel  TYPE STANDARD TABLE OF zvstgtravel WITH DEFAULT KEY.
     DATA lt_booking TYPE STANDARD TABLE OF zvstgbooking WITH DEFAULT KEY.
     DATA lt_cube    TYPE STANDARD TABLE OF zvstgtravelcube WITH DEFAULT KEY.
+    DATA lt_flight  TYPE STANDARD TABLE OF zvstgflightcube WITH DEFAULT KEY.
     DATA lv_entityset_name TYPE string.
 
     lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
@@ -97,6 +103,12 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
                                                        IMPORTING et_data                 = lt_cube
                                                                  es_response_context     = es_response_context ).
         copy_data_to_ref( EXPORTING is_data = lt_cube
+                          CHANGING  cr_data = er_entityset ).
+      WHEN 'Zc_Stg_FlightcubeSet'.
+        if_sadl_gw_dpc_util~get_dpc( )->get_entityset( EXPORTING io_tech_request_context = io_tech_request_context
+                                                       IMPORTING et_data                 = lt_flight
+                                                                 es_response_context     = es_response_context ).
+        copy_data_to_ref( EXPORTING is_data = lt_flight
                           CHANGING  cr_data = er_entityset ).
       WHEN OTHERS.
         super->/iwbep/if_mgw_appl_srv_runtime~get_entityset(

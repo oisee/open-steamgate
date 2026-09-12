@@ -227,6 +227,12 @@ CLASS cl_sadl_gw_model_exposure IMPLEMENTATION.
     lv_type_name = is_structure-name.
     lo_entity_type = io_model->create_entity_type( iv_entity_type_name = lv_type_name
                                                    iv_def_entity_set   = abap_false ).
+* a cube: the Gateway marks the entity type, analytical clients bind on it
+    IF lv_aggregate = abap_true.
+      lo_entity_type->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+        iv_key   = 'semantics'
+        iv_value = 'aggregate' ).
+    ENDIF.
 
     LOOP AT ls_entity-fields INTO ls_field.
       lv_prop_name = ls_field-name.

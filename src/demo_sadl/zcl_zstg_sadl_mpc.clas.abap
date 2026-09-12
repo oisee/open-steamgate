@@ -70,6 +70,7 @@ CLASS zcl_zstg_sadl_mpc IMPLEMENTATION.
       | <sadl:dataSource type="CDS" name="ZC_STG_TRAVEL" binding="ZC_STG_TRAVEL" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_BOOKING" binding="ZC_STG_BOOKING" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_TRAVELCUBE" binding="ZC_STG_TRAVELCUBE" />| &&
+      | <sadl:dataSource type="CDS" name="ZC_STG_FLIGHTCUBE" binding="ZC_STG_FLIGHTCUBE" />| &&
       |<sadl:resultSet>| &&
       |<sadl:structure name="Zc_Stg_Travel" dataSource="ZC_STG_TRAVEL" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
@@ -82,6 +83,10 @@ CLASS zcl_zstg_sadl_mpc IMPLEMENTATION.
       | <sadl:association name="TO_TRAVEL" binding="_TRAVEL" target="Zc_Stg_Travel" cardinality="zeroToOne" />| &&
       |</sadl:structure>| &&
       |<sadl:structure name="Zc_Stg_Travelcube" dataSource="ZC_STG_TRAVELCUBE" maxEditMode="RO" exposure="TRUE" >| &&
+      | <sadl:query name="SADL_QUERY" >| &&
+      | </sadl:query>| &&
+      |</sadl:structure>| &&
+      |<sadl:structure name="Zc_Stg_Flightcube" dataSource="ZC_STG_FLIGHTCUBE" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
       | </sadl:query>| &&
       |</sadl:structure>| &&

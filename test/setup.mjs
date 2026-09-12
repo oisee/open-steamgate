@@ -41,6 +41,7 @@ export async function setup(abap, schemas, insert) {
     await db.execute(duckdbSchema(schemas));
     await db.execute(duckdbInserts(insert));
     await db.execute(seedStatements());
+    await loadScaledData(db, "duckdb");
     await db.commit();
     return;
   }
@@ -50,4 +51,15 @@ export async function setup(abap, schemas, insert) {
   await db.execute(schemas.sqlite);
   await db.execute(insert);
   await db.execute(seedStatements());
+  await loadScaledData(db, "sqlite");
+}
+
+// STG_DATA_SCALE=<rows> adds that many synthetic flight facts (tools/gen-data.mjs)
+// for the analytical cube; the seeds stay as they are
+async function loadScaledData(db, kind) {
+  const scale = Number(process.env.STG_DATA_SCALE ?? 0);
+  if (scale > 0) {
+    const {loadFlightFacts} = await import("../tools/gen-data.mjs");
+    await loadFlightFacts(db, scale, kind);
+  }
 }

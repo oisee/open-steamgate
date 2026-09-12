@@ -143,6 +143,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
   `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
   call. `npm run segw -- <folder> --list` shows what a repo would register.
+- Analytics: `ZSTG_FLIGHTFACT` (`data/zstg_flightfact.tabu.json`, 24 seed
+  rows) → CDS cube `ZC_STG_FLIGHTCUBE` (`@Analytics.dataCategory: #CUBE`,
+  `@Aggregation.default: #SUM`) served by `ZSTG_SADL_SRV`; the SADL runtime
+  turns `$select` into `GROUP BY`, gives aggregated rows synthetic keys and
+  counts before `$top`. Fiori Elements Analytical List Page in
+  `webapp/analytics/` (`/app/analytics/index.html`, launchpad tile "Flight
+  analytics"). `STG_DATA_SCALE=1000000` adds synthetic facts
+  (`tools/gen-data.mjs`); `npm run bench:cube -- 1000000` times the cube on
+  SQLite and DuckDB side by side (`tools/bench-cube.mjs`). Tests
+  `test/analytics.mjs`, `test/e2e/analytics.spec.mjs`.
 - RFC destinations: `.local/rfc-destinations.json` (example in
   `docs/rfc-destinations.example.json`) says per `DESTINATION` name whether
   it is `local`, `replay` (capture folder), `live` (open-rfc, node only),

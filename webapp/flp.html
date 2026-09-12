@@ -43,6 +43,14 @@
           applicationType: "URL",
           url: "./booking/",
           navigationMode: "embedded"
+        },
+        "Flight-analyze": {
+          title: "Flight analytics",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.analytics",
+          applicationType: "URL",
+          url: "./analytics/",
+          navigationMode: "embedded"
         }
       },
       services: {
@@ -78,6 +86,17 @@
                         icon: "sap-icon://flight",
                         targetURL: "#Booking-display"
                       }
+                    },
+                    {
+                      id: "analytics",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Flight analytics",
+                        subtitle: "analytical list page",
+                        info: "ZSTG_SADL_SRV",
+                        icon: "sap-icon://bar-chart",
+                        targetURL: "#Flight-analyze"
+                      }
                     }
                   ]
                 }
@@ -104,7 +123,7 @@
     data-sap-ui-frameOptions="allow"
     data-sap-ui-xx-componentPreload="off"
     data-sap-ui-flexibilityServices=""
-    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking"}'
+    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking", "stg.analytics": "./analytics"}'
     data-sap-ui-oninit="module:stg/launchpad"></script>
 </head>
 <body class="sapUiBody" id="content">
