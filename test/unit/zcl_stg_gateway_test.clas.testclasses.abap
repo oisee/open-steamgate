@@ -174,6 +174,9 @@ ENDCLASS.
 CLASS ltcl_dispatch IMPLEMENTATION.
 
   METHOD setup.
+* the value help of the demo is a search help, its provider comes from the
+* generated registry
+    zcl_stg_shlp_registry=>register( ).
     zcl_oao_registry=>register( iv_service = 'ZSTG_DEMO_SRV'
                                 iv_mpc     = 'ZCL_ZSTG_DEMO_MPC_EXT'
                                 iv_dpc     = 'ZCL_ZSTG_DEMO_DPC_EXT' ).

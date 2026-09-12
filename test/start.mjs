@@ -3,12 +3,16 @@ import {fileURLToPath} from "node:url";
 import {initializeABAP} from "../output/init.mjs";
 import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
 import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
+import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
 
 await initializeABAP();
 
 // the SEGW registration objects (IWSV/IWMO in src/) say which service is
 // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
 await zcl_stg_segw_registry.register();
+// the search help objects (*.shlp.xml in src/) become value help providers;
+// tools/segw-shlp.mjs generated this
+await zcl_stg_shlp_registry.register();
 
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);

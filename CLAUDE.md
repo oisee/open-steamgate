@@ -148,6 +148,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `tools/rfc-replay.mjs`; capture files are the `rfc call` JSON of
   open-rfc-go (`params` + `result`), see AGENDA "RFC replay". Synthetic
   fixtures in `test/fixtures/rfc/`, `mocha test/rfc-replay.mjs`.
+- Search helps serve themselves: `<name>.shlp.xml` in `src/` (DD30V selection
+  table, DD32P parameters) becomes a `zcl_oao_shlp_ddic` provider through
+  `tools/segw-shlp.mjs` (part of `transpile`, writes
+  `gen/segw/zcl_stg_shlp_registry`, called by `test/start.mjs` and the
+  preview); an operation mapped to a search help reaches it through
+  `/iwbep/cl_sb_shlp_data_factory` by name. The demo's `StatusVHSet` runs on
+  `ZSTG_STATUS_SH` this way. Exit search helps are not served yet.
 - SEGW offline: `npm run segw:gen -- <folder> --check` diffs what
   `tools/segw-gen.mjs` makes of a `<project>.iwpr.xml` against the `_MPC`/
   `_DPC` classes in the folder; `--out <dir>` writes them (and the `_EXT`

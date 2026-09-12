@@ -3,6 +3,7 @@ CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
 * dispatch on the entity-set name, delegate to <set>_get_entityset etc.,
 * copy the typed result into the untyped reference. Clean-room.
   PUBLIC SECTION.
+    INTERFACES /iwbep/if_sb_gendpc_shlp_data.
     METHODS /iwbep/if_mgw_appl_srv_runtime~get_entityset REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~get_entity REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~create_entity REDEFINITION.
@@ -575,6 +576,25 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
       EXPORTING
         textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
         method = 'TRAVELSET_GET_ENTITY'.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_sb_gendpc_shlp_data~get_search_help_values.
+* Call to Search Help run time mechanism to get values
+    DATA lo_sh_data TYPE REF TO /iwbep/if_sb_shlp_data.
+
+    CLEAR: et_return_list, es_message.
+    lo_sh_data = /iwbep/cl_sb_shlp_data_factory=>get_sh_data_obj( ).
+
+    lo_sh_data->/iwbep/if_sb_gendpc_shlp_data~get_search_help_values(
+      EXPORTING
+        iv_shlp_name      = iv_shlp_name
+        iv_maxrows        = iv_maxrows
+        iv_sort           = iv_sort
+        iv_call_shlt_exit = iv_call_shlt_exit
+        it_selopt         = it_selopt
+      IMPORTING
+        et_return_list    = et_return_list
+        es_message        = es_message ).
   ENDMETHOD.
 
 ENDCLASS.

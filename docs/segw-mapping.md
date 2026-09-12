@@ -71,6 +71,21 @@ every referential constraint that feeds the mapped key.
 field/value result list unpivoted into `et_entityset` record by record; the
 read variant builds one `EQ` row per key.
 
+The runtime side (open-abap-odata #57, #58): `/iwbep/cl_sb_shlp_data_factory`
+hands out `zcl_oao_shlp_data`, a registry of providers by search help name;
+`zcl_oao_shlp_ddic` is the provider for a search help as the DDIC defines it
+(selection table or view, parameters with input/output flags and positions):
+`SELECT *` over the table with the WHERE the selection options amount to,
+sorted by the list fields when `iv_sort` is set, cut to `iv_maxrows`,
+answered as record / field / value rows. `tools/segw-shlp.mjs` reads every
+`<name>.shlp.xml` under `src/` and writes `gen/segw/zcl_stg_shlp_registry`,
+which builds and registers one provider per elementary search help; the
+demo's `ZSTG_STATUS_SH` over `ZSTG_STATUS` is served this way and
+`StatusVHSet` in `zcl_zstg_demo_dpc_ext` follows the generated template.
+Not served yet: selection through an exit function (`SELMEXIT`, the exit's
+interface needs `SHLP_DESCR`, `DDSHF4CTRL`, `SEAHLPRES`), text tables,
+collective search helps; those come back as an E message.
+
 **SADL** (`sadlMethods`, existed before): `if_sadl_gw_dpc_util~get_dpc`
 with the `<sadl:definition>` XML now takes the binding type from the tree
 (`DDIC`, `CDS`, `EPM`).

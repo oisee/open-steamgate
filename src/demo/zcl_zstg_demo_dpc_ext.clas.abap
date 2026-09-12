@@ -455,19 +455,80 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD statusvhset_get_entityset.
-* the F4 list: $filter on the code, $search over the text, the way the
-* value help dialog asks for it
-    DATA lt_status TYPE ty_ranges.
-    DATA lv_search TYPE string.
+* the F4 list the way SEGW maps an entity set to a search help: the filter
+* becomes selection options of ZSTG_STATUS_SH, the runtime answers in
+* record / field / value rows, mapped back here (the generated template);
+* $search over the text is ours on top, the value help dialog sends it
+    DATA ls_filter  TYPE /iwbep/s_mgw_select_option.
+    DATA ls_range   TYPE /iwbep/s_cod_select_option.
+    DATA lt_selopt  TYPE ddshselops.
+    DATA ls_selopt  LIKE LINE OF lt_selopt.
+    DATA lt_result  TYPE /iwbep/if_sb_gendpc_shlp_data=>tt_result_list.
+    DATA ls_result  LIKE LINE OF lt_result.
+    DATA ls_message TYPE bapiret2.
+    DATA ls_row     LIKE LINE OF et_entityset.
+    DATA lv_record  TYPE i.
+    DATA lv_search  TYPE string.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF et_entityset.
 
-    lt_status = ranges_for( iv_property = 'Status'
-                            it_filter   = it_filter_select_options ).
+    LOOP AT it_filter_select_options INTO ls_filter.
+      CASE ls_filter-property.
+        WHEN 'Status'.
+          ls_selopt-shlpfield = 'STATUS'.
+        WHEN 'Text'.
+          ls_selopt-shlpfield = 'STATUS_TEXT'.
+        WHEN OTHERS.
+          CONTINUE.
+      ENDCASE.
+      ls_selopt-shlpname = 'ZSTG_STATUS_SH'.
+      LOOP AT ls_filter-select_options INTO ls_range.
+        ls_selopt-sign   = ls_range-sign.
+        ls_selopt-option = ls_range-option.
+        ls_selopt-low    = ls_range-low.
+        ls_selopt-high   = ls_range-high.
+        APPEND ls_selopt TO lt_selopt.
+      ENDLOOP.
+    ENDLOOP.
 
-    SELECT status status_text FROM zstg_status
-      INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE status IN lt_status
-      ORDER BY status.
+    me->/iwbep/if_sb_gendpc_shlp_data~get_search_help_values(
+      EXPORTING
+        iv_shlp_name      = 'ZSTG_STATUS_SH'
+        iv_maxrows        = is_paging-top
+        iv_sort           = abap_true
+        iv_call_shlt_exit = abap_true
+        it_selopt         = lt_selopt
+      IMPORTING
+        et_return_list    = lt_result
+        es_message        = ls_message ).
+    IF ls_message IS NOT INITIAL.
+* a generated DPC does this through /iwbep/if_sb_dpc_comm_services~rfc_save_log
+      /iwbep/cl_sb_gen_dpc_rt_util=>rfc_save_log(
+        is_return            = ls_message
+        iv_entity_type       = iv_entity_name
+        it_key_tab           = it_key_tab
+        io_logger            = /iwbep/if_mgw_conv_srv_runtime~get_logger( )
+        io_message_container = /iwbep/if_mgw_conv_srv_runtime~get_message_container( ) ).
+    ENDIF.
+
+    CLEAR et_entityset.
+    LOOP AT lt_result INTO ls_result.
+      IF ls_result-record_number <> lv_record.
+        IF lv_record > 0.
+          APPEND ls_row TO et_entityset.
+        ENDIF.
+        CLEAR ls_row.
+        lv_record = ls_result-record_number.
+      ENDIF.
+      CASE ls_result-field_name.
+        WHEN 'STATUS'.
+          ls_row-status = ls_result-field_value.
+        WHEN 'STATUS_TEXT'.
+          ls_row-status_text = ls_result-field_value.
+      ENDCASE.
+    ENDLOOP.
+    IF lv_record > 0.
+      APPEND ls_row TO et_entityset.
+    ENDIF.
 
     IF iv_search_string IS NOT INITIAL.
       lv_search = to_upper( iv_search_string ).
