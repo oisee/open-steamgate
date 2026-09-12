@@ -216,6 +216,7 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
     METHODS export_of_nobody_is_400 FOR TESTING.
     METHODS delete_node_takes_its_subtree FOR TESTING.
     METHODS delete_unknown_node_is_400 FOR TESTING.
+    METHODS generate_writes_the_mpc FOR TESTING.
     METHODS count IMPORTING iv_set TYPE string iv_needle TYPE string RETURNING VALUE(rv_count) TYPE i.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
@@ -234,6 +235,7 @@ CLASS ltcl_import IMPLEMENTATION.
     DELETE FROM zstg_sbo_et WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbo_pr WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbo_prt WHERE project = 'ZUT_IMP'.
+    DELETE FROM zstg_sbd_ga WHERE project = 'ZUT_IMP'.
   ENDMETHOD.
 
   METHOD iwpr.
@@ -243,6 +245,14 @@ CLASS ltcl_import IMPLEMENTATION.
       && `<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">` && lv_nl
       && ` <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">` && lv_nl
       && `  <asx:values>` && lv_nl
+      && `   <_-IWBEP_-I_SBD_GA>` && lv_nl
+      && `    <_-IWBEP_-I_SBD_GA>` && lv_nl
+      && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
+      && `     <NODE_UUID>ga-1</NODE_UUID>` && lv_nl
+      && `     <NAME>ZCL_ZUT_IMP_MPC</NAME>` && lv_nl
+      && `     <GEN_ART_TYPE>MPCB</GEN_ART_TYPE>` && lv_nl
+      && `    </_-IWBEP_-I_SBD_GA>` && lv_nl
+      && `   </_-IWBEP_-I_SBD_GA>` && lv_nl
       && `   <_-IWBEP_-I_SBD_PR>` && lv_nl
       && `    <_-IWBEP_-I_SBD_PR>` && lv_nl
       && `     <PROJECT>ZUT_IMP</PROJECT>` && lv_nl
@@ -326,8 +336,8 @@ CLASS ltcl_import IMPLEMENTATION.
     ls_response = post( iwpr( ) ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Project":"ZUT_IMP"' ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":7' ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Tables":5' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":8' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Tables":6' ) ).
 
     lv_body = entity_types( ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
@@ -349,7 +359,7 @@ CLASS ltcl_import IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
     ls_response = post( iwpr( abap_false ) ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
-    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":6' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":7' ) ).
 
     lv_body = entity_types( ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
@@ -440,6 +450,31 @@ CLASS ltcl_import IMPLEMENTATION.
                                                 iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/NodeSet(Project='ZUT_IMP',NodeUuid='nobody')` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'no node nobody in project ZUT_IMP' ) ).
+  ENDMETHOD.
+
+  METHOD generate_writes_the_mpc.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZUT_IMP'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"zcl_zut_imp_mpc.clas.abap"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'class ZCL_ZUT_IMP_MPC definition' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'method DEFINE_TRAVEL.' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS `lo_property = lo_entity_type->create_property( iv_property_name = 'BookingId' iv_abap_fieldname = 'BOOKINGID' ).` ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS `lo_entity_type->bind_structure( iv_structure_name   = 'ZSTG_DEMO'` ) ).
+
+* the same file by key
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet(Project='ZUT_IMP',Name='zcl_zut_imp_mpc.clas.abap')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'method GET_LAST_MODIFIED.' ) ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -147,6 +147,22 @@ parent: deleting an entity type leaves its sets. The generic `DELETE` on
 the table sets stays one row, as the editor's property form expects; the
 tree's Delete goes to `NodeSet`. A node nobody has is a 400.
 
+## Generate in ABAP
+
+`GET GenerateSet?$filter=Project eq 'P'` returns the generated classes of a
+project as rows (`Name`, `Content`), made by `zcl_stg_segw_gen` from the
+`ZSTG_SB*` rows: the same model `tools/segw-gen.mjs` builds from an IWPR
+file (entity types with their properties by `SORT_ORDER`, sets, complex
+types, associations with constraints and sets, navigation, function
+imports; `DEFINE_` stems cut to 23 characters and made unique, `TS_`/`GC_`
+to 27) and the same templates, line for line. segw-gen is the oracle: the
+test pushes both fixtures, the compiled demo YAML and every corpus project
+through `ImportSet` and expects the ABAP MPC to equal segw-gen's byte for
+byte (the colleague's rule: same input, same templates, no tolerance).
+`npm run segw:tree generate <P> --out <dir>` writes the files. Stage 1 is
+the `_MPC`; the `_DPC` base with the CRUDQ dispatch and the mapped
+methods (RFC, search help, SADL delegation, ODC) follow the same way.
+
 ## The Cloud pass
 
 `npm run segw:cloud` runs abaplint over `src/`, the generated table sources
@@ -164,8 +180,7 @@ of the narrowed file list, not language findings.
 
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
-- Generate as an operation of the service: segw-gen in ABAP over the
-  tables (`GenerateSet('P')` with the files as rows), staged MPC → DPC
-  base → mapped methods, each stage checked byte for byte against
-  `tools/segw-gen.mjs` over the corpus, so the editor's Generate button
-  stops needing a Node route.
+- Generate, stages 2 and 3: the `_DPC` base (CRUDQ dispatch, the
+  `_EXT` pair) and the mapped methods, each checked byte for byte against
+  `tools/segw-gen.mjs` like the MPC, so the editor's Generate button stops
+  needing a Node route.

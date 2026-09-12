@@ -22,6 +22,7 @@
 //        node tools/segw-tree.mjs check <file.iwpr.xml>... (exit 1 on a difference)
 //        node tools/segw-tree.mjs push <file.iwpr.xml> [--rows] [--url http://localhost:3030]
 //        node tools/segw-tree.mjs pull <PROJECT> [--rows] [--url http://localhost:3030] [--out <file>]
+//        node tools/segw-tree.mjs generate <PROJECT> [--url http://localhost:3030] [--out <dir>]
 import {existsSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
@@ -206,6 +207,13 @@ export async function pullFile(base, project) {
   return json.d.Content;
 }
 
+// the generated classes of a project, made in ABAP (zcl_stg_segw_gen)
+export async function generateFiles(base, project) {
+  const query = `?$filter=${encodeURIComponent(`Project eq '${project}'`)}&$format=json`;
+  const json = await odata(base, "GET", `/GenerateSet${query}`);
+  return Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
+}
+
 // the project's rows, set by set
 export async function pull(base, project, spec) {
   const tables = new Map();
@@ -297,7 +305,20 @@ async function main(args) {
     }
     return 0;
   }
-  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>... [--data dir] | push <file> | pull <PROJECT> [--out f] [--url u]");
+  if (cmd === "generate") {
+    const files = await generateFiles(url, rest[0]);
+    const out = opt("--out");
+    for (const [name, content] of Object.entries(files)) {
+      if (out) {
+        writeFileSync(join(out, name), content);
+      } else {
+        process.stdout.write(content);
+      }
+    }
+    console.error(`${rest[0]}: ${Object.keys(files).join(", ")}${out ? ` written to ${out}` : ""}`);
+    return 0;
+  }
+  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>... [--data dir] | push <file> | pull <PROJECT> [--out f] | generate <PROJECT> [--out dir] [--url u]");
   return 2;
 }
 

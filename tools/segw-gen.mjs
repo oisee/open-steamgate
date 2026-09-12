@@ -233,7 +233,8 @@ export function buildModel(p) {
     // 1 = code based / mapped, 3 = annotation model, 4 = OData 4.0 strategy
     projectType: p.project.PROJECT_TYPE ?? "1",
     description: p.projectText.DESCRIPTION ?? "",
-    namespace: p.model.VALUE_NS,
+    // a model without VALUE_NS (EPM_DEVELOPER_SCENARIO) has no namespace, not "undefined"
+    namespace: p.model.VALUE_NS ?? "",
     lastChanged: p.project.LAST_CHG_TIME ?? "",
     classes: {mpc, mpcExt: artifact("MPCS"), dpc: artifact("DPCB"), dpcExt: artifact("DPCS")},
     artifacts: p.artifacts,

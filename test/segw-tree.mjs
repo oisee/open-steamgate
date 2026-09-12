@@ -3,12 +3,32 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, pullFile, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
 import {startServer} from "./start.mjs";
+import {generate} from "../tools/segw-gen.mjs";
+import {compile} from "../tools/stg-compile.mjs";
 
 // The SEGW project tree as our tables: the spec derived from real SEGW
 // projects, the tables and the service generated from it, and the IWPR
 // round trip through those tables.
+// the untracked corpus of SEGW projects, when this machine has it
+const corpus = [".local/corpus", ".local/corpus-sap", ".local/lars"].filter((d) => existsSync(d));
+const files = [];
+const walk = (folder) => {
+  for (const name of readdirSync(folder)) {
+    const p = join(folder, name);
+    if (name === "node_modules" || name === ".git") {
+      continue;
+    }
+    if (statSync(p).isDirectory()) {
+      walk(p);
+    } else if (name.endsWith(".iwpr.xml")) {
+      files.push(p);
+    }
+  }
+};
+corpus.forEach(walk);
+
 describe("tools/segw-tables + tools/segw-tree: the project tree as tables", () => {
   const spec = readSpec();
 
@@ -100,22 +120,6 @@ describe("tools/segw-tables + tools/segw-tree: the project tree as tables", () =
 
   // the strong claim, on the untracked corpus: every IWPR file a SEGW
   // system wrote comes back byte for byte (the byte order mark aside)
-  const corpus = [".local/corpus", ".local/corpus-sap", ".local/lars"].filter((d) => existsSync(d));
-  const files = [];
-  const walk = (folder) => {
-    for (const name of readdirSync(folder)) {
-      const p = join(folder, name);
-      if (name === "node_modules" || name === ".git") {
-        continue;
-      }
-      if (statSync(p).isDirectory()) {
-        walk(p);
-      } else if (name.endsWith(".iwpr.xml")) {
-        files.push(p);
-      }
-    }
-  };
-  corpus.forEach(walk);
   (files.length === 0 ? it.skip : it)(`the SEGW-written IWPR files of the corpus round trip byte for byte (${files.length} files)`, () => {
     for (const file of files) {
       const xml = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
@@ -189,6 +193,45 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     // put the seeded project back for the tests after this one
     await pushFile(DEFAULT_URL, xml);
     expect(await pullFile(DEFAULT_URL, "ZSTG_MAPPED")).to.equal(xml);
+  });
+
+  // segw-gen in ABAP: for every project we have, the classes GenerateSet
+  // returns are the bytes tools/segw-gen.mjs makes of the same tree
+  it("GenerateSet gives segw-gen's MPC byte for byte for the fixtures, the compiled demo and the corpus", async () => {
+    const sources = [
+      ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8")],
+      ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8")],
+      ["zstg_demo (compiled)", compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml"}).iwpr],
+      ...files.map((f) => [f, readFileSync(f, "utf8").replace(/^\uFEFF/, "")]),
+    ];
+    let checked = 0;
+    for (const [name, xml] of sources) {
+      const oracle = generate(xml, {functionModules: new Map(), warnings: []});
+      if (oracle.skipped) {
+        continue;
+      }
+      const {project} = await pushFile(DEFAULT_URL, xml);
+      const made = await generateFiles(DEFAULT_URL, project);
+      const mpc = Object.keys(oracle.files).find((f) => f.endsWith("mpc.clas.abap"));
+      expect(Object.keys(made), name).to.include(mpc);
+      const a = oracle.files[mpc].split("\n");
+      const b = made[mpc].split("\n");
+      let i = 0;
+      while (i < a.length && i < b.length && a[i] === b[i]) {
+        i++;
+      }
+      expect(made[mpc], `${name}: ${mpc} differs at line ${i + 1}\n  segw-gen: ${JSON.stringify(a[i])}\n  ABAP:     ${JSON.stringify(b[i])}`).to.equal(oracle.files[mpc]);
+      checked++;
+    }
+    expect(checked).to.be.greaterThan(2);
+    // put the seeded project back
+    await pushFile(DEFAULT_URL, readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"));
+  });
+
+  it("GenerateSet without a Project filter is 400", async () => {
+    const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet`);
+    expect(res.status).to.equal(400);
+    expect(await res.text()).to.contain("GenerateSet needs $filter=Project eq");
   });
 
   it("GET ExportSet of a project nobody imported is 400", async () => {

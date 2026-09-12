@@ -3,12 +3,15 @@ CLASS zcl_zstg_segw_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_segw_dpc 
 * the generated base class through the SADL DPC; ImportSet takes an IWPR
 * file as Content and replaces the project's rows, ExportSet('P') gives
 * the project back as one, DELETE NodeSet(P, uuid) takes a node with its
-* subtree (zcl_stg_segw_tree).
+* subtree (zcl_stg_segw_tree), GenerateSet?$filter=Project eq 'P' is the
+* generator (zcl_stg_segw_gen) with the classes as files.
   PUBLIC SECTION.
   PROTECTED SECTION.
     METHODS importset_create_entity REDEFINITION.
     METHODS exportset_get_entity REDEFINITION.
     METHODS nodeset_delete_entity REDEFINITION.
+    METHODS generateset_get_entityset REDEFINITION.
+    METHODS generateset_get_entity REDEFINITION.
   PRIVATE SECTION.
 ENDCLASS.
 
@@ -65,6 +68,60 @@ CLASS zcl_zstg_segw_dpc_ext IMPLEMENTATION.
         EXPORTING
           message = |no node { lv_node } in project { lv_project }|.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD generateset_get_entityset.
+    DATA ls_filter TYPE /iwbep/s_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+    DATA lv_project TYPE string.
+    DATA lt_files  TYPE zcl_stg_segw_gen=>tt_file.
+    DATA ls_file   TYPE zcl_stg_segw_gen=>ty_file.
+    DATA ls_entity TYPE zcl_zstg_segw_mpc=>ts_generate.
+
+    LOOP AT it_filter_select_options INTO ls_filter.
+      IF to_upper( ls_filter-property ) <> 'PROJECT'.
+        CONTINUE.
+      ENDIF.
+      READ TABLE ls_filter-select_options INDEX 1 INTO ls_option.
+      IF sy-subrc = 0 AND ls_option-option = 'EQ'.
+        lv_project = ls_option-low.
+      ENDIF.
+    ENDLOOP.
+    IF lv_project IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = `GenerateSet needs $filter=Project eq '...'`.
+    ENDIF.
+    lt_files = zcl_stg_segw_gen=>generate( lv_project ).
+    LOOP AT lt_files INTO ls_file.
+      ls_entity-project = lv_project.
+      ls_entity-name    = ls_file-name.
+      ls_entity-content = ls_file-content.
+      APPEND ls_entity TO et_entityset.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD generateset_get_entity.
+    DATA ls_key     TYPE /iwbep/s_mgw_name_value_pair.
+    DATA lv_project TYPE string.
+    DATA lv_name    TYPE string.
+    DATA lt_files   TYPE zcl_stg_segw_gen=>tt_file.
+    DATA ls_file    TYPE zcl_stg_segw_gen=>ty_file.
+
+    READ TABLE it_key_tab INTO ls_key WITH KEY name = 'Project'.
+    lv_project = ls_key-value.
+    er_entity-project = lv_project.
+    READ TABLE it_key_tab INTO ls_key WITH KEY name = 'Name'.
+    lv_name = ls_key-value.
+    lt_files = zcl_stg_segw_gen=>generate( lv_project ).
+    READ TABLE lt_files INTO ls_file WITH KEY name = lv_name.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |{ er_entity-project }: no generated file { lv_name }|.
+    ENDIF.
+    er_entity-name    = ls_file-name.
+    er_entity-content = ls_file-content.
   ENDMETHOD.
 
 ENDCLASS.

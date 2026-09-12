@@ -21,7 +21,8 @@ export function startServer(quiet) {
   const app = express();
   app.disable("x-powered-by");
   app.set("etag", false);
-  app.use(express.raw({type: "*/*"}));
+  // an IWPR of a real SEGW project is a few hundred KB (ImportSet takes it as JSON)
+  app.use(express.raw({type: "*/*", limit: "16mb"}));
 
   app.get("/", function (req, res) {
     res.send('open-steamgate: OData v2 services live under /sap/opu/odata/sap/, the demo Fiori app under <a href="/app/index.html">/app/</a>');
