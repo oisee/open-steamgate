@@ -416,7 +416,10 @@ the generator, the editor is the file.
    from the property annotation), the demo's `webapp/annotations/` deleted.
    Complex types followed (`complexTypes:`, a property `type: <complex
    type>`, `returns: {complexType:}`; segw-gen had the templates from the
-   ESH sample). Not yet: Include, function imports over a module.
+   ESH sample). Include and function imports over a module wait for an
+   oracle: no corpus project has either (`docs/stg-compile.md`, Not yet);
+   two small SEGW projects on A4H (an included model, a function import
+   mapped to an RFC) would give it, on Alice's say-so.
 4. **SEGW as an application. Foundation 2026-09-12 night:** generic CRUD
    over `table:` sources (`zcl_stg_tab_<table>` classes from cds2ddic,
    create / update / delete / get_entity in `zcl_stg_sadl_dpc`), the first

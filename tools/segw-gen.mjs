@@ -1261,19 +1261,49 @@ function odcMethod(o, m) {
   return "";
 }
 
+const SADL_CHUNK = 200;
+
 function sadlMethods(m, opts) {
   const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl && es.sadl.type !== "ODC").map((es) => ({...es, entity: et})));
   // a where-used reference to the DDIC object behind each set; an EPM
   // business object node is not a DDIC type, so it gets none
   const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
   const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
-  const structures = [...sets].reverse().map((es) => [
+  const structureLines = [...sets].reverse().flatMap((es) => [
     `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="RO" >| &`,
     `               | <sadl:query name="EntitySetDefault">| &`,
     `               | </sadl:query>| &`,
     ...es.entity.properties.map((pr) => `               | <sadl:attribute name="${pr.abapField}" binding="${pr.abapField}" isOutput="TRUE" isKey="${pr.isKey ? "TRUE" : "FALSE"}" />| &`),
     `               |</sadl:structure>| &`,
-  ].join("\n")).join("\n");
+  ]);
+  const structures = structureLines.join("\n");
+  // SEGW writes the whole definition as one & chain. The transpiler nests
+  // such a chain one concat( ) call per operand, and a service worker's
+  // stack gives out near 800 (ZSTG_SEGW: 55 sets), so a long definition is
+  // built in pieces of SADL_CHUNK lines; the shape of every SAP project we
+  // have (a handful of sets) is unchanged. ANORMALIES: transpiler-concat-chain.
+  const sadlXml = (() => {
+    const lines = [...dataSources, `               |<sadl:resultSet>| &`, ...structureLines, `               |</sadl:resultSet>| &`];
+    if (lines.length + 3 <= SADL_CHUNK) {
+      return `    DATA(lv_sadl_xml) =
+               |<?xml version="1.0" encoding="utf-16"?>| &
+               |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| &
+${dataSources.join("\n")}
+               |<sadl:resultSet>| &
+${structures}
+               |</sadl:resultSet>| &
+               |</sadl:definition>| .`;
+    }
+    let s = `    DATA(lv_sadl_xml) =
+               |<?xml version="1.0" encoding="utf-16"?>| &
+               |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| .`;
+    for (let i = 0; i < lines.length; i += SADL_CHUNK) {
+      const piece = lines.slice(i, i + SADL_CHUNK);
+      piece[piece.length - 1] = piece[piece.length - 1].replace(/ &$/, " .");
+      s += `\n    lv_sadl_xml = lv_sadl_xml &\n${piece.join("\n")}`;
+    }
+    return s + `\n    lv_sadl_xml = lv_sadl_xml &\n               |</sadl:definition>| .`;
+  })();
   return {
     "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY.
     CAST /iwbep/if_mgw_appl_srv_runtime( if_sadl_gw_dpc_util~get_dpc( ) )->create_deep_entity(
@@ -1323,14 +1353,7 @@ function sadlMethods(m, opts) {
     "IF_SADL_GW_DPC_UTIL~GET_DPC": `  method IF_SADL_GW_DPC_UTIL~GET_DPC.
 ${refs.join("\n")}
 
-    DATA(lv_sadl_xml) =
-               |<?xml version="1.0" encoding="utf-16"?>| &
-               |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| &
-${dataSources.join("\n")}
-               |<sadl:resultSet>| &
-${structures}
-               |</sadl:resultSet>| &
-               |</sadl:definition>| .
+${sadlXml}
     ro_dpc = cl_sadl_gw_dpc_factory=>create_for_sadl( iv_sadl_xml   = lv_sadl_xml
                iv_timestamp         = ${opts.generatedAt}
                iv_uuid              = '${m.project}'

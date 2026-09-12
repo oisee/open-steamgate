@@ -201,7 +201,11 @@ registry reads `gen/` too, so a YAML-only service registers itself.
 
 ## Not yet
 
-Include (merging another service's model), annotation terms outside the
-grammar above (write them in the `_MPC_EXT`), text elements, function
-imports mapped to a module, collections of complex types
-(`IS_COLLECTION`).
+Include (a model reference of the include kind, `SBO_MR`) and function
+imports mapped to a module: neither has an oracle in the 20 corpus
+projects (the corpus has `EXT`/`APC` references only, and no `SBD_MH`
+below a function import), and the clean-room rule is to write nothing
+SEGW's own output has not shown; a sample project built on the A4H
+sandbox would unblock both. Also not yet: annotation terms outside the
+grammar above (write them in the `_MPC_EXT`), text elements, collections
+of complex types (`IS_COLLECTION`).

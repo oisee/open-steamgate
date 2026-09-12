@@ -97,7 +97,9 @@ export class RfcLiveClient {
     if (this.clientFactory) {
       client = await this.clientFactory(params);
     } else {
-      const {Client} = await import("open-rfc");
+      // open-rfc is a Node module the browser preview never loads: the
+      // bundler leaves this import alone (a live destination is Node only)
+      const {Client} = await import(/* webpackIgnore: true */ "open-rfc");
       client = new Client(params, {timeout: 30});
     }
     await client.open();
