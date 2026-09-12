@@ -118,8 +118,21 @@ not a to-do for the libraries. Customer namespaces of the projects themselves
 `TRSTATUS`, `TR_AS4USER`, `UNAM`, `USGRP_USER`, `UZEIT`, `VBELN`,
 `W3CONTTYPE`, `XSTRINGVAL`, `XUBNAME`.
 
-The generic ones (`CHAR*`, `NUMC7`, `INTEGER`, `SAP_BOOL`, `UZEIT`, `VBELN`,
-`POSNR`, `PERNR_D`, `BU_PARTNER`, `XUBNAME`, `UNAM`, `CNAM`, `PGMID`,
-`TROBJTYPE`, `TRSTATUS`, `TR_AS4USER`, `DDPOSITION`, `SYSUUID_X`) would be
-cheap additions to open-abap-core if Lars wants them; the CRM, BOPF, SO and
-LXE ones belong to their applications.
+Where each name goes, after Lars's rule of 2026-09-12 (open-abap-core takes
+only released data elements, the C1 contract, and stays small; everything
+else is either taken from a dump or goes to open-abap/open-abap-deprecated):
+
+- **Released**, in `abapedia/steampunk-2305-api`, so for open-abap-core:
+  `CHAR5`, `CHAR64`, `CHAR100`, `CHAR200` (open-abap-core #1213), `BAPIWAIT`
+  (with the `BAPI_TRANSACTION_COMMIT` PR).
+- **In `abapedia/s4-private-2022-doma-and-dtel`** (released + deprecated DOMA
+  and DTEL of S/4 2022, abapGit format, 23,661 data elements): not copied
+  anywhere, the dump is added as a library. From this list: `UZEIT`, `VBELN`,
+  `POSNR`, `PERNR_D`, `UNAM`, `CNAM`, `PGMID`, `TROBJTYPE` and most of the
+  CRM/BOPF/LXE/SO names; the closure run with the dump as a library says
+  exactly how much of the `ddic` bucket it removes.
+- **Neither**, so open-abap-deprecated (#1 there): `CHAR50`, `CHAR258`,
+  `CHAR1024`, `NUMC7`, `INTEGER`, `SAP_BOOL`, `BU_PARTNER`, `XUBNAME`,
+  `SYSUUID_X`, `DDPOSITION`, `TRSTATUS`, `TR_AS4USER`. Structures such as
+  `/IWFND/SU_ERRLOG` and the application-specific ones are not written
+  from memory; they need a source with their field lists.
