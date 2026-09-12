@@ -101,11 +101,21 @@ const loader = `<script>
         try {
           await navigator.serviceWorker.register("../sw.js", {scope: "../"});
           await navigator.serviceWorker.ready;
+          // clients.claim() in the worker makes this page controlled a moment
+          // after ready; the event for it may already have fired, so poll
+          for (let waited = 0; !navigator.serviceWorker.controller && waited < 5000; waited += 100) {
+            await new Promise((tick) => setTimeout(tick, 100));
+          }
           if (!navigator.serviceWorker.controller) {
-            await Promise.race([
-              new Promise((done) => navigator.serviceWorker.addEventListener("controllerchange", done, {once: true})),
-              new Promise((_, no) => setTimeout(() => no(new Error("the service worker was installed but does not control this page")), 15000)),
-            ]);
+            // a navigation after the registration is controlled for sure; once
+            const key = "stg-preview-reload";
+            if (!sessionStorage.getItem(key)) {
+              sessionStorage.setItem(key, "1");
+              location.reload();
+              return;
+            }
+            sessionStorage.removeItem(key);
+            throw new Error("the service worker was installed but does not control this page");
           }
         } catch (error) {
           explain("The preview could not start", String(error && error.stack || error));
@@ -116,7 +126,7 @@ const loader = `<script>
       try {
         const probe = await fetch("../sap/opu/odata/sap/ZSTG_DEMO_SRV/", {headers: {accept: "application/json"}});
         if (!probe.ok) {
-          explain("The gateway did not answer", "GET ../sap/opu/odata/sap/ZSTG_DEMO_SRV/ returned " + probe.status + "\n\n" + (await probe.text()).slice(0, 2000));
+          explain("The gateway did not answer", "GET ../sap/opu/odata/sap/ZSTG_DEMO_SRV/ returned " + probe.status + "\\n\\n" + (await probe.text()).slice(0, 2000));
           return;
         }
       } catch (error) {
