@@ -339,6 +339,13 @@ the generator, the editor is the file.
    dispatcher the way SEGW does. The corpus holds both the IWPR and what
    SEGW generated from it: the generator is done when the diff is empty.
    `_EXT` is created once and never touched, as in SEGW. Days.
+   The project tree mixes sources: `SBD_DS.DS_TYPE` (5 = DDIC structure;
+   the corpus has 14) and the `GENERATED_METHODS_RDS` attachment for
+   reference data sources (CDS via SADL; 2 corpus projects, they call
+   `cl_sadl_gw_model_exposure` in `_MPC_EXT` and `create_for_sadl` in
+   `_DPC_EXT`). The generator must route RDS entities to our SADL runtime
+   and leave DDIC ones to the hand-written DPC. RFC/BOR mapping and ODC
+   (external services) exist in SEGW but not in the corpus: out of scope.
 3. **Edit the model without a system.** No GUI: edit the IWPR (or a YAML
    that becomes one), regenerate, deploy the IWPR back through abapGit; SEGW
    on the system sees a normal project. "Not off-stack" for free.
@@ -347,6 +354,23 @@ Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
 queue is PR → CI → squash-merge by us. The transpiler stays his to merge. A
 second session only for step 2 in its own worktree, if at all.
+
+## Backlog: Gateway extension points the corpus really uses (2026-09-12)
+
+Counted over the corpus DPC/MPC classes. Have: `sap:` annotations and
+vocabulary in `$metadata`, SADL exposure, `execute_action`,
+`get_expanded_*`, every `io_tech_request_context` facet, changeset types.
+Missing, in order of use:
+- `get_logger` (17) and `get_message_container` (8) from
+  `/iwbep/if_mgw_conv_srv_runtime`: check what open-abap-core stubs and
+  make them real (messages must reach the OData error body).
+- `set_header` (5) / `get_request_header` (2) on the runtime: response and
+  request headers from the DPC.
+- media: `get_stream` / `create_stream` (4 each), `$value`, `set_is_media`.
+- changesets: `changeset_begin` / `changeset_process` / `changeset_end`
+  (4); today `$batch` calls the operations one by one.
+- vocabulary annotation providers: `vocab_anno_model` (2) in `_MPC_EXT`,
+  `/iwbep/if_mgw_vocan_model`, `IWVB` objects.
 
 ## Ideas parked (2026-09-11)
 
