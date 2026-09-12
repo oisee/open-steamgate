@@ -23,7 +23,8 @@
     "web:serve": "node scripts/serve-build.mjs",
     "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs",
     "segw": "node tools/segw-registry.mjs",
-    "segw:gen": "node tools/segw-gen.mjs"
+    "segw:gen": "node tools/segw-gen.mjs",
+    "segw:closure": "node tools/segw-closure.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
