@@ -53,6 +53,7 @@ npm test                     # abaplint + ABAP Unit + mocha over the wire
 npm run e2e:install && npm run e2e         # Playwright against localhost:3030
 npm run web:preview && npm run web:serve   # the browser-only build on :3031
 npm run start:duckdb         # the same on DuckDB (STG_DB_PATH=x.duckdb persists)
+npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out gen/demo   # SEGW without the GUI
 ```
 
 The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of

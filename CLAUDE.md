@@ -175,6 +175,12 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   it also uses `.local/lars/s4-private-2022-doma-and-dtel` (abapedia's
   S/4 DOMA/DTEL dump) when cloned. DDIC upstream rule: released data
   elements → open-abap-core, the rest → open-abap-deprecated.
+- `npm run stg:compile -- <service>.stg.yaml [--out <dir>]` is SEGW without
+  the GUI: one YAML → IWPR + IWSV/IWMO + the four classes through segw-gen
+  (`tools/stg-compile.mjs`, `docs/stg-compile.md`); the demo's model is
+  `src/demo/zstg_demo.stg.yaml`, `test/stg-compile.mjs` keeps it in step
+  with the hand-written classes. Sources per entity: none, `struct:`,
+  `table:`/`cds:` (SADL).
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

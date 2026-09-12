@@ -368,9 +368,14 @@ the generator, the editor is the file.
    and leave DDIC ones to the hand-written DPC. RFC/BOR mapping: done
    (second cut, above; runtime side = the RFC replay client). ODC (external
    services) exists in SEGW but not in any oracle we have: out of scope.
-3. **Edit the model without a system.** No GUI: edit the IWPR (or a YAML
-   that becomes one), regenerate, deploy the IWPR back through abapGit; SEGW
-   on the system sees a normal project. "Not off-stack" for free.
+3. **Edit the model without a system. First cut 2026-09-12 night:**
+   `tools/stg-compile.mjs` (`docs/stg-compile.md`): `<service>.stg.yaml` →
+   IWPR (deterministic node ids) + IWSV/IWMO + the four classes through
+   segw-gen; sources none / `struct:` / `table:` / `cds:` (SADL); the demo
+   model as `src/demo/zstg_demo.stg.yaml`, round trip through segw-gen
+   `--check` identical, IWSV/IWMO byte-identical to the demo's, compiled
+   classes lint clean. Not yet: complex types, `function:` (RFC), `service:`
+   (Include/ODC), annotations, `gen/` wired into transpile.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
@@ -406,7 +411,7 @@ a launchpad) and `UI.DataFieldWithIntentBasedNavigation` back. Both keys
 travel with the intent, so the target app lands on the object page. Not
 done, by choice: draft, inline create in the table (draft-only in FE V2).
 
-Order after this: `stg-compile` (composition), ODC-local, draft last; the
+Order after this: ~~`stg-compile`~~ (done, step 3 above), ODC-local, draft last; the
 search-help provider is with the transpiler session; the live RFC client
 (open-rfc npm, record mode, replay substitutions) waits for a go.
 

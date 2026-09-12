@@ -1,0 +1,111 @@
+import {expect} from "chai";
+import {readFileSync} from "node:fs";
+import {compile, readModel} from "../tools/stg-compile.mjs";
+import {buildModel, parseIwpr} from "../tools/segw-gen.mjs";
+
+// stg-compile: the YAML of the demo service becomes the SEGW project tree,
+// the registration objects and (through segw-gen) the classes; the tree
+// must read back as the same model, and the generated MPC must define what
+// the hand-written demo MPC defines.
+describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC", () => {
+  const source = readFileSync("src/demo/zstg_demo.stg.yaml", "utf8");
+  const result = compile(source, {file: "zstg_demo.stg.yaml"});
+
+  it("reads the file with its defaults", () => {
+    const m = result.model;
+    expect(m.classes).to.deep.equal({mpc: "ZCL_ZSTG_DEMO_MPC", mpcExt: "ZCL_ZSTG_DEMO_MPC_EXT", dpc: "ZCL_ZSTG_DEMO_DPC", dpcExt: "ZCL_ZSTG_DEMO_DPC_EXT"});
+    const travel = m.entities[0];
+    expect(travel.properties.map((p) => p.name)).to.deep.equal(["TravelId", "Description", "Status", "Seats", "StatusText"]);
+    // a key is not nullable and not updatable unless said otherwise; readonly turns creatable/updatable off
+    expect(travel.properties[0]).to.include({isKey: true, type: "Edm.String", length: "8", creatable: true, updatable: false, nullable: false});
+    expect(travel.properties[4]).to.include({creatable: false, updatable: false, sortable: false, filterable: false, field: "STATUS_TEXT"});
+    expect(m.entities[2]).to.include({set: "StatusVHSet", creatable: false, searchable: true});
+    expect(m.entities[2].operations).to.deep.equal(["R", "Q"]);
+    expect(m.associations[0].card).to.deep.equal({left: "1", right: "N"});
+    expect(m.functions.map((f) => `${f.name}:${f.method}:${f.multiplicity}`)).to.deep.equal(["CancelTravel:POST:1", "TravelCount:GET:"]);
+  });
+
+  it("writes the tree, the service and the model objects under their abapGit names", () => {
+    expect(Object.keys(result.files)).to.deep.equal(["zstg_demo.iwpr.xml", "zstg_demo_srv                     0001.iwsv.xml", "zstg_demo_mdl                     0001.iwmo.xml"]);
+    expect(result.files["zstg_demo_srv                     0001.iwsv.xml"]).to.contain("<CLASS_NAME>ZCL_ZSTG_DEMO_DPC_EXT</CLASS_NAME>");
+    expect(result.files["zstg_demo_mdl                     0001.iwmo.xml"]).to.contain("<CLASS_NAME>ZCL_ZSTG_DEMO_MPC_EXT</CLASS_NAME>");
+    // the registration objects match the hand-made ones of the demo
+    expect(result.files["zstg_demo_srv                     0001.iwsv.xml"]).to.equal(readFileSync("src/demo/zstg_demo_srv                     0001.iwsv.xml", "utf8"));
+    expect(result.files["zstg_demo_mdl                     0001.iwmo.xml"]).to.equal(readFileSync("src/demo/zstg_demo_mdl                     0001.iwmo.xml", "utf8"));
+  });
+
+  it("is deterministic: the same file gives the same tree", () => {
+    expect(compile(source).iwpr).to.equal(result.iwpr);
+    expect(result.iwpr).to.match(/<NODE_UUID>[A-Za-z0-9+/]{22}==<\/NODE_UUID>/);
+  });
+
+  it("reads back through segw-gen as the same model", () => {
+    const m = buildModel(parseIwpr(result.iwpr));
+    expect(m.project).to.equal("ZSTG_DEMO");
+    expect(m.namespace).to.equal("ZSTG_DEMO_SRV");
+    expect(m.entityTypes.map((e) => e.name)).to.deep.equal(["Travel", "Booking", "StatusVH"]);
+    const travel = m.entityTypes[0];
+    expect(travel.properties.map((p) => `${p.name}:${p.edmType}:${p.maxLength}`)).to.deep.equal(["TravelId:Edm.String:8", "Description:Edm.String:40", "Status:Edm.String:1", "Seats:Edm.Int32:", "StatusText:Edm.String:40"]);
+    expect(travel.properties[0]).to.include({isKey: true, nullable: false, updatable: false, label: "Travel"});
+    expect(travel.entitySets[0]).to.include({name: "TravelSet", creatable: true, searchable: true, subscribable: false});
+    expect(travel.entitySets[0].operations.map((o) => o.method)).to.deep.equal(["TRAVELSET_CREATE_ENTITY", "TRAVELSET_GET_ENTITY", "TRAVELSET_UPDATE_ENTITY", "TRAVELSET_DELETE_ENTITY", "TRAVELSET_GET_ENTITYSET"]);
+    expect(m.entityTypes[2].entitySets[0].operations.map((o) => o.method)).to.deep.equal(["STATUSVHSET_GET_ENTITY", "STATUSVHSET_GET_ENTITYSET"]);
+    expect(m.associations[0]).to.include({name: "TravelToBookings", leftType: "Travel", rightType: "Booking", leftCard: "1", rightCard: "N"});
+    expect(m.associations[0].constraints).to.deep.equal([{principal: "TravelId", dependent: "TravelId"}]);
+    expect(m.associations[0].sets).to.deep.equal([{name: "TravelToBookingsSet", leftSet: "TravelSet", rightSet: "BookingSet"}]);
+    expect(m.navigation).to.deep.equal([{name: "to_Bookings", abapField: "TO_BOOKINGS", entity: "Travel", association: "TravelToBookings"}, {name: "to_Travel", abapField: "TO_TRAVEL", entity: "Booking", association: "TravelToBookings"}]);
+    expect(m.functionImports[0]).to.include({name: "CancelTravel", httpMethod: "POST", returnCard: "1", returnKind: "ETYP", returnType: "Travel", returnSet: "TravelSet", actionFor: "Travel"});
+    expect(m.functionImports[0].parameters[0]).to.include({name: "TravelId", abapField: "TRAVEL_ID", edmType: "Edm.String", maxLength: "8"});
+  });
+
+  it("generates the classes SEGW would write for that tree", () => {
+    const mpc = result.classes["zcl_zstg_demo_mpc.clas.abap"];
+    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'TravelId' iv_abap_fieldname = 'TRAVEL_ID' ). \"#EC NOTEXT\nlo_property->set_is_key( ).\nlo_property->set_type_edm_string( ).\nlo_property->set_maxlength( iv_max_length = 8 ). \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'FlightDate' iv_abap_fieldname = 'FLIGHT_DATE' ). \"#EC NOTEXT\nlo_property->set_type_edm_datetime( ).\nlo_property->set_precison( iv_precision = 0 ). \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_entity_set->set_has_ftxt_search( abap_true ).");
+    expect(mpc).to.contain("lo_association = model->create_association(\n                            iv_association_name = 'TravelToBookings' \"#EC NOTEXT\n                            iv_left_type        = 'Travel' \"#EC NOTEXT\n                            iv_right_type       = 'Booking' \"#EC NOTEXT\n                            iv_right_card       = 'N' \"#EC NOTEXT\n                            iv_left_card        = '1'  \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_ref_constraint->add_property( iv_principal_property = 'TravelId'   iv_dependent_property = 'TravelId' ). \"#EC NOTEXT");
+    expect(mpc).to.contain("iv_property_name  = 'to_Bookings'");
+    expect(mpc).to.contain("lo_action = model->create_action( 'CancelTravel' ).  \"#EC NOTEXT\n*Set return entity type\nlo_action->set_return_entity_type( 'Travel' ). \"#EC NOTEXT\n*Set HTTP method GET or POST\nlo_action->set_http_method( 'POST' ). \"#EC NOTEXT\n* Set return type multiplicity\nlo_action->set_return_multiplicity( '1' ). \"#EC NOTEXT\n*Set the action for entity\nlo_action->set_action_for( 'Travel' ). \"#EC NOTEXT");
+    const dpc = result.classes["zcl_zstg_demo_dpc.clas.abap"];
+    expect(dpc).to.contain("  methods TRAVELSET_GET_ENTITYSET\n    importing");
+    expect(dpc).to.contain("      method = 'BOOKINGSET_CREATE_ENTITY'.");
+    expect(dpc).not.to.contain("STATUSVHSET_CREATE_ENTITY");
+    expect(Object.keys(result.ext)).to.deep.equal(["zcl_zstg_demo_mpc_ext.clas.abap", "zcl_zstg_demo_mpc_ext.clas.xml", "zcl_zstg_demo_dpc_ext.clas.abap", "zcl_zstg_demo_dpc_ext.clas.xml"]);
+  });
+
+  it("routes table: and cds: sources to SADL", () => {
+    const r = compile(`
+project: ZSTG_T
+service: ZSTG_T_SRV
+entities:
+  Status:
+    source: {table: ZSTG_STATUS}
+    keys: [Status]
+    properties:
+      Status: String(1)
+      Text: String(40)
+  Item:
+    source: {cds: ZSTG_I_ITEM}
+    keys: [Id]
+    properties:
+      Id: String(10)
+`);
+    const m = buildModel(parseIwpr(r.iwpr));
+    expect(m.entityTypes[0].entitySets[0].sadl).to.deep.equal({type: "DDIC", binding: "ZSTG_STATUS"});
+    expect(m.entityTypes[0].abapStruct).to.equal("ZSTG_STATUS");
+    expect(m.entityTypes[1].entitySets[0].sadl).to.deep.equal({type: "CDS", binding: "ZSTG_I_ITEM"});
+    const dpc = r.classes["zcl_zstg_t_dpc.clas.abap"];
+    expect(dpc).to.contain("  interfaces IF_SADL_GW_DPC_UTIL .");
+    expect(dpc).to.contain('| <sadl:dataSource type="DDIC" name="StatusSet" binding="ZSTG_STATUS" />| &');
+    expect(dpc).to.contain('| <sadl:dataSource type="CDS" name="ItemSet" binding="ZSTG_I_ITEM" />| &');
+    expect(dpc).to.contain("    if_sadl_gw_dpc_util~get_dpc( )->get_entityset(");
+  });
+
+  it("says what is wrong with a file", () => {
+    expect(() => readModel("project: X\nservice: Y\n", "x.stg.yaml")).to.throw('"entities" is required');
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    keys: [Id]\n    properties: {Name: String}\n", "x.stg.yaml")).to.throw("key Id is not a property");
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: Money}\n")).to.throw("unknown type Money");
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\nassociations:\n  R: {from: A, to: B}\n")).to.throw("entity B is not defined");
+  });
+});

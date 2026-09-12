@@ -1,0 +1,64 @@
+# The demo service as one file. `npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out <dir>`
+# writes the SEGW project tree (IWPR), the registration objects (IWSV, IWMO)
+# and the _MPC/_DPC classes SEGW would generate from that tree; the
+# hand-written classes in this folder are what a developer writes on top
+# (their _EXT). test/stg-compile.mjs keeps this file and the hand-written
+# model in step.
+project: ZSTG_DEMO
+service: ZSTG_DEMO_SRV
+model: ZSTG_DEMO_MDL
+description: "open-steamgate demo: travels and bookings"
+
+entities:
+  Travel:
+    set: TravelSet
+    keys: [TravelId]
+    searchable: true
+    properties:
+      TravelId: {type: String(8), field: TRAVEL_ID, label: Travel}
+      Description: {type: String(40), label: Description}
+      Status: {type: String(1), label: Status}
+      Seats: {type: Int32, label: Seats}
+      # read-only, the DPC fills it from the value-help table
+      StatusText: {type: String(40), field: STATUS_TEXT, readonly: true, sortable: false, filterable: false, label: Status text}
+
+  Booking:
+    set: BookingSet
+    keys: [TravelId, BookingId]
+    properties:
+      TravelId: {type: String(8), field: TRAVEL_ID, label: Travel}
+      BookingId: {type: String(4), field: BOOKING_ID, label: Booking}
+      Customer: {type: String(40), label: Customer}
+      FlightDate: {type: DateTime, digits: 0, field: FLIGHT_DATE, label: Flight date}
+
+  StatusVH:
+    set: StatusVHSet
+    keys: [Status]
+    creatable: false
+    updatable: false
+    deletable: false
+    searchable: true
+    operations: [R, Q]
+    properties:
+      Status: {type: String(1), readonly: true, label: Status}
+      Text: {type: String(40), readonly: true, label: Status text}
+
+associations:
+  TravelToBookings:
+    from: Travel
+    to: Booking
+    cardinality: 1:N
+    constraint: {TravelId: TravelId}
+    navigation: {Travel: to_Bookings, Booking: to_Travel}
+
+functions:
+  CancelTravel:
+    method: POST
+    returns: {entity: Travel, set: TravelSet, multiplicity: "1"}
+    for: Travel
+    parameters:
+      TravelId: {type: String(8), field: TRAVEL_ID}
+  TravelCount:
+    method: GET
+    parameters:
+      Status: {type: String(1)}
