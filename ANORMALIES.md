@@ -60,7 +60,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: `"exclude_filter": ["zcl_oao_http_handler"]` on the lib entry (applied)
 - Upstream issue: https://github.com/open-abap/open-abap-odata/issues/33 (open, same crash); QW1 in `AGENDA.md` is the fix, sent upstream as https://github.com/open-abap/open-abap-odata/pull/40 (merged 2026-09-12)
 - Regression-test location: `npm run transpile` itself
-- Upstream version containing a fix: open-abap-odata main from 5467424 (2026-09-12)
+- Upstream version containing a fix: open-abap-odata main from 5467424 (2026-09-12); open-steamgate consumes upstream directly since #48
 
 ### ANOMALY-2026-09-11-doubled-quote-literal — A literal holding two quotes is transpiled as one character
 

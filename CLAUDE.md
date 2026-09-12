@@ -114,13 +114,14 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - `npm test` = `abaplint` + transpile + ABAP Unit (inside `output/index.mjs`)
   + mocha wire tests. `npm start` serves `/sap/opu/odata/sap/` on port 3030.
 - `abap_transpile.json` pulls open-abap-core, express-icf-shim and the
-  interface part of **our fork** `oisee/open-abap-odata` as libs. `folder`
-  points at `.local/lars/` / `.local/fork/` clones when present, else the URL
-  is cloned. Interface-layer changes go into the fork first; reusable pieces
-  go upstream as PRs from fork branches (open-abap-odata #40, transpiler
-  #1829–#1832, all released in 2.13.86; decision revised 2026-09-12). Since
-  2026-09-12 `oisee` is a collaborator on both upstream repos: branches may
-  live there, the rule stays one small PR per fix. A
+  interface part of **upstream** `open-abap/open-abap-odata` as libs.
+  `folder` points at `.local/lars/` clones when present, else the URL is
+  cloned. The fork `oisee/open-abap-odata` is only a staging area for PR
+  branches; its `main` tracks upstream. Interface-layer changes: prove them
+  here, then one small PR upstream each (open-abap-odata #40–#48, transpiler
+  #1829–#1832, all merged 2026-09-12). `oisee` is a collaborator on both
+  repos; Lars said self-merging in open-abap-odata is fine (he has no time),
+  the transpiler stays his to merge. A
   workaround stays in `src/` or `tools/` only until the fix is on npm.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`

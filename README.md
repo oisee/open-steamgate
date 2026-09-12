@@ -67,7 +67,9 @@ Bottom up, every layer is real, nothing is mocked:
    provider: `it_filter_select_options` → Open SQL with ranges, paging, CRUD,
    deep insert, `get_expanded_entityset`, `iv_search_string`. This is the code
    that lives in a customer system.
-3. **The `/IWBEP/` interfaces** — from our fork of `open-abap-odata`.
+3. **The `/IWBEP/` interfaces** — from `open-abap/open-abap-odata`, where the
+   model, `$metadata`, annotations and SADL signatures we needed went back
+   upstream as PRs #40–#48.
 4. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
    request context with every `io_tech_request_context` facet, dispatcher,
    OData v2 JSON, `$batch`, `$expand`, entry provider. The part that existed

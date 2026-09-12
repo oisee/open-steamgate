@@ -303,8 +303,11 @@ longer blanks the rest. Fork: `bind_structure` derives
 **Lars, 2026-09-12 (afternoon):** invited `oisee` as collaborator on
 `abaplint/transpiler` and `open-abap/open-abap-odata`, saw the preview
 ("looks promising") and said yes to backporting the steamgate work into
-open-abap-odata. Still PRs, one at a time; #42 merged, #43 associations
-open, then function imports, expanded reads, SADL interfaces, display-format.
+open-abap-odata; later the same day: self-merging there is fine, he has no
+time for it. **Queue drained 2026-09-12 evening:** #43 associations, #44
+function imports, #45 expanded reads, #46 SADL interfaces + annotations,
+#47 display-format Date, #48 searchable, all merged (CI green, squash).
+Fork `main` == upstream; `abap_transpile.json` now takes upstream directly.
 
 **Done 2026-09-12: value helps.** `StatusVHSet` in the demo MPC/DPC,
 `Common.ValueList` on Status and TravelId, `Common.Text` + `TextArrangement`
@@ -337,9 +340,9 @@ the generator, the editor is the file.
    on the system sees a normal project. "Not off-stack" for free.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
-Merging our own PRs upstream: technically possible now, not done unless
-Lars says so; a second session only for step 2 in its own worktree, if at
-all.
+Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
+queue is PR → CI → squash-merge by us. The transpiler stays his to merge. A
+second session only for step 2 in its own worktree, if at all.
 
 ## Ideas parked (2026-09-11)
 
