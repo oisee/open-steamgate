@@ -155,9 +155,16 @@ export function buildModel(p) {
         const nodes = [design.NODE_UUID, ...p.operations.filter((op) => op.PARENT_UUID === design.NODE_UUID).map((op) => op.NODE_UUID)];
         for (const mh of p.mappings.filter((x) => nodes.includes(x.PARENT_UUID))) {
           const ds = p.dataSources.find((d) => d.NODE_UUID === mh.DS_UUID);
-          const kind = ds && ds.DS_TYPE === "4" && /^(DDIC|CDS|EPM)~/.exec(ds.DS_GROUP ?? "");
+          const kind = ds && ds.DS_TYPE === "4" && /^(DDIC|CDS|EPM|ODC)~/.exec(ds.DS_GROUP ?? "");
           if (kind) {
-            return {type: kind[1], binding: ds.DS_GROUP.slice(kind[0].length)};
+            const binding = ds.DS_GROUP.slice(kind[0].length);
+            if (kind[1] === "ODC") {
+              // steamgate's local "external service": ODC~<service>~<entity set>
+              // of another service in the registry, consumed in-process
+              const [service, set] = binding.split("~");
+              return {type: "ODC", binding, service, set};
+            }
+            return {type: kind[1], binding};
           }
         }
         return undefined;
@@ -222,6 +229,7 @@ export function buildModel(p) {
   }));
   return {
     project: p.project.PROJECT,
+    service: p.service.TECHNICAL_NAME ?? "",
     // 1 = code based / mapped, 3 = annotation model, 4 = OData 4.0 strategy
     projectType: p.project.PROJECT_TYPE ?? "1",
     description: p.projectText.DESCRIPTION ?? "",
@@ -1206,8 +1214,46 @@ const SADL_DELEGATION = {
                                                    IMPORTING es_data                 = er_entity ).`,
 };
 
+// steamgate's local ODC: the operation is served by another service of
+// the registry through zcl_stg_odata_client (reads only; writes stay stubs)
+function odcMethod(o, m) {
+  const head = `  method ${o.method}.
+    DATA lo_client TYPE REF TO zcl_stg_odata_client.
+
+* served by ${o.set.sadl.service}/${o.set.sadl.set}, another service of this registry
+    CREATE OBJECT lo_client
+      EXPORTING
+        iv_service    = '${o.set.sadl.service}'
+        iv_entity_set = '${o.set.sadl.set}'.
+`;
+  if (o.type === "Q") {
+    return head + `    lo_client->get_entityset(
+      EXPORTING
+        io_tech_request_context = io_tech_request_context
+        iv_local_service        = '${m.service}'
+        iv_local_set            = iv_entity_set_name
+      IMPORTING
+        et_entityset            = et_entityset
+        es_response_context     = es_response_context ).
+  endmethod.
+`;
+  }
+  if (o.type === "R") {
+    return head + `    lo_client->get_entity(
+      EXPORTING
+        it_key_tab       = it_key_tab
+        iv_local_service = '${m.service}'
+        iv_local_set     = iv_entity_set_name
+      IMPORTING
+        es_entity        = er_entity ).
+  endmethod.
+`;
+  }
+  return "";
+}
+
 function sadlMethods(m, opts) {
-  const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl).map((es) => ({...es, entity: et})));
+  const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl && es.sadl.type !== "ODC").map((es) => ({...es, entity: et})));
   // a where-used reference to the DDIC object behind each set; an EPM
   // business object node is not a DDIC type, so it gets none
   const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
@@ -1301,7 +1347,8 @@ export function dpcSource(m, opts = {}) {
   const cls = m.classes.dpc;
   const ops = operations(m);
   const kinds = [...new Set(ops.map((o) => o.type))];
-  const hasSadl = m.entityTypes.some((et) => et.entitySets.some((es) => es.sadl));
+  const isSadl = (es) => es.sadl && es.sadl.type !== "ODC";
+  const hasSadl = m.entityTypes.some((et) => et.entitySets.some(isSadl));
   const hasShlp = ops.some((o) => o.mapping?.kind === "SHLP");
   const redefs = [["Q", "GET_ENTITYSET"], ["R", "GET_ENTITY"], ["U", "UPDATE_ENTITY"], ["C", "CREATE_ENTITY"], ["D", "DELETE_ENTITY"]].filter(([k]) => kinds.includes(k)).map(([, n]) => n);
   if (hasSadl) {
@@ -1378,6 +1425,8 @@ ${comment}  RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
       }
     } else if (o.mapping?.kind === "SHLP") {
       impls[o.method] = shlpMethod(o, m) || stub(o);
+    } else if (o.set.sadl?.type === "ODC") {
+      impls[o.method] = odcMethod(o, m) || stub(o);
     } else if (o.set.sadl) {
       impls[o.method] = `  method ${o.method}.\n${SADL_DELEGATION[o.type]}\n  endmethod.\n`;
     } else {

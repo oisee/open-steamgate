@@ -2,7 +2,7 @@
   "global": {
     "files": "/{src,test,gen}/**/*.*",
     "errorOnDuplicateFilenames": true,
-    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
+    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "/gen/stg/"]
   },
   "dependencies": [
     {

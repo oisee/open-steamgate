@@ -1514,3 +1514,112 @@ CLASS ltcl_luw IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_odc DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* ZSTG_ODC_SRV exists only as src/demo_odc/zstg_odc.stg.yaml: its classes
+* come out of stg-compile at transpile time and its one entity set is
+* served by ZSTG_SADL_SRV through zcl_stg_odata_client (local ODC).
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS metadata_is_the_local_model FOR TESTING RAISING cx_static_check.
+    METHODS entity_set_through_the_client FOR TESTING RAISING cx_static_check.
+    METHODS query_options_travel_along FOR TESTING RAISING cx_static_check.
+    METHODS single_entity_by_key FOR TESTING RAISING cx_static_check.
+    METHODS provider_error_is_business FOR TESTING RAISING cx_static_check.
+
+    METHODS get
+      IMPORTING
+        iv_path            TYPE string
+        iv_query           TYPE string OPTIONAL
+      RETURNING
+        VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
+ENDCLASS.
+
+CLASS ltcl_odc IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_SADL_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_SADL_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_SADL_DPC_EXT' ).
+    zcl_oao_registry=>register( iv_service = 'ZSTG_ODC_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_ODC_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_ODC_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD get.
+    DATA lt_options TYPE tihttpnvp.
+
+    IF iv_query IS NOT INITIAL.
+      lt_options = cl_http_utility=>string_to_fields( iv_query ).
+    ENDIF.
+    rs_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = iv_path
+                                                it_options = lt_options ).
+  ENDMETHOD.
+
+  METHOD metadata_is_the_local_model.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_ODC_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntityType Name="Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Property Name="TRAVELID" Type="Edm.String" Nullable="false" MaxLength="8"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntitySet Name="TravelSet" EntityType="ZSTG_ODC_SRV.Travel" sap:creatable="false"' ) ).
+* the provider's other sets are not ours
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Zc_Stg_TravelcubeSet' ) ).
+  ENDMETHOD.
+
+  METHOD entity_set_through_the_client.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/sap/ZSTG_ODC_SRV/TravelSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200
+                                        msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_ODC_SRV.Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TRAVELID":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"SEATS":2' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `TravelSet('T0002')` ) ).
+  ENDMETHOD.
+
+  METHOD query_options_travel_along.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_ODC_SRV/TravelSet'
+                       iv_query = `$filter=STATUS eq 'A'&$orderby=TRAVELID desc&$top=1&$inlinecount=allpages` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200
+                                        msg = ls_response-body ).
+* $inlinecount comes back as the provider counts it, $orderby desc + $top 1
+* gives the last travel with that status (T0009, the other-client row that
+* leaks by design, see README)
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"__count":"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TRAVELID":"T0009"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TRAVELID":"T0001"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"DESCRIPTION"' ) ).
+  ENDMETHOD.
+
+  METHOD single_entity_by_key.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_ODC_SRV/TravelSet('T0002')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200
+                                        msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TRAVELID":"T0002"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TRAVELID":"T0001"' ) ).
+  ENDMETHOD.
+
+  METHOD provider_error_is_business.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( `/sap/opu/odata/sap/ZSTG_ODC_SRV/TravelSet('T9999')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400
+                                        msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'ZSTG_SADL_SRV/Zc_Stg_TravelSet' ) ).
+  ENDMETHOD.
+
+ENDCLASS.

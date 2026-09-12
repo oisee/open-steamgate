@@ -17,7 +17,9 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 > text arrangement), an object page (bookings via navigation, Edit/Save as
 > MERGE with Gateway semantics, Create below the parent as
 > `POST TravelSet('..')/to_Bookings`), a launchpad sandbox with two apps and
-> intent-based navigation between them, and read-only SADL over CDS projections (with analytics
+> intent-based navigation between them, a service described by one YAML
+> file that consumes another service of the registry (SEGW's "external
+> service", `src/demo_odc/`), and read-only SADL over CDS projections (with analytics
 > annotations) work end to end, on SQLite or DuckDB (`STG_DB=duckdb`).** `npm test`
 > serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
 > as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as

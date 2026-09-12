@@ -28,6 +28,7 @@
 //       source: {struct: ZSTG_DEMO}    # ABAP structure behind the type (bind_structure)
 //               {table: ZSTG_DEMO_BK}  # DDIC table served by SADL, the DPC delegates
 //               {cds: ZSTG_I_STATUS}   # CDS view served by SADL
+//               {service: ZSTG_SADL_SRV, set: Zc_Stg_TravelSet}   # another service of this registry (local ODC)
 //               (none)                 # the DPC declares the structure from the properties
 //       keys: [TravelId]
 //       properties:
@@ -145,14 +146,20 @@ export function readModel(text, file = "stg.yaml") {
       }
     }
     const source = spec.source ?? {};
-    if (Object.keys(source).length > 1) {
+    if (Object.keys(source).filter((k) => k !== "set").length > 1) {
       throw new Error(`${file}: ${name}: one source only`);
     }
     const flag = (key, fallback) => (spec[key] === undefined ? fallback : spec[key] === true);
-    const sadl = source.table ? {kind: "DDIC", binding: String(source.table).toUpperCase()} : source.cds ? {kind: "CDS", binding: String(source.cds)} : undefined;
+    if (source.service && !source.set) {
+      throw new Error(`${file}: ${name}: source.service needs source.set (the entity set of that service)`);
+    }
+    const sadl = source.table ? {kind: "DDIC", binding: String(source.table).toUpperCase()}
+      : source.cds ? {kind: "CDS", binding: String(source.cds)}
+      : source.service ? {kind: "ODC", binding: `${String(source.service).toUpperCase()}~${source.set}`}
+      : undefined;
     return {
       name, set: spec.set ?? `${name}Set`, keys, properties: props, description: spec.description ?? "",
-      abapStruct: source.struct ? String(source.struct).toUpperCase() : sadl ? sadl.binding.toUpperCase() : "",
+      abapStruct: source.struct ? String(source.struct).toUpperCase() : sadl && sadl.kind !== "ODC" ? sadl.binding.toUpperCase() : "",
       sadl,
       creatable: flag("creatable", true), updatable: flag("updatable", true), deletable: flag("deletable", true),
       pageable: flag("pageable", true), addressable: flag("addressable", true), searchable: flag("searchable", false),

@@ -374,8 +374,10 @@ the generator, the editor is the file.
    segw-gen; sources none / `struct:` / `table:` / `cds:` (SADL); the demo
    model as `src/demo/zstg_demo.stg.yaml`, round trip through segw-gen
    `--check` identical, IWSV/IWMO byte-identical to the demo's, compiled
-   classes lint clean. Not yet: complex types, `function:` (RFC), `service:`
-   (Include/ODC), annotations, `gen/` wired into transpile.
+   classes lint clean. Same night: `stg-compile --all` in transpile
+   (`gen/stg/`, `src/` wins by object name) and `service:`+`set:` = local
+   ODC through `zcl_stg_odata_client` (`src/demo_odc/`, `ltcl_odc`). Not
+   yet: complex types, `function:` (RFC) in the YAML, Include, annotations.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the
@@ -411,7 +413,7 @@ a launchpad) and `UI.DataFieldWithIntentBasedNavigation` back. Both keys
 travel with the intent, so the target app lands on the object page. Not
 done, by choice: draft, inline create in the table (draft-only in FE V2).
 
-Order after this: ~~`stg-compile`~~ (done, step 3 above), ODC-local, draft last; the
+Order after this: ~~`stg-compile`~~, ~~ODC-local~~ (both done, step 3 above), then `function:` in the YAML, annotations in the file, draft last; the
 search-help provider is with the transpiler session; the live RFC client
 (open-rfc npm, record mode, replay substitutions) waits for a go.
 

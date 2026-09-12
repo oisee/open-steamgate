@@ -180,7 +180,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   (`tools/stg-compile.mjs`, `docs/stg-compile.md`); the demo's model is
   `src/demo/zstg_demo.stg.yaml`, `test/stg-compile.mjs` keeps it in step
   with the hand-written classes. Sources per entity: none, `struct:`,
-  `table:`/`cds:` (SADL).
+  `table:`/`cds:` (SADL), `service:`+`set:` (another service of the
+  registry, consumed in-process through `zcl_stg_odata_client`; the local
+  ODC, `src/demo_odc/` is a YAML-only example). `stg-compile --all` runs in
+  `transpile`: YAML under `src/` compiles into `gen/stg/` unless `src/`
+  already holds the object.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

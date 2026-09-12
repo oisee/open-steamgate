@@ -1,0 +1,24 @@
+# A service made only of this file: no hand-written class. It consumes
+# another service of the registry (ZSTG_SADL_SRV, the CDS one) as SEGW's
+# "external service" (ODC) in its local flavour: the DPC the compiler
+# generates delegates to zcl_stg_odata_client, which dispatches the request
+# in-process and reads the answer back by property name. Property names
+# are the provider's; fields and types are ours. Compiled by
+# `stg-compile --all` during transpile into gen/stg/, registered from there.
+project: ZSTG_ODC
+service: ZSTG_ODC_SRV
+description: "open-steamgate demo: a service consumed from another one"
+
+entities:
+  Travel:
+    set: TravelSet
+    source: {service: ZSTG_SADL_SRV, set: Zc_Stg_TravelSet}
+    keys: [TRAVELID]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      TRAVELID: {type: String(8), field: TRAVEL_ID, readonly: true, label: Travel}
+      STATUS: {type: String(1), readonly: true, label: Status}
+      SEATS: {type: Int32, readonly: true, label: Seats}

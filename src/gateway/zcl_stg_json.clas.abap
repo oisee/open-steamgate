@@ -403,7 +403,9 @@ CLASS zcl_stg_json IMPLEMENTATION.
         IF lv_name <> '__metadata'.
           lv_count = lv_off - lv_start.
           ls_pair-value = iv_json+lv_start(lv_count).
-          IF ls_pair-value CS '"__deferred"'.
+* a deferred link is an object {"__deferred":{...}}; an array of entries
+* may carry deferred links inside its rows and is still payload
+          IF lv_char = '{' AND ls_pair-value CS '"__deferred"'.
             CONTINUE.
           ENDIF.
           APPEND ls_pair TO et_nested.

@@ -39,6 +39,8 @@ entities:
     source: {struct: ZSTG_DEMO} # the ABAP structure behind the type (bind_structure)
             {table: ZSTG_DEMO_BK}   # a DDIC table served by SADL: the DPC delegates
             {cds: ZSTG_I_STATUS}    # a CDS view served by SADL
+            {service: ZSTG_SADL_SRV, set: Zc_Stg_TravelSet}   # another service of this
+            #   registry, consumed in-process (SEGW's "external service", local flavour)
             # none: the base class declares TS_<entity> from the properties
     keys: [TravelId]
     properties:
@@ -83,10 +85,34 @@ the compiled classes lint clean against the libraries. The hand-written
 demo classes stay as they are: they are the showcase of real DPC code; the
 YAML is the same model in the form a system-less workflow edits.
 
+## A service consumed from another one (`service:`)
+
+`source: {service: X, set: S}` is SEGW's "external service" (ODC) in a local
+flavour: the entity's read operations are served by another service of the
+same registry. The tree carries it as a data source `ODC~X~S` (a steamgate
+extension of the DS_TYPE 4 kinds, not something SEGW writes); the generated
+DPC delegates `GET_ENTITYSET` and `GET_ENTITY` to
+`zcl_stg_odata_client` (`src/gateway`), which turns the request back into an
+OData GET (`$filter`, `$top`, `$skip`, `$orderby`, `$inlinecount`, `search`
+unchanged), dispatches it in-process to X and reads the answer into the
+local structure by property name. So the consuming service declares the
+properties it wants, with the provider's names and its own fields and
+types; `$metadata` shows only those. Writes stay stubs. `src/demo_odc/`
+is such a service made of one file: `ZSTG_ODC_SRV` over the CDS service,
+tested in `ltcl_odc`. An online provider (real HTTP) is the same seam with
+`cl_http_client` behind it: not done.
+
+## In the build
+
+`stg-compile --all` runs in `npm run transpile`: every `src/**/*.stg.yaml`
+compiles into `gen/stg/<project>/` (classes, IWSV, IWMO) except the objects
+that already exist under `src/` by name, so the demo's hand-written classes
+win over their YAML and `src/demo_odc/` gets everything generated. The
+registry reads `gen/` too, so a YAML-only service registers itself.
+
 ## Not yet
 
 Complex types, `function:` (RFC-mapped entities: the mapping rows exist in
-segw-gen, the YAML side does not), `service:` (Include / ODC), annotations
-in the file (`set_value_list`, vocabulary annotations), text elements. The
-step after this: `gen/` output wired into `npm run transpile` so a YAML in
-`src/` registers itself like the hand-written services do.
+segw-gen, the YAML side does not), Include (merging another service's
+model), annotations in the file (`set_value_list`, vocabulary
+annotations), text elements.

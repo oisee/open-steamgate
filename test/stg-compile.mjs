@@ -109,3 +109,20 @@ entities:
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\nassociations:\n  R: {from: A, to: B}\n")).to.throw("entity B is not defined");
   });
 });
+
+describe("tools/stg-compile: a service consumed from another one (local ODC)", () => {
+  it("routes service:/set: to zcl_stg_odata_client in the generated DPC", () => {
+    const r = compile(readFileSync("src/demo_odc/zstg_odc.stg.yaml", "utf8"), {file: "zstg_odc.stg.yaml"});
+    const m = buildModel(parseIwpr(r.iwpr));
+    expect(m.service).to.equal("ZSTG_ODC_SRV");
+    expect(m.entityTypes[0].entitySets[0].sadl).to.deep.equal({type: "ODC", binding: "ZSTG_SADL_SRV~Zc_Stg_TravelSet", service: "ZSTG_SADL_SRV", set: "Zc_Stg_TravelSet"});
+    expect(m.entityTypes[0].abapStruct).to.equal("");
+    const dpc = r.classes["zcl_zstg_odc_dpc.clas.abap"];
+    expect(dpc).not.to.contain("IF_SADL_GW_DPC_UTIL");
+    expect(dpc).to.contain("  method TRAVELSET_GET_ENTITYSET.\n    DATA lo_client TYPE REF TO zcl_stg_odata_client.");
+    expect(dpc).to.contain("        iv_service    = 'ZSTG_SADL_SRV'\n        iv_entity_set = 'Zc_Stg_TravelSet'.");
+    expect(dpc).to.contain("        iv_local_service        = 'ZSTG_ODC_SRV'\n        iv_local_set            = iv_entity_set_name");
+    expect(dpc).to.contain("    lo_client->get_entity(\n      EXPORTING\n        it_key_tab       = it_key_tab");
+    expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    source: {service: Z}\n    properties: {Id: String}\n")).to.throw("source.service needs source.set");
+  });
+});
