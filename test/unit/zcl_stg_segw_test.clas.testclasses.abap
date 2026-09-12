@@ -217,6 +217,7 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
     METHODS delete_node_takes_its_subtree FOR TESTING.
     METHODS delete_unknown_node_is_400 FOR TESTING.
     METHODS generate_writes_the_mpc FOR TESTING.
+    METHODS function_group_fills_the_table FOR TESTING.
     METHODS count IMPORTING iv_set TYPE string iv_needle TYPE string RETURNING VALUE(rv_count) TYPE i.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
@@ -477,6 +478,56 @@ CLASS ltcl_import IMPLEMENTATION.
                                                 iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet(Project='ZUT_IMP',Name='zcl_zut_imp_mpc.clas.abap')` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'method GET_LAST_MODIFIED.' ) ).
+  ENDMETHOD.
+
+  METHOD function_group_fills_the_table.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+    DATA lv_xml      TYPE string.
+    DATA lv_nl       TYPE string.
+
+    DELETE FROM zstg_fm_param WHERE funcname = 'Z_UT_MODULE'.
+    lv_nl = cl_abap_char_utilities=>newline.
+    lv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
+      && `<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">` && lv_nl
+      && ` <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">` && lv_nl
+      && `  <asx:values>` && lv_nl
+      && `   <FUNCTIONS>` && lv_nl
+      && `    <item>` && lv_nl
+      && `     <FUNCNAME>Z_UT_MODULE</FUNCNAME>` && lv_nl
+      && `     <REMOTE_CALL>R</REMOTE_CALL>` && lv_nl
+      && `     <IMPORT>` && lv_nl
+      && `      <RSIMP>` && lv_nl
+      && `       <PARAMETER>IV_ID</PARAMETER>` && lv_nl
+      && `       <OPTIONAL>X</OPTIONAL>` && lv_nl
+      && `       <TYP>CHAR10</TYP>` && lv_nl
+      && `      </RSIMP>` && lv_nl
+      && `     </IMPORT>` && lv_nl
+      && `     <TABLES>` && lv_nl
+      && `      <RSTBL>` && lv_nl
+      && `       <PARAMETER>ET_RETURN</PARAMETER>` && lv_nl
+      && `       <DBSTRUCT>BAPIRET2</DBSTRUCT>` && lv_nl
+      && `      </RSTBL>` && lv_nl
+      && `     </TABLES>` && lv_nl
+      && `    </item>` && lv_nl
+      && `   </FUNCTIONS>` && lv_nl
+      && `  </asx:values>` && lv_nl
+      && ` </asx:abap>` && lv_nl
+      && `</abapGit>` && lv_nl.
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'POST'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/FunctionGroupSet'
+                                                iv_body   = |\{"Name":"ZUT","Content":"{ zcl_stg_json=>escape( lv_xml ) }"\}| ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Modules":1' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Rows":2' ) ).
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Funcname eq 'Z_UT_MODULE'&$orderby=StgSeq` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/ModuleParameterSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Parameter":"IV_ID","Kind":"I","Typ":"CHAR10","Optional":"X","Remote":"X","StgSeq":1' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Parameter":"ET_RETURN","Kind":"T","Typ":"BAPIRET2"' ) ).
   ENDMETHOD.
 
 ENDCLASS.

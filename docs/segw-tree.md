@@ -160,15 +160,32 @@ test pushes both fixtures, the compiled demo YAML and every corpus project
 through `ImportSet` and expects the ABAP MPC to equal segw-gen's byte for
 byte (the colleague's rule: same input, same templates, no tolerance).
 `npm run segw:tree generate <P> --out <dir>` writes the files. Stage 1 was
-the `_MPC`; stage 2 (`zcl_stg_segw_gen_dpc`) adds the `_DPC` base (the
-include banners with the generation stamp, the CRUDQ dispatch per entity
-set, the method signatures in the class editor's order, the comm-services
-block, SADL delegation and the SADL XML for mapped sets, the local ODC
-client, stubs for operations mapped to a function module as segw-gen
-writes them without a function group), the abapGit XML of both classes
-with the component texts, and the `_EXT` pair. Every file is compared;
-the `_DPC` of a project with a search-help mapping waits for stage 3 (the
-search-help interface and its implementation).
+the `_MPC`; stage 2 (`zcl_stg_segw_gen_dpc`) the `_DPC` base (the include
+banners with the generation stamp, the CRUDQ dispatch per entity set, the
+method signatures in the class editor's order, the comm-services block,
+SADL delegation and the SADL XML for mapped sets, the local ODC client),
+the abapGit XML of both classes with the component texts, and the `_EXT`
+pair. Stage 3 (`zcl_stg_segw_gen_rfc`) is "Map to Data Source": the method
+of an operation mapped to a function module (one variable per mapped
+parameter, inputs from keys, entry data, filter ranges and constants, the
+RFC destination, the call local or with DESTINATION, exception handling,
+message log, outputs back, read-after-create; commit on writes) and to a
+search help (the DDSHSELOPS table, the search-help runtime through
+`/IWBEP/IF_SB_GENDPC_SHLP_DATA`, the unpivot of the result list), plus that
+interface and its implementation in the class.
+
+The module signatures come from `ZSTG_FM_PARAM`, one row per parameter
+(FUNCNAME, PARAMETER, KIND I/E/C/T, TYP, OPTIONAL, REMOTE, STG_SEQ): what
+SEGW reads from the function library and `tools/segw-gen-mapping.mjs`
+from an abapGit `*.fugr.xml`. `POST FunctionGroupSet` with that XML as
+`Content` fills it (`zcl_stg_segw_fugr` mirrors `parseFunctionGroup`: the
+`<FUNCTIONS><item>` blocks, IMPORT/EXPORT/CHANGING/TABLES, TYP or DBFIELD
+or DBSTRUCT), `ModuleParameterSet` reads it. `segw-tree push` posts the
+`*.fugr.xml` next to the IWPR first. A module the table does not know, or
+a parameter whose type is unknown, leaves the stub segw-gen writes in that
+case ("Mapped to X: the function group was not available"). Every
+generated file of every project we have equals segw-gen's byte for byte,
+the mapped fixture included.
 
 ## The Cloud pass
 
@@ -187,7 +204,7 @@ of the narrowed file list, not language findings.
 
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
-- Generate, stage 3: the operations mapped to a function module (with the
-  function group's signature) and to a search help, checked byte for byte
-  against `tools/segw-gen.mjs` like the rest; then the editor's Generate
-  button goes to the service.
+- The editor's Generate button to `GenerateSet` (the colleague's switch,
+  now that the mapped fixture generates byte-identically).
+- Generate on a system: where the files land (gen/, src/, a transport) is
+  still a Node concern; on A4H it would be the class builder's.

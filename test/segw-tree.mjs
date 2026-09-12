@@ -3,7 +3,9 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, writeData} from "../tools/segw-tree.mjs";
+import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
+import {dirname} from "node:path";
 import {startServer} from "./start.mjs";
 import {generate} from "../tools/segw-gen.mjs";
 import {compile} from "../tools/stg-compile.mjs";
@@ -198,29 +200,26 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
   // segw-gen in ABAP: for every project we have, the classes GenerateSet
   // returns are the bytes tools/segw-gen.mjs makes of the same tree
   it("GenerateSet gives segw-gen's files byte for byte for the fixtures, the compiled demo and the corpus", async () => {
+    // a project with its folder: the *.fugr.xml next to it are the module
+    // signatures, for segw-gen (--lib) and for the service (FunctionGroupSet)
     const sources = [
-      ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8")],
-      ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8")],
-      ["zstg_demo (compiled)", compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml"}).iwpr],
-      ...files.map((f) => [f, readFileSync(f, "utf8").replace(/^\uFEFF/, "")]),
+      ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"), "test/fixtures/segw"],
+      ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8"), "test/fixtures/segw"],
+      ["zstg_demo (compiled)", compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml", functionModules: loadFunctionGroups(["src/demo"])}).iwpr, "src/demo"],
+      ...files.map((f) => [f, readFileSync(f, "utf8").replace(/^\uFEFF/, ""), dirname(f)]),
     ];
     let checked = 0;
-    for (const [name, xml] of sources) {
-      const oracle = generate(xml, {functionModules: new Map(), warnings: []});
+    for (const [name, xml, folder] of sources) {
+      const oracle = generate(xml, {functionModules: loadFunctionGroups([folder]), warnings: []});
       if (oracle.skipped) {
         continue;
       }
+      await pushFunctionGroups(DEFAULT_URL, folder);
       const {project} = await pushFile(DEFAULT_URL, xml);
       const made = await generateFiles(DEFAULT_URL, project);
-      // an operation mapped to a search help puts an interface and its
-      // implementation into the DPC: stage 3 of the ABAP generator
-      const shlp = oracle.model.entityTypes.some((et) => et.entitySets.some((es) => es.operations.some((o) => o.mapping?.kind === "SHLP")));
       const expected = {...oracle.files, ...oracle.ext};
       expect(Object.keys(made).sort(), name).to.deep.equal(Object.keys(expected).sort());
       for (const [file, content] of Object.entries(expected)) {
-        if (shlp && file.endsWith("dpc.clas.abap")) {
-          continue;
-        }
         const a = content.split("\n");
         const b = made[file].split("\n");
         let i = 0;

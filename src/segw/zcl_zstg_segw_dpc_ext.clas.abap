@@ -12,6 +12,7 @@ CLASS zcl_zstg_segw_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_segw_dpc 
     METHODS nodeset_delete_entity REDEFINITION.
     METHODS generateset_get_entityset REDEFINITION.
     METHODS generateset_get_entity REDEFINITION.
+    METHODS functiongroupset_create_entity REDEFINITION.
   PRIVATE SECTION.
 ENDCLASS.
 
@@ -122,6 +123,21 @@ CLASS zcl_zstg_segw_dpc_ext IMPLEMENTATION.
     ENDIF.
     er_entity-name    = ls_file-name.
     er_entity-content = ls_file-content.
+  ENDMETHOD.
+
+  METHOD functiongroupset_create_entity.
+    DATA ls_result TYPE zcl_stg_segw_fugr=>ty_result.
+
+    io_data_provider->read_entry_data( IMPORTING es_data = er_entity ).
+    IF er_entity-content IS INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = 'Content is required: the abapGit function group XML as text'.
+    ENDIF.
+    ls_result = zcl_stg_segw_fugr=>import( er_entity-content ).
+    CLEAR er_entity-content.
+    er_entity-modules = ls_result-modules.
+    er_entity-rows    = ls_result-rows.
   ENDMETHOD.
 
 ENDCLASS.

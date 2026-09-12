@@ -11,6 +11,8 @@
 //
 // push / pull do the same through a running gateway (npm start) and
 // ZSTG_SEGW_SRV: push POSTs the file to ImportSet as Content, one call,
+// (the *.fugr.xml next to the file go to FunctionGroupSet first: the module
+// signatures for operations mapped to a function module)
 // and zcl_stg_segw_import replaces the project's rows in the database
 // (--rows instead: DELETE the project's rows in every table and POST the
 // file's rows one by one, the generic CRUD only); pull GETs
@@ -23,8 +25,8 @@
 //        node tools/segw-tree.mjs push <file.iwpr.xml> [--rows] [--url http://localhost:3030]
 //        node tools/segw-tree.mjs pull <PROJECT> [--rows] [--url http://localhost:3030] [--out <file>]
 //        node tools/segw-tree.mjs generate <PROJECT> [--url http://localhost:3030] [--out <dir>]
-import {existsSync, readFileSync, writeFileSync} from "node:fs";
-import {join} from "node:path";
+import {existsSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {dirname, join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
 
 export const DATA_DIR = "data";
@@ -170,6 +172,20 @@ function keyOf(result, tag, spec) {
   return spec[tag].keys.map((k) => `${propertyName(k)}='${encodeURIComponent(String(result[propertyName(k)] ?? "")).replaceAll("'", "''")}'`).join(",");
 }
 
+// every abapGit function group in a folder to FunctionGroupSet: the module
+// signatures the generator needs for operations mapped to a function module
+export async function pushFunctionGroups(base, folder) {
+  const out = [];
+  for (const name of existsSync(folder) ? readdirSync(folder) : []) {
+    if (!name.endsWith(".fugr.xml")) {
+      continue;
+    }
+    const json = await odata(base, "POST", "/FunctionGroupSet", {Name: name.slice(0, -".fugr.xml".length).toUpperCase(), Content: readFileSync(join(folder, name), "utf8").replace(/^\uFEFF/, "")});
+    out.push({file: name, modules: json.d.Modules, rows: json.d.Rows});
+  }
+  return out;
+}
+
 // the file to ImportSet: the service parses it and replaces the project
 export async function pushFile(base, xml) {
   const json = await odata(base, "POST", "/ImportSet", {Content: xml});
@@ -290,6 +306,9 @@ async function main(args) {
       const {deleted, posted} = await push(url, tables, project, spec);
       console.log(`${project}: ${posted} rows posted to ${url}${SERVICE}, ${deleted} old rows deleted`);
     } else {
+      for (const g of await pushFunctionGroups(url, dirname(rest[0]))) {
+        console.log(`${g.file}: ${g.modules} modules, ${g.rows} parameters through ${url}${SERVICE}/FunctionGroupSet`);
+      }
       const {project, posted, tables} = await pushFile(url, xml);
       console.log(`${project}: ${posted} rows into ${tables} tables through ${url}${SERVICE}/ImportSet`);
     }

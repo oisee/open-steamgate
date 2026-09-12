@@ -30,14 +30,48 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_property.
     TYPES tt_property TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
 
+* "Map to Data Source" rows of an operation: a property (or a constant) to
+* a parameter path of the module / search help (SBD_MP), the HIGH/LOW/
+* OPTION/SIGN components of a range table (SBD_MR)
+    TYPES: BEGIN OF ty_map_prop,
+             uuid         TYPE string,
+             property     TYPE string,
+             direction    TYPE string,
+             ds_att_path  TYPE string,
+             constant     TYPE string,
+             has_constant TYPE abap_bool,
+           END OF ty_map_prop.
+    TYPES tt_map_prop TYPE STANDARD TABLE OF ty_map_prop WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_map_range,
+             mp_uuid   TYPE string,
+             component TYPE string,
+             semantics TYPE string,
+           END OF ty_map_range.
+    TYPES tt_map_range TYPE STANDARD TABLE OF ty_map_range WITH DEFAULT KEY.
+
 * an operation of an entity set: C R U D Q, the method SEGW named for it,
 * and what the operation is mapped to (a function module, a search help)
     TYPES: BEGIN OF ty_operation,
-             type          TYPE string,
-             method        TYPE string,
-             mapping_kind  TYPE string,
-             function_name TYPE string,
+             type           TYPE string,
+             method         TYPE string,
+             mapping_kind   TYPE string,
+             function_name  TYPE string,
+             function_group TYPE string,
+             destination    TYPE string,
+             log_attr       TYPE string,
+             max_hits_attr  TYPE string,
+             props          TYPE tt_map_prop,
+             ranges         TYPE tt_map_range,
            END OF ty_operation.
+
+* a generated artifact (SBD_GA): the classes, and the BOP interfaces SEGW
+* makes per mapped function module
+    TYPES: BEGIN OF ty_artifact,
+             name     TYPE string,
+             art_type TYPE string,
+             rfc_name TYPE string,
+           END OF ty_artifact.
+    TYPES tt_artifact TYPE STANDARD TABLE OF ty_artifact WITH DEFAULT KEY.
     TYPES tt_operation TYPE STANDARD TABLE OF ty_operation WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_entity_set,
@@ -149,6 +183,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              generated_at     TYPE string,
              generated_on     TYPE string,
              client           TYPE string,
+             artifacts        TYPE tt_artifact,
              entity_types     TYPE tt_entity_type,
              associations     TYPE tt_association,
              navigation       TYPE tt_navigation,
@@ -194,6 +229,13 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
         iv_text        TYPE string
         iv_from        TYPE i
         iv_to          TYPE i
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
+* the part after the last backslash of a parameter path (IT_RANGE\HIGH -> HIGH)
+    CLASS-METHODS last_segment
+      IMPORTING
+        iv_path        TYPE string
       RETURNING
         VALUE(rv_text) TYPE string.
 
@@ -264,6 +306,8 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
         it_op  TYPE tt_row
         it_mh  TYPE tt_row
         it_ds  TYPE tt_row
+        it_mp  TYPE tt_row
+        it_mr  TYPE tt_row
       CHANGING
         cs_set TYPE ty_entity_set.
 
@@ -484,7 +528,9 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA lt_op   TYPE tt_row.
     DATA lt_mh   TYPE tt_row.
     DATA lt_ds   TYPE tt_row.
-    DATA ls_op   TYPE ty_operation.
+    DATA lt_mp   TYPE tt_row.
+    DATA lt_mr   TYPE tt_row.
+    DATA ls_art  TYPE ty_artifact.
     DATA ls_row  TYPE ty_row.
     DATA ls_sub  TYPE ty_row.
     DATA ls_type TYPE ty_entity_type.
@@ -532,6 +578,8 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     lt_op   = rows( iv_tag = 'SBD_OP'  iv_project = iv_project ).
     lt_mh   = rows( iv_tag = 'SBD_MH'  iv_project = iv_project ).
     lt_ds   = rows( iv_tag = 'SBD_DS'  iv_project = iv_project ).
+    lt_mp   = rows( iv_tag = 'SBD_MP'  iv_project = iv_project ).
+    lt_mr   = rows( iv_tag = 'SBD_MR'  iv_project = iv_project ).
 
     CLEAR gt_by_uuid.
     APPEND LINES OF lt_et TO gt_by_uuid.
@@ -569,6 +617,10 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     ENDIF.
     LOOP AT lt_ga INTO ls_row.
       lv_kind = val( is_row = ls_row iv_field = 'GEN_ART_TYPE' ).
+      ls_art-name     = ls_row-name.
+      ls_art-art_type = lv_kind.
+      ls_art-rfc_name = val( is_row = ls_row iv_field = 'RFC_NAME' ).
+      APPEND ls_art TO rs_model-artifacts.
       CASE lv_kind.
         WHEN 'MPCB'.
           IF rs_model-mpc IS INITIAL.
@@ -633,7 +685,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         ls_set-subscribable    = flag( is_row = ls_sub iv_field = 'SUBSCRIBABLE' ).
         ls_set-filter_required = flag( is_row = ls_sub iv_field = 'REQUIRES_FILTER' ).
         ls_set-uuid            = ls_sub-uuid.
-        set_operations( EXPORTING it_se = lt_se it_op = lt_op it_mh = lt_mh it_ds = lt_ds
+        set_operations( EXPORTING it_se = lt_se it_op = lt_op it_mh = lt_mh it_ds = lt_ds it_mp = lt_mp it_mr = lt_mr
                         CHANGING  cs_set = ls_set ).
         APPEND ls_set TO ls_type-entity_sets.
       ENDLOOP.
@@ -816,6 +868,22 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     rv_text = substring( val = iv_text off = iv_from len = lv_to - iv_from ).
   ENDMETHOD.
 
+  METHOD last_segment.
+    DATA lv_at   TYPE i.
+    DATA lv_next TYPE i.
+
+    rv_text = iv_path.
+    lv_at = 0.
+    DO.
+      lv_next = find( val = iv_path sub = '\' off = lv_at ).
+      IF lv_next < 0.
+        EXIT.
+      ENDIF.
+      lv_at = lv_next + 1.
+      rv_text = substring( val = iv_path off = lv_at ).
+    ENDDO.
+  ENDMETHOD.
+
   METHOD file_name.
 * abapGit writes /NS/CL_X as #ns#cl_x
     rv_name = to_lower( replace( val = iv_class sub = '/' with = '#' occ = 0 ) ) && iv_ext.
@@ -829,11 +897,16 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA ls_mh     TYPE ty_row.
     DATA ls_ds     TYPE ty_row.
     DATA ls_op     TYPE ty_operation.
+    DATA ls_mp     TYPE ty_row.
+    DATA ls_mr     TYPE ty_row.
+    DATA ls_prop   TYPE ty_map_prop.
+    DATA ls_range  TYPE ty_map_range.
     DATA lt_nodes  TYPE string_table.
     DATA lv_node   TYPE string.
     DATA lv_group  TYPE string.
     DATA lv_kind   TYPE string.
     DATA lv_at     TYPE i.
+    DATA lv_path   TYPE string.
 
     LOOP AT it_se INTO ls_se.
       IF val( is_row = ls_se iv_field = 'ENTITY_SET_UUID' ) = cs_set-uuid.
@@ -871,10 +944,43 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
             IF ls_op-function_name IS INITIAL.
               ls_op-function_name = ls_ds-name.
             ENDIF.
+            ls_op-function_group = val( is_row = ls_ds iv_field = 'DS_GROUP' ).
+            ls_op-destination    = val( is_row = ls_ds iv_field = 'RFC_DEST' ).
+            ls_op-log_attr       = val( is_row = ls_ds iv_field = 'LOG_DS_ATTR' ).
           WHEN '6'.
             ls_op-mapping_kind  = 'SHLP'.
             ls_op-function_name = ls_ds-name.
+            ls_op-max_hits_attr = val( is_row = ls_ds iv_field = 'MAX_HITS_DS_ATTR' ).
+          WHEN OTHERS.
+            EXIT.
         ENDCASE.
+* the property rows under the mapping header, then the range components
+* of those rows
+        LOOP AT it_mp INTO ls_mp.
+          IF val( is_row = ls_mp iv_field = 'PARENT_UUID' ) <> ls_mh-uuid.
+            CONTINUE.
+          ENDIF.
+          CLEAR ls_prop.
+          ls_prop-uuid        = ls_mp-uuid.
+          ls_prop-property    = val( is_row = ls_mp iv_field = 'PROPERTY_PATH' ).
+          ls_prop-direction   = val( is_row = ls_mp iv_field = 'DIRECTION' ).
+          ls_prop-ds_att_path = val( is_row = ls_mp iv_field = 'DS_ATT_PATH' ).
+          ls_prop-constant    = val( is_row = ls_mp iv_field = 'CONSTANT_VAL' ).
+          ls_prop-has_constant = xsdbool( ls_prop-constant IS NOT INITIAL ).
+          APPEND ls_prop TO ls_op-props.
+        ENDLOOP.
+        LOOP AT it_mr INTO ls_mr.
+          READ TABLE ls_op-props WITH KEY uuid = ls_mr-uuid TRANSPORTING NO FIELDS.
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
+          CLEAR ls_range.
+          ls_range-mp_uuid   = ls_mr-uuid.
+          lv_path = val( is_row = ls_mr iv_field = 'DS_ATT_PATH' ).
+          ls_range-component = last_segment( lv_path ).
+          ls_range-semantics = val( is_row = ls_mr iv_field = 'SEMANTICS' ).
+          APPEND ls_range TO ls_op-ranges.
+        ENDLOOP.
         EXIT.
       ENDLOOP.
       APPEND ls_op TO cs_set-operations.

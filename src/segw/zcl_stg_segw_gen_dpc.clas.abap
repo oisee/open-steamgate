@@ -42,6 +42,8 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
              sadl_set      TYPE string,
              type_stem     TYPE string,
              sort_key      TYPE string,
+             op            TYPE zcl_stg_segw_gen=>ty_operation,
+             entity        TYPE zcl_stg_segw_gen=>ty_entity_type,
            END OF ty_op.
     TYPES tt_op TYPE STANDARD TABLE OF ty_op WITH DEFAULT KEY.
 
@@ -163,6 +165,8 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
           ls_op-sadl_set      = ls_set-sadl_set.
           ls_op-type_stem     = ls_type-type_stem.
           ls_op-sort_key      = sort_key( ls_o-method ).
+          ls_op-op            = ls_o.
+          ls_op-entity        = ls_type.
           APPEND ls_op TO rt_ops.
         ENDLOOP.
       ENDLOOP.
@@ -926,12 +930,6 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
         lv_shlp = abap_true.
       ENDIF.
     ENDLOOP.
-* an operation mapped to a search help adds an interface and its
-* implementation to the class: stage 3, not written yet
-    IF lv_shlp = abap_true.
-      lv_shlp = abap_false.
-    ENDIF.
-
     rv_source = |class { is_model-dpc } definition\n|
       && |  public\n|
       && |  inheriting from /IWBEP/CL_MGW_PUSH_ABS_DATA\n|
@@ -940,8 +938,11 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       && |\n|
       && |public section.\n|
       && |\n|
-      && |  interfaces /IWBEP/IF_SB_DPC_COMM_SERVICES .\n|
-      && |  interfaces /IWBEP/IF_SB_GEN_DPC_INJECTION .\n|.
+      && |  interfaces /IWBEP/IF_SB_DPC_COMM_SERVICES .\n|.
+    IF lv_shlp = abap_true.
+      rv_source = rv_source && |  interfaces { zcl_stg_segw_gen_rfc=>gc_shlp_interface } .\n|.
+    ENDIF.
+    rv_source = rv_source && |  interfaces /IWBEP/IF_SB_GEN_DPC_INJECTION .\n|.
     IF lv_sadl = abap_true.
       rv_source = rv_source
         && |  interfaces IF_SADL_GW_DPC_UTIL .\n|
@@ -1034,13 +1035,29 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     IF lv_sadl = abap_true.
       APPEND LINES OF sadl_methods( is_model ) TO lt_impls.
     ENDIF.
+    IF lv_shlp = abap_true.
+      ls_impl-name    = |{ zcl_stg_segw_gen_rfc=>gc_shlp_interface }~GET_SEARCH_HELP_VALUES|.
+      ls_impl-content = zcl_stg_segw_gen_rfc=>shlp_implementation( ).
+      APPEND ls_impl TO lt_impls.
+    ENDIF.
     LOOP AT lt_sorted INTO ls_op.
       ls_impl-name = ls_op-method.
       IF ls_op-mapping_kind = 'RFC'.
-        ls_impl-content = stub( iv_method  = ls_op-method
-                                iv_comment = |* Mapped to { ls_op-function_name }: the function group was not available when this class was generated\n| ).
+* the module's signature from ZSTG_FM_PARAM; without it (or a parameter
+* whose type is unknown) the stub segw-gen writes without a function group
+        ls_impl-content = zcl_stg_segw_gen_rfc=>rfc_method( is_op        = ls_op-op
+                                                            is_type      = ls_op-entity
+                                                            is_model     = is_model
+                                                            it_signature = zcl_stg_segw_fugr=>signature( ls_op-function_name ) ).
+        IF ls_impl-content IS INITIAL.
+          ls_impl-content = stub( iv_method  = ls_op-method
+                                  iv_comment = |* Mapped to { ls_op-function_name }: the function group was not available when this class was generated\n| ).
+        ENDIF.
       ELSEIF ls_op-mapping_kind = 'SHLP'.
-        ls_impl-content = stub( ls_op-method ).
+        ls_impl-content = zcl_stg_segw_gen_rfc=>shlp_method( is_op = ls_op-op is_type = ls_op-entity ).
+        IF ls_impl-content IS INITIAL.
+          ls_impl-content = stub( ls_op-method ).
+        ENDIF.
       ELSEIF ls_op-sadl_type = 'ODC'.
         ls_impl-content = odc_method( is_op = ls_op is_model = is_model ).
         IF ls_impl-content IS INITIAL.

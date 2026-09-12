@@ -895,6 +895,30 @@ entities:
       NodeUuid: {type: String(32)}
     creatable: false
     updatable: false
+  FunctionGroup:
+    set: FunctionGroupSet
+    description: "POST an abapGit *.fugr.xml as Content: the module signatures go to ZSTG_FM_PARAM"
+    keys: [Name]
+    properties:
+      Name: {type: String(30)}
+      Content: {type: String}
+      Modules: {type: Int32}
+      Rows: {type: Int32}
+    updatable: false
+    deletable: false
+  ModuleParameter:
+    set: ModuleParameterSet
+    description: "ZSTG_FM_PARAM: a function module's parameters, what the generator reads for a mapped operation"
+    source: {table: ZSTG_FM_PARAM}
+    keys: [Funcname, Parameter]
+    properties:
+      Funcname: {type: String(30), field: FUNCNAME}
+      Parameter: {type: String(30), field: PARAMETER}
+      Kind: {type: String(1), field: KIND}
+      Typ: {type: String(30), field: TYP}
+      Optional: {type: String(1), field: OPTIONAL}
+      Remote: {type: String(1), field: REMOTE}
+      StgSeq: {type: Int32, field: STG_SEQ}
   Generate:
     set: GenerateSet
     description: "GET GenerateSet?$filter=Project eq 'P': the generated classes as files (Name, Content), segw-gen in ABAP"
