@@ -333,12 +333,22 @@ the generator, the editor is the file.
    the corpus it finds 11 services in 8 repos, incl. a SADL one whose DPC is
    `CL_SADL_GTK_EXPOSURE_DPC` and a project whose classes end in `_CUST`, not
    `_EXT`: class names must come from the objects, never from a convention.
-2. **IWPR → `_MPC`/`_DPC` generator.** Read the project tree (PROJ → MODL →
-   entity types, properties, associations, navigation properties, entity
-   sets, function imports, attributes), emit `define` and the CASE
-   dispatcher the way SEGW does. The corpus holds both the IWPR and what
-   SEGW generated from it: the generator is done when the diff is empty.
-   `_EXT` is created once and never touched, as in SEGW. Days.
+2. **IWPR → `_MPC`/`_DPC` generator. First cut 2026-09-12 evening:**
+   `tools/segw-gen.mjs` reads the tree (`SBD_*` design: project, model,
+   service, generated artifacts, operations per set; `SBO_*` model: entity
+   types, properties, sets, associations, association sets, navigation
+   properties, referential constraints, complex types, function imports and
+   parameters) and writes `_MPC`/`_DPC` `.clas.abap` + `.clas.xml` and the
+   two empty `_EXT`. `--check <folder>` diffs against the classes SEGW made
+   from the same IWPR. Corpus score: `abap_simple_odata_service` all four
+   files byte-identical (timestamps masked); DPC `.abap` identical on 5 of
+   7 projects, the other 2 identical modulo method declaration order
+   (abapGit version); MPC differs by known things only: text-element labels
+   (the tree does not say which labels came from DDIC and which were typed:
+   an option later), `super->define( )` of older releases (`--super-define`),
+   `set_conversion_exit`, and two repos whose classes were generated from an
+   older tree than the one committed. Not yet: RDS templates (`define_rds_n`,
+   SADL DPC delegation), media, text pools. `_EXT` never overwritten.
    The project tree mixes sources: `SBD_DS.DS_TYPE` (5 = DDIC structure;
    the corpus has 14) and the `GENERATED_METHODS_RDS` attachment for
    reference data sources (CDS via SADL; 2 corpus projects, they call

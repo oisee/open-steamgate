@@ -137,6 +137,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
   `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
   call. `npm run segw -- <folder> --list` shows what a repo would register.
+- SEGW offline: `npm run segw:gen -- <folder> --check` diffs what
+  `tools/segw-gen.mjs` makes of a `<project>.iwpr.xml` against the `_MPC`/
+  `_DPC` classes in the folder; `--out <dir>` writes them (and the `_EXT`
+  pair if missing). Corpus projects under `.local/corpus/` are the oracle.
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.
