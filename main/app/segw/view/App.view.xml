@@ -4,6 +4,7 @@
   xmlns="sap.m"
   xmlns:l="sap.ui.layout"
   xmlns:f="sap.ui.layout.form"
+  xmlns:app="http://schemas.sap.com/sapui5/extension/sap.ui.core.CustomData/1"
   displayBlock="true"
   height="100%">
   <Page id="page" title="SEGW: Service Builder" showHeader="true">
@@ -26,11 +27,12 @@
         </Tree>
         <Page id="detail" showHeader="true" title="{node>/title}" backgroundDesign="List">
           <headerContent>
-            <Button id="addProperty" text="Add property" icon="sap-icon://add" press=".onAddProperty" visible="{= ${node>/entity} === 'EntityType' || ${node>/entity} === 'ComplexType'}"/>
+            <Button id="add0" text="{node>/adds/0/label}" icon="sap-icon://add" press=".onAdd" visible="{= !!${node>/adds/0/label}}" app:add="{node>/adds/0/key}"/>
+            <Button id="add1" text="{node>/adds/1/label}" icon="sap-icon://add" press=".onAdd" visible="{= !!${node>/adds/1/label}}" app:add="{node>/adds/1/key}"/>
             <Button id="delete" text="Delete" icon="sap-icon://delete" type="Reject" press=".onDelete" visible="{= !!${node>/path} &amp;&amp; ${node>/entity} !== 'Project'}"/>
           </headerContent>
           <content>
-            <MessageStrip id="hint" text="Select a node of the tree: its fields are the row of the /IWBEP/I_SB* table it lives in, edited in place." showIcon="true" class="sapUiSmallMargin" visible="{= !${node>/path}}"/>
+            <MessageStrip id="hint" text="{= ${node>/folder} ? 'A folder of the tree: what SEGW creates here is the button above.' : 'Select a node of the tree: its fields are the row of the /IWBEP/I_SB* table it lives in, edited in place.'}" showIcon="true" class="sapUiSmallMargin" visible="{= !${node>/path}}"/>
             <f:SimpleForm id="form" editable="true" layout="ResponsiveGridLayout" labelSpanL="4" labelSpanM="4" columnsL="1" columnsM="1" visible="{= !!${node>/path}}"/>
             <f:SimpleForm id="textForm" editable="true" layout="ResponsiveGridLayout" labelSpanL="4" labelSpanM="4" columnsL="1" columnsM="1" visible="false"/>
           </content>
