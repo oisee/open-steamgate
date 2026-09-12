@@ -16,6 +16,10 @@ CLASS zcl_stg_entry_provider DEFINITION PUBLIC CREATE PUBLIC.
 
 * Fill one entity structure from name/value pairs (and, for a deep insert,
 * the navigation components from nested JSON).
+    METHODS set_base
+      IMPORTING
+        ir_base TYPE REF TO data.
+
     METHODS fill
       IMPORTING
         it_values  TYPE tihttpnvp
@@ -34,6 +38,8 @@ CLASS zcl_stg_entry_provider DEFINITION PUBLIC CREATE PUBLIC.
         cv_target   TYPE any.
   PRIVATE SECTION.
     DATA mt_values  TYPE tihttpnvp.
+* PATCH/MERGE: the entity as it is, the request's values are laid over it
+    DATA mr_base    TYPE REF TO data.
     DATA mt_nested  TYPE tihttpnvp.
     DATA ms_set     TYPE zcl_stg_model_info=>ty_entity_set.
     DATA ms_service TYPE zcl_stg_model_info=>ty_service.
@@ -197,8 +203,18 @@ CLASS zcl_stg_entry_provider IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
+  METHOD set_base.
+    mr_base = ir_base.
+  ENDMETHOD.
+
   METHOD /iwbep/if_mgw_entry_provider~read_entry_data.
+    FIELD-SYMBOLS <ls_base> TYPE any.
+
     CLEAR es_data.
+    IF mr_base IS BOUND.
+      ASSIGN mr_base->* TO <ls_base>.
+      MOVE-CORRESPONDING <ls_base> TO es_data.
+    ENDIF.
     fill( EXPORTING it_values = mt_values
                     it_nested = mt_nested
                     is_set    = ms_set

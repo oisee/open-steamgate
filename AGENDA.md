@@ -292,6 +292,18 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
   — the public prior art for DIAG (Core Security, later pysap). Citable in
   `docs/layers-we-own.md`.
 
+**Done 2026-09-12: object page.** `sap.suite.ui.generic.template.ObjectPage`
+in the manifest, `UI.Facets` + `UI.FieldGroup#General` + bookings through
+`to_Bookings/@UI.LineItem`; non-draft Edit/Save. The gateway now does what
+the Gateway does on PATCH/MERGE: `get_entity` first, the request laid over
+it (`zcl_stg_entry_provider->set_base`), so Fiori's MERGE of one field no
+longer blanks the rest. Fork: `bind_structure` derives
+`sap:display-format="Date"` for DATS fields (dates render as dates).
+
+**Lars, 2026-09-12 (afternoon):** invited `oisee` as collaborator on
+`abaplint/transpiler` and `open-abap/open-abap-odata`. Still PRs, one fix at
+a time; branches can now live upstream instead of on the fork.
+
 **Done 2026-09-12: value helps.** `StatusVHSet` in the demo MPC/DPC,
 `Common.ValueList` on Status and TravelId, `Common.Text` + `TextArrangement`
 (StatusText filled by the DPC), `search` → `iv_search_string`; e2e opens the

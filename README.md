@@ -14,7 +14,8 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 
 > **Status: CRUD, `$batch`, navigation, `$expand`, deep insert, function
 > imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
-> text arrangement) and read-only SADL over CDS projections (with analytics
+> text arrangement), an object page (bookings via navigation, Edit/Save as
+> MERGE with Gateway semantics) and read-only SADL over CDS projections (with analytics
 > annotations) work end to end, on SQLite or DuckDB (`STG_DB=duckdb`).** `npm test`
 > serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
 > as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as
@@ -73,7 +74,8 @@ Bottom up, every layer is real, nothing is mocked:
    nowhere in open source.
 5. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
    Open SQL runs on SQLite (Node), sql.js (browser) or DuckDB.
-6. **Front** — a Fiori Elements V2 list report with no JavaScript of its own:
+6. **Front** — a Fiori Elements V2 list report and object page with no
+   JavaScript of their own:
    `webapp/manifest.json` and `annotations/annotations.xml` (`UI.LineItem`,
    `UI.SelectionFields`, `Common.ValueList`, `Common.Text`). SAPUI5 1.120 from
    SAP's CDN: Fiori Elements and the smart controls are not part of OpenUI5,

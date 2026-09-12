@@ -26,6 +26,40 @@
             <PropertyPath>TravelId</PropertyPath>
           </Collection>
         </Annotation>
+        <Annotation Term="UI.Facets">
+          <Collection>
+            <Record Type="UI.ReferenceFacet">
+              <PropertyValue Property="ID" String="General"/>
+              <PropertyValue Property="Label" String="General"/>
+              <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#General"/>
+            </Record>
+            <Record Type="UI.ReferenceFacet">
+              <PropertyValue Property="ID" String="Bookings"/>
+              <PropertyValue Property="Label" String="Bookings"/>
+              <PropertyValue Property="Target" AnnotationPath="to_Bookings/@UI.LineItem"/>
+            </Record>
+          </Collection>
+        </Annotation>
+        <Annotation Term="UI.FieldGroup" Qualifier="General">
+          <Record Type="UI.FieldGroupType">
+            <PropertyValue Property="Data">
+              <Collection>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="TravelId"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="Description"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="Status"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="Seats"/>
+                </Record>
+              </Collection>
+            </PropertyValue>
+          </Record>
+        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -46,6 +80,44 @@
             </Record>
           </Collection>
         </Annotation>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking">
+        <Annotation Term="UI.HeaderInfo">
+          <Record Type="UI.HeaderInfoType">
+            <PropertyValue Property="TypeName" String="Booking"/>
+            <PropertyValue Property="TypeNamePlural" String="Bookings"/>
+            <PropertyValue Property="Title">
+              <Record Type="UI.DataField">
+                <PropertyValue Property="Value" Path="Customer"/>
+              </Record>
+            </PropertyValue>
+          </Record>
+        </Annotation>
+        <Annotation Term="UI.LineItem">
+          <Collection>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="BookingId"/>
+              <PropertyValue Property="Label" String="Booking"/>
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="Customer"/>
+              <PropertyValue Property="Label" String="Customer"/>
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="FlightDate"/>
+              <PropertyValue Property="Label" String="Flight date"/>
+            </Record>
+          </Collection>
+        </Annotation>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/BookingId">
+        <Annotation Term="Common.Label" String="Booking"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/Customer">
+        <Annotation Term="Common.Label" String="Customer"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/FlightDate">
+        <Annotation Term="Common.Label" String="Flight date"/>
       </Annotations>
       <Annotations Target="ZSTG_DEMO_SRV.Travel/TravelId">
         <Annotation Term="Common.Label" String="Travel"/>

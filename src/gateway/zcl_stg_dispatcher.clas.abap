@@ -477,6 +477,23 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
             it_nested  = lt_nested
             is_set     = is_set
             is_service = is_service.
+* PATCH and MERGE change only the properties sent: as the Gateway does, read
+* the entity first and let the provider lay the request over it
+        IF iv_method <> 'PUT'.
+          lo_dpc->get_entity(
+            EXPORTING
+              iv_entity_name          = is_set-entity_type
+              iv_entity_set_name      = is_set-name
+              iv_source_name          = ''
+              it_key_tab              = lo_context->mt_key_tab
+              it_navigation_path      = lt_nav_path
+              io_tech_request_context = lo_context
+            IMPORTING
+              er_entity               = lr_entity ).
+          IF lr_entity IS BOUND.
+            lo_provider->set_base( lr_entity ).
+          ENDIF.
+        ENDIF.
         lo_dpc->update_entity(
           EXPORTING
             iv_entity_name          = is_set-entity_type

@@ -86,6 +86,47 @@ test("F4 on Status: the value help dialog reads StatusVHSet, searches it, and it
   expect(requests.some((r) => /\$filter=Status eq 'X'/.test(decodeURIComponent(r)))).toBe(true);
 });
 
+test("object page: navigation reads to_Bookings, Edit + Save sends MERGE with the changed field only", async ({page}) => {
+  const requests = [];
+  page.on("request", (req) => {
+    const text = req.method() + " " + req.url() + " " + (req.postData() || "");
+    if (text.includes("/sap/opu/odata/sap/")) {
+      requests.push(text.replace(/\r?\n/g, " "));
+    }
+  });
+  await page.goto("/app/index.html");
+  const row = page.locator("tr.sapMListTblRow", {hasText: "Berlin to Copenhagen"}).first();
+  await row.focus();
+  await page.keyboard.press("Enter");
+
+  // the object page: header, the General field group, bookings through the navigation property
+  await expect(page).toHaveURL(/#\/TravelSet\('T0001'\)/);
+  await expect(page.getByText("Ada Lovelace")).toBeVisible();
+  await expect(page.getByText("Grace Hopper")).toBeVisible();
+  expect(requests.some((r) => r.includes("TravelSet('T0001')/to_Bookings?"))).toBe(true);
+
+  // non-draft edit: Edit, change Seats, Save
+  await page.getByRole("button", {name: "Edit"}).focus();
+  await page.keyboard.press("Enter");
+  const seats = page.getByLabel(/^Seats/).first();
+  await expect(seats).toBeEditable();
+  await seats.fill("3");
+  await page.getByRole("button", {name: "Save"}).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", {name: "Edit"})).toBeVisible();
+
+  const merge = requests.find((r) => /MERGE TravelSet\('T0001'\)/.test(r));
+  expect(merge, requests.join("\n")).toBeDefined();
+  expect(merge).toContain('"Seats":3');
+  expect(merge).not.toContain('"Description"');
+
+  // the gateway laid the request over the entity: the rest survived
+  const travel = await page.evaluate(async () => (await fetch("../sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0001')?$format=json")).json());
+  expect(travel.d.Seats).toBe(3);
+  expect(travel.d.Description).toBe("Berlin to Copenhagen");
+  expect(travel.d.Status).toBe("A");
+});
+
 test("filter bar sends $filter that the DPC honours", async ({page}) => {
   await page.goto("/app/index.html");
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();

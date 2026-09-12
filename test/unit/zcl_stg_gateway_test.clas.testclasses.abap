@@ -651,6 +651,17 @@ CLASS ltcl_writes IMPLEMENTATION.
                         iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"Description":"Odense to Berlin, updated","Status":"X","Seats":5` ) ).
 
+* MERGE (what Fiori Elements sends on Save) changes only the properties it
+* carries; the Gateway reads the entity first and lays the request over it
+    ls_response = call( iv_method = 'MERGE'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')`
+                        iv_body   = `{"Seats":"7"}` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
+    ls_response = call( iv_method = 'GET'
+                        iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS `"Description":"Odense to Berlin, updated","Status":"X","Seats":7` ) ).
+
     ls_response = call( iv_method = 'DELETE'
                         iv_path   = `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T0100')` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
