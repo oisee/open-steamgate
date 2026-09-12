@@ -465,6 +465,8 @@ CLASS ltcl_import IMPLEMENTATION.
                                                 it_options = lt_options ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"zcl_zut_imp_mpc.clas.abap"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"zcl_zut_imp_mpc.clas.xml"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '<CLSNAME>ZCL_ZUT_IMP_MPC</CLSNAME>' ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'class ZCL_ZUT_IMP_MPC definition' ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'method DEFINE_TRAVEL.' ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS `lo_property = lo_entity_type->create_property( iv_property_name = 'BookingId' iv_abap_fieldname = 'BOOKINGID' ).` ) ).

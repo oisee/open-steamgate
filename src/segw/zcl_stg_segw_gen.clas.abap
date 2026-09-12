@@ -30,6 +30,16 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_property.
     TYPES tt_property TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
 
+* an operation of an entity set: C R U D Q, the method SEGW named for it,
+* and what the operation is mapped to (a function module, a search help)
+    TYPES: BEGIN OF ty_operation,
+             type          TYPE string,
+             method        TYPE string,
+             mapping_kind  TYPE string,
+             function_name TYPE string,
+           END OF ty_operation.
+    TYPES tt_operation TYPE STANDARD TABLE OF ty_operation WITH DEFAULT KEY.
+
     TYPES: BEGIN OF ty_entity_set,
              name            TYPE string,
              creatable       TYPE abap_bool,
@@ -41,6 +51,13 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              subscribable    TYPE abap_bool,
              filter_required TYPE abap_bool,
              uuid            TYPE string,
+             operations      TYPE tt_operation,
+* "Map to data source" on a DDIC table, a CDS view, an EPM business object
+* or (steamgate) another service: SADL serves the set
+             sadl_type       TYPE string,
+             sadl_binding    TYPE string,
+             sadl_service    TYPE string,
+             sadl_set        TYPE string,
            END OF ty_entity_set.
     TYPES tt_entity_set TYPE STANDARD TABLE OF ty_entity_set WITH DEFAULT KEY.
 
@@ -127,6 +144,11 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              mpc_ext          TYPE string,
              dpc              TYPE string,
              dpc_ext          TYPE string,
+* the generation stamp segw-gen writes: LAST_CHG_TIME as yyyymmddhhmmss and
+* as dd.mm.yyyy hh:mm:ss, client 001
+             generated_at     TYPE string,
+             generated_on     TYPE string,
+             client           TYPE string,
              entity_types     TYPE tt_entity_type,
              associations     TYPE tt_association,
              navigation       TYPE tt_navigation,
@@ -149,7 +171,8 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
       RAISING
         /iwbep/cx_mgw_busi_exception.
 
-* the generated files of a project: for now the _MPC source
+* the generated files of a project: the _MPC and _DPC pair with their
+* abapGit XML, and the _EXT pair
     CLASS-METHODS generate
       IMPORTING
         iv_project      TYPE string
@@ -163,6 +186,23 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
         is_model         TYPE ty_model
       RETURNING
         VALUE(rv_source) TYPE string.
+
+* JavaScript's slice: out of range gives what is there, not an exception
+* (a project without LAST_CHG_TIME has an empty stamp)
+    CLASS-METHODS slice
+      IMPORTING
+        iv_text        TYPE string
+        iv_from        TYPE i
+        iv_to          TYPE i
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
+    CLASS-METHODS file_name
+      IMPORTING
+        iv_class       TYPE string
+        iv_ext         TYPE string
+      RETURNING
+        VALUE(rv_name) TYPE string.
 
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_row,
@@ -214,6 +254,18 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
         iv_with_key        TYPE abap_bool
       RETURNING
         VALUE(rs_property) TYPE ty_property.
+
+* the operations of an entity set (the design set node under it, SBD_SE,
+* its operations SBD_OP with their mappings SBD_MH -> SBD_DS) and whether
+* SADL serves the set
+    CLASS-METHODS set_operations
+      IMPORTING
+        it_se  TYPE tt_row
+        it_op  TYPE tt_row
+        it_mh  TYPE tt_row
+        it_ds  TYPE tt_row
+      CHANGING
+        cs_set TYPE ty_entity_set.
 
 * a stable sort of properties by SORT_ORDER: equal orders keep the file's order
     CLASS-METHODS sort_properties
@@ -428,6 +480,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA lt_fi   TYPE tt_row.
     DATA lt_fp   TYPE tt_row.
     DATA lt_ct   TYPE tt_row.
+    DATA lt_se   TYPE tt_row.
+    DATA lt_op   TYPE tt_row.
+    DATA lt_mh   TYPE tt_row.
+    DATA lt_ds   TYPE tt_row.
+    DATA ls_op   TYPE ty_operation.
     DATA ls_row  TYPE ty_row.
     DATA ls_sub  TYPE ty_row.
     DATA ls_type TYPE ty_entity_type.
@@ -471,6 +528,10 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     lt_fi   = rows( iv_tag = 'SBO_FI'  iv_project = iv_project ).
     lt_fp   = rows( iv_tag = 'SBO_FP'  iv_project = iv_project ).
     lt_ct   = rows( iv_tag = 'SBO_CT'  iv_project = iv_project ).
+    lt_se   = rows( iv_tag = 'SBD_SE'  iv_project = iv_project ).
+    lt_op   = rows( iv_tag = 'SBD_OP'  iv_project = iv_project ).
+    lt_mh   = rows( iv_tag = 'SBD_MH'  iv_project = iv_project ).
+    lt_ds   = rows( iv_tag = 'SBD_DS'  iv_project = iv_project ).
 
     CLEAR gt_by_uuid.
     APPEND LINES OF lt_et TO gt_by_uuid.
@@ -487,6 +548,13 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       rs_model-project_type = '1'.
     ENDIF.
     rs_model-last_changed = val( is_row = ls_row iv_field = 'LAST_CHG_TIME' ).
+    rs_model-generated_at = rs_model-last_changed.
+    IF strlen( rs_model-generated_at ) > 14.
+      rs_model-generated_at = substring( val = rs_model-generated_at len = 14 ).
+    ENDIF.
+    rs_model-generated_on = |{ slice( iv_text = rs_model-generated_at iv_from = 6 iv_to = 8 ) }.{ slice( iv_text = rs_model-generated_at iv_from = 4 iv_to = 6 ) }.{ slice( iv_text = rs_model-generated_at iv_from = 0 iv_to = 4 ) }|
+      && | { slice( iv_text = rs_model-generated_at iv_from = 8 iv_to = 10 ) }:{ slice( iv_text = rs_model-generated_at iv_from = 10 iv_to = 12 ) }:{ slice( iv_text = rs_model-generated_at iv_from = 12 iv_to = 14 ) }|.
+    rs_model-client = '001'.
     READ TABLE lt_prt INDEX 1 INTO ls_row.
     IF sy-subrc = 0.
       rs_model-description = val( is_row = ls_row iv_field = 'DESCRIPTION' ).
@@ -565,6 +633,8 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         ls_set-subscribable    = flag( is_row = ls_sub iv_field = 'SUBSCRIBABLE' ).
         ls_set-filter_required = flag( is_row = ls_sub iv_field = 'REQUIRES_FILTER' ).
         ls_set-uuid            = ls_sub-uuid.
+        set_operations( EXPORTING it_se = lt_se it_op = lt_op it_mh = lt_mh it_ds = lt_ds
+                        CHANGING  cs_set = ls_set ).
         APPEND ls_set TO ls_type-entity_sets.
       ENDLOOP.
       APPEND ls_type TO rs_model-entity_types.
@@ -714,12 +784,137 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         EXPORTING
           message = |{ iv_project }: no MPC class in the generated artifacts (SBD_GA)|.
     ENDIF.
-    ls_file-name    = to_lower( replace( val = ls_model-mpc sub = '/' with = '#' occ = 0 ) ) && '.clas.abap'.
+    ls_file-name    = file_name( iv_class = ls_model-mpc iv_ext = '.clas.abap' ).
     ls_file-content = mpc_source( ls_model ).
     APPEND ls_file TO rt_files.
+    ls_file-name    = file_name( iv_class = ls_model-mpc iv_ext = '.clas.xml' ).
+    ls_file-content = zcl_stg_segw_gen_dpc=>mpc_xml( ls_model ).
+    APPEND ls_file TO rt_files.
+    IF ls_model-dpc IS NOT INITIAL.
+      ls_file-name    = file_name( iv_class = ls_model-dpc iv_ext = '.clas.abap' ).
+      ls_file-content = zcl_stg_segw_gen_dpc=>dpc_source( ls_model ).
+      APPEND ls_file TO rt_files.
+      ls_file-name    = file_name( iv_class = ls_model-dpc iv_ext = '.clas.xml' ).
+      ls_file-content = zcl_stg_segw_gen_dpc=>dpc_xml( ls_model ).
+      APPEND ls_file TO rt_files.
+    ENDIF.
+    APPEND LINES OF zcl_stg_segw_gen_dpc=>ext_sources( ls_model ) TO rt_files.
+  ENDMETHOD.
+
+  METHOD slice.
+    DATA lv_len TYPE i.
+    DATA lv_to  TYPE i.
+
+    lv_len = strlen( iv_text ).
+    lv_to = iv_to.
+    IF lv_to > lv_len.
+      lv_to = lv_len.
+    ENDIF.
+    IF iv_from >= lv_to.
+      RETURN.
+    ENDIF.
+    rv_text = substring( val = iv_text off = iv_from len = lv_to - iv_from ).
+  ENDMETHOD.
+
+  METHOD file_name.
+* abapGit writes /NS/CL_X as #ns#cl_x
+    rv_name = to_lower( replace( val = iv_class sub = '/' with = '#' occ = 0 ) ) && iv_ext.
   ENDMETHOD.
 
 * --------------------------------------------------------- MPC source
+
+  METHOD set_operations.
+    DATA ls_se     TYPE ty_row.
+    DATA ls_op_row TYPE ty_row.
+    DATA ls_mh     TYPE ty_row.
+    DATA ls_ds     TYPE ty_row.
+    DATA ls_op     TYPE ty_operation.
+    DATA lt_nodes  TYPE string_table.
+    DATA lv_node   TYPE string.
+    DATA lv_group  TYPE string.
+    DATA lv_kind   TYPE string.
+    DATA lv_at     TYPE i.
+
+    LOOP AT it_se INTO ls_se.
+      IF val( is_row = ls_se iv_field = 'ENTITY_SET_UUID' ) = cs_set-uuid.
+        EXIT.
+      ENDIF.
+      CLEAR ls_se.
+    ENDLOOP.
+    IF ls_se-uuid IS INITIAL.
+      RETURN.
+    ENDIF.
+    APPEND ls_se-uuid TO lt_nodes.
+    LOOP AT it_op INTO ls_op_row.
+      IF val( is_row = ls_op_row iv_field = 'PARENT_UUID' ) <> ls_se-uuid.
+        CONTINUE.
+      ENDIF.
+      APPEND ls_op_row-uuid TO lt_nodes.
+      CLEAR ls_op.
+      ls_op-type   = val( is_row = ls_op_row iv_field = 'OPERATION_TYPE' ).
+      ls_op-method = val( is_row = ls_op_row iv_field = 'IMP_METHOD' ).
+* "Map to Data Source" on the operation: its mapping header points at a
+* function module (DS_TYPE 2) or a search help (6)
+      LOOP AT it_mh INTO ls_mh.
+        IF val( is_row = ls_mh iv_field = 'PARENT_UUID' ) <> ls_op_row-uuid.
+          CONTINUE.
+        ENDIF.
+        lv_node = val( is_row = ls_mh iv_field = 'DS_UUID' ).
+        READ TABLE it_ds INTO ls_ds WITH KEY uuid = lv_node.
+        IF sy-subrc <> 0.
+          EXIT.
+        ENDIF.
+        CASE val( is_row = ls_ds iv_field = 'DS_TYPE' ).
+          WHEN '2'.
+            ls_op-mapping_kind  = 'RFC'.
+            ls_op-function_name = val( is_row = ls_ds iv_field = 'FUNCTION_NAME' ).
+            IF ls_op-function_name IS INITIAL.
+              ls_op-function_name = ls_ds-name.
+            ENDIF.
+          WHEN '6'.
+            ls_op-mapping_kind  = 'SHLP'.
+            ls_op-function_name = ls_ds-name.
+        ENDCASE.
+        EXIT.
+      ENDLOOP.
+      APPEND ls_op TO cs_set-operations.
+    ENDLOOP.
+* SADL: a mapping under the design set node or one of its operations to a
+* data source of type 4 whose group is DDIC~, CDS~, EPM~ or ODC~
+    LOOP AT it_mh INTO ls_mh.
+      lv_node = val( is_row = ls_mh iv_field = 'PARENT_UUID' ).
+      READ TABLE lt_nodes WITH KEY table_line = lv_node TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      lv_node = val( is_row = ls_mh iv_field = 'DS_UUID' ).
+      READ TABLE it_ds INTO ls_ds WITH KEY uuid = lv_node.
+      IF sy-subrc <> 0 OR val( is_row = ls_ds iv_field = 'DS_TYPE' ) <> '4'.
+        CONTINUE.
+      ENDIF.
+      lv_group = val( is_row = ls_ds iv_field = 'DS_GROUP' ).
+      lv_at = find( val = lv_group sub = '~' ).
+      IF lv_at < 0.
+        CONTINUE.
+      ENDIF.
+      lv_kind = substring( val = lv_group len = lv_at ).
+      IF lv_kind <> 'DDIC' AND lv_kind <> 'CDS' AND lv_kind <> 'EPM' AND lv_kind <> 'ODC'.
+        CONTINUE.
+      ENDIF.
+      cs_set-sadl_type    = lv_kind.
+      cs_set-sadl_binding = substring( val = lv_group off = lv_at + 1 ).
+      IF lv_kind = 'ODC'.
+        lv_at = find( val = cs_set-sadl_binding sub = '~' ).
+        IF lv_at >= 0.
+          cs_set-sadl_service = substring( val = cs_set-sadl_binding len = lv_at ).
+          cs_set-sadl_set     = substring( val = cs_set-sadl_binding off = lv_at + 1 ).
+        ELSE.
+          cs_set-sadl_service = cs_set-sadl_binding.
+        ENDIF.
+      ENDIF.
+      RETURN.
+    ENDLOOP.
+  ENDMETHOD.
 
   METHOD sort_properties.
     DATA lt_sorted TYPE tt_property.

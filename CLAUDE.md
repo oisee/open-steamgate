@@ -230,8 +230,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   pull (`zcl_stg_segw_export`, the file written in ABAP); `DELETE
   NodeSet(P, uuid)` removes a node with its subtree (`zcl_stg_segw_tree`);
   `GET GenerateSet?$filter=Project eq 'P'` is segw-gen in ABAP
-  (`zcl_stg_segw_gen`, MPC so far), byte-identical to `tools/segw-gen.mjs`
-  by test. `npm run segw:cloud` is the informational abaplint pass
+  (`zcl_stg_segw_gen` + `zcl_stg_segw_gen_dpc`: MPC, DPC base, XML, EXT
+  pair; RFC/search-help bodies are stage 3), byte-identical to
+  `tools/segw-gen.mjs` by test. `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
 - The SEGW editor is `webapp/segw/` (`docs/segw-editor.md`): freestyle

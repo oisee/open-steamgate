@@ -159,9 +159,16 @@ to 27) and the same templates, line for line. segw-gen is the oracle: the
 test pushes both fixtures, the compiled demo YAML and every corpus project
 through `ImportSet` and expects the ABAP MPC to equal segw-gen's byte for
 byte (the colleague's rule: same input, same templates, no tolerance).
-`npm run segw:tree generate <P> --out <dir>` writes the files. Stage 1 is
-the `_MPC`; the `_DPC` base with the CRUDQ dispatch and the mapped
-methods (RFC, search help, SADL delegation, ODC) follow the same way.
+`npm run segw:tree generate <P> --out <dir>` writes the files. Stage 1 was
+the `_MPC`; stage 2 (`zcl_stg_segw_gen_dpc`) adds the `_DPC` base (the
+include banners with the generation stamp, the CRUDQ dispatch per entity
+set, the method signatures in the class editor's order, the comm-services
+block, SADL delegation and the SADL XML for mapped sets, the local ODC
+client, stubs for operations mapped to a function module as segw-gen
+writes them without a function group), the abapGit XML of both classes
+with the component texts, and the `_EXT` pair. Every file is compared;
+the `_DPC` of a project with a search-help mapping waits for stage 3 (the
+search-help interface and its implementation).
 
 ## The Cloud pass
 
@@ -180,7 +187,7 @@ of the narrowed file list, not language findings.
 
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
-- Generate, stages 2 and 3: the `_DPC` base (CRUDQ dispatch, the
-  `_EXT` pair) and the mapped methods, each checked byte for byte against
-  `tools/segw-gen.mjs` like the MPC, so the editor's Generate button stops
-  needing a Node route.
+- Generate, stage 3: the operations mapped to a function module (with the
+  function group's signature) and to a search help, checked byte for byte
+  against `tools/segw-gen.mjs` like the rest; then the editor's Generate
+  button goes to the service.

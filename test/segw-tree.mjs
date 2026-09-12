@@ -197,7 +197,7 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
 
   // segw-gen in ABAP: for every project we have, the classes GenerateSet
   // returns are the bytes tools/segw-gen.mjs makes of the same tree
-  it("GenerateSet gives segw-gen's MPC byte for byte for the fixtures, the compiled demo and the corpus", async () => {
+  it("GenerateSet gives segw-gen's files byte for byte for the fixtures, the compiled demo and the corpus", async () => {
     const sources = [
       ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8")],
       ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8")],
@@ -212,15 +212,23 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       }
       const {project} = await pushFile(DEFAULT_URL, xml);
       const made = await generateFiles(DEFAULT_URL, project);
-      const mpc = Object.keys(oracle.files).find((f) => f.endsWith("mpc.clas.abap"));
-      expect(Object.keys(made), name).to.include(mpc);
-      const a = oracle.files[mpc].split("\n");
-      const b = made[mpc].split("\n");
-      let i = 0;
-      while (i < a.length && i < b.length && a[i] === b[i]) {
-        i++;
+      // an operation mapped to a search help puts an interface and its
+      // implementation into the DPC: stage 3 of the ABAP generator
+      const shlp = oracle.model.entityTypes.some((et) => et.entitySets.some((es) => es.operations.some((o) => o.mapping?.kind === "SHLP")));
+      const expected = {...oracle.files, ...oracle.ext};
+      expect(Object.keys(made).sort(), name).to.deep.equal(Object.keys(expected).sort());
+      for (const [file, content] of Object.entries(expected)) {
+        if (shlp && file.endsWith("dpc.clas.abap")) {
+          continue;
+        }
+        const a = content.split("\n");
+        const b = made[file].split("\n");
+        let i = 0;
+        while (i < a.length && i < b.length && a[i] === b[i]) {
+          i++;
+        }
+        expect(made[file], `${name}: ${file} differs at line ${i + 1}\n  segw-gen: ${JSON.stringify(a[i])}\n  ABAP:     ${JSON.stringify(b[i])}`).to.equal(content);
       }
-      expect(made[mpc], `${name}: ${mpc} differs at line ${i + 1}\n  segw-gen: ${JSON.stringify(a[i])}\n  ABAP:     ${JSON.stringify(b[i])}`).to.equal(oracle.files[mpc]);
       checked++;
     }
     expect(checked).to.be.greaterThan(2);
