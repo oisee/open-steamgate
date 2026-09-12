@@ -886,3 +886,13 @@ entities:
       Tables: {type: Int32}
     updatable: false
     deletable: false
+  Export:
+    set: ExportSet
+    description: "GET ExportSet('P'): the project as an IWPR file in Content"
+    keys: [Project]
+    properties:
+      Project: {type: String(30)}
+      Content: {type: String}
+    creatable: false
+    updatable: false
+    deletable: false

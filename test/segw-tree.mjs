@@ -3,7 +3,7 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, importIwpr, projectOf, pull, pullFile, push, pushFile, readData, writeData} from "../tools/segw-tree.mjs";
 import {startServer} from "./start.mjs";
 
 // The SEGW project tree as our tables: the spec derived from real SEGW
@@ -170,7 +170,15 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       const result = await pushFile(DEFAULT_URL, xml);
       expect(result, name).to.deep.equal({project: projectOf(tables), posted: rows, tables: tables.size});
       expect(exportIwpr(await pull(DEFAULT_URL, result.project, spec), result.project, spec), name).to.equal(xml);
+      // and the file the service writes itself (GET ExportSet, zcl_stg_segw_export)
+      expect(await pullFile(DEFAULT_URL, result.project), name).to.equal(xml);
     }
+  });
+
+  it("GET ExportSet of a project nobody imported is 400", async () => {
+    const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/ExportSet('NOBODY')`);
+    expect(res.status).to.equal(400);
+    expect(await res.text()).to.contain("no project NOBODY");
   });
 
   it("POST ImportSet refuses a field SEGW never writes and leaves the tables alone", async () => {

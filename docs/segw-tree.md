@@ -120,8 +120,12 @@ parameters travel in the URL and a 30 KB file does not fit a request line.
 `push --rows` is the other route, the generic CRUD only: GET the project's
 rows per set, DELETE by key, POST the rows with `StgSeq`.
 
-`pull <PROJECT>` GETs every set with `$filter=Project eq
-'...'&$orderby=StgSeq` and writes the IWPR. The round trip goes through the
+`pull <PROJECT>` GETs `ExportSet('<PROJECT>')`: `zcl_stg_segw_export`
+writes the file in ABAP (tables alphabetical, rows by `STG_SEQ`, fields in
+the table's component order, which is the spec's, initial fields left out,
+escaped as abapGit does), the mirror of the import, so the editor's Export
+button is one GET. `pull --rows` GETs every set with `$filter=Project eq
+'...'&$orderby=StgSeq` and writes the IWPR here instead. The round trip goes through the
 database, not through JSON files: the test pulls the seeded `ZSTG_MAPPED`
 and gets the fixture's bytes, pushes both fixtures through `ImportSet` and
 row by row and pulls them back byte for byte, twice (a push replaces, it
@@ -146,6 +150,5 @@ of the narrowed file list, not language findings.
 
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
-- Export as a read of the service (`GET ExportSet('ZSTG_DEMO')` with the
-  IWPR as `Content`), the mirror of `ImportSet`, so the editor can hand a
-  project back as a file.
+- Generate as an operation of the service: segw-gen in ABAP over the
+  tables, so the editor's Generate button stops needing a Node route.

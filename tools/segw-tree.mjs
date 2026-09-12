@@ -13,21 +13,22 @@
 // ZSTG_SEGW_SRV: push POSTs the file to ImportSet as Content, one call,
 // and zcl_stg_segw_import replaces the project's rows in the database
 // (--rows instead: DELETE the project's rows in every table and POST the
-// file's rows one by one, the generic CRUD only); pull GETs every set
-// ordered by StgSeq and writes the IWPR.
+// file's rows one by one, the generic CRUD only); pull GETs
+// ExportSet('P'), the file written by zcl_stg_segw_export in ABAP
+// (--rows instead: GET every set ordered by StgSeq and write it here).
 //
 // Usage: node tools/segw-tree.mjs import <file.iwpr.xml> [--data data]
 //        node tools/segw-tree.mjs export <PROJECT> [--data data] [--out <file>]
 //        node tools/segw-tree.mjs check <file.iwpr.xml>... (exit 1 on a difference)
 //        node tools/segw-tree.mjs push <file.iwpr.xml> [--rows] [--url http://localhost:3030]
-//        node tools/segw-tree.mjs pull <PROJECT> [--url http://localhost:3030] [--out <file>]
+//        node tools/segw-tree.mjs pull <PROJECT> [--rows] [--url http://localhost:3030] [--out <file>]
 import {existsSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
 
 export const DATA_DIR = "data";
 export const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
-export const DEFAULT_URL = "http://localhost:3030";
+export const DEFAULT_URL = `http://localhost:${process.env.STG_PORT ?? 3030}`;
 
 const dataFile = (dir, tag) => join(dir, `${tableName(tag).toLowerCase()}.tabu.json`);
 
@@ -199,6 +200,13 @@ export async function push(base, tables, project, spec) {
   return {deleted, posted};
 }
 
+// the project as a file, written by the service
+export async function pullFile(base, project) {
+  const json = await odata(base, "GET", `/ExportSet('${encodeURIComponent(project).replaceAll("'", "''")}')?$format=json`);
+  return json.d.Content;
+}
+
+// the project's rows, set by set
 export async function pull(base, project, spec) {
   const tables = new Map();
   for (const tag of Object.keys(spec)) {
@@ -280,7 +288,7 @@ async function main(args) {
     return 0;
   }
   if (cmd === "pull") {
-    const xml = exportIwpr(await pull(url, rest[0], spec), rest[0], spec);
+    const xml = args.includes("--rows") ? exportIwpr(await pull(url, rest[0], spec), rest[0], spec) : await pullFile(url, rest[0]);
     const out = opt("--out");
     if (out) {
       writeFileSync(out, xml);

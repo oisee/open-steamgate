@@ -212,6 +212,8 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
     METHODS import_writes_the_rows FOR TESTING.
     METHODS import_replaces_the_project FOR TESTING.
     METHODS unknown_field_is_400_untouched FOR TESTING.
+    METHODS export_gives_the_file_back FOR TESTING.
+    METHODS export_of_nobody_is_400 FOR TESTING.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
     METHODS entity_types RETURNING VALUE(rv_body) TYPE string.
@@ -346,6 +348,31 @@ CLASS ltcl_import IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Travel"' ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( lv_body CS '"Name":"Booking"' ) ).
     cl_abap_unit_assert=>assert_false( xsdbool( lv_body CS '"Name":"Flight"' ) ).
+  ENDMETHOD.
+
+  METHOD export_gives_the_file_back.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_xml      TYPE string.
+
+    lv_xml = iwpr( ).
+    ls_response = post( lv_xml ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/ExportSet('ZUT_IMP')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+* the same bytes as went in: rows by position, fields in the table's order,
+* &amp; &lt; &gt; escaped again
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS |"Content":"{ zcl_stg_json=>escape( lv_xml ) }"| ) ).
+  ENDMETHOD.
+
+  METHOD export_of_nobody_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/ExportSet('ZUT_NOBODY')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'no project ZUT_NOBODY' ) ).
   ENDMETHOD.
 
 ENDCLASS.
