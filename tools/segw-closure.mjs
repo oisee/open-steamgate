@@ -33,7 +33,10 @@ import {generate} from "./segw-gen.mjs";
 
 const CORPUS = ".local/corpus";
 const DEFAULT_ODATA = ".local/lars/open-abap-odata";
-const LIBS = [".local/lars/open-abap-core/src", ".local/lars/express-icf-shim/src"];
+// open-abap-core, the ICF shim, and open-steamgate's own SADL runtime
+// (cl_sadl_gw_model_exposure, cl_sadl_gw_dpc_factory: what a DDIC- or
+// CDS-mapped DPC calls; the interfaces come from open-abap-odata)
+const LIBS = [".local/lars/open-abap-core/src", ".local/lars/express-icf-shim/src", "src/sadl", "src/cds"];
 const ODATA_FOLDERS = ["src/oo", "src/ddic", "src/exceptions", "src/internal"];
 const DDIC_EXT = /\.(tabl|ttyp|dtel|doma|view|shlp|enqu)\.(xml|abap)$/i;
 const GEN_MARK = "/__segw_gen__/";
