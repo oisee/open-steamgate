@@ -263,6 +263,35 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
   local SADL / V4 / RAP simulator is needed at all. RFC and a DIAG front:
   "cool but not necessary".
 
+### Links Lars shared after the call (public)
+
+- [larshp/hithub](https://github.com/larshp/hithub) — GitHub clone in ABAP,
+  MIT, active. `docs/preview-deployments.md` is the pattern to copy: the
+  transpiled app + SQLite-compiled-to-JS bundled by webpack into a **service
+  worker**, served from GitHub Pages per PR, screenshots + visual diffs
+  against `main`, pinned clock so diffs are deterministic. Same ICF shim we
+  use. Has its own `ANORMALIES.md` and an abapGit-metadata script.
+- [larshp/zqjs](https://github.com/larshp/zqjs) — a JavaScript engine in ABAP
+  derived from QuickJS. The answer to "Steampunk has no JS engine".
+- [larshp/stock-allocation-fun](https://github.com/larshp/stock-allocation-fun/pulls)
+  — one task, one PR per model (Opus 5, Sol, Astra, Ox Alpha, DeepSeek…): a
+  model bake-off on ABAP with preview deployments as the judge.
+- [Flow one-pagers](https://docs.heliconialabs.com/flow-onepagers.pdf)
+  (Heliconia Labs, July 2026) — abapGit Flow process deck; one-pager 11
+  "Transport Sequencing and Preview Deployments" is where a local Gateway +
+  Fiori preview per PR would slot in.
+- [OpenCode Go](https://opencode.ai/go) — flat-fee key for open-weight
+  models with OpenAI/Anthropic-compatible endpoints; the tooling direction
+  Lars mentioned (nothing vendor-specific).
+- [Gallo, DEFCON 20 (2012): Uncovering SAP vulnerabilities, reversing the
+  Diag protocol](https://defcon.org/images/defcon-20/dc-20-presentations/Gallo/DEFCON-20-Gallo-Uncovering-SAP-Vulnerabilities.pdf)
+  — the public prior art for DIAG (Core Security, later pysap). Citable in
+  `docs/layers-we-own.md`.
+
+**Quick win this unlocks:** an open-steamgate preview build — demo service +
+Fiori list report entirely in the browser via hithub's service-worker recipe,
+deployed per PR with screenshot diffs. No server, shareable link.
+
 ## Ideas parked (2026-09-11)
 
 - **DuckDB: done as a spike 2026-09-12** (section above). ClickHouse would
