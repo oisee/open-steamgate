@@ -8,6 +8,10 @@ CLASS cl_sadl_gw_dpc_factory DEFINITION PUBLIC CREATE PUBLIC.
         iv_timestamp  TYPE timestamp OPTIONAL
         iv_uuid       TYPE string OPTIONAL
         io_context    TYPE REF TO /iwbep/if_mgw_context OPTIONAL
+* what a generated DPC with DDIC-mapped sets passes (itself): hooks SADL
+* would call for query options and extension mappings, not used here
+        io_query_control     TYPE REF TO if_sadl_gw_query_control OPTIONAL
+        io_extension_control TYPE REF TO if_sadl_gw_extension_control OPTIONAL
       RETURNING
         VALUE(ro_dpc) TYPE REF TO if_sadl_gw_dpc
       RAISING

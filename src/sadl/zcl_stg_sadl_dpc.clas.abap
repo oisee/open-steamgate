@@ -377,6 +377,14 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
         method = 'SADL EXECUTE_ACTION'.
   ENDMETHOD.
 
+  METHOD if_sadl_gw_dpc~get_is_conditional_implemented.
+    rv_conditional_active = abap_false.
+  ENDMETHOD.
+
+  METHOD if_sadl_gw_dpc~get_is_condi_imple_for_action.
+    rv_conditional_active = abap_false.
+  ENDMETHOD.
+
   METHOD if_sadl_gw_dpc~begin_changeset.
     RETURN.
   ENDMETHOD.
