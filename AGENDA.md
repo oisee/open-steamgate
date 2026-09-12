@@ -440,10 +440,13 @@ the generator, the editor is the file.
    (ef500bc, 19f9a0e), and the editor app `webapp/segw/`
    (`docs/segw-editor.md`): the tree of a project over `ZSTG_SEGW_SRV`,
    nodes edited in place (MERGE), Add property, Delete via `NodeSet`, Import IWPR via
-   `ImportSet`, Export through `ExportSet`, Generate through a dev route of `test/start.mjs`
+   `ImportSet` / `FunctionGroupSet`, Export through `ExportSet`, Generate through `GenerateSet` (files landed by a dev route of `test/start.mjs`)
    (`tools/segw-editor.mjs`, output in `gen/segw-editor/`), launchpad tile
-   `SegwProject-manage`, `test/e2e/segw.spec.mjs`. Next: Generate in ABAP
-   (segw-gen as the oracle, `GenerateSet`), adding other node kinds.
+   `SegwProject-manage`, `test/e2e/segw.spec.mjs`. Generate in ABAP landed
+   in three stages (16d7988, 3c50c73, a913296: MPC, DPC + EXT pair, RFC
+   and search-help bodies with `ZSTG_FM_PARAM`), every file byte-identical
+   to segw-gen over the corpus. Next: adding other node kinds, where
+   Generate's files land on a system.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the

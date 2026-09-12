@@ -1,49 +1,32 @@
-// The server side of the SEGW editor app (webapp/segw/): what the local
-// runtime can do for a project that lives in the ZSTG_SB* tables and SEGW
-// would do itself on a system.
-//
-//   exportProject(base, project)   -> the IWPR XML of the project's rows
-//   generateProject(base, project) -> segw-gen over that IWPR, written to
-//                                     gen/segw-editor/<project>/
-//
-// `base` is the gateway's own URL (the rows are read through ZSTG_SEGW_SRV,
-// as `segw-tree pull` does), so the route in test/start.mjs calls back
-// into the same process over HTTP. The editor's Export button does not
-// come here any more: ExportSet of the service writes the IWPR in ABAP. Function groups for RFC-mapped
-// operations come from STG_SEGW_LIBS (folders, ':'-separated).
+// The one thing the SEGW editor (webapp/segw/) still needs the local runtime
+// for: landing the files GenerateSet gives on disk. Generate itself is the
+// service's (zcl_stg_segw_gen, segw-gen in ABAP); this reads its rows
+// through the gateway's own URL and writes gen/segw-editor/<project>/.
 import {mkdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
-import {generate} from "./segw-gen.mjs";
-import {loadFunctionGroups} from "./segw-gen-mapping.mjs";
-import {readSpec} from "./segw-tables.mjs";
-import {exportIwpr, pull} from "./segw-tree.mjs";
 
 export const OUT_DIR = "gen/segw-editor";
+const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
 
-export async function exportProject(base, project) {
-  const spec = readSpec();
-  const tables = await pull(base, project, spec);
-  if (tables.size === 0) {
-    return "";
+export async function generatedFiles(base, project) {
+  const url = `${base}${SERVICE}/GenerateSet?$filter=${encodeURIComponent(`Project eq '${project}'`)}&$format=json`;
+  const res = await fetch(url, {headers: {accept: "application/json"}});
+  if (!res.ok) {
+    throw new Error(`GET GenerateSet for ${project}: ${res.status} ${await res.text()}`);
   }
-  return exportIwpr(tables, project, spec);
+  const files = {};
+  for (const row of (await res.json()).d.results) {
+    files[row.Name] = row.Content;
+  }
+  return files;
 }
 
 export async function generateProject(base, project, opts = {}) {
-  const iwpr = await exportProject(base, project);
-  if (iwpr === "") {
-    return {project, folder: "", files: {}, warnings: [`no rows for project ${project}`], skipped: "the project has no rows"};
-  }
-  const libs = Array.isArray(opts.libs) ? opts.libs : (opts.libs ?? process.env.STG_SEGW_LIBS ?? "").split(":").filter(Boolean);
-  const warnings = [];
-  const {files, ext, skipped} = generate(iwpr, {functionModules: loadFunctionGroups(libs), warnings});
+  const files = await generatedFiles(base, project);
   const folder = join(opts.out ?? OUT_DIR, project.toLowerCase());
-  const written = {...files, ...ext, [`${project.toLowerCase()}.iwpr.xml`]: iwpr};
-  if (!skipped) {
-    mkdirSync(folder, {recursive: true});
-    for (const [name, content] of Object.entries(written)) {
-      writeFileSync(join(folder, name), content);
-    }
+  mkdirSync(folder, {recursive: true});
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(folder, name), content);
   }
-  return {project, folder, files: skipped ? {} : written, warnings, skipped};
+  return {project, folder, files, warnings: []};
 }

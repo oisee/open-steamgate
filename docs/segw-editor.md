@@ -46,23 +46,26 @@ entity type still used by an entity set is refused in the app first.
   entity to `ImportSet` (`{Content}`); `zcl_stg_segw_import` replaces the
   project's rows in every table and the app selects the project. The whole
   file goes in the request body, so a 40 KB project is fine; a function
-  import would have to carry it in the URL.
+  import would have to carry it in the URL. The same button takes an
+  abapGit `*.fugr.xml`: it goes to `FunctionGroupSet` and its module
+  signatures to `ZSTG_FM_PARAM`, which Generate reads for the operations
+  mapped to a function module.
 - **Export IWPR** is `GET ExportSet('P')`: the IWPR written in ABAP by
   `zcl_stg_segw_export` (byte for byte what `ImportSet` took in), handed
   over as the abapGit file `<project>.iwpr.xml`.
-- **Generate** is the local runtime's seam, not the service's:
-  `test/start.mjs` serves `POST /segw/generate/<PROJECT>` (the project's
-  rows pulled back through the service, `segw-gen` over the IWPR, the
-  `_MPC`/`_DPC` pair plus the `_EXT` stubs written to
-  `gen/segw-editor/<project>/`, answered as JSON with the file names,
-  sources and warnings; `tools/segw-editor.mjs`). Function groups for
-  RFC-mapped operations come from `STG_SEGW_LIBS` (folders, `:`-separated;
-  default `test/fixtures/segw`). On a system this button is SEGW's own
-  Generate; in the browser preview (no Node behind the service worker) it
-  answers with a message, until the generator exists in ABAP.
-  `gen/segw-editor/` is excluded from the transpiler and from abaplint:
-  what the editor generates is a build product to look at or to take to
-  a system, not part of this runtime.
+- **Generate** is `GET GenerateSet?$filter=Project eq 'P'`: segw-gen in
+  ABAP (`zcl_stg_segw_gen`, byte-identical to `tools/segw-gen.mjs` over the
+  corpus), one row per file (`Name`, `Content`): the `_MPC`/`_DPC` pair,
+  their class XMLs and the four `_EXT` files. The dialog lists them, a
+  file opens as source, and **Save to gen/** asks the local runtime to
+  write them to `gen/segw-editor/<project>/` (`POST /segw/generate/<P>` in
+  `test/start.mjs`, `tools/segw-editor.mjs`: the rows of `GenerateSet`
+  onto disk). That last step is the only one that needs Node: in the
+  browser preview Generate shows the files and Save says why it cannot.
+  On a system the button is SEGW's own Generate. `gen/segw-editor/` is
+  excluded from the transpiler and from abaplint: what the editor
+  generates is a build product to look at or to take to a system, not part
+  of this runtime.
 
 ## Tested
 
@@ -70,9 +73,11 @@ entity type still used by an entity set is refused in the app first.
 fixture): the tree with its properties and mapping rows, a property's
 `MaxLength` edited and saved (MERGE, then read back), a property added
 (POST below `et-1`) and deleted (`DELETE NodeSet`, an entity type with
-sets refused), Generate showing the generated
-files and the new property in the generated MPC, Export downloading the
-IWPR with it through `ExportSet`, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
+sets refused), the fixture's function group imported through
+`FunctionGroupSet`, Generate listing `GenerateSet`'s files, the MPC source
+with the new property, Save to gen/ landing them (the DPC with the RFC
+call of the mapped operation), Export downloading the IWPR through
+`ExportSet`, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
 `ZSTG_MINI`; and the launchpad tile.
 
 ## Not yet
@@ -80,6 +85,6 @@ IWPR with it through `ExportSet`, Import of `zstg_mini.iwpr.xml` through `Import
 Adding nodes other than properties (entity types, sets, associations,
 operations) and the wizards SEGW has for them (import from DDIC structure,
 map to data source), drag order (`StgSeq`), the label
-row created when there is none, a Generate that lands the classes in
-`src/` and registers the service without a restart, and Generate in ABAP
-so that the last Node route goes.
+row created when there is none, and a Generate that lands the classes in
+`src/` and registers the service without a restart (or, on a system, in
+the class builder).

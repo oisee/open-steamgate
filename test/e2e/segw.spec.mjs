@@ -59,17 +59,35 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   await expect(page.getByRole("treeitem", {name: "Price", exact: true})).toBeVisible();
   expect(requests.some((r) => r.includes("POST PropertySet") && r.includes('"Name":"Price"') && r.includes('"ParentUuid":"et-1"'))).toBe(true);
 
-  // Generate: the dev server pulls the rows back into an IWPR and runs
-  // segw-gen; the new property is in the generated MPC
+  // the function group the mapped operations need: a fugr.xml through the
+  // same Import button goes to FunctionGroupSet (module signatures)
+  await page.getByRole("button", {name: "Import IWPR"}).click();
+  await page.locator("#stg-segw-import").setInputFiles("test/fixtures/segw/zstg_rfc.fugr.xml");
+  await expect(page.getByText(/zstg_rfc\.fugr\.xml: \d+ modules, \d+ parameters/)).toBeVisible();
+  expect(requests.some((r) => r.includes("POST FunctionGroupSet") && r.includes("LCL_OBJECT_FUGR"))).toBe(true);
+
+  // Generate: GenerateSet of the service (segw-gen in ABAP) lists the
+  // files; a file opens as source; Save to gen/ lands them through the dev
+  // server, whose answer carries the same contents
   await page.getByRole("button", {name: "Generate"}).click();
-  // a MessageBox is an alertdialog
-  const generated = page.getByRole("alertdialog");
+  const generated = page.getByRole("dialog", {name: /Generated ZSTG_MAPPED/});
   await expect(generated).toContainText("zcl_zstg_mapped_mpc.clas.abap");
   await expect(generated).toContainText("zcl_zstg_mapped_dpc_ext.clas.abap");
-  await generated.getByRole("button", {name: "OK"}).click();
+  expect(requests.some((r) => r.includes("GenerateSet") && r.includes("Project eq 'ZSTG_MAPPED'") || r.includes("Project%20eq%20%27ZSTG_MAPPED%27"))).toBe(true);
+  await generated.getByText("zcl_zstg_mapped_mpc.clas.abap").click();
+  const source = page.getByRole("dialog", {name: "zcl_zstg_mapped_mpc.clas.abap"});
+  await expect(source.getByRole("textbox")).toHaveValue(/iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'/);
+  await source.getByRole("button", {name: "Close"}).click();
+  await generated.getByRole("button", {name: "Save to gen/"}).click();
+  await expect(page.getByText(/\d+ files in gen\/segw-editor\/zstg_mapped/)).toBeVisible();
+  await generated.getByRole("button", {name: "Close"}).click();
   const gen = await (await page.request.post("/segw/generate/ZSTG_MAPPED")).json();
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'");
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("set_maxlength( iv_max_length = 12 )");
+  // the RFC-mapped operation has its body, from the signatures just imported
+  expect(gen.files["zcl_zstg_mapped_dpc.clas.abap"]).toContain("CALL FUNCTION lv_rfc_name");
+  expect(gen.files["zcl_zstg_mapped_dpc.clas.abap"]).toContain("iv_travel_id");
+
   // Export IWPR: GET ExportSet('ZSTG_MAPPED'), the IWPR written in ABAP,
   // handed over as the abapGit file
   const download = page.waitForEvent("download");

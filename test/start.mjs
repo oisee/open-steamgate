@@ -31,14 +31,13 @@ export function startServer(quiet) {
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   app.use("/app", express.static(fileURLToPath(new URL("../webapp", import.meta.url))));
 
-  // the SEGW editor's dev-time seam (webapp/segw/): the project's rows out of
-  // the ZSTG_SB* tables as an IWPR and segw-gen over it into gen/segw-editor/
-  // (Export itself is the service's ExportSet; Generate still needs Node)
+  // the SEGW editor's dev-time seam (webapp/segw/): the files GenerateSet
+  // gives, written to gen/segw-editor/<project>/ (Generate, Import and
+  // Export are the service's; only the file system is Node's)
   const self = "http://localhost:" + PORT;
-  const libs = (process.env.STG_SEGW_LIBS ?? "test/fixtures/segw").split(":").filter(Boolean);
   app.post("/segw/generate/:project", async function (req, res) {
     try {
-      res.json(await generateProject(self, req.params.project, {libs}));
+      res.json(await generateProject(self, req.params.project));
     } catch (e) {
       res.status(500).type("text/plain").send(String(e?.message ?? e));
     }
