@@ -30,6 +30,8 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
         VALUE(rt_files) TYPE zcl_stg_segw_gen=>tt_file.
 
   PRIVATE SECTION.
+    CONSTANTS gc_sadl_chunk TYPE i VALUE 200.
+
 * an operation with its entity set and type, in the order of the model
     TYPES: BEGIN OF ty_op,
              type          TYPE string,
@@ -760,11 +762,14 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     DATA ls_property TYPE zcl_stg_segw_gen=>ty_property.
     DATA ls_impl     TYPE ty_named.
     DATA lv_refs     TYPE string.
-    DATA lv_sources  TYPE string.
-    DATA lv_structs  TYPE string.
+    DATA lt_lines    TYPE string_table.
+    DATA lv_line     TYPE string.
+    DATA lv_xml      TYPE string.
     DATA lv_i        TYPE i.
     DATA lv_key      TYPE string.
     DATA lv_n        TYPE i.
+    DATA lv_count    TYPE i.
+    DATA lv_in_piece TYPE i.
 
     LOOP AT is_model-entity_types INTO ls_type.
       LOOP AT ls_type-entity_sets INTO ls_set.
@@ -791,33 +796,65 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       ENDIF.
       lv_refs = lv_refs && |    TYPES ty_{ ls_sadl-binding }_{ lv_i } TYPE { to_lower( ls_sadl-binding ) } ##NEEDED. " reference for where-used list|.
     ENDLOOP.
+* the lines of the definition: the data sources, the result set with one
+* structure per set (in reverse order, as SEGW writes them)
     LOOP AT lt_sadl INTO ls_sadl.
-      IF lv_sources IS NOT INITIAL.
-        lv_sources = lv_sources && |\n|.
-      ENDIF.
-      lv_sources = lv_sources && |               \| <sadl:dataSource type="{ ls_sadl-sadl_type }" name="{ ls_sadl-name }" binding="{ ls_sadl-binding }" />\| &|.
+      APPEND |               \| <sadl:dataSource type="{ ls_sadl-sadl_type }" name="{ ls_sadl-name }" binding="{ ls_sadl-binding }" />\| &| TO lt_lines.
     ENDLOOP.
+    APPEND `               |<sadl:resultSet>| &` TO lt_lines.
     lv_n = lines( lt_sadl ).
     WHILE lv_n > 0.
       READ TABLE lt_sadl INDEX lv_n INTO ls_sadl.
-      IF lv_structs IS NOT INITIAL.
-        lv_structs = lv_structs && |\n|.
-      ENDIF.
-      lv_structs = lv_structs
-        && |               \|<sadl:structure name="{ ls_sadl-name }" dataSource="{ ls_sadl-name }" maxEditMode="RO" >\| &\n|
-        && |               \| <sadl:query name="EntitySetDefault">\| &\n|
-        && |               \| </sadl:query>\| &|.
+      APPEND |               \|<sadl:structure name="{ ls_sadl-name }" dataSource="{ ls_sadl-name }" maxEditMode="RO" >\| &| TO lt_lines.
+      APPEND `               | <sadl:query name="EntitySetDefault">| &` TO lt_lines.
+      APPEND `               | </sadl:query>| &` TO lt_lines.
       LOOP AT ls_sadl-properties INTO ls_property.
         IF ls_property-is_key = abap_true.
           lv_key = 'TRUE'.
         ELSE.
           lv_key = 'FALSE'.
         ENDIF.
-        lv_structs = lv_structs && |\n               \| <sadl:attribute name="{ ls_property-abap_field }" binding="{ ls_property-abap_field }" isOutput="TRUE" isKey="{ lv_key }" />\| &|.
+        APPEND |               \| <sadl:attribute name="{ ls_property-abap_field }" binding="{ ls_property-abap_field }" isOutput="TRUE" isKey="{ lv_key }" />\| &| TO lt_lines.
       ENDLOOP.
-      lv_structs = lv_structs && |\n               \|</sadl:structure>\| &|.
+      APPEND `               |</sadl:structure>| &` TO lt_lines.
       lv_n = lv_n - 1.
     ENDWHILE.
+    APPEND `               |</sadl:resultSet>| &` TO lt_lines.
+* SEGW writes the whole definition as one & chain. The transpiler nests
+* such a chain one concat( ) call per operand and a service worker's stack
+* gives out near 800 lines (ZSTG_SEGW: 55 sets), so segw-gen builds a long
+* definition in pieces of gc_sadl_chunk lines; every SAP project we have is
+* far below. ANORMALIES: transpiler-concat-chain (abaplint/transpiler#1836).
+    lv_count = lines( lt_lines ).
+    IF lv_count + 3 <= gc_sadl_chunk.
+      lv_xml = |    DATA(lv_sadl_xml) =\n|
+        && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
+        && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| &\n|.
+      LOOP AT lt_lines INTO lv_line.
+        lv_xml = lv_xml && lv_line && |\n|.
+      ENDLOOP.
+      lv_xml = lv_xml && |               \|</sadl:definition>\| .|.
+    ELSE.
+      lv_xml = |    DATA(lv_sadl_xml) =\n|
+        && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
+        && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| .|.
+      lv_in_piece = 0.
+      lv_i = 0.
+      LOOP AT lt_lines INTO lv_line.
+        lv_i = lv_i + 1.
+        IF lv_in_piece = 0.
+          lv_xml = lv_xml && |\n    lv_sadl_xml = lv_sadl_xml &|.
+        ENDIF.
+        lv_in_piece = lv_in_piece + 1.
+        IF lv_in_piece = gc_sadl_chunk OR lv_i = lv_count.
+* the last line of a piece ends the statement
+          lv_line = substring( val = lv_line len = strlen( lv_line ) - 2 ) && ` .`.
+          lv_in_piece = 0.
+        ENDIF.
+        lv_xml = lv_xml && |\n| && lv_line.
+      ENDLOOP.
+      lv_xml = lv_xml && |\n    lv_sadl_xml = lv_sadl_xml &\n               \|</sadl:definition>\| .|.
+    ENDIF.
 
     ls_impl-name    = '/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY'.
     ls_impl-content = |  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY.\n|
@@ -873,14 +910,7 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     ls_impl-content = |  method IF_SADL_GW_DPC_UTIL~GET_DPC.\n|
       && lv_refs && |\n|
       && |\n|
-      && |    DATA(lv_sadl_xml) =\n|
-      && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
-      && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| &\n|
-      && lv_sources && |\n|
-      && |               \|<sadl:resultSet>\| &\n|
-      && lv_structs && |\n|
-      && |               \|</sadl:resultSet>\| &\n|
-      && |               \|</sadl:definition>\| .\n|
+      && lv_xml && |\n|
       && |    ro_dpc = cl_sadl_gw_dpc_factory=>create_for_sadl( iv_sadl_xml   = lv_sadl_xml\n|
       && |               iv_timestamp         = { is_model-generated_at }\n|
       && |               iv_uuid              = '{ is_model-project }'\n|

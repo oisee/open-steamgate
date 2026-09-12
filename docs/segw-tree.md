@@ -185,7 +185,12 @@ or DBSTRUCT), `ModuleParameterSet` reads it. `segw-tree push` posts the
 a parameter whose type is unknown, leaves the stub segw-gen writes in that
 case ("Mapped to X: the function group was not available"). Every
 generated file of every project we have equals segw-gen's byte for byte,
-the mapped fixture included.
+the mapped fixture included, and `ZSTG_SEGW` itself (55 SADL sets): its
+SADL definition is built in pieces of 200 lines, as segw-gen writes it
+since 2990f95, because the transpiler nests an `&` chain one `concat( )`
+per operand and a service worker's stack gives out near 800
+(abaplint/transpiler#1836 flattens the chain; when it is on npm, both
+generators can drop the rule).
 
 ## The Cloud pass
 

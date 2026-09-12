@@ -206,6 +206,8 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"), "test/fixtures/segw"],
       ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8"), "test/fixtures/segw"],
       ["zstg_demo (compiled)", compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml", functionModules: loadFunctionGroups(["src/demo"])}).iwpr, "src/demo"],
+      // this service itself: 55 SADL sets, the SADL definition built in pieces
+      ["zstg_segw (compiled)", compile(readFileSync("src/segw/zstg_segw.stg.yaml", "utf8"), {file: "zstg_segw.stg.yaml"}).iwpr, "src/segw"],
       ...files.map((f) => [f, readFileSync(f, "utf8").replace(/^\uFEFF/, ""), dirname(f)]),
     ];
     let checked = 0;
