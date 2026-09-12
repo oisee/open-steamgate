@@ -31,9 +31,9 @@ test("the list report runs against the gateway in the service worker", async () 
 
     // painted, not only present: an ancestor with height 0 and overflow hidden
     // would leave the row in the DOM and the page blank
-    const painted = await rows.first().evaluate((row) => {
-      const r = row.getBoundingClientRect();
-      return row.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+    const painted = await page.getByText("Berlin to Copenhagen").evaluate((cell) => {
+      const r = cell.getBoundingClientRect();
+      return cell.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
     });
     expect(painted).toBe(true);
 
