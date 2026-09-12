@@ -209,3 +209,73 @@ describe("tools/stg-compile: Fiori annotations in the model", () => {
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\nannotations:\n  A/Nope: {label: x}\n")).to.throw("A has no property Nope");
   });
 });
+
+describe("tools/stg-compile: complex types", () => {
+  const yaml = `
+project: ZSTG_CT
+service: ZSTG_CT_SRV
+complexTypes:
+  Address:
+    properties:
+      Street: String(40)
+      City: {type: String(40), label: City}
+  Money:
+    source: {struct: ZSTG_MONEY}
+    properties:
+      Amount: Decimal(15,2)
+      Currency: String(5)
+entities:
+  Customer:
+    keys: [CustomerId]
+    properties:
+      CustomerId: String(10)
+      Name: String(40)
+      Address: {type: Address, field: ADDR}
+      Balance: Money
+functions:
+  Quote:
+    method: GET
+    returns: {complexType: Money}
+    parameters:
+      CustomerId: String(10)
+`;
+  const result = compile(yaml, {file: "zstg_ct.stg.yaml"});
+
+  it("carries the complex types and their properties in the tree, the complex property by reference", () => {
+    const m = result.model;
+    expect(m.complexTypes.map((c) => `${c.name}:${c.abapStruct}:${c.properties.map((p) => p.name).join(",")}`)).to.deep.equal(["Address::Street,City", "Money:ZSTG_MONEY:Amount,Currency"]);
+    expect(m.entities[0].properties[2]).to.include({name: "Address", field: "ADDR", complexType: "Address", type: ""});
+    expect(m.functions[0]).to.include({returnComplex: "Money", multiplicity: "1"});
+    expect(result.iwpr).to.contain("<_-IWBEP_-I_SBO_CT>\n     <PROJECT>ZSTG_CT</PROJECT>");
+    expect(result.iwpr).to.contain("<NAME>Money</NAME>\n     <MODEL>");
+    expect(result.iwpr).to.contain("<ABAP_STRUCT>ZSTG_MONEY</ABAP_STRUCT>");
+    expect(result.iwpr).to.match(/<NAME>Address<\/NAME>\n     <COMPLEX_TYPE>[^<]+<\/COMPLEX_TYPE>\n     <REF_TYPE>T<\/REF_TYPE>\n     <ABAP_FIELD>ADDR<\/ABAP_FIELD>/);
+    expect(result.iwpr).to.contain("<RETURN_TYPE_KIND>CTYP</RETURN_TYPE_KIND>");
+    // SEGW's shape: segw-tree takes it in and gives the same bytes back
+    const spec = readSpec();
+    expect(exportIwpr(importIwpr(result.iwpr, spec), "ZSTG_CT", spec)).to.equal(result.iwpr);
+  });
+
+  it("reads back through segw-gen and generates the complex type code SEGW writes", () => {
+    const m = buildModel(parseIwpr(result.iwpr));
+    expect(m.complexTypes.map((c) => c.name)).to.deep.equal(["Address", "Money"]);
+    expect(m.complexTypes[1]).to.include({abapStruct: "ZSTG_MONEY"});
+    expect(m.complexTypes[0].properties.map((p) => `${p.name}:${p.edmType}:${p.maxLength}`)).to.deep.equal(["Street:Edm.String:40", "City:Edm.String:40"]);
+    expect(m.entityTypes[0].properties[2]).to.include({name: "Address", abapField: "ADDR", complexType: "Address"});
+    expect(m.functionImports[0]).to.include({returnKind: "CTYP", returnType: "Money"});
+    const mpc = result.classes["zcl_zstg_ct_mpc.clas.abap"];
+    expect(mpc).to.contain("define_complextypes( ).");
+    expect(mpc).to.contain("lo_complex_type = model->create_complex_type( 'Address' ). \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_complex_type = lo_entity_type->create_complex_property( iv_property_name = 'Address'\n                                                           iv_complex_type_name = 'Address'\n                                                           iv_abap_fieldname    = 'ADDR' ). \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_complex_type->bind_structure( iv_structure_name   = 'ZSTG_MONEY'");
+    expect(mpc).to.contain("lo_action->set_return_complex_type( 'Money' ). \"#EC NOTEXT");
+    // the entity's structure declares the complex property with the complex type's type
+    expect(mpc).to.match(/begin of TS_CUSTOMER,\n(.*\n)*\s+ADDR type ADDRESS,\n/);
+  });
+
+  it("says what is wrong with a complex type", () => {
+    expect(() => compile(yaml.replace("keys: [CustomerId]", "keys: [Address]"), {file: "x"})).to.throw("a complex property cannot be a key");
+    expect(() => compile(yaml.replace("complexType: Money", "complexType: Price"), {file: "x"})).to.throw("complex type Price is not defined");
+    expect(() => compile(yaml.replace("Balance: Money", "Balance: Price"), {file: "x"})).to.throw("unknown type Price");
+  });
+});

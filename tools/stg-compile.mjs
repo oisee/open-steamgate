@@ -87,8 +87,17 @@ function parseTypeText(text) {
   return {type, length: m[2] ?? ""};
 }
 
-function property(name, spec, isKey) {
+function property(name, spec, isKey, complexTypes = []) {
   const s = typeof spec === "string" || spec === null || spec === undefined ? {type: spec ?? "String"} : {...spec};
+  // type: <name of a complex type> is a complex property: a structure
+  // component, no Edm type, no facets, no flags (SEGW clears them all)
+  if (complexTypes.includes(String(s.type ?? ""))) {
+    if (isKey) {
+      throw new Error(`${name}: a complex property cannot be a key`);
+    }
+    return {name, field: s.field ?? name.toUpperCase(), isKey: false, complexType: String(s.type), type: "", length: "", digits: "", scale: "",
+      creatable: false, updatable: false, sortable: false, nullable: false, filterable: false, label: "", semantics: "", unicode: true};
+  }
   const t = parseTypeText(s.type ?? "String");
   const readonly = s.readonly === true;
   const flag = (key, fallback) => (s[key] === undefined ? fallback : s[key] === true);
@@ -202,10 +211,25 @@ export function readModel(text, file = "stg.yaml") {
     const base = ns ? `/${ns[1]}/CL_${ns[2]}` : `ZCL_${stem}`;
     return (y.classes?.[suffix.toLowerCase()] ?? `${base}_${suffix}`).toUpperCase();
   };
+  // complex types: a named group of properties, used as the type of a
+  // property or as what a function import returns
+  const complexTypes = Object.entries(y.complexTypes ?? {}).map(([name, c]) => {
+    const spec = c ?? {};
+    const source = spec.source ?? {};
+    if (Object.keys(source).some((k) => k !== "struct")) {
+      throw new Error(`${file}: complex type ${name}: only source.struct`);
+    }
+    return {
+      name, description: spec.description ?? "",
+      abapStruct: source.struct ? String(source.struct).toUpperCase() : "",
+      properties: Object.entries(spec.properties ?? {}).map(([p, ps], i) => ({...property(p, ps, false), order: i + 1})),
+    };
+  });
+  const complexNames = complexTypes.map((c) => c.name);
   const entities = Object.entries(y.entities).map(([name, e]) => {
     const spec = e ?? {};
     const keys = (spec.keys ?? []).map(String);
-    const props = Object.entries(spec.properties ?? {}).map(([p, ps], i) => ({...property(p, ps, keys.includes(p)), order: i + 1}));
+    const props = Object.entries(spec.properties ?? {}).map(([p, ps], i) => ({...property(p, ps, keys.includes(p), complexNames), order: i + 1}));
     for (const k of keys) {
       if (!props.some((p) => p.name === k)) {
         throw new Error(`${file}: ${name}: key ${k} is not a property`);
@@ -252,12 +276,19 @@ export function readModel(text, file = "stg.yaml") {
   const functions = Object.entries(y.functions ?? {}).map(([name, f]) => {
     const spec = f ?? {};
     const returns = spec.returns ?? {};
+    if (returns.complexType && !complexNames.includes(String(returns.complexType))) {
+      throw new Error(`${file}: function ${name}: complex type ${returns.complexType} is not defined`);
+    }
+    if (returns.complexType && returns.entity) {
+      throw new Error(`${file}: function ${name}: returns either an entity or a complex type`);
+    }
     return {
       name,
       method: (spec.method ?? "POST").toUpperCase(),
       returnEntity: returns.entity ? entity(returns.entity) : undefined,
+      returnComplex: returns.complexType ? String(returns.complexType) : "",
       returnSet: returns.set ?? (returns.entity ? entity(returns.entity).set : ""),
-      multiplicity: String(returns.multiplicity ?? (returns.entity ? "1" : "")),
+      multiplicity: String(returns.multiplicity ?? (returns.entity || returns.complexType ? "1" : "")),
       actionFor: spec.for ? entity(spec.for) : undefined,
       parameters: Object.entries(spec.parameters ?? {}).map(([p, ps]) => property(p, ps, false)),
     };
@@ -273,7 +304,7 @@ export function readModel(text, file = "stg.yaml") {
   return {
     project, service, model, description: y.description ?? "", namespace: y.namespace ?? service,
     classes: {mpc: cls("MPC"), mpcExt: cls("MPC_EXT"), dpc: cls("DPC"), dpcExt: cls("DPC_EXT"), mpcAnn: cls("MPC_ANN")},
-    entities, associations, functions, annotations,
+    entities, associations, functions, annotations, complexTypes,
   };
 }
 
@@ -607,7 +638,7 @@ export function iwprXml(m, opts = {}) {
   const rows = {
     SBD_AT: [], SBD_DS: [], SBD_DST: [], SBD_GA: [], SBD_GAT: [], SBD_MD: [], SBD_MDT: [], SBD_MH: [], SBD_MP: [], SBD_MR: [], SBD_OP: [], SBD_OPT: [], SBD_PR: [], SBD_PRT: [],
     SBD_SE: [], SBD_SET: [], SBD_SV: [], SBD_SVT: [], SBO_ASO: [], SBO_AST: [], SBO_AT: [], SBO_ATT: [], SBO_ES: [], SBO_EST: [], SBO_ET: [], SBO_ETT: [],
-    SBO_FI: [], SBO_FIT: [], SBO_FP: [], SBO_FPT: [], SBO_NP: [], SBO_NPT: [], SBO_PR: [], SBO_PRT: [], SBO_RC: [], SBO_RCT: [],
+    SBO_FI: [], SBO_FIT: [], SBO_FP: [], SBO_FPT: [], SBO_NP: [], SBO_NPT: [], SBO_PR: [], SBO_PRT: [], SBO_RC: [], SBO_RCT: [], SBO_CT: [], SBO_CTT: [],
   };
   const stamp = opts.timestamp ?? "20260912000000.000000";
   // the text tables: SEGW keeps a label in some (ET_LABEL, ESET_LABEL,
@@ -629,19 +660,36 @@ export function iwprXml(m, opts = {}) {
   }
 
   const etId = (e) => id("ETYP", e.name);
+  const ctId = (c) => id("CTYP", c.name);
+  const propertyRow = (uuid, parent, p) => (p.complexType
+    // a complex property: the type by reference, no Edm type, every flag cleared
+    ? {PROJECT: P, NODE_UUID: uuid, PARENT_UUID: parent, NAME: p.name, COMPLEX_TYPE: ctId({name: p.complexType}), REF_TYPE: "T", ABAP_FIELD: p.field,
+      AS_AUTHOR_XU: "X", AS_ETAG_XU: "X", AS_PUBLISHED_XU: "X", AS_TITLE_XU: "X", AS_UPDATED_XU: "X", CREATABLE_XU: "X", FILTERABLE_XU: "X",
+      SORTABLE_XU: "X", UPDATABLE_XU: "X", IS_NULLABLE_XU: "X", ABTY_XU: "X", SORT_ORDER: String(p.order), DESCRIPTION_XU: "X"}
+    : {
+      PROJECT: P, NODE_UUID: uuid, PARENT_UUID: parent, NAME: p.name, IS_KEY: X(p.isKey), CREATABLE: X(p.creatable), UPDATABLE: X(p.updatable),
+      SORTABLE: X(p.sortable), FILTERABLE: X(p.filterable), IS_NULLABLE: X(p.nullable), MAX_LENGTH: p.length, PROP_PRECISION: p.digits, SCALE: p.scale,
+      SEMANTICS: p.semantics, EDM_CORE_TYPE: p.type, REF_TYPE: "T", ABAP_FIELD: p.field, ABTY_XU: "X", SORT_ORDER: String(p.order),
+      IS_UNICODE_XU: X(!p.unicode), DESCRIPTION_XU: "X",
+    });
+  for (const c of m.complexTypes ?? []) {
+    rows.SBO_CT.push({PROJECT: P, NODE_UUID: ctId(c), NAME: c.name, MODEL: modelId, REF_TYPE: "T", TECH_NAME: c.name.toUpperCase(), ABAP_STRUCT: c.abapStruct, BASE_TYPE_XU: "X", DESCRIPTION_XU: "X"});
+    rows.SBO_CTT.push(text(ctId(c)));
+    for (const p of c.properties) {
+      rows.SBO_PR.push(propertyRow(id("PROP", "CTYP", c.name, p.name), ctId(c), p));
+      rows.SBO_PRT.push(text(id("PROP", "CTYP", c.name, p.name), "PROP_LABEL", p.label));
+    }
+  }
   const esId = (e) => id("ESET", e.set);
   const prId = (e, p) => id("PROP", e.name, p.name);
   for (const e of m.entities) {
     rows.SBO_ET.push({PROJECT: P, NODE_UUID: etId(e), MODEL: modelId, NAME: e.name, ABAP_STRUCT: e.abapStruct, TECH_NAME: e.name.toUpperCase(), REF_TYPE: "T", DESCRIPTION_XU: X(!e.description)});
     rows.SBO_ETT.push(text(etId(e), "ET_LABEL", e.description || e.name));
     for (const p of e.properties) {
-      rows.SBO_PR.push({
-        PROJECT: P, NODE_UUID: prId(e, p), PARENT_UUID: etId(e), NAME: p.name, IS_KEY: X(p.isKey), CREATABLE: X(p.creatable), UPDATABLE: X(p.updatable),
-        SORTABLE: X(p.sortable), FILTERABLE: X(p.filterable), IS_NULLABLE: X(p.nullable), MAX_LENGTH: p.length, PROP_PRECISION: p.digits, SCALE: p.scale,
-        SEMANTICS: p.semantics, EDM_CORE_TYPE: p.type, REF_TYPE: "T", ABAP_FIELD: p.field, ABTY_XU: "X", SORT_ORDER: String(p.order),
-        IS_UNICODE_XU: X(!p.unicode), DESCRIPTION_XU: "X",
-      });
-      rows.SBO_PRT.push(text(prId(e, p), "PROP_LABEL", p.label));
+      rows.SBO_PR.push(propertyRow(prId(e, p), etId(e), p));
+      if (!p.complexType) {
+        rows.SBO_PRT.push(text(prId(e, p), "PROP_LABEL", p.label));
+      }
     }
     rows.SBO_ES.push({
       PROJECT: P, NODE_UUID: esId(e), MODEL: modelId, NAME: e.set, ENTITY_TYPE: etId(e), CREATABLE: X(e.creatable), UPDATABLE: X(e.updatable), DELETABLE: X(e.deletable),
@@ -732,7 +780,8 @@ export function iwprXml(m, opts = {}) {
     const fiId = id("FUNC", f.name);
     rows.SBO_FI.push({
       PROJECT: P, NODE_UUID: fiId, MODEL: modelId, NAME: f.name, HTTP_METHOD: f.method, ACTION_FOR: f.actionFor ? etId(f.actionFor) : "",
-      RETURN_CARD: f.multiplicity, RETURN_REF_TYPE: f.returnEntity ? etId(f.returnEntity) : "", RETURN_TYPE_KIND: f.returnEntity ? "ETYP" : "",
+      RETURN_CARD: f.multiplicity, RETURN_REF_TYPE: f.returnEntity ? etId(f.returnEntity) : f.returnComplex ? ctId({name: f.returnComplex}) : "",
+      RETURN_TYPE_KIND: f.returnEntity ? "ETYP" : f.returnComplex ? "CTYP" : "",
       RETURN_ENTITYSET: f.returnSet ? esId(m.entities.find((e) => e.set === f.returnSet) ?? f.returnEntity) : "", REF_TYPE: "T", DESCRIPTION_XU: "X",
     });
     rows.SBO_FIT.push(text(fiId, "FI_LABEL", f.name));

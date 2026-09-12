@@ -103,6 +103,30 @@ the compiled classes lint clean against the libraries. The hand-written
 demo classes stay as they are: they are the showcase of real DPC code; the
 YAML is the same model in the form a system-less workflow edits.
 
+## Complex types (`complexTypes:`)
+
+```yaml
+complexTypes:
+  Address:                        # SBO_CT, its properties SBO_PR rows below it
+    properties: {Street: String(40), City: String(40)}
+  Money:
+    source: {struct: ZSTG_MONEY}  # bind_structure instead of a declared TYPES block
+    properties: {Amount: Decimal(15,2), Currency: String(5)}
+entities:
+  Customer:
+    properties:
+      Address: {type: Address, field: ADDR}   # a complex property: create_complex_property
+functions:
+  Quote: {method: GET, returns: {complexType: Money}}   # set_return_complex_type
+```
+
+A property whose `type` names a complex type is a complex property: the
+tree row carries `COMPLEX_TYPE` and no Edm type, every flag cleared as
+SEGW writes it, and the `_MPC` declares the entity's structure component
+with the complex type's type (`ADDR type ADDRESS`) and defines the type in
+`DEFINE_COMPLEXTYPES`. A complex property cannot be a key. What segw-gen
+makes of it is what the S_ESH_SEARCH_ODATA sample project has.
+
 ## Operations mapped to a module or a search help
 
 A map under `operations` is SEGW's "Map to Data Source" per operation
@@ -177,6 +201,7 @@ registry reads `gen/` too, so a YAML-only service registers itself.
 
 ## Not yet
 
-Complex types, Include (merging another service's model), annotation
-terms outside the grammar above (write them in the `_MPC_EXT`), text
-elements, function imports mapped to a module.
+Include (merging another service's model), annotation terms outside the
+grammar above (write them in the `_MPC_EXT`), text elements, function
+imports mapped to a module, collections of complex types
+(`IS_COLLECTION`).

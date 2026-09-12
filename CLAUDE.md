@@ -198,9 +198,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   YAML or `--lib`); `annotations:` (header, selectionFields, lineItem,
   facets, fieldGroups, label/text/valueList per property) become
   `ZCL_<project>_MPC_ANN` over `vocab_anno_model`, called from the
-  `_MPC_EXT`, so the Fiori apps need no local annotation file.
+  `_MPC_EXT`, so the Fiori apps need no local annotation file;
+  `complexTypes:` (SBO_CT, a property `type: <complex type>`, a function
+  `returns: {complexType:}`). The tree is written in SEGW's own shape
+  (fields and order from `src/segw/segw-tables.json`).
   `stg-compile --all` runs in `transpile`: YAML under `src/` compiles into
-  `gen/stg/` unless `src/` already holds the object.
+  `gen/stg/` unless `src/` already holds the object (a stale generated copy
+  of an object `src/` now holds is removed).
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
   (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
   registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.

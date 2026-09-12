@@ -414,7 +414,9 @@ the generator, the editor is the file.
    `annotations:` in the YAML → `ZCL_<project>_MPC_ANN` over
    `vocab_anno_model` (open-abap-odata #61 object model, #62 `sap:label`
    from the property annotation), the demo's `webapp/annotations/` deleted.
-   Not yet: complex types, Include, function imports over a module.
+   Complex types followed (`complexTypes:`, a property `type: <complex
+   type>`, `returns: {complexType:}`; segw-gen had the templates from the
+   ESH sample). Not yet: Include, function imports over a module.
 4. **SEGW as an application. Foundation 2026-09-12 night:** generic CRUD
    over `table:` sources (`zcl_stg_tab_<table>` classes from cds2ddic,
    create / update / delete / get_entity in `zcl_stg_sadl_dpc`), the first
