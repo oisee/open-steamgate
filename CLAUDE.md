@@ -149,9 +149,15 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - SEGW offline: `npm run segw:gen -- <folder> --check` diffs what
   `tools/segw-gen.mjs` makes of a `<project>.iwpr.xml` against the `_MPC`/
   `_DPC` classes in the folder; `--out <dir>` writes them (and the `_EXT`
-  pair if missing). Corpus projects under `.local/corpus/` are the oracle;
+  pair if missing); `--lib <folder>` (repeatable) supplies the abapGit
+  function groups (`*.fugr.xml`) the RFC-mapped operations need
+  (`tools/segw-gen-mapping.mjs`: RFC/BOR and search-help data sources,
+  `docs/segw-mapping.md`). SAP-delivered sample projects exported from A4H
+  live under `.local/corpus-sap/` (never tracked) and are the oracle for
+  the mapped kinds. Corpus projects under `.local/corpus/` are the oracle;
   `npm run segw:closure` generates every corpus project and lints it
-  against open-abap-odata (`docs/segw-closure.md`), skips without corpus;
+  against open-abap-odata (`docs/segw-closure.md`), skips without corpus
+  (`--corpus <dir>` for another folder of repos, e.g. `.local/corpus-sap`);
   it also uses `.local/lars/s4-private-2022-doma-and-dtel` (abapedia's
   S/4 DOMA/DTEL dump) when cloned. DDIC upstream rule: released data
   elements → open-abap-core, the rest → open-abap-deprecated.

@@ -349,13 +349,25 @@ the generator, the editor is the file.
    `set_conversion_exit`, and two repos whose classes were generated from an
    older tree than the one committed. Not yet: RDS templates (`define_rds_n`,
    SADL DPC delegation), media, text pools. `_EXT` never overwritten.
+   **Second cut 2026-09-12 night, against SAP's own sample projects from
+   A4H** (`docs/segw-mapping.md`): operations mapped to RFC/BOR modules
+   (DS_TYPE 2, signature from the abapGit function group, `--lib`) and to
+   search helps (DS_TYPE 6) are generated as SEGW writes them; SADL over
+   CDS and EPM objects joins DDIC; complex types over DDIC structures,
+   `set_action_for`, complex return types, `set_semantic`, `set_as_etag`,
+   the real nullable flag, decimal digits/scale, entity-set flags read the
+   way the tree means them. `/IWBEP/GWSAMPLE_BASIC` DPC now comes out
+   line-identical; the RFC DPCs differ by release drift only (2012 key
+   loops vs 2013 converted keys). Redefine and annotation-model projects
+   are recognised and skipped. Corpus (third-party) still identical.
    The project tree mixes sources: `SBD_DS.DS_TYPE` (5 = DDIC structure;
    the corpus has 14) and the `GENERATED_METHODS_RDS` attachment for
    reference data sources (CDS via SADL; 2 corpus projects, they call
    `cl_sadl_gw_model_exposure` in `_MPC_EXT` and `create_for_sadl` in
    `_DPC_EXT`). The generator must route RDS entities to our SADL runtime
-   and leave DDIC ones to the hand-written DPC. RFC/BOR mapping and ODC
-   (external services) exist in SEGW but not in the corpus: out of scope.
+   and leave DDIC ones to the hand-written DPC. RFC/BOR mapping: done
+   (second cut, above; runtime side = the RFC replay client). ODC (external
+   services) exists in SEGW but not in any oracle we have: out of scope.
 3. **Edit the model without a system.** No GUI: edit the IWPR (or a YAML
    that becomes one), regenerate, deploy the IWPR back through abapGit; SEGW
    on the system sees a normal project. "Not off-stack" for free.

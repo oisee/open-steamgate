@@ -24,14 +24,17 @@
 //   npm run segw:closure            report per project
 //   npm run segw:closure -- --names also list the missing DDIC names
 //   npm run segw:closure -- --odata .local/fork/open-abap-odata
+//   npm run segw:closure -- --corpus .local/corpus-sap --lib .local/corpus-sap/S_EPM_GATEWAY
+//                                  another folder of repos, function groups for the RFC-mapped ones
 //                                   check against a fork instead of Lars's clone
 
 import * as abaplint from "@abaplint/core";
 import {existsSync, readdirSync, readFileSync, statSync} from "node:fs";
 import {join, relative} from "node:path";
 import {generate} from "./segw-gen.mjs";
+import {loadFunctionGroups} from "./segw-gen-mapping.mjs";
 
-const CORPUS = ".local/corpus";
+const DEFAULT_CORPUS = ".local/corpus";
 const DEFAULT_ODATA = ".local/lars/open-abap-odata";
 // open-abap-core, the ICF shim, and open-steamgate's own SADL runtime
 // (cl_sadl_gw_model_exposure, cl_sadl_gw_dpc_factory: what a DDIC- or
@@ -41,7 +44,9 @@ const LIBS = [".local/lars/open-abap-core/src", ".local/lars/express-icf-shim/sr
 // what Lars would rather not carry in open-abap-core comes from here
 const OPTIONAL_LIBS = [".local/lars/s4-private-2022-doma-and-dtel/src"];
 const ODATA_FOLDERS = ["src/oo", "src/ddic", "src/exceptions", "src/internal"];
-const DDIC_EXT = /\.(tabl|ttyp|dtel|doma|view|shlp|enqu)\.(xml|abap)$/i;
+// DDIC objects and the interfaces SEGW generates next to the classes (the
+// BOP type copies the RFC templates refer to)
+const DDIC_EXT = /\.(tabl|ttyp|dtel|doma|view|shlp|enqu|intf)\.(xml|abap)$/i;
 const GEN_MARK = "/__segw_gen__/";
 
 const CONFIG = {
@@ -113,8 +118,9 @@ function bucketOf(issue) {
   return {bucket: rule === "unknown_types" || rule === "check_ddic" ? "ddic" : "repo", name};
 }
 
-function checkProject(iwprPath, repo, libFiles) {
-  const {model, files, ext, skipped} = generate(readFileSync(iwprPath, "utf8"));
+function checkProject(iwprPath, repo, libFiles, functionGroupDirs = []) {
+  // RFC-mapped operations need the function group of the module: the repo may carry it, --lib adds folders
+  const {model, files, ext, skipped} = generate(readFileSync(iwprPath, "utf8"), {functionModules: loadFunctionGroups([repo, ...functionGroupDirs]), warnings: []});
   if (skipped) {
     return {project: model.project, skipped};
   }
@@ -147,6 +153,8 @@ function checkProject(iwprPath, repo, libFiles) {
 function main(argv) {
   const names = argv.includes("--names");
   const odata = argv.includes("--odata") ? argv[argv.indexOf("--odata") + 1] : DEFAULT_ODATA;
+  const CORPUS = argv.includes("--corpus") ? argv[argv.indexOf("--corpus") + 1] : DEFAULT_CORPUS;
+  const libs = argv.flatMap((a, i) => (a === "--lib" ? [argv[i + 1]] : []));
   if (!existsSync(CORPUS)) {
     console.log(`segw-closure: no ${CORPUS}, skip`);
     return 0;
@@ -164,7 +172,7 @@ function main(argv) {
   let bad = 0;
   for (const iwpr of iwprs) {
     const repo = join(CORPUS, relative(CORPUS, iwpr).split("/")[0]);
-    const r = checkProject(iwpr, repo, libFiles);
+    const r = checkProject(iwpr, repo, libFiles, libs);
     if (r.skipped) {
       console.log(`${r.project}: skip, ${r.skipped}`);
       continue;

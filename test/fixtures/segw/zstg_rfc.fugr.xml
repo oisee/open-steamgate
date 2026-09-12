@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <AREAT>open-steamgate generator fixture: RFC data sources</AREAT>
+   <INCLUDES>
+    <SOBJ_NAME>LZSTG_RFCTOP</SOBJ_NAME>
+    <SOBJ_NAME>SAPLZSTG_RFC</SOBJ_NAME>
+   </INCLUDES>
+   <FUNCTIONS>
+    <item>
+     <FUNCNAME>Z_STG_TRAVEL_GET</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>Read one travel</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IV_TRAVEL_ID</PARAMETER>
+       <TYP>ZSTG_TRAVEL_ID</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>ES_TRAVEL</PARAMETER>
+       <TYP>ZSTG_DEMO</TYP>
+      </RSEXP>
+      <RSEXP>
+       <PARAMETER>ET_RETURN</PARAMETER>
+       <TYP>BAPIRET2_T</TYP>
+      </RSEXP>
+     </EXPORT>
+    </item>
+    <item>
+     <FUNCNAME>Z_STG_TRAVEL_LIST</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>List travels</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IT_TRAVEL_ID_RANGE</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>ZSTG_TRAVEL_ID_RANGE_T</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_WITH_TEXTS</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>FLAG</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>ET_TRAVEL</PARAMETER>
+       <TYP>ZSTG_DEMO_T</TYP>
+      </RSEXP>
+      <RSEXP>
+       <PARAMETER>ET_RETURN</PARAMETER>
+       <TYP>BAPIRET2_T</TYP>
+      </RSEXP>
+     </EXPORT>
+    </item>
+   </FUNCTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>

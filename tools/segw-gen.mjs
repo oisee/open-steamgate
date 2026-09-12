@@ -23,6 +23,7 @@
 // set"; a plain flag set to X means set.
 import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {SHLP_IMPLEMENTATION, SHLP_INTERFACE, loadFunctionGroups, rfcMethod, shlpMethod} from "./segw-gen-mapping.mjs";
 
 // ---------------------------------------------------------------- parsing
 
@@ -55,6 +56,9 @@ export function parseIwpr(xml) {
     artifacts: t("SBD_GA"),
     dataSources: t("SBD_DS"),
     mappings: t("SBD_MH"),
+    propertyMappings: t("SBD_MP"),
+    mappingRanges: t("SBD_MR"),
+    modelReferences: t("SBO_MR"),
     operations: t("SBD_OP"),
     designSets: t("SBD_SE"),
     entityTypes: t("SBO_ET"),
@@ -75,7 +79,24 @@ export function parseIwpr(xml) {
 // ------------------------------------------------------------------ model
 
 const set = (r, flag) => r[flag] === "X";
-const unset = (r, flag) => r[flag + "_XU"] !== "X"; // X_XU = X means "not set"
+
+// What the tree stores for a property's size and what SEGW writes for it:
+// a string has MAX_LENGTH -> set_maxlength; a decimal has PROP_PRECISION
+// (digits) and SCALE -> set_maxlength( digits ) + set_precison( scale );
+// a DateTime with a precision has PROP_PRECISION (7 for TIMESTAMPL) ->
+// set_precison, and when the tree also carries SCALE (P 21 / S 7) the
+// digits go to set_maxlength. TYPE_KIND/LENGTH/DECIMALS are the ABAP type
+// behind a property without DDIC (inline structure component).
+function lengths(pr) {
+  const digits = pr.PROP_PRECISION ?? "";
+  const scale = pr.SCALE ?? "";
+  const decimal = pr.EDM_CORE_TYPE === "Edm.Decimal";
+  return {
+    precision: scale || (decimal ? "" : digits),
+    maxLength: decimal || scale ? digits : (pr.MAX_LENGTH ?? ""),
+    digits, scale, typeKind: pr.TYPE_KIND ?? "", length: pr.LENGTH ?? "", decimals: pr.DECIMALS ?? "",
+  };
+}
 
 export function buildModel(p) {
   const byUuid = new Map();
@@ -94,13 +115,14 @@ export function buildModel(p) {
         abapField: pr.ABAP_FIELD || pr.NAME.toUpperCase(),
         isKey: set(pr, "IS_KEY"),
         edmType: pr.EDM_CORE_TYPE,
-        maxLength: pr.MAX_LENGTH,
-        precision: pr.PROP_PRECISION,
+        ...lengths(pr),
         creatable: set(pr, "CREATABLE"),
         updatable: set(pr, "UPDATABLE"),
         sortable: set(pr, "SORTABLE"),
-        nullable: set(pr, "NULLABLE"),
+        nullable: set(pr, "IS_NULLABLE"),
         filterable: set(pr, "FILTERABLE"),
+        semantics: pr.SEMANTICS ?? "",
+        asEtag: set(pr, "AS_ETAG"),
         label: p.propertyTexts.find((t) => t.NODE_UUID === pr.NODE_UUID)?.PROP_LABEL ?? "",
         typeName: pr.TYPE_NAME ?? "",
         complexType: pr.COMPLEX_TYPE ? (p.complexTypes.find((ct) => ct.NODE_UUID === pr.COMPLEX_TYPE)?.NAME ?? "") : "",
@@ -108,26 +130,35 @@ export function buildModel(p) {
       }));
     const sets = p.entitySets.filter((es) => es.ENTITY_TYPE === et.NODE_UUID).map((es) => ({
       name: es.NAME,
-      creatable: unset(es, "CREATABLE"),
-      updatable: unset(es, "UPDATABLE"),
-      deletable: unset(es, "DELETABLE"),
-      pageable: unset(es, "PAGEABLE"),
+      // a plain X is set; no field or the X_XU marker ("explicitly cleared") is not
+      creatable: set(es, "CREATABLE"),
+      updatable: set(es, "UPDATABLE"),
+      deletable: set(es, "DELETABLE"),
+      pageable: set(es, "PAGEABLE"),
       addressable: set(es, "ADDRESSABLE"),
-      searchable: unset(es, "SEARCHABLE"),
-      subscribable: unset(es, "SUBSCRIBABLE"),
-      filterRequired: unset(es, "REQUIRES_FLT"),
+      searchable: set(es, "SEARCHABLE"),
+      subscribable: set(es, "SUBSCRIBABLE"),
+      filterRequired: set(es, "REQUIRES_FLT"),
       uuid: es.NODE_UUID,
       operations: p.operations
         .filter((op) => p.designSets.find((d) => d.NODE_UUID === op.PARENT_UUID)?.ENTITY_SET_UUID === es.NODE_UUID)
-        .map((op) => ({type: op.OPERATION_TYPE, method: op.IMP_METHOD})),
-      // "Map to data source" on a DDIC table or view (DS_TYPE 4): SEGW lets
-      // SADL serve the set, the DPC delegates every operation to it
+        .map((op) => ({type: op.OPERATION_TYPE, method: op.IMP_METHOD, mapping: operationMapping(p, op)})),
+      // "Map to data source" on a DDIC table, a CDS view or an EPM business
+      // object (DS_TYPE 4): SEGW lets SADL serve the set, the DPC delegates
+      // every operation to it. The mapping hangs under the entity set node
+      // or under one of its operations.
       sadl: (() => {
         const design = p.designSets.find((d) => d.ENTITY_SET_UUID === es.NODE_UUID);
-        const mapping = design && p.mappings.find((mh) => mh.PARENT_UUID === design.NODE_UUID);
-        const ds = mapping && p.dataSources.find((d) => d.NODE_UUID === mapping.DS_UUID);
-        if (ds && ds.DS_TYPE === "4" && /^DDIC~/.test(ds.DS_GROUP ?? "")) {
-          return {type: "DDIC", binding: ds.DS_GROUP.replace(/^DDIC~/, "")};
+        if (!design) {
+          return undefined;
+        }
+        const nodes = [design.NODE_UUID, ...p.operations.filter((op) => op.PARENT_UUID === design.NODE_UUID).map((op) => op.NODE_UUID)];
+        for (const mh of p.mappings.filter((x) => nodes.includes(x.PARENT_UUID))) {
+          const ds = p.dataSources.find((d) => d.NODE_UUID === mh.DS_UUID);
+          const kind = ds && ds.DS_TYPE === "4" && /^(DDIC|CDS|EPM)~/.exec(ds.DS_GROUP ?? "");
+          if (kind) {
+            return {type: kind[1], binding: ds.DS_GROUP.slice(kind[0].length)};
+          }
         }
         return undefined;
       })(),
@@ -135,21 +166,36 @@ export function buildModel(p) {
     return {
       // the suffix of GC_/DEFINE_/TS_/TT_ is the entity name in upper case, not
       // TECH_NAME: copied or renamed entities keep a stale TECH_NAME in the tree
-      name: et.NAME, techName: et.NAME.toUpperCase(), abapStruct: et.ABAP_STRUCT ?? "",
+      // (an entity type referenced from another model, NAME_XU = X, only has its TECH_NAME)
+      name: et.NAME ?? et.TECH_NAME ?? "", techName: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase(), abapStruct: et.ABAP_STRUCT ?? "",
+      // ABAP names stop at 30 characters: TS_/TT_/GC_ + 27, DEFINE_ + 23
+      typeStem: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase().slice(0, 27), defineStem: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase().slice(0, 23),
       properties: props, entitySets: sets, uuid: et.NODE_UUID,
     };
   });
+  // two entities that agree on the first 23 characters: the one whose name
+  // fits keeps DEFINE_<name>, the other loses one more character
+  // (ESH_SEARCH: DEFINE_DATASOURCEACTIVATIONLOG and DEFINE_DATASOURCEACTIVATIONLO)
+  const taken = new Set();
+  for (const et of [...entityTypes].sort((a, b) => a.techName.length - b.techName.length)) {
+    let stem = et.defineStem;
+    while (taken.has(stem) && stem.length > 1) {
+      stem = stem.slice(0, -1);
+    }
+    taken.add(stem);
+    et.defineStem = stem;
+  }
   for (const r of p.complexTypes) {
     byUuid.set(r.NODE_UUID, r);
   }
   const typeName = (uuid) => byUuid.get(uuid)?.NAME ?? "";
   const complexTypes = p.complexTypes.map((ct) => ({
-    name: ct.NAME, techName: (ct.TECH_NAME || ct.NAME).toUpperCase(), uuid: ct.NODE_UUID,
+    name: ct.NAME, techName: (ct.TECH_NAME || ct.NAME).toUpperCase(), uuid: ct.NODE_UUID, abapStruct: ct.ABAP_STRUCT ?? "",
     properties: p.properties.filter((pr) => pr.PARENT_UUID === ct.NODE_UUID)
       .sort((a, b) => Number(a.SORT_ORDER || 0) - Number(b.SORT_ORDER || 0))
       .map((pr) => ({name: pr.NAME, abapField: pr.ABAP_FIELD || pr.NAME.toUpperCase(), edmType: pr.EDM_CORE_TYPE, typeName: pr.TYPE_NAME ?? "",
-        maxLength: pr.MAX_LENGTH, precision: pr.PROP_PRECISION, isKey: false,
-        creatable: set(pr, "CREATABLE"), updatable: set(pr, "UPDATABLE"), sortable: set(pr, "SORTABLE"), nullable: set(pr, "NULLABLE"), filterable: set(pr, "FILTERABLE")})),
+        ...lengths(pr), isKey: false, semantics: pr.SEMANTICS ?? "",
+        creatable: set(pr, "CREATABLE"), updatable: set(pr, "UPDATABLE"), sortable: set(pr, "SORTABLE"), nullable: set(pr, "IS_NULLABLE"), filterable: set(pr, "FILTERABLE")})),
   }));
   const associations = p.associations.map((a) => ({
     name: a.NAME, leftType: typeName(a.LEFT_END_GUID), rightType: typeName(a.RIGHT_END_GUID),
@@ -168,19 +214,49 @@ export function buildModel(p) {
   const functionImports = p.functionImports.map((fi) => ({
     name: fi.NAME, httpMethod: fi.HTTP_METHOD, returnCard: fi.RETURN_CARD,
     returnKind: fi.RETURN_TYPE_KIND, returnType: typeName(fi.RETURN_REF_TYPE), returnSet: typeName(fi.RETURN_ENTITYSET),
+    actionFor: fi.ACTION_FOR ? typeName(fi.ACTION_FOR) : "",
     parameters: p.functionParameters.filter((fp) => fp.FUNCTION_IMPORT === fi.NODE_UUID).map((fp) => ({
       name: fp.NAME, abapField: fp.ABAP_FIELD || fp.NAME.toUpperCase(), edmType: fp.EDM_CORE_TYPE,
+      dataElement: fp.DATA_ELEMENT ?? "", maxLength: fp.MAX_LENGTH ?? "",
     })),
   }));
   return {
     project: p.project.PROJECT,
+    // 1 = code based / mapped, 3 = annotation model, 4 = OData 4.0 strategy
+    projectType: p.project.PROJECT_TYPE ?? "1",
     description: p.projectText.DESCRIPTION ?? "",
     namespace: p.model.VALUE_NS,
     lastChanged: p.project.LAST_CHG_TIME ?? "",
     classes: {mpc, mpcExt: artifact("MPCS"), dpc: artifact("DPCB"), dpcExt: artifact("DPCS")},
+    artifacts: p.artifacts,
+    // EXT = "Redefine > OData service (GW)", APC = annotation provider over another service
+    modelReferences: p.modelReferences.map((r) => ({name: r.NAME, refType: r.REF_TYPE, object: r.OBJECT_NAME, version: r.OBJECT_VERSION})),
     entityTypes, associations, navigation, functionImports, complexTypes,
     referenceDataSources: p.referenceDataSources.map((r) => ({name: r.NAME, type: r.RDS_TYPE})),
   };
+}
+
+// "Map to Data Source" on one operation: the mapping header under the
+// operation node points at the data source; its property rows (MP) carry
+// the OData property (or a constant) and the parameter path on the
+// function module / search help; MR rows name the range components
+function operationMapping(p, op) {
+  const mh = p.mappings.find((x) => x.PARENT_UUID === op.NODE_UUID);
+  const ds = mh && p.dataSources.find((d) => d.NODE_UUID === mh.DS_UUID);
+  if (!ds || (ds.DS_TYPE !== "2" && ds.DS_TYPE !== "6")) {
+    return undefined;
+  }
+  const props = p.propertyMappings.filter((mp) => mp.PARENT_UUID === mh.NODE_UUID).map((mp) => ({
+    uuid: mp.NODE_UUID, property: mp.PROPERTY_PATH ?? "", direction: mp.DIRECTION, dsAttPath: mp.DS_ATT_PATH ?? "",
+    constant: mp.CONSTANT_VAL === undefined ? undefined : mp.CONSTANT_VAL.replaceAll("&apos;", "'").replaceAll("&quot;", "\""),
+  }));
+  const ranges = p.mappingRanges.filter((mr) => props.some((mp) => mp.uuid === mr.NODE_UUID)).map((mr) => ({
+    mpUuid: mr.NODE_UUID, component: mr.DS_ATT_PATH.split("\\").pop(), semantics: mr.SEMANTICS,
+  }));
+  if (ds.DS_TYPE === "2") {
+    return {kind: "RFC", functionName: ds.FUNCTION_NAME ?? ds.NAME, functionGroup: ds.DS_GROUP ?? "", destination: ds.RFC_DEST ?? "", logAttr: ds.LOG_DS_ATTR ?? "", props, ranges};
+  }
+  return {kind: "SHLP", shlpName: ds.NAME, maxHitsAttr: ds.MAX_HITS_DS_ATTR ?? "", props, ranges};
 }
 
 // -------------------------------------------------------------- MPC source
@@ -201,7 +277,22 @@ const ABAP_INLINE = {
   "Edm.String": "string", "Edm.Guid": "SYSUUID_X", "Edm.Int32": "i", "Edm.Int16": "/IWBEP/SB_ODATA_TY_INT2", "Edm.Boolean": "FLAG",
   "Edm.DateTime": "TIMESTAMP", "Edm.Decimal": "P LENGTH 16 DECIMALS 3", "Edm.Time": "TIMS", "Edm.Byte": "INT1",
 };
-const inlineType = (pr) => pr.typeName || (pr.edmType === "Edm.String" && pr.maxLength ? `c length ${pr.maxLength}` : (ABAP_INLINE[pr.edmType] || "string"));
+// packed length in bytes for a number of digits: 2 digits per byte plus the sign
+const packedLength = (digits) => Math.floor(Number(digits) / 2) + 1;
+function inlineType(pr) {
+  if (pr.typeName) {
+    return pr.typeName;
+  }
+  if (pr.typeKind === "P" && pr.length) {
+    return `p length ${packedLength(pr.length)} decimals ${pr.decimals || 0}`;
+  }
+  switch (pr.edmType) {
+    case "Edm.String": return pr.maxLength ? `c length ${pr.maxLength}` : "string";
+    case "Edm.Decimal": return `p length ${packedLength(pr.digits || 31)} decimals ${pr.scale || 0}`;
+    case "Edm.Double": return "f";
+    default: return ABAP_INLINE[pr.edmType] || "string";
+  }
+}
 const ab = (b) => (b ? "abap_true" : "abap_false");
 
 const MPC_BANNER = `*&---------------------------------------------------------------------*
@@ -235,6 +326,9 @@ function propertyCode(pr, opts) {
   if (pr.maxLength) {
     lines.push(`lo_property->set_maxlength( iv_max_length = ${pr.maxLength} ). "#EC NOTEXT`);
   }
+  if (pr.semantics) {
+    lines.push(`lo_property->set_semantic( '${pr.semantics}' ). "#EC NOTEXT`);
+  }
   lines.push(`lo_property->set_creatable( ${ab(pr.creatable)} ).`);
   lines.push(`lo_property->set_updatable( ${ab(pr.updatable)} ).`);
   lines.push(`lo_property->set_sortable( ${ab(pr.sortable)} ).`);
@@ -246,11 +340,14 @@ function propertyCode(pr, opts) {
         iv_key      = 'unicode'
         iv_value    = 'false' ).`);
   }
+  if (pr.asEtag) {
+    lines.push("lo_property->set_as_etag( ).");
+  }
   return lines.join("\n");
 }
 
 function defineEntityMethod(et, opts, mpcName) {
-  let s = `  method DEFINE_${et.techName}.\n${MPC_BANNER}\n\n  data:
+  let s = `  method DEFINE_${et.defineStem}.\n${MPC_BANNER}\n\n  data:
         lo_annotation     type ref to /iwbep/if_mgw_odata_annotation,                "#EC NEEDED
         lo_entity_type    type ref to /iwbep/if_mgw_odata_entity_typ,                "#EC NEEDED
         lo_complex_type   type ref to /iwbep/if_mgw_odata_cmplx_type,                "#EC NEEDED
@@ -277,7 +374,7 @@ lo_entity_type->bind_structure( iv_structure_name   = '${et.abapStruct}'
 `;
   } else {
     s += `
-lo_entity_type->bind_structure( iv_structure_name  = '${mpcName}=>TS_${et.techName}' ). "#EC NOTEXT
+lo_entity_type->bind_structure( iv_structure_name  = '${mpcName}=>TS_${et.typeStem}' ). "#EC NOTEXT
 
 `;
   }
@@ -333,7 +430,10 @@ lo_property->set_type_edm_${EDM_SETTER[pr.edmType] ?? "string"}( ).
         s += `lo_property->set_precison( iv_precision = ${pr.precision} ). "#EC NOTEXT\n`;
       }
       if (pr.maxLength) {
-        s += `lo_property->set_maxlength( iv_max_length = ${pr.maxLength} ). "#EC NOTEXT\n`;
+        s += `lo_property->set_maxlength( iv_max_length = ${pr.maxLength} ).\n`;
+      }
+      if (pr.semantics) {
+        s += `lo_property->set_semantic( '${pr.semantics}' ). "#EC NOTEXT\n`;
       }
       s += `lo_property->set_creatable( ${ab(pr.creatable)} ).
 lo_property->set_updatable( ${ab(pr.updatable)} ).
@@ -342,7 +442,10 @@ lo_property->set_nullable( ${ab(pr.nullable)} ).
 lo_property->set_filterable( ${ab(pr.filterable)} ).
 `;
     }
-    s += `lo_complex_type->bind_structure( iv_structure_name = '${mpcName}=>${ct.name.toUpperCase()}' ). "#EC NOTEXT\n`;
+    s += ct.abapStruct
+      ? `lo_complex_type->bind_structure( iv_structure_name   = '${ct.abapStruct}'
+                                 iv_bind_conversions = 'X' ). "#EC NOTEXT\n`
+      : `lo_complex_type->bind_structure( iv_structure_name = '${mpcName}=>${ct.name.toUpperCase()}' ). "#EC NOTEXT\n`;
   }
   s += "  endmethod.\n";
   return s;
@@ -412,6 +515,11 @@ ${STARS}
   return s;
 }
 
+// ABAP type names stop at 30 characters: TS_SALESORDER_GOODSISSUECREATE for
+// the action SalesOrder_GoodsIssueCreated
+const actionType = (fi) => `TS_${fi.name.toUpperCase()}`.slice(0, 30);
+const actionParameterType = (fp) => fp.dataElement || ABAP_TYPE[fp.edmType] || "STRING";
+
 function defineActionsMethod(m) {
   let s = `  method DEFINE_ACTIONS.\n${MPC_BANNER}
 
@@ -430,16 +538,24 @@ lo_action = model->create_action( '${fi.name}' ).  "#EC NOTEXT
 `;
     if (fi.returnKind === "ETYP") {
       s += `*Set return entity type\nlo_action->set_return_entity_type( '${fi.returnType}' ). "#EC NOTEXT\n`;
+    } else if (fi.returnKind === "CTYP") {
+      s += `*Set return complex type\nlo_action->set_return_complex_type( '${fi.returnType}' ). "#EC NOTEXT\n`;
     }
     s += `*Set HTTP method GET or POST\nlo_action->set_http_method( '${fi.httpMethod}' ). "#EC NOTEXT\n`;
     s += `* Set return type multiplicity\nlo_action->set_return_multiplicity( '${fi.returnCard}' ). "#EC NOTEXT\n`;
+    if (fi.actionFor) {
+      s += `*Set the action for entity\nlo_action->set_action_for( '${fi.actionFor}' ). "#EC NOTEXT\n`;
+    }
     if (fi.parameters.length > 0) {
       s += `${STARS}\n* Parameters\n${STARS}\n\n`;
       for (const fp of fi.parameters) {
         s += `lo_parameter = lo_action->create_input_parameter( iv_parameter_name = '${fp.name}'    iv_abap_fieldname = '${fp.abapField}' ). "#EC NOTEXT\n`;
         s += `lo_parameter->/iwbep/if_mgw_odata_property~set_type_edm_${EDM_SETTER[fp.edmType] ?? "string"}( ).\n`;
+        if (fp.maxLength && fp.edmType === "Edm.String") {
+          s += `lo_parameter->/iwbep/if_mgw_odata_property~set_maxlength( iv_max_length = ${fp.maxLength} ). "#EC NOTEXT\n`;
+        }
       }
-      s += `lo_action->bind_input_structure( iv_structure_name  = '${m.classes.mpc}=>TS_${fi.name.toUpperCase()}' ). "#EC NOTEXT\n`;
+      s += `lo_action->bind_input_structure( iv_structure_name  = '${m.classes.mpc}=>${actionType(fi)}' ). "#EC NOTEXT\n`;
     }
   }
   s += "  endmethod.\n";
@@ -455,23 +571,27 @@ export function mpcSource(m, opts = {}) {
   // types: the first pair, then the text element types, then the rest
   const typeBlocks = [];
   for (const ct of m.complexTypes) {
+    if (ct.abapStruct) {
+      typeBlocks.push(`  types:\n     ${ct.name.toUpperCase()} type ${ct.abapStruct} .\n`);
+      continue;
+    }
     typeBlocks.push(`  types:\n        begin of ${ct.name.toUpperCase()},\n` +
       ct.properties.map((pr) => `        ${pr.abapField} type ${inlineType(pr)},\n`).join("") +
       `    end of ${ct.name.toUpperCase()} .\n`);
   }
   for (const fi of m.functionImports.filter((f) => f.parameters.length > 0)) {
-    typeBlocks.push(`  types:\n    begin of TS_${fi.name.toUpperCase()},\n` +
-      fi.parameters.map((p) => `        ${p.abapField} type ${ABAP_TYPE[p.edmType] ?? "STRING"},\n`).join("") +
-      `    end of TS_${fi.name.toUpperCase()} .\n`);
+    typeBlocks.push(`  types:\n    begin of ${actionType(fi)},\n` +
+      fi.parameters.map((p) => `        ${p.abapField} type ${actionParameterType(p)},\n`).join("") +
+      `    end of ${actionType(fi)} .\n`);
   }
   for (const et of m.entityTypes) {
     if (et.abapStruct) {
-      typeBlocks.push(`  types:\n     TS_${et.techName} type ${et.abapStruct} .\n  types:\nTT_${et.techName} type standard table of TS_${et.techName} .\n`);
+      typeBlocks.push(`  types:\n     TS_${et.typeStem} type ${et.abapStruct} .\n  types:\nTT_${et.typeStem} type standard table of TS_${et.typeStem} .\n`);
     } else {
       // no DDIC structure behind the entity: SEGW declares one from the properties
-      typeBlocks.push(`  types:\n      begin of TS_${et.techName},\n` +
+      typeBlocks.push(`  types:\n      begin of TS_${et.typeStem},\n` +
         et.properties.map((pr) => `     ${pr.abapField} type ${pr.complexType ? pr.complexType.toUpperCase() : inlineType(pr)},\n`).join("") +
-        `  end of TS_${et.techName} .\n  types:\n    TT_${et.techName} type standard table of TS_${et.techName} .\n`);
+        `  end of TS_${et.typeStem} .\n  types:\n    TT_${et.typeStem} type standard table of TS_${et.typeStem} .\n`);
     }
   }
   const textElementTypes = `  types:
@@ -497,7 +617,7 @@ public section.
 ${types}
 `;
   // one constant per entity and complex type; the class editor keeps them in alphabetical order
-  const named = [...m.entityTypes.map((et) => ({tech: et.techName, name: et.name})), ...m.complexTypes.map((ct) => ({tech: ct.name.toUpperCase(), name: ct.name}))];
+  const named = [...m.entityTypes.map((et) => ({tech: et.typeStem, name: et.name})), ...m.complexTypes.map((ct) => ({tech: ct.name.toUpperCase().slice(0, 27), name: ct.name}))];
   for (const c of named.sort((a, b) => a.tech.localeCompare(b.tech))) {
     s += `  constants GC_${c.tech} type /IWBEP/IF_MGW_MED_ODATA_TYPES=>TY_E_MED_ENTITY_NAME value '${c.name}' ##NO_TEXT.\n`;
   }
@@ -521,7 +641,7 @@ private section.
   }
   s += "\n";
   const hasComplex = m.complexTypes.length > 0;
-  const privateMethods = [...(hasComplex ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.techName}`), ...(hasAssoc ? ["DEFINE_ASSOCIATIONS"] : []), ...(hasActions ? ["DEFINE_ACTIONS"] : [])];
+  const privateMethods = [...(hasComplex ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.defineStem}`), ...(hasAssoc ? ["DEFINE_ASSOCIATIONS"] : []), ...(hasActions ? ["DEFINE_ACTIONS"] : [])];
   for (const name of privateMethods) {
     s += `  methods ${name}\n    raising\n      /IWBEP/CX_MGW_MED_EXCEPTION .\n`;
   }
@@ -541,7 +661,7 @@ model->set_schema_namespace( '${m.namespace}' ).
     s += "define_complextypes( ).\n";
   }
   for (const et of m.entityTypes) {
-    s += `define_${et.techName.toLowerCase()}( ).\n`;
+    s += `define_${et.defineStem.toLowerCase()}( ).\n`;
   }
   if (hasAssoc) {
     s += "define_associations( ).\n";
@@ -563,7 +683,7 @@ model->set_schema_namespace( '${m.namespace}' ).
     impls.DEFINE_COMPLEXTYPES = defineComplexTypesMethod(m, opts, cls);
   }
   for (const et of m.entityTypes) {
-    impls[`DEFINE_${et.techName}`] = defineEntityMethod(et, opts, cls);
+    impls[`DEFINE_${et.defineStem}`] = defineEntityMethod(et, opts, cls);
   }
   impls.GET_LAST_MODIFIED = `  method GET_LAST_MODIFIED.\n${MPC_BANNER}
 
@@ -631,7 +751,7 @@ const OP_SIGNATURES = {
       !IT_NAVIGATION_PATH type /IWBEP/T_MGW_NAVIGATION_PATH
       !IO_DATA_PROVIDER type ref to /IWBEP/IF_MGW_ENTRY_PROVIDER optional
     exporting
-      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.techName}
+      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.typeStem}
     raising
       /IWBEP/CX_MGW_BUSI_EXCEPTION
       /IWBEP/CX_MGW_TECH_EXCEPTION .`,
@@ -654,7 +774,7 @@ const OP_SIGNATURES = {
       !IO_TECH_REQUEST_CONTEXT type ref to /IWBEP/IF_MGW_REQ_ENTITY optional
       !IT_NAVIGATION_PATH type /IWBEP/T_MGW_NAVIGATION_PATH
     exporting
-      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.techName}
+      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.typeStem}
       !ES_RESPONSE_CONTEXT type /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_ENTITY_CNTXT
     raising
       /IWBEP/CX_MGW_BUSI_EXCEPTION
@@ -672,7 +792,7 @@ const OP_SIGNATURES = {
       !IV_SEARCH_STRING type STRING
       !IO_TECH_REQUEST_CONTEXT type ref to /IWBEP/IF_MGW_REQ_ENTITYSET optional
     exporting
-      !ET_ENTITYSET type ${m.classes.mpc}=>TT_${et.techName}
+      !ET_ENTITYSET type ${m.classes.mpc}=>TT_${et.typeStem}
       !ES_RESPONSE_CONTEXT type /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
     raising
       /IWBEP/CX_MGW_BUSI_EXCEPTION
@@ -686,7 +806,7 @@ const OP_SIGNATURES = {
       !IT_NAVIGATION_PATH type /IWBEP/T_MGW_NAVIGATION_PATH
       !IO_DATA_PROVIDER type ref to /IWBEP/IF_MGW_ENTRY_PROVIDER optional
     exporting
-      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.techName}
+      !ER_ENTITY type ${m.classes.mpc}=>TS_${et.typeStem}
     raising
       /IWBEP/CX_MGW_BUSI_EXCEPTION
       /IWBEP/CX_MGW_TECH_EXCEPTION .`,
@@ -709,7 +829,7 @@ function dispatch(kind, m, opts) {
   const mpc = m.classes.mpc.toLowerCase();
   const ops = operations(m).filter((o) => o.type === kind);
   const lower = (o) => o.method.toLowerCase();
-  const decls = ops.map((o) => ` DATA ${lower(o)} TYPE ${mpc}=>${kind === "Q" ? "tt" : "ts"}_${o.entity.techName.toLowerCase()}.\n`).join("");
+  const decls = ops.map((o) => ` DATA ${lower(o)} TYPE ${mpc}=>${kind === "Q" ? "tt" : "ts"}_${o.entity.typeStem.toLowerCase()}.\n`).join("");
   switch (kind) {
     case "C": return `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_ENTITY.
 ${dpcHeader("/IWBEP/DPC_TEMP_CRT_ENTITY_BASE", m, opts)}
@@ -1085,7 +1205,9 @@ const SADL_DELEGATION = {
 
 function sadlMethods(m, opts) {
   const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl).map((es) => ({...es, entity: et})));
-  const refs = sets.map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
+  // a where-used reference to the DDIC object behind each set; an EPM
+  // business object node is not a DDIC type, so it gets none
+  const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
   const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
   const structures = [...sets].reverse().map((es) => [
     `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="RO" >| &`,
@@ -1177,6 +1299,7 @@ export function dpcSource(m, opts = {}) {
   const ops = operations(m);
   const kinds = [...new Set(ops.map((o) => o.type))];
   const hasSadl = m.entityTypes.some((et) => et.entitySets.some((es) => es.sadl));
+  const hasShlp = ops.some((o) => o.mapping?.kind === "SHLP");
   const redefs = [["Q", "GET_ENTITYSET"], ["R", "GET_ENTITY"], ["U", "UPDATE_ENTITY"], ["C", "CREATE_ENTITY"], ["D", "DELETE_ENTITY"]].filter(([k]) => kinds.includes(k)).map(([, n]) => n);
   if (hasSadl) {
     redefs.push("CREATE_DEEP_ENTITY", "EXECUTE_ACTION", "GET_IS_CONDITIONAL_IMPLEMENTED", "GET_IS_CONDI_IMPLE_FOR_ACTION", "PATCH_ENTITY");
@@ -1190,7 +1313,7 @@ export function dpcSource(m, opts = {}) {
 public section.
 
   interfaces /IWBEP/IF_SB_DPC_COMM_SERVICES .
-  interfaces /IWBEP/IF_SB_GEN_DPC_INJECTION .
+${hasShlp ? `  interfaces ${SHLP_INTERFACE} .\n` : ""}  interfaces /IWBEP/IF_SB_GEN_DPC_INJECTION .
 ${hasSadl ? "  interfaces IF_SADL_GW_DPC_UTIL .\n  interfaces IF_SADL_GW_EXTENSION_CONTROL .\n  interfaces IF_SADL_GW_QUERY_CONTROL .\n" : ""}
 `;
   for (const name of redefs) {
@@ -1231,16 +1354,32 @@ CLASS ${cls} IMPLEMENTATION.
   if (hasSadl) {
     Object.assign(impls, sadlMethods(m, opts));
   }
-  for (const o of sorted) {
-    impls[o.method] = o.set.sadl
-      ? `  method ${o.method}.\n${SADL_DELEGATION[o.type]}\n  endmethod.\n`
-      : `  method ${o.method}.
-  RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+  if (hasShlp) {
+    impls[`${SHLP_INTERFACE}~GET_SEARCH_HELP_VALUES`] = SHLP_IMPLEMENTATION;
+  }
+  const stub = (o, comment = "") => `  method ${o.method}.
+${comment}  RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
     EXPORTING
       textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
       method = '${o.method}'.
   endmethod.
 `;
+  for (const o of sorted) {
+    if (o.mapping?.kind === "RFC") {
+      const body = rfcMethod(o, m, opts);
+      if (body === "") {
+        opts.warnings?.push(`${o.method}: mapped to function module ${o.mapping.functionName}, whose signature is not in any function group given with --lib; left as a stub`);
+        impls[o.method] = stub(o, `* Mapped to ${o.mapping.functionName}: the function group was not available when this class was generated\n`);
+      } else {
+        impls[o.method] = body;
+      }
+    } else if (o.mapping?.kind === "SHLP") {
+      impls[o.method] = shlpMethod(o, m) || stub(o);
+    } else if (o.set.sadl) {
+      impls[o.method] = `  method ${o.method}.\n${SADL_DELEGATION[o.type]}\n  endmethod.\n`;
+    } else {
+      impls[o.method] = stub(o);
+    }
   }
   s += "\n" + Object.keys(impls).sort().map((k) => impls[k]).join("\n\n");
   s += "ENDCLASS.\n";
@@ -1298,7 +1437,7 @@ const OP_SUBS = {
 };
 
 export function mpcXml(m) {
-  const names = [...(m.complexTypes.length > 0 ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.techName}`), ...(m.associations.length > 0 || m.navigation.length > 0 ? ["DEFINE_ASSOCIATIONS"] : []), ...(m.functionImports.length > 0 ? ["DEFINE_ACTIONS"] : []), "LOAD_TEXT_ELEMENTS"].sort();
+  const names = [...(m.complexTypes.length > 0 ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.defineStem}`), ...(m.associations.length > 0 || m.navigation.length > 0 ? ["DEFINE_ASSOCIATIONS"] : []), ...(m.functionImports.length > 0 ? ["DEFINE_ACTIONS"] : []), "LOAD_TEXT_ELEMENTS"].sort();
   return clasXml(m.classes.mpc, m.classes.mpc, names.map((n) => [n, n]));
 }
 
@@ -1358,6 +1497,13 @@ export function generate(iwprXml, opts = {}) {
   if (m.referenceDataSources.length > 0 && m.entityTypes.length === 0) {
     return {model: m, files: {}, ext: {}, skipped: "reference data source (SADL) project: the RDS templates are not generated yet"};
   }
+  if (m.projectType === "3") {
+    return {model: m, files: {}, ext: {}, skipped: "annotation model project (PROJECT_TYPE 3): it generates an annotation provider class, not an MPC/DPC pair"};
+  }
+  const redefined = m.modelReferences.find((r) => r.refType === "EXT" || r.refType === "APC");
+  if (redefined) {
+    return {model: m, files: {}, ext: {}, skipped: `redefines ${redefined.object} ${redefined.version}: the MPC extends that model and the DPC inherits its _DPC_EXT; the redefine templates are not generated yet`};
+  }
   const ts = m.lastChanged.replace(/\..*/, "");
   const o = {
     generatedAt: ts.slice(0, 14),
@@ -1386,11 +1532,13 @@ const loose = (s) => mask(s).replace(/<DESCRIPTIONS_SUB>[\s\S]*?<\/DESCRIPTIONS_
 
 if (process.argv[1] && /segw-gen\.mjs$/.test(process.argv[1])) {
   const args = process.argv.slice(2);
-  const folder = args.find((a) => !a.startsWith("--"));
+  const valued = ["--out", "--lib"];
+  const folder = args.find((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
   const check = args.includes("--check");
   const out = args[args.indexOf("--out") + 1];
+  const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
   if (!folder) {
-    console.error("usage: segw-gen.mjs <folder with <project>.iwpr.xml> [--check] [--out <dir>]");
+    console.error("usage: segw-gen.mjs <folder with <project>.iwpr.xml> [--check] [--out <dir>] [--lib <folder with *.fugr.xml>]...");
     process.exit(2);
   }
   const iwpr = readdirSync(folder).find((f) => f.endsWith(".iwpr.xml"));
@@ -1398,12 +1546,19 @@ if (process.argv[1] && /segw-gen\.mjs$/.test(process.argv[1])) {
     console.error("no .iwpr.xml in " + folder);
     process.exit(2);
   }
-  const {model, files, ext, skipped} = generate(readFileSync(join(folder, iwpr), "utf8"), {superDefine: args.includes("--super-define")});
+  const warnings = [];
+  const {model, files, ext, skipped} = generate(readFileSync(join(folder, iwpr), "utf8"), {
+    superDefine: args.includes("--super-define"), functionModules: loadFunctionGroups([folder, ...libs]), warnings,
+  });
   if (skipped) {
     console.log(`segw-gen: ${model.project}: ${skipped}`);
     process.exit(0);
   }
-  console.log(`segw-gen: ${model.project} (${model.description}): ${model.entityTypes.length} entity types, ${model.associations.length} associations, ${model.functionImports.length} function imports -> ${Object.keys(files).join(", ")}`);
+  const mapped = model.entityTypes.flatMap((et) => et.entitySets.flatMap((es) => es.operations.filter((o) => o.mapping).map((o) => o.mapping.kind)));
+  console.log(`segw-gen: ${model.project} (${model.description}): ${model.entityTypes.length} entity types, ${model.associations.length} associations, ${model.functionImports.length} function imports${mapped.length > 0 ? `, ${mapped.filter((k) => k === "RFC").length} operations mapped to function modules, ${mapped.filter((k) => k === "SHLP").length} to search helps` : ""} -> ${Object.keys(files).join(", ")}`);
+  for (const w of warnings) {
+    console.log(`  warning: ${w}`);
+  }
   if (check) {
     let bad = 0;
     for (const [name, content] of Object.entries(files)) {
