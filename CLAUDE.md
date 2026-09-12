@@ -114,8 +114,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - `abap_transpile.json` pulls open-abap-core, express-icf-shim and the
   interface part of **our fork** `oisee/open-abap-odata` as libs. `folder`
   points at `.local/lars/` / `.local/fork/` clones when present, else the URL
-  is cloned. Interface-layer changes go into the fork, never as PRs upstream
-  (decision 2026-09-11).
+  is cloned. Interface-layer changes go into the fork first; reusable pieces
+  go upstream as PRs from fork branches (open-abap-odata #40, transpiler
+  #1829–#1832; decision revised 2026-09-12). Transpiler workarounds in `src/`
+  and `tools/` stay until the fix ships in a release.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).

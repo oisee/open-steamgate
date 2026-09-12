@@ -23,8 +23,13 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   crux). See gap-list in `docs/prior-art.md`.
 
 - **Gateway lives here; the interface/DDIC layer lives in our fork
-  `oisee/open-abap-odata`** (decided 2026-09-11, refined the same day: **no
-  PRs upstream, we work in the fork**). Pulled in as a transpiler lib with
+  `oisee/open-abap-odata`** (decided 2026-09-11; revised 2026-09-12: **we
+  work in the fork and send the reusable pieces upstream as PRs** — first one
+  is open-abap-odata #40, the registry + exception constructors). For the
+  transpiler the same rule: fixes go as PRs from branches of `oisee/transpiler`
+  off `upstream/main` (#1829 literal length, #1830 FAE dedupe, #1831 views +
+  CREATE DATA TABLE OF, #1832 FAE empty driver), workarounds stay here until
+  the fix is released. Pulled in as a transpiler lib with
   `files` limited to `src/{oo,ddic,exceptions,internal}`. Upstream contact is
   issue #39 (license) only. The dispatcher, request context, serializer and
   `$filter` bridge are open-steamgate code. **Working assumption (Alice,
@@ -217,8 +222,8 @@ Ranked in `docs/2026-09-11-lars-ecosystem-audit.md`. Recommended order:
       `"unknownTypes": "runtimeError"` in `abap_transpile.json`. Done 2026-09-11.
 - [x] **QW1** Registry instead of the hardcoded test DPC, plus working
       gateway exception constructors: `oisee/open-abap-odata` main at
-      4c2c301 (2026-09-11). Upstream #33 not PR'd by decision; open-steamgate
-      now consumes the fork without `exclude_filter`.
+      4c2c301 (2026-09-11). Sent upstream as open-abap-odata PR #40
+      (2026-09-12); open-steamgate consumes the fork without `exclude_filter`.
 - [x] **QW5** Truthful `$metadata`: keys, entity sets, all EDM setters,
       facets, labels. Fork main (2026-09-11).
 - [x] **QW2** Generic OData v2 JSON serializer driven by the model
