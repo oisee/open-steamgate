@@ -1,0 +1,111 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-1",
+  "parent_uuid": "mh-1",
+  "property_uuid": "pr-a",
+  "property_path": "TravelId",
+  "direction": "I",
+  "ds_att_path": "IV_TRAVEL_ID",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-2",
+  "parent_uuid": "mh-1",
+  "property_uuid": "pr-a",
+  "property_path": "TravelId",
+  "direction": "O",
+  "ds_att_path": "ES_TRAVEL\\TRAVEL_ID",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-3",
+  "parent_uuid": "mh-1",
+  "property_uuid": "pr-b",
+  "property_path": "Seats",
+  "direction": "O",
+  "ds_att_path": "ES_TRAVEL\\SEATS",
+  "stg_seq": 3
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-4",
+  "parent_uuid": "mh-2",
+  "property_uuid": "pr-a",
+  "property_path": "TravelId",
+  "direction": "I",
+  "ds_att_path": "IT_TRAVEL_ID_RANGE",
+  "stg_seq": 4
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-5",
+  "parent_uuid": "mh-2",
+  "constant_val": "'X'",
+  "direction": "I",
+  "ds_att_path": "IV_WITH_TEXTS",
+  "stg_seq": 5
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-6",
+  "parent_uuid": "mh-2",
+  "property_uuid": "pr-a",
+  "property_path": "TravelId",
+  "direction": "O",
+  "ds_att_path": "ET_TRAVEL\\TRAVEL_ID",
+  "stg_seq": 6
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-7",
+  "parent_uuid": "mh-2",
+  "property_uuid": "pr-b",
+  "property_path": "Seats",
+  "direction": "O",
+  "ds_att_path": "ET_TRAVEL\\SEATS",
+  "stg_seq": 7
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-8",
+  "parent_uuid": "mh-3",
+  "property_uuid": "pr-c",
+  "property_path": "Status",
+  "direction": "I",
+  "ds_att_path": "STATUS",
+  "stg_seq": 8
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-9",
+  "parent_uuid": "mh-3",
+  "property_uuid": "pr-c",
+  "property_path": "Status",
+  "direction": "O",
+  "ds_att_path": "RESULT_LIST\\STATUS",
+  "stg_seq": 9
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-10",
+  "parent_uuid": "mh-3",
+  "property_uuid": "pr-d",
+  "property_path": "Text",
+  "direction": "O",
+  "ds_att_path": "RESULT_LIST\\TEXT",
+  "stg_seq": 10
+ }
+]

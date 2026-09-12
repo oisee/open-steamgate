@@ -139,3 +139,66 @@ CLASS ltcl_crud IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+* the project tree imported from test/fixtures/segw/zstg_mapped.iwpr.xml
+* (data/zstg_sb*.tabu.json, tools/segw-tree.mjs) is served by the same service
+CLASS ltcl_tree DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS entity_types_of_the_project FOR TESTING.
+    METHODS properties_in_file_order FOR TESTING.
+    METHODS text_table_of_the_project FOR TESTING.
+ENDCLASS.
+
+CLASS ltcl_tree IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_oao_registry=>register( iv_service = 'ZSTG_SEGW_SRV'
+                                iv_mpc     = 'ZCL_ZSTG_SEGW_MPC_EXT'
+                                iv_dpc     = 'ZCL_ZSTG_SEGW_DPC_EXT' ).
+    zcl_stg_model_info=>clear( ).
+  ENDMETHOD.
+
+  METHOD entity_types_of_the_project.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options TYPE tihttpnvp.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZSTG_MAPPED'&$orderby=StgSeq` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/EntityTypeSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"Travel"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"StatusVH"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"AbapStruct":"ZSTG_DEMO"' ) ).
+  ENDMETHOD.
+
+  METHOD properties_in_file_order.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options TYPE tihttpnvp.
+    DATA lv_travel TYPE i.
+    DATA lv_seats  TYPE i.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZSTG_MAPPED' and ParentUuid eq 'et-1'&$orderby=StgSeq&$select=Name,StgSeq` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/PropertySet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    FIND '"Name":"TravelId"' IN ls_response-body MATCH OFFSET lv_travel.
+    cl_abap_unit_assert=>assert_subrc( msg = ls_response-body ).
+    FIND '"Name":"Seats"' IN ls_response-body MATCH OFFSET lv_seats.
+    cl_abap_unit_assert=>assert_subrc( msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_travel < lv_seats ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( ls_response-body CS '"Name":"Status"' ) ).
+  ENDMETHOD.
+
+  METHOD text_table_of_the_project.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/ProjectTextSet(Project='ZSTG_MAPPED',Language='E')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Description":"' ) ).
+  ENDMETHOD.
+
+ENDCLASS.

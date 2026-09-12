@@ -1,0 +1,29 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "es-1",
+  "name": "TravelSet",
+  "entity_type": "et-1",
+  "pageable": "X",
+  "addressable": "X",
+  "searchable": "X",
+  "tech_name": "TRAVELSET",
+  "creatable_xu": "X",
+  "updatable_xu": "X",
+  "deletable_xu": "X",
+  "subscribable_xu": "X",
+  "requires_flt_xu": "X",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "es-2",
+  "name": "StatusVHSet",
+  "entity_type": "et-2",
+  "addressable": "X",
+  "tech_name": "STATUSVHSET",
+  "stg_seq": 2
+ }
+]

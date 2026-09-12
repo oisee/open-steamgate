@@ -50,10 +50,13 @@ export function seedStatements(dataDir = "data", ddicDir = "src/ddic") {
     const table = file.slice(0, -".tabu.json".length).toLowerCase();
     const rows = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
     let lengths = new Map();
-    try {
-      lengths = fieldLengths(readFileSync(join(ddicDir, table + ".tabl.xml"), "utf8"));
-    } catch {
-      // table defined in a lib: insert unpadded, the runtime pads on read
+    for (const dir of [ddicDir, "src/segw/ddic"]) {
+      try {
+        lengths = fieldLengths(readFileSync(join(dir, table + ".tabl.xml"), "utf8"));
+        break;
+      } catch {
+        // table defined elsewhere or in a lib: insert unpadded, the runtime pads on read
+      }
     }
     for (const row of rows) {
       const cols = Object.keys(row);

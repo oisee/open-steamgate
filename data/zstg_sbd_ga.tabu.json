@@ -1,0 +1,38 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ga-1",
+  "name": "ZCL_ZSTG_MAPPED_MPC",
+  "trobj_type": "CLAS",
+  "gen_art_type": "MPCB",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ga-2",
+  "name": "ZCL_ZSTG_MAPPED_MPC_EXT",
+  "trobj_type": "CLAS",
+  "gen_art_type": "MPCS",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ga-3",
+  "name": "ZCL_ZSTG_MAPPED_DPC",
+  "trobj_type": "CLAS",
+  "gen_art_type": "DPCB",
+  "stg_seq": 3
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ga-4",
+  "name": "ZCL_ZSTG_MAPPED_DPC_EXT",
+  "trobj_type": "CLAS",
+  "gen_art_type": "DPCS",
+  "stg_seq": 4
+ }
+]

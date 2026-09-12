@@ -1,0 +1,37 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ds-1",
+  "parent_uuid": "pr-1",
+  "name": "Z_STG_TRAVEL_GET",
+  "ds_group": "ZSTG_RFC",
+  "ds_type": "2",
+  "rfc_dest": "NONE",
+  "function_name": "Z_STG_TRAVEL_GET",
+  "log_ds_attr": "ET_RETURN",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ds-2",
+  "parent_uuid": "pr-1",
+  "name": "Z_STG_TRAVEL_LIST",
+  "ds_group": "ZSTG_RFC",
+  "ds_type": "2",
+  "function_name": "Z_STG_TRAVEL_LIST",
+  "log_ds_attr": "ET_RETURN",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "ds-3",
+  "parent_uuid": "pr-1",
+  "name": "ZSTG_STATUS_SH",
+  "ds_type": "6",
+  "max_hits_ds_attr": "MAX_HITS",
+  "stg_seq": 3
+ }
+]

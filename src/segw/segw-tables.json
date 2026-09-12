@@ -1,0 +1,999 @@
+{
+ "SBD_AT": {
+  "entity": "Attachment",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "NAME": "CHAR 32",
+   "TYPE": "CHAR 10",
+   "MIME_TYPE": "CHAR 4",
+   "VALUE": "STRG"
+  }
+ },
+ "SBD_DS": {
+  "entity": "DataSource",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "DS_GROUP": "CHAR 40",
+   "DS_TYPE": "CHAR 1",
+   "MAX_HITS_DS_ATTR": "CHAR 10",
+   "RFC_DEST": "CHAR 10",
+   "FUNCTION_NAME": "CHAR 32",
+   "LOG_DS_ATTR": "CHAR 10"
+  }
+ },
+ "SBD_DST": {
+  "entity": "DataSourceText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "DESCRIPTION": "CHAR 60"
+  }
+ },
+ "SBD_GA": {
+  "entity": "Artifact",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "CREATION_USER_ID": "CHAR 10",
+   "CREATION_TIME": "CHAR 32",
+   "LAST_CHG_USER_ID": "CHAR 10",
+   "LAST_CHG_TIME": "CHAR 32",
+   "NAME": "CHAR 40",
+   "PGMID": "CHAR 4",
+   "TROBJ_TYPE": "CHAR 4",
+   "TROBJ_NAME": "CHAR 40",
+   "GEN_ART_TYPE": "CHAR 4",
+   "HASH": "CHAR 4",
+   "RFC_NAME": "CHAR 32"
+  }
+ },
+ "SBD_GAT": {
+  "entity": "ArtifactText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBD_MAP": {
+  "entity": "NodeMap",
+  "keys": [
+   "PROJECT",
+   "NODE_HASH",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_HASH": "CHAR 32",
+   "NODE_UUID": "CHAR 32",
+   "NODE_TYPE": "CHAR 4",
+   "REF_MODEL": "CHAR 32"
+  }
+ },
+ "SBD_MD": {
+  "entity": "Model",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "TECHNICAL_NAME": "CHAR 32",
+   "VERSION": "CHAR 4",
+   "MPC": "CHAR 32",
+   "STATE_NS": "CHAR 1",
+   "VALUE_NS": "CHAR 40"
+  }
+ },
+ "SBD_MDT": {
+  "entity": "ModelText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "DESCRIPTION": "CHAR 32"
+  }
+ },
+ "SBD_MH": {
+  "entity": "MappingHeader",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "NAME": "CHAR 10",
+   "DS_UUID": "CHAR 32"
+  }
+ },
+ "SBD_MP": {
+  "entity": "MappingProperty",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "PROPERTY_UUID": "CHAR 32",
+   "PROPERTY_PATH": "CHAR 32",
+   "CONSTANT_VAL": "CHAR 32",
+   "DIRECTION": "CHAR 1",
+   "DS_ATT_PATH": "CHAR 40"
+  }
+ },
+ "SBD_MR": {
+  "entity": "MappingRule",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID",
+   "DS_ATT_PATH"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "DS_ATT_PATH": "CHAR 32",
+   "SEMANTICS": "CHAR 1"
+  }
+ },
+ "SBD_NOI": {
+  "entity": "NodeOfInterest",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "TYPE": "CHAR 4",
+   "NAME": "CHAR 80"
+  }
+ },
+ "SBD_OP": {
+  "entity": "Operation",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "OPERATION_TYPE": "CHAR 1",
+   "IMP_METHOD": "CHAR 60"
+  }
+ },
+ "SBD_OPT": {
+  "entity": "OperationText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBD_PR": {
+  "entity": "Project",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "CREATION_USER_ID": "CHAR 10",
+   "CREATION_TIME": "CHAR 32",
+   "LAST_CHG_USER_ID": "CHAR 10",
+   "LAST_CHG_TIME": "CHAR 32",
+   "LAST_CHG_STATE": "CHAR 32",
+   "PLUGIN": "CHAR 10",
+   "STRAT_NAME": "CHAR 4",
+   "STRAT_VERSION": "CHAR 4",
+   "PROJECT_TYPE": "CHAR 1"
+  }
+ },
+ "SBD_PRT": {
+  "entity": "ProjectText",
+  "keys": [
+   "PROJECT",
+   "SYLANGU"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "SYLANGU": "LANG",
+   "DESCRIPTION": "CHAR 60"
+  }
+ },
+ "SBD_SE": {
+  "entity": "ServiceEntity",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "ENTITY_SET_UUID": "CHAR 32"
+  }
+ },
+ "SBD_SET": {
+  "entity": "ServiceEntityText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBD_SV": {
+  "entity": "Service",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "TECHNICAL_NAME": "CHAR 40",
+   "VERSION": "CHAR 4",
+   "DPC": "CHAR 32",
+   "EXTERNAL_NAME": "CHAR 40"
+  }
+ },
+ "SBD_SVT": {
+  "entity": "ServiceText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBD_US": {
+  "entity": "SbdUs",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "NODE_UUID_MD": "CHAR 32",
+   "PLUGIN_MD": "CHAR 32",
+   "NODE_TYPE_MD": "CHAR 4"
+  }
+ },
+ "SBD_VL": {
+  "entity": "SbdVl",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "VALUE_UUID": "CHAR 32",
+   "VALUE": "STRG"
+  }
+ },
+ "SBD_VM": {
+  "entity": "SbdVm",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "VALUE_UUID": "CHAR 32",
+   "VALUE": "STRG"
+  }
+ },
+ "SBO_AN": {
+  "entity": "SboAn",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "TERM": "CHAR 32"
+  }
+ },
+ "SBO_ASO": {
+  "entity": "Association",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "MODEL_GUID": "CHAR 32",
+   "LEFT_END_GUID": "CHAR 32",
+   "RIGHT_END_GUID": "CHAR 32",
+   "LEFT_END_CARD": "CHAR 1",
+   "RIGHT_END_CARD": "CHAR 1",
+   "REF_TYPE": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "ASSOC_LABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_AST": {
+  "entity": "SboAst",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "ASSOC_LABEL": "CHAR 32"
+  }
+ },
+ "SBO_AT": {
+  "entity": "AssociationSet",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "MODEL_GUID": "CHAR 32",
+   "LEFT_END_GUID": "CHAR 32",
+   "RIGHT_END_GUID": "CHAR 32",
+   "ASSOCIATION_GUID": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "ASST_LABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_ATT": {
+  "entity": "AssociationSetText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "ASST_LABEL": "CHAR 32"
+  }
+ },
+ "SBO_CT": {
+  "entity": "ComplexType",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "IS_ABSTRACT": "CHAR 1",
+   "MODEL": "CHAR 32",
+   "BASE_TYPE": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "TECH_NAME": "CHAR 32",
+   "ABAP_STRUCT": "CHAR 32",
+   "BASE_TYPE_XU": "CHAR 1",
+   "DESCRIPTION_XU": "CHAR 1"
+  }
+ },
+ "SBO_CTT": {
+  "entity": "ComplexTypeText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBO_DRT": {
+  "entity": "SboDrt",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBO_DSR": {
+  "entity": "ReferenceDataSource",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "MODEL": "CHAR 32",
+   "RDS_NAME": "CHAR 32",
+   "RDS_TYPE": "CHAR 1"
+  }
+ },
+ "SBO_ENM": {
+  "entity": "SboEnm",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "STATE_NA": "CHAR 1",
+   "VALUE_NA": "CHAR 32",
+   "EDM_CORE_TYPE": "CHAR 10",
+   "ISFLAG": "CHAR 1"
+  }
+ },
+ "SBO_ES": {
+  "entity": "EntitySet",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "MODEL": "CHAR 32",
+   "NAME": "CHAR 40",
+   "ENTITY_TYPE": "CHAR 32",
+   "CREATABLE": "CHAR 1",
+   "UPDATABLE": "CHAR 1",
+   "DELETABLE": "CHAR 1",
+   "PAGEABLE": "CHAR 1",
+   "ADDRESSABLE": "CHAR 1",
+   "SEARCHABLE": "CHAR 1",
+   "SUBSCRIBABLE": "CHAR 1",
+   "REQUIRES_FILTER": "CHAR 1",
+   "REF_TYPE": "CHAR 1",
+   "TECH_NAME": "CHAR 40",
+   "CREATABLE_XU": "CHAR 1",
+   "UPDATABLE_XU": "CHAR 1",
+   "DELETABLE_XU": "CHAR 1",
+   "PAGEABLE_XU": "CHAR 1",
+   "ADDRESSABLE_XU": "CHAR 1",
+   "SEARCHABLE_XU": "CHAR 1",
+   "SUBSCRIBABLE_XU": "CHAR 1",
+   "REQUIRES_FLT_XU": "CHAR 1",
+   "SEMANTIC_XU": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "LABEL_REF_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "ESET_LABEL_XU": "CHAR 1",
+   "IN_SERV_DOCU": "CHAR 1"
+  }
+ },
+ "SBO_EST": {
+  "entity": "EntitySetText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "ESET_LABEL": "CHAR 60"
+  }
+ },
+ "SBO_ET": {
+  "entity": "EntityType",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "IS_MEDIA": "CHAR 1",
+   "MODEL": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "ABAP_STRUCT": "CHAR 32",
+   "TECH_NAME": "CHAR 40",
+   "NAME_XU": "CHAR 1",
+   "BASE_TYPE_XU": "CHAR 1",
+   "ABSTRACT_XU": "CHAR 1",
+   "IS_THING_TYPE_XU": "CHAR 1",
+   "IS_MEDIA_XU": "CHAR 1",
+   "SEMANTIC_XU": "CHAR 1",
+   "FC_TARGET_PATHXU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "ABAP_STRUCT_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "ET_LABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_ETT": {
+  "entity": "EntityTypeText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "ET_LABEL": "CHAR 60"
+  }
+ },
+ "SBO_FI": {
+  "entity": "FunctionImport",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "MODEL": "CHAR 32",
+   "NAME": "CHAR 32",
+   "HTTP_METHOD": "CHAR 4",
+   "ACTION_FOR": "CHAR 32",
+   "RETURN_CARD": "CHAR 1",
+   "RETURN_REF_TYPE": "CHAR 32",
+   "RETURN_TYPE_KIND": "CHAR 4",
+   "RETURN_ENTITYSET": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "RET_TYP_KIND_XU": "CHAR 1",
+   "RET_ENTITYSET_XU": "CHAR 1",
+   "RET_SIMPLE_TY_XU": "CHAR 1",
+   "TEXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "FI_LABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_FIT": {
+  "entity": "FunctionImportText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "FI_LABEL": "CHAR 32"
+  }
+ },
+ "SBO_FP": {
+  "entity": "FunctionParam",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "FUNCTION_IMPORT": "CHAR 32",
+   "ABAP_FIELD": "CHAR 32",
+   "EDM_CORE_TYPE": "CHAR 10",
+   "DATA_ELEMENT": "CHAR 10",
+   "MAX_LENGTH": "CHAR 4",
+   "IS_NULLABLE": "CHAR 1",
+   "REF_TYPE": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "DATA_ELEMENT_XU": "CHAR 1",
+   "FIXED_LENGTH_XU": "CHAR 1",
+   "SEMANTICS_XU": "CHAR 1",
+   "IS_NULLABLE_XU": "CHAR 1",
+   "UNIT_PROP_XU": "CHAR 1",
+   "CONV_EXIT_XU": "CHAR 1",
+   "TEXTR_XU": "CHAR 1",
+   "ABTY_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "FI_PARAMLABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_FPT": {
+  "entity": "FunctionParamText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "FI_PARAM_LABEL": "CHAR 32"
+  }
+ },
+ "SBO_MEM": {
+  "entity": "SboMem",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "STATE_NA": "CHAR 1",
+   "VALUE_NA": "CHAR 32",
+   "MEMBER_VALUE": "CHAR 4",
+   "NODE_POSITION": "CHAR 4"
+  }
+ },
+ "SBO_MR": {
+  "entity": "ModelReference",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "MODEL": "CHAR 32",
+   "REF_TYPE": "CHAR 4",
+   "OBJECT_NAME": "CHAR 32",
+   "OBJECT_VERSION": "CHAR 4",
+   "PLUGIN": "CHAR 32",
+   "DATA_SOURCE_TYPE": "CHAR 10"
+  }
+ },
+ "SBO_MRT": {
+  "entity": "ModelReferenceText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBO_NP": {
+  "entity": "NavProperty",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "RELATION_GUID": "CHAR 32",
+   "FROM_ROLE": "CHAR 32",
+   "TO_ROLE": "CHAR 32",
+   "ENTITY_GUID": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "TECH_NAME": "CHAR 32",
+   "FROM_ROLE_XU": "CHAR 1",
+   "TO_ROLE_XU": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "NAVP_LABEL_XU": "CHAR 1"
+  }
+ },
+ "SBO_NPT": {
+  "entity": "NavPropertyText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAVP_LABEL": "CHAR 10"
+  }
+ },
+ "SBO_PR": {
+  "entity": "Property",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PARENT_UUID": "CHAR 32",
+   "NAME": "CHAR 40",
+   "IS_KEY": "CHAR 1",
+   "CREATABLE": "CHAR 1",
+   "AS_ETAG": "CHAR 1",
+   "FILTERABLE": "CHAR 1",
+   "MAX_LENGTH": "CHAR 4",
+   "PROP_PRECISION": "CHAR 4",
+   "SEMANTICS": "CHAR 32",
+   "SCALE": "CHAR 4",
+   "SORTABLE": "CHAR 1",
+   "EDM_CORE_TYPE": "CHAR 32",
+   "COMPLEX_TYPE": "CHAR 32",
+   "UPDATABLE": "CHAR 1",
+   "IS_NULLABLE": "CHAR 1",
+   "UNIT_PROP": "CHAR 32",
+   "IS_COLLECTION": "CHAR 1",
+   "REF_TYPE": "CHAR 1",
+   "ABAP_FIELD": "CHAR 32",
+   "TYPE_NAME": "CHAR 32",
+   "TYPE_KIND": "CHAR 1",
+   "LENGTH": "CHAR 4",
+   "DELETABLE": "CHAR 1",
+   "AS_AUTHOR_XU": "CHAR 1",
+   "DECIMALS": "CHAR 1",
+   "IS_KEY_XU": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "AS_ETAG_XU": "CHAR 1",
+   "AS_PUBLISHED_XU": "CHAR 1",
+   "AS_TITLE_XU": "CHAR 1",
+   "AS_UPDATED_XU": "CHAR 1",
+   "CREATABLE_XU": "CHAR 1",
+   "FILTERABLE_XU": "CHAR 1",
+   "FIXED_LENGTH_XU": "CHAR 1",
+   "MAX_LENGTH_XU": "CHAR 1",
+   "PROPPRECISION_XU": "CHAR 1",
+   "REQUIREFILTER_XU": "CHAR 1",
+   "SEMANTICS_XU": "CHAR 1",
+   "SORTABLE_XU": "CHAR 1",
+   "UPDATABLE_XU": "CHAR 1",
+   "IS_NULLABLE_XU": "CHAR 1",
+   "IS_UNICODE_XU": "CHAR 1",
+   "SCALE_XU": "CHAR 1",
+   "UNIT_PROP_XU": "CHAR 1",
+   "FCTARGETPATH_XU": "CHAR 1",
+   "DELETABLE_XU": "CHAR 1",
+   "ABTY_XU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "SORT_ORDER": "CHAR 4",
+   "DESCRIPTION_XU": "CHAR 1",
+   "PROP_LABEL_XU": "CHAR 1",
+   "NODE_UUID_TY": "CHAR 32",
+   "PLUGIN_TY": "CHAR 32",
+   "NODE_TYPE_TY": "CHAR 4"
+  }
+ },
+ "SBO_PRT": {
+  "entity": "PropertyText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "PROP_LABEL": "CHAR 60"
+  }
+ },
+ "SBO_RC": {
+  "entity": "RefConstraint",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NAME": "CHAR 32",
+   "DEPENDENT_PROP_R": "CHAR 32",
+   "PRINCIPAL_PROP_R": "CHAR 32",
+   "PRINCIPAL_ROLE": "CHAR 32",
+   "DEPENDENT_ROLE": "CHAR 32",
+   "ASSOCIATION_GUID": "CHAR 32",
+   "REF_TYPE": "CHAR 1",
+   "NAME_XU": "CHAR 1",
+   "TXTR_XU": "CHAR 1",
+   "HASH_PR": "CHAR 32",
+   "PLUGIN_PR": "CHAR 32",
+   "NODE_TYPE_PR": "CHAR 4",
+   "CTXT_NODE_ID_PR": "CHAR 32",
+   "DESCRIPTION_XU": "CHAR 1",
+   "REFC_LABEL_XU": "CHAR 1",
+   "PROPERTY_PATH": "CHAR 32",
+   "REF_PROP_PATH": "CHAR 32"
+  }
+ },
+ "SBO_RCT": {
+  "entity": "RefConstraintText",
+  "keys": [
+   "SYLANGU",
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "SYLANGU": "LANG",
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32"
+  }
+ },
+ "SBO_SE": {
+  "entity": "SboSe",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "EDM_TYPE": "CHAR 10",
+   "STATE_VA": "CHAR 1",
+   "VALUE_VA": "CHAR 40"
+  }
+ },
+ "SBO_TM": {
+  "entity": "SboTm",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "STATE_NA": "CHAR 1",
+   "VALUE_NA": "CHAR 32",
+   "EDM_TYPE": "CHAR 32",
+   "NODE_UUID_TY": "CHAR 32",
+   "PLUGIN_TY": "CHAR 32",
+   "NODE_TYPE_TY": "CHAR 4",
+   "ENTITY_TYPE_AT": "CHAR 1",
+   "ENTITY_SET_AT": "CHAR 1",
+   "COMPLEX_TYPE_AT": "CHAR 1",
+   "PROPERTY_AT": "CHAR 1",
+   "NAV_PROPERTY_AT": "CHAR 1",
+   "TERM_AT": "CHAR 1",
+   "STATE_SM": "CHAR 1",
+   "VALUE_SM": "CHAR 40",
+   "ISCOLLECTION": "CHAR 1",
+   "NODE_POSITION": "CHAR 4"
+  }
+ },
+ "SBO_TY": {
+  "entity": "SboTy",
+  "keys": [
+   "PROJECT",
+   "NODE_UUID"
+  ],
+  "fields": {
+   "PROJECT": "CHAR 30",
+   "NODE_UUID": "CHAR 32",
+   "NODE_UUID_PA": "CHAR 32",
+   "PLUGIN_PA": "CHAR 32",
+   "NODE_TYPE_PA": "CHAR 4",
+   "STATE_NA": "CHAR 1",
+   "VALUE_NA": "CHAR 32",
+   "EDM_CORE_TYPE": "CHAR 32"
+  }
+ }
+}

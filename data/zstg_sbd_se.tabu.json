@@ -1,0 +1,18 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "se-1",
+  "name": "TravelSet",
+  "entity_set_uuid": "es-1",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "se-2",
+  "name": "StatusVHSet",
+  "entity_set_uuid": "es-2",
+  "stg_seq": 2
+ }
+]

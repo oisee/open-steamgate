@@ -1,0 +1,34 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-4",
+  "ds_att_path": "IT_TRAVEL_ID_RANGE\\HIGH",
+  "semantics": "H",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-4",
+  "ds_att_path": "IT_TRAVEL_ID_RANGE\\LOW",
+  "semantics": "L",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-4",
+  "ds_att_path": "IT_TRAVEL_ID_RANGE\\OPTION",
+  "semantics": "O",
+  "stg_seq": 3
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mp-4",
+  "ds_att_path": "IT_TRAVEL_ID_RANGE\\SIGN",
+  "semantics": "S",
+  "stg_seq": 4
+ }
+]

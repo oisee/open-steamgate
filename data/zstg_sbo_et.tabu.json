@@ -1,0 +1,19 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "et-1",
+  "name": "Travel",
+  "abap_struct": "ZSTG_DEMO",
+  "tech_name": "TRAVEL",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "et-2",
+  "name": "StatusVH",
+  "tech_name": "STATUSVH",
+  "stg_seq": 2
+ }
+]

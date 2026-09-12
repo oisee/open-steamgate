@@ -421,11 +421,17 @@ the generator, the editor is the file.
    two project-tree tables `ZSTG_SBD_PR` / `ZSTG_SBD_PRT` under
    `src/segw/ddic/` and `ZSTG_SEGW_SRV` from `src/segw/zstg_segw.stg.yaml`
    (`ltcl_crud`: POST 201, GET, PUT 204, `$filter`, DELETE 204, 404 after).
-   Next: the remaining `SBD_*` / `SBO_*` tables segw-gen reads (keys
-   PROJECT + NODE_UUID, texts + SYLANGU), `tools/segw-tree.mjs` import
-   (IWPR → `data/*.tabu.json`) / export (tables → IWPR) with a byte-identical
-   round trip on the mapped fixture and the demo YAML, and an informational
-   abaplint pass with `syntax.version: Cloud` over `src/segw/**`.
+   Same night, the tables (`docs/segw-tree.md`): all 53 `SBD_*` / `SBO_*`
+   tables of 21 real SEGW projects, generated from a derived spec
+   (`tools/segw-tables.mjs`, fields in SEGW's order, keys as unique
+   prefixes, `STG_SEQ` for row order), `ZSTG_SEGW_SRV` with one entity per
+   table, `tools/segw-tree.mjs` import / export: every SEGW-written IWPR
+   file round trips byte for byte (BOM aside); the hand-written fixtures
+   and stg-compile's output do not, because they write fields and orders
+   SEGW does not (list in the doc, for the stg-compile owner). Cloud pass
+   `npm run segw:cloud`: 155 issues, 133 of them the 7.02 SELECT form the
+   downport rule asks for. Next: the editor app over `ZSTG_SEGW_SRV`,
+   import through the service, stg-compile writing SEGW's field set.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the

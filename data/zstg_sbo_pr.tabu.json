@@ -1,0 +1,54 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "pr-a",
+  "parent_uuid": "et-1",
+  "name": "TravelId",
+  "is_key": "X",
+  "filterable": "X",
+  "max_length": "8",
+  "edm_core_type": "Edm.String",
+  "abap_field": "TRAVEL_ID",
+  "sort_order": "1",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "pr-b",
+  "parent_uuid": "et-1",
+  "name": "Seats",
+  "edm_core_type": "Edm.Int32",
+  "is_nullable": "X",
+  "abap_field": "SEATS",
+  "sort_order": "2",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "pr-c",
+  "parent_uuid": "et-2",
+  "name": "Status",
+  "is_key": "X",
+  "filterable": "X",
+  "max_length": "1",
+  "edm_core_type": "Edm.String",
+  "abap_field": "STATUS",
+  "sort_order": "1",
+  "stg_seq": 3
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "pr-d",
+  "parent_uuid": "et-2",
+  "name": "Text",
+  "max_length": "40",
+  "edm_core_type": "Edm.String",
+  "abap_field": "TEXT",
+  "sort_order": "2",
+  "stg_seq": 4
+ }
+]

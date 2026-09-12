@@ -1,0 +1,29 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mh-1",
+  "parent_uuid": "op-2",
+  "name": "Mapping",
+  "ds_uuid": "ds-1",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mh-2",
+  "parent_uuid": "op-1",
+  "name": "Mapping",
+  "ds_uuid": "ds-2",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "mh-3",
+  "parent_uuid": "op-3",
+  "name": "Mapping",
+  "ds_uuid": "ds-3",
+  "stg_seq": 3
+ }
+]

@@ -6,10 +6,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "abaplint",
+    "lint": "node tools/cds2ddic.mjs && node tools/stg-compile.mjs --all && abaplint",
     "transpile": "rm -rf output && node tools/cds2ddic.mjs && node tools/stg-compile.mjs --all && node tools/segw-registry.mjs && node tools/segw-shlp.mjs && abap_transpile",
     "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
-    "integration": "mocha test/mocha.mjs test/analytics.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/rfc-live.mjs test/segw-shlp.mjs test/stg-compile.mjs",
+    "integration": "mocha test/mocha.mjs test/analytics.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/rfc-live.mjs test/segw-shlp.mjs test/stg-compile.mjs test/segw-tree.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "probe": "node tools/closure-probe.mjs",
@@ -25,6 +25,9 @@
     "segw": "node tools/segw-registry.mjs",
     "segw:gen": "node tools/segw-gen.mjs",
     "segw:shlp": "node tools/segw-shlp.mjs",
+    "segw:tables": "node tools/segw-tables.mjs",
+    "segw:tree": "node tools/segw-tree.mjs",
+    "segw:cloud": "node tools/segw-cloud.mjs",
     "bench:cube": "node tools/bench-cube.mjs",
     "stg:compile": "node tools/stg-compile.mjs",
     "segw:closure": "node tools/segw-closure.mjs"

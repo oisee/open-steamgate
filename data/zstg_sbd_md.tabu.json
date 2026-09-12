@@ -1,0 +1,12 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "md-1",
+  "technical_name": "ZSTG_MAPPED_MDL",
+  "version": "0001",
+  "mpc": "ZCL_ZSTG_MAPPED_MPC_EXT",
+  "value_ns": "ZSTG_MAPPED_SRV",
+  "stg_seq": 1
+ }
+]

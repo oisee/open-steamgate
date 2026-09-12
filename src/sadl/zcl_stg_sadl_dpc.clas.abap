@@ -42,6 +42,7 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
     METHODS orderby_of
       IMPORTING
         it_orderby        TYPE /iwbep/t_mgw_tech_order
+        is_set            TYPE zcl_stg_model_info=>ty_entity_set OPTIONAL
       RETURNING
         VALUE(rt_orderby) TYPE string_table.
 
@@ -200,14 +201,23 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD orderby_of.
-    DATA ls_order TYPE /iwbep/s_mgw_tech_order.
-    DATA lv_line  TYPE string.
+* $orderby names properties; a DDIC-mapped set sorts by the field behind
+* the property (StgSeq -> STG_SEQ), as key_where and the $filter do
+    DATA ls_order    TYPE /iwbep/s_mgw_tech_order.
+    DATA ls_property TYPE zcl_stg_model_info=>ty_property.
+    DATA lv_field    TYPE string.
+    DATA lv_line     TYPE string.
 
     LOOP AT it_orderby INTO ls_order.
+      lv_field = to_upper( ls_order-property ).
+      READ TABLE is_set-properties INTO ls_property WITH KEY name = ls_order-property.
+      IF sy-subrc = 0 AND ls_property-fieldname IS NOT INITIAL.
+        lv_field = ls_property-fieldname.
+      ENDIF.
       IF to_lower( ls_order-order ) = 'desc'.
-        lv_line = |{ to_upper( ls_order-property ) } DESCENDING|.
+        lv_line = |{ lv_field } DESCENDING|.
       ELSE.
-        lv_line = |{ to_upper( ls_order-property ) } ASCENDING|.
+        lv_line = |{ lv_field } ASCENDING|.
       ENDIF.
       APPEND lv_line TO rt_orderby.
     ENDLOOP.
@@ -313,7 +323,8 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     lv_where = io_tech_request_context->get_osql_where_clause( ).
     lv_where = and_where( iv_left  = lv_where
                           iv_right = navigation_where( lo_context ) ).
-    lt_orderby = orderby_of( io_tech_request_context->get_orderby( ) ).
+    lt_orderby = orderby_of( it_orderby = io_tech_request_context->get_orderby( )
+                             is_set     = lo_context->ms_set ).
 
     lv_select = lo_context->mv_select.
     IF lv_select IS NOT INITIAL AND lo_context->mv_aggregate = abap_true.

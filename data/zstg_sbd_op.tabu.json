@@ -1,0 +1,32 @@
+[
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "op-1",
+  "parent_uuid": "se-1",
+  "name": "GetEntitySet (Query)",
+  "operation_type": "Q",
+  "imp_method": "TRAVELSET_GET_ENTITYSET",
+  "stg_seq": 1
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "op-2",
+  "parent_uuid": "se-1",
+  "name": "GetEntity (Read)",
+  "operation_type": "R",
+  "imp_method": "TRAVELSET_GET_ENTITY",
+  "stg_seq": 2
+ },
+ {
+  "mandt": "123",
+  "project": "ZSTG_MAPPED",
+  "node_uuid": "op-3",
+  "parent_uuid": "se-2",
+  "name": "GetEntitySet (Query)",
+  "operation_type": "Q",
+  "imp_method": "STATUSVHSET_GET_ENTITYSET",
+  "stg_seq": 3
+ }
+]
