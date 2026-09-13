@@ -16,8 +16,13 @@ import {createRequire} from "node:module";
 
 const require = createRequire(import.meta.url);
 
-export function transpilerInUse(root = process.cwd()) {
-  const at = join(root, "node_modules", "@abaplint", "transpiler-cli");
+// Two packages decide what a tree does, and only one of them is usually
+// linked: the transpiler writes the code, the runtime executes it. A fix in
+// one arrives on a rebuild and a fix in the other does not, and from the
+// outside they look the same, so both are reported rather than the one we
+// happen to have linked.
+export function packageInUse(root, name) {
+  const at = join(root, "node_modules", "@abaplint", name);
   if (existsSync(at) === false) {
     return {kind: "missing", where: at};
   }
@@ -49,21 +54,40 @@ export function transpilerInUse(root = process.cwd()) {
   return {kind: "linked", version, where: real, branch, commit, dirty};
 }
 
-export function describeTranspiler(root = process.cwd()) {
-  const found = transpilerInUse(root);
+export function transpilerInUse(root = process.cwd()) {
+  return packageInUse(root, "transpiler-cli");
+}
+
+export function runtimeInUse(root = process.cwd()) {
+  return packageInUse(root, "runtime");
+}
+
+function describeOne(label, pkg, found) {
   switch (found.kind) {
     case "missing":
-      return `transpiler: none installed at ${found.where}`;
+      return `${label}: none installed at ${found.where}`;
     case "published":
-      return `transpiler: @abaplint/transpiler-cli ${found.version}, published`;
+      return `${label}: @abaplint/${pkg} ${found.version}, published`;
     default:
-      return `transpiler: a LOCAL BUILD, ${found.where}`
+      return `${label}: a LOCAL BUILD, ${found.where}`
         + (found.branch ? ` (${found.branch} ${found.commit}${found.dirty ? ", uncommitted changes" : ""})` : "")
         + `, calling itself ${found.version}. A clean clone will not build this way.`;
   }
 }
 
+export function describeTranspiler(root = process.cwd()) {
+  return describeOne("transpiler", "transpiler-cli", transpilerInUse(root));
+}
+
+export function describeRuntime(root = process.cwd()) {
+  return describeOne("runtime", "runtime", runtimeInUse(root));
+}
+
+export function describeBuild(root = process.cwd()) {
+  return describeTranspiler(root) + "\n" + describeRuntime(root);
+}
+
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
-  console.log(describeTranspiler());
+  console.log(describeBuild());
   process.exit(0);
 }

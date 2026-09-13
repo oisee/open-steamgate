@@ -181,6 +181,47 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-13-sy-tabix-not-restored — An inner loop keeps the outer loop's `sy-tabix`
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `LOOP AT` and `sy-tabix`
+- Minimal ABAP reproducer:
+
+```abap
+LOOP AT lt_outer INTO DATA(lv_o).
+  LOOP AT lt_inner INTO DATA(lv_i).
+  ENDLOOP.
+  lv_out = lv_out && |{ sy-tabix }|.
+ENDLOOP.
+```
+
+- Exact command used to run it: `npx mocha build/test/statements/loop.js` in the transpiler checkout; found by open-steamgate driving vivid-vibes' `send_megademo`
+- Expected SAP behaviour: `123`. A loop owns `sy-tabix` only while it runs; leaving it, by `ENDLOOP` or `EXIT` or `RETURN` or an exception, restores what the enclosing loop had
+- Actual open-abap behaviour: `333`. The inner loop leaves its own last index behind, so the outer body reads the inner loop's row number as its own
+- Impact on open-steamgate: her `send_megademo` calls `zcl_o4d_demo=>get( )` in the loop body, which walks its own table, and then writes a separator when `sy-tabix > 1`. The separators land wrong, and the frame is a JSON array that is well formed everywhere except one character. Nothing on our side reports anything; the browser says `Expected ',' or ']' after array element in JSON at position 236`. Same family as the day's other findings: output that is valid-looking, plausible, the right size, and wrong
+- Smallest safe workaround: read `sy-tabix` into a variable as the first statement of the loop body, before anything that might loop
+- Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, commit `be5d4db9`. Save on entry, restore in the `finally` that already runs, so every exit path is covered by construction. Full suite 2224/133 before, 2227/130 after, and the three that moved are the new tests
+- Regression-test location: `test/statements/loop.ts`, three cases: nested, inner loop left with `EXIT`, and a method that loops called from a loop
+- Upstream version containing a fix: `unknown`
+
+### DEBT-2026-09-13-runtime-not-linked — The transpiler is linked from our clone, the runtime is not
+
+- Status: `open`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler-cli` linked, `@abaplint/runtime 2.13.86` published
+- Affected ABAP statement, runtime API or adapter: none; a build-topology note
+- Minimal ABAP reproducer: none
+- Exact command used to run it: `ls -la node_modules/@abaplint/`
+- Expected SAP behaviour: n/a
+- Actual open-abap behaviour: only `transpiler-cli` is a symlink into `~/dev/transpiler`; `@abaplint/runtime` in each consuming tree is the published copy. So a fix in `packages/transpiler` or `packages/cli` reaches a rebuild immediately and a fix in `packages/runtime` does not, and the two feel identical from the outside. The `sy-tabix` fix above is a runtime fix and is therefore *not* in any running demo
+- Impact on open-steamgate: a fix can be reported as done and still be absent from the process that needed it. Whoever wants a runtime fix locally has to link `@abaplint/runtime` too, deliberately, and say so here
+- Smallest safe workaround: `npm link @abaplint/runtime` in the consuming tree, or wait for a release
+- Upstream issue: none; this is ours. Related: `DEBT-2026-09-13-linked-transpiler`
+- Regression-test location: `tools/osd-transpiler.mjs` now prints both, and `npm run transpiler:which` says in two lines which transpiler wrote the code and which runtime will execute it. That is the check; it does not make the two match, it makes the mismatch visible. `npm run runtime:local` links the runtime deliberately, the same way `transpiler:local` does
+- Upstream version containing a fix: `n/a`
+
 ### ANOMALY-2026-09-13-xstring-as-hex — An xstring costs two characters per byte, twice over
 
 - Status: `open`
@@ -233,11 +274,11 @@ Format adapted from `larshp/hithub` (MIT).
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FROM wwwparams WHERE objid = ...` and the W3MI registry the transpiler generates
 - Minimal ABAP reproducer: a W3MI object whose name carries a dot; read it back with the name that is in `<NAME>` in its own XML
 - Exact command used to run it: reading an image through a handler that follows SAP's own API shape
-- Expected SAP behaviour: unverified, and that is the point. `OBJID` on a real system is either `ZO4D_06_PLASMA.PNG` or `ZO4D_06_PLASMA%2EPNG`, and nobody here has read one
-- Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name while the object's own XML carries the plain one, so a handler that asks with the plain name finds nothing and returns empty rather than failing
-- Impact on open-steamgate: none of ours; found by open-steamgate on vivid-vibes, whose handler is honest about it and answers 404, where a less careful handler would serve a blank image
+- Expected SAP behaviour: **the plain name**, the one in `<NAME>`. Answered on 2026-09-13 by open-steamgate from the artefact rather than from a system: her page asks for `?audio=ZOISEE-EAR-02.MP3`, her handler passes that straight to `objid`, and that code runs on a real system. Evidence of that grade rather than a read of `wwwparams` on A4H, which is still worth one line the next time someone is on a system with Alice's say-so
+- Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name, `ZOISEE-EAR-02%2EMP3`, while the object's own XML carries `ZOISEE-EAR-02.MP3`, so a handler that asks the way SAP's API is asked finds nothing and returns empty rather than failing. The percent-escape is an abapGit filename spelling that should never have become a key
+- Impact on open-steamgate: this is what stops the audio in the running demo. The images work only because they were asked for by the encoded name while testing, which is the failure mode in miniature: the wrong key looks like a working one until someone uses the right one
 - Smallest safe workaround: ask with the encoded name
-- Upstream issue: none, and none should be filed until vsp reads which name a real system uses as `OBJID`. Fixing it the wrong way round would be worse than leaving it
+- Upstream issue: none yet. The fix is to key both the registry and `wwwparams` on `<NAME>`; open-steamgate owns that code and the change is theirs to make
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`
 

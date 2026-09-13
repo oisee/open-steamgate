@@ -45,7 +45,9 @@
     "segw:closure": "node tools/segw-closure.mjs",
     "transpiler:which": "node tools/osd-transpiler.mjs",
     "transpiler:local": "npm link @abaplint/transpiler-cli && node tools/osd-transpiler.mjs",
-    "transpiler:published": "npm install @abaplint/transpiler-cli && node tools/osd-transpiler.mjs"
+    "transpiler:published": "npm install @abaplint/transpiler-cli && node tools/osd-transpiler.mjs",
+    "runtime:local": "npm link @abaplint/runtime && node tools/osd-transpiler.mjs",
+    "runtime:published": "npm install @abaplint/runtime && node tools/osd-transpiler.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
