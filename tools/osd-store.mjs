@@ -178,6 +178,11 @@ export class ObjectStore {
       }
     }
     this.index = index;
+    // the index was rebuilt because files changed under us and we do not
+    // know which, an import being the reason this exists. The parse
+    // describes the system as it was, so it goes: a check against a parse
+    // that predates the objects it is checking is the worst kind of fast.
+    this.#forget();
     return index;
   }
 
@@ -485,6 +490,22 @@ export class ObjectStore {
     PARSED.delete(this.root);
   }
 
+  // Why a write throws the whole parse away, when abaplint can be told what
+  // changed instead.
+  //
+  // The fast path works and is wrong. Telling the registry about the file
+  // and parsing again takes twenty milliseconds where a full parse takes
+  // four seconds, and the object that changed is checked correctly
+  // afterwards. Its callers are not: abaplint reparses the object whose
+  // file moved and leaves the results it already has for everything else,
+  // so a class that renames a method its callers use comes back clean from
+  // a caller's check that a full parse fails. Measured on exactly the case
+  // activation exists to catch, the one that used to answer with an empty
+  // success.
+  //
+  // So a write costs four seconds of reparse at the next check, and an
+  // activation pays it once. That is the honest price of knowing what the
+  // system contains, and the transpile after it costs more anyway.
   // the parsed system, for whoever needs more than an object: the
   // cross-reference derives from the same parse the check runs on
   registry(configPath = "abaplint.jsonc") {

@@ -228,6 +228,31 @@ ENDCLASS.
     expect(broken.issues[0].line).to.be.greaterThan(1);
   });
 
+  it("a write drops the parse, because an update does not reach the callers", () => {
+    // the fast path was built, measured and taken out again: telling
+    // abaplint what changed is twenty milliseconds against four seconds,
+    // and the object that changed then checks correctly while its callers
+    // do not. A rename that breaks a caller came back clean, which is the
+    // exact case activation exists to catch.
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    store.registry();
+    expect(store.parsed).to.not.equal(undefined);
+
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("'hello'", "'goodbye'"));
+    expect(store.parsed, "a write buys a reparse rather than an update").to.equal(undefined);
+    expect(store.check("CLAS", "ZCL_OSD_PROBE").issues).to.deep.equal([]);
+    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("'goodbye'");
+  });
+
+  it("rebuilding the index drops the parse, because files changed under it", () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    store.registry();
+    expect(store.parsed).to.not.equal(undefined);
+    // what an import does: many files at once, none of them through write()
+    store.build();
+    expect(store.parsed, "a parse that predates the objects it would check").to.equal(undefined);
+  });
+
   it("a check can be given the source, and the file on disk is not touched", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
     const stored = store.read("CLAS", "ZCL_OSD_PROBE").source;
