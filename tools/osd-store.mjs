@@ -16,6 +16,7 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, 
 import {spawn} from "node:child_process";
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
+import {Data} from "./osd-data.mjs";
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -271,6 +272,15 @@ export class ObjectStore {
   }
 
   // --------------------------------------------------- check and activate
+
+  // the rows of the system, for a client that asks for table contents: one
+  // place knows about the schema, the seed and the dialect (tools/osd-data.mjs)
+  data() {
+    if (this.rows === undefined) {
+      this.rows = new Data({root: this.root});
+    }
+    return this.rows;
+  }
 
   // the parsed system, for whoever needs more than an object: the
   // cross-reference derives from the same parse the check runs on
