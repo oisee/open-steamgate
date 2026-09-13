@@ -10,6 +10,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 import {odataProxy} from "../tools/osd-proxy.mjs";
+import {mountServices} from "../tools/osd-icf.mjs";
 
 await initializeABAP();
 
@@ -76,6 +77,23 @@ export function startServer(quiet) {
       facade.store.registry();
       console.log(`parsed ${objects} objects in ${Date.now() - started} ms`);
     });
+  }
+
+  // SICF: every other ICF service this tree carries.
+  //
+  // The OData front is one if_http_extension on one path; a system has many,
+  // and which class answers which URL is what SICF holds. A repository that
+  // brings a *.sicf.xml brings its own route with it, so an application can
+  // be imported and served without this file learning its name. Mounted
+  // before the OData front only so the reserved prefix below is meaningful.
+  const icf = mountServices(app, (args) => cl_express_icf_shim.run({
+    ...args,
+    base: new abap.types.String().set(args.base),
+  }), {root: process.cwd(), reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+  if (quiet !== true && icf.length > 0) {
+    for (const service of icf) {
+      console.log(`ICF service  on http://localhost:${PORT}${service.path}  (${service.handler})`);
+    }
   }
 
   // The OData front, in one of two places.
