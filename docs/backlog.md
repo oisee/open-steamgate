@@ -110,6 +110,49 @@ the objects.
      └─ external: sanitized ADT document shapes from V (see below)
 ```
 
+## 2a. LSD: the tiers, and who owns which layer
+
+The local system, working name LSD. The tiers say **when**, the layers say
+**who**; they are the same picture from two angles and both were agreed
+across the three sessions on 2026-09-13.
+
+```
+Tier 1  LSD speaks ADT well enough for vsp
+        waves 0-4 above, plus abapGit in a box as the way content gets in
+        gate: vsp's wave 0-4 tools green against localhost, AND
+              open-steamgate's own suites unchanged with the facade in
+Tier 2  LSD speaks ADT well enough for Eclipse
+        a much larger surface; the honest milestone is "connects, logs on,
+        browses the tree, reads sources", not "works"
+        needs an Eclipse oracle: the request sequence can be had by pointing
+        Eclipse at the facade and iterating on 404s, but the expected
+        responses need one Eclipse session against A4H        [A]
+        rule: such a capture stays in .local/, never in this repository
+Tier 3  LSD speaks the rest: RFC and DIAG fronts, a screen that answers
+        "not implemented" instead of nothing
+        not ours to build: odgp already draws screens from Go with no
+        system behind it, and the DIAG sibling carries the LZH writer
+        (docs/layers-we-own.md). The spike is "can odgp answer a screen
+        routed from LSD", and it is odgp's question
+```
+
+```
+Layer                      Owner  What
+protocol surface           S      the ADT facade: session, discovery, the
+                                  resource tree, content handlers, ETags,
+                                  locks; and the packaging that ships it
+the object service seam    S      drafted as part of the facade contract:
+                                  read, write, activate, delete, list,
+                                  search, and the shape activation returns
+                                  for an error. The facade never touches
+                                  storage, the store never parses HTTP
+what is behind it          T      the object store, the activation path
+                                  (file, abaplint, transpile), abapGit in
+                                  a box, APC and daemons
+the client and yardstick   V      the calls a real development loop makes,
+                                  the sanitized fixtures, the round trip
+```
+
 ## 2b. Questions parked next to the façade
 
 ```
