@@ -201,6 +201,32 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       }
     });
 
+    it("the range a client reads is a link inside the method, not an attribute on it", async () => {
+      // an attribute is where we put it first and nobody reads it there; a
+      // client walks the element's links and picks the one by its relation
+      const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
+      const element = xml.match(/<abapsource:objectStructureElement adtcore:name="FILES"[\s\S]*?<\/abapsource:objectStructureElement>/);
+      expect(element, "FILES is an element with children").to.not.equal(null);
+      expect(element[0]).to.contain('rel="http://www.sap.com/adt/relations/source/implementationBlock"');
+      expect(element[0]).to.contain('rel="http://www.sap.com/adt/relations/source/definitionBlock"');
+      const body = element[0].match(/implementationBlock" href="source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
+      expect(body, "the implementation link carries a range").to.not.equal(null);
+      const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
+      expect(source[Number(body[1]) - 1].toUpperCase()).to.contain("METHOD FILES");
+      expect(source[Number(body[2]) - 1].toUpperCase()).to.contain("ENDMETHOD");
+    });
+
+    it("the declaration link points at the whole signature, not the name alone", async () => {
+      const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
+      const element = xml.match(/<abapsource:objectStructureElement adtcore:name="FILES"[\s\S]*?<\/abapsource:objectStructureElement>/)[0];
+      const declaration = element.match(/definitionBlock" href="source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
+      expect(declaration).to.not.equal(null);
+      const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
+      expect(source[Number(declaration[1]) - 1].toUpperCase()).to.contain("METHODS FILES");
+      // a declaration with parameters runs over several lines
+      expect(Number(declaration[2])).to.be.greaterThan(Number(declaration[1]));
+    });
+
     it("a class's other includes are elements of the structure too", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_TEST/objectstructure")).text();
       expect(xml).to.contain('adtcore:name="TESTCLASSES"');

@@ -51,6 +51,9 @@ export function uriOf(type, name) {
   return `/sap/bc/adt/${collection}/${encodeURIComponent(String(name).toLowerCase())}`;
 }
 
+// a range in the main source, the way ADT writes one
+const rangeUri = (at) => `source/main#start=${at.row},${at.col}` + (at.endRow === undefined ? "" : `;end=${at.endRow},${at.endCol}`);
+
 const VISIBILITY = {
   [Visibility.Public]: "public",
   [Visibility.Protected]: "protected",
@@ -78,17 +81,20 @@ export function objectStructureDocument(object) {
       e.modifiers === undefined ? undefined : `abapsource:modifiers="${e.modifiers}"`,
       e.uri === undefined ? undefined : `abapsource:sourceUri="${xmlEscape(e.uri)}"`,
     ].filter((a) => a !== undefined).join(" ");
-    if ((e.children ?? []).length === 0) {
+    const links = (e.links ?? []).map((l) => `${pad}  <atom:link rel="http://www.sap.com/adt/relations/source/${xmlEscape(l.rel)}" href="${xmlEscape(l.href)}"/>`);
+    const inner = [...links, ...(e.children ?? []).map((c) => element(c, indent + 2))];
+    if (inner.length === 0) {
       return `${pad}<abapsource:objectStructureElement ${attributes}/>`;
     }
     return `${pad}<abapsource:objectStructureElement ${attributes}>
-${e.children.map((c) => element(c, indent + 2)).join("\n")}
+${inner.join("\n")}
 ${pad}</abapsource:objectStructureElement>`;
   };
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <abapsource:objectStructureElement xmlns:abapsource="http://www.sap.com/adt/abapsource"
                                    xmlns:adtcore="http://www.sap.com/adt/core"
+                                   xmlns:atom="http://www.w3.org/2005/Atom"
                                    adtcore:name="${xmlEscape(object.name)}"
                                    adtcore:type="${xmlEscape(object.type)}"
                                    abapsource:sourceUri="source/main">
@@ -118,6 +124,36 @@ function implementationRows(object) {
         continue;
       }
       rows.set(String(name).toUpperCase(), {
+        row: start.getRow(),
+        col: start.getCol(),
+        endRow: end.getRow(),
+        endCol: end.getCol(),
+      });
+    }
+  }
+  return rows;
+}
+
+// Where each method is declared, as the whole statement rather than the name
+// alone: a client uses this range for a signature, and a declaration with
+// parameters runs over several lines.
+function declarationRows(object) {
+  const rows = new Map();
+  for (const file of object.getSequencedFiles?.() ?? []) {
+    for (const statement of file.getStatements?.() ?? []) {
+      if (statement.get?.()?.constructor?.name !== "MethodDef") {
+        continue;
+      }
+      const tokens = statement.getTokens?.() ?? [];
+      // CLASS-METHODS name ... or METHODS name ...: the name is the first
+      // token that is not part of the keyword
+      const name = tokens.find((t) => ["CLASS", "-", "METHODS"].includes(t.getStr().toUpperCase()) === false);
+      const start = tokens[0]?.getStart?.();
+      const end = tokens[tokens.length - 1]?.getEnd?.();
+      if (name === undefined || start === undefined || end === undefined) {
+        continue;
+      }
+      rows.set(name.getStr().toUpperCase(), {
         row: start.getRow(),
         col: start.getCol(),
         endRow: end.getRow(),
@@ -164,17 +200,32 @@ export function structureOf(store, type, name) {
     // declaration is the fallback for a method that has no implementation:
     // abstract, or inherited and not redefined here.
     const bodies = implementationRows(object);
+    const declarations = declarationRows(object);
     for (const method of definition.getMethodDefinitions?.()?.getAll?.() ?? []) {
       const name = method.getName().toUpperCase();
       const declared = method.getStart?.();
       const body = bodies.get(name);
-      const at = body ?? (declared === undefined ? undefined : {row: declared.getRow?.() ?? declared.row, col: declared.getCol?.() ?? declared.col});
+      const declaration = declarations.get(name) ?? (declared === undefined ? undefined : {
+        row: declared.getRow?.() ?? declared.row,
+        col: declared.getCol?.() ?? declared.col,
+        endRow: declared.getRow?.() ?? declared.row,
+        endCol: declared.getCol?.() ?? declared.col,
+      });
+      const at = body ?? declaration;
       children.push({
         name,
         type: METHOD,
         visibility: VISIBILITY[method.getVisibility?.()] ?? "public",
         modifiers: method.isStatic?.() === true ? "static" : undefined,
-        uri: at === undefined ? "source/main" : `source/main#start=${at.row},${at.col}` + (at.endRow === undefined ? "" : `;end=${at.endRow},${at.endCol}`),
+        uri: at === undefined ? "source/main" : rangeUri(at),
+        // the two links a client actually reads: where the method is declared
+        // and where its body is. The attribute above says the same thing and
+        // is kept because a real system carries both, but a client that wants
+        // one method reads these.
+        links: [
+          declaration === undefined ? undefined : {rel: "definitionBlock", href: rangeUri(declaration)},
+          body === undefined ? undefined : {rel: "implementationBlock", href: rangeUri(body)},
+        ].filter((l) => l !== undefined),
       });
     }
   }
