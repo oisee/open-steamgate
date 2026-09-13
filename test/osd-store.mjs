@@ -2,13 +2,13 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {NotFound, ObjectStore, ReadOnly, fileOf, nameOf} from "../tools/lsd-store.mjs";
+import {NotFound, ObjectStore, ReadOnly, fileOf, nameOf} from "../tools/osd-store.mjs";
 
 // The object store behind the ADT façade: what a client reads, writes,
-// checks and activates when it talks to LSD. The repository itself is the
+// checks and activates when it talks to OSD. The repository itself is the
 // content, and the open-abap clones beside it are the standard objects, so
 // the store is tested against what is actually on disk.
-describe("tools/lsd-store: the objects of the local system", () => {
+describe("tools/osd-store: the objects of the local system", () => {
   const store = new ObjectStore();
 
   it("indexes this repository and the libraries beside it", () => {
@@ -75,16 +75,16 @@ describe("tools/lsd-store: the objects of the local system", () => {
 
 // writing happens in a temporary system, so a test never touches the
 // repository it runs in
-describe("tools/lsd-store: writing to the local system", () => {
+describe("tools/osd-store: writing to the local system", () => {
   let root;
   let store;
 
-  const CLASS = `CLASS zcl_lsd_probe DEFINITION PUBLIC CREATE PUBLIC.
+  const CLASS = `CLASS zcl_osd_probe DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     METHODS run RETURNING VALUE(rv_text) TYPE string.
 ENDCLASS.
 
-CLASS zcl_lsd_probe IMPLEMENTATION.
+CLASS zcl_osd_probe IMPLEMENTATION.
   METHOD run.
     rv_text = 'hello'.
   ENDMETHOD.
@@ -92,7 +92,7 @@ ENDCLASS.
 `;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "lsd-"));
+    root = mkdtempSync(join(tmpdir(), "osd-"));
     mkdirSync(join(root, "src"), {recursive: true});
     writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
     store = new ObjectStore({root, libs: []});
@@ -103,34 +103,34 @@ ENDCLASS.
   });
 
   it("a new object lands as a file and reads back", () => {
-    const written = store.write("CLAS", "ZCL_LSD_PROBE", CLASS);
-    expect(written.file).to.equal("src/lsd/zcl_lsd_probe.clas.abap");
+    const written = store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    expect(written.file).to.equal("src/osd/zcl_osd_probe.clas.abap");
     expect(readFileSync(join(root, written.file), "utf8")).to.equal(CLASS);
-    expect(store.read("CLAS", "ZCL_LSD_PROBE").source).to.equal(CLASS);
-    expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_LSD_PROBE"]);
+    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.equal(CLASS);
+    expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_OSD_PROBE"]);
   });
 
   it("writing again replaces the source, and the includes go beside it", () => {
-    store.write("CLAS", "ZCL_LSD_PROBE", CLASS);
-    store.write("CLAS", "ZCL_LSD_PROBE", CLASS.replace("hello", "goodbye"));
-    expect(store.read("CLAS", "ZCL_LSD_PROBE").source).to.contain("goodbye");
-    store.write("CLAS", "ZCL_LSD_PROBE", "CLASS ltcl DEFINITION FOR TESTING.\nENDCLASS.\n", "testclasses");
-    expect(store.read("CLAS", "ZCL_LSD_PROBE", "testclasses").source).to.contain("ltcl");
-    expect(store.read("CLAS", "ZCL_LSD_PROBE").source).to.contain("goodbye");
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("hello", "goodbye"));
+    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("goodbye");
+    store.write("CLAS", "ZCL_OSD_PROBE", "CLASS ltcl DEFINITION FOR TESTING.\nENDCLASS.\n", "testclasses");
+    expect(store.read("CLAS", "ZCL_OSD_PROBE", "testclasses").source).to.contain("ltcl");
+    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("goodbye");
   });
 
   it("a namespaced name becomes an abapGit file name", () => {
     const written = store.write("PROG", "/DEMO/ZREPORT", "REPORT zreport.\nWRITE 'x'.\n");
-    expect(written.file).to.equal("src/lsd/#demo#zreport.prog.abap");
+    expect(written.file).to.equal("src/osd/#demo#zreport.prog.abap");
     expect(store.read("PROG", "/demo/zreport").source).to.contain("REPORT");
   });
 
   it("deleting takes the object and its includes", () => {
-    store.write("CLAS", "ZCL_LSD_PROBE", CLASS);
-    store.write("CLAS", "ZCL_LSD_PROBE", "CLASS ltcl DEFINITION FOR TESTING.\nENDCLASS.\n", "testclasses");
-    expect(store.delete("CLAS", "ZCL_LSD_PROBE")).to.include({deleted: true});
-    expect(store.exists("CLAS", "ZCL_LSD_PROBE")).to.equal(false);
-    expect(() => store.read("CLAS", "ZCL_LSD_PROBE")).to.throw(NotFound);
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    store.write("CLAS", "ZCL_OSD_PROBE", "CLASS ltcl DEFINITION FOR TESTING.\nENDCLASS.\n", "testclasses");
+    expect(store.delete("CLAS", "ZCL_OSD_PROBE")).to.include({deleted: true});
+    expect(store.exists("CLAS", "ZCL_OSD_PROBE")).to.equal(false);
+    expect(() => store.read("CLAS", "ZCL_OSD_PROBE")).to.throw(NotFound);
   });
 
   it("a library object cannot be written or deleted", () => {
@@ -140,11 +140,11 @@ ENDCLASS.
   });
 
   it("activation holds or fails on the syntax check, with the line and the rule", () => {
-    store.write("CLAS", "ZCL_LSD_PROBE", CLASS);
-    expect(store.activate("CLAS", "ZCL_LSD_PROBE").active).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    expect(store.activate("CLAS", "ZCL_OSD_PROBE").active).to.equal(true);
 
-    store.write("CLAS", "ZCL_LSD_PROBE", CLASS.replace("rv_text = 'hello'.", "rv_text = lv_missing."));
-    const broken = store.activate("CLAS", "ZCL_LSD_PROBE");
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("rv_text = 'hello'.", "rv_text = lv_missing."));
+    const broken = store.activate("CLAS", "ZCL_OSD_PROBE");
     expect(broken.active).to.equal(false);
     expect(broken.issues.length).to.be.greaterThan(0);
     expect(broken.issues[0]).to.include.keys(["severity", "rule", "message", "file", "line", "column"]);

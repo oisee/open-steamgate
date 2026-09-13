@@ -1,11 +1,11 @@
-// The object store of LSD, the local system doppelgänger: what sits behind
+// The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
 // above never touches the file system, this never parses HTTP.
 //
 // What an object is here: a file, the way abapGit names it, in this
 // repository (src/, gen/) or in a library beside it (.local/lars/*, the
-// open-abap clones), which is how LSD has a system's worth of content
+// open-abap clones), which is how OSD has a system's worth of content
 // without anyone typing it. A library object is read-only, ours is not.
 //
 // What activation is: abaplint's syntax and semantic check over the whole
@@ -208,7 +208,7 @@ export class ObjectStore {
     }
     if (entry === undefined) {
       const root = this.roots.find((r) => r.writable);
-      const file = join(root.path, "lsd", fileOf(name) + meta.ext);
+      const file = join(root.path, "osd", fileOf(name) + meta.ext);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false};
       this.#entries().set(`${entry.type} ${entry.name}`, entry);
     }
@@ -384,7 +384,7 @@ function main(args) {
       return 0;
     }
     default:
-      console.log("usage: lsd-store.mjs list [TYPE] | read TYPE NAME | check TYPE NAME | activate TYPE NAME | search TEXT [--source]");
+      console.log("usage: osd-store.mjs list [TYPE] | read TYPE NAME | check TYPE NAME | activate TYPE NAME | search TEXT [--source]");
       return 2;
   }
 }
