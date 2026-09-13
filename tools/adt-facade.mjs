@@ -200,6 +200,38 @@ export function adtRouter(options = {}) {
     accept: ACCEPT[adt] ?? [],
   });
 
+  // What a client asked for and did not get, in two kinds. "resource" is a
+  // path nothing is mounted on, which is the next wave's work. "object" is a
+  // mounted resource answering that the thing is not in this tree, which is
+  // usually a client assuming a system convention we do not have — $TMP was
+  // one of those and it never appeared here, because the route existed.
+  // Recording only the first kind makes an empty list look like a clean bill
+  // of health while a client is failing on every node it opens.
+  const missed = new Map();
+  const record = (req, kind, detail) => {
+    if (req === undefined) {
+      return;
+    }
+    const key = `${kind} ${req.method} ${req.path}`;
+    const seen = missed.get(key);
+    missed.set(key, {
+      kind,
+      method: req.method,
+      path: req.path,
+      query: Object.keys(req.query ?? {}).length === 0 ? undefined : {...req.query},
+      detail: seen?.detail ?? detail,
+      accept: seen?.accept ?? req.headers.accept,
+      count: (seen?.count ?? 0) + 1,
+      first: seen?.first ?? new Date().toISOString(),
+    });
+    if (options.logMisses !== false && seen === undefined) {
+      console.log(`ADT miss (${kind}): ${req.method} ${req.path}${detail === undefined ? "" : "  " + detail}`);
+    }
+  };
+  // every answer() inside this router records the object misses it turns
+  // into 404s, without each call site having to remember to
+  const answer = (res, body) => answered(res, body, record);
+
   // scoped to the façade's own prefix: this router is mounted on the same
   // app as the OData front, and a CSRF gate over somebody else's POST is a
   // 403 they never asked for
@@ -515,20 +547,8 @@ export function adtRouter(options = {}) {
   // us: Eclipse asks for far more than vsp does, and the list of what it
   // asked for and did not get is exactly the next wave's work. So each one
   // is recorded once, by method and path, and the server can print the set.
-  const missed = new Map();
   router.all(`${BASE}/*`, (req, res) => {
-    const key = `${req.method} ${req.path}`;
-    const seen = missed.get(key);
-    missed.set(key, {
-      method: req.method,
-      path: req.path,
-      accept: seen?.accept ?? req.headers.accept,
-      count: (seen?.count ?? 0) + 1,
-      first: seen?.first ?? new Date().toISOString(),
-    });
-    if (options.logMisses !== false && seen === undefined) {
-      console.log(`ADT not served: ${key}  accept=${req.headers.accept ?? "-"}`);
-    }
+    record(req, "resource");
     res.status(404).type("application/xml").send(exceptionDocument("ExceptionResourceNotFound", `${req.path} is not served by OSD`));
   });
 
@@ -550,11 +570,16 @@ function typeOf(asked) {
 // so a 403 that means anything else costs it its only retry and then fails
 // with the wrong reason. A library object that cannot be written is
 // therefore 405, not 403. 403 belongs to the session layer alone.
-function answer(res, body) {
+function answered(res, body, record) {
   try {
     body();
   } catch (e) {
     if (e instanceof NotFound) {
+      // a 404 from here is a different animal from a 404 off the catch-all:
+      // the resource is served and the object is not there. Both are things
+      // a client asked for and did not get, so both are worth recording, and
+      // telling them apart is the whole value of recording them
+      record?.(res.req, "object", e.message);
       res.status(404).type("text/plain").send(e.message);
     } else if (e instanceof ReadOnly) {
       res.status(405).type("text/plain").send(e.message);

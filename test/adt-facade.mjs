@@ -371,6 +371,24 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect((await call("/packages/%24NOPE_NOT_HERE")).status).to.equal(404);
     });
 
+    // the instrument that decides what the next wave is. It used to see only
+    // paths nothing was mounted on, so a client failing on every node it
+    // opened left it empty and the empty list read as a clean bill of health
+    it("a missing object is recorded, not only a missing resource", async () => {
+      await call("/packages/%24NOPE_NOT_HERE");
+      const missed = await (await fetch(`http://localhost:${PORT}/osd/not-served`)).json();
+      const object = missed.find((m) => m.path.endsWith("NOPE_NOT_HERE"));
+      expect(object, "the object miss was not recorded").to.not.equal(undefined);
+      expect(object.kind).to.equal("object");
+      expect(object.detail).to.contain("does not exist");
+    });
+
+    it("a resource nothing is mounted on is recorded as the other kind", async () => {
+      await call("/atc/worklists");
+      const missed = await (await fetch(`http://localhost:${PORT}/osd/not-served`)).json();
+      expect(missed.find((m) => m.path.endsWith("/atc/worklists"))?.kind).to.equal("resource");
+    });
+
     it("the node structure walks one level: subpackages and objects", async () => {
       const res = await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" + encodeURIComponent("$STG_GEN_SEGW"), {method: "POST"});
       expect(res.status).to.equal(200);
