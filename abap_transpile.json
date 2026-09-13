@@ -12,7 +12,9 @@
     {
       "url": "https://github.com/open-abap/open-abap-core",
       "folder": "/.local/lars/open-abap-core",
-      "exclude_filter": ["/src/tcp/"]
+      "exclude_filter": [
+        "/src/tcp/"
+      ]
     },
     {
       "url": "https://github.com/open-abap/express-icf-shim",
@@ -81,6 +83,7 @@
     "/test/e2e/",
     "\\.mjs$",
     "\\.cjs$",
+    "\\.sapc\\.xml$",
     "\\.ddls\\.",
     "\\.stg\\.yaml$",
     "/gen/segw-editor/"

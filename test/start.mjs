@@ -10,7 +10,9 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 import {odataProxy} from "../tools/osd-proxy.mjs";
-import {mountServices} from "../tools/osd-icf.mjs";
+import {mountServices, channels as pushChannels} from "../tools/osd-icf.mjs";
+import {mountChannels} from "../tools/osd-apc.mjs";
+import {zcl_apc_host} from "../output/zcl_apc_host.clas.mjs";
 
 await initializeABAP();
 
@@ -138,6 +140,25 @@ export function startServer(quiet) {
   }
 
   const server = app.listen(PORT);
+
+  // Push channels: the websocket half of what a repository declares.
+  //
+  // A *.sapc.xml names a path, a handler class and whether it is stateful,
+  // and tools/osd-apc.mjs drives that handler through zcl_apc_host, so a
+  // class written for cl_apc_wsp_ext_stateful_base runs here unchanged. The
+  // upgrade is answered on this listener rather than proxied to the serving
+  // child, which is a limit worth knowing: an activated push channel does
+  // not go live until this process restarts, the way the OData path did
+  // before it was proxied. Written down in docs/adt-facade.md.
+  const channels = mountChannels(server, pushChannels(process.cwd()), {
+    host: zcl_apc_host,
+    log: (line) => console.error(line),
+  });
+  if (quiet !== true) {
+    for (const channel of channels) {
+      console.log(`Push channel on ws://localhost:${PORT}${channel.path}  (${channel.handler})`);
+    }
+  }
 
   // HTTPS beside it, on the SAP-shaped port for this instance. Eclipse
   // refuses a plain-HTTP project outright, so without TLS that client cannot

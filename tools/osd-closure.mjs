@@ -109,9 +109,23 @@ export function code(source) {
   return out.join("\n");
 }
 
-const readable = (file) => {
+// Object types that are named by a string rather than called by an
+// identifier. A class is written into the code; a Web Repository object is
+// looked up at run time out of a literal:
+//
+//     ls_key-objid = 'ZO4D_06_PLASMA'.
+//     CALL FUNCTION 'WWWDATA_IMPORT' EXPORTING key = ls_key ...
+//
+// which is exactly the text stripping removes. So these are matched against
+// the whole source and the rest against the code alone. Getting this wrong
+// is not symmetrical: a missing class fails the build loudly, a missing
+// image is a page that renders with a hole in it.
+const BY_NAME = new Set(["W3MI", "MSAG"]);
+
+const readable = (file, literals) => {
   if (/\.abap$/i.test(file)) {
-    return code(readFileSync(file, "utf8"));
+    const source = readFileSync(file, "utf8");
+    return literals === true ? source : code(source);
   }
   // an XML descriptor names types and supertypes as element content, and none
   // of it is a string literal in the ABAP sense
@@ -138,17 +152,18 @@ export function closure(folder, entries, options = {}) {
   const queue = [...wanted];
   while (queue.length > 0) {
     const current = objects.get(queue.shift());
-    const text = current.files.map(readable).join("\n").toUpperCase();
+    const asCode = current.files.map((f) => readable(f, false)).join("\n").toUpperCase();
+    const asWritten = current.files.map((f) => readable(f, true)).join("\n").toUpperCase();
     for (const [name, object] of objects) {
       if (seen.has(name) || name === current.name) {
         continue;
       }
+      const text = BY_NAME.has(object.type) ? asWritten : asCode;
       // a word boundary, so ZCL_O4D_CELL16 is not matched by ZCL_O4D_CELL120
       if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) {
         seen.add(name);
         queue.push(name);
       }
-      void object;
     }
   }
 
