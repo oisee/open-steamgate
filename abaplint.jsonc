@@ -10,9 +10,19 @@
       "files": "/**/*.*"
     },
     {
+      // everything but src/tcp: open-abap-apc carries the APC family, with
+      // the five methods and the alias chain a real handler needs, and core
+      // still has the two-method version. Two of the same file is an error,
+      // so core's is the one that goes.
       "url": "https://github.com/open-abap/open-abap-core",
       "folder": "/.local/lars/open-abap-core",
-      "files": "/src/**/*.*"
+      "files": "/src/{abap,adbc,bcs,bigint,classrun,conv,date_time,ddic,demo,exceptions,fdt,fugr,http,ixml,json,kernel,memory,numberrange,oauth2,oo,package,persistence,rtti,shma,smim,sxml,unit,uuid,w3mi,xco}/**/*.*"
+    },
+    {
+      // and the ones that sit at the root of src rather than in a folder
+      "url": "https://github.com/open-abap/open-abap-core",
+      "folder": "/.local/lars/open-abap-core",
+      "files": "/src/*.*"
     },
     {
       "url": "https://github.com/open-abap/express-icf-shim",
@@ -23,6 +33,14 @@
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
       "files": "/src/{oo,ddic,exceptions,internal}/**/*.*"
+    },
+    {
+      // ABAP Push Channels: the SAP-named family a real websocket handler
+      // implements (five methods where core has two, the alias chain that
+      // carries co_connect_mode_accept) and the host that drives one off
+      // stack. Local only for now, which is why there is no url to clone.
+      "folder": "/.local/lars/open-abap-apc",
+      "files": "/src/{apc,host}/**/*.*"
     },
     {
       // the pack, delta and zlib half of abapGit, the objects

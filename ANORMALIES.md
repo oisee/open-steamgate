@@ -133,6 +133,70 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/unit/zcl_stg_gateway_test.clas.testclasses.abap` `ltcl_sadl->entity_set_with_filter`
 - Upstream version containing a fix: 2.13.86
 
+### ANOMALY-2026-09-13-conv-second-in-expression — The second constructor expression in one expression has no type
+
+- Status: `fixed locally, not released`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler 2.13.86`, `@abaplint/core 2.120.5`
+- Affected ABAP statement, runtime API or adapter: `CONV` (and any constructor expression resolved through an inferred type) when more than one appears in one expression
+- Minimal ABAP reproducer: `foo = CONV f( 1 ) + CONV f( 2 ).`
+- Exact command used to run it: `npx abap_transpile` over oisee/vivid-vibes; isolated with the transpiler's own `runSingle`
+- Expected SAP behaviour: both are floats; ABAP has no opinion about how many of them fit in a statement
+- Actual open-abap behaviour: the transpile ends with `TypeNameOrInfer, type not found: f`. The syntax check records an InferredType reference for the first name and none for the rest, and the transpiler had nothing else to fall back on
+- Impact on open-steamgate: none of ours; 786 uses of `CONV f(` across 69 files of vivid-vibes, 136 of them with two in one expression, so the demo payload did not transpile at all
+- Smallest safe workaround: split the expression into two statements
+- Upstream issue: none yet, PR deferred by Alice 2026-09-13. Fixed in a local branch of the transpiler (`fix/conv-builtin-type`): a built-in type name that names exactly one type (`i`, `f`, `string`, `xstring`, `d`, `t`, `int8`, `utclong`, `decfloat16/34`) is enough on its own when no reference was recorded
+- Regression-test location: the transpiler's `test/single_statements.ts`, local branch
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-13-paren-before-conv — A parenthesised group before `* CONV ... /` generates unbalanced JavaScript
+
+- Status: `fixed locally, not released`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler 2.13.86`
+- Affected ABAP statement, runtime API or adapter: arithmetic where a constructor expression sits between two operators
+- Minimal ABAP reproducer: `foo = ( 1 - 2 ) * CONV f( 3 ) / 256.`
+- Exact command used to run it: `npx abap_transpile`; the generated module then fails to parse with `Private field '#x' must be declared in an enclosing class`, which is V8 recovering from unbalanced parentheses somewhere above
+- Expected SAP behaviour: `(( 1 - 2 ) * conv) / 256`, left to right
+- Actual open-abap behaviour: the emitted JavaScript drops `( 1 - 2 ) *` and closes one bracket too many. The rearranger flattens a nested arithmetic Source into its parent so precedence can be decided across the whole chain, and a constructor expression is five children rather than one, so its type name and body landed beside the operators and were read as operands
+- Impact on open-steamgate: none of ours; 15 of 85 effect classes in vivid-vibes emitted modules that could not be imported, and one broken module breaks the whole runtime because `init.mjs` imports every class
+- Smallest safe workaround: assign the constructor expression to a variable first
+- Upstream issue: none yet, PR deferred. Fixed in the same local branch: the head of the flattened chain is wrapped back into one Source before it is hoisted
+- Regression-test location: the transpiler's `test/single_statements.ts`, local branch
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-13-builtin-as-method — A built-in function in such an expression is emitted as a method of the class
+
+- Status: `fixed locally, not released`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler 2.13.86`
+- Affected ABAP statement, runtime API or adapter: any built-in function call (`cos`, `sin`, `nmax`, `lines`, `frac`) inside an expression carrying more than one constructor expression
+- Minimal ABAP reproducer: in a class, `lv = CONV f( 1 ) + CONV f( 2 ) * nmax( val1 = 0 val2 = lv_ax * cos( lv_ax ) ).`
+- Exact command used to run it: `npx abap_transpile`, then calling the method: `TypeError: this.cos is not a function`
+- Expected SAP behaviour: `cos` is a built-in unless the class defines a method of that name, in which case the method wins
+- Actual open-abap behaviour: emitted as `await this.cos( )`. The decision rests on a BuiltinMethodReference the syntax check records, and in this shape it records none, so the call fell through to the `this.` case. Same root as the two above: one reference per expression
+- Impact on open-steamgate: none of ours; it is why several vivid-vibes effects failed at runtime rather than at build time, which is the worse of the two
+- Smallest safe workaround: split the expression
+- Upstream issue: none yet, PR deferred. Fixed in the same local branch: an unrecorded name is taken as a built-in only when it is the first call in its chain, `abaplint.BuiltIn.searchBuiltin` knows it, and the enclosing class has no method of that name. The chain condition matters, `mi_merge->get_result( )-stage->count( )` is a method called COUNT
+- Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-13-default-ignore — `DEFAULT IGNORE` is parsed and not honoured, and the project cannot switch the rule off
+
+- Status: `open`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/core 2.120.5`, `@abaplint/transpiler-cli 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `METHODS m DEFAULT IGNORE` / `DEFAULT FAIL` in an interface
+- Minimal ABAP reproducer: an interface with one `DEFAULT IGNORE` method and a class that implements the interface and not that method
+- Exact command used to run it: `npx abaplint`, then `npx abap_transpile`
+- Expected SAP behaviour: a class need not implement an optional interface method; calling it does nothing (`IGNORE`) or raises (`FAIL`)
+- Actual open-abap behaviour: `implement_methods` demands it anyway, and turning the rule off in `abaplint.jsonc` changes nothing for the transpile, which runs its own mandatory rule set rather than the project's
+- Impact on open-steamgate: none of ours; found by open-steamgate on vivid-vibes, where an interface grew two methods and fifty implementors were never updated. It is the reason the repository needs 154 written-out implementations rather than two words in the interface
+- Smallest safe workaround: implement the method with an empty body, which is what the patch for that repository does
+- Upstream issue: none yet; the transpiler session owns it, batched with the three above
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
 ## Resolved anomalies
 
 (none yet)
