@@ -3,7 +3,7 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, repoFiles, repoZip, writeData} from "../tools/segw-tree.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {dirname} from "node:path";
 import {startServer} from "./start.mjs";
@@ -241,6 +241,51 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     const res = await fetch(`${DEFAULT_URL}/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet`);
     expect(res.status).to.equal(400);
     expect(await res.text()).to.contain("GenerateSet needs $filter=Project eq");
+  });
+
+  // the abapGit repository of a project: what a system pulls to have it.
+  // The registration objects are stg-compile's oracle, the tree is the file
+  // that went in, the classes are segw-gen's.
+  it("RepoFileSet is the abapGit repository of a project, IWSV and IWMO as stg-compile writes them", async () => {
+    const compiled = compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml", functionModules: loadFunctionGroups(["src/demo"])});
+    await pushFunctionGroups(DEFAULT_URL, "src/demo");
+    await pushFile(DEFAULT_URL, compiled.iwpr);
+    const repo = await repoFiles(DEFAULT_URL, "ZSTG_DEMO");
+
+    expect(Object.keys(repo)).to.include(".abapgit.xml");
+    expect(Object.keys(repo)).to.include("src/package.devc.xml");
+    expect(repo[".abapgit.xml"]).to.contain("<STARTING_FOLDER>/src/</STARTING_FOLDER>");
+    // the tree, byte for byte what the import took in
+    expect(repo["src/zstg_demo.iwpr.xml"]).to.equal(compiled.iwpr);
+    // the registration objects, byte for byte what stg-compile writes
+    for (const [name, content] of Object.entries(compiled.files)) {
+      if (name.endsWith(".iwpr.xml")) {
+        continue;
+      }
+      expect(repo["src/" + name], name).to.equal(content);
+    }
+    // the classes, byte for byte what segw-gen writes
+    const oracle = generate(compiled.iwpr, {functionModules: loadFunctionGroups(["src/demo"]), warnings: []});
+    for (const [name, content] of Object.entries({...oracle.files, ...oracle.ext})) {
+      expect(repo["src/" + name], name).to.equal(content);
+    }
+    expect(Object.keys(repo).length).to.equal(2 + Object.keys(compiled.files).length + Object.keys(oracle.files).length + Object.keys(oracle.ext).length);
+  });
+
+  it("RepoSet is the same repository as one zip", async () => {
+    const {zip, files} = await repoZip(DEFAULT_URL, "ZSTG_DEMO");
+    const repo = await repoFiles(DEFAULT_URL, "ZSTG_DEMO");
+    expect(files).to.equal(Object.keys(repo).length);
+    // a zip: PK\x03\x04 at the start, the end of central directory at the end,
+    // and the local file header of every entry carries its name
+    expect(zip.subarray(0, 4).toString("latin1")).to.equal("PK\u0003\u0004");
+    expect(zip.subarray(-22, -18).toString("latin1")).to.equal("PK\u0005\u0006");
+    const text = zip.toString("latin1");
+    for (const name of Object.keys(repo)) {
+      expect(text, name).to.contain(name);
+    }
+    // put the seeded project back for whatever runs after
+    await pushFile(DEFAULT_URL, readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"));
   });
 
   it("GET ExportSet of a project nobody imported is 400", async () => {

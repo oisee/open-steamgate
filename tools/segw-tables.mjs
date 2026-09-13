@@ -19,7 +19,7 @@
 // ExportSet (GET the project as one), served by the hand-written
 // zcl_zstg_segw_dpc_ext). Every field is CHAR of the size class above the
 // longest value seen (1, 4, 10, 32, 40, 60, 80), LANG for SYLANGU, STRING
-// above 80: SEGW's flags, counters and timestamps come back out of the
+// above 80 and for free text: SEGW's flags, counters and timestamps come back out of the
 // tables exactly as they went in, which is what a byte-identical export
 // needs. One column is ours: STG_SEQ (INT4) keeps the row order of the
 // imported file, because SEGW does not write rows in key order.
@@ -145,6 +145,17 @@ function fieldOrder(chains) {
   return order;
 }
 
+// The sizes come from the projects we have, and a sample can be narrower
+// than the real column: the description of SEGW's project is 40 characters
+// in every corpus file, our own demo has 41 and this service's own YAML 83.
+// Free text (a DESCRIPTION, a *_LABEL) is therefore a STRING: it holds
+// whatever a project puts there, and a string round trips exactly like a
+// CHAR field (trailing blanks are trimmed on both). Other fields stay as
+// the sample says; the import refuses anything a column cannot hold, so a
+// value that does not fit is a 400 naming the table, the field and the
+// length, never a silent cut.
+const isFreeText = (field) => /(^|_)(DESCRIPTION|LABEL)$/.test(field);
+
 function sizeClass(max) {
   for (const n of [1, 4, 10, 32, 40, 60, 80]) {
     if (max <= n) {
@@ -180,7 +191,7 @@ export function derive(folders) {
     const order = fieldOrder(chains.get(tag));
     const fields = {};
     for (const f of order) {
-      fields[f] = f === "PROJECT" ? "CHAR 30" : f === "SYLANGU" ? "LANG" : sizeClass(longest.get(tag).get(f));
+      fields[f] = f === "PROJECT" ? "CHAR 30" : f === "SYLANGU" ? "LANG" : isFreeText(f) ? "STRG" : sizeClass(longest.get(tag).get(f));
     }
     // the key is the shortest prefix of the fields that is unique in every
     // file (a DDIC key is a prefix), and never shorter than PROJECT,
@@ -303,7 +314,9 @@ entities:
   // the import: POST an IWPR file as Content, the project's rows are
   // replaced (zcl_stg_segw_import through zcl_zstg_segw_dpc_ext); the
   // export: GET ExportSet('P'), the project as a file (zcl_stg_segw_export);
-  // DELETE NodeSet(P, uuid): a node with its subtree (zcl_stg_segw_tree)
+  // DELETE NodeSet(P, uuid): a node with its subtree (zcl_stg_segw_tree);
+  // RepoSet / RepoFileSet: the project as an abapGit repository, what a
+  // system pulls to have it (zcl_stg_segw_repo)
   s += `  Import:
     set: ImportSet
     description: "POST an IWPR file as Content; the project's rows in every table are replaced"
@@ -348,6 +361,28 @@ entities:
       Optional: {type: String(1), field: OPTIONAL}
       Remote: {type: String(1), field: REMOTE}
       StgSeq: {type: Int32, field: STG_SEQ}
+  Repo:
+    set: RepoSet
+    description: "GET RepoSet('P'): the project as an abapGit repository, one zip in base64"
+    keys: [Project]
+    properties:
+      Project: {type: String(30)}
+      Content: {type: String}
+      Files: {type: Int32}
+    creatable: false
+    updatable: false
+    deletable: false
+  RepoFile:
+    set: RepoFileSet
+    description: "GET RepoFileSet?$filter=Project eq 'P': the files of that repository (Name, Content)"
+    keys: [Project, Name]
+    properties:
+      Project: {type: String(30)}
+      Name: {type: String(80)}
+      Content: {type: String}
+    creatable: false
+    updatable: false
+    deletable: false
   Generate:
     set: GenerateSet
     description: "GET GenerateSet?$filter=Project eq 'P': the generated classes as files (Name, Content), segw-gen in ABAP"

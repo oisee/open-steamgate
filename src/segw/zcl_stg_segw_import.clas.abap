@@ -94,6 +94,8 @@ CLASS zcl_stg_segw_import IMPLEMENTATION.
     DATA lv_tag     TYPE string.
     DATA lv_seq     TYPE i.
     DATA lv_index   TYPE i.
+    DATA lv_text    TYPE string.
+    DATA lv_back    TYPE string.
     DATA lv_subrc   TYPE sy-subrc.
     FIELD-SYMBOLS <ls_line> TYPE any.
     FIELD-SYMBOLS <lv_value> TYPE any.
@@ -127,7 +129,13 @@ CLASS zcl_stg_segw_import IMPLEMENTATION.
         IF sy-subrc <> 0.
           fail( |{ ls_row-tag }.{ ls_field-name }: not a field of ZSTG_{ ls_row-tag }| ).
         ENDIF.
-        <lv_value> = unescape( ls_field-value ).
+        lv_text = unescape( ls_field-value ).
+        <lv_value> = lv_text.
+        lv_back = <lv_value>.
+        IF lv_back <> lv_text.
+* a CHAR column cuts silently; the file would come back changed
+          fail( |{ ls_row-tag }.{ ls_field-name }: the value does not fit the column of ZSTG_{ ls_row-tag } ({ strlen( lv_text ) } characters)| ).
+        ENDIF.
         IF ls_field-name = 'PROJECT'.
           IF rs_result-project IS INITIAL.
             rs_result-project = <lv_value>.

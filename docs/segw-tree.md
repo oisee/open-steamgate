@@ -192,6 +192,36 @@ per operand and a service worker's stack gives out near 800
 (abaplint/transpiler#1836 flattens the chain; when it is on npm, both
 generators can drop the rule).
 
+## The project as an abapGit repository
+
+`GET RepoFileSet?$filter=Project eq 'P'` gives the whole abapGit repository
+of a project as rows (`Name`, `Content`), `GET RepoSet('P')` the same as one
+zip in base64 (`Content`, `Files`), and `npm run segw:tree repo <P> --out
+<dir> [--zip <file>]` writes it. `zcl_stg_segw_repo` puts together
+`.abapgit.xml` (`STARTING_FOLDER /src/`, `FOLDER_LOGIC PREFIX`),
+`src/package.devc.xml`, the tree (`ExportSet`), the registration objects
+`*.iwsv.xml` and `*.iwmo.xml` (the IWSV/IWMO templates of stg-compile, in
+ABAP) and the generated classes with their XML (`GenerateSet`). The test
+compiles the demo YAML, imports it and expects the registration objects to
+equal stg-compile's byte for byte and the classes segw-gen's.
+
+That is how a project reaches a system: abapGit pulls the repository and
+creates and activates the classes, we write nothing into a live system.
+The other route, a class that creates and activates objects through the
+Class Builder and a transport, is not built; it would need a system to
+develop against and is a decision of its own.
+
+**Free text and truncation.** The size of a column comes from the projects
+we have, and a sample can be narrower than the real field: SEGW's project
+description is 40 characters in every corpus file, our own demo has 41 and
+this service's own YAML 83. So `DESCRIPTION` and `*_LABEL` are STRING
+columns, and every other field keeps the derived size. The import no longer
+lets a value be cut: `zcl_stg_segw_import` writes each field, reads it back
+and refuses the whole import when they differ, with the table, the field
+and the length ("SBO_ET.NAME: the value does not fit the column of
+ZSTG_SBO_ET (66 characters)"). Before that check a long description came
+back shortened from `ExportSet`, silently.
+
 ## The Cloud pass
 
 `npm run segw:cloud` runs abaplint over `src/`, the generated table sources
@@ -209,7 +239,6 @@ of the narrowed file list, not language findings.
 
 - The editor is `webapp/segw/` (`docs/segw-editor.md`); what it still
   lacks is listed there.
-- The editor's Generate button to `GenerateSet` (the colleague's switch,
-  now that the mapped fixture generates byte-identically).
-- Generate on a system: where the files land (gen/, src/, a transport) is
-  still a Node concern; on A4H it would be the class builder's.
+- Pull the repository of a project into A4H with abapGit and see the
+  service run there (needs Alice's go: it is a write to a real system).
+- The editor: a "Download repository" button over `RepoSet`.

@@ -46,7 +46,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      Description: {type: String(60), field: DESCRIPTION}
+      Description: {type: String, field: DESCRIPTION}
       StgSeq: {type: Int32, field: STG_SEQ}
   Artifact:
     set: ArtifactSet
@@ -116,7 +116,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      Description: {type: String(32), field: DESCRIPTION}
+      Description: {type: String, field: DESCRIPTION}
       StgSeq: {type: Int32, field: STG_SEQ}
   MappingHeader:
     set: MappingHeaderSet
@@ -216,7 +216,7 @@ entities:
     properties:
       Project: {type: String(30), field: PROJECT}
       Language: {type: String(1), field: SYLANGU}
-      Description: {type: String(60), field: DESCRIPTION}
+      Description: {type: String, field: DESCRIPTION}
       StgSeq: {type: Int32, field: STG_SEQ}
   ServiceEntity:
     set: ServiceEntitySet
@@ -346,7 +346,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      AssocLabel: {type: String(32), field: ASSOC_LABEL}
+      AssocLabel: {type: String, field: ASSOC_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   AssociationSet:
     set: AssociationSetSet
@@ -380,7 +380,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      AsstLabel: {type: String(32), field: ASST_LABEL}
+      AsstLabel: {type: String, field: ASST_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   ComplexType:
     set: ComplexTypeSet
@@ -498,7 +498,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      EsetLabel: {type: String(60), field: ESET_LABEL}
+      EsetLabel: {type: String, field: ESET_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   EntityType:
     set: EntityTypeSet
@@ -539,7 +539,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      EtLabel: {type: String(60), field: ET_LABEL}
+      EtLabel: {type: String, field: ET_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   FunctionImport:
     set: FunctionImportSet
@@ -579,7 +579,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      FiLabel: {type: String(32), field: FI_LABEL}
+      FiLabel: {type: String, field: FI_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   FunctionParam:
     set: FunctionParamSet
@@ -622,7 +622,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      FiParamLabel: {type: String(32), field: FI_PARAM_LABEL}
+      FiParamLabel: {type: String, field: FI_PARAM_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   SboMem:
     set: SboMemSet
@@ -701,7 +701,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      NavpLabel: {type: String(10), field: NAVP_LABEL}
+      NavpLabel: {type: String, field: NAVP_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   Property:
     set: PropertySet
@@ -779,7 +779,7 @@ entities:
       Language: {type: String(1), field: SYLANGU}
       Project: {type: String(30), field: PROJECT}
       NodeUuid: {type: String(32), field: NODE_UUID}
-      PropLabel: {type: String(60), field: PROP_LABEL}
+      PropLabel: {type: String, field: PROP_LABEL}
       StgSeq: {type: Int32, field: STG_SEQ}
   RefConstraint:
     set: RefConstraintSet
@@ -919,6 +919,28 @@ entities:
       Optional: {type: String(1), field: OPTIONAL}
       Remote: {type: String(1), field: REMOTE}
       StgSeq: {type: Int32, field: STG_SEQ}
+  Repo:
+    set: RepoSet
+    description: "GET RepoSet('P'): the project as an abapGit repository, one zip in base64"
+    keys: [Project]
+    properties:
+      Project: {type: String(30)}
+      Content: {type: String}
+      Files: {type: Int32}
+    creatable: false
+    updatable: false
+    deletable: false
+  RepoFile:
+    set: RepoFileSet
+    description: "GET RepoFileSet?$filter=Project eq 'P': the files of that repository (Name, Content)"
+    keys: [Project, Name]
+    properties:
+      Project: {type: String(30)}
+      Name: {type: String(80)}
+      Content: {type: String}
+    creatable: false
+    updatable: false
+    deletable: false
   Generate:
     set: GenerateSet
     description: "GET GenerateSet?$filter=Project eq 'P': the generated classes as files (Name, Content), segw-gen in ABAP"

@@ -170,6 +170,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
     TYPES: BEGIN OF ty_model,
              project          TYPE string,
              service          TYPE string,
+             model            TYPE string,
              project_type     TYPE string,
              description      TYPE string,
              namespace        TYPE string,
@@ -610,6 +611,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     READ TABLE lt_md INDEX 1 INTO ls_row.
     IF sy-subrc = 0.
       rs_model-namespace = val( is_row = ls_row iv_field = 'VALUE_NS' ).
+      rs_model-model     = val( is_row = ls_row iv_field = 'TECHNICAL_NAME' ).
     ENDIF.
     READ TABLE lt_sv INDEX 1 INTO ls_row.
     IF sy-subrc = 0.

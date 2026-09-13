@@ -229,6 +229,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `src/segw/`, kept by `stg-compile --all`), `GET ExportSet('P')` for the
   pull (`zcl_stg_segw_export`, the file written in ABAP); `DELETE
   NodeSet(P, uuid)` removes a node with its subtree (`zcl_stg_segw_tree`);
+  `GET RepoFileSet?$filter=Project eq 'P'` (or `RepoSet('P')` as a zip, or
+  `npm run segw:tree repo <P> --out <dir>`) is the project as an abapGit
+  repository, which is how it reaches a system (`zcl_stg_segw_repo`);
   `GET GenerateSet?$filter=Project eq 'P'` is segw-gen in ABAP
   (`zcl_stg_segw_gen` + `zcl_stg_segw_gen_dpc` + `zcl_stg_segw_gen_rfc`:
   MPC, DPC with RFC and search-help bodies, XML, EXT pair), byte-identical

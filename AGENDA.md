@@ -447,8 +447,14 @@ the generator, the editor is the file.
    `SegwProject-manage`, `test/e2e/segw.spec.mjs`. Generate in ABAP landed
    in three stages (16d7988, 3c50c73, a913296: MPC, DPC + EXT pair, RFC
    and search-help bodies with `ZSTG_FM_PARAM`), every file byte-identical
-   to segw-gen over the corpus. Next: SEGW's wizards (DDIC import, map to
-   data source), where Generate's files land on a system.
+   to segw-gen over the corpus. Where a project's files land on a system is
+   answered too (Alice, 2026-09-13, "вариант 1"): `RepoSet` / `RepoFileSet`
+   give the project as an abapGit repository (`.abapgit.xml`, the package,
+   the tree, IWSV/IWMO, the classes), abapGit pulls it and creates and
+   activates the classes; we write nothing into a live system. The other
+   route (a class over the Class Builder and a transport) stays unbuilt.
+   Next: SEGW's wizards (DDIC import, map to data source), that pull
+   against A4H (needs Alice's go), the editor's download button.
 
 Order: after `$search` / console / T0009 (this list), then 1, then 2.
 Merging our own PRs in open-abap-odata: Lars said yes (no time), so the

@@ -47,7 +47,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "DESCRIPTION": "CHAR 60"
+   "DESCRIPTION": "STRG"
   }
  },
  "SBD_GA": {
@@ -130,7 +130,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "DESCRIPTION": "CHAR 32"
+   "DESCRIPTION": "STRG"
   }
  },
  "SBD_MH": {
@@ -248,7 +248,7 @@
   "fields": {
    "PROJECT": "CHAR 30",
    "SYLANGU": "LANG",
-   "DESCRIPTION": "CHAR 60"
+   "DESCRIPTION": "STRG"
   }
  },
  "SBD_SE": {
@@ -401,7 +401,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "ASSOC_LABEL": "CHAR 32"
+   "ASSOC_LABEL": "STRG"
   }
  },
  "SBO_AT": {
@@ -440,7 +440,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "ASST_LABEL": "CHAR 32"
+   "ASST_LABEL": "STRG"
   }
  },
  "SBO_CT": {
@@ -575,7 +575,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "ESET_LABEL": "CHAR 60"
+   "ESET_LABEL": "STRG"
   }
  },
  "SBO_ET": {
@@ -621,7 +621,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "ET_LABEL": "CHAR 60"
+   "ET_LABEL": "STRG"
   }
  },
  "SBO_FI": {
@@ -666,7 +666,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "FI_LABEL": "CHAR 32"
+   "FI_LABEL": "STRG"
   }
  },
  "SBO_FP": {
@@ -714,7 +714,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "FI_PARAM_LABEL": "CHAR 32"
+   "FI_PARAM_LABEL": "STRG"
   }
  },
  "SBO_MEM": {
@@ -805,7 +805,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "NAVP_LABEL": "CHAR 10"
+   "NAVP_LABEL": "STRG"
   }
  },
  "SBO_PR": {
@@ -888,7 +888,7 @@
    "SYLANGU": "LANG",
    "PROJECT": "CHAR 30",
    "NODE_UUID": "CHAR 32",
-   "PROP_LABEL": "CHAR 60"
+   "PROP_LABEL": "STRG"
   }
  },
  "SBO_RC": {

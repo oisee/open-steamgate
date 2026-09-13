@@ -218,6 +218,8 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
     METHODS delete_unknown_node_is_400 FOR TESTING.
     METHODS generate_writes_the_mpc FOR TESTING.
     METHODS function_group_fills_the_table FOR TESTING.
+    METHODS value_too_long_is_400 FOR TESTING.
+    METHODS repo_is_an_abapgit_repository FOR TESTING.
     METHODS count IMPORTING iv_set TYPE string iv_needle TYPE string RETURNING VALUE(rv_count) TYPE i.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
@@ -528,6 +530,46 @@ CLASS ltcl_import IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Parameter":"IV_ID","Kind":"I","Typ":"CHAR10","Optional":"X","Remote":"X","StgSeq":1' ) ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Parameter":"ET_RETURN","Kind":"T","Typ":"BAPIRET2"' ) ).
+  ENDMETHOD.
+
+  METHOD value_too_long_is_400.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_xml      TYPE string.
+
+    lv_xml = iwpr( ).
+    REPLACE '<NAME>Travel</NAME>' IN lv_xml
+      WITH '<NAME>TravelWithAnEntityNameFarLongerThanTheColumnOfTheTableThatHoldsIt</NAME>'.
+    ls_response = post( lv_xml ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'SBO_ET.NAME: the value does not fit the column of ZSTG_SBO_ET' ) ).
+
+* nothing of that import was written
+    cl_abap_unit_assert=>assert_equals( act = count( iv_set = 'EntityTypeSet' iv_needle = '"Project"' ) exp = 0 ).
+  ENDMETHOD.
+
+  METHOD repo_is_an_abapgit_repository.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZUT_IMP'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/RepoFileSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":".abapgit.xml"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"src/package.devc.xml"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"src/zut_imp.iwpr.xml"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Name":"src/zcl_zut_imp_mpc.clas.abap"' ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '<STARTING_FOLDER>/src/</STARTING_FOLDER>' ) ).
+
+* the same repository as one zip: PK, and the base64 is not empty
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/RepoSet('ZUT_IMP')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Content":"UEsDB' ) ).
   ENDMETHOD.
 
 ENDCLASS.
