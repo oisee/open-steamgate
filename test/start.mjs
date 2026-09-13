@@ -17,16 +17,6 @@ await zcl_stg_segw_registry.register();
 // tools/segw-shlp.mjs generated this
 await zcl_stg_shlp_registry.register();
 
-// The data layer of OSD reads through the runtime's own database, which it
-// boots itself when it is used from a command line. Here the runtime is
-// already up, so the one thing to replace is where the connection comes
-// from: booting a second time would re-run the seed under a live server.
-class ServedData extends Data {
-  boot() {
-    return Promise.resolve(abap.context.databaseConnections["DEFAULT"]);
-  }
-}
-
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
 
@@ -61,7 +51,10 @@ export function startServer(quiet) {
   // the OData path below stays ABAP behind the ICF shim as it always was.
   // Both fronts share this listener, which is why a client points at one
   // address for both. docs/adt-facade.md is the contract.
-  app.use(adtRouter({data: new ServedData()}).router);
+  // the data layer of OSD boots its own runtime when it is used from a
+  // command line; here one is already up, so it is handed the connection
+  // rather than starting a second and re-running the seed under a live server
+  app.use(adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})}).router);
 
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
     try {
