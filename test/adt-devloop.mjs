@@ -23,6 +23,22 @@ CLASS zcl_osd_scratch IMPLEMENTATION.
 ENDCLASS.
 `;
 
+// a second object that calls the first, so an activation has something to
+// break: renaming greet leaves ZCL_OSD_SCRATCH self-consistent and leaves
+// this one calling a method that is gone
+const CALLER = "ZCL_OSD_SCRATCH_USER";
+const CALLER_SOURCE = `CLASS zcl_osd_scratch_user DEFINITION PUBLIC CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS shout RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+
+CLASS zcl_osd_scratch_user IMPLEMENTATION.
+  METHOD shout.
+    rv = zcl_osd_scratch=>greet( ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+
 describe("tools/adt-facade: the development loop", () => {
   let server;
   let port;
@@ -51,9 +67,11 @@ describe("tools/adt-facade: the development loop", () => {
   after(() => {
     server.close();
     // the scratch object is a file like any other, so it is removed like one
-    const entry = store.find("CLAS", SCRATCH);
-    if (entry !== undefined && existsSync(entry.file)) {
-      rmSync(entry.file);
+    for (const name of [SCRATCH, CALLER]) {
+      const entry = store.find("CLAS", name);
+      if (entry !== undefined && existsSync(entry.file)) {
+        rmSync(entry.file);
+      }
     }
   });
 
@@ -353,6 +371,34 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain('activationExecuted="false"');
       expect(xml).to.contain("<msg:msg");
       expect(xml.toUpperCase()).to.contain(SCRATCH);
+    });
+
+    it("source that holds but breaks its callers does not activate", async function () {
+      this.timeout(120000);
+      // the object is written back whole and healthy first, then a caller
+      store.write("CLAS", SCRATCH, SOURCE);
+      store.write("CLAS", CALLER, CALLER_SOURCE);
+      expect(store.check("CLAS", CALLER).issues).to.have.length(0);
+
+      // the rename: legal ABAP, self-consistent, and it takes the method
+      // the caller calls out from under it
+      const renamed = SOURCE.replaceAll("greet", "greet_zzz");
+      const {handle} = await lock();
+      await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: renamed});
+
+      // the object alone passes its own check, which is why this is the
+      // case that used to come back as an empty success
+      expect(store.check("CLAS", SCRATCH).issues).to.have.length(0);
+
+      const res = await activate(SCRATCH);
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain('activationExecuted="false"');
+      // it names the caller that broke, not only the object that was written
+      expect(xml.toUpperCase()).to.contain(CALLER);
+      expect(xml).to.contain("greet");
+
+      store.write("CLAS", SCRATCH, SOURCE);
     });
 
     it("an activation of nothing is refused rather than reported as success", async () => {

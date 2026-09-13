@@ -549,14 +549,52 @@ export class ObjectStore {
     }
   }
 
-  // activation is that check over the object and everything that uses it:
-  // a local system has no queue, so it either holds or it does not. The
-  // verdict comes back at once and the modules are written afterwards,
+  // the objects whose source names this one, which is who an activation can
+  // break. An over-approximation on purpose: a mention in a comment or a
+  // string counts, so the list is longer than the truth and never shorter,
+  // and a healthy object costs one check to clear. The cheap direction to be
+  // wrong in — the expensive one is telling a client a rename was fine.
+  dependents(type, name) {
+    const needle = String(name).toUpperCase();
+    const word = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    const out = [];
+    for (const object of this.registry().getObjects()) {
+      if (object.getType() === type && object.getName().toUpperCase() === needle) {
+        continue;
+      }
+      for (const file of object.getFiles()) {
+        if (word.test(file.getRaw())) {
+          out.push({type: object.getType(), name: object.getName()});
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  // activation is that check over the object AND everything that uses it: a
+  // local system has no queue, so it either holds or it does not. Checking
+  // the object alone is the false green this whole thing exists to catch —
+  // rename a method its callers use and the object is still self-consistent,
+  // while the system it lives in no longer compiles. A real system refuses
+  // that activation, so this one does too, and it says which caller broke.
+  //
+  // The verdict comes back at once and the modules are written afterwards,
   // because the façade answers the client with the verdict and the next
   // request is what needs the output.
   activate(type, name) {
     const result = this.check(type, name);
-    return {...result, active: result.issues.length === 0};
+    if (result.issues.length > 0) {
+      return {...result, active: false, dependents: []};
+    }
+    const broken = [];
+    for (const dependent of this.dependents(type, name)) {
+      const checked = this.check(dependent.type, dependent.name);
+      if (checked.issues.length > 0) {
+        broken.push(checked);
+      }
+    }
+    return {...result, active: broken.length === 0, dependents: broken};
   }
 
   // the transpile behind an activation: the modules the runtime loads.

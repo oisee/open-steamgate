@@ -381,7 +381,11 @@ export function adtRouter(options = {}) {
       const results = named.map((o) => store.activate(o.type, o.name));
       const failed = results.filter((r) => r.active === false);
       if (failed.length > 0) {
-        res.status(200).type("application/xml").send(activationFailureDocument(failed.map((r, i) => ({...r, type: named[i].type}))));
+        // the object that did not activate, then whatever it broke: an
+        // object with no issues of its own still belongs in the list,
+        // because it is still inactive and a client shows it as such
+        const entries = failed.flatMap((r) => [r, ...(r.dependents ?? [])]);
+        res.status(200).type("application/xml").send(activationFailureDocument(entries));
         return;
       }
       // the modules the runtime loads are written after the verdict goes out,
