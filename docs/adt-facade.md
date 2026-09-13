@@ -288,11 +288,16 @@ registry caches by URL and never re-reads, so the whole transpiled ABAP
 module graph is pinned at boot for the life of the process.
 
 The asymmetry is the part that bites, because it is invisible. ABAP Unit
-over ADT *does* see the new code — `tools/osd-unit.mjs` imports the
-testclasses module dynamically, outside the boot graph — so a developer
-can take a red unit verdict on the code they just wrote while a Fiori
-client in the next tab builds against the model from before they wrote it.
-Nothing in either answer says which one is stale.
+over ADT *does* see the new code: the façade runs it through
+`UnitRun.runDetached`, which spawns a child process that boots its own
+runtime against its own in-memory database. That child is younger than
+the edit, so it loads the module that was just written. It is there for
+isolation — a test writes rows, and the server's rows must not be what it
+writes to — and seeing fresh code is a side effect of that isolation
+rather than its purpose. The result is that a developer can take a red
+unit verdict on the code they just wrote while a Fiori client in the next
+tab builds against the model from before they wrote it. Nothing in either
+answer says which one is stale.
 
 So, the honest sentence: **code activated through the façade does not
 reach the running gateway until the server restarts, and a restart resets
