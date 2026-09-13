@@ -97,21 +97,52 @@ ${(object.children ?? []).map((c) => element(c, 2)).join("\n")}
 `;
 }
 
-// METHOD <name> in the implementation part, by name and row. The parse
-// already knows where every body starts; this only reads it out.
-function implementationRows(object, name) {
+// Where every method body begins and ends, from the parse. A client asks for
+// one method by a range and slices the main source between the two, so half
+// a range is no range: without the end it reads nothing at all.
+function implementationRows(object) {
   const rows = new Map();
   for (const file of object.getSequencedFiles?.() ?? []) {
-    const implementation = file.getInfo?.()?.getClassImplementationByName?.(String(name).toLowerCase());
-    for (const method of implementation?.methods ?? []) {
-      const start = method.token?.getStart?.();
-      if (start === undefined) {
+    const structure = file.getStructure?.();
+    if (structure === null || structure === undefined) {
+      continue;
+    }
+    for (const node of findMethods(structure)) {
+      // METHOD <name> ... ENDMETHOD: the name is the token after METHOD, and
+      // the last token of the node is the end of ENDMETHOD
+      const tokens = [node.getFirstToken?.(), node.getLastToken?.()];
+      const name = nameAfterMethod(node);
+      const start = tokens[0]?.getStart?.();
+      const end = tokens[1]?.getEnd?.() ?? tokens[1]?.getStart?.();
+      if (name === undefined || start === undefined || end === undefined) {
         continue;
       }
-      rows.set(method.token.getStr().toUpperCase(), {row: start.getRow(), col: start.getCol()});
+      rows.set(String(name).toUpperCase(), {
+        row: start.getRow(),
+        col: start.getCol(),
+        endRow: end.getRow(),
+        endCol: end.getCol(),
+      });
     }
   }
   return rows;
+}
+
+function findMethods(node, out = []) {
+  if (node.get?.()?.constructor?.name === "Method") {
+    out.push(node);
+  }
+  for (const child of node.getChildren?.() ?? []) {
+    findMethods(child, out);
+  }
+  return out;
+}
+
+// the name of the method a node implements: the token after METHOD
+function nameAfterMethod(node) {
+  const statement = node.getFirstStatement?.();
+  const tokens = statement?.getTokens?.() ?? [];
+  return tokens.length > 1 ? tokens[1].getStr() : undefined;
 }
 
 // The elements of a class or an interface, out of the parsed system. The
@@ -132,7 +163,7 @@ export function structureOf(store, type, name) {
     // pointing at the declaration gives it the signature and no body. The
     // declaration is the fallback for a method that has no implementation:
     // abstract, or inherited and not redefined here.
-    const bodies = implementationRows(object, entry.name);
+    const bodies = implementationRows(object);
     for (const method of definition.getMethodDefinitions?.()?.getAll?.() ?? []) {
       const name = method.getName().toUpperCase();
       const declared = method.getStart?.();
@@ -143,7 +174,7 @@ export function structureOf(store, type, name) {
         type: METHOD,
         visibility: VISIBILITY[method.getVisibility?.()] ?? "public",
         modifiers: method.isStatic?.() === true ? "static" : undefined,
-        uri: at === undefined ? "source/main" : `source/main#start=${at.row},${at.col}`,
+        uri: at === undefined ? "source/main" : `source/main#start=${at.row},${at.col}` + (at.endRow === undefined ? "" : `;end=${at.endRow},${at.endCol}`),
       });
     }
   }

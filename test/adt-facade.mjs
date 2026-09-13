@@ -176,17 +176,29 @@ describe("tools/adt-facade: OSD answers ADT", () => {
 
     it("a method carries the source position a client asks for it by", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
-      expect(xml).to.match(/abapsource:sourceUri="source\/main#start=\d+,\d+"/);
+      expect(xml).to.match(/abapsource:sourceUri="source\/main#start=\d+,\d+;end=\d+,\d+"/);
     });
 
-    it("that position is the method's body, not its declaration", async () => {
-      // a client slices one method out of the source at this position; the
-      // declaration would give it the signature and no body at all
+    it("a method carries the whole range of its body, both ends", async () => {
+      // a client slices one method out of the main source between the two
+      // ends of this range. Half a range is no range: without the end it
+      // reads nothing, which is what "no implementation" meant.
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
-      const at = xml.match(/adtcore:name="FILES"[^>]*source\/main#start=(\d+),/);
-      expect(at, "FILES is in the structure").to.not.equal(null);
+      const at = xml.match(/adtcore:name="FILES"[^>]*source\/main#start=(\d+),\d+;end=(\d+),\d+/);
+      expect(at, "FILES carries a start and an end").to.not.equal(null);
       const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
       expect(source[Number(at[1]) - 1].toUpperCase()).to.contain("METHOD FILES");
+      expect(source[Number(at[2]) - 1].toUpperCase()).to.contain("ENDMETHOD");
+      expect(Number(at[2])).to.be.greaterThan(Number(at[1]));
+    });
+
+    it("every method of a class carries a range, not only the first", async () => {
+      const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
+      const methods = [...xml.matchAll(/adtcore:type="CLAS\/OM"[^>]*sourceUri="([^"]+)"/g)].map((m) => m[1]);
+      expect(methods.length).to.be.greaterThan(3);
+      for (const uri of methods) {
+        expect(uri, uri).to.match(/#start=\d+,\d+;end=\d+,\d+$/);
+      }
     });
 
     it("a class's other includes are elements of the structure too", async () => {
