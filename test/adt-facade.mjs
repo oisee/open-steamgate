@@ -95,6 +95,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('href="/sap/bc/adt/activation"');
       expect(xml).to.contain('href="/sap/bc/adt/checkruns"');
       expect(xml).to.contain('href="/sap/bc/adt/abapunit/testruns"');
+      expect(xml).to.contain('href="/sap/bc/adt/cts/transportchecks"');
       // not served yet, and so not promised: this is the gatekeeper rule, and
       // it is what keeps "which tools work" answerable by asking the server
       expect(xml).to.not.contain('href="/sap/bc/adt/atc"');
@@ -424,6 +425,36 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
       const parent = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_GEN"), {method: "POST"})).text();
       expect(parent).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>[\s\S]*?<EXPANDABLE>X<\/EXPANDABLE>/);
+    });
+
+    // adt-fs asks this before it writes, and a 404 here is a write that never
+    // happens. The answer is "no transport, and none needed", which is true
+    // rather than convenient: every package in this tree is local, and the
+    // boundary to a real system is an abapGit archive, not a transport.
+    it("a transport check answers that nothing has to be recorded", async () => {
+      const res = await fetch(ADT + "/cts/transportchecks", {
+        method: "POST",
+        headers: {
+          "x-csrf-token": token,
+          cookie: `sap-contextid=${context}`,
+          "content-type": "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData",
+        },
+        body: `<?xml version="1.0" encoding="UTF-8"?><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><URI>/sap/bc/adt/oo/classes/zcl_stg_dispatcher</URI><DEVCLASS></DEVCLASS><OPERATION>I</OPERATION></DATA></asx:values></asx:abap>`,
+      });
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      // the pair that tells a client not to prompt for one
+      expect(xml).to.contain("<RECORDING></RECORDING>");
+      expect(xml).to.contain("<REQUESTS/>");
+      // a message of severity E, A or X makes the client throw, so there are none
+      expect(xml).to.contain("<MESSAGES/>");
+      // and it knows which object it answered about
+      expect(xml).to.contain("<OBJECTNAME>ZCL_STG_DISPATCHER</OBJECTNAME>");
+      expect(xml).to.contain("<DEVCLASS>$STG_GATEWAY</DEVCLASS>");
+    });
+
+    it("transport checks are advertised now that they answer", async () => {
+      expect(await (await call("/discovery")).text()).to.contain("cts/transportchecks");
     });
 
     it("search is advertised now that it answers", async () => {

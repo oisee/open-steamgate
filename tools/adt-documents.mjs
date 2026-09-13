@@ -541,6 +541,62 @@ export function objectFromUri(uri, collections) {
   return undefined;
 }
 
+// What a client is told before it writes: which transport this object would
+// be recorded in.
+//
+// It answers "none, and none is needed", and that is a fact about OSD rather
+// than a convenience. A transport exists to carry a change between systems,
+// and an object in a local package is one a real system also refuses to
+// record — every package here is local, `$`-prefixed, derived from a folder.
+// OSD has no CTS and the boundary to a real system is an abapGit archive
+// from a git ref (ADR 0001, point 3), so there is nothing this could name
+// without inventing it.
+//
+// The shape is the asXML envelope abap-adt-api reads, and the two fields
+// that carry the answer are an empty RECORDING and an empty REQUESTS: that
+// pair is how a client learns not to prompt for a transport. Messages stay
+// empty on purpose — the client throws on a message of severity E, A or X,
+// so a message here would turn "nothing to do" into a failed write.
+export function transportCheckDocument(object = {}) {
+  const value = (name, text) => `      <${name}>${xmlEscape(text ?? "")}</${name}>`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+    <DATA>
+${value("PGMID", "R3TR")}
+${value("OBJECT", ADT_TYPE[object.type] ?? object.type)}
+${value("OBJECTNAME", object.name)}
+${value("OPERATION", object.operation ?? "I")}
+${value("DEVCLASS", object.package)}
+${value("CTEXT", object.description)}
+${value("KORRFLAG", "")}
+${value("AS4USER", "")}
+${value("PDEVCLASS", "")}
+${value("DLVUNIT", "LOCAL")}
+${value("NAMESPACE", "")}
+${value("RESULT", "S")}
+${value("RECORDING", "")}
+${value("EXISTING_REQ_ONLY", "")}
+${value("TADIRDEVC", object.package)}
+${value("URI", object.uri)}
+      <MESSAGES/>
+      <REQUESTS/>
+      <LOCKS/>
+    </DATA>
+  </asx:values>
+</asx:abap>
+`;
+}
+
+// the URI and package a transport check asks about, out of the asXML the
+// client sends. A body we cannot read is not a reason to refuse: the answer
+// is the same for every object in this system.
+export function transportCheckRequest(body) {
+  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
+  const field = (name) => new RegExp(`<${name}>([^<]*)</${name}>`, "i").exec(text)?.[1];
+  return {uri: field("URI"), devclass: field("DEVCLASS"), operation: field("OPERATION")};
+}
+
 // The result of a test run: a program, its test classes, their methods, and
 // the alerts on whichever of them failed. No alert on a method is what
 // "passed" means, so an empty alerts element is a pass and not an omission.

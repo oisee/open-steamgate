@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn, unitResultDocument} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -131,6 +131,7 @@ const ACCEPT = {
   "oo/interfaces": ["application/vnd.sap.adt.oo.interfaces.v2+xml"],
   "functions/groups": ["application/vnd.sap.adt.functions.groups.v3+xml"],
   "packages": ["application/vnd.sap.adt.packages.v1+xml"],
+  "cts/transportchecks": ["application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData"],
 };
 
 // which workspace a collection is filed under in the discovery document
@@ -141,7 +142,7 @@ const WORKSPACE = (adt) => {
   if (adt.startsWith("repository/") || adt.startsWith("packages")) {
     return "Repository";
   }
-  return adt === "activation" || adt === "checkruns" || adt.startsWith("abapunit") ? "Development Loop" : "Source Library";
+  return adt === "activation" || adt === "checkruns" || adt.startsWith("abapunit") || adt.startsWith("cts/") ? "Development Loop" : "Source Library";
 };
 
 const TITLE = {
@@ -158,6 +159,7 @@ const TITLE = {
   "activation": "Activation",
   "checkruns": "Check Runs (syntax)",
   "abapunit/testruns": "ABAP Unit Test Runs",
+  "cts/transportchecks": "Transport Checks",
 };
 
 // The body of a request, whatever the host application did with it.
@@ -419,6 +421,41 @@ export function adtRouter(options = {}) {
   // real check and not a formality: broken source comes back broken even
   // though nothing was written.
   advertise("checkruns");
+  // ---- what a client asks before it writes: which transport would carry
+  // this. Nothing would, and nothing needs to; the document says why.
+  advertise("cts/transportchecks");
+  router.post(`${BASE}/cts/transportchecks`, async (req, res) => {
+    // express does not catch a rejection from an async handler, and an
+    // uncaught one takes the listener down with it — which is how this route
+    // killed the whole server the first time it ran. The façade holds a
+    // developer's session; it does not get to die over one bad request.
+    try {
+      const asked = transportCheckRequest(await rawBody(req));
+      const named = asked.uri === undefined ? undefined : objectFromUri(asked.uri, collections);
+      let found;
+      try {
+        // an object the store does not know is still a question we can
+        // answer: a write that creates one needs a transport no more than a
+        // write that changes one does
+        found = named === undefined ? undefined : store.find(named.type, named.name);
+      } catch {
+        found = undefined;
+      }
+      res.status(200).type("application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData")
+        .send(transportCheckDocument({
+          type: named?.type,
+          name: named?.name,
+          uri: asked.uri,
+          operation: asked.operation,
+          package: found?.package ?? asked.devclass ?? "$TMP",
+        }));
+    } catch (e) {
+      if (res.headersSent === false) {
+        res.status(500).type("application/xml").send(exceptionDocument("ExceptionTransportCheckFailed", String(e?.message ?? e)));
+      }
+    }
+  });
+
   router.post(`${BASE}/checkruns`, async (req, res) => {
     const body = await rawBody(req);
     answer(res, () => {
