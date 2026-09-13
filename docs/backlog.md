@@ -173,13 +173,30 @@ Tier 1  OSD speaks ADT well enough for vsp
         waves 0-4 above, plus abapGit in a box as the way content gets in
         gate: vsp's wave 0-4 tools green against localhost, AND
               open-steamgate's own suites unchanged with the facade in
-Tier 2  OSD speaks ADT well enough for Eclipse
-        a much larger surface; the honest milestone is "connects, logs on,
-        browses the tree, reads sources", not "works"
-        needs an Eclipse oracle: the request sequence can be had by pointing
-        Eclipse at the facade and iterating on 404s, but the expected
-        responses need one Eclipse session against A4H        [A]
-        rule: such a capture stays in .local/, never in this repository
+Tier 2  OSD speaks ADT well enough for an IDE. Not one thing: two, with
+        very different costs, and the split was measured on 2026-09-13
+Tier 2a VS Code, through murbani.vscode-abap-remote-fs on abap-adt-api.
+        That client logs on with plain basic auth, no ticket and no RFC,
+        and its login calls exactly one resource,
+        /sap/bc/adt/compatibility/graph. We were 404ing it; one route was
+        the whole distance. Served and tested now (03fa379), with an
+        empty graph on purpose: a compatibility graph is a system saying
+        which resources a client may use at which versions, and we have
+        measured none of those facts
+        honest scope: one route served and tested, NOT a connected client
+        browsing a tree. What the extension asks for and we lack will
+        name itself in /osd/not-served, which is the instrument
+Tier 2b Eclipse, still on the logon, not on the ADT surface. Two forks:
+        the on-prem project wants an RFC logon on 3399, costed at three
+        to eight weeks with a real chance of never converging, because
+        the logon-accept is a function of the client's init and cannot be
+        replayed; the ABAP Cloud project wants the browser reentrance
+        ticket, which is hours, because the ticket is opaque to Eclipse
+        and only the accepting system validates it, and that is us
+        cheapest next measurement: Alice pastes the string behind
+        "Copy Logon URL to Clipboard", which names the loopback port,
+        the path and whether a nonce is echoed                        [A]
+        rule: an Eclipse capture stays in .local/, never in this repository
 Tier 3  OSD speaks the rest: RFC and DIAG fronts, a screen that answers
         "not implemented" instead of nothing
         not ours to build: odgp already draws screens from Go with no
