@@ -139,7 +139,12 @@ describe("tools/osd-store: the objects of the local system", function () {
 
 // writing happens in a temporary system, so a test never touches the
 // repository it runs in
-describe("tools/osd-store: writing to the local system", () => {
+describe("tools/osd-store: writing to the local system", function () {
+  // one of these waits for a transpile, which is seconds rather than the
+  // two mocha allows by default. It passed until now because the transpile
+  // failed fast in a temporary root, which is luck rather than a test.
+  this.timeout(120000);
+
   let root;
   let store;
 
