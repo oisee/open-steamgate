@@ -451,16 +451,29 @@ export class ObjectStore {
     return registry;
   }
 
-  // the syntax check a write runs; issues of this object only
-  check(type, name) {
+  // the syntax check a write runs; issues of this object only.
+  //
+  // With {source} the given text stands in for the file for this one check
+  // and nothing on disk changes: what an editor asks before it saves, and
+  // what a client asks about an object it has not created yet. The answer
+  // has the same shape either way, because the caller is the same code.
+  check(type, name, options = {}) {
     const entry = this.find(type, name);
-    if (entry === undefined) {
+    if (entry === undefined && options.source === undefined) {
       throw new NotFound(type, name);
     }
-    const registry = this.registry();
-    const object = registry.getObject(type, entry.name);
+    if (options.source === undefined) {
+      return this.#issues(this.registry(), type, entry.name);
+    }
+    const target = this.#fileFor(type, name, entry, options.include ?? "main");
+    return this.#withSource(target.file, options.source, (registry) => this.#issues(registry, type, target.name));
+  }
+
+  // the issues of one object, in the shape the façade returns
+  #issues(registry, type, name) {
+    const object = registry.getObject(type, name);
     if (object === undefined) {
-      return {type, name: entry.name, issues: [{severity: "E", message: `${type} ${entry.name} is not in the registry`, line: 1, column: 1}]};
+      return {type, name, issues: [{severity: "E", message: `${type} ${name} is not in the registry`, line: 1, column: 1}]};
     }
     const issues = registry.findIssuesObject(object).map((issue) => ({
       severity: "E",
@@ -470,7 +483,58 @@ export class ObjectStore {
       line: issue.getStart().getRow(),
       column: issue.getStart().getCol(),
     }));
-    return {type, name: entry.name, issues};
+    return {type, name, issues};
+  }
+
+  // which file a source belongs in: the object's own, the class include the
+  // caller named, or the one a write would create for an object that is not
+  // there yet
+  #fileFor(type, name, entry, include) {
+    const meta = TYPES[type];
+    if (meta === undefined) {
+      throw new NotSupported(`object type ${type}`);
+    }
+    let file = entry?.file;
+    if (file === undefined) {
+      const root = this.roots.find((r) => r.writable);
+      file = join(root.path, "osd", fileOf(name) + meta.ext);
+    }
+    if (type === "CLAS" && include !== "main") {
+      const suffix = INCLUDES[include];
+      if (suffix === undefined) {
+        throw new NotSupported(`class include ${include}`);
+      }
+      file = file.replace(/\.clas\.abap$/, suffix);
+    }
+    return {name: entry?.name ?? String(name).toUpperCase(), file};
+  }
+
+  // the given text stands in for one file, for the length of one call. The
+  // shared parse is borrowed rather than rebuilt, because rebuilding it is
+  // seconds and a human is waiting; the file goes back in a finally, and
+  // nothing between the two lines is asynchronous, so no other caller can
+  // see the substitution. abaplint reparses only what the swap dirtied.
+  #withSource(file, source, fn) {
+    const registry = this.registry();
+    const filename = "/" + file;
+    const before = registry.getFileByName(filename);
+    const replacement = new abaplint.MemoryFile(filename, source);
+    try {
+      if (before === undefined) {
+        registry.addFile(replacement);
+      } else {
+        registry.updateFile(replacement);
+      }
+      registry.parse();
+      return fn(registry);
+    } finally {
+      if (before === undefined) {
+        registry.removeFile(replacement);
+      } else {
+        registry.updateFile(before);
+      }
+      registry.parse();
+    }
   }
 
   // activation is that check over the object and everything that uses it:
@@ -559,7 +623,11 @@ function main(args) {
       return 0;
     case "check":
     case "activate": {
-      const result = command === "check" ? store.check(type, name) : store.activate(type, name);
+      // check TYPE NAME --source file.abap answers for a file that is not
+      // the object's own, the way an editor asks before it saves
+      const at = args.indexOf("--source");
+      const source = at < 0 ? undefined : readFileSync(args[at + 1], "utf8");
+      const result = command === "check" ? store.check(type, name, {source}) : store.activate(type, name);
       console.log(JSON.stringify(result, undefined, 1));
       return result.issues.length === 0 ? 0 : 1;
     }
@@ -570,7 +638,7 @@ function main(args) {
       return 0;
     }
     default:
-      console.log("usage: osd-store.mjs list [TYPE] | read TYPE NAME | check TYPE NAME | activate TYPE NAME | search TEXT [--source]");
+      console.log("usage: osd-store.mjs list [TYPE] | read TYPE NAME | check TYPE NAME [--source FILE] | activate TYPE NAME | search TEXT [--source]");
       return 2;
   }
 }

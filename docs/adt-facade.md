@@ -178,6 +178,17 @@ activations in flight share one promise rather than transpiling twice. The
 modules only have to be in place before the next request that touches the
 object, which is why the split is safe.
 
+**A check run answers for source that is not on disk.** `checkruns` carries
+the editor's buffer, not the stored object, so `check(type, name, {source})`
+lets the given text stand in for the file for that one call and touches
+nothing. The answer has the same shape as a plain check, the same shape
+activation returns, because it is the same code. `{include: "testclasses"}`
+aims it at a class include. A name the store does not have yet is allowed
+here and only here: a client may ask about an object before it creates one,
+and asking creates nothing. The shared parse is borrowed and put back in a
+`finally`, all of it synchronous, so no other caller sees the substitution
+and the cost is milliseconds rather than the seconds a fresh parse takes.
+
 **Wave 4, cheap extras.** `GET /sap/bc/adt/runtime/dumps` and the detail
 resource under it: a runtime error of ours emitted as an ST22-shaped
 document. Revisions, if reading them out of git is enough.

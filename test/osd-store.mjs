@@ -207,4 +207,37 @@ ENDCLASS.
     expect(broken.issues[0].message).to.contain("lv_missing");
     expect(broken.issues[0].line).to.be.greaterThan(1);
   });
+
+  it("a check can be given the source, and the file on disk is not touched", () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    const stored = store.read("CLAS", "ZCL_OSD_PROBE").source;
+
+    const asked = store.check("CLAS", "ZCL_OSD_PROBE", {source: CLASS.replace("rv_text = 'hello'.", "rv_text = lv_missing.")});
+    expect(asked.issues.length).to.be.greaterThan(0);
+    expect(asked.issues[0]).to.include.keys(["severity", "rule", "message", "file", "line", "column"]);
+    expect(asked.issues[0].message).to.contain("lv_missing");
+
+    // what was asked about is gone; what is stored is what answers again
+    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.equal(stored);
+    expect(store.check("CLAS", "ZCL_OSD_PROBE").issues).to.deep.equal([]);
+  });
+
+  it("source in the request goes to the include the caller named", () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    const answer = store.check("CLAS", "ZCL_OSD_PROBE", {include: "testclasses", source: "this is not ABAP"});
+    expect(answer.issues.length).to.be.greaterThan(0);
+    expect(answer.issues[0].file).to.contain(".clas.testclasses.abap");
+    expect(() => store.read("CLAS", "ZCL_OSD_PROBE", "testclasses")).to.not.throw();
+    expect(store.read("CLAS", "ZCL_OSD_PROBE", "testclasses").empty).to.equal(true);
+  });
+
+  it("an object that is not there yet can be checked, which is what a client asks before it creates one", () => {
+    const answer = store.check("CLAS", "ZCL_OSD_UNBORN", {source: CLASS.replaceAll("zcl_osd_probe", "zcl_osd_unborn")});
+    expect(answer).to.include({type: "CLAS", name: "ZCL_OSD_UNBORN"});
+    expect(answer.issues, JSON.stringify(answer.issues)).to.deep.equal([]);
+    // nothing was created by asking
+    expect(store.exists("CLAS", "ZCL_OSD_UNBORN")).to.equal(false);
+    expect(() => store.check("CLAS", "ZCL_OSD_UNBORN")).to.throw(NotFound);
+  });
+
 });

@@ -118,6 +118,21 @@ the objects.
      debugger over ADT and real cluster dumps stay out and stay
      undiscovered.                                                    [S]
      └─ external: sanitized ADT document shapes from V (see below)
+2.8  create: a client POSTs ADT create XML and the object is persisted [S]
+     └─ the store writes the files; the metadata beside the source is
+        what we would otherwise be inventing                          [T]
+     └─ 2.8a AFF (SAP/abap-file-formats) as the source for that metadata,
+        ~90 JSON schemas, Apache-2.0                            [T] ~2h
+        ├─ agreed 2026-09-13 by all three sessions: it waits until create
+        │  arrives, nothing on vsp's Tier 1 path needs it. V's words:
+        │  vsp talks to OSD over ADT and never reads OSD's on-disk
+        │  metadata, so XML-vs-AFF is our internal choice
+        ├─ catch: abaplint reads object metadata from .xml only, its
+        │  aff_and_xml rule merely flags having both. So AFF has to be
+        │  converted to XML on import, or the syntax check answers
+        │  confidently about objects it cannot see
+        └─ later, not now: if OSD ever emits AFF archives, V's deploy
+           path reads standard abapGit XML and would need AFF then
 ```
 
 ## 2a. OSD: the tiers, and who owns which layer
