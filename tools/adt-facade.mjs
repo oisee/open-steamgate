@@ -21,6 +21,7 @@
 import express from "express";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -120,10 +121,16 @@ const ACCEPT = {
   "oo/classes": ["application/vnd.sap.adt.oo.classes.v4+xml"],
   "oo/interfaces": ["application/vnd.sap.adt.oo.interfaces.v2+xml"],
   "functions/groups": ["application/vnd.sap.adt.functions.groups.v3+xml"],
+  "packages": ["application/vnd.sap.adt.packages.v1+xml"],
 };
 
 // which workspace a collection is filed under in the discovery document
-const WORKSPACE = (adt) => (adt.startsWith("ddic/") || adt.startsWith("datapreview/") ? "Data Dictionary" : "Source Library");
+const WORKSPACE = (adt) => {
+  if (adt.startsWith("ddic/") || adt.startsWith("datapreview/")) {
+    return "Data Dictionary";
+  }
+  return adt.startsWith("repository/") || adt.startsWith("packages") ? "Repository" : "Source Library";
+};
 
 const TITLE = {
   "programs/programs": "Programs",
@@ -133,6 +140,9 @@ const TITLE = {
   "ddic/ddl/sources": "CDS DDL Sources",
   "ddic/srvd/sources": "Service Definitions",
   "datapreview/freestyle": "Data Preview (freestyle SQL)",
+  "repository/informationsystem/search": "Object Search",
+  "repository/nodestructure": "Repository Node Structure",
+  "packages": "Packages",
 };
 
 export function adtRouter(options = {}) {
@@ -186,7 +196,50 @@ export function adtRouter(options = {}) {
         res.type("text/plain; charset=utf-8").send(store.read(type, req.params.name, req.params.include).source);
       });
     });
+    // the object structure: what a client reads before asking for one method
+    // rather than the whole source. A plain full-source read never comes
+    // through here, which is why wave 0 could do without it.
+    router.get(`${BASE}/${adt}/:name/objectstructure`, (req, res) => {
+      answer(res, () => {
+        const structure = structureOf(store, type, req.params.name);
+        if (structure === undefined) {
+          throw new NotFound(type, req.params.name);
+        }
+        res.type("application/vnd.sap.adt.objectstructure.v2+xml").send(objectStructureDocument(structure));
+      });
+    });
   }
+
+  // ---- packages: what a package is, and what is inside it. A package here
+  // is a folder, which is what abapGit already means when it writes one; when
+  // a real repository arrives with its DEVC objects, the same two resources
+  // answer from those instead.
+  advertise("packages");
+  router.get(`${BASE}/packages/:name`, (req, res) => {
+    answer(res, () => {
+      res.type("application/vnd.sap.adt.packages.v1+xml").send(packageDocument(store.package(req.params.name)));
+    });
+  });
+
+  // the tree, one level at a time, which is how a client walks it
+  advertise("repository/nodestructure");
+  router.post(`${BASE}/repository/nodestructure`, (req, res) => {
+    answer(res, () => {
+      const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
+      res.type("application/vnd.sap.adt.repository.nodestructure.v1+xml").send(nodeStructureDocument(nodesOf(store, name)));
+    });
+  });
+
+  // ---- searching the repository: a flat list of references into the tree
+  advertise("repository/informationsystem/search");
+  router.get(`${BASE}/repository/informationsystem/search`, (req, res) => {
+    answer(res, () => {
+      const found = searchObjects(store, req.query.query ?? req.query.search ?? "", {
+        max: Number(req.query.maxResults ?? 100),
+      });
+      res.type("application/xml").send(objectReferencesDocument(found));
+    });
+  });
 
   // ---- reading table contents: freestyle SQL in the body, rows back. This
   // is how the client's whole graph layer works, not only its table preview.

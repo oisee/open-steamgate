@@ -1,0 +1,275 @@
+// The XML documents the ADT façade answers with, apart from the two that
+// wave 0 already had. One file, because they share a vocabulary: every ADT
+// document names things with `adtcore:name`, `adtcore:type` and a URI that
+// points back into the resource tree, and getting that vocabulary wrong is
+// what makes a client quietly show nothing.
+//
+// SHAPES PARTLY CONFIRMED. The data-preview document of wave 0 was verified
+// by vsp's own reader against a running OSD. These two have not been, and
+// the places where a guess is load-bearing are marked.
+import {Visibility} from "@abaplint/core";
+import {TYPES} from "./osd-store.mjs";
+
+const xmlEscape = (s) => String(s)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;");
+
+// ADT names an object type with a two-part code: the repository type, then
+// the kind within it. A client uses these to choose an icon and an editor,
+// and to decide which resource to ask for next.
+export const ADT_TYPE = {
+  CLAS: "CLAS/OC",
+  INTF: "INTF/OI",
+  PROG: "PROG/P",
+  INCL: "PROG/I",
+  FUGR: "FUGR/F",
+  TABL: "TABL/DT",
+  STRU: "TABL/DS",
+  DTEL: "DTEL/DE",
+  DOMA: "DOMA/DD",
+  TTYP: "TTYP/DA",
+  VIEW: "VIEW/DV",
+  DDLS: "DDLS/DF",
+  SRVD: "SRVD/SRV",
+  SHLP: "SHLP/DH",
+  MSAG: "MSAG/N",
+  DEVC: "DEVC/K",
+};
+
+// a method of a class, an include of one, and an interface's methods
+const METHOD = "CLAS/OM";
+const CLASS_INCLUDE = "CLAS/I";
+
+// where an object lives in the resource tree, which is what a client follows
+export function uriOf(type, name) {
+  const collection = TYPES[type]?.adt;
+  if (collection === undefined) {
+    return undefined;
+  }
+  return `/sap/bc/adt/${collection}/${encodeURIComponent(String(name).toLowerCase())}`;
+}
+
+const VISIBILITY = {
+  [Visibility.Public]: "public",
+  [Visibility.Protected]: "protected",
+  [Visibility.Private]: "private",
+};
+
+// ------------------------------------------------- the object structure
+
+// What a client reads before it asks for one method rather than a whole
+// class: the elements of an object and, for each, the fragment of the source
+// URI that selects it. A plain full-source read never comes through here,
+// which is why wave 0 did without it.
+//
+// The source URI fragment is the load-bearing part. ADT writes the position
+// as `#start=row,col`, and a client that wants one method asks for
+// `source/main#start=…`. We answer the whole source and let the client cut,
+// which is what it does anyway: the fragment never reaches a server.
+export function objectStructureDocument(object) {
+  const element = (e, indent) => {
+    const pad = " ".repeat(indent);
+    const attributes = [
+      `adtcore:name="${xmlEscape(e.name)}"`,
+      `adtcore:type="${xmlEscape(e.type)}"`,
+      e.visibility === undefined ? undefined : `abapsource:visibility="${e.visibility}"`,
+      e.modifiers === undefined ? undefined : `abapsource:modifiers="${e.modifiers}"`,
+      e.uri === undefined ? undefined : `abapsource:sourceUri="${xmlEscape(e.uri)}"`,
+    ].filter((a) => a !== undefined).join(" ");
+    if ((e.children ?? []).length === 0) {
+      return `${pad}<abapsource:objectStructureElement ${attributes}/>`;
+    }
+    return `${pad}<abapsource:objectStructureElement ${attributes}>
+${e.children.map((c) => element(c, indent + 2)).join("\n")}
+${pad}</abapsource:objectStructureElement>`;
+  };
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<abapsource:objectStructureElement xmlns:abapsource="http://www.sap.com/adt/abapsource"
+                                   xmlns:adtcore="http://www.sap.com/adt/core"
+                                   adtcore:name="${xmlEscape(object.name)}"
+                                   adtcore:type="${xmlEscape(object.type)}"
+                                   abapsource:sourceUri="source/main">
+${(object.children ?? []).map((c) => element(c, 2)).join("\n")}
+</abapsource:objectStructureElement>
+`;
+}
+
+// The elements of a class or an interface, out of the parsed system. The
+// parse is the same one the syntax check runs on, so what a client is told
+// exists is what would compile.
+export function structureOf(store, type, name) {
+  const entry = store.find(type, name);
+  if (entry === undefined) {
+    return undefined;
+  }
+  const object = store.registry().getObject(type === "INCL" ? "PROG" : type, entry.name);
+  const children = [];
+
+  const definition = object?.getDefinition?.();
+  if (definition !== undefined && definition !== undefined) {
+    for (const method of definition.getMethodDefinitions?.()?.getAll?.() ?? []) {
+      const start = method.getStart?.();
+      children.push({
+        name: method.getName().toUpperCase(),
+        type: METHOD,
+        visibility: VISIBILITY[method.getVisibility?.()] ?? "public",
+        modifiers: method.isStatic?.() === true ? "static" : undefined,
+        uri: start === undefined ? "source/main" : `source/main#start=${start.getRow?.() ?? start.row},${start.getCol?.() ?? start.col}`,
+      });
+    }
+  }
+
+  // a class carries more than one file, and ADT calls them includes; a client
+  // reads one through the includes resource rather than through source/main
+  if (type === "CLAS") {
+    for (const include of ["definitions", "implementations", "macros", "testclasses"]) {
+      const part = store.read(type, entry.name, include);
+      if (part.empty === true || part.source === "") {
+        continue;
+      }
+      children.push({
+        name: include.toUpperCase(),
+        type: CLASS_INCLUDE,
+        uri: `includes/${include}/source/main`,
+      });
+    }
+  }
+
+  return {name: entry.name, type: ADT_TYPE[type] ?? type, children};
+}
+
+// ------------------------------------------------------------ packages
+
+// A package document: what a package is, and what is above it. The contents
+// are a separate resource, because a client asks for the tree lazily, one
+// level at a time, rather than pulling a whole system.
+export function packageDocument(pkg) {
+  const parent = pkg.parent === undefined || pkg.parent === null ? "" : `
+  <pak:superPackage adtcore:name="${xmlEscape(pkg.parent)}" adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(pkg.parent).toLowerCase())}"/>`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<pak:package xmlns:pak="http://www.sap.com/adt/packages"
+             xmlns:adtcore="http://www.sap.com/adt/core"
+             adtcore:name="${xmlEscape(pkg.name)}"
+             adtcore:type="DEVC/K"
+             adtcore:description="${xmlEscape(pkg.description ?? "")}">${parent}
+  <pak:attributes pak:isPackageTypeEditable="false" pak:isAddingObjectsAllowed="${pkg.library === true ? "false" : "true"}"/>
+</pak:package>
+`;
+}
+
+// The contents of one node of the repository tree. A client walks this: it
+// asks for a package and gets its subpackages and its objects, each with the
+// URI to ask about next.
+//
+// SHAPE NOT YET CONFIRMED. vsp holds the request body of the real resource
+// and has it ready; this answers the parameters as we understand them and is
+// meant to be corrected.
+export function nodeStructureDocument(nodes) {
+  const node = (n) => `    <SEU_ADT_REPOSITORY_OBJ_NODE>
+      <OBJECT_TYPE>${xmlEscape(n.type)}</OBJECT_TYPE>
+      <OBJECT_NAME>${xmlEscape(n.name)}</OBJECT_NAME>
+      <TECH_NAME>${xmlEscape(n.name)}</TECH_NAME>
+      <OBJECT_URI>${xmlEscape(n.uri ?? "")}</OBJECT_URI>
+      <EXPANDABLE>${n.expandable === true ? "X" : ""}</EXPANDABLE>
+      <DESCRIPTION>${xmlEscape(n.description ?? "")}</DESCRIPTION>
+    </SEU_ADT_REPOSITORY_OBJ_NODE>`;
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+    <DATA>
+      <TREE_CONTENT>
+${nodes.map(node).join("\n")}
+      </TREE_CONTENT>
+    </DATA>
+  </asx:values>
+</asx:abap>
+`;
+}
+
+// the subpackages and objects of one package, as tree nodes
+export function nodesOf(store, name) {
+  const pkg = store.package(name);
+  const nodes = [];
+  for (const child of pkg.subpackages ?? []) {
+    nodes.push({
+      type: "DEVC/K",
+      name: child,
+      uri: `/sap/bc/adt/packages/${encodeURIComponent(String(child).toLowerCase())}`,
+      expandable: true,
+    });
+  }
+  for (const object of pkg.objects ?? []) {
+    nodes.push({
+      type: ADT_TYPE[object.type] ?? object.type,
+      name: object.name,
+      uri: uriOf(object.type, object.name),
+      expandable: false,
+      description: object.library === true ? "library object" : undefined,
+    });
+  }
+  return nodes;
+}
+
+// -------------------------------------------------------------- search
+
+// The answer to a repository search: a flat list of references into the
+// resource tree. A client shows the list and follows a URI when one is
+// picked, so the URI matters more than the description.
+export function objectReferencesDocument(objects) {
+  const reference = (o) => {
+    const attributes = [
+      o.uri === undefined ? undefined : `adtcore:uri="${xmlEscape(o.uri)}"`,
+      `adtcore:type="${xmlEscape(o.type)}"`,
+      `adtcore:name="${xmlEscape(o.name)}"`,
+      o.packageName === undefined ? undefined : `adtcore:packageName="${xmlEscape(o.packageName)}"`,
+      o.description === undefined ? undefined : `adtcore:description="${xmlEscape(o.description)}"`,
+    ].filter((a) => a !== undefined).join(" ");
+    return `  <adtcore:objectReference ${attributes}/>`;
+  };
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
+${objects.map(reference).join("\n")}
+</adtcore:objectReferences>
+`;
+}
+
+// ADT's quick search takes a pattern with `*` as the wildcard, which is not
+// what a substring search does: `ZCL_STG*` means "starts with", and a bare
+// word means "contains" in most clients' usage. Translating here rather than
+// in the store keeps the store's search a plain substring match.
+export function searchObjects(store, query, options = {}) {
+  const max = options.max ?? 100;
+  const pattern = String(query ?? "").trim().toUpperCase();
+  const anchored = pattern.includes("*");
+  const regex = anchored
+    ? new RegExp("^" + pattern.split("*").map((p) => p.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$")
+    : undefined;
+
+  // the store searches names by substring; an anchored pattern is filtered
+  // afterwards, because the widest thing the store can give is the right
+  // thing to narrow
+  const seed = anchored ? pattern.split("*").filter((p) => p !== "")[0] ?? "" : pattern;
+  const hits = store.search(seed, {type: options.type, max: max * 4});
+
+  const out = [];
+  for (const hit of hits) {
+    if (regex !== undefined && regex.test(hit.name) === false) {
+      continue;
+    }
+    out.push({
+      name: hit.name,
+      type: ADT_TYPE[hit.type] ?? hit.type,
+      uri: uriOf(hit.type, hit.name),
+      description: hit.library === true ? "library object" : undefined,
+    });
+    if (out.length >= max) {
+      break;
+    }
+  }
+  return out;
+}

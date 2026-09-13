@@ -63,7 +63,6 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.not.contain('href="/sap/bc/adt/activation"');
       expect(xml).to.not.contain('href="/sap/bc/adt/checkruns"');
       expect(xml).to.not.contain('href="/sap/bc/adt/abapunit/testruns"');
-      expect(xml).to.not.contain('href="/sap/bc/adt/repository/nodestructure"');
     });
 
     it("a client scanning for hrefs finds every collection with its full path", async () => {
@@ -151,6 +150,103 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const res = await call("/datapreview/freestyle", {method: "POST", body: "DROP TABLE zstg_demo"});
       expect(res.status).to.equal(400);
       expect(await res.text()).to.contain("only SELECT");
+    });
+  });
+
+  describe("wave 1: the shapes the round trip asked for", () => {
+    it("the object structure of a class lists its methods with their visibility", async () => {
+      const res = await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("objectstructure.v2+xml");
+      const xml = await res.text();
+      expect(xml).to.contain('adtcore:name="ZCL_STG_DISPATCHER"');
+      expect(xml).to.contain('adtcore:type="CLAS/OC"');
+      expect(xml).to.contain('adtcore:name="DISPATCH"');
+      expect(xml).to.contain('adtcore:type="CLAS/OM"');
+      // dispatch is public, origin is private: the difference is the reason a
+      // client reads this document at all
+      expect(xml).to.match(/adtcore:name="DISPATCH"[^>]*abapsource:visibility="public"/);
+      expect(xml).to.match(/adtcore:name="ORIGIN"[^>]*abapsource:visibility="private"/);
+    });
+
+    it("a method carries the source position a client asks for it by", async () => {
+      const xml = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
+      expect(xml).to.match(/abapsource:sourceUri="source\/main#start=\d+,\d+"/);
+    });
+
+    it("a class's other includes are elements of the structure too", async () => {
+      const xml = await (await call("/oo/classes/ZCL_STG_SEGW_TEST/objectstructure")).text();
+      expect(xml).to.contain('adtcore:name="TESTCLASSES"');
+      expect(xml).to.contain('abapsource:sourceUri="includes/testclasses/source/main"');
+    });
+
+    it("the object structure of an interface answers too", async () => {
+      const res = await call("/oo/interfaces/ZIF_STG_CDS_SOURCE/objectstructure");
+      expect(res.status).to.equal(200);
+      expect(await res.text()).to.contain('adtcore:type="INTF/OI"');
+    });
+
+    it("a structure asked of an object that is not there is a 404", async () => {
+      expect((await call("/oo/classes/ZCL_NOT_A_THING/objectstructure")).status).to.equal(404);
+    });
+
+    it("search finds objects by name and points at where they live", async () => {
+      const res = await call("/repository/informationsystem/search?operation=quickSearch&query=ZCL_STG_DISPATCHER&maxResults=10");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<adtcore:objectReferences");
+      expect(xml).to.contain('adtcore:name="ZCL_STG_DISPATCHER"');
+      expect(xml).to.contain('adtcore:type="CLAS/OC"');
+      expect(xml).to.contain('adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_dispatcher"');
+    });
+
+    it("a star in the pattern anchors the match, the way a client means it", async () => {
+      const xml = await (await call("/repository/informationsystem/search?query=" + encodeURIComponent("ZCL_STG_SEGW*") + "&maxResults=50")).text();
+      const names = [...xml.matchAll(/adtcore:name="([^"]+)"/g)].map((m) => m[1]);
+      expect(names.length).to.be.greaterThan(0);
+      for (const name of names) {
+        expect(name).to.match(/^ZCL_STG_SEGW/);
+      }
+    });
+
+    it("the result count is the client's to cap", async () => {
+      const xml = await (await call("/repository/informationsystem/search?query=Z&maxResults=3")).text();
+      expect([...xml.matchAll(/<adtcore:objectReference /g)].length).to.be.at.most(3);
+    });
+
+    it("a package says what it is and what is above it", async () => {
+      const res = await call("/packages/$STG_GEN_SEGW");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("packages.v1+xml");
+      const xml = await res.text();
+      expect(xml).to.contain('adtcore:name="$STG_GEN_SEGW"');
+      expect(xml).to.contain('adtcore:type="DEVC/K"');
+      expect(xml).to.contain('adtcore:name="$STG_GEN"');
+    });
+
+    it("a package that is not there is a 404 like any other missing object", async () => {
+      expect((await call("/packages/$NOT_A_PACKAGE")).status).to.equal(404);
+    });
+
+    it("the node structure walks one level: subpackages and objects", async () => {
+      const res = await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" + encodeURIComponent("$STG_GEN_SEGW"), {method: "POST"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<TREE_CONTENT>");
+      expect(xml).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
+      expect(xml).to.contain("<OBJECT_URI>/sap/bc/adt/oo/classes/");
+    });
+
+    it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
+      const parent = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_GEN"), {method: "POST"})).text();
+      expect(parent).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>[\s\S]*?<EXPANDABLE>X<\/EXPANDABLE>/);
+    });
+
+    it("search is advertised now that it answers", async () => {
+      const xml = await (await call("/discovery")).text();
+      expect(xml).to.contain('href="/sap/bc/adt/repository/informationsystem/search"');
+      expect(xml).to.contain('href="/sap/bc/adt/packages"');
+      expect(xml).to.contain('href="/sap/bc/adt/repository/nodestructure"');
     });
   });
 
