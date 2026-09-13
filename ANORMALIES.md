@@ -181,6 +181,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-13-xstring-as-hex — An xstring costs two characters per byte, twice over
+
+- Status: `open`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `xstring` itself, and anything that moves a large one: `WWWDATA_IMPORT`, `SCMS_BINARY_TO_XSTRING`, a media response
+- Minimal ABAP reproducer: read a four megabyte W3MI object and send it as a response
+- Exact command used to run it: open-steamgate serving her 4 MB MP3 through the SMW0 chain, measured over twenty-four requests
+- Expected SAP behaviour: an xstring is bytes and costs bytes
+- Actual open-abap behaviour: the runtime carries an xstring as a hex string, two characters to the byte, and the SMW0 path holds it twice at once, once sliced into a table and once joined back. Serving 4 MB costs about 24 MB of transient strings per request; the heap goes 744 MB to 901 MB over twenty-four requests and then flattens, so it is a plateau rather than a leak
+- Impact on open-steamgate: nothing breaks. It is the reason a media-heavy page is expensive rather than cheap, and it will be the reason the browser bundle is heavy when the media go into it
+- Smallest safe workaround: none worth having. Reading the file from disk instead was considered and rejected, because `WWWDATA_IMPORT` has to return a table the caller loops over and her CCP class does exactly that
+- Upstream issue: none. The real fix is an xstring carried as a byte buffer rather than a hex string, which is the open-abap runtime's shape rather than something a caller can route around, and it is a large change. Recorded because the number is worth having before someone diagnoses it as a leak
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
 ### DEBT-2026-09-13-linked-transpiler — This tree may be built by a transpiler that is not published
 
 - Status: `accepted, with a banner`

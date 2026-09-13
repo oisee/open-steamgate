@@ -142,6 +142,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   morning): a branch in the repository triggers the performance and
   regression workflows, and a fork's branch does not, so a PR from a fork is
   reviewed with less evidence than one that costs nothing extra to give him.
+  The mechanism, read off the workflows rather than taken on trust:
+  `regression.yml` triggers on `push` with `branches-ignore: [main]` and has
+  no `pull_request` trigger at all, so a fork PR, whose push lands in the
+  fork, never fires it; `ci.yml` and `web.yml` do have `pull_request`, which
+  is why such a PR still looks green. The check that did not run and the
+  check that passed are the same colour. After pushing a branch, confirm
+  **Regression** is in the checks list and not only **CI**.
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
   `abaplint/transpiler` or `open-abap-core`.
