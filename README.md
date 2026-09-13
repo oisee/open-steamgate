@@ -16,8 +16,10 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 > imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
 > text arrangement), an object page (bookings via navigation, Edit/Save as
 > MERGE with Gateway semantics, Create below the parent as
-> `POST TravelSet('..')/to_Bookings`), a launchpad sandbox with two apps and
-> intent-based navigation between them, a service described by one YAML
+> `POST TravelSet('..')/to_Bookings`), media entities (a picture served as a
+> stream at `<entity>/$value`, shown by Fiori Elements), a launchpad sandbox
+> with four apps and intent-based navigation between them, SEGW itself as one
+> of those apps, a service described by one YAML
 > file that consumes another service of the registry (SEGW's "external
 > service", `src/demo_odc/`), and read-only SADL over CDS projections (with analytics
 > annotations) work end to end, on SQLite or DuckDB (`STG_DB=duckdb`).** `npm test`
@@ -39,6 +41,46 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 > reverse-engineered in sibling projects (SAP compression, EXPORT data
 > clusters, the ADT transport) are indexed in
 > [`docs/layers-we-own.md`](docs/layers-we-own.md).
+
+---
+
+## What it looks like
+
+Every pixel below is served by transpiled ABAP over SQLite. The apps are
+SAPUI5 1.120 from SAP's CDN, unchanged, and the pictures come out of a media
+entity through the DPC's `GET_STREAM`.
+
+**The launchpad** (`app/flp.html`): four Fiori apps over three services,
+`sap.ushell` resolving the intents between them.
+
+![The launchpad with four tiles](docs/images/launchpad.png)
+
+**The Travels list report**: `$filter` from the filter bar arrives in the DPC
+as SELECT-OPTIONS, the value help reads a search help, the Photo column is the
+media resource of each travel (`PhotoSet('T0001')/$value`).
+
+![List report with a column of pictures](docs/images/list-report.png)
+
+**The object page**: the header image comes from the same media entity, the
+bookings below through the navigation property, Edit and Save send a MERGE
+with the changed field only.
+
+![Object page with the travel's picture and its bookings](docs/images/object-page.png)
+
+**SEGW as an application** (`app/segw/`): the Service Builder's project tree
+over `ZSTG_SEGW_SRV`, every node a row of a `/IWBEP/I_SB*` table edited in
+place, Import and Export of the abapGit IWPR, Generate through the ABAP
+generator ([`docs/segw-editor.md`](docs/segw-editor.md)).
+
+![The SEGW project tree as a Fiori app](docs/images/segw-editor.png)
+
+**Analytics** (`app/analytics/`): an Analytical List Page over a CDS cube,
+`$select` turned into `GROUP BY` by the SADL runtime, on SQLite or DuckDB.
+
+![Analytical list page over the flight cube](docs/images/analytics.png)
+
+The pictures are taken from the running thing:
+`node scripts/capture-docs-shots.mjs` while `npm start` is up.
 
 ---
 
@@ -66,7 +108,8 @@ The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
 Bottom up, every layer is real, nothing is mocked:
 
 1. **DDIC and data** — `src/ddic/*.tabl.xml` (abapGit format), seed rows in
-   `data/*.tabu.json` (`abapGit serialize` format for table contents).
+   `data/*.tabu.json` (`abapGit serialize` format for table contents),
+   pictures included: `ZSTG_PHOTO` holds a PNG per travel in a `RSTR` column.
 2. **SEGW registration objects** — `zstg_demo_srv ... 0001.iwsv.xml` (service
    → DPC class) and `zstg_demo_mdl ... 0001.iwmo.xml` (model → MPC class), as
    abapGit serializes them. `tools/segw-registry.mjs` reads them and generates
@@ -97,7 +140,11 @@ Bottom up, every layer is real, nothing is mocked:
    CDN) that resolves `Travel-manage` and `Booking-display`. The fourth tile
    is SEGW itself: `webapp/segw/`, the Service Builder's project tree over
    `ZSTG_SEGW_SRV`, every node edited in place, Import / Export of the
-   abapGit IWPR, Generate through segw-gen (`docs/segw-editor.md`). SAPUI5 1.120 from
+   abapGit IWPR, Generate through segw-gen (`docs/segw-editor.md`); the
+   fourth is the Analytical List Page over the cube. `UI.IsImageURL` on a
+   property whose value is a media resource's URL is what puts the pictures
+   in the list and in the object page header
+   ([`docs/media-entities.md`](docs/media-entities.md)). SAPUI5 1.120 from
    SAP's CDN: Fiori Elements, the smart controls and the launchpad are not
    part of OpenUI5, and the point is that real Fiori apps run unchanged.
    SAPUI5 is SAP's, not part of this project.
