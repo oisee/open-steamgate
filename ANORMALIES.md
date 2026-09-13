@@ -152,3 +152,19 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream issue: PR "Source: flatten & / && chains into concat([...])" from `oisee/transpiler`
 - Regression-test location: `test/e2e/preview.spec.mjs` (the preview installs), `test/stg-compile.mjs`
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-13-bun-percent-encoded-specifier — Bun does not decode `%23` in an ESM specifier
+
+- Status: `workaround`
+- Discovery date: `2026-09-13`
+- Affected versions: `bun 1.4.2`, `@abaplint/transpiler-cli 2.13.86`
+- Affected ABAP statement, runtime API or adapter: not ABAP — the transpiled output of any `/NAMESPACE/`-prefixed object, whose file name carries `#` and whose importers write it percent-encoded (`await import("./%23iwbep%23cl_mgw_data_util.clas.mjs")`)
+- Minimal ABAP reproducer: none needed; two files, `mod.mjs` renamed to `#h#mod.mjs`, imported once as `"./%23h%23mod.mjs"` and once as `"./#h#mod.mjs"`
+- Exact command used to run it: `node enc.mjs` / `bun enc.mjs` (percent-encoded) and `node lit.mjs` / `bun lit.mjs` (literal)
+- Expected SAP behaviour: n/a — this is a runtime divergence, not a SAP one. Node resolves the percent-encoded form and refuses the literal; Bun does the exact opposite, so no single specifier satisfies both
+- Actual open-abap behaviour: under Bun the run dies at the first such import with `Cannot find module "./%23iwbep%23cl_mgw_data_util.clas.mjs"`. 99 files in `output/` carry a `#` today
+- Impact on open-steamgate: nothing today (we run Node); it blocks the whole Bun path, so it blocks `bun build --compile` and any single-binary packaging of the OSD
+- Smallest safe workaround: rename `#` out of the file names in a copy of `output/` and apply the same substitution inside relative `./*.mjs` specifiers (`.local/dehash.mjs`, ~20 lines, 99 renames and 22 rewrites). With it Bun runs the same 107 ABAP Unit tests as Node and serves the gateway over HTTP; see `docs/bun-spike.md`
+- Upstream issue: none filed yet. Two candidate fixes, neither ours alone: a Bun issue for the specifier decoding, or the transpiler emitting a file name both runtimes resolve (the transpiler session owns that queue)
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`

@@ -18,7 +18,10 @@ Nothing below them starts until the answer.
 ```
 0.1  Bun "local ABAP AS" packaging: yes / no                          [A]
      └─ unlocks 1.1, 1.2, 1.3
-     └─ external: bun is not installed on this machine
+     └─ feasibility settled 2026-09-13: bun 1.4.2 runs the whole thing,
+        107 ABAP Unit tests and the gateway over HTTP, docs/bun-spike.md
+     └─ external: the %23 specifier defect blocks it until worked around
+        (ANOMALY-2026-09-13-bun-percent-encoded-specifier)
      └─ external: open-abap-apc (T's, local only, no remote) for the APC layer
      └─ settled already: it lives in this repository, not a third one
 
@@ -67,7 +70,9 @@ Nothing below them starts until the answer.
 1.2  Bun.serve adapter, replacing express-icf-shim                    [S]
      └─ the ABAP side (zcl_stg_http_handler) does not change
 1.3  build and stitch: bun build --compile, one exe per platform      [S]
-     └─ external: bun; CI runners per platform
+     └─ external: CI runners per platform
+     └─ external: the %23 specifier defect, which a compiled binary
+        inherits; either a bun issue or a transpiler file-name change [T]
      └─ known: mainstream platforms only, ~60-100 MB per exe
 1.4  APC over Bun websockets                                          [T]
      └─ open-abap-apc as an outside library, cloned into .local/lars
@@ -113,30 +118,30 @@ the objects.
      └─ external: sanitized ADT document shapes from V (see below)
 ```
 
-## 2a. LSD: the tiers, and who owns which layer
+## 2a. OSD: the tiers, and who owns which layer
 
-The local system, working name LSD. The tiers say **when**, the layers say
-**who**; they are the same picture from two angles and both were agreed
-across the three sessions on 2026-09-13.
+The local system, working name OSD, the off-stack doppelganger. The tiers
+say **when**, the layers say **who**; they are the same picture from two
+angles and both were agreed across the three sessions on 2026-09-13.
 
 ```
-Tier 1  LSD speaks ADT well enough for vsp
+Tier 1  OSD speaks ADT well enough for vsp
         waves 0-4 above, plus abapGit in a box as the way content gets in
         gate: vsp's wave 0-4 tools green against localhost, AND
               open-steamgate's own suites unchanged with the facade in
-Tier 2  LSD speaks ADT well enough for Eclipse
+Tier 2  OSD speaks ADT well enough for Eclipse
         a much larger surface; the honest milestone is "connects, logs on,
         browses the tree, reads sources", not "works"
         needs an Eclipse oracle: the request sequence can be had by pointing
         Eclipse at the facade and iterating on 404s, but the expected
         responses need one Eclipse session against A4H        [A]
         rule: such a capture stays in .local/, never in this repository
-Tier 3  LSD speaks the rest: RFC and DIAG fronts, a screen that answers
+Tier 3  OSD speaks the rest: RFC and DIAG fronts, a screen that answers
         "not implemented" instead of nothing
         not ours to build: odgp already draws screens from Go with no
         system behind it, and the DIAG sibling carries the LZH writer
         (docs/layers-we-own.md). The spike is "can odgp answer a screen
-        routed from LSD", and it is odgp's question
+        routed from OSD", and it is odgp's question
 ```
 
 ```
@@ -277,10 +282,12 @@ open  revisions: reading them out of git instead of a system.
      └─ blocks only the demo payload for APC, nothing structural
 
 9.6  Bun, measured rather than assumed                                [T]
-     └─ when 0.1 is a yes: install bun, rerun the three request shapes
-        (100/20, 1000/100, 5000/100 rows) so the brief has Bun beside
-        Node 2 ms and goja 36 ms rather than an estimate
-     └─ note for the vision text: Bun is JavaScriptCore, not V8
+     └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms
+        against Node's 264 ms (docs/bun-spike.md)
+     └─ still open: the three request shapes (100/20, 1000/100,
+        5000/100 rows) so the brief has Bun beside Node 2 ms and goja
+        36 ms on the same axis
+     └─ confirmed: Bun is JavaScriptCore, not V8
 ```
 
 ---
@@ -304,11 +311,12 @@ SAP
   └─ SAPUI5 1.120.50 from the CDN               the apps' runtime
 
 Tooling
-  ├─ bun                    not installed here
+  ├─ bun 1.4.2              installed (~/.bun), runs everything
   ├─ Go 1.26                installed (used for the goja spike)
   └─ npm, pinned by the lock file
 
 Known defects we live with
   ├─ no implicit MANDT in the transpiler        ANORMALIES, T0009 kept visible
+  ├─ bun does not decode %23 in a specifier     blocks 1.3, workaround known
   └─ Bun runs JavaScriptCore, not V8            corrects the vision draft
 ```
