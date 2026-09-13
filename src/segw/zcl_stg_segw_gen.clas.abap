@@ -99,6 +99,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              name        TYPE string,
              tech_name   TYPE string,
              abap_struct TYPE string,
+             is_media    TYPE abap_bool,
              type_stem   TYPE string,
              define_stem TYPE string,
              properties  TYPE tt_property,
@@ -652,6 +653,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       ENDIF.
       ls_type-tech_name   = to_upper( ls_type-name ).
       ls_type-abap_struct = val( is_row = ls_row iv_field = 'ABAP_STRUCT' ).
+      ls_type-is_media    = flag( is_row = ls_row iv_field = 'IS_MEDIA' ).
 * ABAP names stop at 30 characters: TS_/TT_/GC_ + 27, DEFINE_ + 23
       ls_type-type_stem   = ls_type-tech_name.
       IF strlen( ls_type-type_stem ) > 27.
@@ -1257,8 +1259,12 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       && |        lo_property       type ref to /iwbep/if_mgw_odata_property,                  "#EC NEEDED\n|
       && |        lo_entity_set     type ref to /iwbep/if_mgw_odata_entity_set.                "#EC NEEDED\n|
       && |\n{ gc_stars }\n*   ENTITY - { is_type-name }\n{ gc_stars }\n\n|
-      && |lo_entity_type = model->create_entity_type( iv_entity_type_name = '{ is_type-name }' iv_def_entity_set = abap_false ). "#EC NOTEXT\n|
-      && |\n{ gc_stars }\n*Properties\n{ gc_stars }\n\n|.
+      && |lo_entity_type = model->create_entity_type( iv_entity_type_name = '{ is_type-name }' iv_def_entity_set = abap_false ). "#EC NOTEXT\n|.
+* a media entity: the type carries a stream, $metadata says m:HasStream
+    IF is_type-is_media = abap_true.
+      rv_text = rv_text && |lo_entity_type->set_is_media( 'X' ).  "#EC NOTEXT\n|.
+    ENDIF.
+    rv_text = rv_text && |\n{ gc_stars }\n*Properties\n{ gc_stars }\n\n|.
     LOOP AT is_type-properties INTO ls_property.
       rv_text = rv_text && property_code( ls_property ).
     ENDLOOP.
