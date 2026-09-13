@@ -358,9 +358,32 @@ export class ObjectStore {
     return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // one package: what is under it and what is in it
+  // the top of the tree: what a client sees when it has not named a package
+  // yet. A system answers this for the node its clients call the system
+  // library, and without it a tree has no root to open, which is what
+  // "Unable to resolve nonexistent file" means on the other end.
+  //
+  // Not called roots(): this.roots is the folders the store reads from, and
+  // a method of that name is silently shadowed by the field, which is how
+  // the registry cache broke once already.
+  rootPackages() {
+    return this.packages().filter((node) => node.parent === undefined);
+  }
+
+  // one package: what is under it and what is in it. An empty name is the
+  // root, because that is what a client asks for first.
   package(name) {
-    const wanted = String(name).toUpperCase();
+    const wanted = String(name ?? "").toUpperCase();
+    if (wanted === "") {
+      return {
+        name: "",
+        parent: undefined,
+        description: "the packages of this system",
+        library: false,
+        subpackages: this.rootPackages().map((node) => node.name),
+        objects: [],
+      };
+    }
     const all = this.packages();
     const node = all.find((p) => p.name === wanted);
     if (node === undefined) {

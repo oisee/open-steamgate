@@ -89,6 +89,26 @@ describe("tools/osd-store: the objects of the local system", function () {
     expect(all.find((p) => p.name === "$STG_SEGW_DDIC").parent).to.equal("$STG_SEGW");
   });
 
+  it("the tree has a root, which is what a client opens first", () => {
+    // Alice's VS Code said "Unable to resolve nonexistent file
+    // 'adt://osd/System Library'": the client asks for the node above every
+    // package and OSD had nothing to answer with
+    const tops = store.rootPackages();
+    expect(tops.length).to.be.greaterThan(3);
+    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD"]);
+    for (const node of tops) {
+      expect(node.parent, node.name).to.equal(undefined);
+    }
+
+    // and the same thing by the name a client uses for it: no package
+    const root = store.package("");
+    expect(root.name).to.equal("");
+    expect(root.subpackages).to.deep.equal(tops.map((p) => p.name));
+    expect(root.objects).to.deep.equal([]);
+    // a name that is really missing is still missing
+    expect(() => store.package("$NOSUCH")).to.throw(NotFound);
+  });
+
   it("a package holds its objects and names its subpackages", () => {
     const segw = store.package("$STG_SEGW");
     expect(segw.subpackages).to.deep.equal(["$STG_SEGW_DDIC"]);
