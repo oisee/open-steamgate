@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn, unitResultDocument} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn, unitResultDocument} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -467,7 +467,7 @@ export function adtRouter(options = {}) {
   advertise("packages");
   router.get(`${BASE}/packages/:name`, (req, res) => {
     answer(res, () => {
-      res.type("application/vnd.sap.adt.packages.v1+xml").send(packageDocument(store.package(req.params.name)));
+      res.type("application/vnd.sap.adt.packages.v1+xml").send(packageDocument(packageOf(store, req.params.name)));
     });
   });
 

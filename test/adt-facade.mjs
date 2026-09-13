@@ -344,6 +344,33 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(names.filter((n) => n === "$STG_SEGW_DDIC")).to.have.length(1);
     });
 
+    // $TMP is the local package of every ABAP system, so a client asks for
+    // it by name without ever having been told it is there. The store has
+    // none, because our packages are folders; the façade answers the
+    // protocol's guarantee rather than letting a client meet a 404 for the
+    // first node it opens.
+    it("the local package resolves, because every client assumes it exists", async () => {
+      const res = await call("/packages/%24TMP");
+      expect(res.status).to.equal(200);
+      expect(await res.text()).to.contain("$TMP");
+    });
+
+    it("the local package expands, and is empty rather than invented", async () => {
+      const res = await fetch(ADT + "/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {
+        method: "POST",
+        headers: {"x-csrf-token": token, cookie: `sap-contextid=${context}`},
+      });
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.not.contain("<OBJECT_NAME>ZCL");
+    });
+
+    // the simulation is one name and one failure: anything else the store
+    // says is missing stays missing, or the façade would be inventing a tree
+    it("a package that is genuinely absent is still a 404", async () => {
+      expect((await call("/packages/%24NOPE_NOT_HERE")).status).to.equal(404);
+    });
+
     it("the node structure walks one level: subpackages and objects", async () => {
       const res = await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" + encodeURIComponent("$STG_GEN_SEGW"), {method: "POST"});
       expect(res.status).to.equal(200);

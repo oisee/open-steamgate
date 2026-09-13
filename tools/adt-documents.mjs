@@ -318,8 +318,34 @@ ${nodes.map(node).join("\n")}
 }
 
 // the subpackages and objects of one package, as tree nodes
+// $TMP is the local package every ABAP system has: the one an object goes
+// to when nobody chose a package for it. A client does not discover it, it
+// assumes it, and asks for it by name before it has asked for anything else.
+//
+// Our packages are folders, so the store has no $TMP and honestly cannot
+// invent one: it reports what this tree holds. The protocol guarantee is a
+// different statement from the tree's contents, so it is answered here, at
+// the façade, where the other client-shaped compatibility lives. Simulated
+// and empty is the whole of it — the package resolves, and it holds nothing
+// because nothing in this tree was created without a package.
+export const LOCAL_PACKAGE = "$TMP";
+
+export function packageOf(store, name) {
+  const wanted = String(name ?? "").toUpperCase();
+  try {
+    return store.package(wanted);
+  } catch (error) {
+    // only this one name, and only when the store's answer was that it is
+    // missing: any other failure is the store's to report, not ours to hide
+    if (wanted !== LOCAL_PACKAGE || error?.code !== "NOT_FOUND") {
+      throw error;
+    }
+    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: [], library: false, simulated: true};
+  }
+}
+
 export function nodesOf(store, name) {
-  const pkg = store.package(name);
+  const pkg = packageOf(store, name);
   const nodes = [];
   for (const child of pkg.subpackages ?? []) {
     nodes.push({
