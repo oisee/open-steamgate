@@ -71,7 +71,8 @@ Nothing below them starts until the answer.
      └─ known: mainstream platforms only, ~60-100 MB per exe
 1.4  APC over Bun websockets                                          [T]
      └─ open-abap-apc as an outside library, cloned into .local/lars
-     └─ external: a PR to open-abap-core for the SAP-named part (Lars)
+     └─ not gated on Lars: the library ships its own copy of the SAP-named
+        part today and works; the PR (9.4) only makes it prettier
 ```
 
 ## 2. The ADT façade (gated on 0.2)
@@ -240,13 +241,53 @@ open  revisions: reading them out of git instead of a system.
 8.3  keep the preview build green (it broke twice on bundling)
 ```
 
+## 9. Upstream, outside this repository (T's, verbatim from them)
+
+```
+9.1  transpiler #1835, @abaplint/database-duckdb                      [T]
+     └─ open since 2026-09-12, checks green, no review
+     └─ external: Lars merges; PR only, never merge ourselves
+     └─ blocks nothing here; the branch feat/database-duckdb lives until then
+
+9.2  transpiler: a release after 2.13.86                              [T]
+     └─ external: Lars publishes; #1836 (flat concat chain) is merged but
+        not on npm
+     └─ unblocks 9.3, and lets both generators drop the 200-line SADL rule
+        (segw-gen's sadlXml and my zcl_stg_segw_gen_dpc)
+
+9.3  open-abap-core: BAPI_TRANSACTION_COMMIT / ROLLBACK over the LUW   [T]
+     └─ written, eb0bedd on branch bapi-transaction in the fork, unpushed
+     └─ waits on 9.2, then PR, then the commit_work test in open-abap-odata
+     └─ external: Lars merges
+
+9.4  open-abap-core: the APC family a real handler needs               [T]
+     └─ core's if_apc_wsp_extension has two methods, a stateful handler
+        needs five (on_accept, on_close, on_error) and if_apc_wsp_message
+        needs set_text; cl_apc_wsp_ext_stateful_base does not exist
+     └─ written and tested in open-abap-apc, not yet a PR
+     └─ external: Lars merges; until then open-abap-apc ships its own copy
+        and leaves core's src/tcp out of its dependency
+
+9.5  oisee/vivid-vibes: 154 unimplemented interface methods           [A/T]
+     └─ zif_o4d_effect declares get_required_media and one more; 2 of 85
+        effect classes implement them, so 75 classes do not transpile
+     └─ external: Alice's repository, a patch there is the fix
+     └─ blocks only the demo payload for APC, nothing structural
+
+9.6  Bun, measured rather than assumed                                [T]
+     └─ when 0.1 is a yes: install bun, rerun the three request shapes
+        (100/20, 1000/100, 5000/100 rows) so the brief has Bun beside
+        Node 2 ms and goja 36 ms rather than an estimate
+     └─ note for the vision text: Bun is JavaScriptCore, not V8
+```
+
 ---
 
 ## External dependencies, all of them in one place
 
 ```
 Lars / abaplint
-  ├─ transpiler #1835 (DuckDB driver)          open
+  ├─ transpiler #1835 (DuckDB driver)          open, see 9.1
   ├─ transpiler #1836 (flat concat chain)      merged 2026-09-13
   │   └─ when it reaches npm, SADL_CHUNK can go from both generators
   ├─ open-abap-odata                            license still "todo"

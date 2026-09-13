@@ -119,7 +119,11 @@ shipping a Node sidecar. Their result, for the record:
 - **goja runs it, after one down-level.** As published, the runtime does not
   load: `abap.statements.loop` is an async generator and goja has none. With
   Babel lowering the async-generator syntax it runs, byte-identical output,
-  three small shims, and 40 to 85 times slower than V8.
+  three small shims, and 40 to 85 times slower than V8 **with the database
+  stubbed**. That makes it an envelope for the runtime, not a measurement of
+  a request: the Go path still needs the modernc backend before any number
+  means something end to end. Bun sidesteps it with a native SQLite, and
+  runs JavaScriptCore rather than V8.
 - **The blocker was never WebAssembly.** Our browser build already uses the
   asm.js build of sql.js, so a database without wasm exists today. The case
   for a Go backend over `modernc.org/sqlite` is speed and dropping a 14 MB
