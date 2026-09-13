@@ -178,6 +178,33 @@ activations in flight share one promise rather than transpiling twice. The
 modules only have to be in place before the next request that touches the
 object, which is why the split is safe.
 
+**A test run is a tree, not a verdict.** `(await store.unit()).runDetached(type, name)`
+returns program, test classes, test methods and the alerts under each
+method, which is exactly the nesting of an
+`aunit:runResult`: a method with no alert passed, a method with one did
+not. A class carries the `riskLevel` and `durationCategory` it declares in
+ABAP, a method carries `executionTime` in seconds and `unit`, and both
+carry the line and column they are written at, so the façade can build a
+navigation URI into the include without parsing anything itself. `classes()`
+answers what tests exist without running them, and `{testClass}` or
+`{method}` narrows a run to one. An alert
+is one of three kinds. `failedAssertion` for an assertion that did not
+hold, with the assert's message as the title and expected and actual as
+details; `exception` for an ABAP exception nobody caught; `shortDump` for a
+failure of the runtime. Every alert carries a stack read back through the
+transpiler's source maps, so an entry names the ABAP include and line
+rather than the generated module.
+
+The run happens in a child process. A test writes to the database, and the
+database is the one the gateway is serving from, so a run inside the server
+would mean a client's test data landing in the server's rows. The child
+boots its own runtime against its own in-memory database, about a second,
+and the parse it would otherwise repeat is handed to it, so a run of one
+class costs a little over a second in total. What runs comes from the parse
+rather than from the transpiled index, which is why a test class that has
+been written but not yet transpiled comes back as an alert saying so
+instead of quietly not existing.
+
 **A check run answers for source that is not on disk.** `checkruns` carries
 the editor's buffer, not the stored object, so `check(type, name, {source})`
 lets the given text stand in for the file for that one call and touches

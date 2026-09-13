@@ -405,6 +405,18 @@ export class ObjectStore {
     return this.rows;
   }
 
+  // the test run of an object (tools/osd-unit.mjs). It needs the parse and
+  // the runtime, both of which live here, so the façade asks the store for
+  // it rather than assembling one. Imported when first asked for, because
+  // the runner imports the store back.
+  async unit() {
+    if (this.tests === undefined) {
+      const {UnitRun} = await import("./osd-unit.mjs");
+      this.tests = new UnitRun(this);
+    }
+    return this.tests;
+  }
+
   // a write means the parse is stale, here and for anyone sharing this tree
   #forget() {
     this.parsed = undefined;

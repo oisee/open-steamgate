@@ -111,6 +111,9 @@ the objects.
 2.5  writes: source in, abaplint as the syntax check, transpile as
      activation, ABAP Unit as the test run; synthetic locks, no
      transports                                                       [S]
+     └─ the store side is in: check with source in the request, and the
+        test run as program/testClasses/testMethods/alerts, both
+        tools/osd-*.mjs, both with the shape vsp unmarshals           [T]
 2.6  runtime errors as ST22-shaped dump documents                     [S]
      └─ V's freebie: `vsp dumps --explain` then works with no system
 2.7  honest scope: the development loop, some thirty to fifty of the
