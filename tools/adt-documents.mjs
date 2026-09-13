@@ -522,11 +522,50 @@ export function objectFromUri(uri, collections) {
 // Navigation is the part worth getting right. Every class and method knows
 // the line it is written at and which include it lives in, so a client can
 // jump straight to a failure instead of opening a file and searching.
+// the file a stack frame names, as an address in the façade. The suffix
+// says which include of a class it is; anything else we do not serve by
+// this route comes back undefined and the caller keeps the file name.
+const FRAME_INCLUDES = {
+  "locals_def": "definitions",
+  "locals_imp": "implementations",
+  "macros": "macros",
+  "testclasses": "testclasses",
+};
+
+export function frameUri(file, line, column) {
+  if (typeof file !== "string" || file === "") {
+    return undefined;
+  }
+  const name = file.split("/").pop();
+  const at = `#start=${line ?? 1},${column ?? 1}`;
+  const include = /^(.+)\.clas\.([a-z_]+)\.abap$/.exec(name);
+  if (include !== null && FRAME_INCLUDES[include[2]] !== undefined) {
+    return `${uriOf("CLAS", include[1])}/includes/${FRAME_INCLUDES[include[2]]}/source/main${at}`;
+  }
+  const clas = /^(.+)\.clas\.abap$/.exec(name);
+  if (clas !== null) {
+    return `${uriOf("CLAS", clas[1])}/source/main${at}`;
+  }
+  const prog = /^(.+)\.prog\.abap$/.exec(name);
+  if (prog !== null) {
+    return `${uriOf("PROG", prog[1])}/source/main${at}`;
+  }
+  return undefined;
+}
+
 export function unitResultDocument(run, options = {}) {
   const base = options.base ?? uriOf(run.program?.typeName ?? "CLAS", run.program?.name ?? "") ?? "";
   const at = (include, line, column) => `${base}/includes/${include ?? "testclasses"}/source/main#start=${line ?? 1},${column ?? 1}`;
 
-  const stackEntry = (e) => `            <stackEntry adtcore:uri="${xmlEscape(e.uri ?? "")}" adtcore:name="${xmlEscape(e.name ?? "")}" adtcore:description="${xmlEscape(e.line === undefined ? "" : "line " + e.line)}"/>`;
+  // A frame arrives as the file the source map resolved to, which is a file
+  // name and not an address a client can follow. Turned into one here, so a
+  // failure is a place to jump to; a file whose shape we do not recognise
+  // keeps its name and gets no navigationUri, because a link that goes
+  // nowhere is worse than no link.
+  const stackEntry = (e) => {
+    const uri = frameUri(e.uri, e.line, e.column);
+    return `            <stackEntry adtcore:uri="${xmlEscape(uri ?? e.uri ?? "")}" adtcore:name="${xmlEscape(e.name ?? "")}" adtcore:description="${xmlEscape(e.line === undefined ? "" : "line " + e.line)}"${uri === undefined ? "" : ` navigationUri="${xmlEscape(uri)}"`}/>`;
+  };
 
   const alert = (a) => `        <alert kind="${xmlEscape(a.kind ?? "failedAssertion")}" severity="${xmlEscape(a.severity ?? "critical")}">
           <title>${xmlEscape(a.title ?? "")}</title>
