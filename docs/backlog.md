@@ -104,7 +104,8 @@ the objects.
      ├─ GetSource for a class, from the files in src/ and gen/
      └─ GetTableContents, from the database we already have
      └─ exit test: vsp pointed at localhost, its own tools answer
-2.4  reads: programs, classes, interfaces, tables, packages, search   [S]
+2.4  reads: programs, classes, interfaces, tables, packages, search
+                                                                 [S] DONE
      └─ and the cross-reference tables over freestyle SQL: free on the
         protocol side, filled from the parse by the store layer        [T]
 2.5  writes: source in, abaplint as the syntax check, transpile as

@@ -1,8 +1,9 @@
 # The ADT façade: the contract, and what answers it today
 
-**Wave 0 and the thin slice are built** (2026-09-13). The handshake, the
-discovery document, source reads and table contents answer on 8099, and the
-rest of this page is still the contract for what has not been built. Where a
+**Wave 0 and wave 1's reads are built** (2026-09-13). The handshake, the
+discovery document, source reads, object structures, search, the package
+tree and table contents all answer on 8099, and the rest of this page is
+still the contract for what has not been built. Where a
 shape was guessed rather than known, it says so, and vsp's round trip is what
 settles it.
 
@@ -51,7 +52,7 @@ Each wave ends in a test vsp runs against localhost.
 | Wave | What | Exit test |
 | --- | --- | --- |
 | 0 **done** | session, CSRF, discovery, plus source reads and freestyle SQL | vsp logs on, keeps a session, reads discovery without deciding it was logged out |
-| 1 | reading a repository: sources, package contents, search | `GetSource`, `GetPackage`, `SearchObject`, `GrepPackages` |
+| 1 **reads done** | reading a repository: sources, package contents, search | `GetSource`, `GetPackage`, `SearchObject`, `GrepPackages` |
 | 2 | reading data: table contents, table and structure definitions | the table tools, with a filter |
 | 3 | the development loop: write, lock, syntax check, activate, unit test | the write path end to end on one session |
 | 4 | runtime errors as ST22-shaped documents | `vsp dumps --explain`, with no system |
@@ -101,11 +102,20 @@ mis-reads rather than reports.
 | source of a program | GET | `/sap/bc/adt/programs/programs/{name}/source/main` | `text/plain` | raw ABAP |
 | source of an include | GET | `/sap/bc/adt/programs/includes/{name}/source/main` | `text/plain` | raw ABAP |
 | source of a module | GET | `/sap/bc/adt/functions/groups/{group}/fmodules/{fm}/source/main` | `text/plain` | raw ABAP |
-| object structure | GET | `/sap/bc/adt/oo/classes/{name}` | `application/vnd.sap.adt.objectstructure.v2+xml` | methods and includes |
+| object structure | GET | `/sap/bc/adt/oo/classes/{name}/objectstructure` | `application/vnd.sap.adt.objectstructure.v2+xml` | methods and includes |
 | package | GET | `/sap/bc/adt/packages/{name}` | `application/vnd.sap.adt.packages.v1+xml` | package document |
 | package contents | POST | `/sap/bc/adt/repository/nodestructure` | node structure XML | the tree |
 | search | GET | `/sap/bc/adt/repository/informationsystem/search` | search XML | the result set |
 | grep | — | rides on the reads above, matched in the client | — | — |
+
+What the round trip settled, 2026-09-13. vsp pointed its client at 8099 and
+found exactly two reds, both shape rather than content: the object structure
+answered 404 because the path is `/oo/classes/{name}/objectstructure` and not
+the bare object URI, and search was not mounted. Both are built now. The data
+preview document passed on the first try and its column-oriented shape is
+confirmed. Still unconfirmed by any client: the node structure's request
+parameters, the element type codes `CLAS/OM` and `CLAS/I`, and the package
+document.
 
 Three things the fixtures will pin and we should not guess:
 
