@@ -494,6 +494,42 @@ Order after this: ~~`stg-compile`~~, ~~ODC-local~~, ~~`function:` in the YAML~~ 
 search-help provider is with the transpiler session; the live RFC client
 (open-rfc npm, record mode, replay substitutions) waits for a go.
 
+## The Fiori apps: real ones, and what deploying them to a system takes (2026-09-13)
+
+Asked by Alice, answered from the tree: our apps are not a simulation of
+Fiori, they are Fiori. `webapp/<app>/` holds what any SAPUI5 app holds
+(`Component.js`, `manifest.json` descriptor version 1.59 with `sap.app` /
+`sap.ui` / `sap.ui5`, `dataSources`, `models`, `crossNavigation` inbounds
+and outbounds, `i18n/`, and for the freestyle SEGW editor `view/` +
+`controller/`). UI5 itself comes from SAP's CDN (1.120.50): Fiori Elements
+V2 templates, the smart controls, `sap.ushell`. What open-steamgate
+replaces is only what sits below `/sap/opu/odata/sap/`.
+
+So the apps can be deployed as BSP applications (`WAPA`, abapGit or
+`/UI5/UI5_REPOSITORY_LOAD`, deploy-back is the vsp sibling's job). Three
+things differ between the repo and a deployed copy, none of them
+structural:
+
+- `sap.app.dataSources.mainService.uri`: ours is relative to the mount
+  (`../sap/opu/odata/sap/…`), a deployed app wants `/sap/opu/odata/sap/…`.
+- the bootstrap in `index.html`: ours is the CDN, a system's is
+  `/sap/public/bc/ui5_ui5/resources/sap-ui-core.js`; under a launchpad the
+  page is not deployed at all, the shell loads the Component.
+- `webapp/flp.html` + `launchpad.js` are the sandbox and stay here; on a
+  system the tiles are catalog content and target mappings over the
+  `crossNavigation.inbounds` the manifests already declare.
+
+Plus `ui5 build` for `Component-preload.js` (we run with
+`componentPreload="off"`, fine locally, slow on a system). The looks are
+the same modulo the system's UI5 version and theme. What the sandbox does
+not have: roles, catalogs and personalization (test adapters), logon,
+a real CSRF handshake, translations beyond the default language.
+
+**Backlog item:** try it once on A4H, on Alice's say-so: a BSP with the
+Travels app, the three changes above, a tile over `Travel-manage`, next to
+the transpiled `ZSTG_DEMO_SRV` deployed the same way. That is the end-to-end
+proof that a service and its app built offline land on a system unchanged.
+
 ## RFC replay (2026-09-12, transpiler session)
 
 `CALL FUNCTION ... DESTINATION x` is served without a system:
