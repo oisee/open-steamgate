@@ -16,7 +16,11 @@ import {join} from "node:path";
 export class Data {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
-    this.booted = undefined;
+    // a caller that already has the runtime up, a server serving requests,
+    // hands its connection in rather than letting a second runtime boot and
+    // re-seed the database underneath it
+    this.client = options.client;
+    this.booted = this.client === undefined ? undefined : Promise.resolve(this.client);
   }
 
   // the runtime, once; every later call reuses it

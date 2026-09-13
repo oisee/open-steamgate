@@ -1,12 +1,22 @@
 import {expect} from "chai";
+import {existsSync} from "node:fs";
 import {Data, NotAllowed} from "../tools/osd-data.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
 // The data of OSD: the rows a client sees when it asks for table contents,
 // out of the same database the ABAP runtime uses.
 describe("tools/osd-data: the rows of the local system", function () {
-  this.timeout(60000);
+  this.timeout(120000);
   const data = new Data();
+
+  // the cross-reference rows are derived and git-ignored, so a fresh
+  // checkout has none until they are built; this test reads them
+  before(async () => {
+    if (existsSync("data/wbcrossgt.tabu.json") === false) {
+      const {CrossReference} = await import("../tools/osd-xref.mjs");
+      new CrossReference().build().write();
+    }
+  });
 
   it("the system has its tables: ours, the runtime's own, and the cross-reference", async () => {
     const tables = await data.tables();
@@ -63,5 +73,13 @@ describe("tools/osd-data: the rows of the local system", function () {
     expect(store.data()).to.equal(store.data());
     const answer = await store.data().query("SELECT status, status_text FROM zstg_status");
     expect(answer.rows.map((r) => r.status)).to.include("A");
+  });
+
+  it("a caller that already has a runtime hands in its connection", async () => {
+    const client = await data.boot();
+    const second = new Data({client});
+    // no second boot: the same connection answers
+    expect(await second.boot()).to.equal(client);
+    expect((await second.query("SELECT status FROM zstg_status")).rows.length).to.be.greaterThan(0);
   });
 });
