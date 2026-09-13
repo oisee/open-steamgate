@@ -382,3 +382,32 @@ worked example — one class out of an 85-class repository, because the other
 Until the façade says which state an object is in, the honest instruction
 is: an object under `local/` is readable, and is only runnable if somebody
 put its folder in the transpile input on purpose.
+
+## The pseudo-headers an ICF handler can ask for
+
+A handler reads the request through `~`-prefixed pseudo-headers, and
+`IF_HTTP_HEADER_FIELDS_SAP` is the canonical list. `cl_express_icf_shim`
+serves seven of the eighteen: `~path`, `~path_info`,
+`~path_info_expanded`, `~path_translated_expanded`, `~query_string`,
+`~request_method`, `~request_uri`.
+
+Absent: `~path_translated`, `~script_name`, `~script_name_expanded`,
+`~request_line`, `~server_name`, `~server_port`, `~server_protocol`,
+`~remote_addr`, `~uri_scheme`, `~unidentified_path_segments`,
+`~virtual_host_number`.
+
+Nothing we serve asks for any of them — measured, not assumed: our own code
+uses four and the imported demo application uses two, all of them present.
+So this is a gap and not a defect today. It is written down because of the
+shape it has: a handler asking for `~server_name` gets an initial value and
+builds a wrong absolute URL out of it, with nothing anywhere reporting that
+the question was not answered. `~script_name` is the one most likely to be
+wanted first, being the matched node path — the complement of `~path_info`,
+which is the remainder, by the CGI convention SAP follows.
+
+`~path_info` itself is confirmed against working code from a real system:
+it carries a leading slash, it does not include the service name, and at
+the node root it is empty rather than `/`. That is what OSD does.
+
+The shim is a library, so closing the gap is a small change upstream rather
+than a workaround here.
