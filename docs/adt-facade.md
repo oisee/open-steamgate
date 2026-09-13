@@ -240,6 +240,17 @@ what it already meant for DuckDB, read when a runtime boots and written
 when it exits. Without it the database stays in memory and a test suite
 pays nothing.
 
+A database file carries a fingerprint of the schema it was built for, and a
+runtime that opens a file built for other tables says so and starts clean
+rather than serving rows the running code does not describe. That case is
+reachable by the workflow we intend, a worktree per experiment with its own
+database and its own DDIC, which is why it is checked rather than trusted.
+`STG_DB_STRICT=1` refuses instead of rebuilding, for data worth inspecting
+before it is discarded. The fingerprint is a compatibility check and
+nothing else: never compared between instances, never promoted, and the
+answer to a mismatch is always to rebuild this instance's data rather than
+to take data from somewhere else (vsp's ADR 0001, point 7).
+
 **A repository comes in without a git binary.** `tools/osd-git.mjs` is a
 thin call into `ZCL_OSD_GIT`, which speaks git's smart HTTP protocol: the
 advertisement at `info/refs?service=git-upload-pack` says what branches

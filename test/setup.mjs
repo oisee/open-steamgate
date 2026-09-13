@@ -51,8 +51,10 @@ export async function setup(abap, schemas, insert) {
   // a runtime that gets recycled needs: it is read here and written when
   // this process is asked to go away (tools/osd-persist.mjs). Without it
   // the database is in memory and the seed runs every time, as before.
-  const {loadInto, saveWhenAsked} = await import("../tools/osd-persist.mjs");
-  const restored = await loadInto(db);
+  const {loadInto, saveWhenAsked, stamp} = await import("../tools/osd-persist.mjs");
+  // a file made for a different DDIC is not this instance's data, so it is
+  // said out loud and built again rather than served as if it fitted
+  const restored = await loadInto(db, schemas.sqlite);
   saveWhenAsked(db);
   if (restored === true) {
     return;
@@ -61,6 +63,7 @@ export async function setup(abap, schemas, insert) {
   await db.execute(insert);
   await db.execute(seedStatements());
   await loadScaledData(db, "sqlite");
+  await stamp(db, schemas.sqlite);
 }
 
 // STG_DATA_SCALE=<rows> adds that many synthetic flight facts (tools/gen-data.mjs)

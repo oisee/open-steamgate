@@ -15,8 +15,48 @@
 //
 // Without STG_DB_PATH nothing here changes: the database is in memory, the
 // seed runs every time, and a test suite is not slowed down by a file.
+import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from "node:fs";
 import {dirname} from "node:path";
+
+// The one table OSD owns in its own database: which schema the rows in this
+// file were made for. Source and data version on different axes, git for the
+// one and this file for the other, and a file made for one branch's DDIC
+// opened by another branch's code would otherwise come up silently with the
+// wrong tables and serve rows the running code does not describe.
+//
+// It is a compatibility check and nothing more. Nothing compares it between
+// instances, nothing promotes it, and the answer to a mismatch is to build
+// this instance's data again, never to fetch data from somewhere else.
+const STAMP = "osd_schema";
+
+export function fingerprintOf(schema) {
+  const text = Array.isArray(schema) ? schema.join("\n") : String(schema ?? "");
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+async function stampOf(db) {
+  try {
+    const answer = await db.select({select: `SELECT fingerprint FROM ${STAMP} LIMIT 1`});
+    return answer?.rows?.[0]?.fingerprint;
+  } catch {
+    // no such table: a file from before this existed, which is a file whose
+    // schema nobody recorded and therefore nobody can trust
+    return undefined;
+  }
+}
+
+// written after the seed, so it travels with the bytes that are saved
+export async function stamp(db, schema) {
+  if (databaseFile() === undefined) {
+    return undefined;
+  }
+  const fingerprint = fingerprintOf(schema);
+  await db.execute(`CREATE TABLE IF NOT EXISTS ${STAMP} ('fingerprint' NCHAR(16), 'at' NCHAR(32));`);
+  await db.execute(`DELETE FROM ${STAMP};`);
+  await db.execute(`INSERT INTO ${STAMP} ('fingerprint', 'at') VALUES ('${fingerprint}', '${new Date().toISOString()}');`);
+  return fingerprint;
+}
 
 // SQLite only: the DuckDB client takes the path itself and keeps its own
 // file, which it can write to as it goes
@@ -29,8 +69,9 @@ export function databaseFile() {
 }
 
 // true when the database came back from the file and the caller should not
-// seed over it; false when this is a database that has never existed
-export async function loadInto(db) {
+// seed over it; false when the caller has to build it, which is a file that
+// never existed, an empty one, or one made for a different schema
+export async function loadInto(db, schema) {
   const file = databaseFile();
   if (file === undefined || existsSync(file) === false) {
     await db.connect();
@@ -42,7 +83,38 @@ export async function loadInto(db) {
     return false;
   }
   await db.connect(bytes);
-  return true;
+  if (schema === undefined) {
+    return true;
+  }
+  const wanted = fingerprintOf(schema);
+  const found = await stampOf(db);
+  if (found === wanted) {
+    return true;
+  }
+  // the rows in this file were made for other tables. Saying so is the
+  // point: silently serving them is how a client reads data the running
+  // code does not describe.
+  //
+  // What to do about it is a knob, and the default is to rebuild, because
+  // rows that do not fit the running code cannot be served whatever we
+  // decide, so refusing only leaves an instance stuck. STG_DB_STRICT=1 is
+  // for data worth looking at before it is thrown away: then nothing is
+  // touched and the human chooses. Never silent either way.
+  const said = `${file} was made for schema ${found ?? "nobody recorded which"} and this runtime generates ${wanted}`;
+  if (process.env.STG_DB_STRICT === "1") {
+    throw new SchemaDrift(`${said}: refusing to touch it (STG_DB_STRICT=1). Move it aside, or unset STG_DB_STRICT to rebuild.`);
+  }
+  console.log(`${said}: starting with an empty database`);
+  await db.disconnect();
+  await db.connect();
+  return false;
+}
+
+export class SchemaDrift extends Error {
+  constructor(message) {
+    super(message);
+    this.code = "SCHEMA_DRIFT";
+  }
 }
 
 // the bytes to the file, through a temporary name, so a process killed
