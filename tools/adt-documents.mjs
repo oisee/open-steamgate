@@ -354,9 +354,14 @@ export function nodesOf(store, name) {
 // as much as the messages: a client reads "processed" as "this ran", and a
 // report that could not run must not look like a report that found nothing.
 export function checkReportDocument(reports) {
-  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
+  // the position is an attribute and the text is a child element, which is
+  // where a client reads them; the fragment on the URI says the same thing
+  // and is what a person following the link lands on
+  const message = (uri, issue) => `      <chkrun:checkMessage adtcore:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}">
+        <shortText>${xmlEscape(issue.message)}</shortText>
+      </chkrun:checkMessage>`;
 
-  const report = (r) => `  <chkrun:checkReport chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
+  const report = (r) => `  <chkrun:checkReport adtcore:uri="${xmlEscape(r.uri)}" chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
     <chkrun:checkMessageList>
 ${r.issues.map((i) => message(r.uri, i)).join("\n")}
     </chkrun:checkMessageList>

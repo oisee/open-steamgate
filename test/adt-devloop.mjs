@@ -191,6 +191,9 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await res.text();
       expect(xml).to.contain("<chkrun:checkReport");
       expect(xml).to.contain('chkrun:status="processed"');
+      expect(xml).to.contain("<chkrun:checkMessageList>");
+      // no findings is an empty list, not an absent one: a client tells the
+      // two apart and only one of them means "this ran and found nothing"
       expect(xml).to.not.contain("<chkrun:checkMessage ");
     });
 
@@ -201,6 +204,11 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await res.text();
       expect(xml).to.contain("<chkrun:checkMessage ");
       expect(xml).to.contain('chkrun:type="E"');
+      // a client reads the severity, the position and the text, each where it
+      // expects them: attributes for the first two, a child for the text
+      expect(xml).to.match(/chkrun:line="\d+"/);
+      expect(xml).to.match(/chkrun:column="\d+"/);
+      expect(xml).to.match(/<shortText>[^<]+<\/shortText>/);
       // the point of a check run: the file is untouched by it
       const after = await (await call(`/oo/classes/${SCRATCH}/source/main`)).text();
       expect(after).to.equal(before);
