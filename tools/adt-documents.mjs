@@ -97,6 +97,23 @@ ${(object.children ?? []).map((c) => element(c, 2)).join("\n")}
 `;
 }
 
+// METHOD <name> in the implementation part, by name and row. The parse
+// already knows where every body starts; this only reads it out.
+function implementationRows(object, name) {
+  const rows = new Map();
+  for (const file of object.getSequencedFiles?.() ?? []) {
+    const implementation = file.getInfo?.()?.getClassImplementationByName?.(String(name).toLowerCase());
+    for (const method of implementation?.methods ?? []) {
+      const start = method.token?.getStart?.();
+      if (start === undefined) {
+        continue;
+      }
+      rows.set(method.token.getStr().toUpperCase(), {row: start.getRow(), col: start.getCol()});
+    }
+  }
+  return rows;
+}
+
 // The elements of a class or an interface, out of the parsed system. The
 // parse is the same one the syntax check runs on, so what a client is told
 // exists is what would compile.
@@ -109,15 +126,24 @@ export function structureOf(store, type, name) {
   const children = [];
 
   const definition = object?.getDefinition?.();
-  if (definition !== undefined && definition !== undefined) {
+  if (definition !== undefined) {
+    // where each method's body is, which is not where its declaration is. A
+    // client that wants one method slices the source at this position, so
+    // pointing at the declaration gives it the signature and no body. The
+    // declaration is the fallback for a method that has no implementation:
+    // abstract, or inherited and not redefined here.
+    const bodies = implementationRows(object, entry.name);
     for (const method of definition.getMethodDefinitions?.()?.getAll?.() ?? []) {
-      const start = method.getStart?.();
+      const name = method.getName().toUpperCase();
+      const declared = method.getStart?.();
+      const body = bodies.get(name);
+      const at = body ?? (declared === undefined ? undefined : {row: declared.getRow?.() ?? declared.row, col: declared.getCol?.() ?? declared.col});
       children.push({
-        name: method.getName().toUpperCase(),
+        name,
         type: METHOD,
         visibility: VISIBILITY[method.getVisibility?.()] ?? "public",
         modifiers: method.isStatic?.() === true ? "static" : undefined,
-        uri: start === undefined ? "source/main" : `source/main#start=${start.getRow?.() ?? start.row},${start.getCol?.() ?? start.col}`,
+        uri: at === undefined ? "source/main" : `source/main#start=${at.row},${at.col}`,
       });
     }
   }

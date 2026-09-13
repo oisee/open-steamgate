@@ -57,10 +57,18 @@ export function startServer(quiet) {
   const facade = adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})});
   app.use(facade.router);
   // parsing the system is the expensive part of a syntax check or an object
-  // structure, and it is shared once paid. Paying it at startup rather than
-  // on whichever request arrives first keeps the first client from waiting
-  // for something the second gets free.
-  setImmediate(() => facade.store.registry());
+  // structure, and it is shared once paid. A served instance pays it at
+  // startup so the first client does not buy it for the second; it is
+  // seconds of a blocked loop over a big system, which is why a test
+  // harness, where nothing waits on it, does not.
+  if (quiet !== true) {
+    setImmediate(() => {
+      const started = Date.now();
+      const objects = facade.store.list().length;
+      facade.store.registry();
+      console.log(`parsed ${objects} objects in ${Date.now() - started} ms`);
+    });
+  }
 
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
     try {

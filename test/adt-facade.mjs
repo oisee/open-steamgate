@@ -13,12 +13,17 @@ describe("tools/adt-facade: OSD answers ADT", () => {
   let token;
   let context;
 
-  before(async () => {
+  before(async function () {
+    // parsing the system is seconds over a big one, and every structure read
+    // shares the one parse. Paying it here keeps it out of whichever test
+    // happens to be first, where it would look like that test being slow.
+    this.timeout(120000);
     server = startServer(true);
     // the handshake, once, the way a client opens a session
     const res = await fetch(ADT + "/core/discovery", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
     token = res.headers.get("x-csrf-token");
     context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+    await fetch(ADT + "/oo/classes/ZCL_STG_DISPATCHER/objectstructure", {headers: {cookie: `sap-contextid=${context}`}});
   });
 
   after(() => server.close());
@@ -172,6 +177,16 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("a method carries the source position a client asks for it by", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
       expect(xml).to.match(/abapsource:sourceUri="source\/main#start=\d+,\d+"/);
+    });
+
+    it("that position is the method's body, not its declaration", async () => {
+      // a client slices one method out of the source at this position; the
+      // declaration would give it the signature and no body at all
+      const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
+      const at = xml.match(/adtcore:name="FILES"[^>]*source\/main#start=(\d+),/);
+      expect(at, "FILES is in the structure").to.not.equal(null);
+      const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
+      expect(source[Number(at[1]) - 1].toUpperCase()).to.contain("METHOD FILES");
     });
 
     it("a class's other includes are elements of the structure too", async () => {
