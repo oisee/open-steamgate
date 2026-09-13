@@ -2,7 +2,21 @@ import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {spawn} from "node:child_process";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
+
+// is that process still there?
+const alive = (pid) => {
+  if (pid === undefined) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // The serving runtime, in a process that can be replaced. This is the half
 // that makes an activation true: Node pins a module graph for the life of a
@@ -89,6 +103,38 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       writeFileSync(module, before);
       await runtime.stop();
     }
+  });
+
+  it("a supervisor that goes away takes its runtime with it", async () => {
+    // found by vsp rather than by anything of ours: eight serving processes
+    // reparented to init, one per run, 1.6 GB across three hours. A recycle
+    // killed the child it replaced and nothing killed the last one.
+    const runner = spawn(process.execPath, ["--input-type=module", "-e", `
+      const {ServingRuntime} = await import("${join(process.cwd(), "tools", "osd-runtime.mjs")}");
+      const runtime = new ServingRuntime();
+      const up = await runtime.start();
+      console.log("pid " + up.pid);
+      setTimeout(() => undefined, 60000);
+    `], {cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"]});
+
+    let pid;
+    runner.stdout.on("data", (d) => {
+      const found = /pid (\d+)/.exec(d.toString());
+      if (found !== null) {
+        pid = Number(found[1]);
+      }
+    });
+    for (let waited = 0; pid === undefined && waited < 60000; waited += 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    expect(pid, "the supervisor never reported a child").to.not.equal(undefined);
+    expect(alive(pid), "the child should be running").to.equal(true);
+
+    runner.kill("SIGTERM");
+    for (let waited = 0; alive(pid) && waited < 10000; waited += 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    expect(alive(pid), "the child outlived the supervisor").to.equal(false);
   });
 
   it("a runtime that died is not a runtime that is ready", async () => {

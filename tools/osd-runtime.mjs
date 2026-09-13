@@ -24,6 +24,40 @@ import {fileURLToPath} from "node:url";
 
 const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 
+// Every serving runtime this process started, so that none of them outlives
+// it. A recycle kills the child it replaces, and nothing used to kill the
+// last one when the supervisor itself went away: a long session left one
+// process per run reparented to init, eight of them and 1.6 GB across three
+// hours, found by vsp rather than by anything of ours. A child is not
+// something to leave behind because the parent was not asked to tidy up.
+const CHILDREN = new Set();
+let reaperInstalled = false;
+
+function reapOnExit() {
+  if (reaperInstalled === true) {
+    return;
+  }
+  reaperInstalled = true;
+  const reap = () => {
+    for (const child of CHILDREN) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // it is already gone, which is the outcome we wanted
+      }
+    }
+    CHILDREN.clear();
+  };
+  // exit handlers can only do synchronous work, and kill( ) is synchronous
+  process.on("exit", reap);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => {
+      reap();
+      process.exit(0);
+    });
+  }
+}
+
 export class ServingRuntime {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
@@ -144,6 +178,9 @@ export class ServingRuntime {
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
+      reapOnExit();
+      CHILDREN.add(child);
+
       let out = "";
       child.stdout.on("data", (d) => {
         out += d.toString();
@@ -174,6 +211,7 @@ export class ServingRuntime {
 
       child.once("exit", (code, signal) => {
         clearTimeout(timer);
+        CHILDREN.delete(child);
         // a recycle and a stop clear this.child before the exit arrives, so
         // reaching here with it still set means the runtime died on its own.
         // Then the readiness goes too: it described a process that is gone,
