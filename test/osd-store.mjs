@@ -139,6 +139,18 @@ ENDCLASS.
     expect(() => withLibs.delete("CLAS", "CL_ABAP_ZIP")).to.throw(ReadOnly);
   });
 
+  it("the transpile behind an activation is a separate call, so the verdict is fast", async () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    const before = Date.now();
+    const verdict = store.activate("CLAS", "ZCL_OSD_PROBE");
+    expect(Date.now() - before, "the verdict waits for no transpile").to.be.lessThan(9000);
+    expect(verdict.active).to.equal(true);
+    // the same promise while it runs, so two activations do not transpile twice
+    const first = store.transpile();
+    expect(store.transpile()).to.equal(first);
+    expect(await first).to.include.keys(["ok", "ms", "objects"]);
+  });
+
   it("activation holds or fails on the syntax check, with the line and the rule", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
     expect(store.activate("CLAS", "ZCL_OSD_PROBE").active).to.equal(true);

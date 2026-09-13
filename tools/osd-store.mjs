@@ -13,6 +13,7 @@
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync} from "node:fs";
+import {spawn} from "node:child_process";
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
 
@@ -328,10 +329,44 @@ export class ObjectStore {
   }
 
   // activation is that check over the object and everything that uses it:
-  // a local system has no queue, so it either holds or it does not
+  // a local system has no queue, so it either holds or it does not. The
+  // verdict comes back at once and the modules are written afterwards,
+  // because the façade answers the client with the verdict and the next
+  // request is what needs the output.
   activate(type, name) {
     const result = this.check(type, name);
     return {...result, active: result.issues.length === 0};
+  }
+
+  // the transpile behind an activation: the modules the runtime loads.
+  // Ten seconds over the whole system, so a caller starts it and does not
+  // wait; the promise is there for a caller that wants to know. Not to be
+  // confused with build( ), which is the index of objects.
+  transpile(options = {}) {
+    if (this.building !== undefined && options.force !== true) {
+      return this.building;
+    }
+    this.building = new Promise((resolve) => {
+      const started = Date.now();
+      const child = spawn("npx", ["abap_transpile"], {cwd: this.root, stdio: "pipe"});
+      let output = "";
+      child.stdout.on("data", (d) => {
+        output += d.toString();
+      });
+      child.stderr.on("data", (d) => {
+        output += d.toString();
+      });
+      child.on("close", (code) => {
+        this.building = undefined;
+        resolve({
+          ok: code === 0,
+          ms: Date.now() - started,
+          objects: Number(/(\d+) objects written to disk/.exec(output)?.[1] ?? 0),
+          output: code === 0 ? undefined : output.slice(-2000),
+        });
+      });
+    });
+    return this.building;
   }
 }
 
