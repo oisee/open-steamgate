@@ -347,6 +347,96 @@ export function nodesOf(store, name) {
   return nodes;
 }
 
+// ------------------------------------------------------- the dev loop
+
+// A lock result. The handle is the whole payload; the rest of the envelope is
+// what a client expects around it, and the same envelope carries the node
+// structure, so the shape is already confirmed by one round trip.
+export function lockResultDocument(handle, options = {}) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+    <DATA>
+      <LOCK_HANDLE>${xmlEscape(handle)}</LOCK_HANDLE>
+      <CORRNR/>
+      <CORRUSER/>
+      <CORRTEXT/>
+      <IS_LOCAL>${options.local === false ? "" : "X"}</IS_LOCAL>
+      <IS_LINK_UP/>
+      <MODIFICATION_SUPPORT>${options.modifiable === false ? "" : "X"}</MODIFICATION_SUPPORT>
+    </DATA>
+  </asx:values>
+</asx:abap>
+`;
+}
+
+// How a system refuses. A client looks for the exception marker and shows the
+// type and the message, so an honest refusal reaches a person rather than
+// becoming a status code they have to guess about.
+export function exceptionDocument(type, message, options = {}) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">
+  <namespace id="${xmlEscape(options.namespace ?? "com.sap.adt")}"/>
+  <type id="${xmlEscape(type)}"/>
+  <message lang="EN">${xmlEscape(message)}</message>
+  <localizedMessage lang="EN">${xmlEscape(message)}</localizedMessage>
+  <properties/>
+</exc:exception>
+`;
+}
+
+// The answer to an activation that did not happen. An activation that did
+// happen answers nothing at all, which is the convention and not our choice:
+// a client reads an empty body as success and a document as failure, so a
+// document has to mean failure and nothing else.
+export function activationFailureDocument(objects) {
+  const message = (o, issue) => `    <msg:msg objDescr="${xmlEscape(o.name)}" type="E" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
+      <shortText><txt>${xmlEscape(issue.message)}</txt></shortText>
+    </msg:msg>`;
+
+  const inactive = (o) => `    <ioc:entry adtcore:name="${xmlEscape(o.name)}" adtcore:type="${xmlEscape(ADT_TYPE[o.type] ?? o.type)}" adtcore:uri="${xmlEscape(uriOf(o.type, o.name) ?? "")}"/>`;
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"
+               xmlns:msg="http://www.sap.com/abapxml/checklist/message"
+               xmlns:ioc="http://www.sap.com/adt/inactivectsobjects"
+               xmlns:adtcore="http://www.sap.com/adt/core"
+               activationExecuted="false">
+${objects.flatMap((o) => (o.issues ?? []).map((i) => message(o, i))).join("\n")}
+  <ioc:inactiveObjects>
+${objects.map(inactive).join("\n")}
+  </ioc:inactiveObjects>
+</chkl:messages>
+`;
+}
+
+// The objects a client named in an activation or a check run. The bodies are
+// small documents of a known shape, so they are read with a pattern rather
+// than with a parser we would otherwise not need.
+export function objectReferencesIn(body, collections) {
+  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
+  const out = [];
+  for (const match of text.matchAll(/adtcore:uri="([^"]+)"/g)) {
+    const parsed = objectFromUri(match[1], collections);
+    if (parsed !== undefined) {
+      out.push(parsed);
+    }
+  }
+  return out;
+}
+
+// /sap/bc/adt/oo/classes/zcl_x -> {type: "CLAS", name: "ZCL_X"}
+export function objectFromUri(uri, collections) {
+  const path = String(uri).split("#")[0].split("?")[0].replace(/\/source\/main$/, "");
+  for (const [type, collection] of collections) {
+    const prefix = `/sap/bc/adt/${collection}/`;
+    if (path.startsWith(prefix)) {
+      return {type, name: decodeURIComponent(path.slice(prefix.length)).toUpperCase()};
+    }
+  }
+  return undefined;
+}
+
 // -------------------------------------------------------------- search
 
 // The answer to a repository search: a flat list of references into the

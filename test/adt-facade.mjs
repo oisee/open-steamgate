@@ -63,9 +63,11 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('href="/sap/bc/adt/oo/interfaces"');
       expect(xml).to.contain('href="/sap/bc/adt/programs/programs"');
       expect(xml).to.contain('href="/sap/bc/adt/datapreview/freestyle"');
+      expect(xml).to.contain('href="/sap/bc/adt/activation"');
       // not served yet, and so not promised: this is the gatekeeper rule,
-      // and it is what keeps "which tools work" answerable
-      expect(xml).to.not.contain('href="/sap/bc/adt/activation"');
+      // and it is what keeps "which tools work" answerable. The syntax check
+      // waits on a store check that takes source rather than a file name;
+      // the unit run waits on the store having one at all.
       expect(xml).to.not.contain('href="/sap/bc/adt/checkruns"');
       expect(xml).to.not.contain('href="/sap/bc/adt/abapunit/testruns"');
     });

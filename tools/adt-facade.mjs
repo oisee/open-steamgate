@@ -19,9 +19,10 @@
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
 import express from "express";
+import {randomUUID} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -129,7 +130,10 @@ const WORKSPACE = (adt) => {
   if (adt.startsWith("ddic/") || adt.startsWith("datapreview/")) {
     return "Data Dictionary";
   }
-  return adt.startsWith("repository/") || adt.startsWith("packages") ? "Repository" : "Source Library";
+  if (adt.startsWith("repository/") || adt.startsWith("packages")) {
+    return "Repository";
+  }
+  return adt === "activation" || adt === "checkruns" || adt.startsWith("abapunit") ? "Development Loop" : "Source Library";
 };
 
 const TITLE = {
@@ -143,6 +147,7 @@ const TITLE = {
   "repository/informationsystem/search": "Object Search",
   "repository/nodestructure": "Repository Node Structure",
   "packages": "Packages",
+  "activation": "Activation",
 };
 
 export function adtRouter(options = {}) {
@@ -225,6 +230,113 @@ export function adtRouter(options = {}) {
       });
     });
   }
+
+  // ---- the development loop: lock, write, unlock, activate.
+  //
+  // A lock is synthetic, because a local system has nobody to lock against
+  // but itself. What makes it more than a formality is affinity: the handle
+  // lives on the session, so a client that loses its context loses its lock,
+  // which is exactly what a real system does and exactly what a client's
+  // sequencing bugs look like.
+  const collections = SOURCE_TYPES.map(({type, adt}) => [type, adt]);
+
+  for (const {type, adt} of SOURCE_TYPES) {
+    // LOCK and UNLOCK arrive on the object's own URI, told apart by _action
+    router.post(`${BASE}/${adt}/:name`, (req, res) => {
+      const action = String(req.query._action ?? "").toUpperCase();
+      const {session} = req.adt;
+      const entry = store.find(type, req.params.name);
+      if (entry === undefined) {
+        res.status(404).type("application/xml").send(exceptionDocument("ExceptionResourceNotFound", `${type} ${req.params.name} does not exist`));
+        return;
+      }
+
+      if (action === "LOCK") {
+        if (entry.writable === false) {
+          // A library object is not ours to change, and the way to say so is
+          // the lock envelope with no handle in it: that is what a real
+          // system returns for an object ADT may not modify, and a client
+          // reads it as "not modifiable" before it ever attempts a write.
+          //
+          // Deliberately not MODIFICATION_SUPPORT: a real system returns
+          // NoModification for perfectly writable local objects, so a client
+          // that trusted that field would find nothing writable at all.
+          res.status(200).type("application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.lock.result")
+            .send(lockResultDocument("", {modifiable: false}));
+          return;
+        }
+        const held = [...session.locks.values()].find((l) => l.type === entry.type && l.name === entry.name);
+        const handle = held?.handle ?? randomUUID();
+        session.locks.set(handle, {handle, type: entry.type, name: entry.name, since: Date.now()});
+        res.status(200).type("application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.lock.result").send(lockResultDocument(handle));
+        return;
+      }
+
+      if (action === "UNLOCK") {
+        session.locks.delete(String(req.query.lockHandle ?? ""));
+        res.status(200).type("text/plain").send("");
+        return;
+      }
+
+      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", `unknown action ${action || "(none)"}`));
+    });
+
+    // WRITE. The file only: the transpile belongs to activation, where the
+    // verdict is what the client waits for and the modules follow after.
+    router.put(`${BASE}/${adt}/:name/source/main`, (req, res) => {
+      const {session} = req.adt;
+      const handle = String(req.query.lockHandle ?? "");
+      const lock = session.locks.get(handle);
+      const entry = store.find(type, req.params.name);
+      if (entry !== undefined && entry.writable === false) {
+        res.status(405).type("application/xml").send(exceptionDocument("ExceptionResourceNoAccess", `${entry.type} ${entry.name} is a library object and cannot be changed here`));
+        return;
+      }
+      if (lock === undefined || lock.type !== (entry?.type ?? type) || lock.name !== (entry?.name ?? String(req.params.name).toUpperCase())) {
+        // the handle is the client's proof it owns the object right now, and
+        // a handle from another session or another object is neither
+        res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
+        return;
+      }
+      answer(res, () => {
+        const source = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
+        store.write(type, req.params.name, source);
+        res.status(200).type("text/plain").send("");
+      });
+    });
+  }
+
+  // ACTIVATE. An empty body means it activated; a document means it did not.
+  // That is the convention and not our choice, so a document has to mean
+  // failure and nothing else.
+  advertise("activation");
+  router.post(`${BASE}/activation`, (req, res) => {
+    answer(res, () => {
+      const named = objectReferencesIn(req.body, collections);
+      if (named.length === 0) {
+        res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+        return;
+      }
+      const results = named.map((o) => store.activate(o.type, o.name));
+      const failed = results.filter((r) => r.active === false);
+      if (failed.length > 0) {
+        res.status(200).type("application/xml").send(activationFailureDocument(failed.map((r, i) => ({...r, type: named[i].type}))));
+        return;
+      }
+      // the modules the runtime loads are written after the verdict goes out,
+      // because the next request is what needs them and this client does not.
+      // Deliberately not awaited, and its failure is logged rather than
+      // returned: the client has already been told the source is good.
+      if (options.transpileOnActivate !== false) {
+        Promise.resolve(store.transpile()).then((r) => {
+          if (r?.ok === false) {
+            console.error("transpile after activation failed:", r.output ?? "");
+          }
+        }).catch((e) => console.error("transpile after activation failed:", e?.message ?? e));
+      }
+      res.status(200).type("text/plain").send("");
+    });
+  });
 
   // ---- packages: what a package is, and what is inside it. A package here
   // is a folder, which is what abapGit already means when it writes one; when
