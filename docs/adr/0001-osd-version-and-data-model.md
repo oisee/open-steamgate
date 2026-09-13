@@ -73,7 +73,15 @@ self-inflicted TR.
    **dedicated worktree**, so every ADT edit dirties the working tree of an
    isolatable, revertible branch (`git checkout .` / commit) rather than an
    operator's main checkout. Until that lands, treat this isolation as a target,
-   not a guarantee — do not assume it exists. **`/osd/serving` answers with the
+   not a guarantee — do not assume it exists. *Update, same day: `npm run
+   osd:worktree -- <name>` now makes one (`tools/osd-worktree.mjs`), sharing
+   `node_modules`, `.local/lars` and `.local/tls` by symlink rather than
+   copying them, and serving from it needs no code change because the store
+   and the supervisor already take their root from the working directory.
+   Measured: a write through the store with the worktree as root landed in
+   the worktree's `src/osd/` and the operator's checkout stayed clean. What
+   is still true is the default — `npm run osd:serve` serves from wherever
+   it is run, so the isolation is available rather than enforced.* **`/osd/serving` answers with the
    tree and database file the instance is actually using**, so which checkout an
    instance serves is at least verifiable, not assumed (a real bug caught today:
    two trees served, the address looked right, the code behind it was not).

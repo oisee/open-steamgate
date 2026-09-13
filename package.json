@@ -13,6 +13,7 @@
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "osd:serve": "npm run transpile && STG_SERVE=child STG_PORT=8099 node test/run.mjs",
+    "osd:worktree": "node tools/osd-worktree.mjs",
     "osd:tls": "node tools/osd-tls.mjs",
     "osd:tls-proxy": "node tools/osd-tls-proxy.mjs",
     "probe": "node tools/closure-probe.mjs",

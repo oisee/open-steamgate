@@ -10,7 +10,11 @@ cookies.txt
 captures/
 
 # Node / transpiler substrate
+# without the trailing slash as well: in an OSD worktree this is a symlink
+# to the checkout's own, and a rule ending in / matches directories only, so
+# the shared dependencies showed up as an untracked file on that branch
 node_modules/
+node_modules
 output/
 deps/
 dist/
