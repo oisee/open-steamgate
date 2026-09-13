@@ -181,6 +181,72 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-14-arithmetic-typed-as-character — Arithmetic with a character literal is typed by the literal
+
+- Status: `open`, upstream
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/core 2.120.50`
+- Affected ABAP statement, runtime API or adapter: the inferred type of `DATA(x) = <arithmetic expression>`
+- Minimal ABAP reproducer:
+
+```abap
+DATA lv_f TYPE f.
+DATA(a) = lv_f * '0.25'.   " typed Character(4), should be f
+DATA(b) = lv_f + '0.25'.   " typed Character(4), should be f
+DATA(c) = lv_f * 2.        " typed f, correct
+```
+
+- Exact command used to run it: transpile and read the `let` line in the output; found by open-steamgate driving vivid-vibes, stack `Float.set` ← `Table.cloneRow` ← `APPEND` ← `zcl_o4d_sales_dance=>get_dancing_values`
+- Expected SAP behaviour: the result of an arithmetic expression is never character-like. With an operand of type `f` the calculation type is `f`; a character operand is converted into it, it does not become the result type
+- Actual open-abap behaviour: the inline declaration takes the character literal's type **and its length**, so `sin( x ) * '0.25'` yields `c(4)` and `lv_pulse * '0.3'` yields `c(3)`. An integer literal does not do this
+- Impact on open-steamgate: two ways, and the quiet one is worse. Loud: appending such a variable to a table of `f` raised `CX_SY_CONVERSION_NO_NUMBER` and killed her channel at bar 6. Quiet: the value is truncated to the literal's length, so her dance bars were computed from `9,4` instead of `9.4983552631578956` — right shape, two significant digits, no complaint from anything
+- Smallest safe workaround: `CONV f( '0.25' )` in the expression, or declare the variable rather than inferring it
+- Upstream issue: none yet. This is `@abaplint/core`, not the transpiler: the transpiler asks the scope for the variable's type and faithfully emits the answer it gets. Needs an issue on `abaplint/abaplint` with the four lines above
+- Regression-test location: none here; belongs upstream
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-14-float-separator-not-inverse — A float could not read back what it had just written
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `Float.get`/`Float.set`, `DecFloat34.get`/`DecFloat34.set`, so any move of a float through a character field
+- Minimal ABAP reproducer:
+
+```abap
+DATA float TYPE f.
+DATA ch TYPE c LENGTH 30.
+DATA back TYPE f.
+float = '9.79440789'.
+ch = float.      " 9,7944078900000004E+00
+back = ch.       " CX_SY_CONVERSION_NO_NUMBER
+```
+
+- Exact command used to run it: `npx mocha build/test/types/float.js`; found by open-steamgate from a trace line that showed the comma one field before the exception
+- Expected SAP behaviour: the pair round-trips. SAP localises the decimal separator on the way out and accepts it on the way back
+- Actual open-abap behaviour: `get()` wrote a comma and `set()` accepted only a point. `DecFloat34` was worse and silent: `parseFloat` stops at the comma, so reading back `9,79440789` gave `9` with no error
+- Impact on open-steamgate: this is what turned the type defect above into a dead channel rather than a wrong number. Her page reported it as "Disconnected", because a client cannot tell a handler that raised from a network that dropped
+- Smallest safe workaround: none needed now
+- Upstream issue: none yet, branch pending in `abaplint/transpiler`. `set()` accepts both separators — the comma because that is what `get()` writes, the point because ABAP source literals carry one and `CONV f( '0.25' )` is everywhere. `get()` is unchanged: `test/statements/write.ts:209` asserts the comma at ABAP level, so the output side was verified against a system
+- Regression-test location: `test/types/float.ts` (round trip, point still a point, `'1,2,3'` still raises) and `test/types/decfloat34.ts`
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-14-exception-without-text — An exception raised by the runtime has no text
+
+- Status: `open`
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `throw_error.ts`, so every exception the runtime raises itself — `CX_SY_CONVERSION_NO_NUMBER`, `CX_SY_ZERODIVIDE` and the rest
+- Minimal ABAP reproducer: catch any runtime-raised exception and call `get_text( )`
+- Exact command used to run it: open-steamgate's channel log, which printed a line with a blank where the reason should be
+- Expected SAP behaviour: a system exception carries a text from its message class
+- Actual open-abap behaviour: `throwError` does `throw new abap.Classes[name]()` without calling `constructor_`, so the object is never constructed and has no text. Not a blank reason — an unconstructed exception
+- Impact on open-steamgate: a log line with an empty cause, which reads as "the reason was nothing" and is worse than silence. Three runs told them only that something had failed. Their logger now names the exception class and says when there is no text, which is the right defence regardless
+- Smallest safe workaround: log the class name rather than the text
+- Upstream issue: none yet. The fix wants an async `constructor_` in a synchronous throw path, which is a deliberate change rather than a quick one
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-13-sy-tabix-not-restored — An inner loop keeps the outer loop's `sy-tabix`
 
 - Status: `fixed locally, PR parked`
