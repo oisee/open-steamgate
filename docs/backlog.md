@@ -138,6 +138,28 @@ the objects.
         │  confidently about objects it cannot see
         └─ later, not now: if OSD ever emits AFF archives, V's deploy
            path reads standard abapGit XML and would need AFF then
+2.9  activated code reaches the running gateway                    [T+S]
+     └─ measured 2026-09-13 while answering Alice's "can we develop and
+        deploy today": it does not. Node pins the whole transpiled
+        module graph at boot (test/start.mjs imports output/ statically),
+        so an activation changes src/ and output/ and leaves the serving
+        process on the code it started with. Not a metadata cache: the
+        entire OData runtime is frozen the same way
+     └─ the sharp edge: ABAP Unit over ADT does see the new code,
+        because the runner imports the testclasses module in a child
+        process. So a green unit verdict and a Fiori client reading the
+        old model happen in the same minute
+     └─ a restart fixes it and costs the database, which is in memory.
+        So the fix is two decisions, not one: how the process picks up
+        new modules (recycle a worker, or the whole process) and where
+        the rows live so a recycle does not eat them      [A decides]
+     └─ smaller, same family: activation answers before the transpile
+        finishes and nothing says when it landed                       [S]
+2.10 what a client can do to an object, and what it cannot            [S]
+     └─ no DELETE anywhere in the façade: create and change, never remove
+     └─ a Fiori application is files on disk, not an object of the
+        store, so "deploy an app into OSD" has nowhere to land. Needs a
+        UI5 or BSP type in the store before the façade can carry it [T]
 ```
 
 ## 2a. OSD: the tiers, and who owns which layer
