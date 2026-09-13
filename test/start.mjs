@@ -5,6 +5,8 @@ import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
 import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
 import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
 import {generateProject} from "../tools/segw-editor.mjs";
+import {adtRouter} from "../tools/adt-facade.mjs";
+import {Data} from "../tools/osd-data.mjs";
 
 await initializeABAP();
 
@@ -14,6 +16,16 @@ await zcl_stg_segw_registry.register();
 // the search help objects (*.shlp.xml in src/) become value help providers;
 // tools/segw-shlp.mjs generated this
 await zcl_stg_shlp_registry.register();
+
+// The data layer of OSD reads through the runtime's own database, which it
+// boots itself when it is used from a command line. Here the runtime is
+// already up, so the one thing to replace is where the connection comes
+// from: booting a second time would re-run the seed under a live server.
+class ServedData extends Data {
+  boot() {
+    return Promise.resolve(abap.context.databaseConnections["DEFAULT"]);
+  }
+}
 
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
@@ -43,6 +55,14 @@ export function startServer(quiet) {
     }
   });
 
+  // the ADT façade: /sap/bc/adt/** answered by OSD, the off-stack
+  // doppelgänger. Node rather than ABAP, because it reads the file system
+  // and spawns abaplint and the transpiler, which transpiled ABAP cannot do;
+  // the OData path below stays ABAP behind the ICF shim as it always was.
+  // Both fronts share this listener, which is why a client points at one
+  // address for both. docs/adt-facade.md is the contract.
+  app.use(adtRouter({data: new ServedData()}).router);
+
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
     try {
       await cl_express_icf_shim.run({
@@ -64,6 +84,7 @@ export function startServer(quiet) {
   const server = app.listen(PORT);
   if (quiet !== true) {
     console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/");
+    console.log("ADT façade   on http://localhost:" + PORT + "/sap/bc/adt/core/discovery");
   }
   return server;
 }
