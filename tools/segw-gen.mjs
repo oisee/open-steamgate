@@ -1283,6 +1283,9 @@ function sadlMethods(m, opts) {
   const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
   const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
   const structureLines = [...sets].reverse().flatMap((es) => [
+    // maxEditMode follows what the tree says the set allows: S_EPM_CDS_EXP has
+    // CDS sources, writable EmployeeSet/LeaveRequestSet and EX; every
+    // read-only project in the corpus has RO.
     `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="${es.creatable || es.updatable || es.deletable ? "EX" : "RO"}" >| &`,
     `               | <sadl:query name="EntitySetDefault">| &`,
     `               | </sadl:query>| &`,

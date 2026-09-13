@@ -220,6 +220,10 @@ CLASS cl_sadl_gw_model_exposure IMPLEMENTATION.
           message = |CDS entity { is_structure-data_source } is not in the registry (run tools/cds2ddic.mjs)|.
     ENDIF.
     lv_aggregate = is_aggregate( ls_entity ).
+* the definition of the service is the contract: maxEditMode="EX" exposes the
+* set for writing, "RO" does not, whatever the CDS view would allow. The
+* generated definition gets EX from the entity set of the tree, which for a
+* published view comes from @ObjectModel.writeEnabled (docs/cds-writes.md).
     IF to_upper( is_structure-max_edit_mode ) <> 'RO' AND is_structure-max_edit_mode IS NOT INITIAL.
       lv_editable = abap_true.
     ENDIF.
@@ -287,9 +291,21 @@ CLASS cl_sadl_gw_model_exposure IMPLEMENTATION.
 
     lv_set_name = zcl_stg_sadl_def=>set_name_of( is_structure-name ).
     lo_entity_set = lo_entity_type->create_entity_set( lv_set_name ).
-    lo_entity_set->set_creatable( lv_editable ).
-    lo_entity_set->set_updatable( lv_editable ).
-    lo_entity_set->set_deletable( lv_editable ).
+* within a writable exposure, what the view itself allows; a view that says
+* nothing finer than "writable" allows all three
+    IF lv_editable = abap_false.
+      lo_entity_set->set_creatable( abap_false ).
+      lo_entity_set->set_updatable( abap_false ).
+      lo_entity_set->set_deletable( abap_false ).
+    ELSEIF ls_entity-creatable = abap_false AND ls_entity-updatable = abap_false AND ls_entity-deletable = abap_false.
+      lo_entity_set->set_creatable( abap_true ).
+      lo_entity_set->set_updatable( abap_true ).
+      lo_entity_set->set_deletable( abap_true ).
+    ELSE.
+      lo_entity_set->set_creatable( ls_entity-creatable ).
+      lo_entity_set->set_updatable( ls_entity-updatable ).
+      lo_entity_set->set_deletable( ls_entity-deletable ).
+    ENDIF.
     lo_entity_set->set_pageable( abap_true ).
     lo_entity_set->set_addressable( abap_true ).
     lo_entity_set->set_has_ftxt_search( abap_false ).

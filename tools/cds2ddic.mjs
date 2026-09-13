@@ -485,6 +485,9 @@ function registryClass(entities) {
     ls_entity-sql_view     = ${q(e.sqlView)}.
     ls_entity-source_class = ${q((e.table ? "ZCL_STG_TAB_" : "ZCL_STG_CDS_") + e.sqlView)}.
     ls_entity-label        = ${bt(e.label)}.
+    ls_entity-creatable    = ${e.write?.creatable && e.write?.writable ? "abap_true" : "abap_false"}.
+    ls_entity-updatable    = ${e.write?.updatable && e.write?.writable ? "abap_true" : "abap_false"}.
+    ls_entity-deletable    = ${e.write?.deletable && e.write?.writable ? "abap_true" : "abap_false"}.
 `;
     for (const a of e.viewAnnotations) body += `    APPEND ${bt(a)} TO ls_entity-annotations.\n`;
     for (const f of e.fields) {
@@ -559,6 +562,11 @@ function registryClass(entities) {
              sql_view     TYPE string,
              source_class TYPE string,
              label        TYPE string,
+* what the view allows (@ObjectModel.writeEnabled and the finer switches):
+* SADL writes through a projection only when the view asks for it
+             creatable    TYPE abap_bool,
+             updatable    TYPE abap_bool,
+             deletable    TYPE abap_bool,
              annotations  TYPE string_table,
              fields       TYPE tt_field,
              associations TYPE tt_assoc,

@@ -38,13 +38,21 @@ keeps the not-implemented answer and names the reason, for example
   to the row of the table (view field name → base column, the client from
   `sy-mandt`), and `INSERT` / `UPDATE` / `DELETE FROM` over that table. Only
   the operations the view asked for are generated.
+- **The registry** carries what the view allows, so a writable exposure can
+  still be finer than "everything": a view that asks only for
+  `updateEnabled` gets an updatable set that is not creatable.
 - **The DPC** needs nothing new: `zcl_stg_sadl_dpc`'s create, update and
   delete were already generic over `zif_stg_cds_source`.
 - **The model.** A published view (`docs/cds-publish.md`) takes its
   `creatable` / `updatable` / `deletable` from the same annotations, the key
   property is not updatable, and segw-gen writes the SADL definition with
-  `maxEditMode="EX"` instead of `"RO"` for a writable set (both values are in
-  the corpus).
+  `maxEditMode="EX"` instead of `"RO"` when the tree marks the set writable.
+  The oracle for that rule is `S_EPM_CDS_EXP`: CDS data sources, its tree
+  marks `EmployeeSet` and `LeaveRequestSet` creatable, and its DPC writes
+  `EX` for exactly those two; every read-only project in the corpus writes
+  `RO`. The definition of the service is the contract the exposure follows,
+  so a service whose definition says `RO` stays read-only even over a view
+  the annotations would allow writing to.
 - **The refusal.** `zcl_stg_dispatcher` now reads the set's flags out of the
   model and answers 405 with the reason before looking for a DPC method, so
   a write to a read-only set no longer arrives as "the data provider created
