@@ -181,6 +181,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-13-percent-in-filename — A percent in a file name is not escaped in the import specifier
+
+- Status: `fixed locally, not released`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler 2.13.86`
+- Affected ABAP statement, runtime API or adapter: not ABAP — any object whose abapGit file name carries a percent, which is every W3MI (Web Repository) object, because abapGit encodes the dot of `ZO4D_06_PLASMA.PNG` as `zo4d_06_plasma%2epng`
+- Minimal ABAP reproducer: none needed; a file named `a%2eb.mjs`, imported as `./a%2eb.mjs`, is `ERR_MODULE_NOT_FOUND`, and as `./a%252eb.mjs` it is found
+- Exact command used to run it: `npx abap_transpile` over a repository with any SMW0 image, then `node output/init.mjs`
+- Expected SAP behaviour: n/a — a runtime resolution rule, not a SAP one. A module specifier is a URL and is percent-decoded before it resolves, so a percent in a name has to be escaped as `%25`
+- Actual open-abap behaviour: `init.mjs` throws `ERR_MODULE_NOT_FOUND` at boot with the module sitting beside it, so adding an image to a build takes the whole runtime down: the ADT façade and the OData front never start, not only the images
+- Impact on open-steamgate: found by open-steamgate on oisee/vivid-vibes, whose media are W3MI objects. Nothing of ours carries a percent today
+- Smallest safe workaround: exclude `\.w3mi\.` from the transpile, which is what the vivid-vibes staging did until this was fixed
+- Upstream issue: none yet, PR deferred by Alice 2026-09-13. Fixed in the same local branch of the transpiler as the three above: the percent is escaped before the slash in `escapeNamespaceFilename`, and the order matters because escaping it afterwards would corrupt the `%23` the same function writes for a namespace. Both specifier writers and the CLI's `sourceMappingURL` use it
+- Regression-test location: the transpiler's `test/files.ts`, local branch
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-13-w3mi-objid-encoded — The W3MI registry is keyed on the encoded file name, not the object name
+
+- Status: `open`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM wwwparams WHERE objid = ...` and the W3MI registry the transpiler generates
+- Minimal ABAP reproducer: a W3MI object whose name carries a dot; read it back with the name that is in `<NAME>` in its own XML
+- Exact command used to run it: reading an image through a handler that follows SAP's own API shape
+- Expected SAP behaviour: unverified, and that is the point. `OBJID` on a real system is either `ZO4D_06_PLASMA.PNG` or `ZO4D_06_PLASMA%2EPNG`, and nobody here has read one
+- Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name while the object's own XML carries the plain one, so a handler that asks with the plain name finds nothing and returns empty rather than failing
+- Impact on open-steamgate: none of ours; found by open-steamgate on vivid-vibes, whose handler is honest about it and answers 404, where a less careful handler would serve a blank image
+- Smallest safe workaround: ask with the encoded name
+- Upstream issue: none, and none should be filed until vsp reads which name a real system uses as `OBJID`. Fixing it the wrong way round would be worse than leaving it
+- Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-13-default-ignore — `DEFAULT IGNORE` is parsed and not honoured, and the project cannot switch the rule off
 
 - Status: `open`
