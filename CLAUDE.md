@@ -135,7 +135,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   here, then one small PR upstream each (open-abap-odata #40–#48, transpiler
   #1829–#1832, all merged 2026-09-12). `oisee` is a collaborator on both
   repos; Lars said self-merging in open-abap-odata is fine (he has no time),
-  the transpiler stays his to merge. A
+  the transpiler stays his to merge. `open-abap-core` is the exception to the
+  branch-not-fork rule below: `oisee` has no write access there (403), so it
+  takes a fork (#1218). A
   workaround stays in `src/` or `tools/` only until the fix is on npm.
 - **A transpiler PR comes from a branch inside `abaplint/transpiler`, not
   from a fork.** Lars said so on #1836 (2026-09-13, merged the same
@@ -152,6 +154,14 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
   `abaplint/transpiler` or `open-abap-core`.
+- Media out of SMW0 works (`docs/adt-facade.md`): a `*.w3mi.*` object in the
+  transpile input becomes a row of `wwwparams` plus a file beside the
+  modules, and `WWWDATA_IMPORT` + `SCMS_BINARY_TO_XSTRING` carry it into a
+  response. Both of the latter needed work in open-abap-core, held in
+  `.local/lars/open-abap-core` until the PRs land: `W3MIMETABTYPE` (#1218),
+  `SCMS_BINARY_TO_XSTRING` (absent entirely), and `WWWDATA_IMPORT` walked
+  with an offset instead of consuming its remainder, which made a 4 MB file
+  take minutes and answer nobody meanwhile. Measured after: 4 MB in 0.3 s.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).

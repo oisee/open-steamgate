@@ -3,7 +3,8 @@
     "src",
     "test",
     "gen",
-    "local/o4d"
+    "local/o4d",
+    "local/cpm"
   ],
   "output_folder": "output",
   "write_unit_tests": true,
