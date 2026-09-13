@@ -1,7 +1,15 @@
-# The ADT façade: the contract, before any of it is built
+# The ADT façade: the contract, and what answers it today
 
-Nothing here is implemented. This is the agreed shape, so that the day it
-starts, it starts against a written contract instead of a conversation.
+**Wave 0 and the thin slice are built** (2026-09-13). The handshake, the
+discovery document, source reads and table contents answer on 8099, and the
+rest of this page is still the contract for what has not been built. Where a
+shape was guessed rather than known, it says so, and vsp's round trip is what
+settles it.
+
+The façade is Node over the object store, not ABAP: it reads the file system
+and spawns abaplint and the transpiler, neither of which transpiled ABAP can
+do. The OData front stays ABAP behind the ICF shim, on the same listener, so
+one address serves both. `npm run osd:serve` is that address.
 
 ## Why
 
@@ -42,7 +50,7 @@ Each wave ends in a test vsp runs against localhost.
 
 | Wave | What | Exit test |
 | --- | --- | --- |
-| 0 | session, CSRF, discovery with two resources | vsp logs on, keeps a session, reads discovery without deciding it was logged out |
+| 0 **done** | session, CSRF, discovery, plus source reads and freestyle SQL | vsp logs on, keeps a session, reads discovery without deciding it was logged out |
 | 1 | reading a repository: sources, package contents, search | `GetSource`, `GetPackage`, `SearchObject`, `GrepPackages` |
 | 2 | reading data: table contents, table and structure definitions | the table tools, with a filter |
 | 3 | the development loop: write, lock, syntax check, activate, unit test | the write path end to end on one session |
@@ -51,7 +59,10 @@ Each wave ends in a test vsp runs against localhost.
 
 ## Wave 0, the handshake
 
-From vsp's code (`pkg/adt/http.go`, `compat.go`), not from memory.
+From vsp's code (`pkg/adt/http.go`, `compat.go`), not from memory. All of it
+is implemented in `tools/adt-session.mjs`, and `test/adt-session.mjs` fails
+loudly on each rule separately, because each is a thing a client silently
+mis-reads rather than reports.
 
 - **Token fetch:** `HEAD /sap/bc/adt/core/discovery` with `X-CSRF-Token:
   fetch`; vsp falls back to `GET` if HEAD is refused. A stateful request
@@ -64,9 +75,22 @@ From vsp's code (`pkg/adt/http.go`, `compat.go`), not from memory.
   application/atomsvc+xml` or `*/*`, answered with the ADT Atom service
   document.
 - **Expiry by shape, the thing that breaks first:** vsp decides it is
-  logged out when a 200 was redirected or carries no `X-CSRF-Token`. So the
-  façade never redirects an authenticated request, always emits the token,
-  and keeps the session cookie stable.
+  logged out on any one of three shapes — a redirect off the origin, a 200
+  shaped like a logon page, or a missing token where one was expected. So the
+  façade never redirects at all, always emits the token, and keeps the
+  session cookie stable.
+- **403 is the token-demand signal, and nothing else.** vsp answers a 403 on
+  a modifying request by re-fetching a token and retrying exactly once. A 403
+  that means anything else therefore costs it its only retry and then fails
+  for the wrong reason. So the session layer owns 403 alone: a library object
+  that cannot be written answers 405.
+- **Two names for discovery.** `core/discovery` is the reachability and token
+  probe; `discovery` is the collection list a client scans. The same document
+  answers both.
+- What a client actually parses, worth knowing before polishing XML: vsp does
+  not parse the Atom document. It scans for `href="/sap/bc/adt/…"` and reads
+  the token header. The document is structurally real anyway, for the
+  stricter clients behind it.
 
 ## Wave 1, reading a repository
 

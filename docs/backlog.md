@@ -25,7 +25,7 @@ Nothing below them starts until the answer.
      └─ external: open-abap-apc (T's, local only, no remote) for the APC layer
      └─ settled already: it lives in this repository, not a third one
 
-0.2  ADT façade: yes / no, and thin slice first                       [A]
+0.2  ADT façade: ANSWERED YES by Alice 2026-09-13, building              [A]
      └─ the contract for waves 0 and 1 is written: docs/adt-facade.md
      └─ unlocks 2.1 .. 2.4
      └─ external: open-abap-adt (interfaces only, LICENSE empty -> spec, not base)
@@ -89,17 +89,17 @@ below is V's, and it is the order that matters: the session comes before
 the objects.
 
 ```
-2.1  session and CSRF emulation                                       [S]
+2.1  session and CSRF emulation                                  [S] DONE
      ├─ the token dance: HEAD/GET fetch, x-csrf-token on writes
      ├─ X-sap-adt-sessiontype stateful / stateless, sap-contextid, cookies
      ├─ an affine session for lock -> write -> activate
      └─ expiry by shape: a 200 without a token reads to vsp as logged out
      └─ V's warning: this breaks first, so it is built first
-2.2  discovery as the gatekeeper                                      [S]
+2.2  discovery as the gatekeeper                                 [S] DONE
      ├─ /sap/bc/adt/discovery advertises only what is implemented
      └─ so vsp never calls an endpoint that 404s, and "which tools work"
         has one honest answer
-2.3  thin vertical slice, one day                                     [S]
+2.3  thin vertical slice, one day                                [S] DONE
      ├─ discovery + the session dance
      ├─ GetSource for a class, from the files in src/ and gen/
      └─ GetTableContents, from the database we already have
