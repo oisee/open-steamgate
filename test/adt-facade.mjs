@@ -253,6 +253,13 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect((await call("/packages/$NOT_A_PACKAGE")).status).to.equal(404);
     });
 
+    it("a subpackage appears once, not twice, though the store holds it both ways", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
+      const names = [...xml.matchAll(/<OBJECT_NAME>([^<]+)<\/OBJECT_NAME>/g)].map((m) => m[1]);
+      expect(names).to.include("$STG_SEGW_DDIC");
+      expect(names.filter((n) => n === "$STG_SEGW_DDIC")).to.have.length(1);
+    });
+
     it("the node structure walks one level: subpackages and objects", async () => {
       const res = await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" + encodeURIComponent("$STG_GEN_SEGW"), {method: "POST"});
       expect(res.status).to.equal(200);

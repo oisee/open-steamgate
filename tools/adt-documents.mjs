@@ -222,6 +222,12 @@ export function nodesOf(store, name) {
     });
   }
   for (const object of pkg.objects ?? []) {
+    // a subpackage is an object of the package above it, the way a system
+    // holds it, and it is already a node from the list above; offering it
+    // twice would give a tree view two entries for one thing
+    if (object.type === "DEVC") {
+      continue;
+    }
     nodes.push({
       type: ADT_TYPE[object.type] ?? object.type,
       name: object.name,

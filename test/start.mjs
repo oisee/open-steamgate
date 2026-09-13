@@ -54,7 +54,13 @@ export function startServer(quiet) {
   // the data layer of OSD boots its own runtime when it is used from a
   // command line; here one is already up, so it is handed the connection
   // rather than starting a second and re-running the seed under a live server
-  app.use(adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})}).router);
+  const facade = adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})});
+  app.use(facade.router);
+  // parsing the system is the expensive part of a syntax check or an object
+  // structure, and it is shared once paid. Paying it at startup rather than
+  // on whichever request arrives first keeps the first client from waiting
+  // for something the second gets free.
+  setImmediate(() => facade.store.registry());
 
   app.all("/sap/opu/odata/sap/*", async function (req, res) {
     try {
