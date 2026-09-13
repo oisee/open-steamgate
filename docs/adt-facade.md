@@ -270,3 +270,33 @@ waves; one line in the backlog as a question.
 Wave 0, and within it the session before the resources. The slice that
 proves the whole idea is small: the handshake, one class read, one table
 read, and vsp pointed at localhost.
+
+## Activation reaches the store, not the running gateway
+
+Measured on 2026-09-13, through the façade, on a live server: writing
+`set_schema_namespace( 'ZSTG_DEMO_PROBE1' )` into the demo MPC and
+activating it moves three surfaces at three different times, and one of
+them never moves at all.
+
+`src/` changes when the PUT returns. `output/` changes about two minutes
+later: activation calls `store.transpile()` fire-and-forget, so the
+activation 200 is a verdict on the syntax, not a receipt for the rebuild,
+and there is no resource a client can poll to learn the rebuild landed.
+The running gateway does not change, ever. `test/start.mjs` imports
+`output/init.mjs` and the registries at the top of the file, Node's module
+registry caches by URL and never re-reads, so the whole transpiled ABAP
+module graph is pinned at boot for the life of the process.
+
+The asymmetry is the part that bites, because it is invisible. ABAP Unit
+over ADT *does* see the new code — `tools/osd-unit.mjs` imports the
+testclasses module dynamically, outside the boot graph — so a developer
+can take a red unit verdict on the code they just wrote while a Fiori
+client in the next tab builds against the model from before they wrote it.
+Nothing in either answer says which one is stale.
+
+So, the honest sentence: **code activated through the façade does not
+reach the running gateway until the server restarts, and a restart resets
+the in-memory database.** That trade is why this is written down rather
+than fixed in passing — re-importing the graph and keeping the data are
+two different pieces of work, and picking between them is a design call,
+not a bug fix.
