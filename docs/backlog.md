@@ -72,7 +72,8 @@ Nothing below them starts until the answer.
 1.3  build and stitch: bun build --compile, one exe per platform      [S]
      └─ external: CI runners per platform
      └─ external: the %23 specifier defect, which a compiled binary
-        inherits; either a bun issue or a transpiler file-name change [T]
+        inherits; transpiler #1841, open, waiting on Lars to pick the
+        replacement character [T]
      └─ known: mainstream platforms only, ~60-100 MB per exe
 1.4  APC over Bun websockets                                          [T]
      └─ open-abap-apc as an outside library, cloned into .local/lars
@@ -298,6 +299,7 @@ open  revisions: reading them out of git instead of a system.
 Lars / abaplint
   ├─ transpiler #1835 (DuckDB driver)          open, see 9.1
   ├─ transpiler #1836 (flat concat chain)      merged 2026-09-13
+  ├─ transpiler #1841 (%23 breaks Bun)         open, blocks 1.3
   │   └─ when it reaches npm, SADL_CHUNK can go from both generators
   ├─ open-abap-odata                            license still "todo"
   │   └─ we reimplement, contribute fixes, do not fork
@@ -317,6 +319,6 @@ Tooling
 
 Known defects we live with
   ├─ no implicit MANDT in the transpiler        ANORMALIES, T0009 kept visible
-  ├─ bun does not decode %23 in a specifier     blocks 1.3, workaround known
+  ├─ bun does not decode %23 in a specifier     transpiler #1841, blocks 1.3
   └─ Bun runs JavaScriptCore, not V8            corrects the vision draft
 ```

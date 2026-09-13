@@ -34,10 +34,15 @@ transpiled output, rename `#` to something plain in the file names, and
 rewrite the same substitution inside relative `./…mjs` specifiers only.
 Twenty-two files needed a rewrite. After that everything below worked.
 
-**The real fixes**, neither of them ours to apply alone: a Bun issue for the
-specifier decoding, or the transpiler emitting a file name Bun can also
-resolve. The second is an upstream conversation with the transpiler
-session, who own that queue. Logged in `ANORMALIES.md`.
+**The real fix is filed**: `abaplint/transpiler#1841`, opened by the
+transpiler session on the day of this spike, with these measurements as its
+evidence. It traces to two lines that write `/` as `%23`, in
+`escapeNamespaceFilename` and in the source-map line of the CLI. It is an
+issue and not a patch on purpose: changing the character changes everything
+that maps a file back to an object name, so the choice belongs to the
+maintainer, and `$`, `-` and `_` all avoid encoding everywhere. The other
+half, a Bun issue for the specifier decoding, is not filed. Logged in
+`ANORMALIES.md`.
 
 ## What ran
 

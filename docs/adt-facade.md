@@ -114,21 +114,35 @@ table-scoped version. The definitions come from the DDIC we already carry:
 The cross-reference tables belong here and cost the façade nothing:
 `CROSS`, `WBCROSSGT`, `WBCROSSGTX` for who-calls and references, `D010INC`
 for the load graph. vsp reads them over freestyle SQL like any other table,
-so once freestyle works they are free on the protocol side. Filling them is
-the store layer's job (the transpiler session's): the rows are derived from
-the parse the transpiler already does, not authored, and their key format
-can be whatever is convenient locally because vsp reads them by SQL.
+so once freestyle works they are free on the protocol side.
+
+**These exist already**, built by the store layer on 2026-09-13 (`b78818b`):
+DDIC under `src/osd/ddic/`, so the runtime creates them like any other
+table, and 2424 rows seeded from the parse the transpiler already does
+rather than authored. The columns were taken from the SQL vsp actually
+selects, not from a memory of SAP's DDIC. `npm run osd:xref -- --write`
+rebuilds them and they are not tracked, being derived. So wave 2's
+who-calls-what needs nothing from this side but the freestyle endpoint.
 
 **Wave 3, the development loop.** `POST <object>?_action=LOCK&accessMode=MODIFY`
 returns a lock handle, `PUT <object>/source/main?lockHandle=…` writes,
 `POST /sap/bc/adt/<collection>` creates, `POST <object>?_action=UNLOCK`
 releases. `POST /sap/bc/adt/checkruns?reporters=abapCheckRun` is a syntax
 check, which here is abaplint; `POST /sap/bc/adt/activation?method=activate`
-is activation, which here is a transpile that succeeds;
+is activation, which here is the same check over the object and everything
+that uses it;
 `GET /sap/bc/adt/activation/inactiveobjects` lists what has not been
 activated; `POST /sap/bc/adt/abapunit/testruns` is a test run, which here is
 the runtime running ABAP Unit. The whole path rides one affine session and
 the handle is threaded from lock through write to unlock.
+
+**The activation contract is settled** (`b6762e8`). `activate(type, name)`
+returns the verdict immediately, because that is what the response carries;
+writing the modules is the separate `transpile()` call, about ten seconds
+over the whole system, which the façade starts without awaiting. Two
+activations in flight share one promise rather than transpiling twice. The
+modules only have to be in place before the next request that touches the
+object, which is why the split is safe.
 
 **Wave 4, cheap extras.** `GET /sap/bc/adt/runtime/dumps` and the detail
 resource under it: a runtime error of ours emitted as an ST22-shaped
