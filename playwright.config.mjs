@@ -6,6 +6,11 @@ export default defineConfig({
   testDir: "test/e2e",
   // the preview build has its own config (playwright.preview.config.mjs)
   testIgnore: /preview\.spec\.mjs/,
+  // one worker: every spec talks to the same gateway and the same in-memory
+  // database, so specs that create or delete rows collide when they run in
+  // parallel (a Travel another spec expects disappears, and the run has been
+  // seen losing the server). 13 specs, 41 seconds.
+  workers: 1,
   timeout: 90_000,
   expect: {timeout: 30_000},
   retries: 0,
