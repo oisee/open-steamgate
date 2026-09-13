@@ -14,6 +14,7 @@
     "start": "npm run transpile && node test/run.mjs",
     "osd:serve": "npm run transpile && STG_PORT=8099 node test/run.mjs",
     "osd:tls": "node tools/osd-tls.mjs",
+    "osd:tls-proxy": "node tools/osd-tls-proxy.mjs",
     "probe": "node tools/closure-probe.mjs",
     "e2e": "npm run transpile && playwright test",
     "e2e:install": "playwright install chromium",
