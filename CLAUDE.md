@@ -221,7 +221,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   on a `cast( )` element is a field an ABAP class fills after the read
   (`docs/virtual-elements.md`, `if_sadl_exit_calc_element_read`);
   `@OData.publish: true` on a view writes `gen/cds/<view>_cds.stg.yaml`,
-  which `stg-compile --all` turns into a service (`docs/cds-publish.md`).
+  which `stg-compile --all` turns into a service (`docs/cds-publish.md`);
+  `@ObjectModel.writeEnabled` on a projection of one table makes it writable
+  (`docs/cds-writes.md`), and the dispatcher answers 405 for a write the
+  model does not allow.
 - `table:` sources are read and written generically: `tools/cds2ddic.mjs`
   emits `gen/cds/zcl_stg_tab_<table>` (read / insert / update / delete over
   the table, `zif_stg_cds_source`) for every TABL under `src/`, and

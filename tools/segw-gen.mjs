@@ -1283,7 +1283,7 @@ function sadlMethods(m, opts) {
   const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
   const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
   const structureLines = [...sets].reverse().flatMap((es) => [
-    `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="RO" >| &`,
+    `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="${es.creatable || es.updatable || es.deletable ? "EX" : "RO"}" >| &`,
     `               | <sadl:query name="EntitySetDefault">| &`,
     `               | </sadl:query>| &`,
     ...es.entity.properties.map((pr) => `               | <sadl:attribute name="${pr.abapField}" binding="${pr.abapField}" isOutput="TRUE" isKey="${pr.isKey ? "TRUE" : "FALSE"}" />| &`),

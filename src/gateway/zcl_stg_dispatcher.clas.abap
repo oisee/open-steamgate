@@ -558,6 +558,18 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       lv_source_name = ls_source-entity_type.
     ENDIF.
 
+* what the model says the set allows: a refusal here is the Gateway's, before
+* any DPC method is looked for
+    IF ( iv_method = 'POST' AND is_set-creatable = abap_false )
+        OR ( ( iv_method = 'PUT' OR iv_method = 'PATCH' OR iv_method = 'MERGE' ) AND is_set-updatable = abap_false )
+        OR ( iv_method = 'DELETE' AND is_set-deletable = abap_false ).
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 405
+          code    = 'STG/METHOD_NOT_ALLOWED'
+          message = |{ is_set-name } is not { COND string( WHEN iv_method = 'POST' THEN 'creatable' WHEN iv_method = 'DELETE' THEN 'deletable' ELSE 'updatable' ) }|.
+    ENDIF.
+
     CASE iv_method.
       WHEN 'POST'.
         IF is_request-key_string IS NOT INITIAL.

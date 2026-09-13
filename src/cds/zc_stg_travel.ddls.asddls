@@ -3,6 +3,8 @@
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Travel (CDS projection for the SADL demo)'
 @OData.publish: true
+// a projection of one table, field for field: SADL can write through it
+@ObjectModel.writeEnabled: true
 define view ZC_STG_TRAVEL
   as select from zstg_demo
   association [0..*] to ZC_STG_BOOKING as _Bookings on $projection.TravelId = _Bookings.TravelId

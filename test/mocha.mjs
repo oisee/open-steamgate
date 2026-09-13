@@ -203,6 +203,44 @@ describe("wire", () => {
     expect(cube.d.EntitySets).to.deep.equal(["Zc_Stg_FlightcubeSet"]);
   });
 
+  it("writes through a CDS projection: @ObjectModel.writeEnabled", async () => {
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_TRAVEL_CDS`;
+    const write = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
+
+    // the view is a projection of one table field for field, so SADL writes
+    // through it: the row lands in ZSTG_DEMO
+    let res = await fetch(S + "/Zc_Stg_TravelSet", {method: "POST", headers: write,
+      body: JSON.stringify({TRAVELID: "T0700", DESCRIPTION: "Through the projection", STATUS: "A", SEATS: 3})});
+    expect(res.status).to.equal(201);
+
+    const demo = await (await fetch(`${BASE}/TravelSet('T0700')?$format=json`)).json();
+    expect(demo.d.Description).to.equal("Through the projection");
+
+    res = await fetch(S + "/Zc_Stg_TravelSet('T0700')", {method: "PUT", headers: write,
+      body: JSON.stringify({DESCRIPTION: "Renamed", STATUS: "X", SEATS: 5})});
+    expect(res.status).to.equal(204);
+    const after = (await (await fetch(S + "/Zc_Stg_TravelSet('T0700')?$format=json")).json()).d;
+    expect([after.DESCRIPTION, after.STATUS, after.SEATS]).to.deep.equal(["Renamed", "X", 5]);
+    // the virtual element is recalculated on the way out
+    expect(after.OCCUPANCY).to.equal("50% of 10");
+
+    res = await fetch(S + "/Zc_Stg_TravelSet('T0700')", {method: "DELETE", headers: write});
+    expect(res.status).to.equal(204);
+    expect((await fetch(`${BASE}/TravelSet('T0700')`)).status).to.equal(404);
+
+    // a view that did not ask for writes, and an analytical one, are refused
+    // by the model, before any DPC method is looked for
+    res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS/Zc_Stg_FlightcubeSet`,
+      {method: "POST", headers: write, body: "{}"});
+    expect(res.status).to.equal(405);
+    expect((await res.json()).error.message.value).to.contain("is not creatable");
+
+    res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet('T0001')`,
+      {method: "DELETE", headers: write});
+    expect(res.status).to.equal(405);
+    expect((await fetch(`${BASE}/TravelSet('T0001')`)).status).to.equal(200);
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);
