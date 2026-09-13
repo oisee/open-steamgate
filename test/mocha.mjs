@@ -99,6 +99,27 @@ describe("wire", () => {
     await fetch(BASE + "/TravelSet('T0700')", {method: "DELETE", headers});
   });
 
+  it("media entity: the picture of a travel over the wire", async () => {
+    // $metadata says the type has a stream, the JSON says where it is
+    const meta = await (await fetch(`${BASE}/$metadata`)).text();
+    expect(meta).to.contain('<EntityType Name="Photo" m:HasStream="true"');
+    const photo = await (await fetch(`${BASE}/PhotoSet('T0001')?$format=json`)).json();
+    expect(photo.d.__metadata.media_src).to.equal(`${BASE}/PhotoSet('T0001')/$value`);
+    expect(photo.d.FileName).to.equal("t0001.png");
+
+    // the bytes themselves, with their content type
+    const res = await fetch(`${BASE}/PhotoSet('T0001')/$value`);
+    expect(res.status).to.equal(200);
+    expect(res.headers.get("content-type")).to.equal("image/png");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(bytes.length).to.equal(930);
+    expect([...bytes.slice(0, 8)]).to.deep.equal([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    // and the travel points at it, so Fiori Elements can show it
+    const travel = await (await fetch(`${BASE}/TravelSet('T0003')?$format=json`)).json();
+    expect(travel.d.PhotoUrl).to.equal("../sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet('T0003')/$value");
+  });
+
   it("function imports", async () => {
     let res = await fetch(BASE + "/TravelCount?Status='A'");
     expect(res.status).to.equal(200);

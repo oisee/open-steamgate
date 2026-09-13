@@ -11,6 +11,7 @@ CLASS zcl_stg_url DEFINITION PUBLIC CREATE PUBLIC.
              is_metadata     TYPE abap_bool,
              is_batch        TYPE abap_bool,
              is_count        TYPE abap_bool,
+             is_value        TYPE abap_bool,
              options         TYPE tihttpnvp,
            END OF ty_request.
 
@@ -78,8 +79,9 @@ CLASS zcl_stg_url IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-* /<EntitySet>(<keys>)/<NavigationProperty>(<keys>)/$count
-    FIND REGEX '^/([^/(]+)(?:\(([^)]*)\))?(?:/([^/($]+)(?:\(([^)]*)\))?)?(/\$count)?/?$' IN lv_rest
+* /<EntitySet>(<keys>)/<NavigationProperty>(<keys>)/$count, or the media
+* resource of an entity: /<EntitySet>(<keys>)/$value
+    FIND REGEX '^/([^/(]+)(?:\(([^)]*)\))?(?:/([^/($]+)(?:\(([^)]*)\))?)?(/\$count|/\$value)?/?$' IN lv_rest
       SUBMATCHES lv_segment rs_request-key_string rs_request-nav_prop rs_request-nav_key_string lv_tail.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_stg_error
@@ -92,8 +94,10 @@ CLASS zcl_stg_url IMPLEMENTATION.
     rs_request-key_string = cl_http_utility=>unescape_url( rs_request-key_string ).
     rs_request-nav_prop = cl_http_utility=>unescape_url( rs_request-nav_prop ).
     rs_request-nav_key_string = cl_http_utility=>unescape_url( rs_request-nav_key_string ).
-    IF lv_tail IS NOT INITIAL.
+    IF lv_tail = '/$count'.
       rs_request-is_count = abap_true.
+    ELSEIF lv_tail = '/$value'.
+      rs_request-is_value = abap_true.
     ENDIF.
   ENDMETHOD.
 

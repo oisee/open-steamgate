@@ -35,6 +35,20 @@ test("list report shows the travels served by the transpiled DPC", async ({page}
   });
   expect(painted).toBe(true);
 
+  // the picture of each travel: a column of images, every one of them the
+  // media resource of the Photo entity, fetched from the transpiled DPC
+  // Fiori Elements renders an IsImageURL value as an avatar whose background
+  // is the URL, one per row
+  const pictures = page.locator(".sapFAvatarImageHolder");
+  await expect(pictures.first()).toBeVisible();
+  expect(await pictures.count()).toBeGreaterThanOrEqual(4);
+  const source = await pictures.first().evaluate((e) => getComputedStyle(e).backgroundImage);
+  expect(source).toContain("PhotoSet('T0001')/$value");
+  const picture = await page.request.get(`/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet('T0001')/$value`);
+  expect(picture.status()).toBe(200);
+  expect(picture.headers()["content-type"]).toBe("image/png");
+  expect((await picture.body()).length).toBeGreaterThan(500);
+
   // the app really went through $metadata and the entity set
   expect(odata.some((r) => r.includes("$metadata"))).toBe(true);
   // in batch mode the entity-set request travels inside the $batch body
@@ -105,6 +119,11 @@ test("object page: navigation reads to_Bookings, Edit + Save sends MERGE with th
   await expect(page).toHaveURL(/#\/TravelSet\('T0001'\)/);
   await expect(page.getByText("Ada Lovelace")).toBeVisible();
   await expect(page.getByText("Grace Hopper")).toBeVisible();
+  // the header carries the travel's picture (UI.HeaderInfo ImageUrl)
+  // the list report's own avatars are still in the DOM behind the page
+  const avatar = page.locator(".sapFAvatarImageHolder").locator("visible=true").first();
+  await expect(avatar).toBeVisible();
+  expect(await avatar.evaluate((e) => getComputedStyle(e).backgroundImage)).toContain("PhotoSet('T0001')/$value");
   expect(requests.some((r) => r.includes("TravelSet('T0001')/to_Bookings?"))).toBe(true);
 
   // non-draft edit: Edit, change Seats, Save

@@ -251,6 +251,9 @@ export function readModel(text, file = "stg.yaml") {
       name, set: spec.set ?? `${name}Set`, keys, properties: props, description: spec.description ?? "",
       abapStruct: source.struct ? String(source.struct).toUpperCase() : sadl && sadl.kind !== "ODC" ? sadl.binding.toUpperCase() : "",
       sadl,
+      // a media entity: the content is a stream, read and written at
+      // <entity>/$value through the DPC's GET_STREAM / UPDATE_STREAM
+      media: flag("media", false),
       creatable: flag("creatable", true), updatable: flag("updatable", true), deletable: flag("deletable", true),
       pageable: flag("pageable", true), addressable: flag("addressable", true), searchable: flag("searchable", false),
       subscribable: flag("subscribable", false), filterRequired: flag("filterRequired", false),
@@ -351,8 +354,9 @@ class AnnotationWriter {
 
   // an annotation with one simple value
   simple(term, kind, value, owner = "lo_target", into = "lo_annotation") {
+    const text = kind === "set_boolean" ? (value ? "abap_true" : "abap_false") : lit(value);
     this.line(`${into} = ${owner}->create_annotation( ${lit(term)} ).`);
-    this.line(`${into}->create_simple_value( )->${kind}( ${lit(value)} ).`);
+    this.line(`${into}->create_simple_value( )->${kind}( ${text} ).`);
   }
 
   // a record's property with one simple value
@@ -399,6 +403,9 @@ class AnnotationWriter {
       }
       if (s.header.typeNamePlural) {
         this.value("lo_record", "TypeNamePlural", "set_string", s.header.typeNamePlural);
+      }
+      if (s.header.imageUrl) {
+        this.value("lo_record", "ImageUrl", "set_path", s.header.imageUrl);
       }
       for (const [key, name] of [["title", "Title"], ["description", "Description"]]) {
         if (s.header[key]) {
@@ -450,6 +457,12 @@ class AnnotationWriter {
     const s = a.spec;
     if (s.label) {
       this.simple(COMMON + "Label", "set_string", s.label);
+    }
+    // the value is the URL of an image: a list column and the header show it
+    // as a picture instead of the text (the media resource of a media entity
+    // is the usual source)
+    if (s.isImageUrl) {
+      this.simple(UI + "IsImageURL", "set_boolean", true);
     }
     if (s.text) {
       const t = typeof s.text === "string" ? {path: s.text} : s.text;
@@ -683,7 +696,7 @@ export function iwprXml(m, opts = {}) {
   const esId = (e) => id("ESET", e.set);
   const prId = (e, p) => id("PROP", e.name, p.name);
   for (const e of m.entities) {
-    rows.SBO_ET.push({PROJECT: P, NODE_UUID: etId(e), MODEL: modelId, NAME: e.name, ABAP_STRUCT: e.abapStruct, TECH_NAME: e.name.toUpperCase(), REF_TYPE: "T", DESCRIPTION_XU: X(!e.description)});
+    rows.SBO_ET.push({PROJECT: P, NODE_UUID: etId(e), NAME: e.name, IS_MEDIA: X(e.media), MODEL: modelId, REF_TYPE: "T", ABAP_STRUCT: e.abapStruct, TECH_NAME: e.name.toUpperCase(), DESCRIPTION_XU: X(!e.description)});
     rows.SBO_ETT.push(text(etId(e), "ET_LABEL", e.description || e.name));
     for (const p of e.properties) {
       rows.SBO_PR.push(propertyRow(prId(e, p), etId(e), p));

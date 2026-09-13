@@ -30,6 +30,41 @@ CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
         /iwbep/cx_mgw_busi_exception
         /iwbep/cx_mgw_tech_exception.
 
+    METHODS photoset_get_entityset
+      IMPORTING
+        iv_entity_name           TYPE string
+        iv_entity_set_name       TYPE string
+        iv_source_name           TYPE string
+        it_filter_select_options TYPE /iwbep/t_mgw_select_option
+        is_paging                TYPE /iwbep/s_mgw_paging
+        it_key_tab               TYPE /iwbep/t_mgw_name_value_pair
+        it_navigation_path       TYPE /iwbep/t_mgw_navigation_path
+        it_order                 TYPE /iwbep/t_mgw_sorting_order
+        iv_filter_string         TYPE string
+        iv_search_string         TYPE string
+        io_tech_request_context  TYPE REF TO /iwbep/if_mgw_req_entityset OPTIONAL
+      EXPORTING
+        et_entityset             TYPE zcl_zstg_demo_mpc=>tt_photo
+        es_response_context      TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_context
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
+    METHODS photoset_get_entity
+      IMPORTING
+        iv_entity_name          TYPE string
+        iv_entity_set_name      TYPE string
+        iv_source_name          TYPE string
+        it_key_tab              TYPE /iwbep/t_mgw_name_value_pair
+        it_navigation_path      TYPE /iwbep/t_mgw_navigation_path
+        io_tech_request_context TYPE REF TO /iwbep/if_mgw_req_entity OPTIONAL
+      EXPORTING
+        er_entity               TYPE zcl_zstg_demo_mpc=>ts_photo
+        es_response_context     TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_entity_cntxt
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+
     METHODS bookingset_get_entityset
       IMPORTING
         iv_entity_name           TYPE string
@@ -194,6 +229,7 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
     DATA lt_travel         TYPE zcl_zstg_demo_mpc=>tt_travel.
     DATA lt_booking        TYPE zcl_zstg_demo_mpc=>tt_booking.
     DATA lt_status_vh      TYPE zcl_zstg_demo_mpc=>tt_status_vh.
+    DATA lt_photo          TYPE zcl_zstg_demo_mpc=>tt_photo.
     DATA lv_entityset_name TYPE string.
 
     lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
@@ -219,6 +255,28 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
         copy_data_to_ref(
           EXPORTING
             is_data = lt_status_vh
+          CHANGING
+            cr_data = er_entityset ).
+      WHEN 'PhotoSet'.
+        photoset_get_entityset(
+          EXPORTING
+            iv_entity_name           = iv_entity_name
+            iv_entity_set_name       = iv_entity_set_name
+            iv_source_name           = iv_source_name
+            it_filter_select_options = it_filter_select_options
+            it_order                 = it_order
+            is_paging                = is_paging
+            it_navigation_path       = it_navigation_path
+            it_key_tab               = it_key_tab
+            iv_filter_string         = iv_filter_string
+            iv_search_string         = iv_search_string
+            io_tech_request_context  = io_tech_request_context
+          IMPORTING
+            et_entityset             = lt_photo
+            es_response_context      = es_response_context ).
+        copy_data_to_ref(
+          EXPORTING
+            is_data = lt_photo
           CHANGING
             cr_data = er_entityset ).
       WHEN 'BookingSet'.
@@ -287,6 +345,7 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
   METHOD /iwbep/if_mgw_appl_srv_runtime~get_entity.
     DATA ls_travel         TYPE zcl_zstg_demo_mpc=>ts_travel.
     DATA ls_booking        TYPE zcl_zstg_demo_mpc=>ts_booking.
+    DATA ls_photo          TYPE zcl_zstg_demo_mpc=>ts_photo.
     DATA lv_entityset_name TYPE string.
     DATA lr_entity         TYPE REF TO data.
 
@@ -309,6 +368,27 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
           copy_data_to_ref(
             EXPORTING
               is_data = ls_booking
+            CHANGING
+              cr_data = er_entity ).
+        ELSE.
+          er_entity = lr_entity.
+        ENDIF.
+      WHEN 'PhotoSet'.
+        photoset_get_entity(
+          EXPORTING
+            iv_entity_name          = iv_entity_name
+            iv_entity_set_name      = iv_entity_set_name
+            iv_source_name          = iv_source_name
+            it_key_tab              = it_key_tab
+            it_navigation_path      = it_navigation_path
+            io_tech_request_context = io_tech_request_context
+          IMPORTING
+            er_entity               = ls_photo
+            es_response_context     = es_response_context ).
+        IF ls_photo IS NOT INITIAL.
+          copy_data_to_ref(
+            EXPORTING
+              is_data = ls_photo
             CHANGING
               cr_data = er_entity ).
         ELSE.
@@ -499,6 +579,20 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
           it_key_tab         = it_key_tab
           it_navigation_path = it_navigation_path ).
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD photoset_get_entityset.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'PHOTOSET_GET_ENTITYSET'.
+  ENDMETHOD.
+
+  METHOD photoset_get_entity.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+      EXPORTING
+        textid = /iwbep/cx_mgw_not_impl_exc=>method_not_implemented
+        method = 'PHOTOSET_GET_ENTITY'.
   ENDMETHOD.
 
   METHOD statusvhset_get_entityset.

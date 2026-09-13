@@ -2,6 +2,9 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
 * The hand-written part a developer owns on a real system. Reads the
 * select-options the Gateway hands over, runs Open SQL, applies paging.
   PUBLIC SECTION.
+* the media resource of a Photo: GET and PUT of PhotoSet('T0001')/$value
+    METHODS /iwbep/if_mgw_appl_srv_runtime~get_stream REDEFINITION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~update_stream REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~create_deep_entity REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
     METHODS /iwbep/if_mgw_appl_srv_runtime~get_expanded_entityset REDEFINITION.
@@ -17,7 +20,15 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
     METHODS bookingset_update_entity REDEFINITION.
     METHODS bookingset_delete_entity REDEFINITION.
     METHODS statusvhset_get_entityset REDEFINITION.
+    METHODS photoset_get_entityset REDEFINITION.
+    METHODS photoset_get_entity REDEFINITION.
   PRIVATE SECTION.
+* where a client reaches the pictures: relative to the page the Fiori app is
+* served from (<mount>/app/ here, so <mount>/sap/opu/...). On a system, where
+* the app is a BSP and the service lives under /sap/opu/odata/sap/, this is
+* the absolute path; see AGENDA, "The Fiori apps".
+    CONSTANTS gc_media_base TYPE string VALUE '../sap/opu/odata/sap/ZSTG_DEMO_SRV' ##NO_TEXT.
+
     TYPES ty_travel_id TYPE c LENGTH 8.
     TYPES ty_booking_id TYPE c LENGTH 4.
     TYPES: BEGIN OF ty_range,
@@ -27,6 +38,16 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
              high   TYPE c LENGTH 8,
            END OF ty_range.
     TYPES ty_ranges TYPE STANDARD TABLE OF ty_range WITH DEFAULT KEY.
+
+    METHODS fill_photo_url
+      CHANGING
+        ct_travel TYPE zcl_zstg_demo_mpc=>tt_travel.
+
+    METHODS photo_url
+      IMPORTING
+        iv_travel_id  TYPE ty_travel_id
+      RETURNING
+        VALUE(rv_url) TYPE string.
 
     METHODS key_from
       IMPORTING
@@ -116,6 +137,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
     fill_status_text( CHANGING ct_travel = et_entityset ).
+    fill_photo_url( CHANGING ct_travel = et_entityset ).
 
 * paging the way most hand-written DPCs do it: after the SELECT
     lv_skip = is_paging-skip.
@@ -422,6 +444,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
 
   METHOD travelset_get_entity.
     DATA lv_travel_id TYPE c LENGTH 8.
+    DATA lv_photo_id  TYPE ty_travel_id.
 
     lv_travel_id = key_from( it_key_tab ).
 
@@ -433,6 +456,12 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       SELECT SINGLE status_text FROM zstg_status
         INTO er_entity-status_text
         WHERE status = er_entity-status.
+      SELECT SINGLE travel_id FROM zstg_photo
+        INTO lv_photo_id
+        WHERE travel_id = lv_travel_id.
+      IF sy-subrc = 0.
+        er_entity-photo_url = photo_url( lv_travel_id ).
+      ENDIF.
     ENDIF.
   ENDMETHOD.
 
@@ -450,6 +479,117 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       READ TABLE lt_status INTO ls_status WITH KEY status = <ls_travel>-status.
       IF sy-subrc = 0.
         <ls_travel>-status_text = ls_status-status_text.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD photoset_get_entityset.
+    SELECT travel_id mime_type file_name
+      FROM zstg_photo
+      INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      ORDER BY travel_id.
+  ENDMETHOD.
+
+  METHOD photoset_get_entity.
+    DATA lv_travel_id TYPE ty_travel_id.
+
+    lv_travel_id = key_from( it_key_tab ).
+    SELECT SINGLE travel_id mime_type file_name
+      FROM zstg_photo
+      INTO CORRESPONDING FIELDS OF er_entity
+      WHERE travel_id = lv_travel_id.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_stream.
+* GET PhotoSet('T0001')/$value: the bytes of the picture and their type.
+* er_stream is the media resource the interface declares, handed over the
+* way a SEGW-generated DPC does it, through copy_data_to_ref.
+    DATA ls_stream    TYPE /iwbep/if_mgw_appl_types=>ty_s_media_resource.
+    DATA ls_photo     TYPE zstg_photo.
+    DATA lv_travel_id TYPE ty_travel_id.
+
+    IF iv_entity_set_name <> 'PhotoSet'.
+      super->/iwbep/if_mgw_appl_srv_runtime~get_stream(
+        EXPORTING
+          iv_entity_name          = iv_entity_name
+          iv_entity_set_name      = iv_entity_set_name
+          iv_source_name          = iv_source_name
+          it_key_tab              = it_key_tab
+          it_navigation_path      = it_navigation_path
+          io_tech_request_context = io_tech_request_context
+        IMPORTING
+          er_stream               = er_stream
+          es_response_context     = es_response_context ).
+      RETURN.
+    ENDIF.
+
+    lv_travel_id = key_from( it_key_tab ).
+    SELECT SINGLE * FROM zstg_photo
+      INTO ls_photo
+      WHERE travel_id = lv_travel_id.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    ls_stream-mime_type = ls_photo-mime_type.
+    ls_stream-value     = ls_photo-content.
+    copy_data_to_ref(
+      EXPORTING
+        is_data = ls_stream
+      CHANGING
+        cr_data = er_stream ).
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~update_stream.
+* PUT PhotoSet('T0001')/$value: a new picture for a travel that has one
+    DATA lv_travel_id TYPE ty_travel_id.
+    DATA lv_mime      TYPE c LENGTH 40.
+
+    IF iv_entity_set_name <> 'PhotoSet'.
+      super->/iwbep/if_mgw_appl_srv_runtime~update_stream(
+        EXPORTING
+          iv_entity_name          = iv_entity_name
+          iv_entity_set_name      = iv_entity_set_name
+          iv_source_name          = iv_source_name
+          is_media_resource       = is_media_resource
+          it_key_tab              = it_key_tab
+          it_navigation_path      = it_navigation_path
+          io_tech_request_context = io_tech_request_context ).
+      RETURN.
+    ENDIF.
+
+    lv_travel_id = key_from( it_key_tab ).
+    lv_mime      = is_media_resource-mime_type.
+    UPDATE zstg_photo
+      SET mime_type = lv_mime
+          content   = is_media_resource-value
+      WHERE travel_id = lv_travel_id.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |No picture for travel { lv_travel_id }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD photo_url.
+    rv_url = |{ gc_media_base }/PhotoSet('{ iv_travel_id }')/$value|.
+  ENDMETHOD.
+
+  METHOD fill_photo_url.
+* the travels that have a picture carry the URL of its media resource;
+* UI.IsImageURL on the property is what makes Fiori Elements show it
+    DATA lt_id TYPE STANDARD TABLE OF ty_travel_id WITH DEFAULT KEY.
+    DATA lv_id TYPE ty_travel_id.
+    FIELD-SYMBOLS <ls_travel> LIKE LINE OF ct_travel.
+
+    IF ct_travel IS INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT travel_id FROM zstg_photo INTO TABLE lt_id.
+    LOOP AT ct_travel ASSIGNING <ls_travel>.
+      READ TABLE lt_id INTO lv_id WITH KEY table_line = <ls_travel>-travel_id.
+      IF sy-subrc = 0.
+        <ls_travel>-photo_url = photo_url( <ls_travel>-travel_id ).
       ENDIF.
     ENDLOOP.
   ENDMETHOD.

@@ -26,6 +26,8 @@ CLASS zcl_stg_model_info DEFINITION PUBLIC CREATE PUBLIC.
              properties  TYPE ty_properties,
              navs        TYPE ty_navs,
              aggregate   TYPE abap_bool,
+* set_is_media on the entity type: the content is a stream at <entity>/$value
+             is_media    TYPE abap_bool,
            END OF ty_entity_set.
     TYPES ty_entity_sets TYPE STANDARD TABLE OF ty_entity_set WITH DEFAULT KEY.
 
@@ -225,6 +227,7 @@ CLASS zcl_stg_model_info IMPLEMENTATION.
         ls_set-name        = ls_entity_set-name.
         ls_set-entity_type = lv_type_name.
         ls_set-properties  = lt_info.
+        ls_set-is_media    = lo_entity->mv_is_media.
         IF ls_entity_set-entity_set->mo_annotation IS BOUND.
           lt_annotations = ls_entity_set-entity_set->mo_annotation->get_all( ).
           READ TABLE lt_annotations INTO ls_annotation WITH KEY key = 'semantics'.

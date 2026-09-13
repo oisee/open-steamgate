@@ -7,6 +7,7 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
              status      TYPE c LENGTH 1,
              seats       TYPE i,
              status_text TYPE c LENGTH 40,
+             photo_url   TYPE c LENGTH 120,
            END OF ts_travel.
     TYPES tt_travel TYPE STANDARD TABLE OF ts_travel WITH DEFAULT KEY.
 
@@ -16,6 +17,16 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
              status_text TYPE c LENGTH 40,
            END OF ts_status_vh.
     TYPES tt_status_vh TYPE STANDARD TABLE OF ts_status_vh WITH DEFAULT KEY.
+
+* the picture of a travel: a media entity, its content read and written as
+* a stream at PhotoSet('T0001')/$value; the properties are what is known
+* about the picture, not the bytes
+    TYPES: BEGIN OF ts_photo,
+             travel_id TYPE c LENGTH 8,
+             mime_type TYPE c LENGTH 40,
+             file_name TYPE c LENGTH 40,
+           END OF ts_photo.
+    TYPES tt_photo TYPE STANDARD TABLE OF ts_photo WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ts_booking,
              travel_id   TYPE c LENGTH 8,
@@ -36,6 +47,8 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
     CONSTANTS gc_travel_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'TravelSet' ##NO_TEXT.
     CONSTANTS gc_booking TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Booking' ##NO_TEXT.
     CONSTANTS gc_booking_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'BookingSet' ##NO_TEXT.
+    CONSTANTS gc_photo TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Photo' ##NO_TEXT.
+    CONSTANTS gc_photo_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'PhotoSet' ##NO_TEXT.
     CONSTANTS gc_status_vh TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'StatusVH' ##NO_TEXT.
     CONSTANTS gc_status_vh_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'StatusVHSet' ##NO_TEXT.
 
@@ -51,6 +64,10 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
         /iwbep/cx_mgw_med_exception.
 
     METHODS define_status_vh
+      RAISING
+        /iwbep/cx_mgw_med_exception.
+
+    METHODS define_photo
       RAISING
         /iwbep/cx_mgw_med_exception.
 
@@ -70,6 +87,7 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
     define_travel( ).
     define_booking( ).
     define_status_vh( ).
+    define_photo( ).
     define_associations( ).
     define_actions( ).
   ENDMETHOD.
@@ -95,6 +113,68 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
                                                       iv_abap_fieldname = 'STATUS' ).
     lo_parameter->set_type_edm_string( ).
     lo_parameter->set_maxlength( 1 ).
+  ENDMETHOD.
+
+  METHOD define_photo.
+    DATA lo_entity_type TYPE REF TO /iwbep/if_mgw_odata_entity_typ.
+    DATA lo_property    TYPE REF TO /iwbep/if_mgw_odata_property.
+    DATA lo_entity_set  TYPE REF TO /iwbep/if_mgw_odata_entity_set.
+
+    lo_entity_type = model->create_entity_type( iv_entity_type_name = gc_photo
+                                                iv_def_entity_set   = abap_false ).
+* a media entity: $metadata marks it m:HasStream and the content is served
+* at PhotoSet('T0001')/$value through the DPC's GET_STREAM
+    lo_entity_type->set_is_media( 'X' ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'TravelId'
+                                                   iv_abap_fieldname = 'TRAVEL_ID' ).
+    lo_property->set_is_key( ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 8 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_true ).
+    lo_property->set_nullable( abap_false ).
+    lo_property->set_filterable( abap_true ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      iv_key   = 'label'
+      iv_value = 'Travel' ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'MimeType'
+                                                   iv_abap_fieldname = 'MIME_TYPE' ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 40 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_false ).
+    lo_property->set_nullable( abap_true ).
+    lo_property->set_filterable( abap_false ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      iv_key   = 'label'
+      iv_value = 'MIME type' ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'FileName'
+                                                   iv_abap_fieldname = 'FILE_NAME' ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 40 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_false ).
+    lo_property->set_nullable( abap_true ).
+    lo_property->set_filterable( abap_false ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      iv_key   = 'label'
+      iv_value = 'File name' ).
+
+    lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_PHOTO'
+                                    iv_bind_conversions = abap_true ).
+
+    lo_entity_set = lo_entity_type->create_entity_set( gc_photo_set ).
+    lo_entity_set->set_creatable( abap_false ).
+    lo_entity_set->set_updatable( abap_true ).
+    lo_entity_set->set_deletable( abap_false ).
+    lo_entity_set->set_pageable( abap_false ).
+    lo_entity_set->set_addressable( abap_true ).
   ENDMETHOD.
 
   METHOD define_status_vh.
@@ -334,6 +414,19 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
       EXPORTING
         iv_key      = 'label'
         iv_value    = 'Status text' ).
+
+    lo_property = lo_entity_type->create_property( iv_property_name  = 'PhotoUrl'
+                                                   iv_abap_fieldname = 'PHOTO_URL' ).
+    lo_property->set_type_edm_string( ).
+    lo_property->set_maxlength( 120 ).
+    lo_property->set_creatable( abap_false ).
+    lo_property->set_updatable( abap_false ).
+    lo_property->set_sortable( abap_false ).
+    lo_property->set_nullable( abap_true ).
+    lo_property->set_filterable( abap_false ).
+    lo_property->/iwbep/if_mgw_odata_annotatabl~create_annotation( 'sap' )->add(
+      iv_key      = 'label'
+      iv_value    = 'Photo' ).
 
     lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_TRAVEL'
                                     iv_bind_conversions = abap_true ).

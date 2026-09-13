@@ -175,6 +175,8 @@ export function buildModel(p) {
       // TECH_NAME: copied or renamed entities keep a stale TECH_NAME in the tree
       // (an entity type referenced from another model, NAME_XU = X, only has its TECH_NAME)
       name: et.NAME ?? et.TECH_NAME ?? "", techName: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase(), abapStruct: et.ABAP_STRUCT ?? "",
+      // a media entity: its content is a stream at <entity>/$value
+      isMedia: set(et, "IS_MEDIA"),
       // ABAP names stop at 30 characters: TS_/TT_/GC_ + 27, DEFINE_ + 23
       typeStem: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase().slice(0, 27), defineStem: (et.NAME ?? et.TECH_NAME ?? "").toUpperCase().slice(0, 23),
       properties: props, entitySets: sets, uuid: et.NODE_UUID,
@@ -376,7 +378,7 @@ ${STARS}
 ${STARS}
 
 lo_entity_type = model->create_entity_type( iv_entity_type_name = '${et.name}' iv_def_entity_set = abap_false ). "#EC NOTEXT
-
+${et.isMedia ? `lo_entity_type->set_is_media( 'X' ).  "#EC NOTEXT\n` : ""}
 ${STARS}
 *Properties
 ${STARS}

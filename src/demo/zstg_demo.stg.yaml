@@ -21,6 +21,9 @@ entities:
       Seats: {type: Int32, label: Seats}
       # read-only, the DPC fills it from the value-help table
       StatusText: {type: String(40), field: STATUS_TEXT, readonly: true, sortable: false, filterable: false, label: Status text}
+      # where the picture of this travel is read: the media resource of the
+      # Photo entity, filled by the DPC, shown by UI.IsImageURL
+      PhotoUrl: {type: String(120), field: PHOTO_URL, readonly: true, sortable: false, filterable: false, label: Photo}
 
   Booking:
     set: BookingSet
@@ -30,6 +33,21 @@ entities:
       BookingId: {type: String(4), field: BOOKING_ID, label: Booking}
       Customer: {type: String(40), label: Customer}
       FlightDate: {type: DateTime, digits: 0, field: FLIGHT_DATE, label: Flight date}
+
+  # a media entity: its content is a stream, read and written at
+  # PhotoSet('T0001')/$value through the DPC's GET_STREAM / UPDATE_STREAM
+  Photo:
+    set: PhotoSet
+    media: true
+    keys: [TravelId]
+    creatable: false
+    deletable: false
+    pageable: false
+    operations: [R, Q]
+    properties:
+      TravelId: {type: String(8), field: TRAVEL_ID, readonly: true, label: Travel}
+      MimeType: {type: String(40), field: MIME_TYPE, readonly: true, sortable: false, filterable: false, label: MIME type}
+      FileName: {type: String(40), field: FILE_NAME, readonly: true, sortable: false, filterable: false, label: File name}
 
   StatusVH:
     set: StatusVHSet
@@ -69,9 +87,10 @@ functions:
 # keeps its own local file for its list report; the demo's Travels app has none.)
 annotations:
   Travel:
-    header: {typeName: Travel, typeNamePlural: Travels, title: Description}
+    header: {typeName: Travel, typeNamePlural: Travels, title: Description, imageUrl: PhotoUrl}
     selectionFields: [Status, TravelId, Description]
     lineItem:
+      - {value: PhotoUrl, label: Photo}
       - {value: TravelId, label: Travel}
       - {value: Description, label: Description}
       - {value: Status, label: Status}
@@ -98,6 +117,8 @@ annotations:
       search: true
       parameters: [{inOut: {Status: Status}}, {displayOnly: Text}]
   Travel/StatusText: {label: Status text}
+  # the value is a URL to an image, not text: Fiori Elements renders it as one
+  Travel/PhotoUrl: {label: Photo, isImageUrl: true}
   Travel/Seats: {label: Seats}
   Booking:
     header: {typeName: Booking, typeNamePlural: Bookings, title: Customer, description: BookingId}

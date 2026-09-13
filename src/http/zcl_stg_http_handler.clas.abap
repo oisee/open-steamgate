@@ -18,6 +18,7 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
     DATA ls_header   TYPE ihttpnvp.
     DATA lv_body     TYPE string.
+    DATA lv_body_x   TYPE xstring.
 
     lv_method = server->request->get_header_field( '~request_method' ).
     lv_path   = server->request->get_header_field( '~path' ).
@@ -34,6 +35,8 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     lv_host = |{ lv_proto }://{ lv_host }{ server->request->get_header_field( 'x-forwarded-prefix' ) }|.
     server->request->get_form_fields_cs( CHANGING fields = lt_options ).
     lv_body = server->request->get_cdata( ).
+* a media resource (PUT <entity>/$value) is bytes, not text
+    lv_body_x = server->request->get_data( ).
 
 * CSRF: UI5 fetches a token with a GET and sends it back on writes. There is
 * no session to protect locally, so any token is accepted; hand one out.
@@ -47,6 +50,7 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
                                                 it_options = lt_options
                                                 iv_host    = lv_host
                                                 iv_body    = lv_body
+                                                iv_body_x  = lv_body_x
                                                 iv_content_type = server->request->get_header_field( 'content-type' ) ).
 
     LOOP AT ls_response-headers INTO ls_header.
@@ -59,7 +63,11 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     ENDIF.
     server->response->set_header_field( name  = 'dataserviceversion'
                                         value = '2.0' ).
-    server->response->set_cdata( ls_response-body ).
+    IF ls_response-body_x IS NOT INITIAL.
+      server->response->set_data( ls_response-body_x ).
+    ELSE.
+      server->response->set_cdata( ls_response-body ).
+    ENDIF.
     server->response->set_status( code   = ls_response-status
                                   reason = ls_response-reason ).
   ENDMETHOD.

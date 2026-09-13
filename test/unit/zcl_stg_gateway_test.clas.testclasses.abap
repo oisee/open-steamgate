@@ -260,7 +260,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
                                         exp = 'application/json' ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '{"d":{"results":[{"__metadata":{"id":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"type":"ZSTG_DEMO_SRV.Travel"' ) ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"__deferred"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","PhotoUrl":"../sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value","to_Bookings":{"__deferred"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'TravelSet(''T0009'')' ) ).
   ENDMETHOD.
 
@@ -317,7 +317,7 @@ CLASS ltcl_dispatch IMPLEMENTATION.
 
     ls_response = get( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-body
-                                        exp = '{"d":{"EntitySets":["TravelSet","BookingSet","StatusVHSet"]}}' ).
+                                        exp = `{"d":{"EntitySets":["TravelSet","BookingSet","StatusVHSet","PhotoSet"]}}` ).
   ENDMETHOD.
 
   METHOD unknown_set.
@@ -902,6 +902,98 @@ CLASS ltcl_batch IMPLEMENTATION.
 ENDCLASS.
 
 
+CLASS ltcl_media DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+* A media entity (Photo): the stream at <entity>/$value, both ways, and what
+* $metadata and the JSON say about it.
+  PRIVATE SECTION.
+    METHODS metadata_has_stream FOR TESTING RAISING cx_static_check.
+    METHODS json_points_at_the_stream FOR TESTING RAISING cx_static_check.
+    METHODS read_the_picture FOR TESTING RAISING cx_static_check.
+    METHODS replace_the_picture FOR TESTING RAISING cx_static_check.
+    METHODS not_a_media_entity FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_media IMPLEMENTATION.
+
+  METHOD metadata_has_stream.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntityType Name="Photo" m:HasStream="true"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '<EntityType Name="Travel" m:HasStream' ) ).
+* the property that carries the URL of a picture is annotated as one
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<Annotation Term="com.sap.vocabularies.UI.v1.IsImageURL" Bool="true"/>' ) ).
+  ENDMETHOD.
+
+  METHOD json_points_at_the_stream.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"media_src":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"edit_media":"http://localhost/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"MimeType":"image/png"' ) ).
+  ENDMETHOD.
+
+  METHOD read_the_picture.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_head     TYPE xstring.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-content_type
+                                        exp = 'image/png' ).
+    cl_abap_unit_assert=>assert_initial( ls_response-body ).
+* the bytes are a PNG, and they are the seeded ones
+    lv_head = ls_response-body_x(8).
+    cl_abap_unit_assert=>assert_equals( act = lv_head
+                                        exp = '89504E470D0A1A0A' ).
+    cl_abap_unit_assert=>assert_equals( act = xstrlen( ls_response-body_x )
+                                        exp = 930 ).
+  ENDMETHOD.
+
+  METHOD replace_the_picture.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_new      TYPE xstring VALUE '89504E470D0A1A0A0000000D49484452'.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'PUT'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0002'')/$value'
+                                                iv_body_x       = lv_new
+                                                iv_content_type = 'image/png' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 204 ).
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0002'')/$value' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body_x
+                                        exp = lv_new ).
+
+* a travel without a picture of its own: the DPC says so
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'PUT'
+                                                iv_path         = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0404'')/$value'
+                                                iv_body_x       = lv_new
+                                                iv_content_type = 'image/png' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+  ENDMETHOD.
+
+  METHOD not_a_media_entity.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')/$value' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 400 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'STG/NOT_A_MEDIA_ENTITY' ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_navigation DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS setup.
@@ -1070,7 +1162,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
                        iv_query = '$expand=to_Bookings&$top=2' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0001","Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"StatusText":"Accepted","PhotoUrl":"../sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value","to_Bookings":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
 * the expanded navigation is inline; the bookings' own to_Travel stays deferred
@@ -1102,7 +1194,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"to_Travel":{"__metadata"' ) ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","to_Bookings":{"results":[' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Berlin to Copenhagen","Status":"A","Seats":2,"StatusText":"Accepted","PhotoUrl":"../sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value","to_Bookings":{"results":[' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Grace Hopper"' ) ).
   ENDMETHOD.
 
@@ -1115,7 +1207,7 @@ CLASS ltcl_navigation IMPLEMENTATION.
                        iv_query = '$expand=to_Bookings&$filter=TravelId%20eq%20''T0002''' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002","Description":"Copenhagen to Aarhus","Status":"A","Seats":1,"StatusText":"Accepted","to_Bookings":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002","Description":"Copenhagen to Aarhus","Status":"A","Seats":1,"StatusText":"Accepted","PhotoUrl":"../sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0002'')/$value","to_Bookings":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Customer":"Edsger Dijkstra"' ) ).
     cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS 'Ada Lovelace' ) ).
   ENDMETHOD.

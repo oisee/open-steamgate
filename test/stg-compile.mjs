@@ -19,11 +19,11 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     const m = result.model;
     expect(m.classes).to.deep.equal({mpc: "ZCL_ZSTG_DEMO_MPC", mpcExt: "ZCL_ZSTG_DEMO_MPC_EXT", dpc: "ZCL_ZSTG_DEMO_DPC", dpcExt: "ZCL_ZSTG_DEMO_DPC_EXT", mpcAnn: "ZCL_ZSTG_DEMO_MPC_ANN"});
     const travel = m.entities[0];
-    expect(travel.properties.map((p) => p.name)).to.deep.equal(["TravelId", "Description", "Status", "Seats", "StatusText"]);
+    expect(travel.properties.map((p) => p.name)).to.deep.equal(["TravelId", "Description", "Status", "Seats", "StatusText", "PhotoUrl"]);
     // a key is not nullable and not updatable unless said otherwise; readonly turns creatable/updatable off
     expect(travel.properties[0]).to.include({isKey: true, type: "Edm.String", length: "8", creatable: true, updatable: false, nullable: false});
     expect(travel.properties[4]).to.include({creatable: false, updatable: false, sortable: false, filterable: false, field: "STATUS_TEXT"});
-    expect(m.entities[2]).to.include({set: "StatusVHSet", creatable: false, searchable: true});
+    expect(m.entities[3]).to.include({set: "StatusVHSet", creatable: false, searchable: true});
     expect(m.entities[2].operations.map((o) => o.type)).to.deep.equal(["R", "Q"]);
     expect(m.associations[0].card).to.deep.equal({left: "1", right: "N"});
     expect(m.functions.map((f) => `${f.name}:${f.method}:${f.multiplicity}`)).to.deep.equal(["CancelTravel:POST:1", "TravelCount:GET:"]);
@@ -58,13 +58,15 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     const m = buildModel(parseIwpr(result.iwpr));
     expect(m.project).to.equal("ZSTG_DEMO");
     expect(m.namespace).to.equal("ZSTG_DEMO_SRV");
-    expect(m.entityTypes.map((e) => e.name)).to.deep.equal(["Travel", "Booking", "StatusVH"]);
+    expect(m.entityTypes.map((e) => e.name)).to.deep.equal(["Travel", "Booking", "Photo", "StatusVH"]);
+    // a media entity is marked in the tree and generated with set_is_media
+    expect(m.entityTypes.map((e) => e.isMedia)).to.deep.equal([false, false, true, false]);
     const travel = m.entityTypes[0];
-    expect(travel.properties.map((p) => `${p.name}:${p.edmType}:${p.maxLength}`)).to.deep.equal(["TravelId:Edm.String:8", "Description:Edm.String:40", "Status:Edm.String:1", "Seats:Edm.Int32:", "StatusText:Edm.String:40"]);
+    expect(travel.properties.map((p) => `${p.name}:${p.edmType}:${p.maxLength}`)).to.deep.equal(["TravelId:Edm.String:8", "Description:Edm.String:40", "Status:Edm.String:1", "Seats:Edm.Int32:", "StatusText:Edm.String:40", "PhotoUrl:Edm.String:120"]);
     expect(travel.properties[0]).to.include({isKey: true, nullable: false, updatable: false, label: "Travel"});
     expect(travel.entitySets[0]).to.include({name: "TravelSet", creatable: true, searchable: true, subscribable: false});
     expect(travel.entitySets[0].operations.map((o) => o.method)).to.deep.equal(["TRAVELSET_CREATE_ENTITY", "TRAVELSET_GET_ENTITY", "TRAVELSET_UPDATE_ENTITY", "TRAVELSET_DELETE_ENTITY", "TRAVELSET_GET_ENTITYSET"]);
-    expect(m.entityTypes[2].entitySets[0].operations.map((o) => o.method)).to.deep.equal(["STATUSVHSET_GET_ENTITY", "STATUSVHSET_GET_ENTITYSET"]);
+    expect(m.entityTypes[3].entitySets[0].operations.map((o) => o.method)).to.deep.equal(["STATUSVHSET_GET_ENTITY", "STATUSVHSET_GET_ENTITYSET"]);
     expect(m.associations[0]).to.include({name: "TravelToBookings", leftType: "Travel", rightType: "Booking", leftCard: "1", rightCard: "N"});
     expect(m.associations[0].constraints).to.deep.equal([{principal: "TravelId", dependent: "TravelId"}]);
     expect(m.associations[0].sets).to.deep.equal([{name: "TravelToBookingsSet", leftSet: "TravelSet", rightSet: "BookingSet"}]);
@@ -203,6 +205,15 @@ describe("tools/stg-compile: Fiori annotations in the model", () => {
   it("gives the _MPC_EXT a DEFINE that calls it, and the base class sap:label from the tree", () => {
     expect(r.ext["zcl_zstg_demo_mpc_ext.clas.abap"]).to.contain("    super->define( ).\n    ZCL_ZSTG_DEMO_MPC_ANN=>define( vocab_anno_model ).");
     expect(r.classes["zcl_zstg_demo_mpc.clas.abap"]).to.contain("iv_key      = 'label'\n        iv_value    = 'Travel' ).");
+  });
+
+  it("writes the media entity and the picture annotations", () => {
+    expect(r.iwpr).to.contain("<NAME>Photo</NAME>\n     <IS_MEDIA>X</IS_MEDIA>");
+    const mpc = r.classes["zcl_zstg_demo_mpc.clas.abap"];
+    expect(mpc).to.contain("lo_entity_type = model->create_entity_type( iv_entity_type_name = 'Photo' iv_def_entity_set = abap_false ). \"#EC NOTEXT\nlo_entity_type->set_is_media( 'X' ).  \"#EC NOTEXT");
+    expect(mpc).not.to.contain("'Travel' iv_def_entity_set = abap_false ). \"#EC NOTEXT\nlo_entity_type->set_is_media");
+    expect(ann).to.contain("lo_record->create_property( 'ImageUrl' )->create_simple_value( )->set_path( 'PhotoUrl' ).");
+    expect(ann).to.contain("lo_annotation = lo_target->create_annotation( 'com.sap.vocabularies.UI.v1.IsImageURL' ).\n    lo_annotation->create_simple_value( )->set_boolean( abap_true ).");
   });
 
   it("names a target that is not in the model", () => {

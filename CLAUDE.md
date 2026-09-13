@@ -240,6 +240,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   (`zcl_stg_segw_fugr`). `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
+- Media entities (`docs/media-entities.md`): `set_is_media` in the MPC,
+  `m:HasStream` in `$metadata`, `<entity>/$value` served by the DPC's
+  `GET_STREAM` / `UPDATE_STREAM` (`zcl_stg_dispatcher=>media`, the binary
+  body travels as `ty_response-body_x`), `media_src` / `edit_media` in the
+  JSON. The demo's `PhotoSet` over `ZSTG_PHOTO` (seeded PNGs as hex) is one;
+  `UI.IsImageURL` on `Travel/PhotoUrl` is what makes the Travels app show
+  the picture in the list and in the object page header.
 - The SEGW editor is `webapp/segw/` (`docs/segw-editor.md`): freestyle
   SAPUI5 over `ZSTG_SEGW_SRV`, the project tree in SEGW's shape, every
   node edited in place (MERGE), Create for entity types, sets (with their

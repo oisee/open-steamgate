@@ -494,6 +494,23 @@ Order after this: ~~`stg-compile`~~, ~~ODC-local~~, ~~`function:` in the YAML~~ 
 search-help provider is with the transpiler session; the live RFC client
 (open-rfc npm, record mode, replay substitutions) waits for a go.
 
+## Media entities, 2026-09-13
+
+The demo serves a picture per travel: `PhotoSet` is a media entity
+(`set_is_media`, `m:HasStream`), its bytes come from `ZSTG_PHOTO` through
+the DPC's `GET_STREAM` and go back through `UPDATE_STREAM`, the gateway
+answers `<entity>/$value` with the bytes and their MIME type
+(`ty_response-body_x`, `set_data` instead of `set_cdata`), and the JSON of
+such an entity carries `media_src` / `edit_media`. `UI.IsImageURL` on a
+property whose value is that URL is what Fiori Elements renders, so the
+list report has a column of pictures and the object page a header image.
+Library side: open-abap-odata #63 (`set_is_media` was `ASSERT 1 = 'todo'`).
+`media: true` in a `stg.yaml` entity writes `IS_MEDIA` into the tree and
+segw-gen emits the `set_is_media` line, which also removes one difference
+against the two corpus MPCs that have media entities. The whole story is in
+[`docs/media-entities.md`](docs/media-entities.md); not yet: `CREATE_STREAM`
+with a slug, deleting a media resource, streaming instead of one `xstring`.
+
 ## The Fiori apps: real ones, and what deploying them to a system takes (2026-09-13)
 
 Asked by Alice, answered from the tree: our apps are not a simulation of

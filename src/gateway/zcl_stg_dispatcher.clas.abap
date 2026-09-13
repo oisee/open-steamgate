@@ -6,6 +6,8 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
              reason       TYPE string,
              content_type TYPE string,
              body         TYPE string,
+* the media resource of an entity ($value): bytes, not text
+             body_x       TYPE xstring,
              headers      TYPE tihttpnvp,
            END OF ty_response.
 
@@ -16,6 +18,7 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         it_options         TYPE tihttpnvp OPTIONAL
         iv_host            TYPE string DEFAULT 'localhost'
         iv_body            TYPE string OPTIONAL
+        iv_body_x          TYPE xstring OPTIONAL
         iv_content_type    TYPE string OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response.
@@ -32,6 +35,22 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         it_options         TYPE tihttpnvp
         iv_host            TYPE string
         iv_body            TYPE string
+        iv_body_x          TYPE xstring
+        iv_content_type    TYPE string
+      RETURNING
+        VALUE(rs_response) TYPE ty_response
+      RAISING
+        zcx_stg_error
+        /iwbep/cx_mgw_base_exception.
+
+* GET or PUT of <entity>/$value: the DPC's get_stream / update_stream
+    CLASS-METHODS media
+      IMPORTING
+        iv_method          TYPE string
+        is_service         TYPE zcl_stg_model_info=>ty_service
+        is_set             TYPE zcl_stg_model_info=>ty_entity_set
+        is_request         TYPE zcl_stg_url=>ty_request
+        iv_body_x          TYPE xstring
         iv_content_type    TYPE string
       RETURNING
         VALUE(rs_response) TYPE ty_response
@@ -261,6 +280,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                            it_options = it_options
                            iv_host    = iv_host
                            iv_body    = iv_body
+                           iv_body_x  = iv_body_x
                            iv_content_type = iv_content_type ).
       CATCH zcx_stg_error INTO lx_stg.
         rs_response = json_response( iv_status = lx_stg->status
@@ -375,6 +395,16 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ls_set = zcl_stg_model_info=>find_set( is_service    = ls_service
                                            iv_entity_set = ls_request-entity_set ).
 
+    IF ls_request-is_value = abap_true.
+      rs_response = media( iv_method       = lv_method
+                           is_service      = ls_service
+                           is_set          = ls_set
+                           is_request      = ls_request
+                           iv_body_x       = iv_body_x
+                           iv_content_type = iv_content_type ).
+      RETURN.
+    ENDIF.
+
     IF ls_request-nav_prop IS NOT INITIAL.
       IF lv_method = 'GET'.
         rs_response = read_navigation( is_service  = ls_service
@@ -421,6 +451,85 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                  is_request  = ls_request
                                  iv_base_url = lv_base ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD media.
+* The media resource of an entity: a media entity type (set_is_media in the
+* MPC) answers <entity>/$value with bytes, and the DPC is the one holding
+* them. er_stream of get_stream is a reference to the media resource the
+* interface declares (mime type + value), which is what a SEGW-generated
+* DPC hands back through copy_data_to_ref.
+    DATA lo_dpc     TYPE REF TO /iwbep/if_mgw_appl_srv_runtime.
+    DATA lo_context TYPE REF TO zcl_stg_request_context.
+    DATA lr_stream  TYPE REF TO data.
+    DATA ls_media   TYPE /iwbep/if_mgw_appl_types=>ty_s_media_resource.
+    FIELD-SYMBOLS <ls_media> TYPE /iwbep/if_mgw_appl_types=>ty_s_media_resource.
+
+    IF is_set-is_media = abap_false.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 400
+          code    = 'STG/NOT_A_MEDIA_ENTITY'
+          message = |{ is_set-name } is not a media entity set|.
+    ENDIF.
+    IF is_request-key_string IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING
+          status  = 400
+          code    = 'STG/KEY_MISSING'
+          message = |$value needs an entity key|.
+    ENDIF.
+
+    lo_dpc     = zcl_oao_registry=>create_dpc( is_service-name ).
+    lo_context = build_context( is_request = is_request
+                                is_set     = is_set ).
+
+    CASE iv_method.
+      WHEN 'GET'.
+        lo_dpc->get_stream(
+          EXPORTING
+            iv_entity_name          = is_set-entity_type
+            iv_entity_set_name      = is_set-name
+            iv_source_name          = ''
+            it_key_tab              = lo_context->mt_key_tab
+            io_tech_request_context = lo_context
+          IMPORTING
+            er_stream               = lr_stream ).
+        IF lr_stream IS NOT BOUND.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING
+              status  = 404
+              code    = 'STG/ENTITY_NOT_FOUND'
+              message = |{ is_set-name }({ is_request-key_string }) has no media resource|.
+        ENDIF.
+        ASSIGN lr_stream->* TO <ls_media>.
+        rs_response-status       = 200.
+        rs_response-reason       = 'OK'.
+        rs_response-content_type = <ls_media>-mime_type.
+        IF rs_response-content_type IS INITIAL.
+          rs_response-content_type = 'application/octet-stream'.
+        ENDIF.
+        rs_response-body_x = <ls_media>-value.
+      WHEN 'PUT'.
+        ls_media-mime_type = iv_content_type.
+        ls_media-value     = iv_body_x.
+        lo_dpc->update_stream(
+          EXPORTING
+            iv_entity_name          = is_set-entity_type
+            iv_entity_set_name      = is_set-name
+            iv_source_name          = ''
+            is_media_resource       = ls_media
+            it_key_tab              = lo_context->mt_key_tab
+            io_tech_request_context = lo_context ).
+        rs_response-status = 204.
+        rs_response-reason = 'No Content'.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING
+            status  = 405
+            code    = 'STG/METHOD_NOT_ALLOWED'
+            message = |{ iv_method } on $value is not implemented|.
+    ENDCASE.
   ENDMETHOD.
 
   METHOD write_entity.

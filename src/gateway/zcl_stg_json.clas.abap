@@ -541,6 +541,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
   METHOD entity.
     DATA ls_property LIKE LINE OF is_set-properties.
     DATA lv_uri      TYPE string.
+    DATA lv_media   TYPE string.
     DATA lv_fields   TYPE string.
     DATA ls_nav      LIKE LINE OF is_set-navs.
     DATA ls_nav_json LIKE LINE OF it_nav_json.
@@ -583,7 +584,12 @@ CLASS zcl_stg_json IMPLEMENTATION.
 * the key values are part of the URI: a backslash in one (SEGW's
 * DS_ATT_PATH, IT_RANGE\HIGH) must be escaped like any other string
     lv_uri = escape( lv_uri ).
-    rv_json = |\{"__metadata":\{"id":"{ lv_uri }","uri":"{ lv_uri }","type":"{ iv_namespace }.{ is_set-entity_type }"\}{ lv_fields }\}|.
+* a media entity: where its content is read and written (v2 clients, Fiori
+* Elements among them, follow media_src to show the picture)
+    IF is_set-is_media = abap_true.
+      lv_media = |,"media_src":"{ lv_uri }/$value","edit_media":"{ lv_uri }/$value"|.
+    ENDIF.
+    rv_json = |\{"__metadata":\{"id":"{ lv_uri }","uri":"{ lv_uri }","type":"{ iv_namespace }.{ is_set-entity_type }"{ lv_media }\}{ lv_fields }\}|.
   ENDMETHOD.
 
   METHOD entry.
