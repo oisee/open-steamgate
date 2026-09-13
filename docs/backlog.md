@@ -23,6 +23,7 @@ Nothing below them starts until the answer.
      └─ settled already: it lives in this repository, not a third one
 
 0.2  ADT façade: yes / no, and thin slice first                       [A]
+     └─ the contract for waves 0 and 1 is written: docs/adt-facade.md
      └─ unlocks 2.1 .. 2.4
      └─ external: open-abap-adt (interfaces only, LICENSE empty -> spec, not base)
      └─ external: vsp as the oracle and the test client
@@ -107,6 +108,18 @@ the objects.
      debugger over ADT and real cluster dumps stay out and stay
      undiscovered.                                                    [S]
      └─ external: sanitized ADT document shapes from V (see below)
+```
+
+## 2b. Questions parked next to the façade
+
+```
+open  SOAP: vsp's ADT is pure REST, no SOAP in it. The only SOAP it touches
+      is SOAP-RFC (/sap/bc/soap/rfc), a fallback transport for classic RFC
+      when the gateway is closed, stateless, and it belongs to open-rfc-go.
+      A local system would need it only if a non-ADT, RFC-speaking client
+      had to attach. Question, not an item.
+open  Eclipse ADT against the façade: free if vsp accepts it, untested.
+open  revisions: reading them out of git instead of a system.
 ```
 
 ## 3. Analytics and CDS (no gate, S can start)
