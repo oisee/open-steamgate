@@ -62,6 +62,13 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   // what SEGW's Create makes, from the folders: an entity type, a set with
   // its five operations under Service Implementation, a function import
   // returning it; from a row: a navigation property needs an association
+  // a folder shows its rows as a table with the commands; a row opens the node
+  await page.getByRole("treeitem", {name: "Entity Types", exact: true}).click();
+  const overview = page.locator("#container-stg\\.segw---app--overview");
+  await expect(overview.getByRole("row", {name: /StatusVH/})).toBeVisible();
+  await expect(overview.getByRole("row", {name: /Travel.*ZSTG_DEMO/})).toBeVisible();
+  await overview.getByRole("row", {name: /StatusVH/}).click();
+  await expect(page.getByText("EntityType: StatusVH")).toBeVisible();
   await page.getByRole("treeitem", {name: "Entity Types", exact: true}).click();
   await page.getByRole("button", {name: "Add entity type"}).click();
   await page.getByRole("dialog").getByRole("textbox").fill("Plane");
@@ -176,6 +183,44 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   expect(requests.some((r) => r.includes("POST ImportSet") && r.includes("LCL_OBJECT_IWPR"))).toBe(true);
 
   expect(failed, failed.join("\n")).toEqual([]);
+});
+
+test("SEGW editor: a new project from nothing, an entity type in it, generated", async ({page}) => {
+  const requests = [];
+  page.on("request", (req) => {
+    const text = req.method() + " " + req.url().replace(/^http:\/\/localhost:\d+/, "") + " " + (req.postData() || "");
+    if (text.includes("/sap/opu/odata/sap/")) {
+      requests.push(text.replace(/\r?\n/g, " "));
+    }
+  });
+  await page.goto("/app/segw/index.html");
+  await expect(page.getByRole("treeitem", {name: "ZSTG_MAPPED", exact: true})).toBeVisible();
+  await page.getByRole("button", {name: "New project"}).click();
+  const dialog = page.getByRole("dialog", {name: "New project"});
+  await dialog.getByRole("textbox").first().fill("zstg_trip");
+  await dialog.getByRole("textbox").nth(1).fill("Trips, made in the editor");
+  await dialog.getByRole("button", {name: "Create"}).click();
+  await expect(page.getByText("Project ZSTG_TRIP created")).toBeVisible();
+  // the project node, the model, the service and the six artifacts, as stg-compile writes them
+  expect(requests.some((r) => r.includes("POST ProjectSet") && r.includes('"Project":"ZSTG_TRIP"') && r.includes('"Plugin":"/IWBEP/GEN"'))).toBe(true);
+  expect(requests.some((r) => r.includes("POST ModelSet") && r.includes('"Mpc":"ZCL_ZSTG_TRIP_MPC_EXT"'))).toBe(true);
+  expect(requests.some((r) => r.includes("POST ServiceSet") && r.includes('"Dpc":"ZCL_ZSTG_TRIP_DPC_EXT"'))).toBe(true);
+  expect(requests.filter((r) => r.includes("POST ArtifactSet")).length).toBeGreaterThan(0);
+  // selected, with its empty folders
+  await expect(page.getByRole("treeitem", {name: "ZSTG_TRIP", exact: true})).toBeVisible();
+  await expect(page.getByRole("treeitem", {name: "Entity Types", exact: true})).toBeVisible();
+  await page.getByRole("treeitem", {name: "Entity Types", exact: true}).click();
+  await page.getByRole("button", {name: "Add entity type"}).click();
+  await page.getByRole("dialog").getByRole("textbox").fill("Trip");
+  await page.getByRole("dialog").getByRole("button", {name: "Add"}).click();
+  await expect(page.getByRole("treeitem", {name: "Trip", exact: true})).toBeVisible();
+  // and it generates: the classes of the new project
+  await page.getByRole("button", {name: "Generate"}).click();
+  const generated = page.getByRole("dialog", {name: /Generated ZSTG_TRIP/});
+  await expect(generated).toContainText("zcl_zstg_trip_mpc.clas.abap");
+  await expect(generated).toContainText("zcl_zstg_trip_dpc_ext.clas.abap");
+  await generated.getByText("zcl_zstg_trip_mpc.clas.abap").click();
+  await expect(page.getByRole("dialog", {name: "zcl_zstg_trip_mpc.clas.abap"}).getByRole("textbox")).toHaveValue(/iv_entity_type_name = 'Trip'/);
 });
 
 test("launchpad: the SEGW tile opens the editor", async ({page}) => {

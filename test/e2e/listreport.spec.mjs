@@ -269,6 +269,9 @@ test("launchpad: intent navigation from a booking to the Bookings app and back t
   // the sandbox shell with our two tiles
   const travels = page.getByRole("link", {name: /Travels/}).or(page.locator(".sapUshellTile", {hasText: "Travels"})).first();
   await expect(travels).toBeVisible();
+  // only our group: the sandbox's own catalog (RTA Demo App...) is not shown
+  await expect(page.getByText("RTA Demo App")).toHaveCount(0);
+  await expect(page.locator(".sapUshellTile", {hasText: "SEGW"}).first()).toBeVisible();
   await travels.click();
   await expect(page).toHaveURL(/#Travel-manage/);
   await expect(page.getByText("Berlin to Copenhagen")).toBeVisible();

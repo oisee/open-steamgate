@@ -14,9 +14,16 @@ sap.ui.define([
   "sap/m/TextArea",
   "sap/m/Select",
   "sap/ui/core/Item",
+  "sap/m/Table",
+  "sap/m/Column",
+  "sap/m/ColumnListItem",
+  "sap/m/Text",
+  "sap/m/OverflowToolbar",
+  "sap/m/ToolbarSpacer",
+  "sap/m/Title",
   "sap/m/MessageToast",
   "sap/m/MessageBox",
-], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, Select, Item, MessageToast, MessageBox) {
+], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, Select, Item, Table, Column, ColumnListItem, Text, OverflowToolbar, ToolbarSpacer, MTitle, MessageToast, MessageBox) {
   "use strict";
 
   // The tree SEGW shows, in terms of the entity sets of ZSTG_SEGW_SRV (one
@@ -192,6 +199,29 @@ sap.ui.define([
   // which adds a folder (by the set it lists) or a row (by its entity) offers
   const FOLDER_ADDS = {EntityTypeSet: ["entityType"], EntitySetSet: ["entitySet"], AssociationSet: ["association"], FunctionImportSet: ["functionImport"]};
   const ROW_ADDS = {EntityType: ["property", "navigationProperty"], ComplexType: ["property"], FunctionImport: ["parameter"]};
+  // the overview of a folder: the columns worth a glance per set (the rest
+  // is the row's form); a set not listed shows Name and the node id
+  const OVERVIEW = {
+    EntityTypeSet: ["Name", "TechName", "AbapStruct", "IsMedia"],
+    ComplexTypeSet: ["Name", "TechName", "AbapStruct"],
+    PropertySet: ["Name", "EdmCoreType", "MaxLength", "IsKey", "IsNullable", "AbapField", "ComplexType"],
+    NavPropertySet: ["Name", "TechName", "RelationGuid"],
+    AssociationSet: ["Name", "LeftEndGuid", "LeftEndCard", "RightEndGuid", "RightEndCard"],
+    RefConstraintSet: ["Name", "PrincipalPropR", "DependentPropR"],
+    EntitySetSet: ["Name", "EntityType", "Creatable", "Updatable", "Deletable", "Searchable", "Pageable"],
+    AssociationSetSet: ["Name", "AssociationGuid", "LeftEndGuid", "RightEndGuid"],
+    FunctionImportSet: ["Name", "HttpMethod", "ReturnTypeKind", "ReturnRefType", "ReturnCard"],
+    FunctionParamSet: ["Name", "EdmCoreType", "MaxLength", "AbapField"],
+    ServiceEntitySet: ["Name", "EntitySetUuid"],
+    OperationSet: ["Name", "OperationType", "ImpMethod"],
+    MappingHeaderSet: ["Name", "DsUuid"],
+    MappingPropertySet: ["PropertyPath", "ConstantVal", "Direction", "DsAttPath"],
+    DataSourceSet: ["Name", "DsType", "DsGroup", "FunctionName", "RfcDest"],
+    ArtifactSet: ["Name", "TrobjType", "GenArtType"],
+    ServiceSet: ["TechnicalName", "Version", "Dpc", "ExternalName"],
+  };
+  // a node id in a column reads as the name of the node it points at
+  const GUID_COLUMNS = new Set(["EntityType", "RelationGuid", "LeftEndGuid", "RightEndGuid", "AssociationGuid", "ReturnRefType", "EntitySetUuid", "DsUuid", "PrincipalPropR", "DependentPropR", "ComplexType"]);
 
   return Controller.extend("stg.segw.controller.App", {
     onInit() {
@@ -268,6 +298,73 @@ sap.ui.define([
         error: (e) => MessageBox.error(String(e && (e.responseText || e.message))),
       });
       model.submitChanges();
+    },
+
+    // a new project: the rows stg-compile writes for an empty one (the
+    // project node and its text, the model, the service, the six generated
+    // artifacts), then it is selected with its empty folders
+    onNewProject() {
+      const model = this.getOwnerComponent().getModel();
+      const name = new Input({placeholder: "e.g. ZSTG_TRIP", maxLength: 30});
+      const description = new Input({placeholder: "Description"});
+      const dialog = new Dialog({
+        title: "New project",
+        contentWidth: "24rem",
+        content: [new Label({text: "Project", labelFor: name}), name, new Label({text: "Description", labelFor: description}), description],
+        beginButton: new Button({
+          text: "Create", type: "Emphasized",
+          press: () => {
+            const project = name.getValue().trim().toUpperCase();
+            if (!/^(\/[A-Z0-9_]+\/)?[A-Z][A-Z0-9_]*$/.test(project)) {
+              MessageBox.error("A project name: letters, digits, underscore, an optional /NS/ in front.");
+              return;
+            }
+            dialog.close();
+            const ns = /^\/([^/]+)\/(.*)$/.exec(project);
+            const cls = (suffix) => (ns ? "/" + ns[1] + "/CL_" + ns[2] : "ZCL_" + project) + "_" + suffix;
+            const service = project + "_SRV";
+            const modelName = project + "_MDL";
+            const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14) + ".000000";
+            const ids = {project: uuid(), model: uuid(), service: uuid()};
+            const text = (set, id, field, value) => [set, {Language: "E", Project: project, NodeUuid: id, ...(field ? {[field]: value} : {})}];
+            let seq = 0;
+            const rows = [
+              ["ProjectSet", {Project: project, NodeUuid: ids.project, CreationUserId: "STEAMGATE", CreationTime: stamp, LastChgUserId: "STEAMGATE", LastChgTime: stamp, Plugin: "/IWBEP/GEN", StratName: "0001", StratVersion: "0001", ProjectType: "1"}],
+              ["ProjectTextSet", {Project: project, Language: "E", Description: description.getValue().trim()}],
+              ["ModelSet", {Project: project, NodeUuid: ids.model, NodeUuidPa: ids.project, PluginPa: "/IWBEP/CORE", NodeTypePa: "PROJ", TechnicalName: modelName, Version: "0001", Mpc: cls("MPC_EXT"), StateNs: "S", ValueNs: service}],
+              text("ModelTextSet", ids.model, "Description", description.getValue().trim()),
+              ["ServiceSet", {Project: project, NodeUuid: ids.service, TechnicalName: service, Version: "0001", Dpc: cls("DPC_EXT"), ExternalName: service}],
+              text("ServiceTextSet", ids.service),
+            ];
+            for (const [kind, artifact, type] of [["MPCB", cls("MPC"), "CLAS"], ["MPCS", cls("MPC_EXT"), "CLAS"], ["DPCB", cls("DPC"), "CLAS"], ["DPCS", cls("DPC_EXT"), "CLAS"], ["MDL", modelName, "IWMO"], ["SRV", service, "IWSV"]]) {
+              const id = uuid();
+              rows.push(["ArtifactSet", {Project: project, NodeUuid: id, Name: artifact, Pgmid: "R3TR", TrobjType: type, TrobjName: artifact, GenArtType: kind}]);
+              rows.push(text("ArtifactTextSet", id));
+            }
+            for (const [, data] of rows) {
+              data.StgSeq = ++seq;
+            }
+            Promise.all(rows.map(([set, data]) => new Promise((resolve, reject) => model.create("/" + set, data, {success: resolve, error: reject}))))
+              .then(() => {
+                MessageToast.show("Project " + project + " created");
+                const select = this.byId("project");
+                const binding = select.getBinding("items");
+                const pick = () => {
+                  binding.detachDataReceived(pick);
+                  select.setSelectedKey(project);
+                  this.loadProject(project);
+                };
+                binding.attachDataReceived(pick);
+                binding.refresh(true);
+              })
+              .catch((e) => MessageBox.error(String(e && (e.responseText || e.message))));
+            model.submitChanges();
+          },
+        }),
+        endButton: new Button({text: "Cancel", press: () => dialog.close()}),
+        afterClose: () => dialog.destroy(),
+      });
+      dialog.open();
     },
 
     onProjectChange(event) {
@@ -353,9 +450,16 @@ sap.ui.define([
       form.unbindElement();
       textForm.unbindElement();
       const adds = (keys) => keys.map((k) => ({key: k, label: ADDS[k].label}));
+      const overview = this.byId("overview");
+      overview.destroyItems();
+      overview.setVisible(false);
       if (!node || !node.path) {
-        // a folder: nothing to edit, the adds it offers
+        // a folder: the overview of what is in it, the adds it offers
         nodeModel.setData(node && node.folder ? {folder: node.folder, title: node.text, adds: adds(FOLDER_ADDS[node.folder] || [])} : {});
+        if (node && node.folder) {
+          overview.addItem(this.overviewTable(node));
+          overview.setVisible(true);
+        }
         return;
       }
       nodeModel.setData({path: node.path, entity: node.entity, set: node.set, title: node.entity + ": " + node.text, row: node.row, adds: adds(ROW_ADDS[node.entity] || [])});
@@ -422,6 +526,77 @@ sap.ui.define([
         },
         error: (e) => MessageBox.error(String(e && e.message)),
       });
+    },
+
+    // the rows of a folder as a table with its commands: a row press selects
+    // the node in the tree, Delete takes the selected rows (NodeSet)
+    overviewTable(node) {
+      const children = node.nodes.filter((n) => n.row);
+      const columns = OVERVIEW[node.folder] || ["Name", "NodeUuid"];
+      const names = new Map();
+      for (const list of Object.values(this.rows || {})) {
+        for (const r of list) {
+          if (r.NodeUuid && (r.Name || r.TechnicalName)) {
+            names.set(r.NodeUuid, r.Name || r.TechnicalName);
+          }
+        }
+      }
+      const cell = (r, c) => {
+        const v = r[c] === undefined || r[c] === null ? "" : String(r[c]);
+        return GUID_COLUMNS.has(c) && names.has(v) ? names.get(v) : v;
+      };
+      const table = new Table({
+        mode: "MultiSelect",
+        headerToolbar: new OverflowToolbar({
+          content: [
+            new MTitle({text: node.text + " (" + children.length + ")"}),
+            new ToolbarSpacer(),
+            new Button({
+              text: "Delete", icon: "sap-icon://delete", type: "Transparent",
+              press: () => {
+                const selected = table.getSelectedItems().map((i) => children[table.indexOfItem(i)]);
+                if (selected.length === 0) {
+                  MessageToast.show("Select rows first");
+                  return;
+                }
+                MessageBox.confirm("Delete " + selected.map((n) => n.text).join(", ") + " with everything below?", {
+                  onClose: (action) => {
+                    if (action !== MessageBox.Action.OK) {
+                      return;
+                    }
+                    const model = this.getOwnerComponent().getModel();
+                    Promise.all(selected.map((n) => new Promise((resolve, reject) => model.remove("/" + model.createKey("NodeSet", {Project: n.row.Project, NodeUuid: n.row.NodeUuid}), {success: resolve, error: reject}))))
+                      .then(() => { MessageToast.show("Deleted"); this.loadProject(this.project); })
+                      .catch((e) => { MessageBox.error(String(e && (e.responseText || e.message))); this.loadProject(this.project); });
+                    model.submitChanges();
+                  },
+                });
+              },
+            }),
+          ],
+        }),
+        columns: columns.map((c, i) => new Column({header: new Text({text: c}), minScreenWidth: i > 2 ? "Tablet" : undefined, demandPopin: i > 2})),
+        items: children.map((n) => new ColumnListItem({type: "Navigation", cells: columns.map((c) => new Text({text: cell(n.row, c)}))})),
+      });
+      // the row and its node by position (custom data does not survive the
+      // control); itemPress, not the item's own press, because the list
+      // handles the click itself in a selection mode; deferred, because
+      // select( ) destroys this table
+      const nodeOf = (item) => children[table.indexOfItem(item)];
+      table.attachItemPress((event) => {
+        const node = nodeOf(event.getParameter("listItem"));
+        setTimeout(() => this.selectInTree(node), 0);
+      });
+      return table;
+    },
+
+    selectInTree(node) {
+      const tree = this.byId("tree");
+      const item = tree.getItems().find((i) => i.getBindingContext("tree") && i.getBindingContext("tree").getObject() === node);
+      if (item) {
+        tree.setSelectedItem(item, true);
+      }
+      this.select(node);
     },
 
     onAdd(event) {
