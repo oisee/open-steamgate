@@ -98,6 +98,63 @@ discovery shape come as sanitized fixtures from vsp: real structure,
 synthetic names, scrubbed before they reach this repository, because this
 repository is public and raw captures never come here.
 
+## Waves 2 to 4, and what each one maps onto here
+
+The demand side is written down in vsp's repository as
+`docs/adt-surface.md`, endpoint by endpoint, and that is the canonical list.
+This is the answer side: what each wave means for us.
+
+**Wave 2, data and DDIC.** `POST /sap/bc/adt/datapreview/freestyle` with SQL
+in the body is the one that matters: it is how vsp reads table contents *and*
+how its whole graph layer works. `POST …/datapreview/ddic` is the
+table-scoped version. The definitions come from the DDIC we already carry:
+`/sap/bc/adt/ddic/tables/{n}`, `…/views/{n}`, `…/structures/{n}`,
+`…/dataelements/{n}`, `…/ddl/sources/{n}` for CDS, `…/srvd/sources/{n}`.
+
+The cross-reference tables belong here and cost the façade nothing:
+`CROSS`, `WBCROSSGT`, `WBCROSSGTX` for who-calls and references, `D010INC`
+for the load graph. vsp reads them over freestyle SQL like any other table,
+so once freestyle works they are free on the protocol side. Filling them is
+the store layer's job (the transpiler session's): the rows are derived from
+the parse the transpiler already does, not authored, and their key format
+can be whatever is convenient locally because vsp reads them by SQL.
+
+**Wave 3, the development loop.** `POST <object>?_action=LOCK&accessMode=MODIFY`
+returns a lock handle, `PUT <object>/source/main?lockHandle=…` writes,
+`POST /sap/bc/adt/<collection>` creates, `POST <object>?_action=UNLOCK`
+releases. `POST /sap/bc/adt/checkruns?reporters=abapCheckRun` is a syntax
+check, which here is abaplint; `POST /sap/bc/adt/activation?method=activate`
+is activation, which here is a transpile that succeeds;
+`GET /sap/bc/adt/activation/inactiveobjects` lists what has not been
+activated; `POST /sap/bc/adt/abapunit/testruns` is a test run, which here is
+the runtime running ABAP Unit. The whole path rides one affine session and
+the handle is threaded from lock through write to unlock.
+
+**Wave 4, cheap extras.** `GET /sap/bc/adt/runtime/dumps` and the detail
+resource under it: a runtime error of ours emitted as an ST22-shaped
+document. Revisions, if reading them out of git is enough.
+
+## The object types Tier 1 has to answer for
+
+A finite list, from the paths above: CLAS with its includes and methods
+through the object structure, INTF, PROG, INCL, FUGR and FUNC, DEVC for a
+package, TABL, VIEW, STRU, DTEL, DDLS, SRVD.
+
+Worth keeping straight, because the two get confused: this is the breadth of
+the *façade*, not the dependency closure of a running service. The closure is
+the OData product's problem and a different axis entirely.
+
+## Cross-cutting, all of it
+
+- The token must never be the literal `Required`.
+- `HEAD` on `/sap/bc/adt/core/discovery` must work; vsp tries it before `GET`.
+- Never redirect an authenticated request, always return the token.
+- Namespaced names arrive URL-encoded.
+- Source is raw `text/plain`; structure, package, search and DDIC are the
+  `application/vnd.sap.adt.*+xml` shapes.
+- The lock handle is threaded through one session, and a stateless hop
+  between lock and write retires it.
+
 ## SOAP, asked and answered
 
 vsp's ADT client is pure REST; there is no SOAP in it. The only SOAP it
