@@ -214,8 +214,14 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `gen/stg/` unless `src/` already holds the object (a stale generated copy
   of an object `src/` now holds is removed).
 - CDS views go under `src/cds/*.ddls.asddls` (+ `.ddls.xml`); `npm run cds`
-  (part of `transpile`) generates `gen/cds/` (DDIC view XML, source classes,
-  registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.
+  (part of `transpile`) generates `gen/cds/` (DDIC view XML under the SQL
+  view name *and* under the CDS name, source classes with `ty_row`/`tt_row`,
+  the registry). `gen/` is not tracked. SADL runtime lives in `src/sadl/`.
+  `@ObjectModel.virtualElement` + `virtualElementCalculatedBy: 'ABAP:ZCL_X'`
+  on a `cast( )` element is a field an ABAP class fills after the read
+  (`docs/virtual-elements.md`, `if_sadl_exit_calc_element_read`);
+  `@OData.publish: true` on a view writes `gen/cds/<view>_cds.stg.yaml`,
+  which `stg-compile --all` turns into a service (`docs/cds-publish.md`).
 - `table:` sources are read and written generically: `tools/cds2ddic.mjs`
   emits `gen/cds/zcl_stg_tab_<table>` (read / insert / update / delete over
   the table, `zif_stg_cds_source`) for every TABL under `src/`, and

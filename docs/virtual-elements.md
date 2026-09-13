@@ -51,6 +51,13 @@ class reads another table).
 - `test/mocha.mjs`, "virtual elements": the metadata flags, the values over
   the wire for the set and for one entity, and the two refusals.
 
+## A published view carries them too
+
+`@OData.publish: true` on the same view makes it a service of its own
+(`docs/cds-publish.md`), and the virtual elements are part of it: the model
+binds to the source class's row, so `ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet`
+answers with `Occupancy` and `FreeSeats` like the hand-written SADL service.
+
 ## Not yet
 
 `get_calculation_info` is declared and implemented in the demo class but the

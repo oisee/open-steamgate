@@ -236,7 +236,10 @@ export function readModel(text, file = "stg.yaml") {
       }
     }
     const source = spec.source ?? {};
-    if (Object.keys(source).filter((k) => k !== "set").length > 1) {
+    // one source, plus an optional struct: the ABAP structure the model binds
+    // to when it is not the source's own name (a published CDS view binds to
+    // the row type of its generated source class, virtual elements included)
+    if (Object.keys(source).filter((k) => k !== "set" && k !== "struct").length > 1) {
       throw new Error(`${file}: ${name}: one source only`);
     }
     const flag = (key, fallback) => (spec[key] === undefined ? fallback : spec[key] === true);
@@ -937,14 +940,17 @@ function walk(dir, out = []) {
 // name: the demo's hand-written classes and registration objects win, so
 // the YAML there documents the model and is checked by test/stg-compile.mjs
 // without producing a second copy of the service.
-export function compileAll(root = "src", out = "gen/stg", libs = []) {
+export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots = []) {
   // by object, not by file: a hand-written zcl_x.clas.abap keeps the
   // generated zcl_x.clas.xml out as well
   const objectOf = (name) => basename(name).toLowerCase().replace(/\.(abap|xml)$/, "");
   const existing = new Set(walk(root).map(objectOf));
   const functionModules = loadFunctionGroups([root, ...libs]);
   const report = [];
-  for (const file of walk(root).filter((p) => p.endsWith(".stg.yaml")).sort()) {
+  // src/ first, then the models another generator wrote (a CDS view published
+  // with @OData.publish, gen/cds/*.stg.yaml)
+  const files = [...walk(root), ...extraRoots.filter((d) => existsSync(d)).flatMap((d) => walk(d))];
+  for (const file of files.filter((p) => p.endsWith(".stg.yaml")).sort()) {
     const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules});
     const target = join(out, result.model.project.toLowerCase().replaceAll("/", "#"));
     const written = [];
@@ -966,6 +972,16 @@ export function compileAll(root = "src", out = "gen/stg", libs = []) {
       writeFileSync(join(target, name), content);
       written.push(name);
     }
+    // the folder belongs to this model: what an earlier run left there and
+    // this one did not write (a renamed class, an object that moved to src/)
+    // would otherwise be transpiled as a second copy
+    if (existsSync(target)) {
+      for (const name of readdirSync(target)) {
+        if (!written.includes(name)) {
+          rmSync(join(target, name));
+        }
+      }
+    }
     report.push({file, project: result.model.project, service: result.model.service, written, kept, warnings: result.warnings});
   }
   return report;
@@ -980,7 +996,7 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
   const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
   if (args.includes("--all")) {
-    for (const r of compileAll("src", "gen/stg", libs)) {
+    for (const r of compileAll("src", "gen/stg", libs, ["gen/cds"])) {
       console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} kept from src/)` : ""}`);
       for (const w of r.warnings) {
         console.log(`  warning: ${w}`);

@@ -182,6 +182,27 @@ describe("wire", () => {
     }
   });
 
+  it("@OData.publish: a CDS view is a service, without SEGW", async () => {
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_TRAVEL_CDS`;
+    // the annotation on the view generated the model, the registration
+    // objects and the classes; the registry serves them like any other service
+    const doc = await (await fetch(S + "/")).json();
+    expect(doc.d.EntitySets).to.deep.equal(["Zc_Stg_TravelSet"]);
+
+    const xml = await (await fetch(S + "/$metadata")).text();
+    expect(xml).to.contain('<EntityType Name="Zc_Stg_Travel"');
+    expect(xml).to.contain('<EntitySet Name="Zc_Stg_TravelSet"');
+
+    const rows = (await (await fetch(S + "/Zc_Stg_TravelSet?$format=json&$filter=STATUS eq 'A'")).json()).d.results;
+    expect(rows.map((r) => r.TRAVELID)).to.deep.equal(["T0001", "T0002", "T0009"]);
+    // the virtual elements of the view are part of the published service too
+    expect(rows[0].OCCUPANCY).to.equal("20% of 10");
+
+    // the cube views are published as well
+    const cube = await (await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS/`)).json();
+    expect(cube.d.EntitySets).to.deep.equal(["Zc_Stg_FlightcubeSet"]);
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);

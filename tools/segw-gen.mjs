@@ -39,11 +39,22 @@ function records(xml, table) {
   while ((m = rec.exec(block[1])) !== null) {
     const fields = {};
     for (const f of m[1].matchAll(/<([A-Z_0-9]+)>([^<]*)<\/\1>/g)) {
-      fields[f[1]] = f[2];
+      fields[f[1]] = unescapeXml(f[2]);
     }
     out.push(fields);
   }
   return out;
+}
+
+// abapGit escapes the five XML entities in a value; a tree field can hold any
+// of them (a description with an ampersand, a bind structure with =>)
+function unescapeXml(text) {
+  return text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
 }
 
 export function parseIwpr(xml) {
