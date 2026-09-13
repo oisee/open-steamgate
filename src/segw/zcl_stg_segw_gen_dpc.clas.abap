@@ -59,6 +59,7 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
              name       TYPE string,
              sadl_type  TYPE string,
              binding    TYPE string,
+             edit_mode  TYPE string,
              properties TYPE zcl_stg_segw_gen=>tt_property,
            END OF ty_sadl_set.
     TYPES tt_sadl_set TYPE STANDARD TABLE OF ty_sadl_set WITH DEFAULT KEY.
@@ -779,6 +780,14 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
         ls_sadl-name       = ls_set-name.
         ls_sadl-sadl_type  = ls_set-sadl_type.
         ls_sadl-binding    = ls_set-sadl_binding.
+* maxEditMode follows what the tree says the set allows: EX where it is
+* creatable, updatable or deletable, RO otherwise (S_EPM_CDS_EXP writes EX
+* for its two writable sets, every read-only project in the corpus writes RO)
+        IF ls_set-creatable = abap_true OR ls_set-updatable = abap_true OR ls_set-deletable = abap_true.
+          ls_sadl-edit_mode = 'EX'.
+        ELSE.
+          ls_sadl-edit_mode = 'RO'.
+        ENDIF.
         ls_sadl-properties = ls_type-properties.
         APPEND ls_sadl TO lt_sadl.
       ENDLOOP.
@@ -805,7 +814,7 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     lv_n = lines( lt_sadl ).
     WHILE lv_n > 0.
       READ TABLE lt_sadl INDEX lv_n INTO ls_sadl.
-      APPEND |               \|<sadl:structure name="{ ls_sadl-name }" dataSource="{ ls_sadl-name }" maxEditMode="RO" >\| &| TO lt_lines.
+      APPEND |               \|<sadl:structure name="{ ls_sadl-name }" dataSource="{ ls_sadl-name }" maxEditMode="{ ls_sadl-edit_mode }" >\| &| TO lt_lines.
       APPEND `               | <sadl:query name="EntitySetDefault">| &` TO lt_lines.
       APPEND `               | </sadl:query>| &` TO lt_lines.
       LOOP AT ls_sadl-properties INTO ls_property.
