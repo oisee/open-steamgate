@@ -41,3 +41,6 @@ data/cross.tabu.json
 data/wbcrossgt.tabu.json
 data/wbcrossgtx.tabu.json
 data/d010inc.tabu.json
+
+# objects brought into the local system from a repository (npm run osd:import)
+local/

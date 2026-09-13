@@ -8,7 +8,10 @@ import {NotFound, ObjectStore, ReadOnly, fileOf, nameOf} from "../tools/osd-stor
 // checks and activates when it talks to OSD. The repository itself is the
 // content, and the open-abap clones beside it are the standard objects, so
 // the store is tested against what is actually on disk.
-describe("tools/osd-store: the objects of the local system", () => {
+describe("tools/osd-store: the objects of the local system", function () {
+  // a check parses the whole system, and the system grows when a repository
+  // is imported into local/
+  this.timeout(120000);
   const store = new ObjectStore();
 
   it("indexes this repository and the libraries beside it", () => {

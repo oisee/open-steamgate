@@ -32,6 +32,7 @@
     "osd": "node tools/osd-store.mjs",
     "osd:xref": "node tools/osd-xref.mjs",
     "osd:sql": "node tools/osd-data.mjs",
+    "osd:import": "node tools/osd-import.mjs",
     "bench:cube": "node tools/bench-cube.mjs",
     "stg:compile": "node tools/stg-compile.mjs",
     "segw:closure": "node tools/segw-closure.mjs"

@@ -67,12 +67,17 @@ export const INCLUDES = {
 // texts come from those and nothing above this changes.
 const ROOT_PACKAGES = {
   src: "$STG",
+  local: "$OSD",
   test: "$STG_TEST",
   gen: "$STG_GEN",
 };
 
 const DEFAULT_ROOTS = [
   {path: "src", writable: true, library: false},
+  // what was brought in from a repository: objects of the local system that
+  // nobody here wrote, so they are not in this repository's git, and our own
+  // source wins when a name is in both
+  {path: "local", writable: true, library: false, imported: true},
   // ABAP unit test classes are objects of the system too, and the
   // transpiler already builds from here
   {path: "test", writable: true, library: false},
@@ -86,6 +91,11 @@ const DEFAULT_LIBS = [
   ".local/lars/express-icf-shim/src",
   ".local/lars/open-abap-odata/src",
 ];
+
+// Parsing the system costs seconds and every store of the same tree parses
+// the same thing, so the answer is kept per root and dropped the moment
+// anything is written. A façade that makes a store per request pays once.
+const PARSED = new Map();
 
 export class ObjectStore {
   constructor(options = {}) {
@@ -144,13 +154,23 @@ export class ObjectStore {
           if (!name.endsWith(meta.ext) || meta.sameFileAs !== undefined) {
             continue;
           }
-          const objectName = nameOf(name.slice(0, -meta.ext.length));
+          const chain = this.#packagesOf(file, root);
+          // abapGit calls every package file package.devc.xml and lets the
+          // folder say which package it is, so the object is named after the
+          // folder rather than after the file
+          const objectName = type === "DEVC" && name === "package.devc.xml"
+            ? chain[chain.length - 1]
+            : nameOf(name.slice(0, -meta.ext.length));
           const key = `${type} ${objectName}`;
           // ours wins over a library's, src wins over gen
           if (!index.has(key)) {
-            const chain = this.#packagesOf(file, root);
+            // a package is an object of the package above it, the way a
+            // system holds it, so its own folder is not also its home
+            const home = type === "DEVC" && objectName === chain[chain.length - 1] && chain.length > 1
+              ? chain.slice(0, -1)
+              : chain;
             index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library,
-                            package: chain[chain.length - 1], packages: chain});
+                            imported: root.imported === true, package: home[home.length - 1], packages: home});
           }
           break;
         }
@@ -240,7 +260,8 @@ export class ObjectStore {
     if (entry === undefined) {
       const root = this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
-      entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false};
+      entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,
+               imported: root.imported === true, package: this.#packagesOf(file, root).pop()};
       this.#entries().set(`${entry.type} ${entry.name}`, entry);
     }
     let file = entry.file;
@@ -253,7 +274,7 @@ export class ObjectStore {
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
     writeFileSync(join(this.root, file), source);
-    this.parsed = undefined;
+    this.#forget();
     return {...entry, include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
 
@@ -274,7 +295,7 @@ export class ObjectStore {
       }
     }
     this.#entries().delete(`${entry.type} ${entry.name}`);
-    this.parsed = undefined;
+    this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
 
@@ -369,13 +390,10 @@ export class ObjectStore {
     return undefined;
   }
 
+  // a package object is named after the package it describes
   #devcOf(name) {
-    for (const entry of this.#entries().values()) {
-      if (entry.type === "DEVC" && entry.package === name) {
-        return entry.file;
-      }
-    }
-    return undefined;
+    const entry = this.#entries().get(`DEVC ${name}`);
+    return entry === undefined ? undefined : entry.file;
   }
 
   // the rows of the system, for a client that asks for table contents: one
@@ -385,6 +403,12 @@ export class ObjectStore {
       this.rows = new Data({root: this.root});
     }
     return this.rows;
+  }
+
+  // a write means the parse is stale, here and for anyone sharing this tree
+  #forget() {
+    this.parsed = undefined;
+    PARSED.delete(this.root);
   }
 
   // the parsed system, for whoever needs more than an object: the
@@ -397,6 +421,11 @@ export class ObjectStore {
   #build_registry(configPath = "abaplint.jsonc") {
     if (this.parsed !== undefined) {
       return this.parsed;
+    }
+    const shared = PARSED.get(this.root);
+    if (shared !== undefined) {
+      this.parsed = shared;
+      return shared;
     }
     const text = readFileSync(join(this.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
     const config = JSON.parse(text);
@@ -418,6 +447,7 @@ export class ObjectStore {
     }
     registry.parse();
     this.parsed = registry;
+    PARSED.set(this.root, registry);
     return registry;
   }
 
