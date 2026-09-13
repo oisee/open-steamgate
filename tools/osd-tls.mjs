@@ -10,6 +10,7 @@
 // impersonate, and it costs one command to make another.
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync} from "node:fs";
+import {networkInterfaces} from "node:os";
 import {join} from "node:path";
 
 export const TLS_DIR = ".local/tls";
@@ -20,7 +21,22 @@ export const CERT = "osd.crt";
 // host only in the common name; the subject alternative name is the one it
 // reads. So both spellings of this machine go in it.
 const SUBJECT = "/CN=localhost/O=open-steamgate/OU=OSD";
-const SAN = "subjectAltName=DNS:localhost,DNS:osd,IP:127.0.0.1,IP:::1";
+
+// Every address this machine can be reached on, not only the loopback. The
+// case that needs it: a client on the host operating system reaching a server
+// inside a Linux subsystem, where the address it dials is this machine's own
+// network address and a certificate naming only localhost is rejected.
+function subjectAltName() {
+  const names = ["DNS:localhost", "DNS:osd", "IP:127.0.0.1", "IP:::1"];
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.internal === false && address.family === "IPv4") {
+        names.push("IP:" + address.address);
+      }
+    }
+  }
+  return "subjectAltName=" + names.join(",");
+}
 
 export function paths(root = process.cwd()) {
   return {dir: join(root, TLS_DIR), key: join(root, TLS_DIR, KEY), cert: join(root, TLS_DIR, CERT)};
@@ -54,12 +70,23 @@ export function generate(root = process.cwd(), options = {}) {
     "-days", String(options.days ?? 3650),
     "-nodes",
     "-subj", SUBJECT,
-    "-addext", SAN,
+    "-addext", subjectAltName(),
   ], {stdio: "pipe"});
   return {key, cert, created: true};
 }
 
 // the fingerprint a person compares against what a client shows them
+// what the certificate says it is good for, which is the question a person
+// asks when a client rejects it
+export function hosts(root = process.cwd()) {
+  const {cert} = paths(root);
+  if (existsSync(cert) === false) {
+    return [];
+  }
+  const text = execFileSync("openssl", ["x509", "-in", cert, "-noout", "-ext", "subjectAltName"], {encoding: "utf8"});
+  return text.split("\n").slice(1).join(" ").split(",").map((p) => p.trim()).filter((p) => p !== "");
+}
+
 export function fingerprint(root = process.cwd()) {
   const {cert} = paths(root);
   if (existsSync(cert) === false) {
@@ -75,5 +102,6 @@ if (process.argv[1]?.endsWith("osd-tls.mjs")) {
   const result = generate(process.cwd(), {force});
   console.log(`${result.created ? "written" : "already there"}: ${result.key}, ${result.cert}`);
   console.log(`sha256 ${fingerprint()}`);
+  console.log(`good for ${hosts().join(", ")}`);
   console.log("self-signed: a client will ask once whether to trust it");
 }
