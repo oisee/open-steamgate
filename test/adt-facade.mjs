@@ -65,10 +65,11 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('href="/sap/bc/adt/datapreview/freestyle"');
       expect(xml).to.contain('href="/sap/bc/adt/activation"');
       expect(xml).to.contain('href="/sap/bc/adt/checkruns"');
-      // not served yet, and so not promised: this is the gatekeeper rule,
-      // and it is what keeps "which tools work" answerable. The unit run
-      // waits on the store having one at all.
-      expect(xml).to.not.contain('href="/sap/bc/adt/abapunit/testruns"');
+      expect(xml).to.contain('href="/sap/bc/adt/abapunit/testruns"');
+      // not served yet, and so not promised: this is the gatekeeper rule, and
+      // it is what keeps "which tools work" answerable by asking the server
+      expect(xml).to.not.contain('href="/sap/bc/adt/atc"');
+      expect(xml).to.not.contain('href="/sap/bc/adt/debugger"');
     });
 
     it("a client scanning for hrefs finds every collection with its full path", async () => {

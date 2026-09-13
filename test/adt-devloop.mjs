@@ -204,11 +204,13 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await res.text();
       expect(xml).to.contain("<chkrun:checkMessage ");
       expect(xml).to.contain('chkrun:type="E"');
-      // a client reads the severity, the position and the text, each where it
-      // expects them: attributes for the first two, a child for the text
+      // a client reads the severity, the position and the text as attributes,
+      // which is where real ADT puts them; text in a child element reaches a
+      // client as a finding with no words in it
       expect(xml).to.match(/chkrun:line="\d+"/);
       expect(xml).to.match(/chkrun:column="\d+"/);
-      expect(xml).to.match(/<shortText>[^<]+<\/shortText>/);
+      expect(xml).to.match(/chkrun:shortText="[^"]+"/);
+      expect(xml).to.not.contain("<shortText>");
       // the point of a check run: the file is untouched by it
       const after = await (await call(`/oo/classes/${SCRATCH}/source/main`)).text();
       expect(after).to.equal(before);
@@ -268,6 +270,55 @@ describe("tools/adt-facade: the development loop", () => {
 
     it("the check is advertised now that it answers", async () => {
       expect(await (await call("/discovery")).text()).to.contain('href="/sap/bc/adt/checkruns"');
+    });
+  });
+
+  describe("running the tests", () => {
+    const testRun = (name) => call("/abapunit/testruns", {
+      method: "POST",
+      body: `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <external><coverage active="false"/></external>
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${String(name).toLowerCase()}"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`,
+    });
+
+    it("a class with tests comes back as a tree of classes and methods", async function () {
+      this.timeout(180000);
+      const res = await testRun("ZCL_STG_SEGW_TEST");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<aunit:runResult");
+      expect(xml).to.contain('adtcore:name="ZCL_STG_SEGW_TEST"');
+      expect(xml).to.contain("<testClass ");
+      expect(xml).to.contain("<testMethod ");
+      expect(xml).to.match(/executionTime="\d+\.\d+" unit="s"/);
+    });
+
+    it("a method that passed carries no alert, which is what passing means", async function () {
+      this.timeout(180000);
+      const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
+      const method = xml.match(/<testMethod [^>]*>[\s\S]*?<\/testMethod>/)[0];
+      expect(method).to.contain("<alerts>");
+      expect(method).to.not.contain("<alert ");
+    });
+
+    it("every class and method points at the line it is written at", async function () {
+      this.timeout(180000);
+      const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
+      // a client jumps to a failure instead of opening a file and searching
+      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
+    });
+
+    it("a test run that names nothing is refused", async () => {
+      const res = await call("/abapunit/testruns", {method: "POST", body: "<aunit:runConfiguration/>"});
+      expect(res.status).to.equal(400);
+    });
+
+    it("the test run is advertised now that it answers", async () => {
+      expect(await (await call("/discovery")).text()).to.contain('href="/sap/bc/adt/abapunit/testruns"');
     });
   });
 

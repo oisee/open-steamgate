@@ -354,12 +354,12 @@ export function nodesOf(store, name) {
 // as much as the messages: a client reads "processed" as "this ran", and a
 // report that could not run must not look like a report that found nothing.
 export function checkReportDocument(reports) {
-  // the position is an attribute and the text is a child element, which is
-  // where a client reads them; the fragment on the URI says the same thing
-  // and is what a person following the link lands on
-  const message = (uri, issue) => `      <chkrun:checkMessage adtcore:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}">
-        <shortText>${xmlEscape(issue.message)}</shortText>
-      </chkrun:checkMessage>`;
+  // position and text are both attributes, which is the shape real ADT emits
+  // and the shape a client reads: a message whose text is a child element
+  // arrives as a finding with no text, which is worse than no finding at all.
+  // The fragment on the URI says the position a second time and is what a
+  // person following the link lands on.
+  const message = (uri, issue) => `      <chkrun:checkMessage adtcore:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
 
   const report = (r) => `  <chkrun:checkReport adtcore:uri="${xmlEscape(r.uri)}" chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
     <chkrun:checkMessageList>
@@ -513,6 +513,55 @@ export function objectFromUri(uri, collections) {
     }
   }
   return undefined;
+}
+
+// The result of a test run: a program, its test classes, their methods, and
+// the alerts on whichever of them failed. No alert on a method is what
+// "passed" means, so an empty alerts element is a pass and not an omission.
+//
+// Navigation is the part worth getting right. Every class and method knows
+// the line it is written at and which include it lives in, so a client can
+// jump straight to a failure instead of opening a file and searching.
+export function unitResultDocument(run, options = {}) {
+  const base = options.base ?? uriOf(run.program?.typeName ?? "CLAS", run.program?.name ?? "") ?? "";
+  const at = (include, line, column) => `${base}/includes/${include ?? "testclasses"}/source/main#start=${line ?? 1},${column ?? 1}`;
+
+  const stackEntry = (e) => `            <stackEntry adtcore:uri="${xmlEscape(e.uri ?? "")}" adtcore:name="${xmlEscape(e.name ?? "")}" adtcore:description="${xmlEscape(e.line === undefined ? "" : "line " + e.line)}"/>`;
+
+  const alert = (a) => `        <alert kind="${xmlEscape(a.kind ?? "failedAssertion")}" severity="${xmlEscape(a.severity ?? "critical")}">
+          <title>${xmlEscape(a.title ?? "")}</title>
+          <details>
+${(a.details ?? []).map((d) => `            <detail text="${xmlEscape(d)}"/>`).join("\n")}
+          </details>
+          <stack>
+${(a.stack ?? []).map(stackEntry).join("\n")}
+          </stack>
+        </alert>`;
+
+  const method = (m, include) => `      <testMethod adtcore:name="${xmlEscape(m.name)}" adtcore:uri="${xmlEscape(at(include, m.line, m.column))}" executionTime="${xmlEscape(m.executionTime ?? "0.000")}" unit="${xmlEscape(m.unit ?? "s")}" navigationUri="${xmlEscape(at(include, m.line, m.column))}">
+        <alerts>
+${(m.alerts ?? []).map(alert).join("\n")}
+        </alerts>
+      </testMethod>`;
+
+  const testClass = (c) => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(at(c.include, c.line, c.column))}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" navigationUri="${xmlEscape(at(c.include, c.line, c.column))}">
+      <alerts>
+${(c.alerts ?? []).map(alert).join("\n")}
+      </alerts>
+      <testMethods>
+${(c.testMethods ?? []).map((m) => method(m, c.include)).join("\n")}
+      </testMethods>
+    </testClass>`;
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<aunit:runResult xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <program adtcore:name="${xmlEscape(run.program?.name ?? "")}" adtcore:type="${xmlEscape(run.program?.type ?? "CLAS/OC")}" adtcore:uri="${xmlEscape(base)}">
+    <testClasses>
+${(run.testClasses ?? []).map(testClass).join("\n")}
+    </testClasses>
+  </program>
+</aunit:runResult>
+`;
 }
 
 // -------------------------------------------------------------- search

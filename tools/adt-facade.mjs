@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn, unitResultDocument} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -149,6 +149,7 @@ const TITLE = {
   "packages": "Packages",
   "activation": "Activation",
   "checkruns": "Check Runs (syntax)",
+  "abapunit/testruns": "ABAP Unit Test Runs",
 };
 
 // The body of a request, whatever the host application did with it.
@@ -396,6 +397,29 @@ export function adtRouter(options = {}) {
       }
       res.status(200).type("text/plain").send("");
     });
+  });
+
+  // ABAP UNIT. The runtime actually runs the tests, in a child process of its
+  // own: a test writes to the database, and the database is the one this
+  // server is answering requests from, so a client's test data must not land
+  // in the gateway's rows. About a second for one class.
+  advertise("abapunit/testruns");
+  router.post(`${BASE}/abapunit/testruns`, async (req, res) => {
+    const body = await rawBody(req);
+    const named = objectReferencesIn(body, collections);
+    if (named.length === 0) {
+      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const run = await runner.runDetached(named[0].type, named[0].name);
+      res.status(200).type("application/vnd.sap.adt.api.junit.run-result.v1+xml")
+        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+    } catch (e) {
+      res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
+        .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
+    }
   });
 
   // ---- packages: what a package is, and what is inside it. A package here
