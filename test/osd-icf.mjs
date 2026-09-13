@@ -1,5 +1,8 @@
 import {expect} from "chai";
 import {serviceOf, channelOf, services, channels} from "../tools/osd-icf.mjs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 
 // SICF, and the APC application beside it: which class answers which URL.
 // The shapes are abapGit's, so these are read from the real serialisations
@@ -72,7 +75,38 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     expect(lengths).to.deep.equal([...lengths].sort((a, b) => b - a));
   });
 
-  it("no APC application in this tree yet, and the reader says so rather than guessing", () => {
-    expect(channels(process.cwd())).to.deep.equal([]);
+  // against a fixture rather than the tree. What is under local/ is imported,
+  // gitignored, and different on every machine: a test that asserts over it
+  // passes here and fails on a clean clone, which is a test that reports the
+  // checkout rather than the code. The first version of this asserted no APC
+  // application existed, and it was true until one was imported an hour later.
+  it("an APC application is found wherever it was imported", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-icf-"));
+    try {
+      mkdirSync(join(dir, "local", "demo"), {recursive: true});
+      writeFileSync(join(dir, "local", "demo", "zo4d_demo.sapc.xml"), SAPC);
+      const found = channels(dir);
+      expect(found).to.have.length(1);
+      expect(found[0].handler).to.equal("ZCL_O4D_APC_HANDLER");
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  // two copies of one node is not hypothetical: a narrowed import beside the
+  // whole repository produced exactly that, and which of the two answered
+  // came down to the order express matched in
+  it("one route per path, however many nodes name it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-icf-"));
+    try {
+      mkdirSync(join(dir, "local", "whole"), {recursive: true});
+      mkdirSync(join(dir, "local", "narrow"), {recursive: true});
+      writeFileSync(join(dir, "local", "whole", "a.sicf.xml"), SICF);
+      writeFileSync(join(dir, "local", "narrow", "a.sicf.xml"), SICF);
+      const found = services(dir).filter((s) => s.path === "/sap/bc/zo4d_demo");
+      expect(found).to.have.length(1);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 });

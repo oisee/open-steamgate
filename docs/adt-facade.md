@@ -351,3 +351,34 @@ the in-memory database.** That trade is why this is written down rather
 than fixed in passing — re-importing the graph and keeping the data are
 two different pieces of work, and picking between them is a design call,
 not a bug fix.
+
+## Browsing an object and running it are two different states
+
+Measured on 2026-09-13 while importing a real application. The store reads
+`src`, `local`, `test` and `gen`; the transpiler reads `src`, `test` and
+`gen`. `local/` is missing from the second list, and that is deliberate —
+it is where a repository lands that was imported to be *read*, and
+importing everything breaks the build. abapGit's own GUI classes want SALV
+and kill the transpile in nine seconds.
+
+The consequence is a trap, and it is the same one this document is full of.
+The 466 abapGit classes under `local/` appear in the ADT tree, open in an
+editor, and have no module in `output/`. `ZCL_ABAPGIT_APACK_HELPER` is one
+of them: readable in VS Code, and not code. Nothing in either answer says
+so. A client cannot tell a class it could call from a class it could only
+look at, because both answer a source read with source.
+
+So they are two separately checkable states and neither implies the other:
+
+- **in the tree** — the store found the object under one of its roots.
+- **runnable** — a module for it exists in `output/`, which means it was
+  inside `input_folder` when the transpile last ran.
+
+Making something runnable is a deliberate act: narrow the import to what is
+meant to run and add that folder to `input_folder`. `local/o4d` is the
+worked example — one class out of an 85-class repository, because the other
+84 do not compile and the one that matters does not need them.
+
+Until the façade says which state an object is in, the honest instruction
+is: an object under `local/` is readable, and is only runnable if somebody
+put its folder in the transpile input on purpose.

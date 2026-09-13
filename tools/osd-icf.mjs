@@ -117,15 +117,31 @@ function scan(root, options, suffix, parse) {
   return found;
 }
 
+// One route per path, longest first.
+//
+// Two nodes can name one path — the same repository imported twice, or a
+// narrowed copy of it beside the whole thing, which is how this turned up:
+// the same service mounted twice and which of the two answered was down to
+// the order express happened to match in. A system has one node per path, so
+// the first one found wins and the rest are dropped.
+function routes(found) {
+  const byPath = new Map();
+  for (const one of found.sort((a, b) => b.path.length - a.path.length)) {
+    if (byPath.has(one.path) === false) {
+      byPath.set(one.path, one);
+    }
+  }
+  return [...byPath.values()];
+}
+
 // the websocket applications a repository brought with it
 export function channels(root = process.cwd(), options = {}) {
-  return scan(root, options, ".sapc.xml", channelOf).sort((a, b) => b.path.length - a.path.length);
+  return routes(scan(root, options, ".sapc.xml", channelOf));
 }
 
 export function services(root = process.cwd(), options = {}) {
-  const found = scan(root, options, ".sicf.xml", serviceOf);
   // a longer path first, so /sap/bc/a/b is not swallowed by /sap/bc/a
-  return found.sort((a, b) => b.path.length - a.path.length);
+  return routes(scan(root, options, ".sicf.xml", serviceOf));
 }
 
 // Mount them on an express app. `run` is cl_express_icf_shim.run, passed in
