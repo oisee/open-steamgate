@@ -419,7 +419,29 @@ export function adtRouter(options = {}) {
     }
   });
 
-  return {router, sessions, store, data, resources};
+  // Everything under the façade that nothing above answered. A 404 is the
+  // right answer and also the most useful thing a strange client can tell
+  // us: Eclipse asks for far more than vsp does, and the list of what it
+  // asked for and did not get is exactly the next wave's work. So each one
+  // is recorded once, by method and path, and the server can print the set.
+  const missed = new Map();
+  router.all(`${BASE}/*`, (req, res) => {
+    const key = `${req.method} ${req.path}`;
+    const seen = missed.get(key);
+    missed.set(key, {
+      method: req.method,
+      path: req.path,
+      accept: seen?.accept ?? req.headers.accept,
+      count: (seen?.count ?? 0) + 1,
+      first: seen?.first ?? new Date().toISOString(),
+    });
+    if (options.logMisses !== false && seen === undefined) {
+      console.log(`ADT not served: ${key}  accept=${req.headers.accept ?? "-"}`);
+    }
+    res.status(404).type("application/xml").send(exceptionDocument("ExceptionResourceNotFound", `${req.path} is not served by OSD`));
+  });
+
+  return {router, sessions, store, data, resources, missed};
 }
 
 // a client names a type either as ADT does (DEVC/K, CLAS/OC) or bare (DEVC)

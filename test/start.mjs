@@ -56,6 +56,11 @@ export function startServer(quiet) {
   // rather than starting a second and re-running the seed under a live server
   const facade = adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})});
   app.use(facade.router);
+  // what a client asked the façade for and did not get, on demand: point a
+  // strange client at OSD, then read this to learn what it wanted
+  app.get("/osd/not-served", function (req, res) {
+    res.json([...facade.missed.values()].sort((a, b) => b.count - a.count));
+  });
   // parsing the system is the expensive part of a syntax check or an object
   // structure, and it is shared once paid. A served instance pays it at
   // startup so the first client does not buy it for the second; it is
