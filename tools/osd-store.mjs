@@ -79,7 +79,7 @@ export class ObjectStore {
     this.roots = options.roots ?? DEFAULT_ROOTS;
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
-    this.registry = undefined;
+    this.parsed = undefined;
   }
 
   // ---------------------------------------------------------------- index
@@ -222,7 +222,7 @@ export class ObjectStore {
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
     writeFileSync(join(this.root, file), source);
-    this.registry = undefined;
+    this.parsed = undefined;
     return {...entry, include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
 
@@ -243,7 +243,7 @@ export class ObjectStore {
       }
     }
     this.#entries().delete(`${entry.type} ${entry.name}`);
-    this.registry = undefined;
+    this.parsed = undefined;
     return {type: entry.type, name: entry.name, deleted: true};
   }
 
@@ -271,10 +271,16 @@ export class ObjectStore {
 
   // --------------------------------------------------- check and activate
 
+  // the parsed system, for whoever needs more than an object: the
+  // cross-reference derives from the same parse the check runs on
+  registry(configPath = "abaplint.jsonc") {
+    return this.#build_registry(configPath);
+  }
+
   // the whole registry, so a check sees the system and not one file
   #build_registry(configPath = "abaplint.jsonc") {
-    if (this.registry !== undefined) {
-      return this.registry;
+    if (this.parsed !== undefined) {
+      return this.parsed;
     }
     const text = readFileSync(join(this.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
     const config = JSON.parse(text);
@@ -295,7 +301,7 @@ export class ObjectStore {
       }
     }
     registry.parse();
-    this.registry = registry;
+    this.parsed = registry;
     return registry;
   }
 
@@ -305,7 +311,7 @@ export class ObjectStore {
     if (entry === undefined) {
       throw new NotFound(type, name);
     }
-    const registry = this.#build_registry();
+    const registry = this.registry();
     const object = registry.getObject(type, entry.name);
     if (object === undefined) {
       return {type, name: entry.name, issues: [{severity: "E", message: `${type} ${entry.name} is not in the registry`, line: 1, column: 1}]};
