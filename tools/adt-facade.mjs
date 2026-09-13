@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, checkReportDocument, checkObjectsIn} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -148,6 +148,7 @@ const TITLE = {
   "repository/nodestructure": "Repository Node Structure",
   "packages": "Packages",
   "activation": "Activation",
+  "checkruns": "Check Runs (syntax)",
 };
 
 export function adtRouter(options = {}) {
@@ -305,6 +306,36 @@ export function adtRouter(options = {}) {
       });
     });
   }
+
+  // SYNTAX CHECK. The source arrives inline, because a client checks what a
+  // person has typed rather than what is on disk. The store checks the given
+  // text against the parsed system without touching the file, so this is a
+  // real check and not a formality: broken source comes back broken even
+  // though nothing was written.
+  advertise("checkruns");
+  router.post(`${BASE}/checkruns`, (req, res) => {
+    answer(res, () => {
+      const objects = checkObjectsIn(req.body, collections);
+      if (objects.length === 0) {
+        res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
+        return;
+      }
+      const reports = objects.map((o) => {
+        try {
+          const result = store.check(o.type, o.name, {
+            source: o.source,
+            include: o.include,
+          });
+          return {uri: o.uri, issues: result.issues};
+        } catch (e) {
+          // a check that could not run must not look like a check that found
+          // nothing, or a client writes on the strength of it
+          return {uri: o.uri, issues: [], status: "notProcessed", statusText: String(e?.message ?? e)};
+        }
+      });
+      res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument(reports));
+    });
+  });
 
   // ACTIVATE. An empty body means it activated; a document means it did not.
   // That is the convention and not our choice, so a document has to mean

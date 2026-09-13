@@ -349,6 +349,79 @@ export function nodesOf(store, name) {
 
 // ------------------------------------------------------- the dev loop
 
+// A check run's answer: the findings of a syntax check over source the client
+// is holding, which is usually source it has not written yet. Status matters
+// as much as the messages: a client reads "processed" as "this ran", and a
+// report that could not run must not look like a report that found nothing.
+export function checkReportDocument(reports) {
+  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
+
+  const report = (r) => `  <chkrun:checkReport chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
+    <chkrun:checkMessageList>
+${r.issues.map((i) => message(r.uri, i)).join("\n")}
+    </chkrun:checkMessageList>
+  </chkrun:checkReport>`;
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun"
+                        xmlns:adtcore="http://www.sap.com/adt/core">
+${reports.map(report).join("\n")}
+</chkrun:checkRunReports>
+`;
+}
+
+// The objects and the source a check run carries. A client sends the source
+// inline because it is checking what a person has typed, so the content is
+// the payload and the URI only says what it is.
+export function checkObjectsIn(body, collections) {
+  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
+  const out = [];
+  for (const block of text.matchAll(/<chkrun:checkObject\b([^>]*)>([\s\S]*?)<\/chkrun:checkObject>/g)) {
+    const uri = block[1].match(/adtcore:uri="([^"]+)"/)?.[1];
+    const object = uri === undefined ? undefined : objectFromUri(uri, collections);
+    if (object === undefined) {
+      continue;
+    }
+    const artifact = block[2].match(/<chkrun:content>([\s\S]*?)<\/chkrun:content>/);
+    const includeUri = block[2].match(/chkrun:uri="([^"]+)"/)?.[1] ?? "";
+    out.push({
+      ...object,
+      uri,
+      include: includeUri.match(/\/includes\/([^/]+)\//)?.[1],
+      source: artifact === undefined ? undefined : decodeContent(artifact[1]),
+    });
+  }
+  // a client that sends no check object at all still names the object the
+  // old way, as a plain object reference
+  if (out.length === 0) {
+    return objectReferencesIn(body, collections).map((o) => ({...o, uri: uriOf(o.type, o.name)}));
+  }
+  return out;
+}
+
+// Real ADT base64s the content of a check artifact; the shape we were given
+// carries it as text. Accept both rather than guess, since the two are easy
+// to tell apart: base64 has no angle brackets, no newlines and no keywords.
+function decodeContent(raw) {
+  const text = String(raw).trim();
+  if (text === "") {
+    return "";
+  }
+  const plain = text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+  if (/^[A-Za-z0-9+/\s]+={0,2}$/.test(text) === false) {
+    return plain;
+  }
+  const decoded = Buffer.from(text, "base64").toString("utf8");
+  // base64 of ABAP decodes to something with line breaks; base64 of nothing
+  // useful decodes to bytes that are not text at all
+  return /[\r\n]/.test(decoded) && /\uFFFD/.test(decoded) === false ? decoded : plain;
+}
+
 // A lock result. The handle is the whole payload; the rest of the envelope is
 // what a client expects around it, and the same envelope carries the node
 // structure, so the shape is already confirmed by one round trip.

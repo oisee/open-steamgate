@@ -169,6 +169,61 @@ describe("tools/adt-facade: the development loop", () => {
     });
   });
 
+  describe("the syntax check", () => {
+    const checkRun = (name, source) => call("/checkruns?reporters=abapCheckRun", {
+      method: "POST",
+      body: `<?xml version="1.0" encoding="UTF-8"?>
+<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">
+  <chkrun:checkObject adtcore:uri="/sap/bc/adt/oo/classes/${String(name).toLowerCase()}" chkrun:version="active">
+    <chkrun:artifacts>
+      <chkrun:artifact chkrun:contentType="text/plain; charset=utf-8" chkrun:uri="/sap/bc/adt/oo/classes/${String(name).toLowerCase()}/source/main">
+        <chkrun:content>${source.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</chkrun:content>
+      </chkrun:artifact>
+    </chkrun:artifacts>
+  </chkrun:checkObject>
+</chkrun:checkObjectList>`,
+    });
+
+    it("source that holds checks clean", async function () {
+      this.timeout(60000);
+      const res = await checkRun(SCRATCH, SOURCE);
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<chkrun:checkReport");
+      expect(xml).to.contain('chkrun:status="processed"');
+      expect(xml).to.not.contain("<chkrun:checkMessage ");
+    });
+
+    it("source that does not hold comes back with the finding, though nothing was written", async function () {
+      this.timeout(60000);
+      const before = await (await call(`/oo/classes/${SCRATCH}/source/main`)).text();
+      const res = await checkRun(SCRATCH, SOURCE.replace("rv = 'hello'.", "rv = no_such_variable."));
+      const xml = await res.text();
+      expect(xml).to.contain("<chkrun:checkMessage ");
+      expect(xml).to.contain('chkrun:type="E"');
+      // the point of a check run: the file is untouched by it
+      const after = await (await call(`/oo/classes/${SCRATCH}/source/main`)).text();
+      expect(after).to.equal(before);
+    });
+
+    it("a check of an object that does not exist yet answers, because that is what a create looks like", async function () {
+      this.timeout(60000);
+      const res = await checkRun("ZCL_OSD_NEVER_WRITTEN", SOURCE.replaceAll("zcl_osd_scratch", "zcl_osd_never_written"));
+      expect(res.status).to.equal(200);
+      expect(await res.text()).to.contain("<chkrun:checkReport");
+      expect(store.exists("CLAS", "ZCL_OSD_NEVER_WRITTEN"), "asking created nothing").to.equal(false);
+    });
+
+    it("a check run that names nothing is refused", async () => {
+      const res = await call("/checkruns?reporters=abapCheckRun", {method: "POST", body: "<chkrun:checkObjectList/>"});
+      expect(res.status).to.equal(400);
+    });
+
+    it("the check is advertised now that it answers", async () => {
+      expect(await (await call("/discovery")).text()).to.contain('href="/sap/bc/adt/checkruns"');
+    });
+  });
+
   describe("activating", () => {
     const activate = (name) => call("/activation?method=activate&preauditRequested=true", {
       method: "POST",
