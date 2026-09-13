@@ -14,58 +14,10 @@
     // UI.DataFieldWithIntentBasedNavigation) has somewhere to go. Nothing
     // here is specific to open-steamgate: it is the sandbox any Fiori
     // developer runs locally.
-    window["sap-ushell-config"] = {
-      defaultRenderer: "fiori2",
-      renderers: {
-        fiori2: {
-          componentData: {
-            config: {
-              enableSearch: false,
-              enablePersonalization: false,
-              rootIntent: "Shell-home"
-            }
-          }
-        }
-      },
-      applications: {
-        "Travel-manage": {
-          title: "Travels",
-          description: "open-steamgate demo",
-          additionalInformation: "SAPUI5.Component=stg.travel",
-          applicationType: "URL",
-          url: "./",
-          navigationMode: "embedded"
-        },
-        "Booking-display": {
-          title: "Bookings",
-          description: "open-steamgate demo",
-          additionalInformation: "SAPUI5.Component=stg.booking",
-          applicationType: "URL",
-          url: "./booking/",
-          navigationMode: "embedded"
-        },
-        "Flight-analyze": {
-          title: "Flight analytics",
-          description: "open-steamgate demo",
-          additionalInformation: "SAPUI5.Component=stg.analytics",
-          applicationType: "URL",
-          url: "./analytics/",
-          navigationMode: "embedded"
-        },
-        "SegwProject-manage": {
-          title: "SEGW",
-          description: "the Service Builder as an app",
-          additionalInformation: "SAPUI5.Component=stg.segw",
-          applicationType: "URL",
-          url: "./segw/",
-          navigationMode: "embedded"
-        }
-      },
-      services: {
-        LaunchPage: {
-          adapter: {
-            config: {
-              groups: [
+    // The tiles: launchpad.js sets them again after the sandbox has mixed in
+    // its own file (which replaces "groups" and adds every application of the
+    // sandbox as a tile), so only these stay.
+    window["stg-launchpad-groups"] = [
                 {
                   id: "demo",
                   title: "open-steamgate",
@@ -119,7 +71,59 @@
                     }
                   ]
                 }
-              ]
+              ];
+    window["sap-ushell-config"] = {
+      defaultRenderer: "fiori2",
+      renderers: {
+        fiori2: {
+          componentData: {
+            config: {
+              enableSearch: false,
+              enablePersonalization: false,
+              rootIntent: "Shell-home"
+            }
+          }
+        }
+      },
+      applications: {
+        "Travel-manage": {
+          title: "Travels",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.travel",
+          applicationType: "URL",
+          url: "./",
+          navigationMode: "embedded"
+        },
+        "Booking-display": {
+          title: "Bookings",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.booking",
+          applicationType: "URL",
+          url: "./booking/",
+          navigationMode: "embedded"
+        },
+        "Flight-analyze": {
+          title: "Flight analytics",
+          description: "open-steamgate demo",
+          additionalInformation: "SAPUI5.Component=stg.analytics",
+          applicationType: "URL",
+          url: "./analytics/",
+          navigationMode: "embedded"
+        },
+        "SegwProject-manage": {
+          title: "SEGW",
+          description: "the Service Builder as an app",
+          additionalInformation: "SAPUI5.Component=stg.segw",
+          applicationType: "URL",
+          url: "./segw/",
+          navigationMode: "embedded"
+        }
+      },
+      services: {
+        LaunchPage: {
+          adapter: {
+            config: {
+              groups: window["stg-launchpad-groups"]
             }
           }
         },
