@@ -270,6 +270,29 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(await res.text()).to.contain('adtcore:type="INTF/OI"');
     });
 
+    // the resource VS Code opens a class with. abap-adt-api's
+    // objectStructure() GETs the object's own address, not the
+    // /objectstructure spelling vsp uses, so this path met the catch-all and
+    // a class would not open although the whole tree had already rendered
+    it("an object answers at its own address, which is how a class opens", async () => {
+      const res = await call("/oo/classes/ZCL_STG_DISPATCHER");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("objectStructureElement");
+      // the root carries where the source is, and a client follows it
+      expect(xml).to.contain('abapsource:sourceUri="source/main"');
+    });
+
+    it("both spellings of the object answer the same document", async () => {
+      const bare = await (await call("/oo/classes/ZCL_STG_DISPATCHER")).text();
+      const suffixed = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
+      expect(bare).to.equal(suffixed);
+    });
+
+    it("an object that is not there is a 404 at its own address too", async () => {
+      expect((await call("/oo/classes/ZCL_NOPE_NOT_HERE")).status).to.equal(404);
+    });
+
     it("a structure asked of an object that is not there is a 404", async () => {
       expect((await call("/oo/classes/ZCL_NOT_A_THING/objectstructure")).status).to.equal(404);
     });

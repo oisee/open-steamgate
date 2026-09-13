@@ -314,15 +314,27 @@ export function adtRouter(options = {}) {
     // the object structure: what a client reads before asking for one method
     // rather than the whole source. A plain full-source read never comes
     // through here, which is why wave 0 could do without it.
-    router.get(`${BASE}/${adt}/:name/objectstructure`, (req, res) => {
+    // The object itself, at two spellings of one resource.
+    //
+    // `.../objectstructure` is the one vsp asks for. The bare object URI is
+    // the one abap-adt-api asks for, and through it adt-fs: its
+    // objectStructure() GETs the object's own address and reads the
+    // structure out of whatever comes back, taking the source from the
+    // root's abapsource:sourceUri. So opening a class in VS Code hit the
+    // bare path, met the catch-all, and failed with "not served by OSD"
+    // after the tree had already opened — the object was there and its
+    // front door was not.
+    const structure = (req, res) => {
       answer(res, () => {
-        const structure = structureOf(store, type, req.params.name);
-        if (structure === undefined) {
+        const found = structureOf(store, type, req.params.name);
+        if (found === undefined) {
           throw new NotFound(type, req.params.name);
         }
-        res.type("application/vnd.sap.adt.objectstructure.v2+xml").send(objectStructureDocument(structure));
+        res.type("application/vnd.sap.adt.objectstructure.v2+xml").send(objectStructureDocument(found));
       });
-    });
+    };
+    router.get(`${BASE}/${adt}/:name/objectstructure`, structure);
+    router.get(`${BASE}/${adt}/:name`, structure);
   }
 
   // ---- the development loop: lock, write, unlock, activate.
