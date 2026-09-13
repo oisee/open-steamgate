@@ -44,6 +44,14 @@ const xmlEscape = (s) => String(s)
 // off the response header. So the bar for vsp is low, and the reason to emit
 // a structurally real document anyway is the stricter clients behind it,
 // adt-fs and eventually Eclipse.
+// An empty compatibility graph: well formed, and claiming nothing. See the
+// route for why it is empty rather than populated.
+export function compatibilityGraphDocument() {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<adtcomp:graph xmlns:adtcomp="http://www.sap.com/adt/compatibility"/>
+`;
+}
+
 export function discoveryDocument(resources) {
   const workspaces = new Map();
   for (const resource of resources) {
@@ -211,6 +219,32 @@ export function adtRouter(options = {}) {
       res.status(200).type("application/atomsvc+xml").end();
     });
     router.get(path, discovery);
+  }
+
+  // ---- compatibility/graph: the logon probe, and the whole of what stands
+  // between OSD and a real IDE.
+  //
+  // abap-adt-api, which is what the VS Code client adt-fs runs on, calls this
+  // and nothing else from login(): it sends basic auth, asks for a token with
+  // `x-csrf-token: fetch`, and keeps the cookies. It never reads the body and
+  // never checks the content type. So a 404 here is a failed logon, and a 200
+  // here is a connected IDE, with no reentrance ticket and no RFC anywhere in
+  // it. That is the entire reason this route exists.
+  //
+  // The body is deliberately an empty graph. A compatibility graph is a
+  // system telling a client which resources it may use at which version, and
+  // OSD has measured no such facts; filling it in would be inventing
+  // permissions on behalf of a system that has not been asked. Discovery is
+  // where this façade says what it serves, and it says it from the routes
+  // that are actually mounted. An empty graph adds no claim to that, which is
+  // the honest answer to a question we cannot answer.
+  for (const path of [BASE + "/compatibility/graph"]) {
+    router.head(path, (req, res) => {
+      res.status(200).type("application/xml").end();
+    });
+    router.get(path, (req, res) => {
+      res.status(200).type("application/xml").send(compatibilityGraphDocument());
+    });
   }
 
   // ---- reading source

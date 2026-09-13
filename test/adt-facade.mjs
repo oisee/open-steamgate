@@ -49,6 +49,35 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<app:workspace>");
     });
 
+    // abap-adt-api's login() calls this one resource and reads three things
+    // off it: the status, the token header, and the cookies. The body it
+    // never opens. So these are the assertions that decide whether a real
+    // VS Code client can log on, and they are deliberately the client's
+    // three and not a shape we find pleasing.
+    it("the logon probe answers, which is what lets an IDE log on at all", async () => {
+      const res = await fetch(ADT + "/compatibility/graph?sap-client=001&sap-language=EN", {
+        headers: {"x-csrf-token": "fetch", authorization: "Basic " + Buffer.from("DEVELOPER:secret").toString("base64")},
+      });
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("x-csrf-token")).to.be.a("string").with.length.greaterThan(8);
+      expect((res.headers.getSetCookie?.() ?? []).join("; ")).to.contain("sap-contextid=");
+    });
+
+    it("HEAD on the logon probe works too, since a token is fetched with it", async () => {
+      const res = await fetch(ADT + "/compatibility/graph", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("x-csrf-token")).to.be.a("string").with.length.greaterThan(8);
+    });
+
+    // the graph is empty on purpose: a compatibility graph is a system
+    // granting a client use of resources at versions, and OSD has measured
+    // no such thing. Well formed, and claiming nothing.
+    it("the compatibility graph is well formed and grants nothing", async () => {
+      const xml = await (await call("/compatibility/graph")).text();
+      expect(xml).to.contain("<adtcomp:graph");
+      expect(xml).to.not.contain("<adtcomp:resource");
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");
