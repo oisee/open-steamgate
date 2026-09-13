@@ -151,6 +151,32 @@ const TITLE = {
   "checkruns": "Check Runs (syntax)",
 };
 
+// The body of a request, whatever the host application did with it.
+//
+// A client may send a wildcard content type — `application/*` is one a real
+// system accepts on a check run — and a body parser that cannot resolve that
+// to a media type quietly leaves the body unparsed. The façade then sees no
+// body and answers "you sent me nothing", which is a lie about the request
+// and a hard one to diagnose from the other end. So it reads the stream
+// itself when the body did not arrive as bytes.
+function rawBody(req) {
+  if (Buffer.isBuffer(req.body)) {
+    return Promise.resolve(req.body);
+  }
+  if (typeof req.body === "string") {
+    return Promise.resolve(Buffer.from(req.body, "utf8"));
+  }
+  if (req.readableEnded === true || req.readable === false) {
+    return Promise.resolve(Buffer.alloc(0));
+  }
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 export function adtRouter(options = {}) {
   const store = options.store ?? new ObjectStore({root: options.root});
   const sessions = options.sessions ?? new Sessions();
@@ -299,10 +325,11 @@ export function adtRouter(options = {}) {
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
         return;
       }
-      answer(res, () => {
-        const source = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
-        store.write(type, req.params.name, source);
-        res.status(200).type("text/plain").send("");
+      rawBody(req).then((body) => {
+        answer(res, () => {
+          store.write(type, req.params.name, body.toString("utf8"));
+          res.status(200).type("text/plain").send("");
+        });
       });
     });
   }
@@ -313,9 +340,10 @@ export function adtRouter(options = {}) {
   // real check and not a formality: broken source comes back broken even
   // though nothing was written.
   advertise("checkruns");
-  router.post(`${BASE}/checkruns`, (req, res) => {
+  router.post(`${BASE}/checkruns`, async (req, res) => {
+    const body = await rawBody(req);
     answer(res, () => {
-      const objects = checkObjectsIn(req.body, collections);
+      const objects = checkObjectsIn(body, collections);
       if (objects.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
@@ -341,9 +369,10 @@ export function adtRouter(options = {}) {
   // That is the convention and not our choice, so a document has to mean
   // failure and nothing else.
   advertise("activation");
-  router.post(`${BASE}/activation`, (req, res) => {
+  router.post(`${BASE}/activation`, async (req, res) => {
+    const body = await rawBody(req);
     answer(res, () => {
-      const named = objectReferencesIn(req.body, collections);
+      const named = objectReferencesIn(body, collections);
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
@@ -406,7 +435,7 @@ export function adtRouter(options = {}) {
   // is how the client's whole graph layer works, not only its table preview.
   advertise("datapreview/freestyle");
   router.post(`${BASE}/datapreview/freestyle`, async (req, res) => {
-    const query = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
+    const query = (await rawBody(req)).toString("utf8");
     const started = Date.now();
     try {
       const result = await data.query(query, {max: Number(req.query.rowNumber ?? 100)});

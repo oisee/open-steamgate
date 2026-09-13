@@ -222,6 +222,45 @@ describe("tools/adt-facade: the development loop", () => {
       expect(store.exists("CLAS", "ZCL_OSD_NEVER_WRITTEN"), "asking created nothing").to.equal(false);
     });
 
+    it("a wildcard content type is a request like any other", async function () {
+      // a real system accepts application/* on a check run, so a client sends
+      // it; a body parser that cannot resolve that to a media type leaves the
+      // body unread, and the façade must not then claim nothing was sent
+      this.timeout(60000);
+      const res = await call("/checkruns?reporters=abapCheckRun", {
+        method: "POST",
+        headers: {"content-type": "application/*"},
+        body: `<?xml version="1.0" encoding="UTF-8"?>
+<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">
+  <chkrun:checkObject adtcore:uri="/sap/bc/adt/oo/classes/${SCRATCH.toLowerCase()}" chkrun:version="active">
+    <chkrun:artifacts>
+      <chkrun:artifact chkrun:contentType="text/plain; charset=utf-8" chkrun:uri="/sap/bc/adt/oo/classes/${SCRATCH.toLowerCase()}/source/main">
+        <chkrun:content>${Buffer.from(SOURCE, "utf8").toString("base64")}</chkrun:content>
+      </chkrun:artifact>
+    </chkrun:artifacts>
+  </chkrun:checkObject>
+</chkrun:checkObjectList>`,
+      });
+      expect(res.status).to.equal(200);
+      expect(await res.text()).to.contain("<chkrun:checkReport");
+    });
+
+    it("base64 content is the path a real client takes", async function () {
+      this.timeout(60000);
+      const res = await call("/checkruns?reporters=abapCheckRun", {
+        method: "POST",
+        headers: {"content-type": "application/*"},
+        body: `<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">
+  <chkrun:checkObject adtcore:uri="/sap/bc/adt/oo/classes/${SCRATCH.toLowerCase()}">
+    <chkrun:artifacts><chkrun:artifact chkrun:uri="/sap/bc/adt/oo/classes/${SCRATCH.toLowerCase()}/source/main">
+      <chkrun:content>${Buffer.from(SOURCE.replace("rv = 'hello'.", "rv = no_such_variable."), "utf8").toString("base64")}</chkrun:content>
+    </chkrun:artifact></chkrun:artifacts>
+  </chkrun:checkObject>
+</chkrun:checkObjectList>`,
+      });
+      expect(await res.text()).to.contain("<chkrun:checkMessage ");
+    });
+
     it("a check run that names nothing is refused", async () => {
       const res = await call("/checkruns?reporters=abapCheckRun", {method: "POST", body: "<chkrun:checkObjectList/>"});
       expect(res.status).to.equal(400);

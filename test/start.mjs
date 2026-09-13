@@ -1,4 +1,5 @@
 import express from "express";
+import {createServer as createHttpsServer} from "node:https";
 import {fileURLToPath} from "node:url";
 import {initializeABAP} from "../output/init.mjs";
 import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
@@ -7,6 +8,7 @@ import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
 import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
+import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 
 await initializeABAP();
 
@@ -94,9 +96,33 @@ export function startServer(quiet) {
   });
 
   const server = app.listen(PORT);
+
+  // HTTPS beside it, on the SAP-shaped port for this instance. Eclipse
+  // refuses a plain-HTTP project outright, so without TLS that client cannot
+  // reach OSD at all; other clients keep the plain port and lose nothing.
+  // The certificate is self-signed and lives outside this repository.
+  const TLS_PORT = Number(process.env.STG_TLS_PORT ?? 44300 + (PORT % 100));
+  const tls = process.env.STG_TLS === "0" ? undefined : tlsCredentials();
+  let secure;
+  if (tls !== undefined) {
+    secure = createHttpsServer(tls, app).listen(TLS_PORT);
+  }
+
   if (quiet !== true) {
     console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/");
     console.log("ADT façade   on http://localhost:" + PORT + "/sap/bc/adt/core/discovery");
+    if (secure === undefined) {
+      console.log("No TLS: run `npm run osd:tls` to make a certificate, for a client that refuses plain HTTP");
+    } else {
+      console.log("HTTPS        on https://localhost:" + TLS_PORT + "  (self-signed, sha256 " + tlsFingerprint() + ")");
+      console.log("             the certificate is " + TLS_DIR + "/osd.crt; a client will ask once whether to trust it");
+    }
   }
+
+  const close = server.close.bind(server);
+  server.close = (cb) => {
+    secure?.close();
+    return close(cb);
+  };
   return server;
 }
