@@ -23,6 +23,13 @@
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
       "files": "/src/{oo,ddic,exceptions,internal}/**/*.*"
+    },
+    {
+      // the pack, delta and zlib half of abapGit, the objects
+      // abap_transpile.json takes as a library; zcl_osd_git calls them
+      "url": "https://github.com/abapGit/abapGit",
+      "folder": "/.local/lars/abapgit",
+      "files": "/{src/{git/{*.*,v2/*.*},utils/*.*,objects/aff_types/*.*,ui/progress/zif_abapgit_progress.*,zcx_abapgit_exception.*,zcx_abapgit_not_found.*,zcx_abapgit_type_not_supported.*,zif_abapgit_definitions.*,zif_abapgit_version.*},deps/{progname.dtel.xml,trobjtype.dtel.xml,trnspace.tabl.xml,dokil.tabl.xml}}"
     }
   ],
   "syntax": {

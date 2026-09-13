@@ -17,6 +17,36 @@
       "folder": "/.local/lars/express-icf-shim"
     },
     {
+      "url": "https://github.com/abapGit/abapGit",
+      "folder": "/.local/lars/abapgit",
+      "files": [
+        "/src/git/zcl_abapgit_git_pack.*",
+        "/src/git/zcl_abapgit_git_delta.*",
+        "/src/git/zcl_abapgit_git_tag.*",
+        "/src/git/zcl_abapgit_git_time.*",
+        "/src/git/zcl_abapgit_git_utils.*",
+        "/src/git/zcl_abapgit_hash.*",
+        "/src/git/zif_abapgit_git_definitions.*",
+        "/src/utils/zcl_abapgit_convert.*",
+        "/src/utils/zcl_abapgit_path.*",
+        "/src/utils/zcl_abapgit_string_buffer.*",
+        "/src/utils/zcl_abapgit_time_date.*",
+        "/src/utils/zcl_abapgit_utils.*",
+        "/src/utils/zif_abapgit_log.*",
+        "/src/ui/progress/zif_abapgit_progress.*",
+        "/src/objects/aff_types/*",
+        "/src/zcx_abapgit_exception.*",
+        "/src/zcx_abapgit_not_found.*",
+        "/src/zcx_abapgit_type_not_supported.*",
+        "/src/zif_abapgit_definitions.*",
+        "/src/zif_abapgit_version.*",
+        "/deps/progname.dtel.xml",
+        "/deps/trobjtype.dtel.xml",
+        "/deps/trnspace.tabl.xml",
+        "/deps/dokil.tabl.xml"
+      ]
+    },
+    {
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
       "files": [

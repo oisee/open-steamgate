@@ -52,16 +52,24 @@ export class UnitRun {
     const classes = [];
     for (const file of object.getABAPFiles()) {
       const filename = file.getFilename();
+      const implementations = new Map(file.getInfo().listClassImplementations().map((i) => [i.name.toUpperCase(), i]));
       for (const definition of file.getInfo().listClassDefinitions()) {
         if (definition.isForTesting !== true || definition.isAbstract === true) {
           continue;
         }
-        const methods = definition.methods.filter((m) => m.isForTesting === true).map((m) => ({
-          name: m.name.toUpperCase(),
-          method: m.name,
-          line: m.identifier?.token?.start?.row ?? 1,
-          column: m.identifier?.token?.start?.col ?? 1,
-        }));
+        // a method's position is where its body is, not where it was
+        // declared: a client that follows the URI wants the code
+        const bodies = new Map((implementations.get(definition.name.toUpperCase())?.methods ?? [])
+          .map((m) => [m.token.strUpper, m.token.start]));
+        const methods = definition.methods.filter((m) => m.isForTesting === true).map((m) => {
+          const at = bodies.get(m.name.toUpperCase()) ?? m.identifier?.token?.start;
+          return {
+            name: m.name.toUpperCase(),
+            method: m.name,
+            line: at?.getRow?.() ?? at?.row ?? 1,
+            column: at?.getCol?.() ?? at?.col ?? 1,
+          };
+        });
         classes.push({
           name: definition.name.toUpperCase(),
           localClass: definition.name,

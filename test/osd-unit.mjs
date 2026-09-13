@@ -1,4 +1,5 @@
 import {expect} from "chai";
+import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun, alertOf} from "../tools/osd-unit.mjs";
 
 // The test run of OSD. vsp reads a program, its test classes, their test
@@ -8,7 +9,8 @@ import {UnitRun, alertOf} from "../tools/osd-unit.mjs";
 describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", function () {
   // a run boots the transpiled runtime in a child process
   this.timeout(180000);
-  const runner = new UnitRun();
+  const store = new ObjectStore();
+  const runner = new UnitRun(store);
 
   it("finds the test classes and their methods in the parse, without running anything", () => {
     const {object, classes} = runner.classes("CLAS", "ZCL_STG_SEGW_TEST");
@@ -23,9 +25,12 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
       "ENTITY_TYPES_OF_THE_PROJECT", "PROPERTIES_IN_FILE_ORDER", "TEXT_TABLE_OF_THE_PROJECT",
     ]);
     // every method knows where it is written, so the façade can build a
-    // navigation URI into the include
+    // navigation URI into the include. The position is the body, not the
+    // declaration: a client that follows the URI wants the code
+    const source = store.read("CLAS", "ZCL_STG_SEGW_TEST", "testclasses").source.split("\n");
     for (const method of tree.testMethods) {
       expect(method.line, method.name).to.be.greaterThan(tree.line);
+      expect(source[method.line - 1].toUpperCase(), method.name).to.contain(`METHOD ${method.name}`);
     }
   });
 

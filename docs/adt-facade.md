@@ -205,6 +205,20 @@ rather than from the transpiled index, which is why a test class that has
 been written but not yet transpiled comes back as an alert saying so
 instead of quietly not existing.
 
+**A repository comes in without a git binary.** `tools/osd-git.mjs` is a
+thin call into `ZCL_OSD_GIT`, which speaks git's smart HTTP protocol: the
+advertisement at `info/refs?service=git-upload-pack` says what branches
+exist, a `want` over `git-upload-pack` asks for one, and what comes back is
+a pack. Reading the pack is abapGit's own code, twenty-odd objects this
+repository transpiles as a library named in `abap_transpile.json`, so the
+hard half is not written twice. Two of those objects are ours under
+abapGit's names, because off stack they cannot be abapGit's: inflate goes
+to the platform rather than to the ABAP DEFLATE, which is minutes against
+seconds on a real pack, and the progress indicator does nothing because
+there is no screen to indicate on. `Import.fromGit(url)` uses it by
+default; the git binary is still there behind `{via: "git"}` for a remote
+OSD cannot reach on its own, an ssh URL for instance.
+
 **A check run answers for source that is not on disk.** `checkruns` carries
 the editor's buffer, not the stored object, so `check(type, name, {source})`
 lets the given text stand in for the file for that one call and touches

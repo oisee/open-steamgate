@@ -9,14 +9,17 @@
 // the starting folder and the folder logic included, and writes what it
 // finds into the store.
 //
-// Where the files come from is the swappable half. A folder that someone
-// already cloned works today; a URL is cloned with git; and when abapGit's
-// own git layer is transpiled (109 files, no issues against open-abap-core)
-// the fetch moves inside and OSD needs no git binary at all.
+// Where the files come from was the swappable half, and it has been
+// swapped: a URL is fetched by OSD itself, ZCL_OSD_GIT speaking git's
+// smart HTTP protocol and abapGit's transpiled pack code reading the
+// answer (tools/osd-git.mjs). A folder someone already cloned still
+// works, and the git binary is still there behind `via: "git"` for a
+// remote OSD cannot reach, such as one that needs an ssh key.
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
+import {Git} from "./osd-git.mjs";
 import {ObjectStore, TYPES, nameOf} from "./osd-store.mjs";
 
 export const ABAPGIT_XML = ".abapgit.xml";
@@ -139,18 +142,37 @@ export class Import {
     };
   }
 
-  // a repository nobody has yet: git fetches it, and this is the half that
-  // abapGit's own git layer replaces once it is transpiled
-  fromGit(url, options = {}) {
-    const clone = mkdtempSync(join(tmpdir(), "osd-clone-"));
+  // a repository nobody has yet. OSD fetches it itself; the files land in
+  // a temporary folder only because the importer reads a repository the
+  // way abapGit does, `.abapgit.xml` first, and that wants a tree.
+  async fromGit(url, options = {}) {
+    const name = options.name ?? url.split("/").pop().replace(/\.git$/, "").toLowerCase();
+    const into = mkdtempSync(join(tmpdir(), "osd-clone-"));
     try {
-      execFileSync("git", ["clone", "--depth", "1", ...(options.branch ? ["--branch", options.branch] : []), url, clone], {stdio: "pipe"});
-      const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], {cwd: clone, encoding: "utf8"}).trim();
-      const result = this.fromFolder(clone, {name: options.name ?? url.split("/").pop().replace(/\.git$/, "").toLowerCase(), ...options});
-      return {...result, url, commit: head};
+      const clone = options.via === "git"
+        ? this.#binary(url, into, options)
+        : await this.#osd(url, into, options);
+      const result = this.fromFolder(into, {...options, name});
+      return {...result, url, commit: clone.commit.slice(0, 8), branch: clone.branch, via: clone.via, ms: clone.ms};
     } finally {
-      rmSync(clone, {recursive: true, force: true});
+      rmSync(into, {recursive: true, force: true});
     }
+  }
+
+  // the fetch inside OSD: no git binary, and the same code a system would
+  // run if abapGit were installed on it
+  async #osd(url, into, options) {
+    const clone = await new Git(this.store).clone(url, {branch: options.branch});
+    new Git(this.store).write(clone, into);
+    return {...clone, via: "osd"};
+  }
+
+  // the way out for a remote OSD cannot speak to, an ssh URL for instance
+  #binary(url, into, options) {
+    execFileSync("git", ["clone", "--depth", "1", ...(options.branch ? ["--branch", options.branch] : []), url, into], {stdio: "pipe"});
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: into, encoding: "utf8"}).trim();
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {cwd: into, encoding: "utf8"}).trim();
+    return {commit, branch, via: "git", ms: 0};
   }
 
   #copy(file, target, written, object) {
@@ -168,10 +190,10 @@ export class NotARepository extends Error {
   }
 }
 
-function main(args) {
+async function main(args) {
   const where = args.find((a) => a.startsWith("-") === false);
   if (where === undefined) {
-    console.log("usage: osd-import.mjs <folder|git url> [--types CLAS,INTF] [--overwrite] [--name <folder under local/>]");
+    console.log("usage: osd-import.mjs <folder|git url> [--types CLAS,INTF] [--overwrite] [--name <folder under local/>] [--branch main] [--git-binary]");
     return 2;
   }
   const at = (flag) => {
@@ -187,9 +209,11 @@ function main(args) {
   const store = new ObjectStore();
   const before = store.list().length;
   const importer = new Import(store);
-  const result = /^https?:|^git@/.test(where) ? importer.fromGit(where, options) : importer.fromFolder(where, options);
+  const result = /^https?:|^git@/.test(where)
+    ? await importer.fromGit(where, {...options, via: args.includes("--git-binary") ? "git" : undefined})
+    : importer.fromFolder(where, options);
   const after = store.list().length;
-  console.log(`${result.objects} objects from ${result.folder}${result.commit ? ` at ${result.commit}` : ""}`);
+  console.log(`${result.objects} objects from ${result.url ?? result.folder}${result.commit ? ` at ${result.commit}` : ""}${result.via ? ` (fetched by ${result.via}, ${result.ms} ms)` : ""}`);
   console.log(`  starting folder ${result.config.startingFolder}, folder logic ${result.config.folderLogic}${result.config.declared ? "" : " (assumed, no .abapgit.xml)"}`);
   console.log(`  the system went from ${before} to ${after} objects`);
   if (result.skipped.length > 0) {
@@ -203,5 +227,8 @@ function main(args) {
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
-  process.exit(main(process.argv.slice(2)));
+  main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
+    console.error(`${error.code ?? "ERROR"}: ${error.message}`);
+    process.exit(1);
+  });
 }
