@@ -17,6 +17,7 @@ import {spawn} from "node:child_process";
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
+import {ServingRuntime} from "./osd-runtime.mjs";
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -403,6 +404,44 @@ export class ObjectStore {
       this.rows = new Data({root: this.root});
     }
     return this.rows;
+  }
+
+  // the serving runtime, the process that answers OData (tools/osd-runtime.mjs
+  // and tools/osd-serve.mjs). This only hands the supervisor over; whoever
+  // owns the listener decides when to start it, because starting a process
+  // is not something a store should do behind a caller's back.
+  serving(options = {}) {
+    if (this.served === undefined) {
+      this.served = new ServingRuntime({root: this.root, ...options});
+    }
+    return this.served;
+  }
+
+  // activation, finished rather than promised: the modules are written and
+  // then the process that serves them is replaced, because Node pins a
+  // module graph and the old process would go on answering with the old
+  // code. A caller that awaits this can tell a client the truth, which is
+  // what a real system's activation does.
+  //
+  // Recycling is skipped when nothing is serving, so a command line or a
+  // test suite pays only for the transpile.
+  async publish(options = {}) {
+    const transpile = await this.transpile(options);
+    if (transpile?.ok === false) {
+      return {ok: false, transpile};
+    }
+    const runtime = this.served;
+    if (runtime === undefined || runtime.running === false) {
+      return {ok: true, transpile, recycled: false};
+    }
+    try {
+      const recycle = await runtime.recycle();
+      return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms};
+    } catch (error) {
+      // the modules are good and the process that should carry them is not:
+      // that is a failure of the activation, not a detail to log quietly
+      return {ok: false, transpile, recycled: false, error: error.message};
+    }
   }
 
   // the test run of an object (tools/osd-unit.mjs). It needs the parse and

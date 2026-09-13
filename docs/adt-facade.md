@@ -205,6 +205,28 @@ rather than from the transpiled index, which is why a test class that has
 been written but not yet transpiled comes back as an alert saying so
 instead of quietly not existing.
 
+**An activation can be finished rather than promised.** The store has
+`publish()`: it transpiles, and if a serving runtime is up it replaces it,
+resolving only when the new process answers. That is what makes an
+activation true rather than a syntax verdict, because Node pins a module
+graph for the life of a process and the old one goes on answering with the
+old code however often the modules are rewritten. Measured on this
+repository: a fresh serving runtime is 0.7 to 0.9 seconds and a recycle
+about 0.9, against 3.9 seconds for the store's parse, which is why only the
+serving half is replaced and the façade never restarts. The pieces are
+`tools/osd-runtime.mjs`, the supervisor, and `tools/osd-serve.mjs`, the
+OData front on its own in a process that can be thrown away.
+
+The order inside a recycle is not the zero-downtime one. The old runtime is
+asked to go first and the new one starts after it, because both would
+otherwise hold the same database file and the second to write would win.
+`whenReady()` is the promise a proxy awaits so a request that arrives
+mid-recycle waits about a second instead of failing. And the rows need a
+file to live in or a recycle eats them: `STG_DB_PATH` now means for SQLite
+what it already meant for DuckDB, read when a runtime boots and written
+when it exits. Without it the database stays in memory and a test suite
+pays nothing.
+
 **A repository comes in without a git binary.** `tools/osd-git.mjs` is a
 thin call into `ZCL_OSD_GIT`, which speaks git's smart HTTP protocol: the
 advertisement at `info/refs?service=git-upload-pack` says what branches

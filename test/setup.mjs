@@ -47,7 +47,16 @@ export async function setup(abap, schemas, insert) {
   }
   db = new SQLiteDatabaseClient();
   abap.context.databaseConnections["DEFAULT"] = db;
-  await db.connect();
+  // STG_DB_PATH keeps the rows between runs for SQLite too, which is what
+  // a runtime that gets recycled needs: it is read here and written when
+  // this process is asked to go away (tools/osd-persist.mjs). Without it
+  // the database is in memory and the seed runs every time, as before.
+  const {loadInto, saveWhenAsked} = await import("../tools/osd-persist.mjs");
+  const restored = await loadInto(db);
+  saveWhenAsked(db);
+  if (restored === true) {
+    return;
+  }
   await db.execute(schemas.sqlite);
   await db.execute(insert);
   await db.execute(seedStatements());

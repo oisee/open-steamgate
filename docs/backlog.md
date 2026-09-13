@@ -155,6 +155,17 @@ the objects.
         the rows live so a recycle does not eat them      [A decides]
      └─ smaller, same family: activation answers before the transpile
         finishes and nothing says when it landed                       [S]
+     └─ the store half is in: serving runtime in a process of its own
+        (tools/osd-serve.mjs), a supervisor that replaces it
+        (tools/osd-runtime.mjs), STG_DB_PATH for SQLite so a recycle
+        does not eat a client's rows, and store.publish() which
+        transpiles and then recycles, resolving when the new process
+        answers. Asserted: changed modules are live after a recycle and
+        not before it                                                  [T]
+     └─ what is left is the listener's half: proxy the OData path to the
+        current runtime, await whenReady() so a request mid-recycle
+        waits rather than fails, and let activation answer out of
+        publish() instead of firing the transpile and forgetting    [S]
 2.10 what a client can do to an object, and what it cannot            [S]
      └─ no DELETE anywhere in the façade: create and change, never remove
      └─ a Fiori application is files on disk, not an object of the
