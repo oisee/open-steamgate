@@ -21,7 +21,7 @@
 import {existsSync, readFileSync} from "node:fs";
 import {spawn} from "node:child_process";
 import {SourceMap} from "node:module";
-import {basename, join} from "node:path";
+import {basename, dirname, join} from "node:path";
 import {ObjectStore, NotFound} from "./osd-store.mjs";
 
 // ADT's own words for what a class declares
@@ -35,6 +35,7 @@ export class UnitRun {
   constructor(store = new ObjectStore()) {
     this.store = store;
     this.maps = new Map();
+    this.sources = new Map();
   }
 
   // the test classes of an object, from the parse: what would run, without
@@ -258,7 +259,20 @@ export class UnitRun {
       return undefined;
     }
     const source = basename(entry.originalSource);
-    return {name: `${source}, line ${entry.originalLine + 1}`, uri: source, line: entry.originalLine + 1, column: entry.originalColumn + 1};
+    const at = statementAfter(
+      this.#source(join(dirname(file), entry.originalSource)),
+      entry.originalLine + 1,
+      entry.originalColumn + 1);
+    return {name: `${source}, line ${at.line}`, uri: source, line: at.line, column: at.column};
+  }
+
+  // the ABAP the map points at, read once. The path in a map is relative to
+  // the module beside it, which is how a generated file names its source.
+  #source(path) {
+    if (this.sources.has(path) === false) {
+      this.sources.set(path, existsSync(path) ? readFileSync(path, "utf8") : undefined);
+    }
+    return this.sources.get(path);
   }
 
   // the run the façade wants: a child process, because a test writes to the
@@ -345,6 +359,35 @@ export function alertOf(error, where, stack = []) {
 
   details.push(`Raised in ${where}`);
   return {kind: "shortDump", severity: "fatal", title: String(error?.message ?? error), details, stack};
+}
+
+// Where a failure really is.
+//
+// The transpiler maps a generated line to the position where the previous
+// ABAP statement ended, so a stack entry read straight out of the map
+// points at the line above the one that raised: right screen, wrong line,
+// and a client that jumps there lands on the end of the call before the
+// assert. When the mapped position is the end of its line, the statement
+// that produced the code is the next line carrying any, and that is the
+// line to name. A position inside a line is left alone, because then the
+// map is pointing at a statement rather than past one.
+export function statementAfter(text, line, column) {
+  if (typeof text !== "string") {
+    return {line, column};
+  }
+  const lines = text.split("\n");
+  const at = lines[line - 1];
+  if (at === undefined || column < at.replace(/\s+$/, "").length) {
+    return {line, column};
+  }
+  for (let next = line; next < lines.length; next += 1) {
+    const content = lines[next].trim();
+    if (content === "" || content.startsWith("*") || content.startsWith("\"")) {
+      continue;
+    }
+    return {line: next + 1, column: lines[next].length - lines[next].trimStart().length + 1};
+  }
+  return {line, column};
 }
 
 // setup and teardown live in three places: the class, the friends instance

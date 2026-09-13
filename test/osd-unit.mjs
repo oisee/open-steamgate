@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {UnitRun, alertOf} from "../tools/osd-unit.mjs";
+import {UnitRun, alertOf, statementAfter} from "../tools/osd-unit.mjs";
 
 // The test run of OSD. vsp reads a program, its test classes, their test
 // methods and the alerts under a method, and a method with no alert is a
@@ -113,6 +113,29 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
     expect(alert).to.include({kind: "failedAssertion", severity: "critical", title: "Expected 'b', got 'a'"});
     expect(alert.details).to.include.members(["Expected [b]", "Actual [a]", "Raised in text_table_of_the_project"]);
     expect(alert.stack[0]).to.include({uri: "cl_abap_unit_assert.clas.abap", line: 460});
+  });
+
+  it("a stack entry names the statement that raised, not the one before it", () => {
+    // the transpiler maps a generated line to where the previous ABAP
+    // statement ended, so a position read straight out of the map lands on
+    // the line above: right screen, wrong line. Verified against a real
+    // failure too, which moved from 199 to 200 on the assert it broke.
+    const source = [
+      "  METHOD does_something.",
+      "    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'",
+      "                                                iv_path   = '/x' ).",
+      "",
+      "*   a comment is not a statement",
+      "    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 ).",
+      "  ENDMETHOD.",
+    ].join("\n");
+
+    // the end of the dispatch call, which is what the map points at
+    expect(statementAfter(source, 3, source.split("\n")[2].length)).to.deep.equal({line: 6, column: 5});
+    // a position inside a statement is already the statement
+    expect(statementAfter(source, 6, 20)).to.deep.equal({line: 6, column: 20});
+    // no source to read means the mapped position stands
+    expect(statementAfter(undefined, 12, 3)).to.deep.equal({line: 12, column: 3});
   });
 
   it("an uncaught ABAP exception and a broken runtime are different kinds of alert", () => {
