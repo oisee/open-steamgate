@@ -438,8 +438,10 @@ export function adtRouter(options = {}) {
   advertise("activation");
   router.post(`${BASE}/activation`, async (req, res) => {
     const body = await rawBody(req);
+    let named = [];
+    let published = false;
     answer(res, () => {
-      const named = objectReferencesIn(body, collections);
+      named = objectReferencesIn(body, collections);
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
@@ -454,19 +456,36 @@ export function adtRouter(options = {}) {
         res.status(200).type("application/xml").send(activationFailureDocument(entries));
         return;
       }
-      // the modules the runtime loads are written after the verdict goes out,
-      // because the next request is what needs them and this client does not.
-      // Deliberately not awaited, and its failure is logged rather than
-      // returned: the client has already been told the source is good.
-      if (options.transpileOnActivate !== false) {
-        Promise.resolve(store.transpile()).then((r) => {
-          if (r?.ok === false) {
-            console.error("transpile after activation failed:", r.output ?? "");
-          }
-        }).catch((e) => console.error("transpile after activation failed:", e?.message ?? e));
+      published = true;
+    });
+    if (published === false || options.transpileOnActivate === false) {
+      if (published === true) {
+        res.status(200).type("text/plain").send("");
+      }
+      return;
+    }
+    // The activation is finished here rather than promised. It used to
+    // answer and then transpile behind the client's back, so a 200 meant
+    // "the source is good" while the code a client would next read was still
+    // the old code, and nothing said when that stopped being true. Awaiting
+    // publish() makes the empty body mean what a real system means by it:
+    // the modules are written, and the process that serves them is the one
+    // that has them.
+    try {
+      const result = await store.publish();
+      if (result?.ok === false) {
+        const why = result.error ?? result.transpile?.output ?? "the build after activation failed";
+        res.status(200).type("application/xml").send(activationFailureDocument(
+          named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).slice(-2000), severity: "E", line: 1, column: 1}]})),
+        ));
+        return;
       }
       res.status(200).type("text/plain").send("");
-    });
+    } catch (e) {
+      res.status(200).type("application/xml").send(activationFailureDocument(
+        named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(e?.message ?? e), severity: "E", line: 1, column: 1}]})),
+      ));
+    }
   });
 
   // ABAP UNIT. The runtime actually runs the tests, in a child process of its

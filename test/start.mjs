@@ -9,6 +9,7 @@ import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
+import {odataProxy} from "../tools/osd-proxy.mjs";
 
 await initializeABAP();
 
@@ -77,23 +78,46 @@ export function startServer(quiet) {
     });
   }
 
-  app.all("/sap/opu/odata/sap/*", async function (req, res) {
-    try {
-      await cl_express_icf_shim.run({
-        req,
-        res,
-        class: "ZCL_STG_HTTP_HANDLER",
-        base: new abap.types.String().set("/sap/opu/odata/sap"),
-      });
-    } catch (e) {
-      // a runtime (kernel) error is not an ABAP exception the dispatcher can
-      // catch; answer instead of leaving the client hanging
-      if (!res.headersSent) {
-        res.status(500).type("application/json").send(JSON.stringify({error: {code: "STG/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
+  // The OData front, in one of two places.
+  //
+  // Inline is this process: the modules imported at the top of this file
+  // answer the request. It is what a test wants, because it costs no child
+  // and no second database, and it is what the browser preview is built
+  // from. Its limit is the reason the other mode exists: Node pins a module
+  // graph for the life of a process, so code activated through the façade is
+  // never live here until somebody restarts the whole listener, and that
+  // restart takes the developer's ADT session with it.
+  //
+  // Child is a process the façade supervises and replaces after a successful
+  // transpile (tools/osd-runtime.mjs), which is the only way an activation
+  // can honestly report that the code is live. STG_SERVE=child asks for it;
+  // npm run osd:serve sets it, and nothing else does, so a suite that never
+  // activates anything pays nothing for the ability.
+  const runtime = process.env.STG_SERVE === "child"
+    ? facade.store.serving({root: process.cwd(), database: process.env.STG_DB_PATH})
+    : undefined;
+
+  if (runtime !== undefined) {
+    app.all("/sap/opu/odata/sap/*", odataProxy(runtime));
+  } else {
+    app.all("/sap/opu/odata/sap/*", async function (req, res) {
+      try {
+        await cl_express_icf_shim.run({
+          req,
+          res,
+          class: "ZCL_STG_HTTP_HANDLER",
+          base: new abap.types.String().set("/sap/opu/odata/sap"),
+        });
+      } catch (e) {
+        // a runtime (kernel) error is not an ABAP exception the dispatcher can
+        // catch; answer instead of leaving the client hanging
+        if (!res.headersSent) {
+          res.status(500).type("application/json").send(JSON.stringify({error: {code: "STG/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
+        }
+        console.error("runtime error:", e);
       }
-      console.error("runtime error:", e);
-    }
-  });
+    });
+  }
 
   const server = app.listen(PORT);
 
@@ -122,6 +146,9 @@ export function startServer(quiet) {
   const close = server.close.bind(server);
   server.close = (cb) => {
     secure?.close();
+    // the supervised runtime is this listener's child; leaving it behind
+    // would hold the port and the database the next one needs
+    void runtime?.stop();
     return close(cb);
   };
   return server;
