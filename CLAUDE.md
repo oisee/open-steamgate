@@ -143,6 +143,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 - Every SAP-vs-open-abap discrepancy goes into `ANORMALIES.md` before any
   workaround. Known: no implicit MANDT; `sy-mandt = 123`.
 - Closure audit of a real DPC: `npm run probe -- <folder> [--lib <stubs>]`.
+- The database seam (`docs/db-backends.md`): the transpiled ABAP talks to one
+  object, `abap.context.databaseConnections["DEFAULT"]`, implementing the
+  runtime's eleven-method `DatabaseClient`; `test/setup.mjs` chooses it. Two
+  implementations exist, `@abaplint/database-sqlite` and
+  `tools/duckdb-client.mjs`, and a third needs no change anywhere else.
 - `STG_DB=duckdb` runs everything on DuckDB (`tools/duckdb-client.mjs`: real
   LUW with replay-based savepoints, literals trimmed); `STG_DB_PATH=x.duckdb`
   persists; `npm run unit:duckdb`, `start:duckdb`.
