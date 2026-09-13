@@ -122,8 +122,9 @@ Bottom up, every layer is real, nothing is mocked:
    deep insert, `get_expanded_entityset`, `iv_search_string`. This is the code
    that lives in a customer system.
 4. **The `/IWBEP/` interfaces** — from `open-abap/open-abap-odata`, where the
-   model, `$metadata`, annotations and SADL signatures we needed went back
-   upstream as PRs #40–#48.
+   model, `$metadata`, annotations, RFC and search-help signatures, vocabulary
+   annotations and media entities we needed went back upstream as small PRs
+   (#40–#48, #56–#63).
 5. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
    request context with every `io_tech_request_context` facet, dispatcher,
    OData v2 JSON, `$batch`, `$expand`, entry provider. The part that existed
@@ -183,6 +184,11 @@ data capture.
 > novelty this project builds. The two mature halves have **no code connecting
 > an OData request to a transpiled DPC method.**
 
+That was the finding on 2026-09-11, before any code. It held: the connecting
+piece is now `src/gateway/` + `src/http/`, ~4600 lines of ABAP, and everything
+below it is reuse. What follows is the plan as written, with what each part
+turned into.
+
 ## Prior-art matrix
 
 Best single source per component. Full evidence, licenses and runner-ups in
@@ -193,75 +199,115 @@ Best single source per component. Full evidence, licenses and runner-ups in
 | **Open SQL → SQLite** execution | abaplint transpiler + `@abaplint/database-sqlite` | full | **REUSE AS-IS** |
 | **DDIC → local schema** | transpiler `sqlite_database_schema.ts` | partial→full | **REUSE AS-IS** |
 | **Table-data export** (blessed) | abapGit `src/data/` (TABU) + open-abap `load-table-contents` | full | **REUSE AS-IS** |
-| **OData v2/v4 serializer** ($metadata, $batch) | `@sap-ux/fe-mockserver-core` | full | **REUSE / FORK** |
-| **UI5 / Fiori Elements local serving** | `@sap-ux/ui5-middleware-fe-mockserver` | full | **REUSE AS-IS** |
-| **MPC model-API** (`IF_MGW_ODATA_MODEL`) | `open-abap/open-abap-odata` | skeleton | **FORK & FILL** ⚠️ license |
-| **DPC dispatch** (`IF_MGW_APPL_SRV_RUNTIME`) | `open-abap/open-abap-odata` (`ZCL_OAO_HTTP_HANDLER`) | skeleton | **FORK & BUILD** ⚠️ license |
-| **`$filter` → SELECT-OPTIONS** (`io_tech_request_context`) | fe-mockserver parser (parse only) | none for the bridge | **BUILD — the crux** |
-| **CDS / SADL / RAP → OData** | *(none viable for ABAP)* | none | **BUILD / DEFER** |
-| **Headless deploy-back** | abapGit deserialize | partial | **PIN + wrap** (stays SAP-side) |
+| **OData v2/v4 serializer** ($metadata, $batch) | `@sap-ux/fe-mockserver-core` | full | ~~REUSE / FORK~~ → **not used**, written in ABAP (`zcl_stg_json`, `zcl_stg_batch`) |
+| **UI5 / Fiori Elements local serving** | `@sap-ux/ui5-middleware-fe-mockserver` | full | ~~REUSE AS-IS~~ → **not needed**: express serves `webapp/`, SAPUI5 comes from SAP's CDN |
+| **MPC model-API** (`IF_MGW_ODATA_MODEL`) | `open-abap/open-abap-odata` | skeleton | **REUSED as the interface layer**, the gaps filled by PRs upstream (#40–#48, #56–#63) |
+| **DPC dispatch** (`IF_MGW_APPL_SRV_RUNTIME`) | `open-abap/open-abap-odata` (`ZCL_OAO_HTTP_HANDLER`) | skeleton | **BUILT here** (`src/gateway/zcl_stg_dispatcher`) |
+| **`$filter` → SELECT-OPTIONS** (`io_tech_request_context`) | fe-mockserver parser (parse only) | none for the bridge | **BUILT here** (`zcl_stg_filter`, day one) |
+| **CDS / SADL / RAP → OData** | *(none viable for ABAP)* | none | **BUILT read-only** (`src/sadl/`, CDS projections + an analytics cube); BOPF/RAP still out |
+| **Headless deploy-back** | abapGit deserialize | partial | **PIN + wrap** (stays SAP-side); the SEGW editor exports a ready abapGit repository |
 
-## The gaps we actually build
+## The gaps we built
 
-1. **The `/IWBEP/` Gateway runtime.** `open-abap-odata` is a *validated
-   skeleton, not a product*: it proves the plug-in contract for one flat
-   string-keyed entity, then `ASSERT 1='todo'`s associations, actions,
-   nav-props and most EDM setters; `ZCL_OAO_HTTP_HANDLER` wires only
-   `GET_ENTITYSET`, hardcoded to a single entity set. Build the in-memory EDM
-   model registry and a generic DPC dispatcher (verb+path → GET_ENTITYSET /
-   GET_ENTITY / CREATE / UPDATE / DELETE / deep / action, key parsing,
-   `$expand`).
+The four gaps as stated on day one, and what each one is now. All of it is
+ABAP: the gateway runs transpiled next to the DPC it serves, so the same
+classes would run in a system's ICF.
+
+1. **The `/IWBEP/` Gateway runtime.** `open-abap-odata` was a *validated
+   skeleton, not a product*: the plug-in contract for one flat string-keyed
+   entity, then `ASSERT 1='todo'` for associations, actions, nav-props and most
+   EDM setters; `ZCL_OAO_HTTP_HANDLER` wired only `GET_ENTITYSET`, hardcoded to
+   one entity set. **Built:** `zcl_stg_model_info` (the EDM registry, read out
+   of a running MPC), `zcl_stg_dispatcher` (verb + path → GET_ENTITYSET /
+   GET_ENTITY / CREATE / UPDATE / DELETE / deep insert / action / `$expand` /
+   `$value`), `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_batch`,
+   `zcl_stg_entry_provider`. The model API's own gaps went back upstream as
+   PRs instead of being forked around.
 2. **`io_tech_request_context`: the `$filter` → SELECT-OPTIONS bridge** — the
-   vision's stated hard part and the single highest-risk piece. The target ABAP
-   (RANGES / SELECT-OPTIONS / IN) *runs* in the transpiler; a mature JS
-   `$filter` parser exists in fe-mockserver — but nothing translates a parsed
-   query option into the SIGN/OPTION/LOW/HIGH ranges a DPC reads.
-   `open-abap-odata`'s request context is 100% todo-asserts.
-3. **The seam.** A fe-mockserver data-access plugin whose entity-set backing
-   invokes the transpiled DPC method against SQLite.
-4. **Request-body deserializer** for CREATE/UPDATE (fe-mockserver gives the wire
-   for free; wire it into the dispatcher's write path).
+   stated hard part and the single highest-risk piece. **Built on day one**
+   (`zcl_stg_filter` + `zcl_stg_request_context`): `$filter` becomes
+   `/iwbep/t_mgw_select_option` rows with SIGN/OPTION/LOW/HIGH, `startswith` /
+   `substringof` become `CP` patterns, `ge`+`le` on one property collapse into
+   `BT`, and what cannot be expressed as a range is reported instead of being
+   silently dropped. The context implements every facet a DPC reads
+   (`get_filter`, `get_filter_select_options`, paging, `$orderby`, keys,
+   navigation path, source entity set).
+3. **The seam.** Not a fe-mockserver plugin: the dispatcher *is* the seam and
+   it calls the transpiled DPC directly. In front of it sits one ABAP
+   `if_http_extension` (`src/http/zcl_stg_http_handler`) behind
+   `cl_express_icf_shim` on Node, or the same class behind a service worker in
+   the browser preview.
+4. **Request-body deserializer** for CREATE/UPDATE: `zcl_stg_json` both ways,
+   including deep insert, `__deferred` links, PATCH/MERGE semantics (only the
+   fields that came in) and the binary body of a media resource.
 
-## Sharpest risks (from the adversarial critic)
+## The sharpest risks, and how they turned out
 
-- **Dependency-closure of a real `_DPC_EXT` may be the true long pole**, not
-  `$filter`. `ZCL_*_DPC_EXT` inherits `/IWBEP/CL_MGW_ABS_DATA`; real handlers
-  fan into BAPIs, `CL_*` utils, auth-checks and message classes — the
-  transpiler needs runnable *implementations* of all of it, not stubs. **First
-  move:** pick 3–5 representative live `_DPC_EXT` classes and compute their
-  actual dependency closure against what `open-abap-core` + `abaplint/deps`
-  implement.
-- **Many modern SEGW services are SADL-mapped** to CDS/BOPF and have no
-  hand-written `GET_ENTITYSET` at all → no transpilable ABAP. **v1 targets
-  classic code-based SEGW only**; CDS/SADL/RAP is deferred.
-- **Fixed client 123 / SysID ABC / no implicit MANDT** in the transpiler runtime
-  is a *first-order* correctness risk (most business tables are
-  client-dependent), not an edge.
-- **`open-abap-odata` is effectively unlicensed** (`LICENSE` reads `"todo"`,
-  `package.json` license empty). Treat its stubs as a *spec*, reimplement the
-  small interface surface fresh under MIT, or get the grant clarified before any
-  fork.
+- **"Dependency-closure of a real `_DPC_EXT` may be the true long pole, not
+  `$filter`."** Measured first, before any architecture
+  ([`docs/2026-09-11-closure-probe.md`](docs/2026-09-11-closure-probe.md)):
+  eight public SEGW repositories through `npm run probe`. **The closure is
+  DDIC, not code** — data elements, domains, tables and table types, with only
+  a handful of standard classes on the DPC path (`CL_OO_OBJECT`,
+  `CL_O2_API_PAGES`). abapGit serializes exactly those, and the transpiler
+  consumes exactly that, so the answer is a capture script, not weeks of
+  shims. The BAPI fan-out the critic expected appeared in one repo, and even
+  there it was mostly types. **Still true:** a customer DPC with forty BAPI
+  calls is not in the public sample.
+- **"Many modern SEGW services are SADL-mapped."** Confirmed by the same probe
+  (three of eight). v1 stayed classic code-based SEGW, and then a read-only
+  SADL runtime was built anyway (`src/sadl/`: CDS projections, an analytics
+  cube, `$select` → `GROUP BY`), because two corpus services needed it. BOPF
+  and RAP remain out.
+- **"Fixed client 123 / SysID ABC / no implicit MANDT."** Still open, still
+  first-order, logged in [`ANORMALIES.md`](ANORMALIES.md). The demo keeps a row
+  seeded in client 001 (`T0009`, "Other client, must not leak") visible on
+  purpose, with a test pinning the behaviour, so the day the transpiler learns
+  implicit MANDT the test flips instead of the bug hiding.
+- **"`open-abap-odata` is effectively unlicensed."** Unchanged: `LICENSE` still
+  reads `todo`, the `license` field is still empty. So the runtime here is a
+  clean-room reimplementation under MIT and the upstream repository is used as
+  the *interface* layer only, with every fix contributed back as a small PR
+  (#40–#48, #56–#63) rather than forked. The question is with the maintainer.
+- **"The accessor surface is not one method."** Right: the corpus DPCs read
+  `it_filter_select_options` from the signature *and* call
+  `io_tech_request_context->get_filter( )`; both are served.
 
-## Build order (weeks-scale)
+## The build order, weeks-scale on paper
 
-- **Phase 0 — substrate stand-up** (mostly reuse): transpile one real
-  `MPC_EXT`/`DPC_EXT`, generate the SQLite schema from DDIC, seed rows via
-  abapGit TABU → SQLite. Exit test: the DPC's Open SQL returns rows from local
-  SQLite.
-- **Phase 1 — Gateway model + dispatch:** clear the license question;
-  reimplement the model registry and a *generic* DPC dispatcher.
-- **Phase 2 — the crux, request-context:** build the `$filter`→SELECT-OPTIONS
-  translator; back it with differential tests against the stock MockServer /
-  fe-mockserver as an OData-conformance oracle.
-- **Phase 3 — wire layer:** mount fe-mockserver-core as front-of-house (router,
-  $metadata, $batch, body deserialization); plug its data access into the
-  Phase-1 dispatcher.
-- **Phase 4 — Fiori serving:** serve a real FE app via
-  `ui5-middleware-fe-mockserver` pointed at the DPC-backed endpoint.
-- **Deferred / out of scope:** CDS/SADL/RAP; code push-back to SAP (SAP-side,
-  already the sibling projects' territory).
+- **Phase 0 — substrate stand-up** (mostly reuse): transpile a real
+  `MPC_EXT`/`DPC_EXT`, DDIC → SQLite schema, seed via abapGit TABU. **Done
+  2026-09-11**, the same day the plan was written.
+- **Phase 1 — Gateway model + dispatch.** **Done 2026-09-11**: model registry
+  and a generic dispatcher, then grown through writes, `$batch`, navigation,
+  `$expand`, deep insert, function imports and media entities.
+- **Phase 2 — the crux, request-context.** **Done 2026-09-11**, one commit
+  (`$filter -> SELECT-OPTIONS bridge (zcl_stg_filter)`). The "critical path"
+  was half a day. The differential-test oracle was not needed: the DPC's own
+  ranges, a corpus of real services and the Fiori client together pinned the
+  behaviour.
+- **Phase 3 — wire layer.** **Deviated on purpose.** fe-mockserver was never
+  mounted: it is built around mock data files, and everything it would have
+  provided (router, `$metadata`, `$batch`, deserialization) had to exist in
+  ABAP anyway for the code to run on a system. The project has no runtime
+  dependency on it; the whole request path is ABAP behind
+  `cl_express_icf_shim`.
+- **Phase 4 — Fiori serving.** **Done 2026-09-11** with the plain SAPUI5 CDN
+  bootstrap instead of the middleware: four Fiori apps, a launchpad sandbox,
+  and the same files deployable as a BSP (see AGENDA, "The Fiori apps").
+- **Deferred:** CDS/SADL/RAP — the read-only half arrived on 2026-09-12; BOPF,
+  RAP and drafts are still out. Push-back to SAP stays with the siblings.
 
-**Critical path: Phase 2.**
+**What the long pole actually was:** not the Gateway and not `$filter`, but
+SEGW itself — reading and writing the project tree the way the transaction
+does (`tools/segw-gen.mjs`, `tools/stg-compile.mjs`, `tools/segw-tree.mjs`,
+byte-identical against 21 real projects), and then running it as an app
+(`webapp/segw/`). That work is most of the commits since, and it is what turns
+"the runtime works" into "a service can be built, generated and taken to a
+system without opening SAP GUI".
+
+**Where it stands:** 125 ABAP Unit tests, 80+ wire tests, 13 browser tests,
+`abaplint` clean, a browser-only deployment of the whole thing on GitHub Pages.
 
 ---
 
@@ -290,11 +336,13 @@ MIT unless noted. Full source list with evidence in
 - [abaplint/transpiler](https://github.com/abaplint/transpiler) — ABAP→JS
   transpiler + Open-SQL-over-SQLite runtime (Lars Hvam et al.)
 - [open-abap/open-abap-odata](https://github.com/open-abap/open-abap-odata) —
-  the `/IWBEP/` Gateway shim skeleton (⚠️ license unclear)
+  the `/IWBEP/` interface layer (⚠️ license still unclear; used as interfaces,
+  reimplemented runtime, fixes contributed back)
 - [abapGit](https://github.com/abapGit/abapGit) — Data Config (TABU) blessed
   data export; deserialize as the deploy-back path
 - [SAP/open-ux-odata](https://github.com/SAP/open-ux-odata) — fe-mockserver
-  OData v2/v4 serializer + FE serving (Apache-2.0)
+  OData v2/v4 serializer + FE serving (Apache-2.0). Studied as prior art and
+  as the conformance reference; not a dependency, see the build order above.
 
 ## License
 

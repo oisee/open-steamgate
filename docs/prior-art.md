@@ -190,6 +190,25 @@ claim is ecosystem-wide rather than abaplint-specific.
 
 ---
 
+## 3a. How the risks turned out (2026-09-13)
+
+Written 2026-09-11 before any code; this is the two-day-later record. The
+research above stays as it was.
+
+| Risk | Outcome |
+|---|---|
+| Dependency closure is the true long pole | **Measured, and no.** [`docs/2026-09-11-closure-probe.md`](2026-09-11-closure-probe.md): the closure of a hand-written DPC is DDIC (dtel/doma/tabl/ttyp), not code; standard classes on the DPC path are a handful. abapGit captures DDIC, so it is a script, not a shim farm. Caveat: public repos skew small. |
+| Many services are SADL-mapped | **Confirmed** (3 of 8 in the probe). v1 stayed code-based SEGW; a read-only SADL runtime over CDS projections was built anyway (`src/sadl/`). BOPF, CRM one-order and RAP stay out. |
+| The accessor surface is not one method | **Confirmed.** Corpus DPCs use both the signature table and `io_tech_request_context->get_filter( )`; both are implemented. |
+| Fixed client 123 / no implicit MANDT | **Open, unchanged**, in `ANORMALIES.md`. A row seeded in client 001 is kept visible in the demo with a test on it. |
+| SEGW/DPC is v2 | **Confirmed and adopted:** v2 only. |
+| open-abap-odata unlicensed | **Unchanged upstream** (`LICENSE` = `todo`). Used as the *interface* layer, runtime reimplemented clean-room under MIT, fixes contributed back as PRs #40–#48 and #56–#63 rather than forked. |
+| Cheap check: does fe-mockserver evaluate `$filter`? | **Moot.** The wire layer had to be ABAP to run on a system, so nothing of fe-mockserver is mounted; the project has no dependency on it. The `$filter` bridge is `src/gateway/zcl_stg_filter`. |
+| Cheap check: is its data-access seam public? | **Moot**, same reason. The dispatcher calls the transpiled DPC directly. |
+| Cheap check: can `ui5-middleware-fe-mockserver` point at an external endpoint? | **Not needed.** express serves `webapp/`, SAPUI5 comes from SAP's CDN, and the same files deploy as a BSP. |
+
+---
+
 ## 4. Build order (weeks-scale)
 
 - **Phase 0 — substrate stand-up (~all reuse).** Fork the abap2UI5 *playground*
@@ -220,6 +239,28 @@ claim is ecosystem-wide rather than abaplint-specific.
 
 **Critical path: Phase 2** (request-context) is the long pole and the true
 novelty; Phases 0/3/4 are largely assembly of MIT/Apache parts.
+
+### 4a. What actually happened (2026-09-13)
+
+- **Phases 0, 1, 2 and 4 all landed on 2026-09-11**, the day this plan was
+  written. Phase 2, the declared critical path, was one commit
+  (`$filter -> SELECT-OPTIONS bridge (zcl_stg_filter)`): the shape of a
+  SELECT-OPTIONS row is small and the DPC on the other side is the oracle.
+  The differential-test harness against stock MockServer was never built; the
+  corpus DPCs and a real Fiori client turned out to be the sharper oracle.
+- **Phase 3 was dropped as designed.** fe-mockserver is built around mock data
+  files, and everything it would have contributed (router, `$metadata`,
+  `$batch`, body deserialization) has to exist in ABAP for the same classes to
+  run in a system's ICF. So the wire layer is one `if_http_extension` behind
+  `cl_express_icf_shim` on Node and behind a service worker in the browser
+  build, with the serializer in ABAP (`zcl_stg_json`, `zcl_stg_batch`).
+- **The real long pole was SEGW**, not the Gateway: reading and writing the
+  project tree the way the transaction does (`tools/segw-gen.mjs`,
+  `tools/stg-compile.mjs`, `tools/segw-tree.mjs`, byte-identical over 21 real
+  projects), the generator in ABAP, and the Service Builder as a Fiori app.
+- **Deferred items that arrived anyway:** read-only SADL over CDS, an
+  analytics cube, search helps, RFC replay and a live RFC client, DuckDB,
+  media entities. Still deferred: BOPF, RAP, drafts, v4, push-back to SAP.
 
 ---
 

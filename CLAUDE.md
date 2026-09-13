@@ -47,12 +47,20 @@ The substrate exists (transpile ABAP → run Open SQL over SQLite → serve UI5)
 is MIT/Apache. The Gateway — everything at and above the `/IWBEP/` line — does
 not exist as working code anywhere. **Build only the Gateway and the seam.**
 
-Concretely, build order (weeks-scale, critical path = Phase 2):
-0. Substrate stand-up (reuse) — transpile one real MPC/DPC, DDIC→SQLite schema, seed via abapGit TABU.
-1. Gateway model registry + generic DPC dispatcher.
-2. **`$filter` → SELECT-OPTIONS / `io_tech_request_context` — the crux.**
-3. Wire layer (fe-mockserver front-of-house → the dispatcher).
-4. Fiori Elements serving.
+The original build order and how it went (README, "The build order"):
+0. Substrate stand-up — done 2026-09-11.
+1. Gateway model registry + generic DPC dispatcher — done 2026-09-11.
+2. `$filter` → SELECT-OPTIONS / `io_tech_request_context` — done 2026-09-11,
+   one commit; the declared critical path was half a day.
+3. Wire layer — **dropped on purpose**: no fe-mockserver anywhere. The whole
+   request path is ABAP (`src/http/zcl_stg_http_handler` = `if_http_extension`)
+   behind `cl_express_icf_shim` on Node and behind the service worker in the
+   preview, so the same classes run in a system's ICF.
+4. Fiori Elements serving — done 2026-09-11 with the plain SAPUI5 CDN
+   bootstrap, no ui5 middleware.
+
+What the long pole actually is: SEGW itself (tree in, tree out, generator,
+editor), not the Gateway.
 
 ## Scope guards (decided)
 
@@ -96,9 +104,9 @@ this before any architectural commitment. See `AGENDA.md` for the checklist.
   abaplint downport rule first — an extra pipeline step.
 - `open-abap-core` has `ASSERT 1 = 'todo'` stub methods. Don't assume any
   `CL_*` / `IF_*` is fully implemented — verify per class.
-- fe-mockserver is built *around* mock data files; verify its data-access seam
-  is a public extension point and can be backed by a live DPC call before
-  treating Phase 3 as pure reuse.
+- fe-mockserver is built *around* mock data files. Checked and not used: the
+  wire layer has to be ABAP to run on a system, so there is no dependency on
+  it and no data-access plugin. Keep it that way unless something changes.
 
 ## Family & links
 
@@ -277,8 +285,8 @@ for source reads instead of GitHub fetches.
 
 ## Substrate (when code starts)
 
-Expected stack, Phase 0+: Node ≥ 16, `@abaplint/transpiler` +
-`@abaplint/database-sqlite`, `@sap-ux/fe-mockserver-core` +
-`@sap-ux/ui5-middleware-fe-mockserver`, `@ui5/cli`. The abap2UI5 *playground*
-(transpile + SQLite + UI5-serve + offline-PWA scaffold) is the harness template
-to fork for Phase 0.
+What it actually is: Node 22/24, `@abaplint/transpiler-cli` +
+`@abaplint/database-sqlite` (+ `@duckdb/node-api`, `sql.js` for the browser),
+`express` with `cl_express_icf_shim`, `mocha`/`chai` and `@playwright/test`.
+No `@sap-ux/*`, no `@ui5/cli`: SAPUI5 comes from SAP's CDN and `webapp/` is
+plain files. The one runtime dependency is `open-rfc` (live RFC, Node only).

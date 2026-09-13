@@ -677,12 +677,14 @@ Missing, in order of use:
 
 ## Cheap checks that could shrink the plan
 
-- [ ] Does fe-mockserver *evaluate* `$filter` (parse → predicate), not just
-      parse? If yes, stronger prior art for Gap 2 → less Phase-2 risk.
-- [ ] Is fe-mockserver's data-access seam a public, supported extension point?
-      If yes, Phase 3 is reuse, not fork.
-- [ ] Can `ui5-middleware-fe-mockserver` point at an arbitrary external OData
-      endpoint (not only file-based mock data)? Load-bearing for Phase 4.
+- [x] ~~Does fe-mockserver *evaluate* `$filter`?~~ **Moot, 2026-09-13.** No
+  fe-mockserver is used at all: the wire layer had to be ABAP to run in a
+  system's ICF, so `$filter` is parsed and turned into SELECT-OPTIONS in
+  `src/gateway/zcl_stg_filter`, `$metadata` / `$batch` / the JSON are ABAP
+  too, and the project has no `@sap-ux/*` dependency. The same answer retires
+  the other two checks (the data-access seam, pointing the UI5 middleware at
+  an external endpoint): express serves `webapp/`, SAPUI5 comes from the CDN,
+  and the files deploy as a BSP unchanged (see "The Fiori apps").
 
 ## Un-swept sources to check
 
