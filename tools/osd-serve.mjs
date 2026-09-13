@@ -13,12 +13,23 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import express from "express";
-import {initializeABAP} from "../output/init.mjs";
-import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
-import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
-import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
+import {join} from "node:path";
+import {pathToFileURL} from "node:url";
 
 const started = Date.now();
+
+// which tree this runtime serves, so one copy of this script can serve any
+// of them: a second worktree, a branch under test, an experiment on its own
+// port and its own database. The modules are loaded from there rather than
+// from next to this file, which is what would otherwise pin an instance to
+// the checkout the script happens to live in.
+const root = process.env.OSD_ROOT ?? process.cwd();
+const from = (file) => import(pathToFileURL(join(root, "output", file)).href);
+
+const {initializeABAP} = await from("init.mjs");
+const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
+const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
+const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
 
 await initializeABAP();
 await zcl_stg_segw_registry.register();
@@ -32,7 +43,14 @@ app.use(express.raw({type: "*/*", limit: "16mb"}));
 // how a supervisor knows this runtime is alive and which generation of the
 // code it carries; not part of any ADT or OData surface
 app.get("/osd/serving", function (req, res) {
-  res.json({ready: true, pid: process.pid, since: started, generation: process.env.OSD_GENERATION ?? "0"});
+  res.json({
+    ready: true,
+    pid: process.pid,
+    since: started,
+    generation: process.env.OSD_GENERATION ?? "0",
+    root,
+    database: process.env.STG_DB_PATH ?? ":memory:",
+  });
 });
 
 app.all("/sap/opu/odata/sap/*", async function (req, res) {

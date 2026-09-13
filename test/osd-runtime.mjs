@@ -91,11 +91,104 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     }
   });
 
+  it("a runtime that died is not a runtime that is ready", async () => {
+    // found by open-steamgate reviewing the seam before wiring it: a stale
+    // readiness is a success report for work that is not happening, which
+    // is the same shape as the two false greens we closed today
+    const runtime = new ServingRuntime();
+    try {
+      const first = await runtime.start();
+      process.kill(first.pid, "SIGKILL");
+      await new Promise((resolve) => runtime.child?.once("exit", resolve) ?? resolve());
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(runtime.running).to.equal(false);
+      expect(runtime.url).to.equal(undefined);
+      expect(runtime.died).to.include({signal: "SIGKILL", generation: 1});
+
+      let resolved;
+      await runtime.whenReady().then((a) => {
+        resolved = a;
+      }, (e) => {
+        resolved = e.code;
+      });
+      expect(resolved, "a dead runtime must not hand out its old address").to.equal("NOT_SERVING");
+
+      // and a proxy that only wants something serving gets it, with a
+      // generation that says a crash happened rather than hiding it
+      const back = await runtime.ensure();
+      expect(back.generation).to.equal(2);
+      expect((await get(runtime.url, "/osd/serving")).status).to.equal(200);
+      expect(runtime.died).to.equal(undefined);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("a recycle that cannot come up says so, and then says nothing is serving", async () => {
+    const runtime = new ServingRuntime();
+    try {
+      await runtime.start();
+      // the next process will not exist, which is what a broken transpile
+      // would look like from here
+      runtime.command = [process.execPath, "/nonexistent-osd-serve.mjs"];
+      let failed;
+      try {
+        await runtime.recycle();
+      } catch (error) {
+        failed = error;
+      }
+      expect(failed?.code).to.equal("NOT_SERVING");
+
+      // not the old error for ever after, and not a stale address either
+      let second;
+      await runtime.whenReady().then(() => {
+        second = "resolved";
+      }, (e) => {
+        second = e.code;
+      });
+      expect(second).to.equal("NOT_SERVING");
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("an instance is a tree, a port and a database, and two of them do not collide", async () => {
+    // flagged by vsp: a branch under test is its own instance, so nothing
+    // here may assume there is one of them
+    const folder = mkdtempSync(join(tmpdir(), "osd-two-"));
+    const one = new ServingRuntime({database: join(folder, "one.sqlite")});
+    const two = new ServingRuntime({database: join(folder, "two.sqlite")});
+    try {
+      await one.start();
+      await two.start();
+      expect(one.port).to.not.equal(two.port);
+
+      const first = JSON.parse((await get(one.url, "/osd/serving")).text);
+      const second = JSON.parse((await get(two.url, "/osd/serving")).text);
+      expect(first.database).to.not.equal(second.database);
+      expect(first.root).to.equal(second.root);
+
+      // a row in one instance is not a row in the other
+      await fetch(`${one.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({Project: "ZSTG_MAPPED", TravelId: "T7779", Description: "only in the first instance", Status: "O", Seats: 1}),
+      });
+      expect((await get(one.url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T7779')?$format=json")).status).to.equal(200);
+      expect((await get(two.url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T7779')?$format=json")).status).to.equal(404);
+    } finally {
+      await one.stop();
+      await two.stop();
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
+
   it("rows written through one runtime survive the next, when they have a file to live in", async () => {
     // a recycle would otherwise eat what a client created: the database here
     // is sql.js, which is memory only, so STG_DB_PATH is what carries it
     const folder = mkdtempSync(join(tmpdir(), "osd-db-"));
-    const runtime = new ServingRuntime({env: {STG_DB_PATH: join(folder, "osd.sqlite")}});
+    const runtime = new ServingRuntime({database: join(folder, "osd.sqlite")});
     const body = JSON.stringify({Project: "ZSTG_MAPPED", TravelId: "T7777", Description: "written before a recycle", Status: "O", Seats: 2});
     try {
       await runtime.start();

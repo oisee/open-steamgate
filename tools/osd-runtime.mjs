@@ -15,6 +15,10 @@
 // What this deliberately does not do: recycle on a write. Only a transpile
 // that succeeded changes what a process would load, so only that is worth
 // a new process.
+//
+// Every instance is (a source tree, a port, a database) and nothing here
+// assumes there is one of them. Two of these can run side by side over two
+// worktrees, which is what a branch under test would be.
 import {spawn} from "node:child_process";
 import {fileURLToPath} from "node:url";
 
@@ -24,14 +28,25 @@ export class ServingRuntime {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
     this.command = options.command ?? [process.execPath, CHILD];
+    // a fixed port for an instance someone has to reach by name; the
+    // default is whatever the system gives, because a supervised runtime is
+    // reached through the supervisor
+    this.port = undefined;
+    this.wanted = options.port;
+    // where this instance's rows live. Two instances must not share one
+    // file, and two runtimes of the same instance must not hold it at once,
+    // which is why a recycle stops the old one first.
+    this.database = options.database;
     this.env = options.env ?? {};
     this.timeout = options.timeout ?? 60000;
     this.grace = options.grace ?? 2000;
     this.generation = 0;
     this.child = undefined;
-    this.port = undefined;
     this.ready = undefined;
     this.recycling = undefined;
+    // what the last unexpected death said, for a caller that wants to
+    // report why nothing is serving rather than only that nothing is
+    this.died = undefined;
   }
 
   // the address the façade proxies to; undefined until something is serving
@@ -43,9 +58,11 @@ export class ServingRuntime {
     return this.child !== undefined && this.child.exitCode === null && this.child.signalCode === null;
   }
 
-  // a promise that is resolved while a runtime is serving and pending while
-  // one is being replaced: the façade awaits this before it forwards, so a
-  // request that arrives mid-recycle waits a second instead of failing
+  // a promise that is resolved while a runtime is serving, pending while one
+  // is being replaced, and rejected when there is none: the façade awaits
+  // this before it forwards, so a request that arrives mid-recycle waits a
+  // second instead of failing, and one that arrives after a crash is told
+  // rather than sent to a port nothing is listening on
   whenReady() {
     return this.ready ?? Promise.reject(new NotServing());
   }
@@ -53,6 +70,20 @@ export class ServingRuntime {
   async start() {
     if (this.running === true) {
       return {url: this.url, generation: this.generation, started: false};
+    }
+    return this.#spawn();
+  }
+
+  // what a proxy wants when it does not care why nothing is serving: a
+  // runtime, now. It waits out a recycle, starts one after a crash, and is
+  // idempotent while one is up. The crash is not hidden, because the
+  // generation it answers with is a new one.
+  async ensure() {
+    if (this.recycling !== undefined) {
+      await this.recycling.catch(() => undefined);
+    }
+    if (this.running === true) {
+      return this.whenReady();
     }
     return this.#spawn();
   }
@@ -77,7 +108,11 @@ export class ServingRuntime {
         const answer = await this.#spawn({announce: pending});
         return {...answer, ms: Date.now() - began, recycled: true};
       } catch (error) {
+        // whoever is waiting hears why; the next caller hears "nothing is
+        // serving", because a stale error that never clears is a worse
+        // answer than the plain truth
         pending.reject(error);
+        this.ready = undefined;
         throw error;
       } finally {
         this.recycling = undefined;
@@ -97,7 +132,16 @@ export class ServingRuntime {
       const generation = this.generation + 1;
       const child = spawn(this.command[0], this.command.slice(1), {
         cwd: this.root,
-        env: {...process.env, ...this.env, OSD_GENERATION: String(generation)},
+        env: {
+          ...process.env,
+          // the tree, the port and the database are this instance's, and the
+          // child is told rather than assuming
+          OSD_ROOT: this.root,
+          ...(this.wanted === undefined ? {} : {OSD_SERVE_PORT: String(this.wanted)}),
+          ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
+          ...this.env,
+          OSD_GENERATION: String(generation),
+        },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
       let out = "";
@@ -118,6 +162,7 @@ export class ServingRuntime {
           return;
         }
         clearTimeout(timer);
+        this.died = undefined;
         this.child = child;
         this.port = message.port;
         this.generation = generation;
@@ -129,9 +174,18 @@ export class ServingRuntime {
 
       child.once("exit", (code, signal) => {
         clearTimeout(timer);
+        // a recycle and a stop clear this.child before the exit arrives, so
+        // reaching here with it still set means the runtime died on its own.
+        // Then the readiness goes too: it described a process that is gone,
+        // and handing that address to a proxy is a success report for work
+        // that is not happening.
         if (this.child === child) {
           this.child = undefined;
           this.port = undefined;
+          if (this.recycling === undefined) {
+            this.ready = undefined;
+            this.died = {generation, code, signal, at: Date.now(), output: out.slice(-2000)};
+          }
         }
         // an exit before "ready" is a runtime that could not come up, and
         // the output is the only explanation anyone will get

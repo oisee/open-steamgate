@@ -221,7 +221,20 @@ The order inside a recycle is not the zero-downtime one. The old runtime is
 asked to go first and the new one starts after it, because both would
 otherwise hold the same database file and the second to write would win.
 `whenReady()` is the promise a proxy awaits so a request that arrives
-mid-recycle waits about a second instead of failing. And the rows need a
+mid-recycle waits about a second instead of failing. It is resolved while a
+runtime is serving, pending while one is being replaced, and **rejected when
+there is none**, including after a crash: a readiness that outlives the
+process it described is a success report for work that is not happening,
+which is the shape of every false green we have closed. `ensure()` is the
+call for a proxy that does not care why nothing is serving and wants one
+now; it waits out a recycle, starts a runtime after a crash, and the
+generation it answers with is how a caller sees that a crash happened.
+`died` carries what the last unexpected exit said.
+
+An instance is a source tree, a port and a database, and nothing in the
+supervisor assumes there is one of them: `new ServingRuntime({root, port,
+database})` runs over a second worktree beside the first, which is what a
+branch under test would be. And the rows need a
 file to live in or a recycle eats them: `STG_DB_PATH` now means for SQLite
 what it already meant for DuckDB, read when a runtime boots and written
 when it exits. Without it the database stays in memory and a test suite
