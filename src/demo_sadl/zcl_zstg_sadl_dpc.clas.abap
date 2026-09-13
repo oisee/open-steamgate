@@ -77,10 +77,12 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_appl_srv_runtime~get_entityset.
-    DATA lt_travel  TYPE STANDARD TABLE OF zvstgtravel WITH DEFAULT KEY.
-    DATA lt_booking TYPE STANDARD TABLE OF zvstgbooking WITH DEFAULT KEY.
-    DATA lt_cube    TYPE STANDARD TABLE OF zvstgtravelcube WITH DEFAULT KEY.
-    DATA lt_flight  TYPE STANDARD TABLE OF zvstgflightcube WITH DEFAULT KEY.
+* the row of a CDS entity is what its source class says it is: the columns of
+* the SQL view plus the virtual elements an exit class fills after the read
+    DATA lt_travel  TYPE zcl_stg_cds_zvstgtravel=>tt_row.
+    DATA lt_booking TYPE zcl_stg_cds_zvstgbooking=>tt_row.
+    DATA lt_cube    TYPE zcl_stg_cds_zvstgtravelcube=>tt_row.
+    DATA lt_flight  TYPE zcl_stg_cds_zvstgflightcube=>tt_row.
     DATA lv_entityset_name TYPE string.
 
     lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
@@ -130,8 +132,8 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_appl_srv_runtime~get_entity.
-    DATA ls_travel  TYPE zvstgtravel.
-    DATA ls_booking TYPE zvstgbooking.
+    DATA ls_travel  TYPE zcl_stg_cds_zvstgtravel=>ty_row.
+    DATA ls_booking TYPE zcl_stg_cds_zvstgbooking=>ty_row.
     DATA lv_entityset_name TYPE string.
     DATA lr_entity  TYPE REF TO data.
 

@@ -1412,9 +1412,18 @@ CLASS ltcl_sadl IMPLEMENTATION.
     ls_entity = zcl_stg_cds_registry=>get( 'ZC_STG_TRAVEL' ).
     cl_abap_unit_assert=>assert_equals( act = ls_entity-sql_view
                                         exp = 'ZVSTGTRAVEL' ).
+* four columns of the SQL view plus the two virtual elements
     cl_abap_unit_assert=>assert_equals( act = lines( ls_entity-fields )
-                                        exp = 4 ).
+                                        exp = 6 ).
+    READ TABLE ls_entity-fields INTO ls_field WITH KEY name = 'OCCUPANCY'.
+    cl_abap_unit_assert=>assert_subrc( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_field-virtual
+                                        exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = ls_field-calculated_by
+                                        exp = 'ZCL_STG_TRAVEL_CALC' ).
     READ TABLE ls_entity-fields INTO ls_field WITH KEY name = 'SEATS'.
+    cl_abap_unit_assert=>assert_equals( act = ls_field-virtual
+                                        exp = abap_false ).
     cl_abap_unit_assert=>assert_subrc( ).
     cl_abap_unit_assert=>assert_equals( act = ls_field-edm_type
                                         exp = 'Edm.Int32' ).
@@ -1528,7 +1537,7 @@ CLASS ltcl_sadl IMPLEMENTATION.
                        iv_query = '$expand=TO_BOOKINGS&$top=1' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"SEATS":2,"TO_BOOKINGS":{"results":[{"__metadata"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"SEATS":2,"OCCUPANCY":"20% of 10","FREESEATS":0,"TO_BOOKINGS":{"results":[{"__metadata"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"CUSTOMER":"Grace Hopper"' ) ).
   ENDMETHOD.
 

@@ -56,6 +56,24 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
 
 * aggregated rows have no key of their own; the Gateway gives them one, so
 * the client can tell them apart (the UI5 model keeps entries by their uri)
+* a virtual element is not a column: SADL refuses to filter or sort by it
+    METHODS reject_virtual
+      IMPORTING
+        is_entity  TYPE zcl_stg_cds_registry=>ty_entity
+        iv_where   TYPE string
+        it_orderby TYPE string_table
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
+* the virtual elements of the entity: an ABAP class fills them after the read
+    METHODS calculate_virtual
+      IMPORTING
+        is_entity TYPE zcl_stg_cds_registry=>ty_entity
+      CHANGING
+        ct_data   TYPE STANDARD TABLE
+      RAISING
+        /iwbep/cx_mgw_tech_exception.
+
     METHODS synthetic_keys
       IMPORTING
         is_entity  TYPE zcl_stg_cds_registry=>ty_entity
@@ -301,6 +319,71 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD reject_virtual.
+    DATA ls_field TYPE zcl_stg_cds_registry=>ty_field.
+    DATA lv_order TYPE string.
+    DATA lv_all   TYPE string.
+
+    LOOP AT it_orderby INTO lv_order.
+      lv_all = |{ lv_all } { lv_order }|.
+    ENDLOOP.
+    lv_all = to_upper( |{ lv_all } { iv_where }| ).
+
+    LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true.
+      FIND REGEX |\\b{ to_upper( ls_field-name ) }\\b| IN lv_all.
+      IF sy-subrc = 0.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING
+            message = |{ ls_field-name } is a virtual element: it is calculated after the read, so it cannot be filtered or sorted|.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD calculate_virtual.
+* @ObjectModel.virtualElement: the value is not in the database, an exit class
+* computes it from the row that was read (if_sadl_exit_calc_element_read).
+* One call per class, with every virtual element it owns.
+    DATA ls_field   TYPE zcl_stg_cds_registry=>ty_field.
+    DATA lt_classes TYPE string_table.
+    DATA lv_class   TYPE string.
+    DATA lo_exit    TYPE REF TO if_sadl_exit_calc_element_read.
+    DATA lt_calc    TYPE if_sadl_exit=>ty_t_element_info.
+    DATA ls_calc    TYPE if_sadl_exit=>ty_s_element_info.
+    DATA lx_root    TYPE REF TO cx_root.
+
+    LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true.
+      READ TABLE lt_classes TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-calculated_by.
+      IF sy-subrc <> 0.
+        APPEND ls_field-calculated_by TO lt_classes.
+      ENDIF.
+    ENDLOOP.
+    IF lt_classes IS INITIAL OR ct_data IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_classes INTO lv_class.
+      CLEAR lt_calc.
+      LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true AND calculated_by = lv_class.
+        ls_calc-name = ls_field-name.
+        APPEND ls_calc TO lt_calc.
+      ENDLOOP.
+      TRY.
+          CREATE OBJECT lo_exit TYPE (lv_class).
+          lo_exit->calculate(
+            EXPORTING
+              it_original_data           = ct_data
+              it_requested_calc_elements = lt_calc
+            CHANGING
+              ct_calculated_data         = ct_data ).
+        CATCH cx_root INTO lx_root.
+          RAISE EXCEPTION TYPE /iwbep/cx_mgw_tech_exception
+            EXPORTING
+              textid   = /iwbep/cx_mgw_tech_exception=>internal_error
+              previous = lx_root.
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD if_sadl_gw_dpc~get_entityset.
     DATA lo_context  TYPE REF TO zcl_stg_request_context.
     DATA ls_entity   TYPE zcl_stg_cds_registry=>ty_entity.
@@ -334,6 +417,10 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
                                   et_groupby = lt_groupby ).
     ENDIF.
 
+    reject_virtual( is_entity  = ls_entity
+                    iv_where   = lv_where
+                    it_orderby = lt_orderby ).
+
     lr_data = lo_source->read( iv_where   = lv_where
                                it_orderby = lt_orderby
                                it_fields  = lt_fields
@@ -344,6 +431,8 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
                                 it_groupby = lt_groupby
                       CHANGING  ct_data    = <lt_data> ).
     ENDIF.
+    calculate_virtual( EXPORTING is_entity = ls_entity
+                       CHANGING  ct_data   = <lt_data> ).
 
 * $inlinecount counts before the page is cut
     IF lo_context->mv_inlinecount = abap_true.
@@ -397,6 +486,8 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     lr_data = lo_source->read( iv_where   = lv_where
                                it_orderby = lt_orderby ).
     ASSIGN lr_data->* TO <lt_data>.
+    calculate_virtual( EXPORTING is_entity = ls_entity
+                       CHANGING  ct_data   = <lt_data> ).
     READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_row>.
     IF sy-subrc = 0.
       es_data = <ls_row>.

@@ -154,6 +154,34 @@ describe("wire", () => {
     expect(rows).to.deep.equal([["A", 12], ["X", 4]]);
   });
 
+  it("virtual elements: a CDS field an ABAP class calculates after the read", async () => {
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV`;
+    // the model says they exist and that the database cannot order or filter by them
+    const xml = await (await fetch(S + "/$metadata")).text();
+    expect(xml).to.contain('<Property Name="OCCUPANCY" Type="Edm.String" Nullable="true" MaxLength="12" sap:unicode="false" sap:label="Occupancy" sap:creatable="false" sap:updatable="false" sap:sortable="false" sap:filterable="false"/>');
+    expect(xml).to.contain('<Property Name="FREESEATS" Type="Edm.Int32"');
+
+    // zcl_stg_travel_calc fills them: occupancy from the row, free seats from
+    // the bookings of that travel (T0001 has 2 seats and 2 bookings)
+    const rows = (await (await fetch(S + "/Zc_Stg_TravelSet?$format=json")).json()).d.results;
+    expect(rows.map((r) => [r.TRAVELID, r.OCCUPANCY, r.FREESEATS])).to.deep.equal([
+      ["T0001", "20% of 10", 0],
+      ["T0002", "10% of 10", 0],
+      ["T0003", "40% of 10", 4],
+      ["T0009", "90% of 10", 9],
+    ]);
+    const one = (await (await fetch(S + "/Zc_Stg_TravelSet('T0003')?$format=json")).json()).d;
+    expect(one.OCCUPANCY).to.equal("40% of 10");
+    expect(one.FREESEATS).to.equal(4);
+
+    // and SADL refuses what it cannot do, instead of failing in SQL
+    for (const query of ["$filter=OCCUPANCY eq 'x'", "$orderby=FREESEATS"]) {
+      const res = await fetch(`${S}/Zc_Stg_TravelSet?${query}`);
+      expect(res.status).to.equal(400);
+      expect((await res.json()).error.message.value).to.contain("is a virtual element");
+    }
+  });
+
   it("$count", async () => {
     const res = await fetch(BASE + "/TravelSet/$count");
     expect(res.status).to.equal(200);

@@ -250,8 +250,10 @@ CLASS cl_sadl_gw_model_exposure IMPLEMENTATION.
                 is_field    = ls_field ).
       lo_property->set_creatable( lv_editable ).
       lo_property->set_updatable( lv_editable ).
-      lo_property->set_sortable( abap_true ).
-      lo_property->set_filterable( abap_true ).
+* a virtual element lives outside the SELECT: the database cannot order or
+* filter by it, and SADL says so in $metadata
+      lo_property->set_sortable( boolc( ls_field-virtual = abap_false ) ).
+      lo_property->set_filterable( boolc( ls_field-virtual = abap_false ) ).
 
 * analytics: measures carry an aggregation, everything else is a dimension
       IF lv_aggregate = abap_true.
