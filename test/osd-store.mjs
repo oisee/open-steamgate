@@ -66,6 +66,47 @@ describe("tools/osd-store: the objects of the local system", () => {
     expect(active.active).to.equal(true);
   });
 
+  it("packages come from the tree, and every parent is one a folder really has", () => {
+    const all = store.packages();
+    expect(all.length).to.be.greaterThan(50);
+    const names = new Set(all.map((p) => p.name));
+    // a root has no parent, everyone else has one that exists
+    for (const node of all) {
+      if (node.parent !== undefined) {
+        expect(names, `${node.name} -> ${node.parent}`).to.include(node.parent);
+      }
+    }
+    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE"]);
+    // the name is the chain joined, so an underscore in a folder invents no
+    // parent: src/demo_sadl sits under $STG, not under $STG_DEMO, and the
+    // library roots do not sprout a $OPEN above them
+    expect(names).to.not.include("$OPEN");
+    expect(names).to.not.include("$EXPRESS_ICF");
+    expect(all.find((p) => p.name === "$STG_DEMO_SADL").parent).to.equal("$STG");
+    expect(all.find((p) => p.name === "$STG_SEGW_DDIC").parent).to.equal("$STG_SEGW");
+  });
+
+  it("a package holds its objects and names its subpackages", () => {
+    const segw = store.package("$STG_SEGW");
+    expect(segw.subpackages).to.deep.equal(["$STG_SEGW_DDIC"]);
+    expect(segw.objects.map((o) => o.name)).to.include("ZCL_STG_SEGW_GEN");
+    // an object of the subpackage is not in the parent's list
+    expect(segw.objects.map((o) => o.name)).to.not.include("ZSTG_SBD_PR");
+    expect(store.package("$STG_SEGW_DDIC").objects.map((o) => o.name)).to.include("ZSTG_SBD_PR");
+    expect(store.package("$stg_segw").name).to.equal("$STG_SEGW");
+    expect(() => store.package("$NOBODY")).to.throw(NotFound, "DEVC $NOBODY");
+  });
+
+  it("an object knows its package, and a library package says so", () => {
+    expect(store.find("CLAS", "ZCL_STG_SEGW_GEN").package).to.equal("$STG_SEGW");
+    expect(store.find("CLAS", "CL_ABAP_ZIP").package).to.contain("$OPEN_ABAP_CORE");
+    expect(store.package("$OPEN_ABAP_CORE").library).to.equal(true);
+    expect(store.package("$STG_SEGW").library).to.equal(false);
+    // every object of the system is in exactly one package
+    const counted = store.packages().reduce((n, p) => n + p.objects, 0);
+    expect(counted).to.equal(store.list().length);
+  });
+
   it("abapGit's file names and object names convert both ways", () => {
     expect(fileOf("/DEMO/ZREPORT")).to.equal("#demo#zreport");
     expect(nameOf("#demo#zreport")).to.equal("/DEMO/ZREPORT");

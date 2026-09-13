@@ -59,6 +59,18 @@ export const INCLUDES = {
   testclasses: ".clas.testclasses.abap",
 };
 
+// A package is a folder. abapGit's PREFIX logic names the folders of a
+// repository after the package they hold, so a tree that came from a system
+// carries the names, and a tree that did not, like ours, gets them from the
+// layout: the root's own name, then one segment per folder below it. When
+// real content arrives with its package.devc.xml files, the names and the
+// texts come from those and nothing above this changes.
+const ROOT_PACKAGES = {
+  src: "$STG",
+  test: "$STG_TEST",
+  gen: "$STG_GEN",
+};
+
 const DEFAULT_ROOTS = [
   {path: "src", writable: true, library: false},
   // ABAP unit test classes are objects of the system too, and the
@@ -107,6 +119,21 @@ export class ObjectStore {
     return out;
   }
 
+  // the chain of packages a file sits in: the root's package, then one per
+  // folder below it. The chain is the hierarchy; the name is only its last
+  // link joined up, so a name that happens to hold an underscore does not
+  // invent a parent that is not there.
+  #packagesOf(file, root) {
+    const base = ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    const inside = file.slice(root.path.length).split("/").filter((p) => p !== "");
+    inside.pop();
+    const chain = [base];
+    for (const folder of inside) {
+      chain.push(`${chain[chain.length - 1]}_${folder.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
+    }
+    return chain;
+  }
+
   // every object of every root, by type and name
   build() {
     const index = new Map();
@@ -121,7 +148,9 @@ export class ObjectStore {
           const key = `${type} ${objectName}`;
           // ours wins over a library's, src wins over gen
           if (!index.has(key)) {
-            index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library});
+            const chain = this.#packagesOf(file, root);
+            index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library,
+                            package: chain[chain.length - 1], packages: chain});
           }
           break;
         }
@@ -272,6 +301,82 @@ export class ObjectStore {
   }
 
   // --------------------------------------------------- check and activate
+
+  // ------------------------------------------------------------ packages
+
+  // every package of the system, parent first, with what is in it
+  packages() {
+    const packages = new Map();
+    const ensure = (name, parent) => {
+      if (packages.has(name) === false) {
+        packages.set(name, {name, parent, description: this.#packageText(name), objects: 0, subpackages: [], library: true});
+      }
+      return packages.get(name);
+    };
+    for (const entry of this.#entries().values()) {
+      // every link of the chain exists, even a folder that holds only folders
+      entry.packages.forEach((name, at) => {
+        const node = ensure(name, at === 0 ? undefined : entry.packages[at - 1]);
+        if (entry.library === false) {
+          node.library = false;
+        }
+        if (at > 0) {
+          const parent = packages.get(entry.packages[at - 1]);
+          if (parent.subpackages.includes(name) === false) {
+            parent.subpackages.push(name);
+          }
+        }
+      });
+      const own = packages.get(entry.package);
+      own.objects = own.objects + 1;
+    }
+    for (const node of packages.values()) {
+      node.subpackages.sort();
+    }
+    return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // one package: what is under it and what is in it
+  package(name) {
+    const wanted = String(name).toUpperCase();
+    const all = this.packages();
+    const node = all.find((p) => p.name === wanted);
+    if (node === undefined) {
+      throw new NotFound("DEVC", wanted);
+    }
+    const objects = [];
+    for (const entry of this.#entries().values()) {
+      if (entry.package === wanted) {
+        objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable});
+      }
+    }
+    return {
+      ...node,
+      objects: objects.sort((a, b) => (a.type + a.name).localeCompare(b.type + b.name)),
+    };
+  }
+
+  // the text of a package: a real one carries it in package.devc.xml, and
+  // until content arrives the folder speaks for itself
+  #packageText(name) {
+    const file = this.#devcOf(name);
+    if (file !== undefined) {
+      const text = /<CTEXT>([^<]*)<\/CTEXT>/.exec(readFileSync(join(this.root, file), "utf8"));
+      if (text !== null) {
+        return text[1];
+      }
+    }
+    return undefined;
+  }
+
+  #devcOf(name) {
+    for (const entry of this.#entries().values()) {
+      if (entry.type === "DEVC" && entry.package === name) {
+        return entry.file;
+      }
+    }
+    return undefined;
+  }
 
   // the rows of the system, for a client that asks for table contents: one
   // place knows about the schema, the seed and the dialect (tools/osd-data.mjs)
