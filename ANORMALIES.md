@@ -181,6 +181,32 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-14-builtin-positional-argument — An unrecorded built-in is called positionally
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/transpiler 2.13.86`, including the local build that already carried the earlier half of this fix
+- Affected ABAP statement, runtime API or adapter: any built-in function taking a single argument — `sin`, `cos`, `sqrt`, `exp` — called from inside an expression that carries more than one constructor expression
+- Minimal ABAP reproducer:
+
+```abap
+DATA lv_t TYPE f.
+DATA lv_speed TYPE f.
+DATA(a) = CONV f( '0.5' ) + sin( lv_t * lv_speed ) * CONV f( '0.3' ).
+"        -> abap.builtin.sin(abap.operators.multiply(...))   wrong
+DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
+"        -> abap.builtin.sin({val: abap.operators.add(...)}) right
+```
+
+- Exact command used to run it: `npx mocha build/test/builtin/cos.js`; found by open-steamgate driving her preload sequence, which died at frame 1281 in `zcl_o4d_twistzoomer`
+- Expected SAP behaviour: n/a, this is an emitter defect rather than a semantic one. The runtime signature is `sin(input: {val})`
+- Actual open-abap behaviour: the argument is emitted positionally, so `input.val` is undefined and the first line that touches it throws `Cannot read properties of undefined (reading 'get')`. Nineteen calls across eight of her classes, with correct calls in the same files three lines away
+- Impact on open-steamgate: the whole timeline. Twistzoomer was simply the first of the eight her sequence reached; the other seven were queued behind it. Deterministic, not a race — they chased concurrency first and it was a blind alley
+- Smallest safe workaround: `sin( val = x )` written out, or lift the argument into its own variable first
+- Upstream issue: none yet, commit `cd135f31` on `local/osd-build`. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
+- Regression-test location: `test/builtin/cos.ts` — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-14-arithmetic-typed-as-character — Arithmetic with a character literal is typed by the literal
 
 - Status: `open`, upstream
