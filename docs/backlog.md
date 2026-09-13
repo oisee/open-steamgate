@@ -26,6 +26,8 @@ Nothing below them starts until the answer.
      └─ unlocks 2.1 .. 2.4
      └─ external: open-abap-adt (interfaces only, LICENSE empty -> spec, not base)
      └─ external: vsp as the oracle and the test client
+     └─ external: sanitized ADT fixtures from V; this repository is public,
+        so raw captures never come here, V scrubs before handing over
 
 0.3  A4H: what goes up, and when                                      [A]
      ├─ level 1  the SEGW project as an abapGit repository (13 files)
@@ -73,17 +75,38 @@ Nothing below them starts until the answer.
 
 ## 2. The ADT façade (gated on 0.2)
 
+Not "flip a URL and 96 tools work". It is "flip a URL and iterate one
+subset at a time against vsp", whose client is strict on purpose. Order
+below is V's, and it is the order that matters: the session comes before
+the objects.
+
 ```
-2.1  thin vertical slice, one day                                     [S]
-     ├─ /sap/bc/adt/discovery
+2.1  session and CSRF emulation                                       [S]
+     ├─ the token dance: HEAD/GET fetch, x-csrf-token on writes
+     ├─ X-sap-adt-sessiontype stateful / stateless, sap-contextid, cookies
+     ├─ an affine session for lock -> write -> activate
+     └─ expiry by shape: a 200 without a token reads to vsp as logged out
+     └─ V's warning: this breaks first, so it is built first
+2.2  discovery as the gatekeeper                                      [S]
+     ├─ /sap/bc/adt/discovery advertises only what is implemented
+     └─ so vsp never calls an endpoint that 404s, and "which tools work"
+        has one honest answer
+2.3  thin vertical slice, one day                                     [S]
+     ├─ discovery + the session dance
      ├─ GetSource for a class, from the files in src/ and gen/
      └─ GetTableContents, from the database we already have
      └─ exit test: vsp pointed at localhost, its own tools answer
-2.2  reads: programs, classes, interfaces, tables, packages, search   [S]
-2.3  writes: source in, abaplint as the syntax check, transpile as
-     activation; synthetic locks, no transports                       [S]
-2.4  the rest of the surface vsp exercises (96 tools, 48 focused)     [S]
-     └─ external: recorded ADT payloads from V as the shape oracle
+2.4  reads: programs, classes, interfaces, tables, packages, search   [S]
+2.5  writes: source in, abaplint as the syntax check, transpile as
+     activation, ABAP Unit as the test run; synthetic locks, no
+     transports                                                       [S]
+2.6  runtime errors as ST22-shaped dump documents                     [S]
+     └─ V's freebie: `vsp dumps --explain` then works with no system
+2.7  honest scope: the development loop, some thirty to fifty of the
+     ninety-six tools. Transport organiser, job and spool, identity,
+     debugger over ADT and real cluster dumps stay out and stay
+     undiscovered.                                                    [S]
+     └─ external: sanitized ADT document shapes from V (see below)
 ```
 
 ## 3. Analytics and CDS (no gate, S can start)
