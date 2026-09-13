@@ -3,6 +3,10 @@
 The living board: what is decided, what is open, what is next. Dated analyses go
 in `docs/` as `YYYY-MM-DD-topic.md`.
 
+> The open list, as a tree with owners and external dependencies, is
+> [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
+> was decided and why.
+
 ## Decided (2026-09-11)
 
 - **Repo created** as the OData/Gateway member of the SAP-protocol family
