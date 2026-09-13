@@ -141,6 +141,25 @@ export function structureOf(store, type, name) {
   return {name: entry.name, type: ADT_TYPE[type] ?? type, children};
 }
 
+// The base resource of a class include. A client resolves a method body by
+// asking for the implementations include, and it asks for the include object
+// before it asks for the include's source. SHAPE NOT CONFIRMED: this answers
+// with the include as an object, carrying the link to its source, and a
+// client that wanted the source itself gets that instead when it says so in
+// its Accept header.
+export function classIncludeDocument(className, include, sourceUri) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes"
+                        xmlns:adtcore="http://www.sap.com/adt/core"
+                        xmlns:atom="http://www.w3.org/2005/Atom"
+                        adtcore:name="${xmlEscape(className)}"
+                        adtcore:type="${CLASS_INCLUDE}"
+                        class:includeType="${xmlEscape(include)}">
+  <atom:link href="${xmlEscape(sourceUri)}" rel="http://www.sap.com/adt/relations/source" type="text/plain"/>
+</class:abapClassInclude>
+`;
+}
+
 // ------------------------------------------------------------ packages
 
 // A package document: what a package is, and what is above it. The contents
@@ -249,6 +268,35 @@ export function searchObjects(store, query, options = {}) {
   const regex = anchored
     ? new RegExp("^" + pattern.split("*").map((p) => p.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$")
     : undefined;
+
+  // a package is not in the object index, because it is not a file: it comes
+  // from the package layer. A client that searches for one still expects to
+  // find it, which is how it discovers what to open a tree on.
+  if (options.type === undefined || options.type === "DEVC") {
+    const packages = store.packages()
+      .filter((p) => (regex === undefined ? p.name.includes(pattern) : regex.test(p.name)))
+      .slice(0, max)
+      .map((p) => ({
+        name: p.name,
+        type: ADT_TYPE.DEVC,
+        uri: `/sap/bc/adt/packages/${encodeURIComponent(p.name.toLowerCase())}`,
+        description: p.description === undefined || p.description === "" ? undefined : p.description,
+      }));
+    if (options.type === "DEVC") {
+      return packages;
+    }
+    if (packages.length >= max) {
+      return packages.slice(0, max);
+    }
+    const rest = searchNonPackages(store, pattern, regex, anchored, {...options, max: max - packages.length});
+    return [...packages, ...rest];
+  }
+
+  return searchNonPackages(store, pattern, regex, anchored, options);
+}
+
+function searchNonPackages(store, pattern, regex, anchored, options = {}) {
+  const max = options.max ?? 100;
 
   // the store searches names by substring; an anchored pattern is filtered
   // afterwards, because the widest thing the store can give is the right

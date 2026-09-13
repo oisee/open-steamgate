@@ -21,7 +21,7 @@
 import express from "express";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf} from "./adt-documents.mjs";
+import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, nodeStructureDocument, nodesOf, classIncludeDocument} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -190,6 +190,22 @@ export function adtRouter(options = {}) {
         res.type("text/plain; charset=utf-8").send(store.read(type, req.params.name).source);
       });
     });
+    // the base resource of a class include. A client resolving a method body
+    // asks for the include object before it asks for the include's source, so
+    // a 404 here stops a method read that would otherwise work.
+    router.get(`${BASE}/${adt}/:name/includes/:include`, (req, res) => {
+      answer(res, () => {
+        const {name, include} = req.params;
+        const part = store.read(type, name, include);
+        // a client that wants the text says so; otherwise it gets the object
+        if (String(req.headers.accept ?? "").includes("text/plain")) {
+          res.type("text/plain; charset=utf-8").send(part.source);
+          return;
+        }
+        res.type("application/vnd.sap.adt.oo.classes.includes.v2+xml")
+          .send(classIncludeDocument(store.find(type, name).name, include, `${BASE}/${adt}/${encodeURIComponent(String(name).toLowerCase())}/includes/${include}/source/main`));
+      });
+    });
     // a class's other includes: definitions, implementations, macros, tests
     router.get(`${BASE}/${adt}/:name/includes/:include/source/main`, (req, res) => {
       answer(res, () => {
@@ -236,6 +252,8 @@ export function adtRouter(options = {}) {
     answer(res, () => {
       const found = searchObjects(store, req.query.query ?? req.query.search ?? "", {
         max: Number(req.query.maxResults ?? 100),
+        // a client narrows by ADT type code (DEVC/K) or by the bare type
+        type: typeOf(req.query.objectType ?? req.query.type),
       });
       res.type("application/xml").send(objectReferencesDocument(found));
     });
@@ -259,6 +277,14 @@ export function adtRouter(options = {}) {
   });
 
   return {router, sessions, store, data, resources};
+}
+
+// a client names a type either as ADT does (DEVC/K, CLAS/OC) or bare (DEVC)
+function typeOf(asked) {
+  if (asked === undefined || asked === "") {
+    return undefined;
+  }
+  return String(asked).toUpperCase().split("/")[0];
 }
 
 // The store's errors as the statuses a client expects.

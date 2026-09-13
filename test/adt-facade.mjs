@@ -214,6 +214,31 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect([...xml.matchAll(/<adtcore:objectReference /g)].length).to.be.at.most(3);
     });
 
+    it("the base resource of a class include answers, which is what a method read hits first", async () => {
+      const res = await call("/oo/classes/ZCL_STG_SEGW_TEST/includes/testclasses");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("abapClassInclude");
+      expect(xml).to.contain('class:includeType="testclasses"');
+      expect(xml).to.contain("includes/testclasses/source/main");
+    });
+
+    it("a client that asks the include for text gets the source itself", async () => {
+      const res = await call("/oo/classes/ZCL_STG_SEGW_TEST/includes/testclasses", {headers: {accept: "text/plain"}});
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("text/plain");
+      expect(await res.text()).to.contain("CLASS ltcl");
+    });
+
+    it("packages are findable by search, which is how a client discovers the tree to open", async () => {
+      const res = await call("/repository/informationsystem/search?query=" + encodeURIComponent("$STG_SEGW*") + "&objectType=DEVC%2FK&maxResults=20");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain('adtcore:type="DEVC/K"');
+      expect(xml).to.contain('adtcore:name="$STG_SEGW"');
+      expect(xml).to.contain('adtcore:uri="/sap/bc/adt/packages/');
+    });
+
     it("a package says what it is and what is above it", async () => {
       const res = await call("/packages/$STG_GEN_SEGW");
       expect(res.status).to.equal(200);
