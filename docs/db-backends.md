@@ -110,7 +110,24 @@ script** (`build/sw.js`, 14 MB, service worker, no ESM at load time). Whether
 a given engine executes a 4 MB asm.js blob fast enough is a separate
 question, and a Go-backed client removes it entirely.
 
+## What the vsp session measured on top of this (2026-09-13)
+
+The question behind the write-up was whether the transpiler's runtime plus
+this gateway can be embedded into a single static Go binary instead of
+shipping a Node sidecar. Their result, for the record:
+
+- **goja runs it, after one down-level.** As published, the runtime does not
+  load: `abap.statements.loop` is an async generator and goja has none. With
+  Babel lowering the async-generator syntax it runs, byte-identical output,
+  three small shims, and 40 to 85 times slower than V8.
+- **The blocker was never WebAssembly.** Our browser build already uses the
+  asm.js build of sql.js, so a database without wasm exists today. The case
+  for a Go backend over `modernc.org/sqlite` is speed and dropping a 14 MB
+  bundle, not feasibility.
+- If the embed path is chosen, the first build item is exactly the eleven
+  methods and seven rewrites above, as Go host functions.
+
 ## Not measured here
 
-Speed. `npm run bench:cube -- 1000000` compares SQLite and DuckDB through this
+Speed of a Go-hosted engine against ours. `npm run bench:cube -- 1000000` compares SQLite and DuckDB through this
 same seam; nothing comparable exists for a Go engine yet.
