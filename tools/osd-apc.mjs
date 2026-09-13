@@ -122,6 +122,39 @@ export function fieldsOf(url, HostClass) {
   return table;
 }
 
+// What went wrong, in words.
+//
+// An ABAP exception carries its text in a method rather than a property, and
+// plenty of them carry none at all — a raised CX_ with nothing set reads as
+// the empty string. Logging that alone prints a line with a blank where the
+// reason should be, which is worse than silence because it looks like the
+// reason was "nothing". The class name is always there, so it goes first.
+export function describe(error) {
+  if (error === undefined || error === null) {
+    return "an exception with no value";
+  }
+  const name = error.constructor?.INTERNAL_NAME ?? error.constructor?.name ?? "exception";
+  const text = (() => {
+    try {
+      const raw = error.message?.get?.() ?? error.message;
+      return typeof raw === "string" ? raw.trim() : "";
+    } catch {
+      return "";
+    }
+  })();
+  // the frame goes on either way. An ABAP exception with no text needs it to
+  // be findable at all; a JavaScript TypeError out of transpiled code needs
+  // it more, because the message names a property and not a place, and
+  // "cannot read properties of undefined" is the same sentence everywhere.
+  const frames = (error.stack ?? "").split("\n").slice(1)
+    .map((l) => l.trim())
+    .filter((l) => l.includes("/output/") || l.includes("node_modules/@abaplint"))
+    .slice(0, 3);
+  const where = frames.length === 0 ? (error.stack?.split("\n")?.[1]?.trim() ?? "") : frames.join(" <- ");
+  const body = text === "" ? `${name} (no text)` : `${name}: ${text}`;
+  return where === "" ? body : `${body}\n    ${where}`;
+}
+
 // The upgrade, and then the conversation.
 //
 // `open()` is allowed to refuse: a handler that says no gets a clean close
@@ -238,7 +271,7 @@ export async function serveChannel(options) {
   let turn = Promise.resolve();
   const queue = (work) => {
     turn = turn.then(work).catch((e) => {
-      log?.(`APC ${channel.path}: ${e?.message?.get?.() ?? e?.message ?? e}`);
+      log?.(`APC ${channel.path} (${channel.handler}): ${describe(e)}`);
       shut(1011, "handler failed");
     });
     return turn;
