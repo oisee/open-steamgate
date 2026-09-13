@@ -587,6 +587,11 @@ export class ObjectStore {
     if (result.issues.length > 0) {
       return {...result, active: false, dependents: []};
     }
+    // the order matters: a candidate is only a dependent if its own check
+    // fails. That is what makes the over-approximation above safe — a name
+    // mentioned in a comment produces a candidate, the candidate checks
+    // clean, and nothing is refused over it. A wasted check, not a wrong
+    // verdict.
     const broken = [];
     for (const dependent of this.dependents(type, name)) {
       const checked = this.check(dependent.type, dependent.name);
