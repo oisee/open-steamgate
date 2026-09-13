@@ -137,6 +137,14 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   repos; Lars said self-merging in open-abap-odata is fine (he has no time),
   the transpiler stays his to merge. A
   workaround stays in `src/` or `tools/` only until the fix is on npm.
+- **A transpiler PR comes from a branch inside `abaplint/transpiler`, not
+  from a fork.** Lars said so on #1836 (2026-09-13, merged the same
+  morning): a branch in the repository triggers the performance and
+  regression workflows, and a fork's branch does not, so a PR from a fork is
+  reviewed with less evidence than one that costs nothing extra to give him.
+  The performance test itself is #1837. Pushing a branch there is not
+  merging: `main` is still his, and nothing of ours is merged by us in
+  `abaplint/transpiler` or `open-abap-core`.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).
