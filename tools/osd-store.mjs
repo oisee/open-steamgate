@@ -234,6 +234,30 @@ export class ObjectStore {
   }
 
   // the source of an object, or of one of a class's includes
+  // Which includes a class actually has on disk.
+  //
+  // A client builds the class's file list from this: against a real system a
+  // class appears as a folder holding .clas.abap beside .clas.locals_def.abap
+  // and its siblings, and a class document that lists only main gets a single
+  // flat file. Reporting an include that is not there would be worse — a file
+  // in the tree that opens empty.
+  classIncludes(name) {
+    const entry = this.find("CLAS", name);
+    if (entry === undefined) {
+      return [];
+    }
+    const present = [];
+    for (const [include, suffix] of Object.entries(INCLUDES)) {
+      if (include === "main") {
+        continue;
+      }
+      if (existsSync(join(this.root, entry.file.replace(/\.clas\.abap$/, suffix)))) {
+        present.push(include);
+      }
+    }
+    return present;
+  }
+
   read(type, name, include = "main") {
     const entry = this.find(type, name);
     if (entry === undefined) {
