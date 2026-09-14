@@ -313,21 +313,32 @@ back = ch.       " CX_SY_CONVERSION_NO_NUMBER
 - Regression-test location: `test/types/float.ts` (round trip, point still a point, `'1,2,3'` still raises) and `test/types/decfloat34.ts`
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-09-14-exception-without-text — An exception raised by the runtime has no text
+### ANOMALY-2026-09-14-source-position-without-raise — `get_source_position( )` crashes on an exception the runtime raised
 
-- Status: `open`
+- Status: `fixed upstream: open-abap/open-abap-core#1219`
 - Discovery date: `2026-09-14`
-- Affected versions: `@abaplint/runtime 2.13.86`
-- Affected ABAP statement, runtime API or adapter: `throw_error.ts`, so every exception the runtime raises itself — `CX_SY_CONVERSION_NO_NUMBER`, `CX_SY_ZERODIVIDE` and the rest
-- Minimal ABAP reproducer: catch any runtime-raised exception and call `get_text( )`
-- Exact command used to run it: open-steamgate's channel log, which printed a line with a blank where the reason should be
-- Expected SAP behaviour: a system exception carries a text from its message class
-- Actual open-abap behaviour: `throwError` does `throw new abap.Classes[name]()` without calling `constructor_`, so the object is never constructed and has no text. Not a blank reason — an unconstructed exception
-- Impact on open-steamgate: a log line with an empty cause, which reads as "the reason was nothing" and is worse than silence. Three runs told them only that something had failed. Their logger now names the exception class and says when there is no text, which is the right defence regardless
-- Smallest safe workaround: log the class name rather than the text
-- Upstream issue: none yet. The fix wants an async `constructor_` in a synchronous throw path, which is a deliberate change rather than a quick one
-- Regression-test location: none
-- Upstream version containing a fix: `unknown`
+- Affected versions: `open-abap-core` before #1219
+- Affected ABAP statement, runtime API or adapter: `cx_root~get_source_position`, so every exception the runtime raises itself — `CX_SY_CONVERSION_NO_NUMBER`, `CX_SY_ZERODIVIDE` and the rest
+- Minimal ABAP reproducer:
+
+```abap
+TRY.
+    DATA(lv_f) = CONV f( 'not a number' ).
+  CATCH cx_root INTO DATA(lx).
+    lx->get_source_position( IMPORTING source_line = DATA(lv_line) ).
+ENDTRY.
+```
+
+- Exact command used to run it: `npm run unit` in open-abap-core with that test class
+- Expected SAP behaviour: a position, or at worst the fallback the method already writes
+- Actual open-abap behaviour: `Cannot read properties of undefined (reading 'INTERNAL_LINE')`. `EXTRA_CX` is attached by the transpiled `RAISE` statement (`raise.ts:104`); an exception the runtime raises never goes through `RAISE`, so it has none, and `this.EXTRA_CX.INTERNAL_LINE || 1` throws on the property access before the fallback can be reached
+- Impact on open-steamgate: this is the one that actually cost the three blind runs, not the missing text. Their channel logged an empty reason, and the natural next step — asking the exception where it came from — would have replaced a silent failure with a louder unrelated one
+- **Correction, 2026-09-14.** This entry previously said the exception had *no text*, and that `throwError` not calling `constructor_` was why. Both were wrong, and measured to be wrong the next morning: `get_text( )` returns "Conversion no number" on a runtime-raised exception, constructed or not, because `cx_root~constructor` only sets `previous` and `textid` and `get_text` goes through `cl_message_helper`, which needs neither. The real empty-reason bug was open-steamgate's `String(error?.message ?? error)`, where `??` does not fire on `""` — see [[ANOMALY-2026-09-14-exception-with-no-message]] in their half. Two wrong causes for one symptom, and the entry named neither
+- Smallest safe workaround: none needed now
+- Upstream issue: **[open-abap/open-abap-core#1219](https://github.com/open-abap/open-abap-core/pull/1219)**, merged and approved 2026-09-14. Two question marks; the fallbacks were already written and unreachable
+- Regression-test location: `src/exceptions/cx_root.clas.testclasses.abap`, raising through `CONV` rather than `RAISE` so it goes down the path that had no cover
+- Upstream version containing a fix: the commit after #1219
+- Related: the position it returns is still the fallback, because nothing attaches a real one. `tools/osd-where.mjs` answers the actual question from the source maps instead
 
 ### ANOMALY-2026-09-14-sy-tabix-hashed — `sy-tabix` is a row number in a loop over a hashed table
 
