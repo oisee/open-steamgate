@@ -24,8 +24,14 @@ test("the worker answering is the worker that was just built", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html");
+    await page.goto("http://localhost:3031/index.html?stay=1");
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    // land somewhere stable first. index.html is the installer and navigates
+    // to the app the moment the worker is in control, so anything evaluated
+    // on it races that navigation and dies as "execution context was
+    // destroyed" — which reads like a worker fault and is not one. This is
+    // the same race that made the suite flake.
+    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/stamp", {waitUntil: "domcontentloaded"});
     const answered = await page.evaluate(async () => {
       const res = await fetch("/__preview/build", {cache: "no-store"});
       return {status: res.status, body: await res.json(), sw: true};
@@ -117,7 +123,7 @@ test("an ICF service is served by the worker too, page and all", async () => {
     // so land somewhere stable before asking anything of the page: an
     // evaluate that runs mid-navigation dies with "execution context was
     // destroyed" and reads like a worker fault rather than a race
-    await page.goto("http://localhost:3031/index.html");
+    await page.goto("http://localhost:3031/index.html?stay=1");
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
     await page.goto("http://localhost:3031/sap/bc/zork");
     await page.waitForLoadState("domcontentloaded");
@@ -151,7 +157,7 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     const page = await context.newPage();
     // the installer page navigates away once the worker is registered, so
     // land on a page the worker serves and stay there
-    await page.goto("http://localhost:3031/index.html");
+    await page.goto("http://localhost:3031/index.html?stay=1");
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
     await page.goto("http://localhost:3031/sap/bc/zork");
     await page.waitForLoadState("domcontentloaded");
@@ -215,7 +221,7 @@ test("SMW0 objects are served from the bundle, byte for byte", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html");
+    await page.goto("http://localhost:3031/index.html?stay=1");
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
     // somewhere the worker serves and nothing else happens: the Zork page
     // opens its channel on load, and a handler that boots a Z-machine in the
@@ -258,6 +264,40 @@ test("SMW0 objects are served from the bundle, byte for byte", async () => {
     expect(fetched.audio.type).toContain("audio/mpeg");
     expect(fetched.audio.length).toBe(expected["ZOISEE-EAR-02.MP3"].length);
     expect(fetched.audio.sha256).toBe(sha(expected["ZOISEE-EAR-02.MP3"]));
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
+// A real stateful handler, end to end, which the synthetic one cannot prove.
+//
+// Alice's suggestion, and the right one: Zork exercises more of the bundle in
+// one go than the demo does and has none of its unrelated trouble. The page
+// opens its own socket in its own script, so the injected shim has to be
+// there first; the handler is a stateful APC class with a Z-machine behind
+// it; and the story file is an SMW0 object, so the media path is in the
+// chain too. If any link is missing the terminal says DISCONNECTED instead
+// of the game.
+test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-zork-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    // domcontentloaded, not load: the page connects as it loads and the
+    // handler boots a Z-machine in the worker, which is the only thread
+    // there is, so waiting for the load event is waiting for the game
+    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+
+    // the handler accepted the connection
+    await expect(page.locator("#statusText")).toHaveText("Connected - Playing ZORK", {timeout: 60000});
+
+    // and it ran: the banner is the handler's own, the rest is the story
+    // file out of SMW0 interpreted by the ABAP Z-machine
+    await expect(page.getByText("Z-Machine V3 Interpreter in ABAP")).toBeVisible({timeout: 60000});
+    await expect(page.getByText("West of House")).toBeVisible({timeout: 60000});
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});

@@ -398,13 +398,22 @@ open  revisions: reading them out of git instead of a system.
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
-8.5  the preview suite flakes on navigation to a worker-served page    [S]
-     └─ seen twice in about eight runs on 2026-09-14, both times a
-        page.goto to a path the worker answers timing out; the same run
-        passes on retry, and a standalone probe never reproduced it
-     └─ worth fixing rather than retrying: a suite that goes green on a
-        second run teaches everyone to run it twice, which is how a real
-        failure gets waved through
+8.5  the preview suite flakes on a worker-served page        [S] FIXED
+     └─ seen on 2026-09-14, a different test each run, mostly a page.goto
+        timing out or "execution context was destroyed". Diagnosed rather
+        than retried, and it was a real race: web/index.html is the
+        installer and does location.replace("app/") the moment the worker
+        is ready, so every test that waits for the controller on that page
+        and then goes somewhere collides with a navigation already in
+        flight. The error surfaces on an unrelated line, which is why it
+        read as noise
+     └─ the fix is in the page, not the tests: index.html?stay leaves the
+        visitor where they are instead of redirecting, which is a
+        reasonable thing to offer anyway, and the suite uses it. Four
+        consecutive clean runs, 6/6
+     └─ the lesson is 8.4's: a suite that goes green on a second run
+        teaches everyone to run it twice, which is how a real failure gets
+        waved through. This one was hiding a defect for a day
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
