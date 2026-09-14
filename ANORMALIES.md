@@ -183,7 +183,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-14-class-constructor-eager — A class constructor runs before the program, not at first use
 
-- Status: `open`
+- Status: `reported: abaplint/transpiler#1849`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `CLASS-METHODS class_constructor`
@@ -215,7 +215,7 @@ WRITE / 'after'.
 - Actual open-abap behaviour: `ctor / before / touch / after`. The constructor runs eagerly, before the program's own statements, which is what an ES module initialising at import time does
 - Impact on open-steamgate: subtle and real, because a class constructor can touch `sy-tabix`. A registry filled with `APPEND` in a class constructor leaves `sy-tabix` at the last appended index; run lazily inside a loop body that reads `sy-tabix` afterwards, the first iteration sees that index rather than its own row number. Measured: `12` here where a system would give `32` for the same program. Found by larshp reviewing `abaplint/transpiler#1848`, who asked whether a test should expect `,a,b,c` — it depends entirely on this
 - Smallest safe workaround: do not read `sy-tabix` after a call that may be a class's first access; or touch the class once before the loop, which is what that test now does
-- Upstream issue: none yet. Deferring initialisation to first access is a design change in how the transpiler emits and imports modules, not a bug fix, so it belongs to larshp to decide rather than to a drive-by pull request. Reported on #1848 with the measurement
+- Upstream issue: **[abaplint/transpiler#1849](https://github.com/abaplint/transpiler/issues/1849)**. Confirmed as a bug by larshp on #1848 the same day — "yea, its a bug, dont use class constructors" — so the expected column above is no longer only our reading. Filed as an issue rather than a pull request because deferring initialisation to first access changes how the transpiler emits and imports modules, which is his design call. His advice, avoid class constructors, is a good workaround and not one a repository being transpiled knows to have followed
 - Regression-test location: none; the pull request that found it now avoids the dependency rather than pinning it
 - Upstream version containing a fix: `unknown`
 
