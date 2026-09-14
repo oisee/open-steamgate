@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -63,7 +63,7 @@ export function discoveryDocument(resources) {
 
   const collection = (r) => `    <app:collection href="${xmlEscape(r.href)}">
       <atom:title>${xmlEscape(r.title)}</atom:title>
-${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}    </app:collection>`;
+${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}    </app:collection>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <app:service xmlns:app="http://www.w3.org/2007/app"
@@ -135,6 +135,31 @@ const ACCEPT = {
 };
 
 // which workspace a collection is filed under in the discovery document
+// The category every collection carries, and which a client needs before it
+// will parse the collection at all.
+//
+// Read off A4H's own discovery document rather than invented: a cloud project
+// reported "Error parsing collection" for every collection this façade
+// advertised, and the message named what was wrong — categories=[]. The terms
+// and schemes below are the system's, including the two that misspell
+// "repository" as "respository", because a client matching on the string
+// would not forgive the correction.
+const CATEGORY = {
+  "programs/programs": ["programs", "http://www.sap.com/adt/categories/programs"],
+  "programs/includes": ["includes", "http://www.sap.com/adt/categories/programs"],
+  "oo/classes": ["classes", "http://www.sap.com/adt/categories/oo"],
+  "oo/interfaces": ["interfaces", "http://www.sap.com/adt/categories/oo"],
+  "functions/groups": ["groups", "http://www.sap.com/adt/categories/functions"],
+  "packages": ["devck", "http://www.sap.com/wbobj/packages"],
+  "ddic/tables": ["tabldt", "http://www.sap.com/wbobj/dictionary"],
+  "abapunit/testruns": ["unittestruns", "http://www.sap.com/adt/categories/abapunit"],
+  "activation": ["activationruns", "http://www.sap.com/adt/categories/activation"],
+  "checkruns": ["checkruns", "http://www.sap.com/adt/categories/check"],
+  "repository/nodestructure": ["nodestructure", "http://www.sap.com/adt/categories/respository"],
+  "repository/informationsystem/search": ["search", "http://www.sap.com/adt/categories/respository"],
+  "repository/informationsystem/virtualfolders": ["virtualfolders", "http://www.sap.com/adt/categories/repository"],
+};
+
 const WORKSPACE = (adt) => {
   if (adt.startsWith("ddic/") || adt.startsWith("datapreview/")) {
     return "Data Dictionary";
@@ -200,6 +225,7 @@ export function adtRouter(options = {}) {
     title: TITLE[adt] ?? adt,
     href: `${BASE}/${adt}`,
     accept: ACCEPT[adt] ?? [],
+    category: CATEGORY[adt],
   });
 
   // What a client asked for and did not get, in two kinds. "resource" is a
@@ -341,6 +367,135 @@ export function adtRouter(options = {}) {
     );
   });
 
+  // ---- Virtual folders: how a cloud project builds its tree.
+  //
+  // Measured on a working session: the tree came from 19 POSTs to
+  // virtualfolders/contents and not one call to nodestructure. The two are
+  // not interchangeable — a cloud client asked this façade for a tree, got
+  // nodestructure back, and reported "No content-handler found for
+  // content-type …nodestructure.v1+xml and data-type RepositoryObjectTreeContent".
+  // It was not outdated and no plug-in was missing: it had asked for one
+  // thing and been handed another.
+  //
+  // The model is a filter, not a hierarchy. The client sends preselections
+  // (this package, that type) and an order of facets still to expand. A
+  // non-empty facetorder asks for the folders of its first facet; an empty
+  // one asks for the objects themselves. So one resource serves every level
+  // of the tree, and the tree's shape is the client's choice rather than
+  // ours.
+  const FACETS = ["package", "type", "group"];
+
+  const virtualFoldersRequest = (xml) => {
+    const preselection = new Map();
+    for (const [, facet, inner] of xml.matchAll(
+      /<vfs:preselection[^>]*facet="([^"]+)"[^>]*>([\s\S]*?)<\/vfs:preselection>/g)) {
+      preselection.set(facet.toLowerCase(),
+        [...inner.matchAll(/<vfs:value>([^<]*)<\/vfs:value>/g)].map((m) => m[1].toUpperCase()));
+    }
+    const order = [...xml.matchAll(/<vfs:facet>([^<]+)<\/vfs:facet>/g)].map((m) => m[1].toLowerCase());
+    const pattern = /objectSearchPattern="([^"]*)"/.exec(xml)?.[1] ?? "*";
+    return {preselection, order, pattern};
+  };
+
+  // Every object this façade holds, with the two properties the facets
+  // select on.
+  const everyObject = () => {
+    const all = [];
+    for (const pkg of store.packages()) {
+      for (const object of store.package(pkg.name).objects) {
+        all.push({...object, package: pkg.name});
+      }
+    }
+    return all;
+  };
+
+  const matchesPattern = (name, pattern) => {
+    if (pattern === "" || pattern === "*") {
+      return true;
+    }
+    const escaped = pattern.toUpperCase().split("*")
+      .map((part) => part.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+    return new RegExp(`^${escaped}$`).test(name.toUpperCase());
+  };
+
+  const facetValue = (object, facet) => {
+    if (facet === "package") {
+      return object.package;
+    }
+    if (facet === "type") {
+      return object.type;
+    }
+    // "group" splits the workbench into its top-level drawers; everything
+    // here is source or dictionary, and the client only ever uses it to
+    // narrow, so one value it recognises is enough.
+    return "SOURCE_LIBRARY";
+  };
+
+  const xmlEscape = (text) => String(text)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
+  advertise("repository/informationsystem/virtualfolders");
+  router.get(`${BASE}/repository/informationsystem/virtualfolders/facets`, (req, res) => {
+    res.type("application/vnd.sap.adt.facets.v1+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<vf:facets xmlns:vf="http://www.sap.com/adt/ris/facets">' +
+      FACETS.map((facet) =>
+        `<vf:facet key="${facet}" displayName="${facet[0].toUpperCase() + facet.slice(1)}"` +
+        ` description="${facet}" isHierarchical="false"` +
+        ' isForFiltering="true" isForStructuring="true"/>').join("") +
+      "</vf:facets>",
+    );
+  });
+
+  router.post(`${BASE}/repository/informationsystem/virtualfolders/contents`, async (req, res) => {
+    const asked = virtualFoldersRequest((await rawBody(req)).toString("utf8"));
+
+    let objects = everyObject().filter((object) => matchesPattern(object.name, asked.pattern));
+    for (const [facet, values] of asked.preselection) {
+      objects = objects.filter((object) => values.includes(facetValue(object, facet)));
+    }
+
+    const selection = [...asked.preselection]
+      .map(([facet, values]) => `${facet}:${values.join(",")}`).join(" ");
+    const link =
+      `<atom:link href="${BASE}/repository/informationsystem/virtualfolders?selection=${encodeURIComponent(selection)}"` +
+      ' rel="http://www.sap.com/adt/relations/informationsystem/virtualfolders/selection"' +
+      ' title="Virtual Folder Selection" xmlns:atom="http://www.w3.org/2005/Atom"/>';
+
+    let body;
+    if (asked.order.length === 0) {
+      // the leaves
+      body = objects.map((object) => {
+        const type = TYPES[object.type];
+        const uri = `${BASE}/${type?.adt ?? "unknown"}/${object.name.toLowerCase()}`;
+        return `<vfs:object uri="${uri}" text="${xmlEscape(object.name)}" name="${xmlEscape(object.name)}"` +
+          ` package="${xmlEscape(object.package)}" type="${ADT_TYPE[object.type] ?? object.type}" expandable="${type?.source === true}">` +
+          `<atom:link href="${uri}" rel="http://www.sap.com/adt/relations/objects"` +
+          ' title="ADT Object Reference" xmlns:atom="http://www.w3.org/2005/Atom"/>' +
+          "</vfs:object>";
+      }).join("");
+    } else {
+      // the folders of the next facet, each counting what is under it
+      const facet = asked.order[0];
+      const counts = new Map();
+      for (const object of objects) {
+        const value = facetValue(object, facet);
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+      body = [...counts].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) =>
+        `<vfs:virtualFolder hasChildrenOfSameFacet="false" counter="${count}"` +
+        ` name="${xmlEscape(value)}" text="${xmlEscape(value)}" facet="${facet}"/>`).join("");
+    }
+
+    res.type("application/vnd.sap.adt.repository.virtualfolders.result.v1+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      `<vfs:virtualFoldersResult objectCount="${objects.length}"` +
+      ' xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders">' +
+      link + body +
+      "</vfs:virtualFoldersResult>",
+    );
+  });
+
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
   //
@@ -376,7 +531,7 @@ export function adtRouter(options = {}) {
     const descriptors = Object.entries(TYPES).map(([code, type]) => {
       const [label, plural, category] = LABELS[code] ?? [code, code, "Others"];
       return "<SEU_ADT_OBJECT_TYPE_DESCRIPTOR>" +
-        `<OBJECT_TYPE>${code}/${code === "DEVC" ? "K" : "I"}</OBJECT_TYPE>` +
+        `<OBJECT_TYPE>${ADT_TYPE[code] ?? code}</OBJECT_TYPE>` +
         `<OBJECT_TYPE_LABEL>${label}</OBJECT_TYPE_LABEL>` +
         `<OBJECT_TYPE_LABEL_PLURAL>${plural}</OBJECT_TYPE_LABEL_PLURAL>` +
         `<CATEGORY>${category}</CATEGORY>` +
@@ -388,7 +543,7 @@ export function adtRouter(options = {}) {
         "</SEU_ADT_OBJECT_TYPE_DESCRIPTOR>";
     }).join("");
 
-    res.type("application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.RepositoryTypeList").send(
+    res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryTypeList")).send(
       '<?xml version="1.0" encoding="utf-8"?>' +
       '<asx:abap version="1.0" xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA>' +
       descriptors +
@@ -420,17 +575,14 @@ export function adtRouter(options = {}) {
     );
   };
 
-  advertise("runtime/dumps");
   router.get(`${BASE}/runtime/dumps`, (req, res) => {
     emptyFeed(res, "Runtime Errors", `${BASE}/runtime/dumps`);
   });
 
-  advertise("runtime/systemmessages");
   router.get(`${BASE}/runtime/systemmessages`, (req, res) => {
     emptyFeed(res, "System Messages", `${BASE}/runtime/systemmessages`);
   });
 
-  advertise("gw/errorlog");
   router.get(`${BASE}/gw/errorlog`, (req, res) => {
     emptyFeed(res, "SAP Gateway Error Log", `${BASE}/gw/errorlog`);
   });
@@ -788,7 +940,18 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/repository/nodestructure`, (req, res) => {
     answer(res, () => {
       const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
-      res.type("application/vnd.sap.adt.repository.nodestructure.v1+xml").send(nodeStructureDocument(nodesOf(store, name)));
+      // Answered in the type the client asked for, which is not the one this
+      // resource is named after.
+      //
+      // A client sends Accept: application/vnd.sap.as+xml; dataname=com.sap.
+      // adt.RepositoryObjectTreeContent, and this used to answer
+      // …nodestructure.v1+xml. The body was right all along — the asx:abap
+      // with TREE_CONTENT that the client wanted — and only the label was
+      // wrong, so the client reported "No content-handler found" for a
+      // document it would have understood. The dataname is the client's own
+      // name for the shape it expects; echoing it is the whole fix.
+      res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryObjectTreeContent"))
+        .send(nodeStructureDocument(nodesOf(store, name)));
     });
   });
 
@@ -883,4 +1046,14 @@ function sessionIdentifier(req, identity) {
   const named = new RegExp(`SAP_SESSIONID_${identity.systemID}_${identity.client}=([^;]+)`).exec(cookie);
   const seed = named === null ? `${identity.systemID}${identity.client}${identity.userName}` : named[1];
   return createHash("sha256").update(seed).digest("hex").slice(0, 32).toUpperCase();
+}
+
+// asXmlTypeFor echoes back the vnd.sap.as+xml dataname a client asked for.
+//
+// These resources carry ABAP serialization rather than a document of their
+// own, and the dataname is how a client knows which structure is inside.
+// Naming a different one is how a correct body gets refused.
+function asXmlTypeFor(req, fallback) {
+  const asked = /dataname=([\w.]+)/.exec(String(req.headers.accept ?? ""));
+  return `application/vnd.sap.as+xml; charset=utf-8; dataname=${asked === null ? fallback : asked[1]}`;
 }

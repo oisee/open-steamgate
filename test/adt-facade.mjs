@@ -133,7 +133,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
 
       const body = await res.text();
       expect(body).to.match(/<asx:abap/);
-      expect(body).to.match(/<OBJECT_TYPE>CLAS\/I<\/OBJECT_TYPE>/);
+      expect(body).to.match(/<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>/);
       expect(body).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>/);
 
       // a list naming a type this façade does not serve is a 404 waiting for
