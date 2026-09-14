@@ -135,7 +135,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-13-conv-second-in-expression — The second constructor expression in one expression has no type
 
-- Status: `fixed locally, PR parked`
+- Status: `PR open: abaplint/transpiler#1842`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`, `@abaplint/core 2.120.5`
 - Affected ABAP statement, runtime API or adapter: `CONV` (and any constructor expression resolved through an inferred type) when more than one appears in one expression
@@ -145,7 +145,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: the transpile ends with `TypeNameOrInfer, type not found: f`. The syntax check records an InferredType reference for the first name and none for the rest, and the transpiler had nothing else to fall back on
 - Impact on open-steamgate: none of ours; 786 uses of `CONV f(` across 69 files of vivid-vibes, 136 of them with two in one expression, so the demo payload did not transpile at all
 - Smallest safe workaround: split the expression into two statements
-- Upstream issue: none yet, PR deferred by Alice 2026-09-13. Fixed in a local branch of the transpiler (`fix/conv-builtin-type`): a built-in type name that names exactly one type (`i`, `f`, `string`, `xstring`, `d`, `t`, `int8`, `utclong`, `decfloat16/34`) is enough on its own when no reference was recorded
+- Upstream issue: **PR [abaplint/transpiler#1842](https://github.com/abaplint/transpiler/pull/1842)**, opened 2026-09-14 from branch `fix/conv-builtin-type-name` inside the repo, so Regression runs. A built-in type name that names exactly one type (`i`, `f`, `string`, `xstring`, `d`, `t`, `int8`, `utclong`, `decfloat16/34`) is enough on its own when no reference was recorded
 - Regression-test location: the transpiler's `test/single_statements.ts`, local branch
 - Upstream version containing a fix: `unknown`
 
@@ -161,7 +161,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: the emitted JavaScript drops `( 1 - 2 ) *` and closes one bracket too many. The rearranger flattens a nested arithmetic Source into its parent so precedence can be decided across the whole chain, and a constructor expression is five children rather than one, so its type name and body landed beside the operators and were read as operands
 - Impact on open-steamgate: none of ours; 15 of 85 effect classes in vivid-vibes emitted modules that could not be imported, and one broken module breaks the whole runtime because `init.mjs` imports every class
 - Smallest safe workaround: assign the constructor expression to a variable first
-- Upstream issue: none yet, PR deferred. Fixed in the same local branch: the head of the flattened chain is wrapped back into one Source before it is hoisted
+- Upstream issue: none yet, branch `fix/rearranger-constructor-operand`, next in the queue. The head of the flattened chain is wrapped back into one Source before it is hoisted
 - Regression-test location: the transpiler's `test/single_statements.ts`, local branch
 - Upstream version containing a fix: `unknown`
 
@@ -203,7 +203,7 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 - Actual open-abap behaviour: the argument is emitted positionally, so `input.val` is undefined and the first line that touches it throws `Cannot read properties of undefined (reading 'get')`. Nineteen calls across eight of her classes, with correct calls in the same files three lines away
 - Impact on open-steamgate: the whole timeline. Twistzoomer was simply the first of the eight her sequence reached; the other seven were queued behind it. Deterministic, not a race — they chased concurrency first and it was a blind alley
 - Smallest safe workaround: `sin( val = x )` written out, or lift the argument into its own variable first
-- Upstream issue: none yet, branch `fix/conv-builtin-type` in `abaplint/transpiler`, which is where the earlier half of it lives too. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
+- Upstream issue: none yet, branch `fix/builtin-not-a-method`, which carries both halves — the name and the argument shape — since they are the same defect one layer apart. It sits on `fix/conv-builtin-type-name` (PR #1842) because a built-in only goes unrecorded in an expression that also loses a constructor expression's type, so the test cannot be written without it; four other shapes were tried. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
 - Regression-test location: `test/builtin/cos.ts` — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
 - Upstream version containing a fix: `unknown`
 
@@ -385,6 +385,22 @@ ENDLOOP.
 - How it ends: four pull requests upstream, one per fix, at which point the link comes out and this entry moves to the resolved section. The four are recorded above with their reproducers
 - Upstream issue: none yet, deferred by Alice 2026-09-13
 
+### ANOMALY-2026-09-13-binary-file-to-output — A binary file is corrupted on the way to output
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-13`
+- Affected versions: `@abaplint/transpiler-cli 2.13.86`
+- Affected ABAP statement, runtime API or adapter: the CLI's copy of non-ABAP files, `FileOperations.readAllFiles` and `writeFiles`
+- Minimal ABAP reproducer: none; put a PNG in a W3MI object and transpile
+- Exact command used to run it: `abap_transpile` on a tree with `*.w3mi.data.png`
+- Expected SAP behaviour: n/a, a tooling defect. The bytes that went in should come out
+- Actual open-abap behaviour: the file was read and written as UTF-8, so every byte above 0x7F became the replacement character: an 11770-byte PNG arrived as 20175 bytes and no image. Nothing reported an error, because a corrupted PNG is a perfectly valid file
+- Impact on open-steamgate: every image and every sound in her demo. It is the reason the media chain could not be tested end to end until it was fixed
+- Smallest safe workaround: none; exclude the binary objects from the transpile and copy them by hand
+- Upstream issue: none yet, branch `fix/binary-file-copy`. Files matching `\.(w3mi|smim)\.data\.` are read and written as `latin1`. `binary` was measured against `latin1` on Node and Bun and is the same alias, so the plainer name is used
+- Regression-test location: `packages/cli` — the fix is in `file_operations.ts`; the end-to-end proof is open-steamgate serving the 11770-byte PNG byte-identical through the whole ABAP chain
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-13-percent-in-filename — A percent in a file name is not escaped in the import specifier
 
 - Status: `fixed locally, PR parked`
@@ -397,7 +413,7 @@ ENDLOOP.
 - Actual open-abap behaviour: `init.mjs` throws `ERR_MODULE_NOT_FOUND` at boot with the module sitting beside it, so adding an image to a build takes the whole runtime down: the ADT façade and the OData front never start, not only the images
 - Impact on open-steamgate: found by open-steamgate on oisee/vivid-vibes, whose media are W3MI objects. Nothing of ours carries a percent today
 - Smallest safe workaround: exclude `\.w3mi\.` from the transpile, which is what the vivid-vibes staging did until this was fixed
-- Upstream issue: none yet, PR deferred by Alice 2026-09-13. Fixed in the same local branch of the transpiler as the three above: the percent is escaped before the slash in `escapeNamespaceFilename`, and the order matters because escaping it afterwards would corrupt the `%23` the same function writes for a namespace. Both specifier writers and the CLI's `sourceMappingURL` use it
+- Upstream issue: none yet, branch `fix/percent-in-filename`. The percent is escaped before the slash in `escapeNamespaceFilename`, and the order matters because escaping it afterwards would corrupt the `%23` the same function writes for a namespace. Both specifier writers and the CLI's `sourceMappingURL` use it
 - Regression-test location: the transpiler's `test/files.ts`, local branch
 - Upstream version containing a fix: `unknown`
 

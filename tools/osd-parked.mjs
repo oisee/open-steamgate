@@ -71,7 +71,10 @@ function report(repo) {
       commits,
       pushed: git("rev-parse", "--verify", `origin/${branch}`) !== "",
       behind: Number(git("rev-list", "--count", `${branch}..main`) || 0),
-      entries: anomalies.filter(a => a.text.includes(branch)),
+      // exact branch names, not substrings: "fix/conv-builtin-type" is a
+      // prefix of "fix/conv-builtin-type-name", and a prefix match had each
+      // of them claiming the other's entries
+      entries: anomalies.filter(a => a.branches.has(branch)),
       // a branch can also explain itself: git branch --edit-description keeps
       // the note on the branch, where it cannot drift away from it
       description: git("config", `branch.${branch}.description`),
@@ -96,13 +99,16 @@ function report(repo) {
     for (const commit of row.commits) {
       console.log(`    ${commit}`);
     }
-    if (row.entries.length > 0) {
-      for (const entry of row.entries) {
-        console.log(`    ${entry.id}  [${entry.status}]`);
-      }
-    } else if (row.description !== "") {
+    // the description is printed whether or not there are entries: a branch
+    // that has been superseded still carries the entries it was named in, and
+    // hiding its note behind them is how it stays in the queue forever
+    if (row.description !== "") {
       console.log(`    ${row.description}`);
-    } else {
+    }
+    for (const entry of row.entries) {
+      console.log(`    ${entry.id}  [${entry.status}]`);
+    }
+    if (row.entries.length === 0 && row.description === "") {
       console.log("    !! nothing explains this branch: no ANORMALIES entry, no branch description");
     }
     console.log("");
@@ -114,8 +120,7 @@ function report(repo) {
 // an entry naming a branch that no clone has, which is how a record rots
 function staleReferences() {
   for (const entry of anomalies) {
-    const named = [...new Set([...entry.text.matchAll(BRANCH_IN_TEXT)].map(m => m[1]))]
-      .filter(b => seen.has(b) === false);
+    const named = [...entry.branches].filter(b => seen.has(b) === false);
     if (named.length > 0) {
       console.log(`!! ${entry.id} names ${named.join(", ")}, which is not a branch with commits of its own`);
     }
@@ -154,6 +159,7 @@ function readAnomalies() {
     id: part.split(/[\s—]/)[0],
     status: /^- Status: (.*)$/m.exec(part)?.[1].replace(/`/g, "").trim() ?? "?",
     text: part,
+    branches: new Set([...part.matchAll(BRANCH_IN_TEXT)].map(m => m[1])),
   }));
 }
 
