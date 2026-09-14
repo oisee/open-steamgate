@@ -63,7 +63,7 @@ export function discoveryDocument(resources) {
 
   const collection = (r) => `    <app:collection href="${xmlEscape(r.href)}">
       <atom:title>${xmlEscape(r.title)}</atom:title>
-${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}${r.templates === undefined ? "" : `      <adtcomp:templateLinks>\n${r.templates.map(([rel, template]) => `        <adtcomp:templateLink rel="${xmlEscape(rel)}" template="${xmlEscape(template)}"/>`).join("\n")}\n      </adtcomp:templateLinks>\n`}    </app:collection>`;
+${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}${(r.templates ?? []).length === 0 ? `      <adtcomp:templateLinks/>\n` : `      <adtcomp:templateLinks>\n${r.templates.map(([rel, template]) => `        <adtcomp:templateLink rel="${xmlEscape(rel)}" template="${xmlEscape(template)}"/>`).join("\n")}\n      </adtcomp:templateLinks>\n`}    </app:collection>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <app:service xmlns:app="http://www.w3.org/2007/app"
@@ -162,6 +162,8 @@ const CATEGORY = {
   "repository/informationsystem/search": ["search", "http://www.sap.com/adt/categories/respository"],
   "repository/informationsystem/virtualfolders": ["virtualfolders", "http://www.sap.com/adt/categories/repository"],
   "cts/transportchecks": ["transportchecks", "http://www.sap.com/adt/categories/cts"],
+  "checkruns/reporters": ["reporters", "http://www.sap.com/adt/categories/check"],
+  "activation/inactiveobjects": ["inactiveobjects", "http://www.sap.com/adt/categories/activation"],
   "datapreview/freestyle": ["DatapreviewFreeStyle", "http://www.sap.com/adt/categories/datapreview"],
   "ddic/ddl/sources": ["ddlsources", "http://www.sap.com/adt/categories/ddic/ddlsources"],
   "ddic/srvd/sources": ["srvdsrv", "http://www.sap.com/wbobj/raps"],
@@ -191,6 +193,13 @@ const TEMPLATE_LINKS = {
   ],
   "datapreview/freestyle": [
     ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
+  ],
+  "checkruns": [
+    ["http://www.sap.com/adt/categories/check/relations/reporters", "/sap/bc/adt/checkruns{?reporters}"],
+  ],
+  "activation/inactiveobjects": [
+    ["http://www.sap.com/adt/relations/activation/inactiveobjects", "/sap/bc/adt/activation/inactiveobjects{?USERNAME}"],
+    ["http://www.sap.com/adt/relations/activation/inactiveobjects/update", "/sap/bc/adt/activation/inactiveobjects{?action}"],
   ],
   "ddic/ddl/sources": [
     ["http://www.sap.com/adt/categories/ddic/ddlsources/properties",
@@ -865,6 +874,37 @@ export function adtRouter(options = {}) {
         res.status(500).type("application/xml").send(exceptionDocument("ExceptionTransportCheckFailed", String(e?.message ?? e)));
       }
     }
+  });
+
+  // Which checks this system offers, asked for before any check is run. A
+  // client that cannot read this concludes checking is unavailable, and says
+  // so about activation too, because the two travel together.
+  //
+  // One reporter, named as the real one names it, over the types this façade
+  // actually holds — the list is what a client offers in its own UI, so
+  // naming a type that is not here would advertise a check that finds nothing.
+  advertise("checkruns/reporters");
+  router.get(`${BASE}/checkruns/reporters`, (req, res) => {
+    const supported = Object.keys(TYPES).map((code) =>
+      `<chkrun:supportedType>${code}*</chkrun:supportedType>`).join("");
+    res.type("application/vnd.sap.adt.reporters+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<chkrun:checkReporters xmlns:chkrun="http://www.sap.com/adt/checkrun">' +
+      `<chkrun:reporter chkrun:name="abapCheckRun">${supported}</chkrun:reporter>` +
+      "</chkrun:checkReporters>",
+    );
+  });
+
+  // Nothing here is ever inactive: an object is what the file says and there
+  // is no inactive version to hold. The empty list is the answer, and it is
+  // the resource's absence rather than its content that a client reports as
+  // "activation is not supported".
+  advertise("activation/inactiveobjects");
+  router.get(`${BASE}/activation/inactiveobjects`, (req, res) => {
+    res.type("application/vnd.sap.adt.inactivectsobjects.v1+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<ioc:inactiveObjects xmlns:ioc="http://www.sap.com/adt/ioc"/>',
+    );
   });
 
   router.post(`${BASE}/checkruns`, async (req, res) => {
