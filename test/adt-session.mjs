@@ -92,6 +92,29 @@ describe("tools/adt-session: the token dance", () => {
     expect(cookiesOf(again)).to.contain(CONTEXT_COOKIE + "=" + context);
   });
 
+  // The bug this pins cost a live session against Eclipse, and the client was
+  // blameless throughout: an ABAP Cloud Project returns SAP_SESSIONID_* and
+  // sap-usercontext and never sap-contextid, because it never asks for a
+  // stateful session and the context cookie is what statefulness is kept in.
+  // Reading only the context cookie made every request a new session with a
+  // new token, so the token just handed out always belonged to a session that
+  // no longer existed and every write was refused. Re-fetching could not help:
+  // the fetch made a new session too.
+  it("keeps one session for a client that returns only the session cookie", async () => {
+    const first = await call("/sap/bc/adt/core/discovery");
+    const cookie = cookiesOf(first).match(new RegExp(SESSION_COOKIE + "=([^;]+)"))[1];
+    const token = first.headers.get("x-csrf-token");
+
+    // the way a cloud project comes back: session cookie, no context cookie
+    const carrying = {cookie: `${SESSION_COOKIE}=${cookie}`, "x-csrf-token": token};
+
+    const again = await call("/sap/bc/adt/core/discovery", {headers: carrying});
+    expect(again.headers.get("x-csrf-token"), "the token must survive the hop").to.equal(token);
+
+    const wrote = await call("/sap/bc/adt/write", {method: "POST", headers: carrying});
+    expect(wrote.status, "a write with that token must not be refused").to.not.equal(403);
+  });
+
   it("nothing here ever redirects, because a client reads a redirect as a logout", async () => {
     for (const path of ["/sap/bc/adt/core/discovery", "/sap/bc/adt/write"]) {
       const res = await call(path, {method: path.endsWith("write") ? "POST" : "GET", redirect: "manual"});

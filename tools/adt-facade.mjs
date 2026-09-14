@@ -305,10 +305,15 @@ export function adtRouter(options = {}) {
     url.searchParams.set("_", String(req.query._ ?? Date.now()));
     url.searchParams.set("reentrance-ticket", ticket);
 
-    // The cookie is what the client actually uses afterwards; every request
-    // Eclipse made after logging on carried a session cookie and no
-    // Authorization header at all.
-    res.cookie(`SAP_SESSIONID_${identity.systemID}_${identity.client}`, ticket, {path: "/"});
+    // The session cookie is not set here on purpose. The session middleware
+    // above already issued one naming a real session, and writing the ticket
+    // over it would leave the client holding a value that identifies nothing
+    // — which is how every later write earned a CSRF refusal the first time
+    // this ran against Eclipse.
+    //
+    // The ticket's whole life is this redirect. What the client uses
+    // afterwards is the cookie: every request Eclipse made after logging on
+    // carried one, and no Authorization header at all.
     res.cookie("sap-usercontext", `sap-client=${identity.client}`, {path: "/"});
     res.redirect(307, url.toString());
   });
