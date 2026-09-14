@@ -29,9 +29,12 @@ jobs:
       && (github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PREVIEW_DIRECTORY: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}"
+      # The commit of the transpiler this deployment is pinned to, or empty
+      # to use whatever npm resolves. See the step below.
+      OSD_TRANSPILER_REF: "c5a2290ff8b1ef0b680a4f748e3f8b3bdf991124"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +42,36 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The public build needs a transpiler that is not on npm yet.
+      #
+      # Two of the fixes the media path rests on are still open pull
+      # requests: #1845, a binary file surviving the copy to output, and
+      # #1846, a W3MI object keyed on its name rather than its file name.
+      # On a published transpiler a runner writes no *.w3mi.data.* files at
+      # all, so the bundle it builds is not the bundle this repository
+      # tests, and the first thing that notices is an ENOENT on a PNG.
+      #
+      # So the deployment is pinned to a commit of an integration branch,
+      # built here and linked the same way a developer links it. Pinned to a
+      # SHA rather than a branch on purpose: a moving branch would make the
+      # public site depend on what somebody pushed this morning. Setting
+      # OSD_TRANSPILER_REF to an empty string turns the whole thing off and
+      # takes what npm gives. DEBT-2026-09-14-ci-pinned-transpiler: this
+      # comes out the day both pull requests are released.
+      - name: Build the transpiler this deployment is pinned to
+        if: env.OSD_TRANSPILER_REF != ''
+        run: |
+          git clone --filter=blob:none https://github.com/oisee/transpiler.git ../transpiler
+          git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
+          done
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$package" run compile
+          done
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-transpiler.mjs
       - run: npm run web:preview
       - run: npx playwright install --with-deps chromium
       - name: Check the build in a browser

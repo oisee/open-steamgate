@@ -435,6 +435,18 @@ ENDLOOP.
 - How it ends: four pull requests upstream, one per fix, at which point the link comes out and this entry moves to the resolved section. The four are recorded above with their reproducers
 - Upstream issue: none yet, deferred by Alice 2026-09-13
 
+### DEBT-2026-09-14-ci-pinned-transpiler — The public deployment is built by an unmerged branch
+
+- Status: `accepted, with a way out written into the step`
+- Discovery date: `2026-09-14`
+- What it is: the preview deployment builds a transpiler from a pinned commit of `oisee/transpiler` (`osd-build`, `c5a2290f`) and links it, instead of taking what npm resolves. Decided by Alice: "можно сделать один раз (или добавить режим для этого) — и записать в техдолг"
+- Why it had to happen: on a published transpiler a runner writes **no** `*.w3mi.data.*` files at all, so the bundle CI builds is not the bundle this repository tests. #1845 (a binary file survives the copy to output) and #1846 (a W3MI object keyed on its name, not its file name) are both still open. Measured on the runner: `ENOENT: output/zo4d_05_copper%2epng.w3mi.data.png`. Before this, the public site had been serving a build from before the media, the Zork channel and the two new tiles — 17.7 MB of `sw.js` against the 22.8 MB built here — and nobody had noticed, because a failed deployment leaves the previous one standing
+- The cost, said plainly: the public site now depends on a branch nobody has reviewed. A commit rather than a branch name is pinned on purpose, so the site cannot change because somebody pushed to `osd-build` this morning; the price of that is that moving the pin is a commit here
+- What keeps it honest: `OSD_TRANSPILER_REF` is a plain environment variable at the top of the workflow. Empty means "take what npm gives" and the whole step is skipped, so the day the fixes are released the debt is paid by deleting one line. `tools/osd-transpiler.mjs` runs at the end of the step and prints which transpiler produced the build, into the run log
+- Related: `DEBT-2026-09-13-linked-transpiler`, which is the same divergence on a developer's machine. This one is that divergence made public
+- How it ends: #1845 and #1846 merged and released, then `OSD_TRANSPILER_REF: ""` and the step goes
+- Upstream issue: the two pull requests above
+
 ### ANOMALY-2026-09-13-binary-file-to-output — A binary file is corrupted on the way to output
 
 - Status: `fixed locally, PR parked`
