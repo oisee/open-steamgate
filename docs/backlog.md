@@ -417,3 +417,53 @@ abaplint as a character field whose length comes from the literal, so
 significant digits. `zcl_o4d_sales_dance` computes its bar heights that
 way. The effect runs, the picture is plausible, the numbers are coarse, and
 nothing reports it. Whether it explains all four is unknown.
+
+## Two for abaplint/abaplint, both reproduced here
+
+Verified independently on abaplint 2.120.50 with minimal projects, not
+relayed: `.local/` scratch, no libraries, no demo. Both have a live
+consumer in this repository, which is the part that makes them worth
+raising rather than noting.
+
+**Arithmetic against a character literal is inferred as a character
+field.** Thirteen lines:
+
+```abap
+DATA lv_f TYPE f.
+DATA(a) = lv_f * '0.25'.            " -> Character(4)   wrong
+DATA(b) = lv_f + '0.25'.            " -> Character(4)   wrong
+DATA(c) = lv_f * 2.                 " -> Float          right
+DATA(d) = lv_f * CONV f( '0.25' ).  " -> Float          right
+```
+
+The literal's length becomes the field's. In ABAP the result of arithmetic
+is never character-like; with an `f` operand the calculation type is `f`.
+An integer literal does not poison it, a `CONV` does not either — only the
+bare character literal. Consumer: `zcl_o4d_sales_dance` computes bar
+heights this way, so they are truncated to about two significant digits.
+It draws, it looks plausible, and nothing reports the loss.
+
+**`implement_methods` does not honour `DEFAULT IGNORE` / `DEFAULT FAIL`.**
+A class may legally omit such a method; the rule demands it anyway.
+
+```abap
+INTERFACE zif_t PUBLIC.
+  METHODS required.
+  METHODS optional DEFAULT IGNORE.
+ENDINTERFACE.
+```
+
+A class implementing only `required` gets `Implement method "optional"`
+[E]. The control matters: removing `DEFAULT IGNORE` produces the identical
+message, so the rule is not reading the modifier at all, although the
+parser understands it (`method_def`, v740sp08, marked as available in
+OpenABAP). Consumer: a class that legitimately omits an optional method
+cannot be transpiled, and the error says "implement this" where ABAP says
+"you need not". Switching the rule off in the project does not help — the
+transpiler runs its own mandatory set.
+
+Raise as pull requests rather than issues where the fix is small, and note
+what Lars said on transpiler#1836: a branch inside the repository triggers
+the regression and performance suites and a fork's branch triggers neither.
+Write access is the deciding factor; `oisee` had none on open-abap-core
+(403) and #1218 went as a fork.
