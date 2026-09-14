@@ -187,13 +187,31 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(res.headers.get("x-csrf-token")).to.be.a("string").with.length.greaterThan(8);
     });
 
-    // the graph is empty on purpose: a compatibility graph is a system
-    // granting a client use of resources at versions, and OSD has measured
-    // no such thing. Well formed, and claiming nothing.
-    it("the compatibility graph is well formed and grants nothing", async () => {
+    // This test used to assert the graph was empty, on the reasoning that a
+    // compatibility graph grants a client the use of features and OSD had
+    // measured none, so claiming nothing was the honest answer. The reasoning
+    // was careful and the conclusion was wrong: an empty graph does not read
+    // as "no opinion", it reads as "supports nothing", and a client acts on
+    // it. This one deleted its content handler for object references, decided
+    // activation was unsupported, and stopped filling in package contents —
+    // three failures that looked unrelated and were one document.
+    //
+    // So the graph names the features this façade serves, and the test now
+    // guards the property that matters: every feature declared must be one
+    // there is a resource for. Claiming a feature invites its use, and a
+    // claim that breaks on the first click is worse than a missing one.
+    it("declares the features it serves, under the element a client looks for", async () => {
       const xml = await (await call("/compatibility/graph")).text();
-      expect(xml).to.contain("<adtcomp:graph");
-      expect(xml).to.not.contain("<adtcomp:resource");
+      expect(xml, "the local name is not arbitrary").to.contain("<compatibility:graph");
+      expect(xml).to.match(/<node nameSpace="COM\.SAP\.ADT\.RIS" name="search"\/>/);
+      expect(xml).to.match(/<node nameSpace="COM\.SAP\.ADT\.ACTIVATION" name="activate"\/>/);
+
+      // nothing is declared that this façade cannot answer for
+      const declared = [...xml.matchAll(/name="([^"]+)"/g)].map((m) => m[1]);
+      for (const promised of ["classes", "programs", "checkruns", "abapunit", "search"]) {
+        expect(declared, promised).to.include(promised);
+      }
+      expect(declared, "a feature with no resource behind it").to.not.include("codeCompletion");
     });
 
     it("it answers at both of its names, because a client uses both", async () => {

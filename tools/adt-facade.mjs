@@ -46,9 +46,44 @@ const xmlEscape = (s) => String(s)
 // adt-fs and eventually Eclipse.
 // An empty compatibility graph: well formed, and claiming nothing. See the
 // route for why it is empty rather than populated.
-export function compatibilityGraphDocument() {
+// What this system can do, said in the vocabulary a client checks against.
+//
+// This was an empty element under the wrong name, and an empty graph does not
+// mean "no opinion" — it means "supports nothing". The client acted on it
+// exactly as told: it deleted the content handler for object references and
+// reported "Outdated content handler ... was deleted", it concluded
+// "Activation is not supported on this project", and it stopped filling in
+// package contents. Three unrelated-looking failures, one document, and none
+// of them a request that any resource here answered wrongly — the client had
+// decided before asking.
+//
+// The element is compatibility:graph, not adtcomp:graph. The prefix is
+// arbitrary but the local name is not, and ours was a different element
+// entirely.
+//
+// The nodes are feature flags. Only the ones matching what this façade
+// actually serves are declared: claiming a feature invites the client to use
+// it, and a claim that fails on the first click is worse than a missing one,
+// which the client simply works around. Edges express dependencies between
+// features and an empty set is honest here — nothing declared depends on
+// anything else declared.
+const COMPATIBILITY = {
+  "COM.SAP.ADT.CORE": ["checkruns", "xmlFormat", "xmlNameSpace"],
+  "COM.SAP.ADT.RIS": ["ris", "search"],
+  "COM.SAP.ADT.ACTIVATION": ["activate", "check"],
+  "COM.SAP.ADT.ABAPUNIT": ["abapunit"],
+  "COM.SAP.ADT.PROGRAMS": ["programs", "includes"],
+  "COM.SAP.ADT.OO": ["classes", "interfaces"],
+  "COM.SAP.ADT.FUNCTIONS": ["functionGroups", "functions"],
+  "COM.SAP.ADT.DDIC": ["ddic"],
+  "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData", "treePath"],
+};
+
+export function compatibilityGraphDocument(features = COMPATIBILITY) {
+  const nodes = Object.entries(features).flatMap(([nameSpace, names]) =>
+    names.map((name) => `<node nameSpace="${nameSpace}" name="${name}"/>`)).join("");
   return `<?xml version="1.0" encoding="utf-8"?>
-<adtcomp:graph xmlns:adtcomp="http://www.sap.com/adt/compatibility"/>
+<compatibility:graph xmlns:compatibility="http://www.sap.com/adt/compatibility"><nodes>${nodes}</nodes><edges/></compatibility:graph>
 `;
 }
 
