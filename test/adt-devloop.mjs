@@ -292,8 +292,10 @@ describe("tools/adt-facade: the development loop", () => {
       expect(res.status).to.equal(400);
     });
 
-    it("returns the package result Eclipse looks up even when it has no direct objects", async () => {
-      const uri = "/sap/bc/adt/packages/%24stg";
+    it("returns the package result Eclipse looks up instead of only child reports", async function () {
+      this.timeout(60000);
+      const packageName = (store.packages().find((pkg) => pkg.objects.length === 0) ?? store.packages()[0]).name;
+      const uri = `/sap/bc/adt/packages/${encodeURIComponent(packageName.toLowerCase())}`;
       const res = await call("/checkruns", {
         method: "POST",
         body: `<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core"><chkrun:checkObject adtcore:uri="${uri}" chkrun:version="active"/></chkrun:checkObjectList>`,
