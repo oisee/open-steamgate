@@ -20,8 +20,9 @@
 // yet transpiled is reported as such instead of silently missing.
 import {existsSync, readFileSync} from "node:fs";
 import {spawn} from "node:child_process";
-import {SourceMap} from "node:module";
-import {basename, dirname, join} from "node:path";
+import {basename, join} from "node:path";
+import {resolveFrame} from "./osd-where.mjs";
+export {statementAfter} from "./osd-where.mjs";
 import {ObjectStore, NotFound} from "./osd-store.mjs";
 
 // ADT's own words for what a class declares
@@ -34,8 +35,6 @@ const ADT_TYPE = {CLAS: "CLAS/OC", INTF: "INTF/OI", PROG: "PROG/P", FUGR: "FUGR/
 export class UnitRun {
   constructor(store = new ObjectStore()) {
     this.store = store;
-    this.maps = new Map();
-    this.sources = new Map();
   }
 
   // the test classes of an object, from the parse: what would run, without
@@ -248,31 +247,15 @@ export class UnitRun {
     return out;
   }
 
+  // the mapping itself lives in osd-where.mjs, which is the only copy: two
+  // copies of a thing whose whole job is to be accurate is how they stop
+  // agreeing. Only the shape the facade wants is built here.
   #map(file, row, column) {
-    if (this.maps.has(file) === false) {
-      const map = `${file}.map`;
-      this.maps.set(file, existsSync(map) ? new SourceMap(JSON.parse(readFileSync(map, "utf8"))) : undefined);
-    }
-    const map = this.maps.get(file);
-    const entry = map?.findEntry(row - 1, column - 1);
-    if (entry?.originalSource === undefined) {
+    const found = resolveFrame(file, row, column);
+    if (found === undefined) {
       return undefined;
     }
-    const source = basename(entry.originalSource);
-    const at = statementAfter(
-      this.#source(join(dirname(file), entry.originalSource)),
-      entry.originalLine + 1,
-      entry.originalColumn + 1);
-    return {name: `${source}, line ${at.line}`, uri: source, line: at.line, column: at.column};
-  }
-
-  // the ABAP the map points at, read once. The path in a map is relative to
-  // the module beside it, which is how a generated file names its source.
-  #source(path) {
-    if (this.sources.has(path) === false) {
-      this.sources.set(path, existsSync(path) ? readFileSync(path, "utf8") : undefined);
-    }
-    return this.sources.get(path);
+    return {name: `${found.file}, line ${found.line}`, uri: found.file, line: found.line, column: found.column};
   }
 
   // the run the façade wants: a child process, because a test writes to the
@@ -365,30 +348,6 @@ export function alertOf(error, where, stack = []) {
 //
 // The transpiler maps a generated line to the position where the previous
 // ABAP statement ended, so a stack entry read straight out of the map
-// points at the line above the one that raised: right screen, wrong line,
-// and a client that jumps there lands on the end of the call before the
-// assert. When the mapped position is the end of its line, the statement
-// that produced the code is the next line carrying any, and that is the
-// line to name. A position inside a line is left alone, because then the
-// map is pointing at a statement rather than past one.
-export function statementAfter(text, line, column) {
-  if (typeof text !== "string") {
-    return {line, column};
-  }
-  const lines = text.split("\n");
-  const at = lines[line - 1];
-  if (at === undefined || column < at.replace(/\s+$/, "").length) {
-    return {line, column};
-  }
-  for (let next = line; next < lines.length; next += 1) {
-    const content = lines[next].trim();
-    if (content === "" || content.startsWith("*") || content.startsWith("\"")) {
-      continue;
-    }
-    return {line: next + 1, column: lines[next].length - lines[next].trimStart().length + 1};
-  }
-  return {line, column};
-}
 
 // setup and teardown live in three places: the class, the friends instance
 // the transpiler wraps it in, and the superclass of that
