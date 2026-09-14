@@ -17,6 +17,19 @@ globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
 const {cl_express_icf_shim} = await import("../output/cl_express_icf_shim.clas.mjs");
+const {services} = await import("./generated/services.mjs");
+
+// which service answers a path: the longest prefix that matches, so a service
+// mounted below another is found before its parent. Nothing here knows what
+// any of them do.
+const byLength = [...services].sort((a, b) => b.path.length - a.path.length);
+function serviceFor(path) {
+  const found = byLength.find((s) => path === s.path || path.startsWith(s.path + "/"));
+  if (found === undefined) {
+    throw new Error(`no service is mounted on ${path}`);
+  }
+  return found;
+}
 const {zcl_stg_segw_registry} = await import("../output/zcl_stg_segw_registry.clas.mjs");
 const {zcl_stg_shlp_registry} = await import("../output/zcl_stg_shlp_registry.clas.mjs");
 
@@ -63,6 +76,7 @@ async function invoke({method, path, search = "", headers = {}, body}) {
       data = toBytes(payload);
     },
   };
+  const service = serviceFor(path);
   await cl_express_icf_shim.run({
     req: {
       body: Buffer.from(body ?? new Uint8Array(0)),
@@ -72,10 +86,61 @@ async function invoke({method, path, search = "", headers = {}, body}) {
       url: `${path}${search}`,
     },
     res,
-    class: "ZCL_STG_HTTP_HANDLER",
-    base: new abap.types.String().set("/sap/opu/odata/sap"),
+    class: service.handler,
+    base: new abap.types.String().set(service.path),
   });
   return {status, headers: responseHeaders, body: data};
+}
+
+// A push channel, driven where the runtime already is.
+//
+// The page has a WebSocket-shaped object (web/preview-socket.mjs) and no
+// runtime; this end has the runtime and no socket. One zcl_apc_host per
+// conversation, because a stateful handler is one object per connection,
+// and the messages it pushed come back through drain( ) after every
+// callback — on_start is allowed to speak first and usually does.
+const hosts = new Map();
+
+export async function openChannel(id, channel, send) {
+  const {zcl_apc_host} = await import("../output/zcl_apc_host.clas.mjs");
+  const host = new zcl_apc_host();
+  const drain = async () => {
+    const pushed = await host.drain();
+    for (const row of pushed.array()) {
+      send({apc: "message", text: row.get()});
+    }
+  };
+  await host.constructor_({
+    iv_handler: new abap.types.String().set(channel.handler),
+    it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
+  });
+  const accepted = await host.open();
+  await drain();
+  if (accepted.get() !== "X") {
+    throw new Error("the handler refused the connection");
+  }
+  hosts.set(id, {host, drain});
+}
+
+export async function channelMessage(id, text, send) {
+  const entry = hosts.get(id);
+  if (entry === undefined) {
+    throw new Error(`no channel ${id}`);
+  }
+  await entry.host.message({iv_text: new abap.types.String().set(text)});
+  await entry.drain();
+  void send;
+}
+
+export async function closeChannel(id) {
+  const entry = hosts.get(id);
+  hosts.delete(id);
+  if (entry !== undefined) {
+    await entry.host.close({
+      iv_reason: new abap.types.String().set("closed by the page"),
+      iv_code: new abap.types.Integer().set(1000),
+    });
+  }
 }
 
 export async function startBackend(stored) {

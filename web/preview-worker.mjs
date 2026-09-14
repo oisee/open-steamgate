@@ -8,8 +8,15 @@
 //
 // Listeners are registered during the initial evaluation, as the service
 // worker specification requires; the runtime is imported on the first request.
+import {services, channels} from "./generated/services.mjs";
+
 const MOUNT = new URL("./", self.location).pathname;
-const SERVICE_PREFIX = "sap/opu/odata/sap/";
+// every prefix this deployment answers, longest first so a service nested
+// under another is matched before its parent. Generated from the SICF nodes
+// in the tree, so an imported application arrives with its own route.
+const SERVICE_PREFIXES = services
+  .map((s) => s.path.replace(/^\//, "") + "/")
+  .sort((a, b) => b.length - a.length);
 const RESET_PATH = "__preview/reset";
 const DATABASE_CACHE = "open-steamgate-preview-database";
 const DATABASE_KEY = `${MOUNT}__preview/database`;
@@ -25,13 +32,91 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// The page's websockets. A port per conversation, so a message belongs to
+// one socket without either end tagging it, and the conversation ends when
+// the page closes it or the handler refuses.
+self.addEventListener("message", (event) => {
+  const message = event.data;
+  if (message?.apc !== "open") {
+    return;
+  }
+  const port = event.ports?.[0];
+  if (port === undefined) {
+    return;
+  }
+  const channel = channels.find((c) => c.path === message.path);
+  if (channel === undefined) {
+    port.postMessage({apc: "close", code: 1008, reason: `no channel on ${message.path}`});
+    return;
+  }
+  const send = (payload) => port.postMessage(payload);
+  port.onmessage = (inner) => {
+    const body = inner.data;
+    if (body?.apc === "message") {
+      void run(() => backendOf().then((b) => b.channelMessage(message.id, body.text, send)));
+    } else if (body?.apc === "close") {
+      void run(() => backendOf().then((b) => b.closeChannel(message.id)));
+    }
+  };
+  void run(async () => {
+    const backend = await backendOf();
+    await backend.openChannel(message.id, channel, send);
+    send({apc: "open"});
+  });
+
+  // a failure here is the handler's, and the page can only be told by the
+  // socket closing; saying why in the reason is the whole of what we can do
+  async function run(work) {
+    try {
+      await work();
+    } catch (error) {
+      send({apc: "close", code: 1011, reason: String(error?.message ?? error)});
+    }
+  }
+});
+
+// An ABAP-generated page opens its own websocket in its own script, before
+// anything the deployment adds could replace the constructor. So the shim
+// goes in ahead of it: one module tag, first thing in the document.
+//
+// This is a real edit to somebody's HTML and it is worth being uneasy about.
+// The justification is narrow: in a bundle there is no network, so
+// `new WebSocket(...)` cannot succeed, and a page that hangs on a socket
+// that will never open is worse than one told plainly there is none. The
+// shim only takes over the channel paths this deployment actually serves
+// and hands every other URL to the real constructor.
+const SHIM = `<script type="module">import {install} from "${MOUNT}preview-socket.mjs";`
+  + `install({paths: ${JSON.stringify(channels.map((c) => c.path))}});</script>`;
+
+async function withSocketShim(answer) {
+  const type = answer.headers?.get?.("content-type") ?? "";
+  if (channels.length === 0 || type.includes("text/html") === false) {
+    return answer.body;
+  }
+  const html = new TextDecoder().decode(answer.body);
+  const at = html.search(/<head[^>]*>/i);
+  const patched = at < 0
+    ? SHIM + html
+    : html.slice(0, html.indexOf(">", at) + 1) + SHIM + html.slice(html.indexOf(">", at) + 1);
+  const bytes = new TextEncoder().encode(patched);
+  answer.headers?.set?.("content-length", String(bytes.length));
+  return bytes;
+}
+
+function backendOf() {
+  return start();
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || !url.pathname.startsWith(MOUNT)) {
     return;
   }
   const path = url.pathname.slice(MOUNT.length);
-  if (path !== RESET_PATH && !path.startsWith(SERVICE_PREFIX)) {
+  // a bare service path with no trailing slash is the service's own root,
+  // which is how a terminal page is opened
+  const served = SERVICE_PREFIXES.some((p) => path.startsWith(p) || path + "/" === p);
+  if (path !== RESET_PATH && served === false) {
     return;
   }
   event.respondWith(serve(event.request, url, path));
@@ -62,8 +147,10 @@ async function serve(request, url, path) {
     if (mutation) {
       await storeDatabase(backend);
     }
-    return new Response(EMPTY_STATUSES.has(answer.status) ? null : answer.body,
-      {status: answer.status, headers: answer.headers});
+    if (EMPTY_STATUSES.has(answer.status)) {
+      return new Response(null, {status: answer.status, headers: answer.headers});
+    }
+    return new Response(await withSocketShim(answer), {status: answer.status, headers: answer.headers});
   } catch (error) {
     return failure(error);
   }

@@ -32,6 +32,15 @@ module.exports = {
     ],
   },
   resolve: {
+    // Keep a linked package at the path it was linked to rather than at the
+    // path it really lives at. The browser polyfills below are resolved from
+    // this project's node_modules; a package linked in from another checkout
+    // resolves outside it and the build fails on "Can't resolve
+    // 'process/browser'" from a directory that has no node_modules of its own.
+    // Following the symlink is the default and is right for a normal install;
+    // it is wrong for the deliberate divergence recorded as
+    // DEBT-2026-09-13-linked-transpiler, and it should not stop a bundle.
+    symlinks: false,
     extensions: [".mjs", ".js"],
     alias: {
       // the asm.js build needs no separate .wasm file to deploy and route
@@ -63,6 +72,15 @@ module.exports = {
     rules: [{test: /\.m?js$/, resolve: {fullySpecified: false}}],
   },
   plugins: [
+    // A module specifier is a URL, so a percent in a file name is written as
+    // %25 and Node decodes it before resolving. webpack does not decode, and
+    // looks for a file whose name really contains "%25". Both are defensible
+    // and they cannot both be satisfied by one string, so the bundle decodes
+    // on the way in. Web Repository objects are the ones that have a percent:
+    // abapGit writes ZO4D_06_PLASMA.PNG as zo4d_06_plasma%2epng.
+    new (require("webpack").NormalModuleReplacementPlugin)(/%25/, (resource) => {
+      resource.request = resource.request.replace(/%25/g, "%");
+    }),
     new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
       resource.request = resource.request.replace(/^node:/, "");
     }),
