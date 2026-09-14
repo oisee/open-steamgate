@@ -1203,9 +1203,17 @@ export function adtRouter(options = {}) {
       // a hang rather than as thoroughness.
       const packages = [...body.toString("utf8").matchAll(
         new RegExp(`adtcore:uri="${BASE}/packages/([^"]+)"`, "g"))].map((m) => decodeURIComponent(m[1]));
+      const packageReports = [];
       for (const name of packages) {
+        const uri = `${BASE}/packages/${encodeURIComponent(name.toLowerCase())}`;
         try {
-          for (const object of store.package(name.toUpperCase()).objects) {
+          const pkg = store.package(name.toUpperCase());
+          // CheckHandler looks up the result by the URI it submitted. Reports
+          // for children do not stand in for the package itself; without this
+          // row an empty/top-level package produces checkResult=null in the
+          // Eclipse automatic syntax-check trigger.
+          packageReports.push({uri, issues: []});
+          for (const object of pkg.objects) {
             const adt = TYPES[object.type]?.adt;
             if (adt !== undefined) {
               objects.push({
@@ -1216,23 +1224,18 @@ export function adtRouter(options = {}) {
             }
           }
         } catch {
-          // a package that is not here checks as nothing, and the empty
-          // report below says so without claiming the request was malformed
+          packageReports.push({uri, issues: [], status: "notProcessed", statusText: `package ${name} does not exist`});
         }
       }
 
-      if (objects.length === 0) {
+      if (objects.length === 0 && packageReports.length === 0) {
         // Nothing to check is not the same as a request that made no sense.
         // An empty report is the honest answer for an empty package, and the
         // 400 stays for a body that named no object at all.
-        if (packages.length > 0) {
-          res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument([]));
-          return;
-        }
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
       }
-      const reports = objects.map((o) => {
+      const reports = [...packageReports, ...objects.map((o) => {
         try {
           const result = store.check(o.type, o.name, {
             source: o.source,
@@ -1244,7 +1247,7 @@ export function adtRouter(options = {}) {
           // nothing, or a client writes on the strength of it
           return {uri: o.uri, issues: [], status: "notProcessed", statusText: String(e?.message ?? e)};
         }
-      });
+      })];
       res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument(reports));
     });
   });
