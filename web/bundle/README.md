@@ -7,6 +7,11 @@ her APC handler, and a WebSocket that reaches the handler instead of a network.
 Handed from the transpiler session to open-steamgate on 2026-09-14. It builds
 and it does not yet run. What is here, what is missing, and the two traps.
 
+**Status, 2026-09-14: parked.** Alice put the one-page-no-server goal in the far
+backlog (1a.2), and open-steamgate was right not to start it on my say-so — a
+peer relaying "Alice split the work" is not Alice saying it. This file is a
+record so the work is not done twice, not a task.
+
 ## What works
 
 - `webpack.config.cjs` bundles the transpiled output into one file. Measured:
@@ -32,16 +37,29 @@ and it does not yet run. What is here, what is missing, and the two traps.
    whole of the first failure, and it is one line. It is also why "it builds"
    meant nothing: the 12.6 MiB sat beside the page, unloaded.
 
-2. **Media are fetched over HTTP.** Her page does `au.src = '?audio=' + name`
-   and `img.src = '?image=' + name`. With no server those are 404s. They have
-   to be answered from `abap.W3MI` inside the page — a blob URL per object,
-   built once and cached. Watch the size: the mp3 is 4 MB and the runtime
-   carries an xstring as a hex string, two characters to the byte, so the naive
-   route costs about 24 MB of transient string per media object. See
-   `ANOMALY-2026-09-13-xstring-as-hex`.
+2. **Media are fetched over HTTP**, and two things I wrote here were wrong.
+   Corrected by open-steamgate, who measured instead of assuming:
+
+   - The image URL is **`?img=`**, not `?image=`. `?image=` has never worked:
+     the handler has no such route, the request falls through to the default
+     branch and gets the page back as `text/html`, and nothing errors. Her
+     megademo player has been asking for `?image=` all along. So a shim written
+     against `?image=` would answer requests the page should stop making. The
+     objid carries the extension: `?img=ZO4D_05_COPPER.PNG`.
+   - **The hex cost is not the wall.** On the service-worker route, with
+     `abap.W3MI_LOADER(objid, filename)` answering out of `WWWDATA_IMPORT` and
+     the media copied beside the bundle rather than into it, the 4.6 MB mp3
+     arrives in 782 ms cold and 337 ms warm in Chromium, hex path included. So
+     `ANOMALY-2026-09-13-xstring-as-hex` is a real cost and not an argument for
+     changing the xstring representation at this size.
 
 3. **Nobody has measured the start-up cost** of a 12.6 MiB bundle. It may be
    fine and it may be ten seconds; it is unknown, and unknown is not fine.
+
+4. **`local/vivid-vibes` is not an input** to `abap_transpile.json`, although it
+   looks like source and holds 121 objects, 85 of which the build also has.
+   open-steamgate lost an edit into it and reported a fix as shipped while both
+   copies still carried the bug. `tools/osd-inputs.mjs` now names that shape.
 
 ## The two traps
 
@@ -52,6 +70,19 @@ and it does not yet run. What is here, what is missing, and the two traps.
 - Paths in `webpack.config.cjs` are absolute into
   `/home/alice/dev/open-steamgate-shlp/node_modules`. That is deliberate for a
   scratch build and wrong for anything permanent.
+
+## Source maps
+
+`write_source_map` in `abap_transpile.json` is **off by default** and worth
+turning on for anything you intend to debug. With it, the transpiler emits one
+map per CLAS, PROG and FUGR — 341 of them on her tree — and they resolve to the
+statement, not just the object:
+
+    zcl_o4d_sales_dance.clas.mjs:1346   abap.statements.append({source: lv_val, ...})
+ -> zcl_o4d_sales_dance.clas.abap:119   APPEND lv_val TO rt_values.
+
+which is exactly the line the demo died on. The bundle has no maps at all
+unless the transpile that fed it had them.
 
 ## Running it
 
