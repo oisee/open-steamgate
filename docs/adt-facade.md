@@ -431,8 +431,17 @@ DIAG work already lives.
 **The dispatcher is not needed for ADT at all.** Tested rather than
 inferred, the same afternoon: with the dispatcher forwarder taken down,
 Eclipse created its project and everything worked — until a program was run,
-when the embedded GUI opened and displayed nothing. So the two ports carry
-two unrelated jobs. An RFC server on `33NN` answering one function module is
+when the embedded GUI opened and displayed nothing. Putting the forwarder
+back brought the GUI back, which makes it a controlled result rather than an
+observation: the variable was removed, the failure appeared, the variable
+was restored, the failure went.
+
+And the embedded GUI is not a special case. It is an ordinary DIAG client —
+two connections on the dispatcher, 36 frames, the same protocol a standalone
+SAP GUI speaks. So there is no Eclipse-flavoured screen protocol to
+reverse-engineer: whatever can already draw a DIAG screen can answer it.
+
+So the two ports carry two unrelated jobs. An RFC server on `33NN` answering one function module is
 the whole of what a client needs to connect and develop; `32NN` is DIAG and
 only DIAG, and it is what running something needs. OSD without a DIAG front
 is a development environment that cannot execute, which is a soft and
