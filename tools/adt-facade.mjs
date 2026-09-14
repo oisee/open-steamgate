@@ -36,6 +36,22 @@ const xmlEscape = (s) => String(s)
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
 
+// ADT persists the entity tag from a properties/source response alongside
+// the workspace file. Without it the filesystem synchronizer refuses to
+// create the editor part. The tag describes the representation, so properties
+// and source intentionally get different values and change with their body.
+const sendEntity = (req, res, body) => {
+  const tag = createHash("sha256").update(Buffer.from(String(body))).digest("hex").slice(0, 32);
+  res.set("ETag", tag);
+  const candidates = String(req.headers["if-none-match"] ?? "")
+    .split(",").map((value) => value.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));
+  if (candidates.includes(tag)) {
+    res.status(304).end();
+    return;
+  }
+  res.send(body);
+};
+
 // ------------------------------------------------------------- discovery
 
 // An ADT discovery document is an Atom service document: workspaces of
@@ -928,7 +944,9 @@ export function adtRouter(options = {}) {
     // has already decoded it by the time it is a parameter
     router.get(`${BASE}/${adt}/:name/source/main`, (req, res) => {
       answer(res, () => {
-        res.type("text/plain; charset=utf-8").send(store.read(type, req.params.name).source);
+        const source = store.read(type, req.params.name).source;
+        res.type("text/plain; charset=utf-8");
+        sendEntity(req, res, source);
       });
     });
     // the base resource of a class include. A client resolving a method body
@@ -944,11 +962,13 @@ export function adtRouter(options = {}) {
         // VSP and the source links in class properties use this URL directly
         // with */*. Only an explicit include-property request wants XML.
         if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
-          res.type("text/plain; charset=utf-8").send(part.source);
+          res.type("text/plain; charset=utf-8");
+          sendEntity(req, res, part.source);
           return;
         }
-        res.type("application/vnd.sap.adt.oo.classes.includes.v2+xml")
-          .send(classIncludeDocument(store.find(type, name).name, include, `${BASE}/${adt}/${encodeURIComponent(String(name).toLowerCase())}/includes/${include}/source/main`));
+        const document = classIncludeDocument(store.find(type, name).name, include, `${BASE}/${adt}/${encodeURIComponent(String(name).toLowerCase())}/includes/${include}/source/main`);
+        res.type("application/vnd.sap.adt.oo.classes.includes.v2+xml");
+        sendEntity(req, res, document);
       });
     });
     // a class's other includes: definitions, implementations, macros, tests
@@ -957,7 +977,9 @@ export function adtRouter(options = {}) {
         if (type !== "CLAS") {
           throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
         }
-        res.type("text/plain; charset=utf-8").send(store.read(type, req.params.name, req.params.include).source);
+        const source = store.read(type, req.params.name, req.params.include).source;
+        res.type("text/plain; charset=utf-8");
+        sendEntity(req, res, source);
       });
     });
     // the object structure: what a client reads before asking for one method
@@ -1011,16 +1033,18 @@ export function adtRouter(options = {}) {
           if (found === undefined) {
             throw new NotFound(type, req.params.name);
           }
-          res.type("application/vnd.sap.adt.oo.classes.v4+xml").send(
-            classDocument(found, {includes: store.classIncludes?.(found.name) ?? []}),
-          );
+          const document = classDocument(found, {includes: store.classIncludes?.(found.name) ?? []});
+          res.type("application/vnd.sap.adt.oo.classes.v4+xml");
+          sendEntity(req, res, document);
         });
       });
     } else if (SOURCE_PROPERTY_MIME[type] !== undefined) {
       router.get(`${BASE}/${adt}/:name`, (req, res) => {
         answer(res, () => {
           const object = store.read(type, req.params.name);
-          res.type(SOURCE_PROPERTY_MIME[type]).send(sourcePropertiesDocument(type, object));
+          const document = sourcePropertiesDocument(type, object);
+          res.type(SOURCE_PROPERTY_MIME[type]);
+          sendEntity(req, res, document);
         });
       });
     } else {

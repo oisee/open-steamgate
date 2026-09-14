@@ -1,0 +1,3 @@
+INTERFACE zif_editor PUBLIC.
+  METHODS greet RETURNING VALUE(result) TYPE string.
+ENDINTERFACE.

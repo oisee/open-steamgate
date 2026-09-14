@@ -30,12 +30,14 @@ describe("ADT editor follows typed property documents to their sources", () => {
   for (const [path, root, mime, source] of [
     ["programs/programs/zdemo_editor", "program:abapProgram", "programs.programs.v3+xml", "REPORT zdemo_editor."],
     ["ddic/ddl/sources/zdemo_editor", "ddl:ddlSource", "adt.ddlSource+xml", "define view entity ZDemo_Editor"],
+    ["oo/interfaces/zif_editor", "intf:abapInterface", "oo.interfaces.v2+xml", "INTERFACE zif_editor PUBLIC."],
   ]) {
     it(`${path}: base resource is properties and its source link opens text`, async () => {
       const url = base + "/sap/bc/adt/" + path;
       const res = await fetch(url);
       expect(res.status).to.equal(200);
       expect(res.headers.get("content-type").toLowerCase()).to.contain(mime.toLowerCase());
+      expect(res.headers.get("etag"), "properties must carry the synchronization token").to.be.a("string").and.not.empty;
       const xml = await res.text();
       expect(xml).to.contain(`<${root} `);
       expect(xml).to.contain('<adtcore:packageRef ');
@@ -44,11 +46,20 @@ describe("ADT editor follows typed property documents to their sources", () => {
       const content = await fetch(new URL(relative, url + "/"));
       expect(content.status).to.equal(200);
       expect(content.headers.get("content-type")).to.contain("text/plain");
+      expect(content.headers.get("etag"), "source must carry its own synchronization token").to.be.a("string").and.not.empty;
       expect(await content.text()).to.contain(source);
       const packageUri = /adtcore:uri="([^"]+)"/.exec(xml)?.[1];
       expect((await fetch(new URL(packageUri, base))).status).to.equal(200);
     });
   }
+  it("returns 304 when an editor already has the current source entity", async () => {
+    const url = base + "/sap/bc/adt/oo/interfaces/zif_editor/source/main";
+    const first = await fetch(url);
+    const etag = first.headers.get("etag");
+    expect(etag).to.be.a("string").and.not.empty;
+    const cached = await fetch(url, {headers: {"if-none-match": etag}});
+    expect(cached.status).to.equal(304);
+  });
   it("program objectstructure remains a separate representation", async () => {
     const response = await fetch(base + "/sap/bc/adt/programs/programs/zdemo_editor/objectstructure");
     expect(response.status).to.equal(200);
