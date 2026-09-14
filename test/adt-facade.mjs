@@ -511,8 +511,10 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect([...xml.matchAll(/<adtcore:objectReference /g)].length).to.be.at.most(3);
     });
 
-    it("the base resource of a class include answers, which is what a method read hits first", async () => {
-      const res = await call("/oo/classes/ZCL_STG_SEGW_TEST/includes/testclasses");
+    it("an explicit include-property request still gets the include document", async () => {
+      const res = await call("/oo/classes/ZCL_STG_SEGW_TEST/includes/testclasses", {
+        headers: {accept: "application/vnd.sap.adt.oo.classes.includes.v2+xml"},
+      });
       expect(res.status).to.equal(200);
       const xml = await res.text();
       expect(xml).to.contain("abapClassInclude");

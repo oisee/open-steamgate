@@ -905,9 +905,13 @@ export function adtRouter(options = {}) {
     router.get(`${BASE}/${adt}/:name/includes/:include`, (req, res) => {
       answer(res, () => {
         const {name, include} = req.params;
+        if (type !== "CLAS") {
+          throw new NotFound(type, `${name} include ${include}`);
+        }
         const part = store.read(type, name, include);
-        // a client that wants the text says so; otherwise it gets the object
-        if (String(req.headers.accept ?? "").includes("text/plain")) {
+        // VSP and the source links in class properties use this URL directly
+        // with */*. Only an explicit include-property request wants XML.
+        if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
           res.type("text/plain; charset=utf-8").send(part.source);
           return;
         }
@@ -918,6 +922,9 @@ export function adtRouter(options = {}) {
     // a class's other includes: definitions, implementations, macros, tests
     router.get(`${BASE}/${adt}/:name/includes/:include/source/main`, (req, res) => {
       answer(res, () => {
+        if (type !== "CLAS") {
+          throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
+        }
         res.type("text/plain; charset=utf-8").send(store.read(type, req.params.name, req.params.include).source);
       });
     });
@@ -1041,7 +1048,7 @@ export function adtRouter(options = {}) {
 
     // WRITE. The file only: the transpile belongs to activation, where the
     // verdict is what the client waits for and the modules follow after.
-    router.put(`${BASE}/${adt}/:name/source/main`, (req, res) => {
+    const writeSource = (req, res) => {
       const {session} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
@@ -1058,11 +1065,22 @@ export function adtRouter(options = {}) {
       }
       rawBody(req).then((body) => {
         answer(res, () => {
-          store.write(type, req.params.name, body.toString("utf8"));
+          const include = req.params.include ?? "main";
+          // Validate the include name before writing. Known empty includes may
+          // be created, but arbitrary suffixes are not repository objects.
+          if (include !== "main") {
+            store.read(type, req.params.name, include);
+          }
+          store.write(type, req.params.name, body.toString("utf8"), include);
           res.status(200).type("text/plain").send("");
         });
       });
-    });
+    };
+    router.put(`${BASE}/${adt}/:name/source/main`, writeSource);
+    if (type === "CLAS") {
+      router.put(`${BASE}/${adt}/:name/includes/:include`, writeSource);
+      router.put(`${BASE}/${adt}/:name/includes/:include/source/main`, writeSource);
+    }
   }
 
   // SYNTAX CHECK. The source arrives inline, because a client checks what a
