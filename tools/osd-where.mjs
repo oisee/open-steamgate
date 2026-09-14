@@ -51,7 +51,10 @@ export function abapFrames(from, options = {}) {
 
 /** One line for a log: what was raised and where, in ABAP. */
 export function describe(error, options = {}) {
-  const name = error?.constructor?.name?.toUpperCase?.() ?? "error";
+  // `??` does not fire on "", and an ABAP exception can reach JavaScript with
+  // an empty name the same way it reaches it with an empty message. Falsy,
+  // not nullish — open-steamgate paid an afternoon for that distinction.
+  const name = error?.constructor?.name?.toUpperCase?.() || "error";
   const frame = abapFrames(error, {...options, keepUnmapped: false})[0];
   if (frame === undefined) {
     return `${name} (no ABAP position; is write_source_map on?)`;

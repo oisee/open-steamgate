@@ -32,6 +32,11 @@ const CLONES = [
     path: resolve(process.env.ABAPLINT ?? "../abaplint"),
     note: "no push rights: a PR can only come from a fork, and Regression skips forks. Run it locally and put the result in the PR body",
   },
+  {
+    name: "open-abap/open-abap-core",
+    path: resolve(process.env.OPEN_ABAP_CORE ?? "../open-abap-core"),
+    note: "no push rights: a PR comes from the fork oisee/open-abap-core. Two sessions contribute here, so check this list before starting: the one outcome to avoid is the same fix offered twice",
+  },
 ];
 
 const askRemote = process.argv.includes("--remote");
