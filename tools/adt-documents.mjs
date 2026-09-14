@@ -520,6 +520,20 @@ const TREE_FOLDER = {
 const TREE_CATEGORY = {
   CLAS: "source_library", INTF: "source_library", PROG: "source_library",
   FUGR: "source_library", INCL: "source_library", MSAG: "source_library",
+  TABL: "dictionary", DTEL: "dictionary", DOMA: "dictionary",
+  TTYP: "dictionary", DDLS: "dictionary", SRVD: "dictionary",
+  VIEW: "dictionary", SHLP: "dictionary",
+};
+
+// A measured DEVC/xx grouping node supplies the visible plural label for the
+// types that have one. Types without such a node must label themselves: an
+// empty OBJECT_TYPE_LABEL is rendered by Eclipse as "???" even though the
+// global type registry knows the type.
+const TREE_TYPE_LABEL = {
+  INCL: "Includes", MSAG: "Message Classes",
+  TABL: "Database Tables", DTEL: "Data Elements", DOMA: "Domains",
+  TTYP: "Table Types", DDLS: "Data Definitions",
+  SRVD: "Service Definitions", VIEW: "Views", SHLP: "Search Helps",
 };
 
 const TREE_CATEGORY_LABEL = {
@@ -551,7 +565,7 @@ export function nodeStructureDocument(nodes) {
     const category = TREE_CATEGORY[kind] ?? "other";
     categories.add(category);
     const typeOf = nodes.find((n) => bare(n.type) === kind)?.type ?? kind;
-    objectTypes.push({type: typeOf, category, label: "", node: id()});
+    objectTypes.push({type: typeOf, category, label: folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "", node: id()});
     if (folder !== undefined) {
       const node = id();
       folders.push({type: folder[0], node});
@@ -719,17 +733,16 @@ export function checkReportDocument(reports) {
   // arrives as a finding with no text, which is worse than no finding at all.
   // The fragment on the URI says the position a second time and is what a
   // person following the link lands on.
-  const message = (uri, issue) => `      <chkrun:checkMessage adtcore:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
+  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
 
-  const report = (r) => `  <chkrun:checkReport adtcore:uri="${xmlEscape(r.uri)}" chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
+  const report = (r) => `  <chkrun:checkReport chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
     <chkrun:checkMessageList>
 ${r.issues.map((i) => message(r.uri, i)).join("\n")}
     </chkrun:checkMessageList>
   </chkrun:checkReport>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
-<chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun"
-                        xmlns:adtcore="http://www.sap.com/adt/core">
+<chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun">
 ${reports.map(report).join("\n")}
 </chkrun:checkRunReports>
 `;

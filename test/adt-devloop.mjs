@@ -210,6 +210,10 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain("<chkrun:checkReport");
       expect(xml).to.contain('chkrun:status="processed"');
       expect(xml).to.contain("<chkrun:checkMessageList>");
+      // Eclipse's EMF handler uses the checkrun model. An attribute from the
+      // adtcore namespace on checkReport made deserialization return null;
+      // these names match the document emitted by ADT itself.
+      expect(xml).to.not.contain("adtcore:uri=");
       // no findings is an empty list, not an absent one: a client tells the
       // two apart and only one of them means "this ran and found nothing"
       expect(xml).to.not.contain("<chkrun:checkMessage ");
@@ -228,6 +232,8 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.match(/chkrun:line="\d+"/);
       expect(xml).to.match(/chkrun:column="\d+"/);
       expect(xml).to.match(/chkrun:shortText="[^"]+"/);
+      expect(xml).to.match(/chkrun:uri="[^"]+#start=\d+,\d+"/);
+      expect(xml).to.not.contain("adtcore:uri=");
       expect(xml).to.not.contain("<shortText>");
       // the point of a check run: the file is untouched by it
       const after = await (await call(`/oo/classes/${SCRATCH}/source/main`)).text();

@@ -671,6 +671,16 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<OBJECT_URI>/sap/bc/adt/oo/classes/");
     });
 
+    it("labels an ungrouped DDIC type instead of rendering it as question marks", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" +
+        encodeURIComponent("$EXPRESS_ICF_SHIM_DDIC"), {method: "POST"})).text();
+      expect(xml).to.contain("<OBJECT_TYPE>DTEL/DE</OBJECT_TYPE>");
+      expect(xml).to.contain("<CATEGORY_TAG>dictionary</CATEGORY_TAG>");
+      expect(xml).to.contain("<OBJECT_TYPE_LABEL>Data Elements</OBJECT_TYPE_LABEL>");
+      expect(xml).to.contain("<CATEGORY>dictionary</CATEGORY>");
+      expect(xml).to.contain("<CATEGORY_LABEL>Dictionary</CATEGORY_LABEL>");
+    });
+
     it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
       const parent = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_GEN"), {method: "POST"})).text();
       expect(parent).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>[\s\S]*?<EXPANDABLE>X<\/EXPANDABLE>/);
