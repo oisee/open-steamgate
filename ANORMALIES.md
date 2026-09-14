@@ -42,13 +42,13 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: 4 rows; no client predicate is generated, `INSERT`/`UPDATE`/`DELETE` likewise touch every client
 - Impact on open-steamgate: every real business table is client-dependent; a seeded multi-client capture leaks rows across clients, and any DPC that branches on `sy-mandt` sees `123`
 - Smallest safe workaround: seed captures with a single client and set every row's `mandt` to `123`; do not rely on client isolation in tests
-- Upstream issue: not reported yet; check `abaplint/transpiler` for an existing MANDT issue before opening one
+- Upstream issue: **[abaplint/transpiler#606](https://github.com/abaplint/transpiler/issues/606)**, open since 2022 and phrased as a question. larshp's own answer on it is "or ignore it? as the client feature is not needed in the transpiler/runtime, just spin up multiple" — which is what our workaround already does, so this is a settled design decision rather than a missing fix. Measured and added to the issue on 2026-09-14: a `CLNT`-keyed table with rows under 123, 456 and 789 returns 3 rows here and 1 on a system. Documented rather than implemented, in [abaplint/transpiler#1850](https://github.com/abaplint/transpiler/pull/1850), because the README's `SY-MANDT = 123` line reads as though the client is handled and merely constant
 - Regression-test location: `test/unit/zcl_stg_phase0_test.clas.testclasses.abap` `entityset_reads_sqlite` pins the current 4-row result and will fail when the runtime starts filtering
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-11-oao-handler-hardcodes-test-dpc — open-abap-odata cannot be consumed as a library
 
-- Status: `workaround`
+- Status: `fixed upstream, workaround removed`
 - Discovery date: `2026-09-11`
 - Affected versions: `open-abap/open-abap-odata` main at `7b20ba2` (2026-08-27)
 - Affected ABAP statement, runtime API or adapter: `zcl_oao_http_handler=>data` declares `lo_dpc TYPE REF TO zcl_zsegw_dpc_ext`, a class that only exists in that repo's `test/` folder
@@ -57,7 +57,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: n/a (library packaging)
 - Actual open-abap behaviour: `Error: CreateObjectTranspiler, target variable "lo_dpc" not a object reference`
 - Impact on open-steamgate: blocks using the interface transcription as a lib
-- Smallest safe workaround: `"exclude_filter": ["zcl_oao_http_handler"]` on the lib entry (applied)
+- Smallest safe workaround: `"exclude_filter": ["zcl_oao_http_handler"]` on the lib entry. **Removed 2026-09-14**: the filter is no longer in `abap_transpile.json` and the build is green without it, so the record saying "(applied)" had outlived the thing it described
 - Upstream issue: https://github.com/open-abap/open-abap-odata/issues/33 (open, same crash); QW1 in `AGENDA.md` is the fix, sent upstream as https://github.com/open-abap/open-abap-odata/pull/40 (merged 2026-09-12)
 - Regression-test location: `npm run transpile` itself
 - Upstream version containing a fix: open-abap-odata main from 5467424 (2026-09-12); open-steamgate consumes upstream directly since #48
