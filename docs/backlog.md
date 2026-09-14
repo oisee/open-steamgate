@@ -503,10 +503,25 @@ open  revisions: reading them out of git instead of a system.
         it the whole walkthrough plays in the bundle, every assertion,
         start to finish. The test still tolerates the old death because a
         fresh clone of core has no such file
-     └─ needs Alice's word on who opens it. S has the reproducer, the
-        regression test and a live fork PR there already (#1218); T owns
-        the upstream queue and `npm run parked`. Whoever does it, the other
-        must know, or it gets offered twice
+     └─ OPENED: open-abap-core#1221, 2026-09-14, after asking T for
+        objections (none: "take it") as Alice instructed. Lint and the full
+        core unit suite green on a clean clone of the fork, the four new
+        tests confirmed to have run, and checked by negative control — the
+        naive 1..RANGE version fails random_int_zero with "Expected '0',
+        got '1'"
+     └─ the contract was measured on A4H, not inferred, and the inference
+        was wrong twice over: it is 0..range inclusive, and a negative
+        range is legal. cl_abap_random_int cannot express either, because
+        intinrange asserts high > low and low >= 0
+
+9.5b zork-abap: the Z-machine assumes random( ) returns 1..range        [A]
+     └─ falls out of the A4H measurement. The Z standard says the `random`
+        opcode yields 1..range; GENERAL_GET_RANDOM_INT yields 0..range. So
+        zcl_ork_00_zmachine:557 takes the module's answer unmapped and will
+        occasionally store 0 where the story expects 1..range — on a real
+        system as much as here
+     └─ not ours to fix and not the module's job to bend: matching the real
+        system is what #1221 is for, and the caller maps
 
 9.6  Bun, measured rather than assumed                                [T]
      └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms

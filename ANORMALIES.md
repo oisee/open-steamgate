@@ -542,17 +542,17 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-14-general-get-random-int — `GENERAL_GET_RANDOM_INT` is not implemented
 
-- Status: `workaround` (written and proven locally; the upstream pull request is not opened yet)
+- Status: `reported` — open-abap-core#1221, opened 2026-09-14
 - Discovery date: `2026-09-14`
 - Affected versions: `open-abap-core` as cloned 2026-09-14
 - Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT'`
 - Minimal ABAP reproducer: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT' EXPORTING range = 10 IMPORTING random = lv_n.`
 - Exact command used to run it: `npx playwright test --config playwright.preview.config.mjs -g walkthrough` — the MiniZork walkthrough replayed through the APC channel of the browser bundle
-- Expected SAP behaviour: returns a pseudo-random integer in `[1, range]`; it is a released, widely used utility module
+- Expected SAP behaviour: **measured on an AS ABAP 1909 sandbox rather than inferred, and the inference was wrong.** The parameter text says only "The random int will be <= range". It is uniform over `[0, range]` — `range + 1` values, not `range`: 300 calls each gave zero in 163 (range 1), 105 (range 2), 53 (range 6) and 3 (range 100), which is `1/(range+1)` at every point. `range = 0` answers `0`; `range = -5` answered `-2`, so a negative range is not an error and the span runs towards `range`. No exceptions are raised. Observed by calling it from a throwaway report and test class in `$TMP`, never by reading its implementation — an observation can be contributed upstream, an adaptation cannot
 - Actual open-abap behaviour: the module does not exist, so the dynamic call raises `CX_SY_DYN_CALL_ILLEGAL_FUNC`
 - Impact on open-steamgate: it is the Z-machine's `random` opcode (`local/zork/zcl_ork_00_zmachine.clas.abap:557`), so MiniZork plays perfectly until the first dice roll and then the channel dies. The first dice roll in the walkthrough is the troll fight, twenty-five commands in. Anything transpiled that needs randomness hits the same wall
-- Smallest safe workaround: twelve lines in the local clone of open-abap-core, `src/fugr/openabap.fugr.general_get_random_int.abap` plus the FUNCNAME block in `openabap.fugr.xml`. It is built on core's own `cl_abap_random_int=>create( min = 1 max = range )`, so it borrows the house style rather than adding a second way to be random, and it answers zero for a range of zero or less because the module declares no exceptions. With it the whole MiniZork walkthrough plays in the browser bundle, every assertion, start to finish. The test still tolerates the old death, because a fresh clone of core does not have this file
-- Upstream issue: none filed yet. A small addition to open-abap-core and therefore a fork, since `oisee` has no write access there (403, as with #1218)
+- Smallest safe workaround: `src/fugr/openabap.fugr.general_get_random_int.abap` plus the FUNCNAME block in `openabap.fugr.xml`, three `@KERNEL` lines over `Math.random`. **Not** `cl_abap_random_int`, which was the first attempt and cannot express this: `cl_abap_random=>intinrange` opens with `ASSERT high > low` and `ASSERT low >= 0`, so a range of zero dumps and every negative range dumps. Reaching the contract through `abs( )` and a negation works and reads as cleverness hiding intent; it is the same `Math.random` either way, and `generate_sec_random` in that group is the precedent for the plain form. With it the whole MiniZork walkthrough plays in the browser bundle, every assertion, start to finish, three runs on the strict form of the test. The test still tolerates the old death, because a fresh clone of core does not have this file
+- Upstream issue: https://github.com/open-abap/open-abap-core/pull/1221 (fork branch `general-get-random-int`; no write access on that repository, as with #1218). Agreed with the transpiler session before opening, per Alice, so the same fix is not offered twice
 - Regression-test location: `test/e2e/preview.spec.mjs`, "the MiniZork walkthrough plays the same in the bundle"
 - Upstream version containing a fix: `unknown`
 
