@@ -683,6 +683,21 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<OBJECT_URI>/sap/bc/adt/oo/classes/");
     });
 
+    it("identifies every repository object row uniquely for Eclipse navigation", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_type=DEVC&parent_name=", {
+        method: "POST",
+      })).text();
+      const rows = [...xml.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)]
+        .map((match) => match[1]);
+      const objects = rows.filter((row) => /<OBJECT_NAME>[^<]+<\/OBJECT_NAME>/.test(row));
+      const ids = objects.map((row) => /<NODE_ID>([^<]+)<\/NODE_ID>/.exec(row)?.[1]);
+      expect(objects.length, "the root fixture must exercise sibling packages").to.be.greaterThan(1);
+      expect(ids, "an empty NODE_ID makes every click resolve to the first sibling")
+        .to.not.include(undefined);
+      expect(new Set(ids).size).to.equal(ids.length);
+      expect(ids).to.not.include("000000");
+    });
+
     it("labels an ungrouped DDIC type instead of rendering it as question marks", async () => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" +
         encodeURIComponent("$EXPRESS_ICF_SHIM_DDIC"), {method: "POST"})).text();

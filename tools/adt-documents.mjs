@@ -586,7 +586,7 @@ export function nodeStructureDocument(nodes) {
 
   const objectRow = (n) => row({
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
-    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
+    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: id(),
     PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
     VERSION: "active", INACTIVE_TYPE: "",
   });
