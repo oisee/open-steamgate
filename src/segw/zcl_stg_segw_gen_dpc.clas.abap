@@ -30,7 +30,6 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
         VALUE(rt_files) TYPE zcl_stg_segw_gen=>tt_file.
 
   PRIVATE SECTION.
-    CONSTANTS gc_sadl_chunk TYPE i VALUE 200.
 
 * an operation with its entity set and type, in the order of the model
     TYPES: BEGIN OF ty_op,
@@ -769,8 +768,6 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     DATA lv_i        TYPE i.
     DATA lv_key      TYPE string.
     DATA lv_n        TYPE i.
-    DATA lv_count    TYPE i.
-    DATA lv_in_piece TYPE i.
 
     LOOP AT is_model-entity_types INTO ls_type.
       LOOP AT ls_type-entity_sets INTO ls_set.
@@ -829,41 +826,20 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       lv_n = lv_n - 1.
     ENDWHILE.
     APPEND `               |</sadl:resultSet>| &` TO lt_lines.
-* SEGW writes the whole definition as one & chain. The transpiler nests
-* such a chain one concat( ) call per operand and a service worker's stack
-* gives out near 800 lines (ZSTG_SEGW: 55 sets), so segw-gen builds a long
-* definition in pieces of gc_sadl_chunk lines; every SAP project we have is
-* far below. ANORMALIES: transpiler-concat-chain (abaplint/transpiler#1836).
-    lv_count = lines( lt_lines ).
-    IF lv_count + 3 <= gc_sadl_chunk.
-      lv_xml = |    DATA(lv_sadl_xml) =\n|
-        && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
-        && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| &\n|.
-      LOOP AT lt_lines INTO lv_line.
-        lv_xml = lv_xml && lv_line && |\n|.
-      ENDLOOP.
-      lv_xml = lv_xml && |               \|</sadl:definition>\| .|.
-    ELSE.
-      lv_xml = |    DATA(lv_sadl_xml) =\n|
-        && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
-        && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| .|.
-      lv_in_piece = 0.
-      lv_i = 0.
-      LOOP AT lt_lines INTO lv_line.
-        lv_i = lv_i + 1.
-        IF lv_in_piece = 0.
-          lv_xml = lv_xml && |\n    lv_sadl_xml = lv_sadl_xml &|.
-        ENDIF.
-        lv_in_piece = lv_in_piece + 1.
-        IF lv_in_piece = gc_sadl_chunk OR lv_i = lv_count.
-* the last line of a piece ends the statement
-          lv_line = substring( val = lv_line len = strlen( lv_line ) - 2 ) && ` .`.
-          lv_in_piece = 0.
-        ENDIF.
-        lv_xml = lv_xml && |\n| && lv_line.
-      ENDLOOP.
-      lv_xml = lv_xml && |\n    lv_sadl_xml = lv_sadl_xml &\n               \|</sadl:definition>\| .|.
-    ENDIF.
+* SEGW writes the whole definition as one & chain, and so does this. It used
+* to be built in pieces of 200 lines, because the transpiler nested such a
+* chain one concat( ) call per operand and a service worker's stack gave out
+* near 800 lines (ZSTG_SEGW: 55 sets). abaplint/transpiler#1836 flattens the
+* whole chain into one call, released in 2.13.87; measured at 1200 operands,
+* one concat( ), no recursion left to run out of.
+* ANORMALIES: transpiler-concat-chain.
+    lv_xml = |    DATA(lv_sadl_xml) =\n|
+      && |               \|<?xml version="1.0" encoding="utf-16"?>\| &\n|
+      && |               \|<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >\| &\n|.
+    LOOP AT lt_lines INTO lv_line.
+      lv_xml = lv_xml && lv_line && |\n|.
+    ENDLOOP.
+    lv_xml = lv_xml && |               \|</sadl:definition>\| .|.
 
     ls_impl-name    = '/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY'.
     ls_impl-content = |  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY.\n|

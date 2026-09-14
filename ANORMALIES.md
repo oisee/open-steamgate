@@ -494,7 +494,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-12-transpiler-concat-chain — An `&`/`&&` chain nests one concat( ) call per operand
 
-- Status: `workaround`
+- Status: `fixed upstream, workaround removed`
 - Discovery date: `2026-09-12`
 - Affected versions: `@abaplint/transpiler-cli 2.13.85`
 - Affected ABAP statement, runtime API or adapter: `a & b & c ...` (also `&&`), `abap.operators.concat`
@@ -504,7 +504,7 @@ ENDLOOP.
 - Actual open-abap behaviour: `concat(a, concat(b, concat(c, ...)))`, one nesting level per operand; the runtime already accepts `concat([a, b, c])` (used for constant chains) but the Source transpiler does not emit it
 - Impact on open-steamgate: the browser preview (GitHub Pages) fails to install its worker once any transpiled class carries a chain of ~800 operands
 - Smallest safe workaround: `tools/segw-gen.mjs` builds a SADL definition longer than `SADL_CHUNK` (200) lines in pieces (`lv_sadl_xml = lv_sadl_xml & ...`); every SAP project we have is shorter (85 max), so their generated classes are unchanged
-- Upstream issue: PR "Source: flatten & / && chains into concat([...])" from `oisee/transpiler`
+- Upstream issue: **[abaplint/transpiler#1836](https://github.com/abaplint/transpiler/pull/1836)**, merged and released in `@abaplint/transpiler 2.13.87` on 2026-09-14. The workaround is gone from both generators — `tools/segw-gen.mjs` and `src/segw/zcl_stg_segw_gen_dpc.clas.abap` — which had to move together, because a test compares them byte for byte. Measured before removing rather than after: 1200 operands now emit one `concat( )` call, where the nesting used to be one per operand. ZSTG_SEGW's definition is back to a single 836-line chain, past the 800 the service worker's stack used to give out at, and the whole Playwright suite is green
 - Regression-test location: `test/e2e/preview.spec.mjs` (the preview installs), `test/stg-compile.mjs`
 - Upstream version containing a fix: `unknown`
 

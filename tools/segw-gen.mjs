@@ -1274,8 +1274,6 @@ function odcMethod(o, m) {
   return "";
 }
 
-const SADL_CHUNK = 200;
-
 function sadlMethods(m, opts) {
   const sets = m.entityTypes.flatMap((et) => et.entitySets.filter((es) => es.sadl && es.sadl.type !== "ODC").map((es) => ({...es, entity: et})));
   // a where-used reference to the DDIC object behind each set; an EPM
@@ -1293,15 +1291,14 @@ function sadlMethods(m, opts) {
     `               |</sadl:structure>| &`,
   ]);
   const structures = structureLines.join("\n");
-  // SEGW writes the whole definition as one & chain. The transpiler nests
-  // such a chain one concat( ) call per operand, and a service worker's
-  // stack gives out near 800 (ZSTG_SEGW: 55 sets), so a long definition is
-  // built in pieces of SADL_CHUNK lines; the shape of every SAP project we
-  // have (a handful of sets) is unchanged. ANORMALIES: transpiler-concat-chain.
-  const sadlXml = (() => {
-    const lines = [...dataSources, `               |<sadl:resultSet>| &`, ...structureLines, `               |</sadl:resultSet>| &`];
-    if (lines.length + 3 <= SADL_CHUNK) {
-      return `    DATA(lv_sadl_xml) =
+  // SEGW writes the whole definition as one & chain, and the generator now
+  // writes it the same way. It used to be built in pieces of 200 lines,
+  // because the transpiler nested such a chain one concat( ) call per operand
+  // and a service worker's stack gave out near 800 (ZSTG_SEGW: 55 sets).
+  // abaplint/transpiler#1836 flattens the whole chain into one call, released
+  // in 2.13.87; measured here at 1200 operands, one concat( ) call, no
+  // recursion left to run out of. ANORMALIES: transpiler-concat-chain.
+  const sadlXml = `    DATA(lv_sadl_xml) =
                |<?xml version="1.0" encoding="utf-16"?>| &
                |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| &
 ${dataSources.join("\n")}
@@ -1309,17 +1306,6 @@ ${dataSources.join("\n")}
 ${structures}
                |</sadl:resultSet>| &
                |</sadl:definition>| .`;
-    }
-    let s = `    DATA(lv_sadl_xml) =
-               |<?xml version="1.0" encoding="utf-16"?>| &
-               |<sadl:definition xmlns:sadl="http://sap.com/sap.nw.f.sadl" syntaxVersion="V2" >| .`;
-    for (let i = 0; i < lines.length; i += SADL_CHUNK) {
-      const piece = lines.slice(i, i + SADL_CHUNK);
-      piece[piece.length - 1] = piece[piece.length - 1].replace(/ &$/, " .");
-      s += `\n    lv_sadl_xml = lv_sadl_xml &\n${piece.join("\n")}`;
-    }
-    return s + `\n    lv_sadl_xml = lv_sadl_xml &\n               |</sadl:definition>| .`;
-  })();
   return {
     "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY": `  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY.
     CAST /iwbep/if_mgw_appl_srv_runtime( if_sadl_gw_dpc_util~get_dpc( ) )->create_deep_entity(
