@@ -269,6 +269,18 @@ const CATEGORY = {
   "datapreview/freestyle": ["DatapreviewFreeStyle", "http://www.sap.com/adt/categories/datapreview"],
   "ddic/ddl/sources": ["ddlsources", "http://www.sap.com/adt/categories/ddic/ddlsources"],
   "ddic/srvd/sources": ["srvdsrv", "http://www.sap.com/wbobj/raps"],
+  // These three were advertised with no category at all, and a collection
+  // without one is not a collection the client can read: its discovery
+  // handler calls category.getScheme() without checking, so one such entry
+  // throws NullPointerException and the *whole* discovery document fails to
+  // deserialize — which is why the tree sat on "Loading repository tree ..."
+  // under every package while three unrelated-looking errors sat in the log.
+  // Terms and schemes are the system's own, "respository" included: that
+  // misspelling is in SAP's scheme and fixing it would be inventing a scheme
+  // nobody looks for.
+  "abapunit/metadata": ["metadata", "http://www.sap.com/adt/categories/abapunit"],
+  "repository/informationsystem/objecttypes": ["objecttypes", "http://www.sap.com/adt/categories/respository"],
+  "repository/informationsystem/releasestates": ["releasestates", "http://www.sap.com/adt/categories/respository"],
 };
 
 // How a client builds a URL it was never told in full.

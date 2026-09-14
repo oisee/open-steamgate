@@ -237,6 +237,25 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       }
     });
 
+    // The invariant behind three log entries and a tree that never loaded.
+    //
+    // A collection with no atom:category is not a collection the client can
+    // read: DiscoveryContentHandler.deserialize calls category.getScheme()
+    // without a null check, so one such entry throws NullPointerException and
+    // the whole discovery document fails to parse — not just that collection.
+    // Three of ours had none, and every package below sat on "Loading
+    // repository tree ..." while the errors named resources nobody had
+    // clicked. So this is checked over all of them rather than per resource:
+    // the cost of a missing one is not local.
+    it("gives every collection a category, because one without kills the document", async () => {
+      const xml = await (await call("/discovery")).text();
+      const collections = [...xml.matchAll(/<app:collection[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/app:collection>/g)];
+      expect(collections.length, "no collections at all").to.be.greaterThan(0);
+      for (const [, href, body] of collections) {
+        expect(body, href).to.match(/<atom:category[^>]*term="[^"]+"[^>]*scheme="[^"]+"/);
+      }
+    });
+
     // The gate, and the reason every other node in this graph was dead weight.
     //
     // Taken from the client's own bytecode, not from a guess: isNodeAvailable
