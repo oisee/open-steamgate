@@ -145,26 +145,80 @@ function identifiers(root) {
   return list;
 }
 
-function scan(root, files, names) {
+// Everything about to be pushed, which is not the same as everything in the
+// working tree. A commit that introduced an identifier and a later commit that
+// removed it leave a clean tree and a history that still carries it, and
+// "clean the history before merging" is a step somebody has to remember at
+// exactly the right moment — the same shape as the rule that has already
+// failed twice. So the range is walked commit by commit and every version of
+// every blob it touches is read, along with the messages, which are published
+// too and are the easiest place to paste an address into.
+function blobsInRange(root, range) {
+  let commits;
+  try {
+    commits = execFileSync("git", ["rev-list", range], {
+      cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }).split("\n").filter(Boolean);
+  } catch (error) {
+    // A hook that dies with a stack trace teaches people to pass --no-verify.
+    console.error(`osd-leak-scan: не смог прочитать диапазон ${range}: ${error.message.trim().split("\n")[0]}`);
+    process.exit(1);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const commit of commits) {
+    const message = execFileSync("git", ["log", "-1", "--format=%B", commit], {
+      cwd: root, encoding: "utf8",
+    });
+    out.push({ file: `${commit.slice(0, 8)} (сообщение коммита)`, text: message });
+
+    const names = execFileSync(
+      "git", ["diff-tree", "-r", "--no-commit-id", "--name-only", "--diff-filter=ACMR", commit],
+      { cwd: root, encoding: "utf8" },
+    ).split("\n").filter(Boolean);
+    for (const name of names) {
+      const key = `${commit}:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        const buf = execFileSync("git", ["show", `${commit}:${name}`], {
+          cwd: root, maxBuffer: 64 * 1024 * 1024,
+        });
+        out.push({ file: `${name} @ ${commit.slice(0, 8)}`, realFile: name, text: buf.toString("latin1") });
+      } catch {
+        // Deleted, or a submodule. Neither has content to read here.
+      }
+    }
+  }
+  return out;
+}
+
+function scan(root, sources, names) {
   const hits = [];
   const isAllowed = allowed(root);
-  for (const file of files) {
-    if (GENERATED.test(file) || OWN_CONFIG.test(file)) continue;
-    if (CAPTURE.test(file)) {
+  for (const source of sources) {
+    const file = typeof source === "string" ? source : source.file;
+    const forAllow = typeof source === "string" ? file : (source.realFile ?? file);
+    if (GENERATED.test(forAllow) || OWN_CONFIG.test(forAllow)) continue;
+    if (CAPTURE.test(forAllow)) {
       hits.push({ file, how: "имя файла", what: "захват", text: file });
       continue;
     }
     let text;
-    try {
-      text = readFileSync(resolve(root, file), "latin1");
-    } catch {
-      continue;
+    if (typeof source === "string") {
+      try {
+        text = readFileSync(resolve(root, file), "latin1");
+      } catch {
+        continue;
+      }
+    } else {
+      text = source.text;
     }
     if (text.length > 8 * 1024 * 1024) continue;
 
     const seen = new Set();
     const note = (how, what, value) => {
-      if (isAllowed(file, value)) return;
+      if (isAllowed(forAllow, value)) return;
       const key = `${file}|${what}|${value}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -205,9 +259,11 @@ function trackedFiles(root) {
 const args = process.argv.slice(2);
 const root = resolve(args.find((a) => !a.startsWith("--")) ?? ".");
 const all = args.includes("--all");
+const rangeAt = args.indexOf("--range");
+const range = rangeAt >= 0 ? args[rangeAt + 1] : null;
 
 const names = identifiers(root);
-const files = all ? trackedFiles(root) : stagedFiles(root);
+const files = range ? blobsInRange(root, range) : all ? trackedFiles(root) : stagedFiles(root);
 const hits = scan(root, files, names);
 
 if (!names) {

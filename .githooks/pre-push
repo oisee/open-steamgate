@@ -1,0 +1,61 @@
+#!/bin/sh
+# The gate that matters. A commit stays on this machine; a push does not.
+#
+# Committing freely to a local branch and cleaning the history before it goes
+# anywhere is a good way to work — but only if something checks at the moment
+# it goes. That moment is here, and what it checks is the range actually being
+# pushed, every commit in it, not the working tree: a leak introduced in one
+# commit and scrubbed in the next leaves a clean tree and a history that still
+# carries it, and the push publishes the history.
+#
+# Commit messages are scanned too. They are as public as the files and are the
+# easiest place to paste an address into without thinking about it.
+root=$(git rev-parse --show-toplevel)
+status=0
+
+# The scanner may not live in the repository being pushed. A sibling Go clone
+# takes the same captures and deserves the same check, and the way to give it
+# one is a shared core.hooksPath — so the tool is looked for next to this hook
+# first, and only then in the repository itself.
+hook_dir=$(cd "$(dirname "$0")" && pwd)
+for candidate in "$hook_dir/../tools/osd-leak-scan.mjs" "$root/tools/osd-leak-scan.mjs"; do
+  if [ -f "$candidate" ]; then scanner="$candidate"; break; fi
+done
+if [ -z "${scanner:-}" ]; then
+  echo "osd-leak-scan: не нашёл сканер рядом с хуком — проверка не выполнена" >&2
+  exit 0
+fi
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # A deletion has nothing to look at.
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+
+  case "$remote_sha" in
+    # A branch the remote has never seen: everything on it is new. Limited to
+    # what is not already on another remote branch, so a first push of a topic
+    # does not rescan the whole repository.
+    0000000000000000000000000000000000000000)
+      range="$local_sha --not --remotes=origin"
+      ;;
+    *)
+      range="$remote_sha..$local_sha"
+      ;;
+  esac
+
+  # shellcheck disable=SC2086
+  node "$scanner" "$root" --range $range || rc=$?
+  case "${rc:-0}" in
+    0|2) ;;          # 2 = ran without the identifier list, which is CI's normal state
+    *) status=1 ;;
+  esac
+  rc=0
+done
+
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "Пуш остановлен. Это уйдёт в публичный репозиторий."
+  echo "Почисти историю (rebase/squash) и попробуй снова."
+fi
+exit $status
