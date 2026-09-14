@@ -135,7 +135,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-13-conv-second-in-expression — The second constructor expression in one expression has no type
 
-- Status: `fixed locally, not released`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`, `@abaplint/core 2.120.5`
 - Affected ABAP statement, runtime API or adapter: `CONV` (and any constructor expression resolved through an inferred type) when more than one appears in one expression
@@ -151,7 +151,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-13-paren-before-conv — A parenthesised group before `* CONV ... /` generates unbalanced JavaScript
 
-- Status: `fixed locally, not released`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: arithmetic where a constructor expression sits between two operators
@@ -167,7 +167,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-13-builtin-as-method — A built-in function in such an expression is emitted as a method of the class
 
-- Status: `fixed locally, not released`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: any built-in function call (`cos`, `sin`, `nmax`, `lines`, `frac`) inside an expression carrying more than one constructor expression
@@ -203,7 +203,7 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 - Actual open-abap behaviour: the argument is emitted positionally, so `input.val` is undefined and the first line that touches it throws `Cannot read properties of undefined (reading 'get')`. Nineteen calls across eight of her classes, with correct calls in the same files three lines away
 - Impact on open-steamgate: the whole timeline. Twistzoomer was simply the first of the eight her sequence reached; the other seven were queued behind it. Deterministic, not a race — they chased concurrency first and it was a blind alley
 - Smallest safe workaround: `sin( val = x )` written out, or lift the argument into its own variable first
-- Upstream issue: none yet, commit `cd135f31` on `local/osd-build`. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
+- Upstream issue: none yet, branch `fix/conv-builtin-type` in `abaplint/transpiler`, which is where the earlier half of it lives too. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
 - Regression-test location: `test/builtin/cos.ts` — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
 - Upstream version containing a fix: `unknown`
 
@@ -227,7 +227,7 @@ DATA(c) = lv_f * 2.        " typed f, correct
 - Actual open-abap behaviour: the inline declaration takes the character literal's type **and its length**, so `sin( x ) * '0.25'` yields `c(4)` and `lv_pulse * '0.3'` yields `c(3)`. An integer literal does not do this
 - Impact on open-steamgate: two ways, and the quiet one is worse. Loud: appending such a variable to a table of `f` raised `CX_SY_CONVERSION_NO_NUMBER` and killed her channel at bar 6. Quiet: the value is truncated to the literal's length, so her dance bars were computed from `9,4` instead of `9.4983552631578956` — right shape, two significant digits, no complaint from anything
 - Smallest safe workaround: `CONV f( '0.25' )` in the expression, or declare the variable rather than inferring it
-- Upstream issue: none yet. This is `@abaplint/core`, not the transpiler: the transpiler asks the scope for the variable's type and faithfully emits the answer it gets. Needs an issue on `abaplint/abaplint` with the four lines above
+- Upstream issue: none yet, needs an issue on `abaplint/abaplint`. This is `@abaplint/core`, not the transpiler: the transpiler asks the scope for the variable's type and faithfully emits the answer it gets. Reproduced independently by open-steamgate on 2026-09-14 with a fourth line that narrows it further: `DATA(d) = lv_f * CONV f( '0.25' ).` gives `f`, so it is the bare character literal that poisons the inference and not the mixed arithmetic
 - Regression-test location: none here; belongs upstream
 - Upstream version containing a fix: `unknown`
 
@@ -253,7 +253,7 @@ back = ch.       " CX_SY_CONVERSION_NO_NUMBER
 - Actual open-abap behaviour: `get()` wrote a comma and `set()` accepted only a point. `DecFloat34` was worse and silent: `parseFloat` stops at the comma, so reading back `9,79440789` gave `9` with no error
 - Impact on open-steamgate: this is what turned the type defect above into a dead channel rather than a wrong number. Her page reported it as "Disconnected", because a client cannot tell a handler that raised from a network that dropped
 - Smallest safe workaround: none needed now
-- Upstream issue: none yet, branch pending in `abaplint/transpiler`. `set()` accepts both separators — the comma because that is what `get()` writes, the point because ABAP source literals carry one and `CONV f( '0.25' )` is everywhere. `get()` is unchanged: `test/statements/write.ts:209` asserts the comma at ABAP level, so the output side was verified against a system
+- Upstream issue: none yet, branch `fix/float-separator` in `abaplint/transpiler`. `set()` accepts both separators — the comma because that is what `get()` writes, the point because ABAP source literals carry one and `CONV f( '0.25' )` is everywhere. `get()` is unchanged: `test/statements/write.ts:209` asserts the comma at ABAP level, so the output side was verified against a system
 - Regression-test location: `test/types/float.ts` (round trip, point still a point, `'1,2,3'` still raises) and `test/types/decfloat34.ts`
 - Upstream version containing a fix: `unknown`
 
@@ -271,6 +271,30 @@ back = ch.       " CX_SY_CONVERSION_NO_NUMBER
 - Smallest safe workaround: log the class name rather than the text
 - Upstream issue: none yet. The fix wants an async `constructor_` in a synchronous throw path, which is a deliberate change rather than a quick one
 - Regression-test location: none
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-14-sy-tabix-hashed — `sy-tabix` is a row number in a loop over a hashed table
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: `LOOP AT` over a hashed table, and `LOOP AT ... USING KEY` with a hash secondary key
+- Minimal ABAP reproducer:
+
+```abap
+DATA lt TYPE HASHED TABLE OF ty WITH UNIQUE KEY id.
+LOOP AT lt INTO DATA(ls).
+  lv_out = lv_out && |{ sy-tabix }|.   " 123, a system writes 000
+ENDLOOP.
+```
+
+- Exact command used to run it: `npx mocha build/test/statements/loop.js`
+- Expected SAP behaviour: `000`. A hashed table has no row order, so ABAP reports no position rather than inventing one
+- Actual open-abap behaviour: `123`. A position that looks usable and is not
+- Impact on open-steamgate: compounded with [[ANOMALY-2026-09-13-sy-tabix-not-restored]] in her `send_megademo`. Her `gt_registry` is `HASHED TABLE OF REF TO zcl_o4d_demo`, so an inner loop over it both invented an index and kept it. Restoring already made her caller correct; this makes the value itself correct for anyone who reads it
+- Smallest safe workaround: do not read `sy-tabix` in a loop over a hashed table, which is also the rule on a system
+- Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, alongside the restore fix, since the two are siblings and one test file covers both
+- Regression-test location: `test/statements/loop.ts`, two cases: hashed gives `000`, sorted still gives `12`
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-13-sy-tabix-not-restored — An inner loop keeps the outer loop's `sy-tabix`
@@ -345,7 +369,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-13-percent-in-filename — A percent in a file name is not escaped in the import specifier
 
-- Status: `fixed locally, not released`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: not ABAP — any object whose abapGit file name carries a percent, which is every W3MI (Web Repository) object, because abapGit encodes the dot of `ZO4D_06_PLASMA.PNG` as `zo4d_06_plasma%2epng`
@@ -361,7 +385,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-13-w3mi-objid-encoded — The W3MI registry is keyed on the encoded file name, not the object name
 
-- Status: `open`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FROM wwwparams WHERE objid = ...` and the W3MI registry the transpiler generates
@@ -371,7 +395,7 @@ ENDLOOP.
 - Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name, `ZOISEE-EAR-02%2EMP3`, while the object's own XML carries `ZOISEE-EAR-02.MP3`, so a handler that asks the way SAP's API is asked finds nothing and returns empty rather than failing. The percent-escape is an abapGit filename spelling that should never have become a key
 - Impact on open-steamgate: this is what stops the audio in the running demo. The images work only because they were asked for by the encoded name while testing, which is the failure mode in miniature: the wrong key looks like a working one until someone uses the right one
 - Smallest safe workaround: ask with the encoded name
-- Upstream issue: none yet. The fix is to key both the registry and `wwwparams` on `<NAME>`; open-steamgate owns that code and the change is theirs to make
+- Upstream issue: none yet, branch `fix/w3mi-objid` in `abaplint/transpiler`. The registry, `wwwparams` and `tadir` are all keyed on `<NAME>` now. Corrected 2026-09-14: this was the transpiler's code all along, not open-steamgate's, and saying otherwise nearly left it unowned
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`
 
@@ -387,7 +411,7 @@ ENDLOOP.
 - Actual open-abap behaviour: `implement_methods` demands it anyway, and turning the rule off in `abaplint.jsonc` changes nothing for the transpile, which runs its own mandatory rule set rather than the project's
 - Impact on open-steamgate: none of ours; found by open-steamgate on vivid-vibes, where an interface grew two methods and fifty implementors were never updated. It is the reason the repository needs 154 written-out implementations rather than two words in the interface
 - Smallest safe workaround: implement the method with an empty body, which is what the patch for that repository does
-- Upstream issue: none yet; the transpiler session owns it, batched with the three above
+- Upstream issue: none yet, needs an issue on `abaplint/abaplint`. Reproduced independently by open-steamgate on 2026-09-14 with a control: removing `DEFAULT IGNORE` gives the identical message, so `implement_methods` does not read the modifier at all, although the parser understands it (`method_def.js`, 7.40 SP08)
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`
 

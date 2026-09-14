@@ -150,7 +150,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   fork, never fires it; `ci.yml` and `web.yml` do have `pull_request`, which
   is why such a PR still looks green. The check that did not run and the
   check that passed are the same colour. After pushing a branch, confirm
-  **Regression** is in the checks list and not only **CI**.
+  **Regression** is in the checks list and not only **CI**. The queue of what is
+  waiting to go is `npm run parked`, which derives it from the branches in the
+  clone and the entries in ANORMALIES rather than from a list somebody keeps:
+  it names each parked branch, its commits, whether it has ever been pushed,
+  the anomalies that claim it, and it complains in both directions — a branch
+  nothing explains, an entry naming a branch that is gone. A branch that is
+  not a defect fix explains itself with `git branch --edit-description`, which
+  keeps the note on the branch where it cannot drift from it. Entries whose
+  fix belongs upstream in abaplint rather than here say **needs an issue** in
+  their Upstream line, and `parked` lists those separately.
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
   `abaplint/transpiler` or `open-abap-core`.

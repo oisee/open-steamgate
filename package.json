@@ -47,7 +47,8 @@
     "transpiler:local": "node tools/osd-link.mjs transpiler-cli packages/cli",
     "transpiler:published": "npm install @abaplint/transpiler-cli && node tools/osd-transpiler.mjs",
     "runtime:local": "node tools/osd-link.mjs runtime packages/runtime",
-    "runtime:published": "npm install @abaplint/runtime && node tools/osd-transpiler.mjs"
+    "runtime:published": "npm install @abaplint/runtime && node tools/osd-transpiler.mjs",
+    "parked": "node tools/osd-parked.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
