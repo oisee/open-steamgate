@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {ADT_TYPE, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, classDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -634,6 +634,91 @@ export function adtRouter(options = {}) {
     );
   });
 
+  // ---- The rest of what a client asks for before it will work.
+  //
+  // Found by a sweep rather than one failure at a time: every path the real
+  // system answered was replayed against this façade, and these are the ones
+  // that came back 404 while being asked for on every project open. Fixing
+  // them one dialog at a time was costing a round trip with a person for
+  // each, which is a slow way to find out what a client wants.
+
+  // What kinds of object a client may filter a search by. Ours, not a
+  // system's list of 304 — a filter for a type this façade cannot hold finds
+  // nothing, and the client shows it as an option anyway.
+  advertise("repository/informationsystem/objecttypes");
+  router.get(`${BASE}/repository/informationsystem/objecttypes`, (req, res) => {
+    res.type("application/vnd.sap.adt.nameditems.v1+xml; charset=utf-8").send(
+      namedItemsDocument(Object.keys(TYPES).map((code) => ({
+        name: ADT_TYPE[code] ?? code,
+        description: (LABELS[code] ?? [code])[1] ?? code,
+      }))),
+    );
+  });
+
+  // Release states, which a cloud client uses to split released APIs from the
+  // rest. Nothing here is released in that sense and the empty list says so.
+  advertise("repository/informationsystem/releasestates");
+  router.get(`${BASE}/repository/informationsystem/releasestates`, (req, res) => {
+    res.type("application/vnd.sap.adt.nameditems.v1+xml; charset=utf-8").send(namedItemsDocument([]));
+  });
+
+  // Property value helps behind the search dialog's filters.
+  router.get(`${BASE}/repository/informationsystem/objectproperties/values`, (req, res) => {
+    res.type("application/vnd.sap.adt.nameditems.v1+xml; charset=utf-8").send(namedItemsDocument([]));
+  });
+
+  // Whether to report package check errors. False, because there are none.
+  router.get(`${BASE}/packages/settings`, (req, res) => {
+    res.type("application/vnd.sap.adt.packages.settings+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<pkcs:settings pkcs:showPackageCheckErrors="false" xmlns:pkcs="http://www.sap.com/adt/packages/settings"/>',
+    );
+  });
+
+  // The feed list, and the feeds themselves elsewhere. A client activates
+  // "registered feed queries" on every project open and logs an error when it
+  // cannot read this.
+  router.get(`${BASE}/feeds`, (req, res) => {
+    emptyFeed(res, "ABAP System Monitoring", `${BASE}/feeds`);
+  });
+  router.get(`${BASE}/feeds/variants`, (req, res) => {
+    emptyFeed(res, "Feed Variants", `${BASE}/feeds/variants`);
+  });
+
+  // Who exists. One user: the one this façade answers as, because there is no
+  // user store behind it and pretending otherwise would put names in a
+  // dropdown that mean nothing here.
+  router.get(`${BASE}/system/users`, (req, res) => {
+    res.type("application/atom+xml;type=feed").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">' +
+      `<atom:title>Users</atom:title><atom:updated>${new Date().toISOString()}</atom:updated>` +
+      `<atom:entry><atom:id>${identity.userName}</atom:id>` +
+      `<atom:title>${identity.userFullName}</atom:title></atom:entry>` +
+      "</atom:feed>",
+    );
+  });
+
+  // Which object types can carry unit tests. Packages and classes here, which
+  // is what this façade can actually run.
+  advertise("abapunit/metadata");
+  router.get(`${BASE}/abapunit/metadata`, (req, res) => {
+    const feature = (kind, own) =>
+      `<aunit:supportedTypeFeatures globalWorkbenchType="${kind}" ownTests="${own}"` +
+      ' assignedTests="true" coverage="false"/>';
+    res.type("application/vnd.sap.adt.abapunit.metadata.result.v1+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<aunit:metadata xmlns:aunit="http://www.sap.com/adt/aunit">' +
+      feature("DEVC/K", "true") + feature("CLAS/OC", "true") + feature("PROG/P", "true") +
+      "</aunit:metadata>",
+    );
+  });
+
+  // Ending a session. There is nothing to end — the session is a cookie and a
+  // token — but a client that gets 404 here reports a failed logoff.
+  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
+  router.get("/sap/public/bc/icf/logoff", (req, res) => res.status(200).type("text/plain").send("logged off"));
+
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
   //
@@ -767,13 +852,10 @@ export function adtRouter(options = {}) {
   // here is a connected IDE, with no reentrance ticket and no RFC anywhere in
   // it. That is the entire reason this route exists.
   //
-  // The body is deliberately an empty graph. A compatibility graph is a
-  // system telling a client which resources it may use at which version, and
-  // OSD has measured no such facts; filling it in would be inventing
-  // permissions on behalf of a system that has not been asked. Discovery is
-  // where this façade says what it serves, and it says it from the routes
-  // that are actually mounted. An empty graph adds no claim to that, which is
-  // the honest answer to a question we cannot answer.
+  // The graph says which features this façade serves; see
+  // compatibilityGraphDocument for what an empty one turned out to mean and
+  // why it is no longer empty. A client reads it before it reads discovery,
+  // and disables what it finds unclaimed.
   for (const path of [BASE + "/compatibility/graph"]) {
     router.head(path, (req, res) => {
       res.status(200).type("application/xml").end();
@@ -838,7 +920,43 @@ export function adtRouter(options = {}) {
       });
     };
     router.get(`${BASE}/${adt}/:name/objectstructure`, structure);
-    router.get(`${BASE}/${adt}/:name`, structure);
+
+    // One address, two clients, two documents — and both are right.
+    //
+    // abap-adt-api, which VS Code uses, calls objectStructure() on the
+    // object's own address and expects the structure back; there is a test
+    // for it, written when a class would not open in VS Code because this
+    // path fell through to the catch-all. Eclipse asks the same URL for
+    // class:abapClass, the properties document whose source link it follows
+    // to open the editor, and gets no further without it.
+    //
+    // They are distinguishable, so neither has to lose: Eclipse says what it
+    // wants — Accept: application/vnd.sap.adt.oo.classes.v4+xml — and
+    // abap-adt-api does not. Answering the type that was asked for serves
+    // both, and is what the header is for.
+    //
+    // Only classes have a document of their own here so far. The rest keep
+    // the structure at both spellings, which is likely wrong in the same way
+    // and has not been measured against a real answer yet.
+    if (type === "CLAS") {
+      router.get(`${BASE}/${adt}/:name`, (req, res) => {
+        if (String(req.headers.accept ?? "").includes("oo.classes") === false) {
+          structure(req, res);
+          return;
+        }
+        answer(res, () => {
+          const found = store.find(type, req.params.name);
+          if (found === undefined) {
+            throw new NotFound(type, req.params.name);
+          }
+          res.type("application/vnd.sap.adt.oo.classes.v4+xml").send(
+            classDocument(found, {includes: store.classIncludes?.(found.name) ?? []}),
+          );
+        });
+      });
+    } else {
+      router.get(`${BASE}/${adt}/:name`, structure);
+    }
   }
 
   // ---- the development loop: lock, write, unlock, activate.

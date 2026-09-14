@@ -449,6 +449,29 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(bare).to.equal(suffixed);
     });
 
+    // The same address, asked differently, by a different client.
+    //
+    // Eclipse opens a class by reading class:abapClass and following its
+    // source link; it never gets as far as the structure. abap-adt-api asks
+    // the same URL for the structure and the test above pins that. Both are
+    // right and they are distinguishable, because Eclipse says which type it
+    // wants and abap-adt-api does not.
+    it("answers a class as a class when a client asks for one", async () => {
+      const res = await call("/oo/classes/ZCL_STG_DISPATCHER", {
+        headers: {Accept: "application/vnd.sap.adt.oo.classes.v4+xml"},
+      });
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.match(/oo\.classes\.v4\+xml/);
+
+      const xml = await res.text();
+      expect(xml).to.contain("<class:abapClass");
+      expect(xml, "the editor follows this to the source").to.match(/rel="http:\/\/www\.sap\.com\/adt\/relations\/source"/);
+      // the fields a client reads without checking whether they are there
+      for (const attribute of ["adtcore:name", "adtcore:changedAt", "adtcore:version", "adtcore:responsible"]) {
+        expect(xml, attribute).to.contain(attribute + "=");
+      }
+    });
+
     it("an object that is not there is a 404 at its own address too", async () => {
       expect((await call("/oo/classes/ZCL_NOPE_NOT_HERE")).status).to.equal(404);
     });

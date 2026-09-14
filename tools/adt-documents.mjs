@@ -255,6 +255,77 @@ export function structureOf(store, type, name) {
 // with the include as an object, carrying the link to its source, and a
 // client that wanted the source itself gets that instead when it says so in
 // its Accept header.
+// A class as the client asks for it before it opens one.
+//
+// GET /oo/classes/<name> is not a request for the class's structure. A4H
+// answers it with class:abapClass — properties, links and one class:include
+// per source part — and this façade answered with an objectStructureElement,
+// which is the answer to a different question asked at a different URL. The
+// client opens a class by reading this document and following its source
+// link, so the wrong root element is the difference between a class that
+// opens and one that does not.
+//
+// The include list is what the editor's tabs are built from. Only the parts
+// this façade can actually serve are listed; naming one it cannot would give
+// the editor a tab that fails when clicked.
+export function classDocument(object, options = {}) {
+  const name = object.name;
+  const lower = encodeURIComponent(String(name).toLowerCase());
+  const when = object.changedAt ?? "1970-01-01T00:00:00Z";
+  const who = object.changedBy ?? "OSD";
+
+  const link = (href, rel, type, title) =>
+    `  <atom:link href="${xmlEscape(href)}" rel="${xmlEscape(rel)}"` +
+    (type === undefined ? "" : ` type="${xmlEscape(type)}"`) +
+    (title === undefined ? "" : ` title="${xmlEscape(title)}"`) +
+    ' xmlns:atom="http://www.w3.org/2005/Atom"/>';
+
+  const include = (kind, href) =>
+    `  <class:include class:includeType="${kind}" abapsource:sourceUri="${href}"` +
+    ` adtcore:name="${xmlEscape(name)}" adtcore:type="CLAS/I"` +
+    ` adtcore:changedAt="${when}" adtcore:version="active"` +
+    ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
+    `    <atom:link href="${href}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
+    ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
+    "  </class:include>";
+
+  const parts = ["main", ...(options.includes ?? [])];
+  return `<?xml version="1.0" encoding="utf-8"?>
+<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes"
+                 xmlns:abapoo="http://www.sap.com/adt/oo"
+                 xmlns:abapsource="http://www.sap.com/adt/abapsource"
+                 xmlns:adtcore="http://www.sap.com/adt/core"
+                 class:final="false"
+                 class:abstract="false"
+                 class:visibility="public"
+                 class:category="generalObjectType"
+                 class:sharedMemoryEnabled="false"
+                 abapoo:modeled="false"
+                 abapsource:fixPointArithmetic="true"
+                 abapsource:activeUnicodeCheck="true"
+                 adtcore:name="${xmlEscape(name)}"
+                 adtcore:type="CLAS/OC"
+                 adtcore:version="active"
+                 adtcore:language="EN"
+                 adtcore:masterLanguage="EN"
+                 adtcore:abapLanguageVersion="standard"
+                 adtcore:responsible="${xmlEscape(who)}"
+                 adtcore:createdAt="${when}"
+                 adtcore:createdBy="${xmlEscape(who)}"
+                 adtcore:changedAt="${when}"
+                 adtcore:changedBy="${xmlEscape(who)}"
+                 adtcore:descriptionTextLimit="60"
+                 adtcore:description="${xmlEscape(object.description ?? "")}">
+${link(`/sap/bc/adt/oo/classes/${lower}/source/main`, "http://www.sap.com/adt/relations/source", "text/plain")}
+${link(`/sap/bc/adt/oo/classes/${lower}/objectstructure`, "http://www.sap.com/adt/relations/objectstructure", "application/vnd.sap.adt.elementinfo+xml")}
+${parts.map((part) => include(part === "main" ? "main" : part,
+    part === "main"
+      ? `/sap/bc/adt/oo/classes/${lower}/source/main`
+      : `/sap/bc/adt/oo/classes/${lower}/includes/${part}/source/main`)).join("\n")}
+</class:abapClass>
+`;
+}
+
 export function classIncludeDocument(className, include, sourceUri) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes"
