@@ -423,6 +423,29 @@ open  revisions: reading them out of git instead of a system.
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
+8.7  a leak detector on the way out, not a rule in a document        [S]
+     └─ 2026-09-14: a wire capture was about to go into open-rfc-go, a
+        public repository, as a test fixture. It contained two LAN
+        addresses, a host name, an Eclipse project name, a machine id and
+        Alice's surname. I caught it by reading the bytes before committing,
+        which is exactly the kind of catch that works until the once it
+        does not
+     └─ CLAUDE.md has said "no live identifiers in any tracked file" since
+        the first week. The rule did not stop it; noticing did. That is the
+        day's theme in a new place, and the answer is the same: a mechanism
+        that cannot be walked past
+     └─ what it should be: a check on `git commit` and again before a
+        publish — addresses in the private ranges, host names of the
+        machines in play, the user names, anything matching a GUID shape,
+        and a *.jsonl or *.pcap staged at all. Hex-encoded too, since a
+        capture hides its identifiers inside hex strings where grep for
+        "192.168" finds nothing
+     └─ scope: this repository and the sibling Go ones, since they take the
+        same captures. A pre-commit hook is not enough on its own — hooks
+        are per-clone and silently absent on a fresh one — so the same check
+        belongs in CI where it cannot be skipped
+     └─ Alice's call, 2026-09-14, and the right one
+
 8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
      └─ from T, 2026-09-14, half done already: `write_source_map` is
         ALREADY true in our abap_transpile.json and output/ carries the
