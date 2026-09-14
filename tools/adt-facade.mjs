@@ -19,6 +19,9 @@
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
 import express from "express";
+import {readFileSync} from "node:fs";
+import {dirname, join} from "node:path";
+import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
@@ -349,6 +352,8 @@ function rawBody(req) {
     req.on("error", reject);
   });
 }
+
+const STARTED = new Date().toISOString();
 
 export function adtRouter(options = {}) {
   const store = options.store ?? new ObjectStore({root: options.root});
@@ -712,6 +717,24 @@ export function adtRouter(options = {}) {
       feature("DEVC/K", "true") + feature("CLAS/OC", "true") + feature("PROG/P", "true") +
       "</aunit:metadata>",
     );
+  });
+
+  // Which build is answering.
+  //
+  // "Are we sure the server was restarted" is a question that should cost one
+  // request, not a chain of inference. It was asked after a deploy that had
+  // in fact landed, and the only way to answer was to probe three unrelated
+  // resources and reason about what their shapes implied. The bridge grew the
+  // same stamp for the same reason.
+  //
+  // The digest is over the façade's own sources, so it changes when the
+  // answers change and not when the process merely restarts.
+  router.get(`${BASE}/core/http/build`, (req, res) => {
+    res.type("application/json; charset=utf-8").send(JSON.stringify({
+      build: facadeBuildStamp(),
+      started: STARTED,
+      identity,
+    }));
   });
 
   // Ending a session. There is nothing to end — the session is a cookie and a
@@ -1358,4 +1381,26 @@ function sessionIdentifier(req, identity) {
 function asXmlTypeFor(req, fallback) {
   const asked = /dataname=([\w.]+)/.exec(String(req.headers.accept ?? ""));
   return `application/vnd.sap.as+xml; charset=utf-8; dataname=${asked === null ? fallback : asked[1]}`;
+}
+
+// facadeBuildStamp digests the files that decide what this façade answers.
+//
+// Cached after the first call: the answer cannot change without the process
+// restarting, and hashing on every request would be a cost paid for nothing.
+let stamp;
+function facadeBuildStamp() {
+  if (stamp !== undefined) {
+    return stamp;
+  }
+  const here = dirname(fileURLToPath(import.meta.url));
+  const digest = createHash("sha256");
+  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "osd-store.mjs"]) {
+    try {
+      digest.update(readFileSync(join(here, file)));
+    } catch {
+      digest.update(file); // a missing file is itself part of what this build is
+    }
+  }
+  stamp = digest.digest("hex").slice(0, 16);
+  return stamp;
 }
