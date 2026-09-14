@@ -315,8 +315,11 @@ ANSWERED  does Eclipse need the dispatcher port at all? No. Tested by
       connect and develop, OSD needs an RFC server on ONE port answering ONE
       function module. To make programs run inside it, OSD needs a DIAG
       front on 32NN, which is open-diag-go's territory and not the façade's.
-      The failure without DIAG is soft and predictable: a full development
-      environment that cannot execute.
+      What is lost without DIAG is dialog programs and transactions, and
+      only those: ABAP Unit runs over ADT (abapunit/metadata is in the
+      capture, Ctrl+Shift+F10 goes through the façade), so edit, check,
+      activate and test all work with no DIAG frame at all. Alice's
+      correction, and it matters — "cannot execute" undersold it badly.
 open  SOAP: vsp's ADT is pure REST, no SOAP in it. The only SOAP it touches
       is SOAP-RFC (/sap/bc/soap/rfc), a fallback transport for classic RFC
       when the gateway is closed, stateless, and it belongs to open-rfc-go.

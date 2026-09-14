@@ -443,9 +443,14 @@ reverse-engineer: whatever can already draw a DIAG screen can answer it.
 
 So the two ports carry two unrelated jobs. An RFC server on `33NN` answering one function module is
 the whole of what a client needs to connect and develop; `32NN` is DIAG and
-only DIAG, and it is what running something needs. OSD without a DIAG front
-is a development environment that cannot execute, which is a soft and
-predictable place to stop rather than a broken one.
+only DIAG, and it is what running something needs. OSD without a DIAG front cannot run
+**dialog** programs and transactions — and that is the whole of what it
+loses. ABAP Unit goes over ADT, not DIAG: `abapunit/metadata` is one of the
+thirty-three resources in the capture, and Ctrl+Shift+F10 in Eclipse runs a
+test class through the façade. So the loop that matters — edit, syntax
+check, activate, run the tests — is intact without a single DIAG frame. The
+stopping point is a development environment with a working test cycle and no
+screens, which is a good deal more than "cannot execute".
 
 **What this changes about the order of work.** The list is no longer a guess:
 an RFC server answering one function module on paired conversations, then the
