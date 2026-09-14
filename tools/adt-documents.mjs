@@ -542,7 +542,7 @@ const TREE_CATEGORY_LABEL = {
   other: "Others",
 };
 
-export function nodeStructureDocument(nodes) {
+export function nodeStructureDocument(nodes, options = {}) {
   // NODE_ID is assigned per document by the system that writes it, so these
   // are ours and need only be consistent within this answer.
   let next = 1;
@@ -578,6 +578,26 @@ export function nodeStructureDocument(nodes) {
       value === "" ? `<${name}/>` : `<${name}>${xmlEscape(String(value))}</${name}>`).join("") +
     "</SEU_ADT_REPOSITORY_OBJ_NODE>";
 
+  // The DEVC root is not a package and has no virtual drawers. A measured
+  // working response lists the packages directly and omits CATEGORIES,
+  // OBJECT_TYPES and NODE_ID altogether. Adding a synthetic "Subpackages"
+  // type node here makes Eclipse bind every displayed package to the first
+  // DEVC/K object, so clicking $STG asks the server for an unrelated sibling.
+  if (options.flat === true) {
+    const flatRow = (n) => row({
+      OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name,
+      OBJECT_URI: n.uri ?? "", EXPANDABLE: n.expandable === true ? "X" : "",
+      DESCRIPTION: n.description ?? "",
+    });
+    return `<?xml version="1.0" encoding="utf-8"?>
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values><DATA><TREE_CONTENT>
+${nodes.map(flatRow).join("\n")}
+  </TREE_CONTENT></DATA></asx:values>
+</asx:abap>
+`;
+  }
+
   const folderRow = (f) => row({
     OBJECT_TYPE: f.type, OBJECT_NAME: "", TECH_NAME: "", OBJECT_URI: "", OBJECT_VIT_URI: "",
     EXPANDABLE: "X", NODE_ID: f.node, PARENT_NAME: "", DESCRIPTION: "", DESCRIPTION_TYPE: "",
@@ -586,7 +606,7 @@ export function nodeStructureDocument(nodes) {
 
   const objectRow = (n) => row({
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
-    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: id(),
+    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
     PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
     VERSION: "active", INACTIVE_TYPE: "",
   });

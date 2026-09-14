@@ -1386,6 +1386,7 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/repository/nodestructure`, (req, res) => {
     answer(res, () => {
       const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
+      const parentType = req.query.parent_type ?? req.query.parentType;
       // Answered in the type the client asked for, which is not the one this
       // resource is named after.
       //
@@ -1397,7 +1398,9 @@ export function adtRouter(options = {}) {
       // document it would have understood. The dataname is the client's own
       // name for the shape it expects; echoing it is the whole fix.
       res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryObjectTreeContent"))
-        .send(nodeStructureDocument(nodesOf(store, name, req.query.parent_type ?? req.query.parentType)));
+        .send(nodeStructureDocument(nodesOf(store, name, parentType), {
+          flat: name === "" && parentType === "DEVC",
+        }));
     });
   });
 
