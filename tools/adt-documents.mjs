@@ -560,14 +560,18 @@ export function nodeStructureDocument(nodes, options = {}) {
   const folders = [];
   const objectTypes = [];
   const categories = new Set();
+  const kindByNode = new Map();
   for (const kind of present) {
     const folder = TREE_FOLDER[kind];
     const category = TREE_CATEGORY[kind] ?? "other";
     categories.add(category);
     const typeOf = nodes.find((n) => bare(n.type) === kind)?.type ?? kind;
-    objectTypes.push({type: typeOf, category, label: folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "", node: id()});
+    const typeNode = id();
+    kindByNode.set(typeNode, kind);
+    objectTypes.push({type: typeOf, category, label: folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "", node: typeNode});
     if (folder !== undefined) {
       const node = id();
+      kindByNode.set(node, kind);
       folders.push({type: folder[0], node});
       objectTypes.push({type: folder[0], category: "", label: folder[1], node});
     }
@@ -596,6 +600,16 @@ ${nodes.map(flatRow).join("\n")}
   </TREE_CONTENT></DATA></asx:values>
 </asx:abap>
 `;
+  }
+
+  // TV_NODEKEY values are the virtual type/drawer keys from the preceding
+  // answer. On expansion Eclipse asks for one or several of them. Repeating
+  // the complete package makes every drawer recursively contain itself and
+  // leaves the UI at "Loading repository tree...". A selected drawer gets
+  // only its concrete objects, in the same flat shape as a leaf result.
+  if ((options.nodeKeys?.length ?? 0) > 0) {
+    const kinds = new Set(options.nodeKeys.map((node) => kindByNode.get(node)).filter(Boolean));
+    return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {flat: true});
   }
 
   const folderRow = (f) => row({

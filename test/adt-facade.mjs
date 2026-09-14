@@ -707,6 +707,22 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<CATEGORY_LABEL>Dictionary</CATEGORY_LABEL>");
     });
 
+    it("returns only objects selected by a virtual tree node key", async () => {
+      const path = "/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" +
+        encodeURIComponent("$EXPRESS_ICF_SHIM");
+      const initial = await (await call(path, {method: "POST"})).text();
+      const classType = /<SEU_ADT_OBJECT_TYPE_INFO><OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>[\s\S]*?<NODE_ID>([^<]+)<\/NODE_ID>/.exec(initial)?.[1];
+      expect(classType).to.match(/^\d{6}$/);
+      const selected = await (await call(path, {
+        method: "POST",
+        headers: {"content-type": "application/vnd.sap.as+xml"},
+        body: `<asx:abap><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
+      })).text();
+      expect(selected).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
+      expect(selected).to.not.contain("<OBJECT_TYPE>INTF/OI</OBJECT_TYPE>");
+      expect(selected).to.not.contain("<OBJECT_TYPES>");
+    });
+
     it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
       const parent = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_GEN"), {method: "POST"})).text();
       expect(parent).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>[\s\S]*?<EXPANDABLE>X<\/EXPANDABLE>/);

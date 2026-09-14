@@ -1387,6 +1387,8 @@ export function adtRouter(options = {}) {
     answer(res, () => {
       const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
       const parentType = req.query.parent_type ?? req.query.parentType;
+      const nodeKeys = [...String(req.body ?? "").matchAll(/<TV_NODEKEY>([^<]+)<\/TV_NODEKEY>/g)]
+        .map((match) => match[1]).filter((key) => key !== "000000");
       // Answered in the type the client asked for, which is not the one this
       // resource is named after.
       //
@@ -1400,6 +1402,7 @@ export function adtRouter(options = {}) {
       res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryObjectTreeContent"))
         .send(nodeStructureDocument(nodesOf(store, name, parentType), {
           flat: name === "" && parentType === "DEVC",
+          nodeKeys,
         }));
     });
   });
