@@ -22,7 +22,7 @@ import express from "express";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {ADT_TYPE, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -976,13 +976,24 @@ export function adtRouter(options = {}) {
   // a real repository arrives with its DEVC objects, the same two resources
   // answer from those instead.
   advertise("packages");
+  // The dropdowns of the package editor. Empty, because this façade has no
+  // application components, software components or transport layers, and an
+  // empty list is the true answer rather than a missing resource.
+  router.get(`${BASE}/packages/valuehelps/:what`, (req, res) => {
+    res.type("application/vnd.sap.adt.nameditems.v1+xml; charset=utf-8")
+      .send(namedItemsDocument(req.params.what === "abaplanguageversions"
+        ? [{name: "standard", description: "Standard ABAP"}]
+        : []));
+  });
+
   router.get(`${BASE}/packages/:name`, (req, res) => {
     answer(res, () => {
       // Answered at the version asked for. The document is the same either
       // way; what differs is whether the client recognises it.
       const wants2 = String(req.headers.accept ?? "").includes("packages.v2+xml");
+      const describe = (name) => store.packages().find((p) => p.name === name)?.description ?? "";
       res.type(`application/vnd.sap.adt.packages.v${wants2 ? 2 : 1}+xml`)
-        .send(packageDocument(packageOf(store, req.params.name)));
+        .send(packageDocument(packageOf(store, req.params.name), {describe}));
     });
   });
 

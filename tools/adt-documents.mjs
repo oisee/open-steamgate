@@ -273,24 +273,49 @@ export function classIncludeDocument(className, include, sourceUri) {
 // A package document: what a package is, and what is above it. The contents
 // are a separate resource, because a client asks for the tree lazily, one
 // level at a time, rather than pulling a whole system.
-export function packageDocument(pkg) {
-  const parent = pkg.parent === undefined || pkg.parent === null ? "" : `
-  <pak:superPackage adtcore:name="${xmlEscape(pkg.parent)}" adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(pkg.parent).toLowerCase())}"/>`;
-  // The audit attributes, which are not decoration.
+export function packageDocument(pkg, options = {}) {
+  // The shape a package editor binds to, which is not the shape of a package.
   //
-  // A client opening the package editor read adtcore:changedAt and crashed:
-  // "Cannot invoke XMLGregorianCalendar.toGregorianCalendar() because
-  // changedAt is null". It does not treat them as optional, so a document
-  // without them is not a smaller document, it is a broken one.
+  // Answering with a name, a type and a description used to be enough to say
+  // what a package is. It is not enough to open one: the editor builds its
+  // panels from these elements and, finding nothing to bind, failed with
+  // "Failed to create the part's controls" — a UI error that says nothing
+  // about the document behind it. Before that it crashed on a null changedAt.
+  // Both times the document was not a smaller version of the real one, it was
+  // an unusable one.
   //
-  // Nothing here has an author or an edit history — the objects come from
-  // files on disk — so these say so rather than inventing a plausible person
-  // and a plausible afternoon. The name is the façade's, the timestamps are
-  // the epoch, and both are stable: a value that changed per request would
-  // make a client believe the package had just been edited, every time it
-  // looked.
+  // So the structure is the real structure, from a system's own answer, and
+  // the values are this façade's truth: nothing here has an application
+  // component, a transport layer or a software component, and saying so
+  // explicitly with isVisible="false" is what turns a missing panel into a
+  // hidden one.
+  //
+  // Nothing here has an author or an edit history either — the objects are
+  // files on disk — so the audit fields name the façade and sit at the epoch
+  // rather than inventing a plausible person and a plausible afternoon. Both
+  // stable on purpose: a timestamp that moved per request would tell a client
+  // the package had just been edited, every time it looked.
   const when = pkg.changedAt ?? "1970-01-01T00:00:00Z";
   const who = pkg.changedBy ?? "OSD";
+  const uriOfPackage = (name) => `/sap/bc/adt/packages/${encodeURIComponent(String(name).toLowerCase())}`;
+
+  const parent = pkg.parent === undefined || pkg.parent === null ? "" :
+    `\n  <pak:superPackage adtcore:uri="${uriOfPackage(pkg.parent)}" adtcore:type="DEVC/K" adtcore:name="${xmlEscape(pkg.parent)}"/>`;
+
+  // Named for what they are rather than by a lookup: the client shows the
+  // description beside the name, and an empty one reads as a broken row.
+  const children = (pkg.subpackages ?? []).map((child) => {
+    const name = typeof child === "string" ? child : child.name;
+    const description = typeof child === "string" ? (options.describe?.(name) ?? "") : (child.description ?? "");
+    return `    <pak:packageRef adtcore:uri="${uriOfPackage(name)}" adtcore:type="DEVC/K" adtcore:name="${xmlEscape(name)}" adtcore:description="${xmlEscape(description)}"/>`;
+  }).join("\n");
+
+  // Only the value helps this façade serves. A link to one it does not would
+  // be a 404 waiting for the first time somebody opens the dropdown.
+  const valueHelp = (rel, title) =>
+    `  <atom:link href="/sap/bc/adt/packages/valuehelps/${rel}" rel="${rel}"` +
+    ` type="application/vnd.sap.adt.nameditems.v1+xml" title="${title}" xmlns:atom="http://www.w3.org/2005/Atom"/>`;
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <pak:package xmlns:pak="http://www.sap.com/adt/packages"
              xmlns:adtcore="http://www.sap.com/adt/core"
@@ -305,9 +330,52 @@ export function packageDocument(pkg) {
              adtcore:changedAt="${when}"
              adtcore:changedBy="${xmlEscape(who)}"
              adtcore:descriptionTextLimit="60"
-             adtcore:description="${xmlEscape(pkg.description ?? "")}">${parent}
-  <pak:attributes pak:isPackageTypeEditable="false" pak:isAddingObjectsAllowed="${pkg.library === true ? "false" : "true"}"/>
+             adtcore:description="${xmlEscape(pkg.description ?? "")}">
+${valueHelp("applicationcomponents", "Application Components Value Help")}
+${valueHelp("softwarecomponents", "Software Components Value Help")}
+${valueHelp("transportlayers", "Transport Layers Value Help")}
+${valueHelp("translationrelevances", "Transport Relevances Value Help")}
+${valueHelp("abaplanguageversions", "ABAP Language Version Value Help")}
+  <pak:attributes pak:packageType="development"
+                  pak:isPackageTypeEditable="false"
+                  pak:isAddingObjectsAllowed="${pkg.library === true ? "false" : "true"}"
+                  pak:isAddingObjectsAllowedEditable="false"
+                  pak:isEncapsulated="false"
+                  pak:isEncapsulationEditable="false"
+                  pak:isEncapsulationVisible="false"
+                  pak:recordChanges="false"
+                  pak:isRecordChangesEditable="false"
+                  pak:isSwitchVisible="false"
+                  pak:languageVersion=""
+                  pak:isLanguageVersionVisible="true"
+                  pak:isLanguageVersionEditable="false"/>${parent}
+  <pak:applicationComponent pak:name="" pak:description="No application component assigned" pak:isVisible="true" pak:isEditable="false"/>
+  <pak:transport>
+    <pak:softwareComponent pak:name="LOCAL" pak:description="Local Developments (No Automatic Transport)" pak:isVisible="true" pak:isEditable="false"/>
+    <pak:transportLayer pak:name="" pak:description="" pak:isVisible="false" pak:isEditable="false"/>
+  </pak:transport>
+  <pak:useAccesses pak:isVisible="false"/>
+  <pak:packageInterfaces pak:isVisible="false"/>
+  <pak:subPackages>
+${children}
+  </pak:subPackages>
 </pak:package>
+`;
+}
+
+// A value help with nothing in it, which is the true answer here.
+//
+// The package editor's dropdowns ask for these. Offering the links and not
+// the resource would turn every dropdown into a 404; offering neither hides
+// fields the editor expects to find. An empty list says "this system has no
+// application components" and the editor shows an empty dropdown, which is
+// exactly right.
+export function namedItemsDocument(items = []) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<nameditem:namedItemList xmlns:nameditem="http://www.sap.com/adt/nameditem">
+  <nameditem:totalItemCount>${items.length}</nameditem:totalItemCount>
+${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.name)}</nameditem:name><nameditem:description>${xmlEscape(item.description ?? "")}</nameditem:description></nameditem:namedItem>`).join("\n")}
+</nameditem:namedItemList>
 `;
 }
 
