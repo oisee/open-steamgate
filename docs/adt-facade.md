@@ -507,10 +507,63 @@ values < REQUEST < REQUEST_LINE < METHOD  T "GET"
                                    item < NAME  T "sap-adt-request-id" … > … >
 ```
 
-Single-byte tokens carry the structure: `+` defines a name, `<` opens an
-element, `>` closes it, `T` introduces text, `@` an attribute, `A` its value.
+Single-byte tokens carry the structure, and the grammar is complete for the
+request side — a parser written from these reads 384 captured documents out of
+384 and consumes each to its last byte, which is the check: an incomplete
+grammar stops somewhere, and this one did, twice.
+
+| token | byte | what follows |
+| --- | --- | --- |
+| define a name | `+` `0x2b` | length, then the name |
+| open an element | `<` `0x3c` | two bytes, a reference to a defined name |
+| close | `>` `0x3e` | — |
+| text | `T` `0x54` | length, then UTF-8 |
+| attribute | `@` `0x40` | two bytes |
+| attribute value | `A` `0x41` | length, then the value |
+| bind a namespace | `:` `0x3a` | two bytes |
+| message body | `B` `0x42` | length, then the content |
+| header pair | `?` `0x3f` | length+key, length+value |
+
 Names are defined once and referenced afterwards, which is where most of the
 saving comes from.
+
+**Lengths are code points written as UTF-8**, which the header's `ENC utf-8`
+turns out to mean literally: a length under 0x80 is one byte, and above it two
+— `c2 97` is U+0097, 151, and `c3 84` is U+00C4, 196, both confirmed against
+the actual length of the string that followed. This is the kind of detail that
+cannot be guessed from a structure diagram and falls straight out of measuring
+one field.
+
+The two stops are worth recording because both were the same mistake in
+miniature: assuming a byte belonged to the data. The namespace declaration
+reads `+ 1a "http://www.sap.com/abapxml"` and is followed by `:` — the colon
+looks like the end of the URI and is a token. Then `B`, which turned out to
+open the request body and had gone unseen because only some requests carry
+one.
+
+### What a working session actually asks for
+
+384 calls in the captured session, 39 distinct shapes. Not a wish list — this
+is what Eclipse asked while the session worked, opening a program's source and
+a function group's, running unit tests and previewing a table.
+
+The shape of the traffic is the surprise. **Over a quarter of all calls are
+`/runtime/dumps` (108) and `/runtime/systemmessages` (54)**, both polled on a
+timer and both content-free in a healthy system: a façade that answers them
+with an empty list sheds most of its load before implementing anything
+interesting. `/debugger/listeners` is the next heaviest at 72 POSTs, which is
+a long poll rather than real work.
+
+`/security/reentranceticket` appears 8 times, which settles it: it was on the
+list of sixteen unimplemented resources as a guess, and it is genuinely asked
+for. `/abapunit/testruns` confirms that unit tests travel this path and need
+no DIAG, matching what the dispatcher experiment showed from the other side.
+
+The rest is the expected surface: `core/discovery` and `discovery`,
+`compatibility/graph`, `repository/informationsystem/*` (search, objecttypes,
+objectproperties, releasestates, virtualfolders), `checkruns`, `feeds`,
+`packages/settings`, `ddic/tables/*`, `datapreview/ddic`, and
+`programs/programs/<name>` with `/source/main` beneath it.
 
 **What this means for a server.** Two pieces of work, and a question that one
 attempt answers:
