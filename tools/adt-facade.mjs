@@ -341,6 +341,110 @@ export function adtRouter(options = {}) {
     );
   });
 
+  // ---- The workbench type list, which the client pre-loads before it will
+  // open anything.
+  //
+  // Answered from what this façade actually serves rather than copied from a
+  // system: TYPES already names every kind here and where it lives under
+  // /sap/bc/adt, which is exactly the two things a descriptor carries. A list
+  // borrowed from somewhere else would advertise types that 404 on the first
+  // click.
+  //
+  // The real one is 359 KB of the same shape — a flat run of descriptors
+  // inside asx:abap — and reaches the client gzipped by the ICM, which is
+  // where the "binary" first impression came from. Express compresses it
+  // here for the same reason.
+  const LABELS = {
+    CLAS: ["Class", "Classes", "Source Code Library"],
+    INTF: ["Interface", "Interfaces", "Source Code Library"],
+    PROG: ["Program", "Programs", "Source Code Library"],
+    INCL: ["Include", "Includes", "Source Code Library"],
+    FUGR: ["Function Group", "Function Groups", "Source Code Library"],
+    TABL: ["Database Table", "Database Tables", "Dictionary"],
+    DTEL: ["Data Element", "Data Elements", "Dictionary"],
+    DOMA: ["Domain", "Domains", "Dictionary"],
+    TTYP: ["Table Type", "Table Types", "Dictionary"],
+    DDLS: ["Data Definition", "Data Definitions", "Dictionary"],
+    SRVD: ["Service Definition", "Service Definitions", "Dictionary"],
+    VIEW: ["View", "Views", "Dictionary"],
+    SHLP: ["Search Help", "Search Helps", "Dictionary"],
+    MSAG: ["Message Class", "Message Classes", "Source Code Library"],
+    DEVC: ["Package", "Packages", "Others"],
+  };
+
+  router.post(`${BASE}/repository/typestructure`, (req, res) => {
+    const descriptors = Object.entries(TYPES).map(([code, type]) => {
+      const [label, plural, category] = LABELS[code] ?? [code, code, "Others"];
+      return "<SEU_ADT_OBJECT_TYPE_DESCRIPTOR>" +
+        `<OBJECT_TYPE>${code}/${code === "DEVC" ? "K" : "I"}</OBJECT_TYPE>` +
+        `<OBJECT_TYPE_LABEL>${label}</OBJECT_TYPE_LABEL>` +
+        `<OBJECT_TYPE_LABEL_PLURAL>${plural}</OBJECT_TYPE_LABEL_PLURAL>` +
+        `<CATEGORY>${category}</CATEGORY>` +
+        `<CATEGORY_LABEL>${category}</CATEGORY_LABEL>` +
+        `<URI_TEMPLATE>${BASE}/${type.adt}/{name}</URI_TEMPLATE>` +
+        "<PARENT_OBJECT_TYPE/>" +
+        "<OBJNAME_MAXLENGTH>30</OBJNAME_MAXLENGTH>" +
+        "<CAPABILITIES/><USER_AUTHORIZATIONS/>" +
+        "</SEU_ADT_OBJECT_TYPE_DESCRIPTOR>";
+    }).join("");
+
+    res.type("application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.RepositoryTypeList").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<asx:abap version="1.0" xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA>' +
+      descriptors +
+      "</DATA></asx:values></asx:abap>",
+    );
+  });
+
+  // ---- What the client polls, and what a healthy system has to say about it.
+  //
+  // Measured: over a captured working session these were a quarter of every
+  // request made — 108 calls to runtime/dumps and 54 to systemmessages, both
+  // on a timer, both answered with an empty feed because nothing had gone
+  // wrong. A façade that answers them sheds most of its traffic before
+  // implementing anything interesting, and a façade that 404s them makes a
+  // client report an error where the real answer is "nothing to report".
+  //
+  // An empty feed is not a stub. It is the correct answer, and it stays the
+  // correct answer for as long as nothing here dumps.
+  const emptyFeed = (res, title, self) => {
+    res.type("application/atom+xml;type=feed").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">' +
+      `<atom:author><atom:name>${identity.userFullName}</atom:name></atom:author>` +
+      `<atom:contributor><atom:name>${identity.systemID}</atom:name></atom:contributor>` +
+      `<atom:link href="${self}" rel="self" type="application/atom+xml;type=feed"/>` +
+      `<atom:title type="text">${title}</atom:title>` +
+      `<atom:updated>${new Date().toISOString()}</atom:updated>` +
+      "</atom:feed>",
+    );
+  };
+
+  advertise("runtime/dumps");
+  router.get(`${BASE}/runtime/dumps`, (req, res) => {
+    emptyFeed(res, "Runtime Errors", `${BASE}/runtime/dumps`);
+  });
+
+  advertise("runtime/systemmessages");
+  router.get(`${BASE}/runtime/systemmessages`, (req, res) => {
+    emptyFeed(res, "System Messages", `${BASE}/runtime/systemmessages`);
+  });
+
+  advertise("gw/errorlog");
+  router.get(`${BASE}/gw/errorlog`, (req, res) => {
+    emptyFeed(res, "SAP Gateway Error Log", `${BASE}/gw/errorlog`);
+  });
+
+  // The debugger's long poll. A4H answers 200 with no body at all, to every
+  // one of GET, POST and DELETE, and that is the whole contract: there is no
+  // listener, nobody is being debugged, come back later. Nothing here can be
+  // debugged either, so the same answer is honest rather than a placeholder.
+  for (const method of ["get", "post", "delete"]) {
+    router[method](`${BASE}/debugger/listeners`, (req, res) => {
+      res.status(200).end();
+    });
+  }
+
   // Read once at startup and shown in the window title.
   router.get(`${BASE}/core/http/systeminformation`, (req, res) => {
     res.type("application/vnd.sap.adt.core.http.systeminformation.v1+json; charset=utf-8")

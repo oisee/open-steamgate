@@ -101,6 +101,48 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(info.systemID).to.be.a("string").with.length(3);
     });
 
+    // A quarter of a working session's traffic, on a timer, and every one of
+    // them empty because nothing had gone wrong. 404 here makes a client
+    // report an error where the real answer is "nothing to report".
+    it("answers the polled feeds with an empty feed, which is the true answer", async () => {
+      for (const path of ["/runtime/dumps", "/runtime/systemmessages", "/gw/errorlog"]) {
+        const res = await call(path);
+        expect(res.status, path).to.equal(200);
+        expect(res.headers.get("content-type"), path).to.match(/atom\+xml/);
+        const body = await res.text();
+        expect(body, path).to.match(/<atom:feed/);
+        expect(body, path).to.not.match(/<atom:entry/);
+      }
+    });
+
+    // The whole contract, measured: 200 and no body, to all three methods.
+    it("answers the debugger poll with nothing, to every method it uses", async () => {
+      for (const method of ["GET", "POST", "DELETE"]) {
+        const res = await call("/debugger/listeners?debuggingMode=user", {method});
+        expect(res.status, method).to.equal(200);
+        expect(await res.text(), method).to.equal("");
+      }
+    });
+
+    // Without this the client stops at "Pre-loading workbench object types"
+    // and opens nothing at all.
+    it("lists the object types it actually serves, and no others", async () => {
+      const res = await call("/repository/typestructure", {method: "POST"});
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.match(/vnd\.sap\.as\+xml/);
+
+      const body = await res.text();
+      expect(body).to.match(/<asx:abap/);
+      expect(body).to.match(/<OBJECT_TYPE>CLAS\/I<\/OBJECT_TYPE>/);
+      expect(body).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>/);
+
+      // a list naming a type this façade does not serve is a 404 waiting for
+      // the first click
+      for (const [, template] of body.matchAll(/<URI_TEMPLATE>([^<]+)<\/URI_TEMPLATE>/g)) {
+        expect(template, "URI template").to.match(/^\/sap\/bc\/adt\/[a-z]/);
+      }
+    });
+
     // A4H answers 404 here and the wizard carries on, so the façade needs no
     // route at all — this pins that the absence is deliberate.
     it("leaves /sap/public/bc/icf/virtualhost unanswered, as the real one does", async () => {
