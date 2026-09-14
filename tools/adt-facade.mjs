@@ -61,29 +61,76 @@ const xmlEscape = (s) => String(s)
 // arbitrary but the local name is not, and ours was a different element
 // entirely.
 //
-// The nodes are feature flags. Only the ones matching what this façade
-// actually serves are declared: claiming a feature invites the client to use
-// it, and a claim that fails on the first click is worse than a missing one,
-// which the client simply works around. Edges express dependencies between
-// features and an empty set is honest here — nothing declared depends on
-// anything else declared.
+// The nodes are feature flags and the edges are what makes them mean
+// something.
+//
+// Declaring the flags alone was not enough, and the reason is the second
+// measurement: an obligatory edge says a feature is incomplete without its
+// partner. OO/classes obligatorily requires classModelXmlSchemaConform,
+// PROGRAMS/programs requires programsXmlSchemaConform, CORE/checkruns
+// requires checkrunsVendorContentType, ACTIVATION/activate requires
+// CORE/xmlFormat. A client reading a feature whose obligations are missing
+// treats it as unusable — which is what "Outdated content handler ... was
+// deleted" and "Activation is not supported on this project" were both
+// saying.
+//
+// So the set below is the obligatory closure of what this façade serves,
+// computed from the system's own edges rather than assembled by hand: start
+// from the features there are resources for, and add whatever they are
+// declared to require, transitively. Nineteen nodes became thirty-two.
+//
+// The names ending XmlSchemaConform are promises about the shape of the
+// documents here, not about which resources exist, and they are made
+// knowingly: a client that finds them false will say so, and there is a real
+// system beside this one to compare against when it does.
 const COMPATIBILITY = {
-  "COM.SAP.ADT.CORE": ["checkruns", "xmlFormat", "xmlNameSpace"],
-  "COM.SAP.ADT.RIS": ["ris", "search"],
+  "COM.SAP.ADT.ABAPUNIT": ["abapunit", "uriBasedAbapUnit", "xmlVersion2"],
   "COM.SAP.ADT.ACTIVATION": ["activate", "check"],
-  "COM.SAP.ADT.ABAPUNIT": ["abapunit"],
-  "COM.SAP.ADT.PROGRAMS": ["programs", "includes"],
-  "COM.SAP.ADT.OO": ["classes", "interfaces"],
-  "COM.SAP.ADT.FUNCTIONS": ["functionGroups", "functions"],
+  "COM.SAP.ADT.CORE": ["checkruns", "checkrunsVendorContentType", "xmlFormat", "xmlNameSpace"],
   "COM.SAP.ADT.DDIC": ["ddic"],
-  "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData", "treePath"],
+  "COM.SAP.ADT.FUNCTIONS": ["fmodulesSignatureEditable", "functionGroupIncludes",
+    "functionGroupIncludesXmlSchemaConform", "functionGroups", "functionModules",
+    "functionModulesXmlSchemaConform", "functions"],
+  "COM.SAP.ADT.OO": ["classModelXmlSchemaConform", "classes", "interfaces",
+    "interfacesModelXmlSchemaConform", "startUriAdaptationToMainResource"],
+  "COM.SAP.ADT.PROGRAMS": ["includes", "includesXmlSchemaConform", "programs", "programsXmlSchemaConform"],
+  "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "treePath", "typeMetaData"],
+  "COM.SAP.ADT.RIS": ["ris", "search"],
 };
 
-export function compatibilityGraphDocument(features = COMPATIBILITY) {
+// [source namespace, source, target namespace, target, obligatory]
+const COMPATIBILITY_EDGES = [
+  ["COM.SAP.ADT.ABAPUNIT", "abapunit", "COM.SAP.ADT.ABAPUNIT", "uriBasedAbapUnit", true],
+  ["COM.SAP.ADT.ABAPUNIT", "abapunit", "COM.SAP.ADT.ABAPUNIT", "xmlVersion2", true],
+  ["COM.SAP.ADT.ACTIVATION", "activate", "COM.SAP.ADT.CORE", "xmlFormat", true],
+  ["COM.SAP.ADT.CORE", "checkruns", "COM.SAP.ADT.CORE", "checkrunsVendorContentType", true],
+  ["COM.SAP.ADT.CORE", "xmlFormat", "COM.SAP.ADT.CORE", "xmlNameSpace", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functionGroupIncludes", "COM.SAP.ADT.FUNCTIONS", "functionGroupIncludesXmlSchemaConform", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functionModules", "COM.SAP.ADT.FUNCTIONS", "fmodulesSignatureEditable", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functionModules", "COM.SAP.ADT.FUNCTIONS", "functionModulesXmlSchemaConform", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functions", "COM.SAP.ADT.FUNCTIONS", "fmodulesSignatureEditable", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functions", "COM.SAP.ADT.FUNCTIONS", "functionGroupIncludes", true],
+  ["COM.SAP.ADT.FUNCTIONS", "functions", "COM.SAP.ADT.FUNCTIONS", "functionGroups", false],
+  ["COM.SAP.ADT.FUNCTIONS", "functions", "COM.SAP.ADT.FUNCTIONS", "functionModules", true],
+  ["COM.SAP.ADT.OO", "classes", "COM.SAP.ADT.OO", "classModelXmlSchemaConform", true],
+  ["COM.SAP.ADT.OO", "classes", "COM.SAP.ADT.OO", "startUriAdaptationToMainResource", true],
+  ["COM.SAP.ADT.OO", "interfaces", "COM.SAP.ADT.OO", "interfacesModelXmlSchemaConform", true],
+  ["COM.SAP.ADT.OO", "interfaces", "COM.SAP.ADT.OO", "startUriAdaptationToMainResource", true],
+  ["COM.SAP.ADT.PROGRAMS", "includes", "COM.SAP.ADT.PROGRAMS", "includesXmlSchemaConform", true],
+  ["COM.SAP.ADT.PROGRAMS", "programs", "COM.SAP.ADT.PROGRAMS", "programsXmlSchemaConform", true],
+  ["COM.SAP.ADT.RIS", "ris", "COM.SAP.ADT.RIS", "search", true],
+];
+
+export function compatibilityGraphDocument(features = COMPATIBILITY, edges = COMPATIBILITY_EDGES) {
   const nodes = Object.entries(features).flatMap(([nameSpace, names]) =>
     names.map((name) => `<node nameSpace="${nameSpace}" name="${name}"/>`)).join("");
+  const wires = edges.map(([sourceSpace, source, targetSpace, target, obligatory]) =>
+    `<edge isObligatory="${obligatory}">` +
+    `<sourceNode nameSpace="${sourceSpace}" name="${source}"/>` +
+    `<targetNode nameSpace="${targetSpace}" name="${target}"/>` +
+    "</edge>").join("");
   return `<?xml version="1.0" encoding="utf-8"?>
-<compatibility:graph xmlns:compatibility="http://www.sap.com/adt/compatibility"><nodes>${nodes}</nodes><edges/></compatibility:graph>
+<compatibility:graph xmlns:compatibility="http://www.sap.com/adt/compatibility"><nodes>${nodes}</nodes><edges>${wires}</edges></compatibility:graph>
 `;
 }
 

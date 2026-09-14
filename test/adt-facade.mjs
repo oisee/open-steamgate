@@ -214,6 +214,29 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(declared, "a feature with no resource behind it").to.not.include("codeCompletion");
     });
 
+    // Declaring the flags was not enough on its own, and this is why.
+    //
+    // An obligatory edge says a feature is incomplete without its partner, so
+    // a client reading one whose obligations are missing treats the feature as
+    // unusable — which was "Outdated content handler ... was deleted" and
+    // "Activation is not supported on this project", both at once. Every
+    // obligation must therefore be met by something also declared, or the
+    // declaration is worse than silence.
+    it("meets every obligation it declares", async () => {
+      const xml = await (await call("/compatibility/graph")).text();
+      const nodes = new Set([...xml.matchAll(/<node nameSpace="([^"]+)" name="([^"]+)"\/>/g)]
+        .map((m) => `${m[1]}/${m[2]}`));
+      const edges = [...xml.matchAll(
+        /<edge isObligatory="([^"]+)"><sourceNode nameSpace="([^"]+)" name="([^"]+)"\/><targetNode nameSpace="([^"]+)" name="([^"]+)"\/><\/edge>/g)];
+
+      expect(edges.length, "a graph with no edges declares nothing about its features").to.be.greaterThan(0);
+      for (const [, obligatory, sourceSpace, source, targetSpace, target] of edges) {
+        expect(nodes, `edge from ${source}`).to.include(`${sourceSpace}/${source}`);
+        expect(nodes, `${obligatory === "true" ? "obligation" : "edge"} to ${target}`)
+          .to.include(`${targetSpace}/${target}`);
+      }
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");
