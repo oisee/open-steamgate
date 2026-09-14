@@ -20,8 +20,11 @@ Nothing below them starts until the answer.
      └─ unlocks 1.1, 1.2, 1.3
      └─ feasibility settled 2026-09-13: bun 1.4.2 runs the whole thing,
         107 ABAP Unit tests and the gateway over HTTP, docs/bun-spike.md
-     └─ external: the %23 specifier defect blocks it until worked around
-        (ANOMALY-2026-09-13-bun-percent-encoded-specifier)
+     └─ packaging settled 2026-09-14: the %23 defect does NOT block a
+        compiled binary. Bun.build({compile, plugins}) with a five-line
+        onResolve builds one that runs; only `bun <script>` and the
+        plugin-less CLI `bun build --compile` fail. #1841 is no longer a
+        gate here (docs/bun-spike.md part two)
      └─ external: open-abap-apc (T's, local only, no remote) for the APC layer
      └─ settled already: it lives in this repository, not a third one
 
@@ -71,14 +74,70 @@ Nothing below them starts until the answer.
      └─ the ABAP side (zcl_stg_http_handler) does not change
 1.3  build and stitch: bun build --compile, one exe per platform      [S]
      └─ external: CI runners per platform
-     └─ external: the %23 specifier defect, which a compiled binary
-        inherits; transpiler #1841, open, waiting on Lars to pick the
-        replacement character [T]
+     └─ NOT gated on #1841 any more, measured 2026-09-14: the bundler's
+        onResolve closes %23 and %25 together, ten lines, and the compiled
+        binary runs. #1841 stays worth having (it would delete the plugin
+        and fix `bun <script>`) but nothing waits on Lars for it
      └─ known: mainstream platforms only, ~60-100 MB per exe
 1.4  APC over Bun websockets                                          [T]
      └─ open-abap-apc as an outside library, cloned into .local/lars
      └─ not gated on Lars: the library ships its own copy of the SAP-named
         part today and works; the PR (9.4) only makes it prettier
+1.5  layers: the binary takes an ordered list of abapGit src paths   [S+A]
+     └─ Alice's formulation, 2026-09-14: later layers win on a name
+        collision, and data layers (data/*.tabu.json) apply the same way
+     └─ the argument is not theoretical: local/o4d/ and local/vivid-vibes/
+        both carry ZCL_O4D_HTTP_HANDLER, and on 2026-09-14 whichever the
+        directory walk reached first won, silently. Explicit order plus a
+        report of what was overridden is the whole feature
+     └─ the unifying bit: hash(ordered layers) is the transpile cache key
+        AND the ADT version-id Alice proposed earlier. One number, three
+        uses, and it is what makes "spin a runtime from sources" fast —
+        first run transpiles 1065 objects, later runs do not
+     └─ open, needs Alice: does a layer override the OBJECT (all its
+        files) or single FILES? Overriding .clas.abap without .clas.xml
+        is the case that decides it                                   [A]
+     └─ zip as a layer: an abapGit export unpacked into the cache
+1.6  the runtime half of packaging, in order                          [S]
+     └─ measured first, built second: `bun tools/osd-serve.mjs`
+        interpreted is the next cheap check, and it is where the %23
+        defect still bites (1.3 is unaffected)
+     └─ then the supervisor: ServingRuntime spawns a SCRIPT PATH today;
+        a binary must spawn `process.execPath serve --port ...`, so the
+        entry needs subcommands before --compile is useful
+```
+
+## 1a. Shipping shapes that are not the binary
+
+Three exist or could: the browser bundle (done), the binary (section 1),
+and one local HTML file. They answer different questions, and the third is
+the only one still undecided.
+
+```
+1a.1 the browser bundle                                          [S] DONE
+     └─ service worker + sql.js, every ICF service, APC channels, and
+        since 2026-09-14 the SMW0 media. Read-only showroom: no ADT, no
+        activation, no writes that outlive the tab
+     └─ needs https off localhost, which is the friction the binary removes
+1a.2 one local HTML file, opened from disk                        [S+A]
+     └─ FACT, not an opinion: a service worker cannot be registered from
+        file://. So this is not "bundle harder", it is a different seam —
+        run the runtime IN THE PAGE and shim fetch + XMLHttpRequest
+     └─ already half-built without meaning to: preview-socket.mjs shims
+        WebSocket the same way, and handleRequest({method, path, search,
+        headers, body}) knows nothing about transport. Tens of lines
+     └─ cost: ~45-50 MB (33 MB JS + 11 MB media as base64), re-parsed on
+        every open, UI5 still from the CDN
+     └─ needs webpack, not Bun: file:// refuses <script type="module">,
+        so the build must be a classic script with TLA lowered
+     └─ worth it only for "send someone a file they double-click". Where
+        an executable may be run, the binary wins                     [A]
+1a.3 UI5 is NOT embedded in any of them — decided 2026-09-14         [S]
+     └─ Fiori Elements (sap.fe, sap.ui.generic.app) is SAPUI5 and is not
+        in OpenUI5, so embedding OpenUI5 buys freestyle apps and not the
+        thing the project is for. Licence aside, it would not work
+     └─ instead: CDN by default, `osd ui5 fetch` caching a dist under
+        ~/.osd/ui5/<version>/ for offline, --ui5 <dir> to point at one
 ```
 
 ## 2. The ADT façade (gated on 0.2)
@@ -318,6 +377,18 @@ open  revisions: reading them out of git instead of a system.
      └─ today: workers: 1, deterministic, 44 seconds
 8.2  the flaky value-help spec, seen once, not reproduced
 8.3  keep the preview build green (it broke twice on bundling)
+8.4  verification discipline, after three false greens in one day     [S]
+     └─ 2026-09-14, all three the same shape: a test that passed while
+        the path it claimed to cover was broken (it called install()
+        itself), a suite that passed against a stale build/sw.js, and a
+        fix "verified" by grepping for a comment webpack strips
+     └─ rules that follow: assert on CODE in a built artefact, never on
+        a comment; a test must exercise the injected path, not simulate
+        it; and a deployed bundle is verified by content, not by the
+        deploy command exiting 0
+     └─ this is the argument for one e2e suite running against every
+        packaging target, or the binary becomes a second runtime with
+        no second check
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
@@ -360,6 +431,29 @@ open  revisions: reading them out of git instead of a system.
         5000/100 rows) so the brief has Bun beside Node 2 ms and goja
         36 ms on the same axis
      └─ confirmed: Bun is JavaScriptCore, not V8
+     └─ part two 2026-09-14: no native dependencies exist at all
+        (database-sqlite is sql.js, wasm); the bundler is 166x faster and
+        unusable; the compiled binary is not blocked by #1841
+
+9.7  oisee/vivid-vibes: the megademo player asks for ?image=          [A]
+     └─ found 2026-09-14 while making SMW0 media work in the bundle.
+        get_megademo_html writes `img.src='?image='+n`; the handler's
+        route is `?img=`, and the SMW0 objid carries the extension
+        (ZO4D_05_COPPER.PNG). So the gallery images of the DEFAULT player
+        have never loaded, on Node or in the browser, silently: the
+        request falls through to the default branch and returns the page
+     └─ fixed to `'?img='+n+'.PNG'` in local/ (a gitignored working copy),
+        which is why the bundle works; the real repository is unchanged
+     └─ the dev player, line 443, was always right, which is how it hid
+     └─ external: Alice's repository, a one-line patch there is the fix
+
+9.8  local/o4d/ and local/vivid-vibes/ are the same package twice      [A]
+     └─ 60 files and 237, both carrying ZCL_O4D_HTTP_HANDLER and the same
+        W3MI objects. Whichever the directory walk reaches first wins,
+        silently. It won correctly on 2026-09-14 by luck, not by rule
+     └─ removing local/o4d/ is Alice's call; until then both copies are
+        kept identical by hand, which is exactly the fragility 1.5 exists
+        to remove
 ```
 
 ---
@@ -390,7 +484,10 @@ Tooling
 
 Known defects we live with
   ├─ no implicit MANDT in the transpiler        ANORMALIES, T0009 kept visible
-  ├─ bun does not decode %23 in a specifier     transpiler #1841, blocks 1.3
+  ├─ bun does not decode %23 in a specifier     transpiler #1841; blocks
+  │     `bun <script>` only — NOT the compiled binary (measured 2026-09-14)
+  ├─ bun's bundler emits import.meta + TLA        ANOMALY-2026-09-14; webpack
+  │     stays for web:preview, the binary is unaffected
   └─ Bun runs JavaScriptCore, not V8            corrects the vision draft
 ```
 

@@ -175,6 +175,15 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `SCMS_BINARY_TO_XSTRING` (absent entirely), and `WWWDATA_IMPORT` walked
   with an offset instead of consuming its remainder, which made a 4 MB file
   take minutes and answer nobody meanwhile. Measured after: 4 MB in 0.3 s.
+  In a browser there is no file and no `fs`, so `WWWDATA_IMPORT` lets a host
+  answer instead: `abap.W3MI_LOADER(objid, filename)` returns the content as
+  upper-case hex and the disk is the fallback rather than the only way.
+  `scripts/build-preview.mjs` copies `output/*.w3mi.data.*` into
+  `build/media/` (29 objects, 11.4 MB) **beside** the bundle, not inside it,
+  so a page pays for the audio only if it plays it, and
+  `web/preview-backend.mjs` installs the loader. A compiled binary needs the
+  same hook for the same reason. Measured in Chromium: a 4.6 MB track in
+  0.78 s cold and 0.34 s warm, and Zork boots from `ZORK-MINI.Z3`.
 - ABAP goes under `src/` (7.02-compatible, `open-abap` abaplint version),
   tests under `test/unit/*.clas.testclasses.abap`, seed captures under `data/`
   as abapGit TABU JSON (`test/seed.mjs` pads CHAR to DDIC length).
@@ -326,6 +335,35 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `preview deployment` workflow publishes `main/` and `pr-<n>/` to GitHub
   Pages. See `docs/preview-deployments.md`. `build/` and `web/generated/` are
   not tracked.
+- **webpack stays for the preview; do not swap it for Bun.** Measured
+  2026-09-14 (`docs/bun-spike.md` part two): Bun bundles the same graph in
+  337 ms against webpack's 56 s and the output cannot be evaluated, because
+  it keeps `import.meta` and 8893 top-level awaits and a service worker is a
+  classic script. webpack lowers both. Ten of its jobs are load-bearing —
+  sixteen node-builtin polyfills, `symlinks: false`, the sql.js asm alias,
+  three specifier rewrites, the DuckDB ignore, `Buffer`/`process`, one chunk,
+  and Terser with `keep_classnames`/`keep_fnames`, which is not cosmetic
+  because the runtime looks classes up by name. None of this touches the
+  binary, where a module target makes both constructs legal, and where the
+  `%23` defect turned out **not** to block packaging: `Bun.build({compile,
+  plugins})` with a five-line `onResolve` builds a binary that runs.
+- A page that speaks APC gets `open` before `drain`. A stateful handler
+  speaks from `on_start`, so draining what it pushed before signalling open
+  delivers a message while the page's socket is still CONNECTING: `onmessage`
+  runs before `onopen` and the page's reply is refused as "the socket is not
+  open". The page is right; the ordering was wrong (`web/preview-backend.mjs`).
+- **Verify a built artefact by its code, never by a comment, and never by
+  the build command exiting 0.** Three false greens in one day, 2026-09-14,
+  all the same shape: a test that called `install()` itself and passed while
+  the injected path it claimed to cover was broken; a suite that passed
+  against a stale `build/sw.js`; and a fix "confirmed" by grepping for a
+  comment webpack strips. A deployed bundle is checked by content, and a
+  test must exercise the real path rather than simulate it. Backlog 8.4.
+- Objects are not deduplicated across input folders and collisions are
+  silent. `local/o4d/` and `local/vivid-vibes/` both carry
+  `ZCL_O4D_HTTP_HANDLER`; whichever the directory walk reaches first wins.
+  Until layers are explicit (backlog 1.5) a duplicate is a hazard, not a
+  convenience.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 

@@ -45,6 +45,80 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
   If the answer is "no", reimplement the ~50 signatures from SAP's public
   contract.
 
+## Packaging, media and what Bun is for, 2026-09-14
+
+The day started with a socket error and ended with three beliefs corrected.
+Written down because two of them had already been planned around.
+
+**Media out of SMW0 now works in the browser.** `WWWDATA_IMPORT` read the
+bytes from the file beside the transpiled module, which is right on a
+checkout and impossible in a service worker, so the gateway answered every
+request except the ones that showed a picture or played a sound. The fix is
+a seam rather than a special case: open-abap-core lets a host install
+`abap.W3MI_LOADER(objid, filename)` and the disk becomes the fallback. The
+build copies the media beside the bundle instead of into it, so a visitor
+pays for the audio only if the page plays it. Zork boots from
+`ZORK-MINI.Z3` in a browser, and a 4.6 MB track arrives in 0.78 s. The same
+hook is what a compiled binary will need, which is the sign the seam is in
+the right place — it was cut for one reason and paid for two.
+
+**A stateful APC handler speaks before the page is listening.** Draining
+what `on_start` pushed before signalling open delivers a message while the
+page's socket is still CONNECTING, so `onmessage` runs before `onopen` and
+the page's reply comes back as "the socket is not open". Open first, then
+drain. The page was right and we were wrong.
+
+**Three things believed about Bun were false.** There are no native
+dependencies at all — `@abaplint/database-sqlite` is `sql.js`, wasm — so the
+question carried since the idea was raised does not exist. The percent
+defects (`%23` for namespaces, `%25` for the 172 W3MI names) are a
+ten-line bundler plugin, not a blocker. And `bun build --compile` does
+**not** inherit the specifier defect: `Bun.build({compile, plugins})` builds
+a binary that runs, while the plugin-less CLI and the interpreted path both
+fail. Transpiler #1841 stays worth having and stops being a gate.
+
+**Bun does not replace webpack, and will not soon.** It bundles the same
+graph 166 times faster and the result cannot be evaluated: it keeps
+`import.meta` and 8893 top-level awaits, and a service worker is a classic
+script. webpack lowers both. So the two are not competitors — webpack ships
+the browser, Bun ships the binary, and the fantasy of one tool doing both is
+retired.
+
+**One local HTML file: possible, but not with a worker.** A service worker
+cannot be registered from `file://`. The route is to run the runtime in the
+page and shim `fetch` and `XMLHttpRequest`, which is the trick
+`preview-socket.mjs` already plays on `WebSocket`, and which
+`handleRequest()` is already shaped for. It needs webpack for the same
+lowering, because `file://` also refuses module scripts. Parked as backlog
+1a.2: worth it only for "send someone a file they double-click", and where
+an executable may be run the binary is better, because it is the server and
+the https a worker demands off localhost stops mattering.
+
+**UI5 is not embedded.** Decided rather than measured: Fiori Elements
+(`sap.fe`, `sap.ui.generic.app`) is SAPUI5 and is not in OpenUI5, so
+embedding OpenUI5 would buy freestyle apps and not the thing this project
+exists for. CDN by default, a cached dist for offline.
+
+**Layers, in Alice's formulation.** The binary takes an ordered list of
+abapGit `src` paths; a later layer wins a name collision; data layers
+(`data/*.tabu.json`) apply the same way. The argument is no longer
+theoretical: `local/o4d/` and `local/vivid-vibes/` both carry
+`ZCL_O4D_HTTP_HANDLER` and the directory walk decided silently which one ran.
+The unifying observation is that `hash(ordered layers)` is the transpile
+cache key **and** the ADT version-id proposed earlier — one number, and it
+is what makes "spin a runtime from sources" true rather than aspirational,
+because the first run transpiles 1065 objects and later runs do not. One
+question is open and is Alice's: does a layer override the object or single
+files (backlog 1.5).
+
+**Three false greens in one day.** A test that called `install()` itself and
+passed while the path it covered was broken; a suite that passed against a
+stale `build/sw.js`; a fix confirmed by grepping for a comment webpack
+strips. Same shape each time: the check and the thing checked drifted apart.
+The rule that follows is in CLAUDE.md, and it is the argument for running
+one e2e suite against every packaging target rather than trusting that a
+second runtime behaves like the first.
+
 ## DuckDB as the store, 2026-09-12 (night run)
 
 `tools/duckdb-client.mjs` implements the transpiler's `DatabaseClient` over
