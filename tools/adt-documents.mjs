@@ -562,13 +562,15 @@ export function nodeStructureDocument(nodes, options = {}) {
   const categories = new Set();
   const kindByNode = new Map();
   for (const kind of present) {
-    const folder = TREE_FOLDER[kind];
+    const folder = options.leaf === true ? undefined : TREE_FOLDER[kind];
     const category = TREE_CATEGORY[kind] ?? "other";
     categories.add(category);
     const typeOf = nodes.find((n) => bare(n.type) === kind)?.type ?? kind;
     const typeNode = id();
     kindByNode.set(typeNode, kind);
-    objectTypes.push({type: typeOf, category, label: folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "", node: typeNode});
+    objectTypes.push({type: typeOf, category,
+      label: options.leaf === true ? "" : folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "",
+      node: typeNode});
     if (folder !== undefined) {
       const node = id();
       kindByNode.set(node, kind);
@@ -606,10 +608,12 @@ ${nodes.map(flatRow).join("\n")}
   // answer. On expansion Eclipse asks for one or several of them. Repeating
   // the complete package makes every drawer recursively contain itself and
   // leaves the UI at "Loading repository tree...". A selected drawer gets
-  // only its concrete objects, in the same flat shape as a leaf result.
+  // only its concrete objects. A measured A4H leaf still carries category
+  // and type metadata, but no virtual folder row; its node keys are local to
+  // this new answer.
   if ((options.nodeKeys?.length ?? 0) > 0) {
     const kinds = new Set(options.nodeKeys.map((node) => kindByNode.get(node)).filter(Boolean));
-    return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {flat: true});
+    return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {leaf: true});
   }
 
   const folderRow = (f) => row({

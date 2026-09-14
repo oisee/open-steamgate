@@ -720,7 +720,10 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       })).text();
       expect(selected).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
       expect(selected).to.not.contain("<OBJECT_TYPE>INTF/OI</OBJECT_TYPE>");
-      expect(selected).to.not.contain("<OBJECT_TYPES>");
+      expect(selected).to.contain("<CATEGORIES>");
+      expect(selected).to.contain("<OBJECT_TYPES>");
+      expect(selected).to.not.contain("<OBJECT_TYPE>DEVC/OC</OBJECT_TYPE>");
+      expect(selected).to.match(/<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE><CATEGORY_TAG>source_library<\/CATEGORY_TAG><OBJECT_TYPE_LABEL\/><NODE_ID>\d{6}<\/NODE_ID>/);
     });
 
     it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
