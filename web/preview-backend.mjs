@@ -19,6 +19,50 @@ const {initializeABAP} = await import("../output/init.mjs");
 const {cl_express_icf_shim} = await import("../output/cl_express_icf_shim.clas.mjs");
 const {services} = await import("./generated/services.mjs");
 
+// SMW0 without a disk.
+//
+// WWWDATA_IMPORT reads the bytes from the file beside the transpiled module,
+// which is right on a checkout and impossible here: there is no fs in a
+// service worker, so every page that shows a picture or plays a sound got a
+// 500 from a runtime that was otherwise working. open-abap-core lets a host
+// answer instead — abap.W3MI_LOADER(objid, filename) hands back the content
+// as upper-case hex, which is how an xstring travels through that function.
+//
+// The files sit beside the bundle under media/ rather than inside sw.js, so
+// a page pays for the audio only if it plays it.
+const HEX = Array.from({length: 256}, (_, byte) => byte.toString(16).padStart(2, "0").toUpperCase());
+const loaded = new Map();
+
+globalThis.abap.W3MI_LOADER = async (objid, filename) => {
+  const already = loaded.get(filename);
+  if (already !== undefined) {
+    return already;
+  }
+  // the per cent in an abapGit media name (zork-mini%2ez3.w3mi.data.z3) is a
+  // character of the name, not an escape, so it has to reach the host as %25
+  // or the file asked for is a different one
+  const url = new URL(`media/${encodeURIComponent(filename)}`, self.location.href);
+  const response = await fetch(url, {cache: "force-cache"});
+  if (response.ok === false) {
+    throw new Error(`W3MI ${objid}: ${filename} is ${response.status} here`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  // in slices: four megabytes of audio is eight million hex digits, and
+  // growing one string by two characters eight million times is the quadratic
+  // shape that made this take minutes on the Node side
+  const parts = [];
+  for (let at = 0; at < bytes.length; at += 8192) {
+    let part = "";
+    for (const byte of bytes.subarray(at, at + 8192)) {
+      part += HEX[byte];
+    }
+    parts.push(part);
+  }
+  const hex = parts.join("");
+  loaded.set(filename, hex);
+  return hex;
+};
+
 // which service answers a path: the longest prefix that matches, so a service
 // mounted below another is found before its parent. Nothing here knows what
 // any of them do.
@@ -115,11 +159,19 @@ export async function openChannel(id, channel, send) {
     it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
   });
   const accepted = await host.open();
-  await drain();
   if (accepted.get() !== "X") {
     throw new Error("the handler refused the connection");
   }
   hosts.set(id, {host, drain});
+  // open first, then whatever on_start pushed.
+  //
+  // The other order looks harmless and is not: a handler that speaks first —
+  // and a stateful one usually does — delivers a message while the page's
+  // socket is still CONNECTING, so the page's onmessage runs before its
+  // onopen and any send( ) from it is refused as "the socket is not open".
+  // The page is right and the ordering was wrong.
+  send({apc: "open"});
+  await drain();
 }
 
 export async function channelMessage(id, text, send) {

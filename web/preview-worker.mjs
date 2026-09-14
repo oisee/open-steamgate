@@ -9,6 +9,7 @@
 // Listeners are registered during the initial evaluation, as the service
 // worker specification requires; the runtime is imported on the first request.
 import {services, channels} from "./generated/services.mjs";
+import {shim} from "./generated/socket-shim.mjs";
 
 const MOUNT = new URL("./", self.location).pathname;
 // every prefix this deployment answers, longest first so a service nested
@@ -58,10 +59,11 @@ self.addEventListener("message", (event) => {
       void run(() => backendOf().then((b) => b.closeChannel(message.id)));
     }
   };
+  // openChannel signals the open itself, before it drains what on_start
+  // pushed, because the page must be OPEN before its onmessage can fire
   void run(async () => {
     const backend = await backendOf();
     await backend.openChannel(message.id, channel, send);
-    send({apc: "open"});
   });
 
   // a failure here is the handler's, and the page can only be told by the
@@ -85,8 +87,13 @@ self.addEventListener("message", (event) => {
 // that will never open is worse than one told plainly there is none. The
 // shim only takes over the channel paths this deployment actually serves
 // and hands every other URL to the real constructor.
-const SHIM = `<script type="module">import {install} from "${MOUNT}preview-socket.mjs";`
-  + `install({paths: ${JSON.stringify(channels.map((c) => c.path))}});</script>`;
+// inline and classic, not a module and not a src. A module script is
+// deferred: it runs after the document is parsed, which is after the page's
+// own script has already called new WebSocket( ) and been refused. An
+// earlier version of this injected a module and a test asserted the shim was
+// installed once the page had loaded — which was true, and proved nothing,
+// because by then the socket had already failed.
+const SHIM = `<script>${shim}\ninstall({paths: ${JSON.stringify(channels.map((c) => c.path))}});</script>`;
 
 async function withSocketShim(answer) {
   const type = answer.headers?.get?.("content-type") ?? "";

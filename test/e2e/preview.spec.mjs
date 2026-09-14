@@ -123,13 +123,22 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     // script, which is the only moment it could have
     expect(await page.evaluate(() => globalThis.WebSocket.__previewInstalled === true)).toBe(true);
 
+    // no install( ) here on purpose. The worker injected the shim into the
+    // page and that is the thing under test: an earlier version injected a
+    // module, which is deferred, so it ran after the page's own script had
+    // already opened its socket and failed. This test called install( )
+    // itself and passed while the real path was broken.
     const frames = await page.evaluate(async () => {
-      const {install} = await import("/preview-socket.mjs");
-      install({paths: ["/sap/bc/apc/sap/zstg_apc_demo"]});
       return await new Promise((done, fail) => {
         const got = [];
         const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zstg_apc_demo");
+        // sending from onopen is what a page does, and it is what caught the
+        // ordering defect: the handler speaks from on_start, so draining
+        // before signalling open delivered a message while the socket was
+        // still CONNECTING, onmessage ran before onopen, and the page's reply
+        // was refused as "the socket is not open"
         socket.onopen = () => { socket.send("ping"); socket.send("hello"); };
+        socket.onerror = () => fail(new Error("error before the exchange finished"));
         socket.onmessage = (e) => { got.push(e.data); if (got.length >= 3) { done(got); } };
         socket.onclose = (e) => fail(new Error("closed: " + e.reason));
         setTimeout(() => fail(new Error("timed out with " + JSON.stringify(got))), 20000);
@@ -142,6 +151,76 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     // the counter proves one handler object served both messages, which is
     // what stateful means and what a per-message object would not show
     expect(frames[2]).toContain('"seen":2');
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
+// SMW0 media in the bundle.
+//
+// The runtime reads a W3MI object with WWWDATA_IMPORT, which reads a file
+// beside the transpiled module. There is no file and no fs in a service
+// worker, so every page that showed a picture or played a sound got a 500
+// from a gateway that was otherwise answering. The build carries the media
+// under media/ and web/preview-backend.mjs installs abap.W3MI_LOADER, so the
+// bytes come back over fetch and the ABAP above is unchanged.
+test("SMW0 objects are served from the bundle, byte for byte", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {fileURLToPath} = await import("node:url");
+  const output = fileURLToPath(new URL("../../output/", import.meta.url));
+  const expected = {
+    "ZO4D_05_COPPER.PNG": await readFile(output + "zo4d_05_copper%2epng.w3mi.data.png"),
+    "ZOISEE-EAR-02.MP3": await readFile(output + "zoisee-ear-02%2emp3.w3mi.data.mp3"),
+  };
+
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-w3mi-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html");
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    // somewhere the worker serves and nothing else happens: the Zork page
+    // opens its channel on load, and a handler that boots a Z-machine in the
+    // worker holds the only thread there is, so waiting for that page's load
+    // event is waiting for the game to start
+    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/media", {waitUntil: "domcontentloaded"});
+
+    const fetched = await page.evaluate(async () => {
+      const one = async (query) => {
+        const res = await fetch("/sap/bc/zo4d_demo?" + query);
+        const body = new Uint8Array(await res.arrayBuffer());
+        // a digest rather than the bytes: four megabytes through the
+        // Playwright bridge is the slow part of this test, not the runtime
+        const digest = await crypto.subtle.digest("SHA-256", body);
+        return {
+          status: res.status,
+          type: res.headers.get("content-type"),
+          length: body.length,
+          sha256: [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join(""),
+        };
+      };
+      return {
+        image: await one("img=ZO4D_05_COPPER.PNG"),
+        audio: await one("audio=ZOISEE-EAR-02.MP3"),
+      };
+    }, undefined, {timeout: 60000});
+
+    const {createHash} = await import("node:crypto");
+    const sha = (buffer) => createHash("sha256").update(buffer).digest("hex");
+
+    expect(fetched.image.status).toBe(200);
+    expect(fetched.image.type).toContain("image/png");
+    expect(fetched.image.length).toBe(expected["ZO4D_05_COPPER.PNG"].length);
+    expect(fetched.image.sha256).toBe(sha(expected["ZO4D_05_COPPER.PNG"]));
+
+    // the audio is the four megabyte case: the one that turned the whole
+    // WWWDATA_IMPORT walk quadratic on the Node side and the one nobody would
+    // notice was missing until a demo went silent
+    expect(fetched.audio.status).toBe(200);
+    expect(fetched.audio.type).toContain("audio/mpeg");
+    expect(fetched.audio.length).toBe(expected["ZOISEE-EAR-02.MP3"].length);
+    expect(fetched.audio.sha256).toBe(sha(expected["ZOISEE-EAR-02.MP3"]));
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
