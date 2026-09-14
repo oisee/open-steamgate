@@ -386,9 +386,25 @@ open  revisions: reading them out of git instead of a system.
         a comment; a test must exercise the injected path, not simulate
         it; and a deployed bundle is verified by content, not by the
         deploy command exiting 0
-     └─ this is the argument for one e2e suite running against every
-        packaging target, or the binary becomes a second runtime with
-        no second check
+     └─ DONE, the mechanism rather than the rule: the bundle carries a
+        digest of itself, serves it at <mount>__preview/build, and the
+        first test of the preview suite compares it with build/build.json.
+        A registration that outlived a rebuild now says so instead of
+        answering quietly. scripts/build-preview.mjs writes the stamp
+     └─ a FOURTH one the same day, after the rule was written: a fix
+        reported as shipped that had gone into a folder which is not an
+        input (9.7, 9.8). The stamp would not have caught that one; the
+        input report does
+     └─ still open: this is the argument for one e2e suite running against
+        every packaging target, or the binary becomes a second runtime
+        with no second check
+8.5  the preview suite flakes on navigation to a worker-served page    [S]
+     └─ seen twice in about eight runs on 2026-09-14, both times a
+        page.goto to a path the worker answers timing out; the same run
+        passes on retry, and a standalone probe never reproduced it
+     └─ worth fixing rather than retrying: a suite that goes green on a
+        second run teaches everyone to run it twice, which is how a real
+        failure gets waved through
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
@@ -442,18 +458,30 @@ open  revisions: reading them out of git instead of a system.
         (ZO4D_05_COPPER.PNG). So the gallery images of the DEFAULT player
         have never loaded, on Node or in the browser, silently: the
         request falls through to the default branch and returns the page
-     └─ fixed to `'?img='+n+'.PNG'` in local/ (a gitignored working copy),
-        which is why the bundle works; the real repository is unchanged
+     └─ CORRECTED 2026-09-14, having been written wrong the same day: the
+        first fix went into local/vivid-vibes, which is NOT an input folder,
+        so it changed nothing; the second went into local/o4d, which is, but
+        after the last build. The bundle was reported fixed while both
+        copies still shipped `?image=`. Now built and verified by content:
+        two occurrences of `'?img='+n+'.PNG'`, none of `?image=`
      └─ the dev player, line 443, was always right, which is how it hid
      └─ external: Alice's repository, a one-line patch there is the fix
 
-9.8  local/o4d/ and local/vivid-vibes/ are the same package twice      [A]
-     └─ 60 files and 237, both carrying ZCL_O4D_HTTP_HANDLER and the same
-        W3MI objects. Whichever the directory walk reaches first wins,
-        silently. It won correctly on 2026-09-14 by luck, not by rule
-     └─ removing local/o4d/ is Alice's call; until then both copies are
-        kept identical by hand, which is exactly the fragility 1.5 exists
-        to remove
+9.8  local/vivid-vibes is a shadow copy, not a duplicate input        [A]
+     └─ CORRECTED 2026-09-14: the first version of this entry said the
+        directory walk picks a winner silently. It does not. Only local/o4d
+        is in abap_transpile.json; local/vivid-vibes holds 121 objects, 85
+        of which the build also has, and is not an input at all. So it is
+        not a race that happens to go the right way — it is a folder that
+        looks like source and absorbs edits that reach nothing
+     └─ now reported rather than remembered: tools/osd-inputs.mjs runs as
+        part of `transpile` and names both shapes, a later input overriding
+        an earlier one and a folder beside the inputs that is not one.
+        test/osd-inputs.mjs. It prints and never fails the build, because
+        either can be deliberate
+     └─ what is left for Alice: whether local/vivid-vibes should be the
+        input (it is the complete package, 237 files against 60) or should
+        go. Today the smaller copy is what runs
 ```
 
 ---

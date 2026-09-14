@@ -19,6 +19,21 @@ const SERVICE_PREFIXES = services
   .map((s) => s.path.replace(/^\//, "") + "/")
   .sort((a, b) => b.length - a.length);
 const RESET_PATH = "__preview/reset";
+// Which bundle is actually answering, said by the bundle itself.
+//
+// Three times in one day a check passed against something other than the
+// thing it was checking: a suite green against a stale build/sw.js, a
+// deployment verified by the command exiting 0, a fix confirmed by grepping
+// for a comment the bundler strips. The file on disk being right proves
+// nothing about the worker in control of the page, which is the one that
+// answers, and it can be an older registration.
+//
+// So the bundle carries its own identity. scripts/build-preview.mjs hashes
+// the emitted worker and writes the digest over this placeholder, and the
+// same digest into build/build.json. A test can then ask the running worker
+// what it is and compare, and a stale one says so instead of passing.
+const BUILD_PATH = "__preview/build";
+const BUILD_STAMP = "__OSD_BUILD_STAMP__";
 const DATABASE_CACHE = "open-steamgate-preview-database";
 const DATABASE_KEY = `${MOUNT}__preview/database`;
 const EMPTY_STATUSES = new Set([204, 205, 304]);
@@ -123,7 +138,7 @@ self.addEventListener("fetch", (event) => {
   // a bare service path with no trailing slash is the service's own root,
   // which is how a terminal page is opened
   const served = SERVICE_PREFIXES.some((p) => path.startsWith(p) || path + "/" === p);
-  if (path !== RESET_PATH && served === false) {
+  if (path !== RESET_PATH && path !== BUILD_PATH && served === false) {
     return;
   }
   event.respondWith(serve(event.request, url, path));
@@ -131,6 +146,13 @@ self.addEventListener("fetch", (event) => {
 
 async function serve(request, url, path) {
   try {
+    // answered before the runtime is started: the point is to identify the
+    // worker even when the runtime behind it is broken
+    if (path === BUILD_PATH) {
+      return new Response(JSON.stringify({stamp: BUILD_STAMP}), {
+        headers: {"content-type": "application/json", "cache-control": "no-store"},
+      });
+    }
     const backend = await start();
     if (path === RESET_PATH) {
       await backend.resetBackend();

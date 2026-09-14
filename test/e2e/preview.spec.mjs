@@ -3,6 +3,43 @@ import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
+// Which bundle is answering. This runs first on purpose.
+//
+// Three times in one day a check passed against something other than what it
+// was checking: this suite green against a stale build/sw.js, a deployment
+// confirmed because the command exited 0, a fix verified by grepping for a
+// comment the bundler strips. Every one of them reported work as done that
+// was not. The file on disk being current proves nothing — a service worker
+// registration outlives a rebuild, and the old one keeps answering.
+//
+// So the worker carries a digest of itself (scripts/build-preview.mjs writes
+// it in) and says it on request. If this test fails, nothing below it means
+// anything, which is why it is first.
+test("the worker answering is the worker that was just built", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {fileURLToPath} = await import("node:url");
+  const onDisk = JSON.parse(await readFile(fileURLToPath(new URL("../../build/build.json", import.meta.url)), "utf8"));
+
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-stamp-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html");
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    const answered = await page.evaluate(async () => {
+      const res = await fetch("/__preview/build", {cache: "no-store"});
+      return {status: res.status, body: await res.json(), sw: true};
+    });
+    expect(answered.status).toBe(200);
+    expect(answered.body.stamp).toBe(onDisk.stamp);
+    // and it is unstamped only if the build step never ran
+    expect(answered.body.stamp).not.toBe("__OSD_BUILD_STAMP__");
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // The static preview build: no server answers /sap/opu/odata/sap/, the
 // service worker does, with the transpiled DPC over sql.js.
 //

@@ -84,6 +84,31 @@ const statistics = await new Promise((fulfil, reject) => {
 });
 console.log(statistics.toString({colors: false, preset: "minimal"}));
 
+// The bundle's own identity, written into the bundle.
+//
+// A suite that passes against a stale build/sw.js, a deployment verified by
+// the command exiting 0, a fix confirmed by grepping for a comment the
+// bundler strips — three of those in one day, all the same shape: the check
+// and the thing checked were not the same object. The file on disk being
+// right says nothing about which worker controls a page, because a
+// registration outlives a rebuild.
+//
+// So the worker carries a digest of itself and serves it. The digest is
+// taken before the stamp is substituted, which makes it well defined: it is
+// what webpack emitted. build.json holds the same value for whoever wants to
+// compare from outside.
+const workerPath = resolve(build, "sw.js");
+const emitted = await readFile(workerPath, "utf8");
+const PLACEHOLDER = "__OSD_BUILD_STAMP__";
+if (emitted.includes(PLACEHOLDER) === false) {
+  throw new Error(`${PLACEHOLDER} is not in the bundle: web/preview-worker.mjs must carry it`);
+}
+const stamp = createHash("sha256").update(emitted).digest("hex").slice(0, 16);
+await writeFile(workerPath, emitted.replaceAll(PLACEHOLDER, stamp), "utf8");
+await writeFile(resolve(build, "build.json"),
+  JSON.stringify({stamp, buildId, builtAt: new Date().toISOString()}, undefined, 2) + "\n", "utf8");
+console.log(`Stamp: ${stamp}`);
+
 await mkdir(build, {recursive: true});
 await copyFile(resolve(root, "web/index.html"), resolve(build, "index.html"));
 
