@@ -237,6 +237,23 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       }
     });
 
+    // The gate, and the reason every other node in this graph was dead weight.
+    //
+    // Taken from the client's own bytecode, not from a guess: isNodeAvailable
+    // resolves COM.SAP.ADT.COMPATIBILITY/compatibilityAvailable first and
+    // answers false for whatever it was asked about if that node is not in the
+    // graph this system served. A graph missing it is indistinguishable, to
+    // the client, from a graph declaring nothing at all — and the failure is
+    // silent, client-side, before any request, so the server logs stay clean
+    // while every feature is off. That is what "Activation is not supported"
+    // meant while activation, checkruns and their obligations were all
+    // declared and all reachable.
+    it("opens the gate the client checks before every other node", async () => {
+      const xml = await (await call("/compatibility/graph")).text();
+      expect(xml, "without this node the client reads the whole graph as empty")
+        .to.match(/<node nameSpace="COM\.SAP\.ADT\.COMPATIBILITY" name="compatibilityAvailable"\/>/);
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");

@@ -88,6 +88,17 @@ const xmlEscape = (s) => String(s)
 // knowingly: a client that finds them false will say so, and there is a real
 // system beside this one to compare against when it does.
 const COMPATIBILITY = {
+  // The one node without which none of the others count for anything.
+  //
+  // Read off the client's own code rather than guessed: GraphAnalyzer's
+  // isNodeAvailable looks up COM.SAP.ADT.COMPATIBILITY/compatibilityAvailable
+  // *before* the node it was asked about, and returns false for everything if
+  // that node is missing from this system's graph. So a graph that carefully
+  // lists activation, checkruns and search, and omits this one line, says "I
+  // support nothing" just as loudly as the empty graph did -- and the client
+  // says so without sending a request, which is why the resources were all
+  // there and none of them were ever called.
+  "COM.SAP.ADT.COMPATIBILITY": ["compatibilityAvailable"],
   "COM.SAP.ADT.ABAPUNIT": ["abapunit", "uriBasedAbapUnit", "xmlVersion2"],
   "COM.SAP.ADT.ACTIVATION": ["activate", "check"],
   "COM.SAP.ADT.CORE": ["checkruns", "checkrunsVendorContentType", "xmlFormat", "xmlNameSpace"],
