@@ -694,6 +694,26 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(row[1], "a class that is not expandable is named ZCL_X.abap").to.equal("X");
     });
 
+    // One link is not a list, and the client does not check.
+    //
+    // abap-adt-api parses a class:include with links: e["atom:link"].map(...)
+    // — .map straight on the property, where the class root beside it goes
+    // through its xmlArray helper. An XML-to-object parser gives an object for
+    // one child and a list for several, so a single link here is
+    // "e.atom:link.map is not a function" and the class never opens. A4H emits
+    // four per include and never meets the case, which is why no oracle
+    // comparison would have found this.
+    it("gives every class include more than one link, because one is not a list", async () => {
+      const xml = await (await call("/oo/classes/zcl_stg_segw_gen")).text();
+      const includes = [...xml.matchAll(/<class:include[\s\S]*?<\/class:include>/g)].map((m) => m[0]);
+      expect(includes.length, "no includes in the class document").to.be.greaterThan(0);
+      for (const part of includes) {
+        const links = [...part.matchAll(/<atom:link[^>]*\/>/g)];
+        expect(links.length, part.slice(0, 80)).to.be.greaterThan(1);
+        expect(part, "the client selects by this type").to.contain('type="text/plain"');
+      }
+    });
+
     it("expanding a class answers with the includes it really has", async () => {
       const pkg = await (await call("/repository/nodestructure?parent_name=" +
         encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();

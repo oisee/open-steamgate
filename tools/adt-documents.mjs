@@ -286,12 +286,31 @@ export function classDocument(object, options = {}) {
     (title === undefined ? "" : ` title="${xmlEscape(title)}"`) +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>';
 
+  // An include carries both of the system's source links, and that is not
+  // padding.
+  //
+  // abap-adt-api parses a class:include with
+  //   links: e["atom:link"].map(xmlNodeAttr)
+  // — `.map` straight on the property, where the class root beside it goes
+  // through its xmlArray helper first. An XML-to-object parser turns a single
+  // child into an object and several into a list, so exactly one link here is
+  // "e.atom:link.map is not a function" and the class will not open. A4H emits
+  // four per include and never meets the case.
+  //
+  // These are the two the system points at the same href: the plain source and
+  // its HTML rendering. Only text/plain is distinguished here — that URL
+  // answers with the source whichever is asked for, and the client picks the
+  // text/plain one by type. The other two A4H links, versions and enhancement
+  // options, are deliberately not copied: nothing here serves them, and a link
+  // that 404s is the failure this round was spent removing.
   const include = (kind, sourceUri) =>
     `  <class:include class:includeType="${kind}" abapsource:sourceUri="${sourceUri}"` +
     ' adtcore:name="" adtcore:type="CLAS/I"' +
     ` adtcore:changedAt="${when}" adtcore:version="active"` +
     ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
     `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
+    ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
+    `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/html"` +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
     "  </class:include>";
 
