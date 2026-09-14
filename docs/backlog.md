@@ -306,13 +306,17 @@ the client and yardstick   V      the calls a real development loop makes,
 ## 2b. Questions parked next to the façade
 
 ```
-open  does Eclipse need the dispatcher port at all? Measured 2026-09-14:
-      every ADT request went to the gateway and the only dispatcher traffic
-      was SAP GUI — one session Alice started by hand, one Eclipse launched
-      for a program. So the hypothesis is that ADT needs 33NN alone and 32NN
-      only to hand off to SAP GUI. Cheap to test: take the dispatcher
-      forwarder down and connect Eclipse again. If the project still opens,
-      OSD needs one port rather than two.
+ANSWERED  does Eclipse need the dispatcher port at all? No. Tested by
+      taking the dispatcher forwarder down on 2026-09-14 and connecting
+      again: the project was created and everything worked — until a program
+      was run, when Eclipse's embedded GUI opened and could show nothing.
+      So ADT is entirely the gateway, 33NN, and 32NN is only ever DIAG.
+      Two consequences, and they split the work cleanly. To make Eclipse
+      connect and develop, OSD needs an RFC server on ONE port answering ONE
+      function module. To make programs run inside it, OSD needs a DIAG
+      front on 32NN, which is open-diag-go's territory and not the façade's.
+      The failure without DIAG is soft and predictable: a full development
+      environment that cannot execute.
 open  SOAP: vsp's ADT is pure REST, no SOAP in it. The only SOAP it touches
       is SOAP-RFC (/sap/bc/soap/rfc), a fallback transport for classic RFC
       when the gateway is closed, stateless, and it belongs to open-rfc-go.

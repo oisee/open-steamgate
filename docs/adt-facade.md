@@ -428,6 +428,16 @@ tunnelled over the gateway. So "answer a transaction Eclipse asked for" is
 not an ADT problem at all — it is the DIAG problem, and it belongs where the
 DIAG work already lives.
 
+**The dispatcher is not needed for ADT at all.** Tested rather than
+inferred, the same afternoon: with the dispatcher forwarder taken down,
+Eclipse created its project and everything worked — until a program was run,
+when the embedded GUI opened and displayed nothing. So the two ports carry
+two unrelated jobs. An RFC server on `33NN` answering one function module is
+the whole of what a client needs to connect and develop; `32NN` is DIAG and
+only DIAG, and it is what running something needs. OSD without a DIAG front
+is a development environment that cannot execute, which is a soft and
+predictable place to stop rather than a broken one.
+
 **What this changes about the order of work.** The list is no longer a guess:
 an RFC server answering one function module on paired conversations, then the
 resources in the order the client asks for them — discovery, the
