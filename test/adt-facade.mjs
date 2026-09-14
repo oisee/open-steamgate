@@ -7,6 +7,7 @@ import {startServer} from "./start.mjs";
 // point of the address.
 const PORT = process.env.STG_PORT ?? 3030;
 const ADT = `http://localhost:${PORT}/sap/bc/adt`;
+const BASE_URL = `http://localhost:${PORT}`;
 
 describe("tools/adt-facade: OSD answers ADT", () => {
   let server;
@@ -31,6 +32,81 @@ describe("tools/adt-facade: OSD answers ADT", () => {
   const call = (path, options = {}) => fetch(ADT + path, {
     ...options,
     headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token, ...(options.headers ?? {})},
+  });
+
+  // What an ABAP Cloud Project needs beyond the classic surface, written
+  // against what A4H actually did behind a TLS terminator on 2026-09-14 —
+  // the wizard opened, the tree filled, sources read and ABAP Unit ran.
+  describe("the cloud flavour", () => {
+    it("issues a reentrance ticket by sending the browser back to the client's own listener", async () => {
+      const back = "http://localhost:62223/adt/redirect";
+      const res = await fetch(
+        `${ADT}/core/http/reentranceticket?redirect-url=${encodeURIComponent(back)}&_=12345`,
+        {redirect: "manual"},
+      );
+      expect(res.status).to.equal(307);
+
+      const to = new URL(res.headers.get("location"));
+      expect(to.origin + to.pathname).to.equal(back);
+      // the nonce comes back as it was sent: the client matches on it
+      expect(to.searchParams.get("_")).to.equal("12345");
+      expect(to.searchParams.get("reentrance-ticket")).to.be.a("string").with.length.greaterThan(16);
+
+      // and the cookie is the part that actually carries the session
+      // afterwards — Eclipse sent no Authorization header on any request
+      const cookies = (res.headers.getSetCookie?.() ?? []).join("; ");
+      expect(cookies).to.match(/SAP_SESSIONID_/);
+      expect(cookies).to.match(/sap-usercontext=/);
+    });
+
+    // An open redirect that mints a credential on the way out would be worth
+    // having by accident exactly once. Eclipse's listener is always loopback.
+    it("refuses to bounce a browser anywhere but loopback", async () => {
+      for (const target of ["https://example.invalid/adt/redirect", "http://192.0.2.1/adt/redirect"]) {
+        const res = await fetch(
+          `${ADT}/core/http/reentranceticket?redirect-url=${encodeURIComponent(target)}`,
+          {redirect: "manual"},
+        );
+        expect(res.status, target).to.equal(400);
+      }
+    });
+
+    it("answers the session poll with the links the client watches", async () => {
+      const res = await call("/core/http/sessions");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.match(/adt\.core\.http\.session\.v3\+xml/);
+
+      const body = await res.text();
+      expect(body).to.match(/categories\/core\/http\/sessions\/securitysession/);
+      expect(body).to.match(/categories\/core\/http\/sessions\/logoff/);
+      expect(body).to.match(/categories\/core\/http\/system\/systeminformation/);
+      expect(body).to.match(/inactivityTimeout/);
+    });
+
+    // The client polls this. A session identifier that changed per request
+    // would read as the session ending over and over.
+    it("names the same security session on every poll", async () => {
+      const [first, second] = await Promise.all([call("/core/http/sessions"), call("/core/http/sessions")]);
+      const idOf = async (res) => /sessions\/([0-9A-F]+)"/.exec(await res.text())?.[1];
+      expect(await idOf(first)).to.equal(await idOf(second));
+    });
+
+    it("says who and what it is, which is what the window title shows", async () => {
+      const res = await call("/core/http/systeminformation");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.match(/systeminformation\.v1\+json/);
+
+      const info = await res.json();
+      expect(info).to.include.keys("systemID", "userName", "userFullName", "client", "language");
+      expect(info.systemID).to.be.a("string").with.length(3);
+    });
+
+    // A4H answers 404 here and the wizard carries on, so the façade needs no
+    // route at all — this pins that the absence is deliberate.
+    it("leaves /sap/public/bc/icf/virtualhost unanswered, as the real one does", async () => {
+      const res = await fetch(BASE_URL + "/sap/public/bc/icf/virtualhost");
+      expect(res.status).to.equal(404);
+    });
   });
 
   describe("wave 0: the handshake", () => {

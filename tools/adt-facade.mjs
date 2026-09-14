@@ -19,7 +19,7 @@
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
 import express from "express";
-import {randomUUID} from "node:crypto";
+import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
 import {objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
@@ -238,6 +238,109 @@ export function adtRouter(options = {}) {
   // app as the OData front, and a CSRF gate over somebody else's POST is a
   // 403 they never asked for
   router.use(BASE, sessions.middleware());
+
+  // ---- What an ABAP Cloud Project needs that an ordinary one does not.
+  //
+  // Measured 2026-09-14 against A4H behind a TLS terminator: an ABAP Cloud
+  // Project asks for exactly four things beyond the classic surface, and with
+  // them a plain on-premise system opens as a cloud one — tree, sources, and
+  // ABAP Unit runs. Everything else the wizard needs, including the released-
+  // objects tree, comes from resources this façade already serves.
+  //
+  // The fourth is /sap/public/bc/icf/virtualhost, which is not here because
+  // the right answer to it is 404 and that is what an unmounted path already
+  // gives. A4H answers the same, and the wizard carries on regardless.
+  const identity = {
+    systemID: options.systemID ?? "OSD",
+    userName: options.userName ?? "DEVELOPER",
+    userFullName: options.userFullName ?? "Off-Stack Doppelganger",
+    client: options.client ?? "001",
+    language: options.language ?? "EN",
+    ...options.identity,
+  };
+
+  // The logon, and the whole of what the wizard calls a challenge.
+  //
+  // It turns out to be neither OAuth nor PKCE. Eclipse opens a listener on a
+  // loopback port, sends a browser here, and expects to be sent back to that
+  // listener with a ticket in the query string; the ticket exists only to let
+  // the client pick up a session cookie. A real system authenticates first.
+  // This one has nobody to authenticate, so it issues the ticket directly —
+  // which is the honest behaviour for a façade with no user store, and is why
+  // it must not be exposed to a network that matters.
+  //
+  // The redirect target is restricted to loopback, which is where Eclipse's
+  // listener always is. Without that this is an open redirect: anything could
+  // hand out a link to this endpoint and have a trusted-looking host bounce a
+  // browser wherever it liked, carrying a freshly minted credential.
+  //
+  // This is the one resource here that redirects, and adt-session's rule that
+  // nothing does is not being broken: that rule is about requests for data,
+  // where a client reads a redirect as having been logged out. A logon that
+  // redirects is the logon working.
+  //
+  // For now it admits everyone. A façade over a local SQLite file has no user
+  // store and inventing one would be pretending; when there is a reason to
+  // ask for credentials, this is where the 401 goes, and A4H shows the shape
+  // — a plain Basic challenge, then the same 307.
+  router.get(`${BASE}/core/http/reentranceticket`, (req, res) => {
+    const target = req.query["redirect-url"];
+    if (typeof target !== "string" || target === "") {
+      res.status(400).type("text/plain").send("redirect-url is required");
+      return;
+    }
+    let url;
+    try {
+      url = new URL(target);
+    } catch {
+      res.status(400).type("text/plain").send("redirect-url is not a URL");
+      return;
+    }
+    if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") {
+      res.status(400).type("text/plain").send("redirect-url must point at loopback");
+      return;
+    }
+
+    const ticket = randomBytes(24).toString("base64url");
+    url.searchParams.set("_", String(req.query._ ?? Date.now()));
+    url.searchParams.set("reentrance-ticket", ticket);
+
+    // The cookie is what the client actually uses afterwards; every request
+    // Eclipse made after logging on carried a session cookie and no
+    // Authorization header at all.
+    res.cookie(`SAP_SESSIONID_${identity.systemID}_${identity.client}`, ticket, {path: "/"});
+    res.cookie("sap-usercontext", `sap-client=${identity.client}`, {path: "/"});
+    res.redirect(307, url.toString());
+  });
+
+  // Polled for the life of the project. The security-session link is what the
+  // client watches; the timeout is advertised and never enforced here,
+  // because there is nothing to expire.
+  router.get(`${BASE}/core/http/sessions`, (req, res) => {
+    const id = sessionIdentifier(req, identity);
+    res.type("application/vnd.sap.adt.core.http.session.v3+xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<http:session xmlns:http="http://www.sap.com/adt/http" xmlns:atom="http://www.w3.org/2005/Atom">' +
+      `<atom:link href="${BASE}/core/http/sessions/${id}"` +
+      ' rel="http://www.sap.com/adt/categories/core/http/sessions/securitysession"' +
+      ' title="Security session"/>' +
+      '<atom:link href="/sap/public/bc/icf/logoff"' +
+      ' rel="http://www.sap.com/adt/categories/core/http/sessions/logoff"' +
+      ' title="Logoff resource"/>' +
+      `<atom:link href="${BASE}/core/http/systeminformation"` +
+      ' rel="http://www.sap.com/adt/categories/core/http/system/systeminformation"' +
+      ' type="application/vnd.sap.adt.core.http.systeminformation.v1+json"' +
+      ' title="System information resource"/>' +
+      '<http:properties><http:property name="inactivityTimeout">1800</http:property></http:properties>' +
+      "</http:session>",
+    );
+  });
+
+  // Read once at startup and shown in the window title.
+  router.get(`${BASE}/core/http/systeminformation`, (req, res) => {
+    res.type("application/vnd.sap.adt.core.http.systeminformation.v1+json; charset=utf-8")
+      .send(JSON.stringify(identity));
+  });
 
   // ---- discovery: the handshake and the gatekeeper, at both of its names.
   // core/discovery is what a client probes for reachability and a token;
@@ -657,4 +760,18 @@ function answered(res, body, record) {
       res.status(500).type("text/plain").send(String(e?.message ?? e));
     }
   }
+}
+
+// sessionIdentifier names the security session in the sessions document.
+//
+// Derived from the cookie the logon set, so that it is stable for as long as
+// the client's session is and changes when that does — the client treats it
+// as an identity and polls it. A client that arrives without one gets a
+// stable placeholder rather than a fresh value per request, which would look
+// like a session ending on every poll.
+function sessionIdentifier(req, identity) {
+  const cookie = req.headers.cookie ?? "";
+  const named = new RegExp(`SAP_SESSIONID_${identity.systemID}_${identity.client}=([^;]+)`).exec(cookie);
+  const seed = named === null ? `${identity.systemID}${identity.client}${identity.userName}` : named[1];
+  return createHash("sha256").update(seed).digest("hex").slice(0, 32).toUpperCase();
 }
