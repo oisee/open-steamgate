@@ -364,6 +364,78 @@ estimate frightening — a logon-accept that is a function of the client's init
 and cannot be replayed — stops being the obstacle once the plan is to
 implement rather than to replay.
 
+### What Eclipse actually asks for, off the wire
+
+**Captured 2026-09-14** against a sandbox, one scenario end to end: log on
+with SAP GUI, create an ABAP project, expand System Library and `$TMP`, open
+a program, run it so it lands in SAP GUI. Recorders sat between the client
+and the system on every port the system exposes. Identifiers are scrubbed;
+the capture itself stays out of this repository.
+
+**Every ADT request rode RFC. None of them touched HTTP.**
+
+| wire | connections | frames | bytes |
+| --- | --- | --- | --- |
+| gateway, `33NN` | 8 | 338 | 175 KB up, 404 KB down |
+| dispatcher, `32NN` | 3 | 45 | 10 KB up, 33 KB down |
+| ICM HTTP / HTTPS | 0 | — | — |
+
+The ICM ports saw nothing at all. The dispatcher traffic was SAP GUI, not
+Eclipse — see the GUI note below.
+
+**The gateway conversations come in pairs.** Three pairs, each pair nearly
+identical in size: discovery and the compatibility graph; the reentrance
+ticket and the debugger; then the two large ones. That is almost certainly
+the stateful/stateless split ADT makes with a `sap-contextid` cookie over
+HTTP — and over RFC there is no cookie to make, because the conversation is
+the session.
+
+**The thirty-three resources, in the order they first appear:**
+
+```
+core/discovery                     discovery
+compatibility/graph                security/reentranceticket
+feeds                              feeds/variants?category=obligatory
+repository/informationsystem/virtualfolders/contents     (12 calls)
+repository/informationsystem/virtualfolders/facets
+repository/informationsystem/objecttypes?maxItemCount=…&data=usedByProvider
+repository/informationsystem/releasestates?maxItemCount=…
+repository/informationsystem/objectproperties/values?uri=…
+repository/informationsystem/search?operation=quickSearch&query=…
+repository/typestructure
+programs/programs/<name>           programs/programs/<name>/source/main
+abapsource/parsers/rnd/grammar?head=true
+checkruns?reporters=abapCheckRun   checkruns/reporters
+abapunit/metadata                  packages/settings
+debugger/listeners?debuggingMode=user&requestUser=…&terminalId=…
+debugger/breakpoints
+runtime/dumps                      runtime/systemmessages
+runtime/workprocesses/<id>         gw/errorlog
+```
+
+`RFCPING` appears eight times: the gateway conversation is kept alive by it.
+
+**`security/reentranceticket` is fetched six times — in the on-prem flow.**
+It had been filed here as a property of the ABAP Cloud project. That was
+wrong: an on-prem Eclipse asks for it during an ordinary logon, so it is an
+entry-point resource rather than a later one.
+
+**Launching a program into SAP GUI does not go through ADT's transport.**
+`BADI_ADT_GUI_INTEGRATION` and `CL_SEU_ADT_GUI_INT_HANDLER_VIT` appear only
+on the **dispatcher** wire, inside a SAP GUI session. Eclipse starts a real
+SAP GUI and that program speaks DIAG on `32NN` as it always has; no DIAG is
+tunnelled over the gateway. So "answer a transaction Eclipse asked for" is
+not an ADT problem at all — it is the DIAG problem, and it belongs where the
+DIAG work already lives.
+
+**What this changes about the order of work.** The list is no longer a guess:
+an RFC server answering one function module on paired conversations, then the
+resources in the order the client asks for them — discovery, the
+compatibility graph, the reentrance ticket, the virtual folders, sources,
+check runs, the debugger. Of those, discovery, the compatibility graph,
+source reads, object structures, search and the package tree already answer
+here.
+
 ### And it gives the split a consumer
 
 The RFC front would be Go (that is where the transport lives) and the façade
