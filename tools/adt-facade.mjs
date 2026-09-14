@@ -109,7 +109,12 @@ const COMPATIBILITY = {
   "COM.SAP.ADT.OO": ["classModelXmlSchemaConform", "classes", "interfaces",
     "interfacesModelXmlSchemaConform", "startUriAdaptationToMainResource"],
   "COM.SAP.ADT.PROGRAMS": ["includes", "includesXmlSchemaConform", "programs", "programsXmlSchemaConform"],
-  "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "treePath", "typeMetaData"],
+  // treePath is deliberately absent: it promises repository/nodepath, which
+  // nothing here answers, and a client that believes the promise asks for it
+  // while expanding a package instead of falling back to nodestructure. The
+  // other three are kept because there is a resource behind each —
+  // nodestructure, informationsystem/search and typestructure.
+  "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData"],
   "COM.SAP.ADT.RIS": ["ris", "search"],
 };
 
@@ -1349,7 +1354,7 @@ export function adtRouter(options = {}) {
       // document it would have understood. The dataname is the client's own
       // name for the shape it expects; echoing it is the whole fix.
       res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryObjectTreeContent"))
-        .send(nodeStructureDocument(nodesOf(store, name)));
+        .send(nodeStructureDocument(nodesOf(store, name, req.query.parent_type ?? req.query.parentType)));
     });
   });
 
@@ -1379,7 +1384,9 @@ export function adtRouter(options = {}) {
       // NOT_ALLOWED is a statement that is not a SELECT, NOT_BUILT is a
       // system that has never been transpiled; both are the client's answer
       // to give, and neither is a 403 (see below)
-      res.status(e?.code === "NOT_BUILT" ? 503 : 400).type("text/plain").send(String(e?.message ?? e));
+      refuse(res, e?.code === "NOT_BUILT" ? 503 : 400,
+        e?.code === "NOT_BUILT" ? "ExceptionResourceNoAccess" : "ExceptionResourceWrongData",
+        String(e?.message ?? e));
     }
   });
 
@@ -1411,6 +1418,23 @@ function typeOf(asked) {
 // so a 403 that means anything else costs it its only retry and then fails
 // with the wrong reason. A library object that cannot be written is
 // therefore 405, not 403. 403 belongs to the session layer alone.
+// A refusal is a document, not a sentence.
+//
+// These answers were text/plain, and the catch-all beside them was already
+// serving exc:exception, so the façade refused in two different languages
+// depending on which one said no. The client reads only the second: a
+// ResourceException built from a body it cannot parse carries no exception
+// data at all, and the first thing that asks it a question dereferences null.
+// That is why expanding a package produced "Cannot invoke
+// IExceptionData.getNamespace() because ... getExceptionData() is null" and
+// the neighbouring nodes sat on "Loading repository tree ..." forever —
+// the error never became an error, so the expansion never finished failing.
+//
+// The type ids are the client's own vocabulary, read out of its jars rather
+// than invented, so that a refusal names something it can recognise. The one
+// exception is a genuine 500, which is a defect here and not a condition the
+// SAP framework has a name for; it answers in this project's namespace so
+// that nobody reading it mistakes our bug for a system's.
 function answered(res, body, record) {
   try {
     body();
@@ -1421,15 +1445,21 @@ function answered(res, body, record) {
       // a client asked for and did not get, so both are worth recording, and
       // telling them apart is the whole value of recording them
       record?.(res.req, "object", e.message);
-      res.status(404).type("text/plain").send(e.message);
+      refuse(res, 404, "ExceptionResourceNotFound", e.message);
     } else if (e instanceof ReadOnly) {
-      res.status(405).type("text/plain").send(e.message);
+      refuse(res, 405, "ExceptionResourceNoAccess", e.message);
     } else if (e instanceof NotSupported) {
-      res.status(501).type("text/plain").send(e.message);
+      refuse(res, 501, "ExceptionResourceNoAccess", e.message);
     } else {
-      res.status(500).type("text/plain").send(String(e?.message ?? e));
+      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e),
+        {namespace: "org.open-steamgate.osd"});
     }
   }
+}
+
+// One way of saying no, so that every no is the same shape on the wire.
+function refuse(res, status, type, message, options) {
+  res.status(status).type("application/xml").send(exceptionDocument(type, message, options));
 }
 
 // sessionIdentifier names the security session in the sessions document.

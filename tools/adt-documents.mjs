@@ -8,7 +8,7 @@
 // by vsp's own reader against a running OSD. These two have not been, and
 // the places where a guess is load-bearing are marked.
 import {Visibility} from "@abaplint/core";
-import {TYPES} from "./osd-store.mjs";
+import {TYPES, NotFound} from "./osd-store.mjs";
 
 const xmlEscape = (s) => String(s)
   .replaceAll("&", "&amp;")
@@ -288,7 +288,7 @@ export function classDocument(object, options = {}) {
 
   const include = (kind, sourceUri) =>
     `  <class:include class:includeType="${kind}" abapsource:sourceUri="${sourceUri}"` +
-    ` adtcore:name="${xmlEscape(name)}" adtcore:type="CLAS/I"` +
+    ' adtcore:name="" adtcore:type="CLAS/I"' +
     ` adtcore:changedAt="${when}" adtcore:version="active"` +
     ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
     `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
@@ -327,6 +327,14 @@ export function classDocument(object, options = {}) {
                  adtcore:descriptionTextLimit="60"
                  adtcore:description="${xmlEscape(object.description ?? "")}">
 ${link("objectstructure", "http://www.sap.com/adt/relations/objectstructure", "application/vnd.sap.adt.objectstructure.v2+xml")}
+  <adtcore:packageRef adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(object.package ?? "").toLowerCase())}" adtcore:type="DEVC/K" adtcore:name="${xmlEscape(object.package ?? "")}"/>
+  <abapsource:syntaxConfiguration>
+    <abapsource:language>
+      <abapsource:version>X</abapsource:version>
+      <abapsource:description>Standard ABAP</abapsource:description>
+      <atom:link href="/sap/bc/adt/abapsource/parsers/rnd/grammar" rel="http://www.sap.com/adt/relations/abapsource/parser" type="text/plain" title="Standard ABAP" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </abapsource:language>
+  </abapsource:syntaxConfiguration>
 ${parts.map(([kind, uri]) => include(kind, uri)).join("\n")}
 </class:abapClass>
 `;
@@ -608,7 +616,23 @@ export function packageOf(store, name) {
   }
 }
 
-export function nodesOf(store, name) {
+export function nodesOf(store, name, type) {
+  // A class is a folder, and that is not cosmetic.
+  //
+  // vscode-abap-fs names a file from the object it was built for, and it has
+  // no name for a class: its AbapClass carries no extension of its own, so a
+  // class that is not expandable falls through to the base ".abap" and the
+  // tree showed ZCL_X.abap. The ".clas.abap" a person expects belongs to the
+  // class's *main include*, which only exists once the class is a folder with
+  // children. The interface beside it looked right the whole time because
+  // AbapInterface does carry its own extension — which is what said the
+  // difference was in expandability rather than in the type code.
+  //
+  // Eclipse expands a class node too, and asks here for the children, so a
+  // class that says it is expandable has to have something to answer with.
+  if (String(type ?? "").split("/")[0] === "CLAS") {
+    return classNodesOf(store, name);
+  }
   const pkg = packageOf(store, name);
   const nodes = [];
   for (const child of pkg.subpackages ?? []) {
@@ -630,11 +654,38 @@ export function nodesOf(store, name) {
       type: ADT_TYPE[object.type] ?? object.type,
       name: object.name,
       uri: uriOf(object.type, object.name),
-      expandable: false,
+      // only a class: the parts of one are objects in their own right and
+      // both clients go looking for them. Everything else here is a leaf,
+      // and saying otherwise buys an expansion arrow that opens nothing.
+      expandable: object.type === "CLAS",
       description: object.library === true ? "library object" : undefined,
     });
   }
   return nodes;
+}
+
+// The parts of a class, as the tree below it.
+//
+// Only the parts that are on disk are listed, the same rule the class
+// document follows: naming an include this façade cannot serve would give a
+// tree a node that errors when opened, which is the failure this whole round
+// was about.
+function classNodesOf(store, name) {
+  const entry = store.find("CLAS", name);
+  if (entry === undefined) {
+    throw new NotFound("CLAS", name);
+  }
+  const path = `/sap/bc/adt/oo/classes/${encodeURIComponent(String(entry.name).toLowerCase())}`;
+  const node = (include, uri) => ({
+    type: CLASS_INCLUDE,
+    // the client builds the file name from this, splitting on the first dot:
+    // the class names the file and the include names the extension
+    name: `${entry.name}.${include}`,
+    uri,
+    expandable: false,
+  });
+  return [node("main", `${path}/source/main`),
+    ...store.classIncludes(entry.name).map((i) => node(i, `${path}/includes/${i}`))];
 }
 
 // ------------------------------------------------------- the dev loop

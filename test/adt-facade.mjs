@@ -569,6 +569,28 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect((await call("/packages/$NOT_A_PACKAGE")).status).to.equal(404);
     });
 
+    // A refusal the client cannot parse is worse than a refusal it dislikes.
+    //
+    // These 404s used to be text/plain while the catch-all beside them served
+    // exc:exception, so the same façade said no in two languages. The client
+    // builds a ResourceException from the body and reads its exception data
+    // without checking: a body it cannot parse leaves that null, and expanding
+    // a package died on "Cannot invoke IExceptionData.getNamespace()" while
+    // every sibling node in the tree stayed on "Loading repository tree ..."
+    // — the failure never finished failing. So the shape is the contract here,
+    // not the status code.
+    it("refuses in the one language the client can read", async () => {
+      const res = await call("/repository/nodestructure?parent_name=" +
+        encodeURIComponent("$NOT_A_PACKAGE_EITHER"), {method: "POST"});
+      expect(res.status).to.equal(404);
+      expect(res.headers.get("content-type"), "text/plain leaves the client with no exception data")
+        .to.contain("application/xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<exc:exception");
+      expect(xml, "the namespace the client dereferences").to.contain("<namespace id=");
+      expect(xml).to.contain("ExceptionResourceNotFound");
+    });
+
     it("a subpackage appears once, not twice, though the store holds it both ways", async () => {
       const xml = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
       const names = [...xml.matchAll(/<OBJECT_NAME>([^<]+)<\/OBJECT_NAME>/g)].map((m) => m[1]);
@@ -633,6 +655,38 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("a subpackage is expandable and an object is not, which is what a tree needs", async () => {
       const parent = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_GEN"), {method: "POST"})).text();
       expect(parent).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE>[\s\S]*?<EXPANDABLE>X<\/EXPANDABLE>/);
+    });
+
+    // Why a class is the exception to the line above.
+    //
+    // vscode-abap-fs builds a file name from the object it is showing, and its
+    // AbapClass has no extension of its own: a class that is not expandable
+    // takes the base ".abap" and appears as ZCL_X.abap. The ".clas.abap" a
+    // person expects is the extension of the class's main *include*, which
+    // only exists once the class is a folder with children. The interface next
+    // to it always looked right because AbapInterface does carry its own
+    // extension — which is how we knew the difference was expandability and
+    // not the type code, since both codes were already what the client wanted.
+    it("a class is a folder, because its main include is what carries the name", async () => {
+      const parent = await (await call("/repository/nodestructure?parent_name=" +
+        encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
+      const row = /<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>(?:(?!SEU_ADT_REPOSITORY_OBJ_NODE>)[\s\S])*?<EXPANDABLE>([^<]*)<\/EXPANDABLE>/.exec(parent);
+      expect(row, "no class in the package the test reads").to.not.equal(null);
+      expect(row[1], "a class that is not expandable is named ZCL_X.abap").to.equal("X");
+    });
+
+    it("expanding a class answers with the includes it really has", async () => {
+      const pkg = await (await call("/repository/nodestructure?parent_name=" +
+        encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
+      const name = /<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE><OBJECT_NAME>([^<]+)<\/OBJECT_NAME>/.exec(pkg)[1];
+      const xml = await (await call("/repository/nodestructure?parent_type=CLAS%2FOC&parent_name=" +
+        encodeURIComponent(name), {method: "POST"})).text();
+      const names = [...xml.matchAll(/<OBJECT_NAME>([^<]+)<\/OBJECT_NAME>/g)].map((m) => m[1]);
+      expect(names, "the main include is the one every class has").to.include(`${name}.main`);
+      expect(xml).to.contain("<OBJECT_TYPE>CLAS/I</OBJECT_TYPE>");
+      // and it is addressable: a node whose URI 404s is a tree that errors on click
+      const uri = /<OBJECT_URI>([^<]*source\/main)<\/OBJECT_URI>/.exec(xml)[1];
+      expect((await call(uri.replace("/sap/bc/adt", ""))).status).to.equal(200);
     });
 
     // adt-fs asks this before it writes, and a 404 here is a write that never
