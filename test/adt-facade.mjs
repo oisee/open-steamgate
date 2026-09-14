@@ -303,6 +303,18 @@ describe("tools/adt-facade: OSD answers ADT", () => {
         expect(href).to.match(/^\/sap\/bc\/adt\//);
       }
     });
+
+    it("gives every object-type filter the data string Eclipse splits", async () => {
+      const res = await call("/repository/informationsystem/objecttypes?maxItemCount=999&name=*&data=usedByProvider");
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.match(/<nameditem:name>CLAS<\/nameditem:name>[\s\S]*?<nameditem:data>type:CLAS\/OC;usedBy:quick_search,virtual_folders<\/nameditem:data>/);
+      const items = [...xml.matchAll(/<nameditem:namedItem>([\s\S]*?)<\/nameditem:namedItem>/g)].map((m) => m[1]);
+      expect(items.length).to.be.greaterThan(0);
+      for (const item of items) {
+        expect(item, "data=null makes Eclipse call split on null").to.match(/<nameditem:data>type:[^<]+;usedBy:[^<]+<\/nameditem:data>/);
+      }
+    });
   });
 
   describe("the thin slice: one source, one table", () => {

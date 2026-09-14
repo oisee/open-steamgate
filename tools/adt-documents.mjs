@@ -478,7 +478,7 @@ export function namedItemsDocument(items = []) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <nameditem:namedItemList xmlns:nameditem="http://www.sap.com/adt/nameditem">
   <nameditem:totalItemCount>${items.length}</nameditem:totalItemCount>
-${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.name)}</nameditem:name><nameditem:description>${xmlEscape(item.description ?? "")}</nameditem:description></nameditem:namedItem>`).join("\n")}
+${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.name)}</nameditem:name><nameditem:description>${xmlEscape(item.description ?? "")}</nameditem:description>${item.data === undefined ? "" : `<nameditem:data>${xmlEscape(item.data)}</nameditem:data>`}</nameditem:namedItem>`).join("\n")}
 </nameditem:namedItemList>
 `;
 }

@@ -683,8 +683,12 @@ export function adtRouter(options = {}) {
   router.get(`${BASE}/repository/informationsystem/objecttypes`, (req, res) => {
     res.type("application/vnd.sap.adt.nameditems.v1+xml; charset=utf-8").send(
       namedItemsDocument(Object.keys(TYPES).map((code) => ({
-        name: ADT_TYPE[code] ?? code,
+        // The item name is the workbench kind. The qualified ADT type and
+        // its consumers live in data; Eclipse parses this field without a
+        // null check while pre-loading and while constructing search filters.
+        name: code,
         description: (LABELS[code] ?? [code])[1] ?? code,
+        data: `type:${ADT_TYPE[code] ?? code};usedBy:quick_search,virtual_folders`,
       }))),
     );
   });
