@@ -393,3 +393,27 @@ Known defects we live with
   ├─ bun does not decode %23 in a specifier     transpiler #1841, blocks 1.3
   └─ Bun runs JavaScriptCore, not V8            corrects the vision draft
 ```
+
+## Effects that render, and render wrong
+
+Noted by Alice watching vivid-vibes run off-stack on 2026-09-14, in the
+order the timeline reaches them. All four draw something; none of them
+errors. That is what makes them worth writing down rather than fixing by
+eye: a frame that arrives, parses and paints is indistinguishable from a
+correct one without something to compare against.
+
+- the equaliser's second, coloured part
+- `mountains` and the variant after it
+- the plasma between copperbars and twistzoomer
+
+The oracle exists: the same scene on a real system, driven to the same
+bar. Until somebody runs that comparison these are observations, not
+defects, and they are recorded as observations.
+
+One known cause is already upstream and would produce exactly this shape.
+`DATA(x) = <arithmetic involving a character literal>` is inferred by
+abaplint as a character field whose length comes from the literal, so
+`lv_f * '0.25'` lands in a `c(4)` and the value is truncated to a couple of
+significant digits. `zcl_o4d_sales_dance` computes its bar heights that
+way. The effect runs, the picture is plausible, the numbers are coarse, and
+nothing reports it. Whether it explains all four is unknown.
