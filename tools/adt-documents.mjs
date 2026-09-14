@@ -454,26 +454,121 @@ ${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.n
 // asks for a package and gets its subpackages and its objects, each with the
 // URI to ask about next.
 //
-// SHAPE NOT YET CONFIRMED. vsp holds the request body of the real resource
-// and has it ready; this answers the parameters as we understand them and is
-// meant to be corrected.
+// Measured against A4H on 2026-09-14, which corrects the note that used to
+// stand here saying the shape was unconfirmed.
+//
+// The document has three tables, and this used to send one. TREE_CONTENT
+// alone is why package contents did not appear: the objects were all there
+// and the client had nowhere to put them.
+//
+// The grouping is the part that is not obvious. The folders a client shows —
+// Classes, Interfaces, Programs — are themselves rows in TREE_CONTENT, with a
+// DEVC/xx type, an empty name and a NODE_ID. OBJECT_TYPES then gives each
+// folder its label and ties each real object type to a category, and
+// CATEGORIES gives the categories theirs. So the tree's shape is data, not
+// structure, which is why sending the objects by themselves produced a
+// package that looked empty rather than one that looked wrong.
+//
+// The folder codes below are the ones seen on a real system. A type with no
+// measured code is emitted without a folder rather than under an invented
+// one: an ungrouped object is visible and slightly untidy, and a wrong DEVC
+// code is a folder a client may refuse to draw at all.
+const TREE_FOLDER = {
+  DEVC: ["DEVC/K", "Subpackages"],
+  CLAS: ["DEVC/OC", "Classes"],
+  INTF: ["DEVC/OI", "Interfaces"],
+  PROG: ["DEVC/P", "Programs"],
+  FUGR: ["DEVC/F", "Function Groups"],
+  TRAN: ["DEVC/T", "Transactions"],
+};
+
+// Which drawer of the workbench a type belongs in. Measured: source_library
+// and other are the two a package of ours can land in.
+const TREE_CATEGORY = {
+  CLAS: "source_library", INTF: "source_library", PROG: "source_library",
+  FUGR: "source_library", INCL: "source_library", MSAG: "source_library",
+};
+
+const TREE_CATEGORY_LABEL = {
+  source_library: "Source Code Library",
+  dictionary: "Dictionary",
+  other: "Others",
+};
+
 export function nodeStructureDocument(nodes) {
-  const node = (n) => `    <SEU_ADT_REPOSITORY_OBJ_NODE>
-      <OBJECT_TYPE>${xmlEscape(n.type)}</OBJECT_TYPE>
-      <OBJECT_NAME>${xmlEscape(n.name)}</OBJECT_NAME>
-      <TECH_NAME>${xmlEscape(n.name)}</TECH_NAME>
-      <OBJECT_URI>${xmlEscape(n.uri ?? "")}</OBJECT_URI>
-      <EXPANDABLE>${n.expandable === true ? "X" : ""}</EXPANDABLE>
-      <DESCRIPTION>${xmlEscape(n.description ?? "")}</DESCRIPTION>
-    </SEU_ADT_REPOSITORY_OBJ_NODE>`;
+  // NODE_ID is assigned per document by the system that writes it, so these
+  // are ours and need only be consistent within this answer.
+  let next = 1;
+  const id = () => String(next++).padStart(6, "0");
+
+  const bare = (type) => String(type ?? "").split("/")[0];
+  const present = [];
+  for (const n of nodes) {
+    const kind = bare(n.type);
+    if (present.includes(kind) === false) {
+      present.push(kind);
+    }
+  }
+
+  const folders = [];
+  const objectTypes = [];
+  const categories = new Set();
+  for (const kind of present) {
+    const folder = TREE_FOLDER[kind];
+    const category = TREE_CATEGORY[kind] ?? "other";
+    categories.add(category);
+    const typeOf = nodes.find((n) => bare(n.type) === kind)?.type ?? kind;
+    objectTypes.push({type: typeOf, category, label: "", node: id()});
+    if (folder !== undefined) {
+      const node = id();
+      folders.push({type: folder[0], node});
+      objectTypes.push({type: folder[0], category: "", label: folder[1], node});
+    }
+  }
+
+  const row = (fields) => "    <SEU_ADT_REPOSITORY_OBJ_NODE>" +
+    Object.entries(fields).map(([name, value]) =>
+      value === "" ? `<${name}/>` : `<${name}>${xmlEscape(String(value))}</${name}>`).join("") +
+    "</SEU_ADT_REPOSITORY_OBJ_NODE>";
+
+  const folderRow = (f) => row({
+    OBJECT_TYPE: f.type, OBJECT_NAME: "", TECH_NAME: "", OBJECT_URI: "", OBJECT_VIT_URI: "",
+    EXPANDABLE: "X", NODE_ID: f.node, PARENT_NAME: "", DESCRIPTION: "", DESCRIPTION_TYPE: "",
+    VERSION: "", INACTIVE_TYPE: "",
+  });
+
+  const objectRow = (n) => row({
+    OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
+    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
+    PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
+    VERSION: "active", INACTIVE_TYPE: "",
+  });
+
+  const typeRow = (t) => "    <SEU_ADT_OBJECT_TYPE_INFO>" +
+    `<OBJECT_TYPE>${xmlEscape(t.type)}</OBJECT_TYPE>` +
+    (t.category === "" ? "<CATEGORY_TAG/>" : `<CATEGORY_TAG>${xmlEscape(t.category)}</CATEGORY_TAG>`) +
+    (t.label === "" ? "<OBJECT_TYPE_LABEL/>" : `<OBJECT_TYPE_LABEL>${xmlEscape(t.label)}</OBJECT_TYPE_LABEL>`) +
+    `<NODE_ID>${t.node}</NODE_ID>` +
+    "</SEU_ADT_OBJECT_TYPE_INFO>";
+
+  const categoryRow = (name) => "    <SEU_ADT_OBJECT_CATEGORY_INFO>" +
+    `<CATEGORY>${xmlEscape(name)}</CATEGORY>` +
+    `<CATEGORY_LABEL>${xmlEscape(TREE_CATEGORY_LABEL[name] ?? name)}</CATEGORY_LABEL>` +
+    "</SEU_ADT_OBJECT_CATEGORY_INFO>";
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
     <DATA>
       <TREE_CONTENT>
-${nodes.map(node).join("\n")}
+${[...folders.map(folderRow), ...nodes.map(objectRow)].join("\n")}
       </TREE_CONTENT>
+      <CATEGORIES>
+${[...categories].map(categoryRow).join("\n")}
+      </CATEGORIES>
+      <OBJECT_TYPES>
+${objectTypes.map(typeRow).join("\n")}
+      </OBJECT_TYPES>
     </DATA>
   </asx:values>
 </asx:abap>
