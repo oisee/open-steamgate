@@ -63,7 +63,7 @@ export function discoveryDocument(resources) {
 
   const collection = (r) => `    <app:collection href="${xmlEscape(r.href)}">
       <atom:title>${xmlEscape(r.title)}</atom:title>
-${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}    </app:collection>`;
+${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}${r.templates === undefined ? "" : `      <adtcomp:templateLinks>\n${r.templates.map(([rel, template]) => `        <adtcomp:templateLink rel="${xmlEscape(rel)}" template="${xmlEscape(template)}"/>`).join("\n")}\n      </adtcomp:templateLinks>\n`}    </app:collection>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <app:service xmlns:app="http://www.w3.org/2007/app"
@@ -161,6 +161,49 @@ const CATEGORY = {
   "repository/nodestructure": ["nodestructure", "http://www.sap.com/adt/categories/respository"],
   "repository/informationsystem/search": ["search", "http://www.sap.com/adt/categories/respository"],
   "repository/informationsystem/virtualfolders": ["virtualfolders", "http://www.sap.com/adt/categories/repository"],
+  "cts/transportchecks": ["transportchecks", "http://www.sap.com/adt/categories/cts"],
+  "datapreview/freestyle": ["DatapreviewFreeStyle", "http://www.sap.com/adt/categories/datapreview"],
+  "ddic/ddl/sources": ["ddlsources", "http://www.sap.com/adt/categories/ddic/ddlsources"],
+  "ddic/srvd/sources": ["srvdsrv", "http://www.sap.com/wbobj/raps"],
+};
+
+// How a client builds a URL it was never told in full.
+//
+// Some resources are not just a path: a client reads the template and fills
+// it in. Without one it cannot form the request at all, and it does not fail
+// at the server — it fails before the network, which is why the search dialog
+// reported "Outdated content handler" while nothing whatsoever arrived here.
+// The same search against A4H went out and came back fine, and the difference
+// was this element.
+//
+// Templates copied from the system rather than reduced to what this façade
+// honours. A client fills in what it wants and an unknown parameter is
+// ignored here, so offering fewer would only teach it to ask for less.
+const SEARCH_TEMPLATE =
+  "/sap/bc/adt/repository/informationsystem/search{?operation,query,useSearchProvider,noDescription,maxResults}" +
+  "{&objectType*}{&group*}{&packageName*}{&sourcetype*}{&state*}{&lifecycle*}{&rollout*}{&category*}{&appl*}" +
+  "{&userName*}{&releaseState*}{&language*}{&system*}{&version*}{&docu*}{&fav*}{&created*}{&month*}{&date*}{&comp*}";
+
+const TEMPLATE_LINKS = {
+  "repository/informationsystem/search": [
+    ["http://www.sap.com/adt/relations/informationsystem/search/quicksearch", SEARCH_TEMPLATE],
+    ["http://www.sap.com/adt/relations/informationsystem/search/whitelisting", SEARCH_TEMPLATE],
+  ],
+  "datapreview/freestyle": [
+    ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
+  ],
+  "ddic/ddl/sources": [
+    ["http://www.sap.com/adt/categories/ddic/ddlsources/properties",
+      "/sap/bc/adt/ddic/ddl/sources/{object_name}{?corrNr,lockHandle,version,accessMode,_action}"],
+    ["http://www.sap.com/adt/categories/ddic/ddlsources/source",
+      "/sap/bc/adt/ddic/ddl/sources/{object_name}/source/main{?corrNr,lockHandle,version}"],
+  ],
+  "ddic/srvd/sources": [
+    ["http://www.sap.com/wbobj/raps/srvdsrv/properties",
+      "/sap/bc/adt/ddic/srvd/sources/{object_name}{?corrNr,lockHandle,version,accessMode,_action}"],
+    ["http://www.sap.com/wbobj/raps/srvdsrv/source",
+      "/sap/bc/adt/ddic/srvd/sources/{object_name}/source/main{?corrNr,lockHandle,version}"],
+  ],
 };
 
 const WORKSPACE = (adt) => {
@@ -229,6 +272,7 @@ export function adtRouter(options = {}) {
     href: `${BASE}/${adt}`,
     accept: ACCEPT[adt] ?? [],
     category: CATEGORY[adt],
+    templates: TEMPLATE_LINKS[adt],
   });
 
   // What a client asked for and did not get, in two kinds. "resource" is a

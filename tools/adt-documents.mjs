@@ -276,11 +276,35 @@ export function classIncludeDocument(className, include, sourceUri) {
 export function packageDocument(pkg) {
   const parent = pkg.parent === undefined || pkg.parent === null ? "" : `
   <pak:superPackage adtcore:name="${xmlEscape(pkg.parent)}" adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(pkg.parent).toLowerCase())}"/>`;
+  // The audit attributes, which are not decoration.
+  //
+  // A client opening the package editor read adtcore:changedAt and crashed:
+  // "Cannot invoke XMLGregorianCalendar.toGregorianCalendar() because
+  // changedAt is null". It does not treat them as optional, so a document
+  // without them is not a smaller document, it is a broken one.
+  //
+  // Nothing here has an author or an edit history — the objects come from
+  // files on disk — so these say so rather than inventing a plausible person
+  // and a plausible afternoon. The name is the façade's, the timestamps are
+  // the epoch, and both are stable: a value that changed per request would
+  // make a client believe the package had just been edited, every time it
+  // looked.
+  const when = pkg.changedAt ?? "1970-01-01T00:00:00Z";
+  const who = pkg.changedBy ?? "OSD";
   return `<?xml version="1.0" encoding="utf-8"?>
 <pak:package xmlns:pak="http://www.sap.com/adt/packages"
              xmlns:adtcore="http://www.sap.com/adt/core"
              adtcore:name="${xmlEscape(pkg.name)}"
              adtcore:type="DEVC/K"
+             adtcore:version="active"
+             adtcore:language="EN"
+             adtcore:masterLanguage="EN"
+             adtcore:responsible="${xmlEscape(who)}"
+             adtcore:createdAt="${when}"
+             adtcore:createdBy="${xmlEscape(who)}"
+             adtcore:changedAt="${when}"
+             adtcore:changedBy="${xmlEscape(who)}"
+             adtcore:descriptionTextLimit="60"
              adtcore:description="${xmlEscape(pkg.description ?? "")}">${parent}
   <pak:attributes pak:isPackageTypeEditable="false" pak:isAddingObjectsAllowed="${pkg.library === true ? "false" : "true"}"/>
 </pak:package>
