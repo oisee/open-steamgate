@@ -498,8 +498,15 @@ open  revisions: reading them out of git instead of a system.
         on the first dice roll — the troll fight, twenty-five commands in
      └─ small and contributable; a fork, since we have no write access to
         open-abap-core. ANOMALY-2026-09-14-general-get-random-int
-     └─ the walkthrough test holds the boundary rather than skipping it, so
-        filling the gap makes the rest of the script the requirement
+     └─ WRITTEN AND PROVEN 2026-09-14, not yet offered: twelve lines on
+        core's own cl_abap_random_int, in .local/lars/open-abap-core. With
+        it the whole walkthrough plays in the bundle, every assertion,
+        start to finish. The test still tolerates the old death because a
+        fresh clone of core has no such file
+     └─ needs Alice's word on who opens it. S has the reproducer, the
+        regression test and a live fork PR there already (#1218); T owns
+        the upstream queue and `npm run parked`. Whoever does it, the other
+        must know, or it gets offered twice
 
 9.6  Bun, measured rather than assumed                                [T]
      └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms

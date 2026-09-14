@@ -542,7 +542,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-14-general-get-random-int — `GENERAL_GET_RANDOM_INT` is not implemented
 
-- Status: `open`
+- Status: `workaround` (written and proven locally; the upstream pull request is not opened yet)
 - Discovery date: `2026-09-14`
 - Affected versions: `open-abap-core` as cloned 2026-09-14
 - Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT'`
@@ -551,7 +551,7 @@ ENDLOOP.
 - Expected SAP behaviour: returns a pseudo-random integer in `[1, range]`; it is a released, widely used utility module
 - Actual open-abap behaviour: the module does not exist, so the dynamic call raises `CX_SY_DYN_CALL_ILLEGAL_FUNC`
 - Impact on open-steamgate: it is the Z-machine's `random` opcode (`local/zork/zcl_ork_00_zmachine.clas.abap:557`), so MiniZork plays perfectly until the first dice roll and then the channel dies. The first dice roll in the walkthrough is the troll fight, twenty-five commands in. Anything transpiled that needs randomness hits the same wall
-- Smallest safe workaround: none taken. The walkthrough test holds the boundary instead — every assertion before the troll must pass and the death must still be this exception, so filling the gap makes the rest of the script the requirement
+- Smallest safe workaround: twelve lines in the local clone of open-abap-core, `src/fugr/openabap.fugr.general_get_random_int.abap` plus the FUNCNAME block in `openabap.fugr.xml`. It is built on core's own `cl_abap_random_int=>create( min = 1 max = range )`, so it borrows the house style rather than adding a second way to be random, and it answers zero for a range of zero or less because the module declares no exceptions. With it the whole MiniZork walkthrough plays in the browser bundle, every assertion, start to finish. The test still tolerates the old death, because a fresh clone of core does not have this file
 - Upstream issue: none filed yet. A small addition to open-abap-core and therefore a fork, since `oisee` has no write access there (403, as with #1218)
 - Regression-test location: `test/e2e/preview.spec.mjs`, "the MiniZork walkthrough plays the same in the bundle"
 - Upstream version containing a fix: `unknown`
