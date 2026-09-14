@@ -1,0 +1,13 @@
+#!/bin/sh
+# Look at what is staged before it becomes a commit. See tools/osd-leak-scan.mjs.
+#
+# A hook is per-clone and silently absent on a fresh one, which is why the same
+# check runs in CI as well. This one is the fast feedback, not the guarantee.
+node "$(git rev-parse --show-toplevel)/tools/osd-leak-scan.mjs" "$(git rev-parse --show-toplevel)"
+status=$?
+if [ $status -eq 2 ]; then
+  # The identifier list is missing: structural rules ran, names did not. Worth
+  # saying out loud, not worth blocking a commit over.
+  exit 0
+fi
+exit $status

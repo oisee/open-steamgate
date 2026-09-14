@@ -423,7 +423,7 @@ open  revisions: reading them out of git instead of a system.
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
-8.7  a leak detector on the way out, not a rule in a document        [S]
+8.7  a leak detector on the way out, not a rule in a document   [СДЕЛАНО]
      └─ 2026-09-14: a wire capture was about to go into open-rfc-go, a
         public repository, as a test fixture. It contained two LAN
         addresses, a host name, an Eclipse project name, a machine id and
@@ -445,6 +445,29 @@ open  revisions: reading them out of git instead of a system.
         are per-clone and silently absent on a fresh one — so the same check
         belongs in CI where it cannot be skipped
      └─ Alice's call, 2026-09-14, and the right one
+     └─ built 2026-09-14, `tools/osd-leak-scan.mjs`, `npm run leak`, hook in
+        `.githooks/pre-commit`, CI in `.github/workflows/leak-scan.yml`
+     └─ and it caught one the same hour, in the repository it was written
+        for. A 746-byte logon template committed to open-rfc-go carried the
+        captured system's host name, instance, address, logon string and
+        user, all in UTF-16LE — and a hand scan run over that very file had
+        reported it clean an hour earlier, because it looked for runs of
+        printable ASCII and a NUL after every character is enough to hide a
+        host name from a grep. The design lesson is one line: decode first,
+        match second, over every encoding a file plausibly has
+     └─ a sixth identifier was not text at all. The last six bytes of a
+        session GUID are the client's own IPv4 packed into the uuid node
+        field, which is how a LAN address travels through a public
+        repository without ever spelling itself out. Matched in binary now,
+        and only on two-byte prefixes: 10.x is one byte, any random blob
+        produces one per 256, and the first run turned up seven of those and
+        nothing real. A check that cries wolf is read once
+     └─ its first real catch was the comment I wrote explaining the scrub. I
+        cleaned the data and spelled both identifiers out in the prose beside
+        it. Nothing was pushed, so nothing was public
+     └─ what it finds on open-rfc-go's public main is Alice's to decide: two
+        of her LAN addresses, her surname, and the stock A4H appliance host
+        name, in files that predate this branch
 
 8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
      └─ from T, 2026-09-14, half done already: `write_source_map` is
