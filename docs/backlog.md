@@ -491,6 +491,16 @@ open  revisions: reading them out of git instead of a system.
         real errors in zcl_o4d_composer, and mountains_oops_a once
         abaplint #4291 lands or its two methods are written
 
+9.5a open-abap-core: GENERAL_GET_RANDOM_INT                            [S]
+     └─ found 2026-09-14 by replaying the MiniZork walkthrough through the
+        bundle's APC channel: the Z-machine's `random` opcode calls it, it
+        does not exist, and CX_SY_DYN_CALL_ILLEGAL_FUNC closes the channel
+        on the first dice roll — the troll fight, twenty-five commands in
+     └─ small and contributable; a fork, since we have no write access to
+        open-abap-core. ANOMALY-2026-09-14-general-get-random-int
+     └─ the walkthrough test holds the boundary rather than skipping it, so
+        filling the gap makes the rest of the script the requirement
+
 9.6  Bun, measured rather than assumed                                [T]
      └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms
         against Node's 264 ms (docs/bun-spike.md)

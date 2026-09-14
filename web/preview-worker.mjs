@@ -10,6 +10,7 @@
 // worker specification requires; the runtime is imported on the first request.
 import {services, channels} from "./generated/services.mjs";
 import {shim} from "./generated/socket-shim.mjs";
+import {describe} from "../tools/osd-describe.mjs";
 
 const MOUNT = new URL("./", self.location).pathname;
 // every prefix this deployment answers, longest first so a service nested
@@ -83,11 +84,15 @@ self.addEventListener("message", (event) => {
 
   // a failure here is the handler's, and the page can only be told by the
   // socket closing; saying why in the reason is the whole of what we can do
+  //
+  // describe() rather than error.message, because an ABAP exception has
+  // none: the obvious line produced code 1011 with an empty reason, which
+  // is how a crash in the transpiled Z-machine looked for an afternoon.
   async function run(work) {
     try {
       await work();
     } catch (error) {
-      send({apc: "close", code: 1011, reason: String(error?.message ?? error)});
+      send({apc: "close", code: 1011, reason: describe(error)});
     }
   }
 });

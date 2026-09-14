@@ -539,3 +539,35 @@ ENDLOOP.
 - Upstream issue: none filed. Two halves, as with the specifier defect: Bun could lower for non-module targets, and we could stop generating top-level awaits. Neither is ours to decide alone
 - Regression-test location: `test/e2e/preview.spec.mjs` (four tests, which is what caught it)
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-14-general-get-random-int — `GENERAL_GET_RANDOM_INT` is not implemented
+
+- Status: `open`
+- Discovery date: `2026-09-14`
+- Affected versions: `open-abap-core` as cloned 2026-09-14
+- Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT'`
+- Minimal ABAP reproducer: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT' EXPORTING range = 10 IMPORTING random = lv_n.`
+- Exact command used to run it: `npx playwright test --config playwright.preview.config.mjs -g walkthrough` — the MiniZork walkthrough replayed through the APC channel of the browser bundle
+- Expected SAP behaviour: returns a pseudo-random integer in `[1, range]`; it is a released, widely used utility module
+- Actual open-abap behaviour: the module does not exist, so the dynamic call raises `CX_SY_DYN_CALL_ILLEGAL_FUNC`
+- Impact on open-steamgate: it is the Z-machine's `random` opcode (`local/zork/zcl_ork_00_zmachine.clas.abap:557`), so MiniZork plays perfectly until the first dice roll and then the channel dies. The first dice roll in the walkthrough is the troll fight, twenty-five commands in. Anything transpiled that needs randomness hits the same wall
+- Smallest safe workaround: none taken. The walkthrough test holds the boundary instead — every assertion before the troll must pass and the death must still be this exception, so filling the gap makes the rest of the script the requirement
+- Upstream issue: none filed yet. A small addition to open-abap-core and therefore a fork, since `oisee` has no write access there (403, as with #1218)
+- Regression-test location: `test/e2e/preview.spec.mjs`, "the MiniZork walkthrough plays the same in the bundle"
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-14-exception-with-no-message — An ABAP exception reaches JavaScript with an empty `message`
+
+- Status: `workaround`
+- Discovery date: `2026-09-14`
+- Affected versions: `@abaplint/runtime 2.13.86`
+- Affected ABAP statement, runtime API or adapter: any `RAISE EXCEPTION` or runtime-raised `CX_*` crossing into host JavaScript
+- Minimal ABAP reproducer: none needed; catch anything thrown out of transpiled code and read `error.message`
+- Exact command used to run it: the APC channel of the browser bundle closing on a handler failure
+- Expected SAP behaviour: n/a — a host-boundary question, not a SAP one
+- Actual open-abap behaviour: the thrown value is an exception class instance, not an `Error`. It has no `message`, or one that is an ABAP string object. So the obvious host line, `String(error?.message ?? error)`, yields the empty string — the nullish coalescing does not fire on `""`
+- Impact on open-steamgate: a channel closed with code 1011 and a blank reason, and a real crash in the transpiled Z-machine looked like an unexplained disconnect for an afternoon. The same shape would hide any handler failure in the bundle
+- Smallest safe workaround: `tools/osd-describe.mjs`, now used by both the APC front and the service worker: it reads `constructor.INTERNAL_NAME` for the class, unwraps an ABAP string `message` through `.get()`, and appends the frames that point into `output/`. `CX_SY_DYN_CALL_ILLEGAL_FUNC (no text)` beats an empty string
+- Upstream issue: none. Arguably the runtime could give exception instances a `message`; T is separately fixing `get_source_position( )`, which throws on anything the runtime raised itself
+- Regression-test location: `test/osd-apc.mjs`
+- Upstream version containing a fix: `unknown`

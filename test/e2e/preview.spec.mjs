@@ -321,3 +321,152 @@ test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async
     await rm(profile, {recursive: true, force: true});
   }
 });
+
+// The walkthrough, replayed. Alice remembered this existed and it does.
+//
+// .local/cpm-abap/test-games/MINIZORK_TEST.TXT is a script of commands with
+// assertions between them — %*pattern* for "the answer contains this",
+// %=text for the exact spelling, %!pattern for "must not". It is already the
+// oracle for the ABAP side, run there by ltcl_speedrun, and replaying it
+// through the bundle asks a harder question than any assertion of mine: not
+// "did the handler answer" but "does the game play the same when the Z-machine
+// is transpiled, the story file comes out of SMW0 and the socket is a
+// MessagePort".
+//
+// It lives outside the repository, so this skips rather than fails when the
+// cpm-abap checkout is absent, the way the corpus suites do.
+const SCRIPT = ".local/cpm-abap/test-games/MINIZORK_TEST.TXT";
+
+function parseScript(text) {
+  const steps = [{command: undefined, expects: []}];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+    if (line.startsWith("%")) {
+      const body = line.slice(1);
+      if (body.startsWith("=")) {
+        steps.at(-1).expects.push({kind: "exact", pattern: body.slice(1)});
+      } else if (body.startsWith("!")) {
+        steps.at(-1).expects.push({kind: "absent", pattern: body.slice(1)});
+      } else {
+        // %*pattern* — the stars are the wildcard, the middle is the text
+        steps.at(-1).expects.push({kind: "contains", pattern: body.replace(/^\*|\*$/g, "")});
+      }
+      continue;
+    }
+    steps.push({command: line, expects: []});
+  }
+  return steps;
+}
+
+test("the MiniZork walkthrough plays the same in the bundle", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {fileURLToPath} = await import("node:url");
+  const path = fileURLToPath(new URL("../../" + SCRIPT, import.meta.url));
+  let text;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    test.skip(true, `${SCRIPT} is not in this checkout`);
+    return;
+  }
+  const steps = parseScript(text);
+  expect(steps.filter((s) => s.expects.length > 0).length).toBeGreaterThan(10);
+
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-walk-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/walkthrough", {waitUntil: "domcontentloaded"});
+
+    const answers = await page.evaluate(async (script) => {
+      const {install} = await import("/preview-socket.mjs");
+      install({paths: ["/sap/bc/apc/sap"]});
+      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zapc_zork");
+      let buffer = "";
+      // a channel that dies mid-walkthrough must name the command that
+      // killed it; without this the next send throws "the socket is not
+      // open" and the report blames the test rather than the game
+      let died;
+      socket.onmessage = (event) => { buffer += event.data; };
+      socket.onclose = (e) => { died = died ?? `closed ${e.code} ${e.reason || "(no reason)"}`; };
+      socket.onerror = () => { died = died ?? "socket error"; };
+      await new Promise((open, fail) => {
+        socket.onopen = open;
+        setTimeout(() => fail(new Error(died ?? "no open")), 20000);
+      });
+      // the game has spoken when it stops: a prompt and then quiet
+      const settle = async () => {
+        for (let waited = 0; waited < 20000; waited += 100) {
+          const was = buffer.length;
+          await new Promise((tick) => setTimeout(tick, 100));
+          if (buffer.length === was && buffer.trimEnd().endsWith(">")) {
+            break;
+          }
+        }
+        const said = buffer;
+        buffer = "";
+        return said;
+      };
+      const out = [];
+      for (const step of script) {
+        if (died !== undefined) {
+          return {out, died, stoppedAt: step.command ?? "(intro)"};
+        }
+        if (step.command !== undefined) {
+          socket.send(step.command);
+        }
+        out.push(await settle());
+      }
+      socket.close();
+      return {out};
+    }, steps);
+
+    // every assertion in the script, against the answer to its own command
+    const failures = [];
+    steps.forEach((step, at) => {
+      // only what actually ran: once the channel dies the remaining steps
+      // have no answer, and reporting those as failed assertions buries the
+      // one thing that went wrong under a list of things that never happened
+      if (at >= answers.out.length) {
+        return;
+      }
+      const said = answers.out[at];
+      for (const {kind, pattern} of step.expects) {
+        const hit = kind === "exact"
+          ? said.includes(pattern)
+          : said.toLowerCase().includes(pattern.toLowerCase());
+        if (kind === "absent" ? hit : hit === false) {
+          failures.push(`${step.command ?? "(intro)"} -> ${kind} ${JSON.stringify(pattern)}; got ${JSON.stringify(said.trim().slice(0, 120))}`);
+        }
+      }
+    });
+    expect(failures).toEqual([]);
+
+    // Where the walkthrough stops today, held exactly there.
+    //
+    // The `random` opcode calls GENERAL_GET_RANDOM_INT, which open-abap-core
+    // does not implement, so the first dice roll closes the channel with
+    // CX_SY_DYN_CALL_ILLEGAL_FUNC — and the first dice roll in MiniZork is
+    // the troll. Until that function module exists the walkthrough cannot
+    // finish, so this test asserts the shape of the stop rather than
+    // pretending it is not there: a different command, a different
+    // exception, or fewer commands surviving is a new defect and turns it
+    // red. When the gap is filled the else branch takes over and demands the
+    // whole script.
+    if (answers.died === undefined) {
+      expect(answers.out.length).toBe(steps.length);
+    } else {
+      expect(answers.stoppedAt).toBe("kill troll with sword");
+      expect(answers.died).toContain("CX_SY_DYN_CALL_ILLEGAL_FUNC");
+      expect(answers.out.length).toBeGreaterThan(20);
+    }
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
