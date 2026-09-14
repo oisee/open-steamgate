@@ -470,3 +470,51 @@ test("the MiniZork walkthrough plays the same in the bundle", async () => {
     await rm(profile, {recursive: true, force: true});
   }
 });
+
+// The launchpad carries the two that are not UI5.
+//
+// Travels, Bookings, Flight analytics and SEGW are components the shell
+// loads. Vivid Vibes and Zork are pages an ABAP class writes, served from
+// the ICF path by the same runtime, and they sit on the same launchpad
+// because that is what a launchpad is for: pointing at a service, whatever
+// is behind it.
+//
+// What this asserts is the wiring — the tiles are there and their targets
+// name the ICF paths. It deliberately does not drive the shell to open one:
+// a ushell tile is a composite that resists clicking from a test, and intent
+// navigation through the sandbox took as long as it felt like on a cold
+// profile, so an end-to-end assertion here would have been a flaky way of
+// proving something two other tests already prove deterministically — that
+// the Zork page connects and plays, and that the o4d media are served.
+test("the launchpad carries the ABAP-served demos, wired to the ICF paths", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-flp-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+
+    await page.goto("http://localhost:3031/app/flp.html", {waitUntil: "domcontentloaded", timeout: 60000});
+    await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
+    await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
+
+    // the tile targets, read off the page the shell actually booted from.
+    // The shell consumes sap-ushell-config during startup, so only the group
+    // definition is still there to read; the application URLs are asserted
+    // against the built file below, which is the artefact that ships.
+    const targets = await page.evaluate(() =>
+      globalThis["stg-launchpad-groups"][0].tiles.map((t) => t.properties.targetURL));
+    expect(targets).toContain("#Zork-play");
+    expect(targets).toContain("#VividVibes-play");
+    expect(targets).toHaveLength(6);
+
+    const {readFile} = await import("node:fs/promises");
+    const {fileURLToPath} = await import("node:url");
+    const shipped = await readFile(fileURLToPath(new URL("../../build/app/flp.html", import.meta.url)), "utf8");
+    expect(shipped).toContain('url: "../sap/bc/zork"');
+    expect(shipped).toContain('url: "../sap/bc/zo4d_demo"');
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});

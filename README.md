@@ -12,13 +12,52 @@ Deploy back through abapGit when you want to.
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
 
+---
+
+## ▶ Try it without installing anything
+
+### **[oisee.github.io/open-steamgate/main/app/flp.html](https://oisee.github.io/open-steamgate/main/app/flp.html)**
+
+A Fiori launchpad with six tiles, and **no server behind any of them**. The
+whole gateway — the transpiled ABAP, the OData runtime, SQLite as
+[sql.js](https://github.com/sql-js/sql.js) — is in a service worker in your
+own browser. Every request the apps make is answered there.
+
+| tile | what it is |
+| --- | --- |
+| Travels, Bookings | Fiori Elements V2, list report and object page, over a SEGW-shaped `_MPC_EXT` / `_DPC_EXT` pair |
+| Flight analytics | an analytical list page over a CDS cube, `$select` turned into `GROUP BY` |
+| SEGW | the Service Builder itself, as an app, editing the project tree |
+| Vivid Vibes | WebGL and audio driven from ABAP over an APC push channel |
+| Zork | a Z-machine interpreter in ABAP, the story file loaded out of SMW0 |
+
+The last two are not UI5 at all: they are pages an ABAP class writes, served
+from the ICF path by the same runtime. That is the point of them.
+
+First visit installs the worker and takes a moment; after that it works
+offline. It needs a browser that allows service workers — a private window
+usually does not.
+
+---
+
+## Thanks
+
+This is grown on **[Lars Hvam](https://github.com/larshp)**'s work, and would
+not exist without it. [abaplint](https://github.com/abaplint/abaplint) and the
+[transpiler](https://github.com/abaplint/transpiler) are what turn the ABAP
+into something a browser can run; [open-abap](https://github.com/open-abap) is
+the runtime library underneath it; [abapGit](https://github.com/abapGit/abapGit)
+is how code gets in and out. The substrate was there, mature and MIT — this
+project only builds the Gateway on top of it, which is the one part that did
+not exist.
+
 > **Status: CRUD, `$batch`, navigation, `$expand`, deep insert, function
 > imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
 > text arrangement), an object page (bookings via navigation, Edit/Save as
 > MERGE with Gateway semantics, Create below the parent as
 > `POST TravelSet('..')/to_Bookings`), media entities (a picture served as a
 > stream at `<entity>/$value`, shown by Fiori Elements), a launchpad sandbox
-> with four apps and intent-based navigation between them, SEGW itself as one
+> with six tiles and intent-based navigation between them, SEGW itself as one
 > of those apps, a service described by one YAML
 > file that consumes another service of the registry (SEGW's "external
 > service", `src/demo_odc/`), and read-only SADL over CDS projections (with analytics
