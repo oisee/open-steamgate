@@ -719,6 +719,46 @@ a run against A4H is by hand, on Alice's say-so, never in CI.
   repositories' own Z/Y structures (TABL) and CRM/BOPF pieces.
 - The transpiler session re-sorts its core PRs #1213–#1215 by this rule.
 
+## Backlog: client handling, re-opened by OSD (2026-09-14)
+
+`abaplint/transpiler#606` has been open since 2022, and larshp's answer on it
+is *"or ignore it? as the client feature is not needed in the
+transpiler/runtime — just spin up multiple"*. For a transpiler that runs unit
+tests, that is the right call and we agreed with it: one database per client,
+and the question goes away. Documented rather than implemented, in
+`abaplint/transpiler#1850`.
+
+**OSD changes the calculus, and this is the note to come back to.** An
+off-stack doppelgänger is not a test harness — it is a stand-in for one
+system, and the thing it stands in for has clients. Three consequences we can
+already name:
+
+- **Captured data.** We seed from a real system. If more than one client has
+  rows in the capture, every `SELECT` here returns more rows than the same
+  statement returns there, and nothing reports it: it reads as "the capture
+  was bigger than I thought". Measured: a `CLNT`-keyed table with rows under
+  123, 456 and 789 gives 3 rows here and 1 on a system
+  (`ANOMALY-2026-09-11-no-implicit-mandt`).
+- **"Spin up multiple" costs more here than there.** A second database is
+  cheap for a test run and not cheap for OSD, which carries an object store,
+  an ADT façade and a serving child per instance. Client isolation by process
+  means a doppelgänger per client.
+- **It is the same shape as the day's other findings**: output that looks
+  right, is plausibly sized, and is quietly wrong, with no error anywhere
+  along the path.
+
+None of that is an argument for changing larshp's mind about the transpiler.
+It is an argument that *OSD* may want client handling of its own — most
+likely in our Open SQL layer rather than in his, so his "not needed in the
+transpiler/runtime" stays true and we stop being surprised. Worth costing
+before anyone starts: the cheap version is a client predicate added where OSD
+builds SQL, the expensive version is `CLIENT SPECIFIED` and client-dependent
+`INSERT`/`UPDATE`/`DELETE` semantics, and only the first is obviously worth
+it.
+
+Not started. Recorded because the decision to ignore it was taken for a
+different system than the one we are now building.
+
 ## Backlog: Gateway extension points the corpus really uses (2026-09-12)
 
 Counted over the corpus DPC/MPC classes. Have: `sap:` annotations and
