@@ -256,7 +256,18 @@ Tier 2a VS Code, through murbani.vscode-abap-remote-fs on abap-adt-api.
         honest scope: one route served and tested, NOT a connected client
         browsing a tree. What the extension asks for and we lack will
         name itself in /osd/not-served, which is the instrument
-Tier 2b Eclipse, still on the logon, not on the ADT surface. Two forks:
+Tier 2b Eclipse. RE-COSTED 2026-09-14, because the premise was wrong:
+        ADT is NOT only HTTP over the ICM. SADT_REST_RFC_ENDPOINT (function
+        group SADT_REST) carries a whole HTTP exchange in one RFC call --
+        REQUEST_LINE, HEADER_FIELDS, MESSAGE_BODY in, STATUS_LINE, headers,
+        body out. Measured: GET /sap/bc/adt/discovery over RFC answered 200
+        with the atomsvc document. Alice had sniffed this; the session had
+        asserted the opposite without data. So the on-prem route is not
+        "replay an unreplayable logon and then still need HTTP", it is "be
+        an RFC server answering one function module", and the payload is
+        already the shape the facade speaks. See docs/adt-facade.md.
+        The old note below is kept for the reasoning it records.
+        Eclipse, still on the logon, not on the ADT surface. Two forks:
         the on-prem project wants an RFC logon on 3399, costed at three
         to eight weeks with a real chance of never converging, because
         the logon-accept is a function of the client's init and cannot be

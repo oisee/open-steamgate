@@ -311,6 +311,68 @@ only matter if a non-ADT, RFC-speaking client had to attach to a local
 system, which is a different consumer and a later question. Not in the
 waves; one line in the backlog as a question.
 
+## ADT over RFC: `SADT_REST_RFC_ENDPOINT`
+
+**Measured on the sandbox 2026-09-14, and it corrects something this session
+had asserted confidently and wrongly.** The claim was that ADT is pure HTTP
+over the ICM, that 32NN/33NN carry only DIAG and RFC, and that nothing routes
+an RFC port to `/adt`. Alice had sniffed the traffic and said otherwise. She
+was right.
+
+There is a standard function module that carries a whole HTTP exchange in one
+RFC call:
+
+```
+SADT_REST_RFC_ENDPOINT          function group SADT_REST, package SADT_REST
+
+IMPORTING REQUEST   SADT_REST_REQUEST
+            REQUEST_LINE   METHOD / URI / VERSION
+            HEADER_FIELDS  TIHTTPNVP, a table of NAME / VALUE
+            MESSAGE_BODY   xstring
+EXPORTING RESPONSE  SADT_REST_RESPONSE
+            STATUS_LINE    VERSION / STATUS_CODE / REASON_PHRASE
+            HEADER_FIELDS  TIHTTPNVP
+            MESSAGE_BODY   xstring
+```
+
+Called with `GET /sap/bc/adt/discovery` it answered `200 OK`,
+`Content-Type: application/atomsvc+xml`, and a body that is the discovery
+service document — the same document the HTTP front serves. Request in,
+response out, verbatim, one call per request.
+
+### What it changes
+
+**Nothing about the façade, and everything about the estimate.** The shape
+this module carries is the shape the façade already speaks:
+`{method, path, headers, body}` in, `{status, headers, body}` out. Mapping
+`SADT_REST_REQUEST` onto it is an adapter of a few dozen lines, not a
+protocol to reverse-engineer.
+
+What remains for Eclipse on-prem is to **be an RFC server** — accept the
+logon, accept a call to one function module, hand the payload to the façade,
+send the answer back. That is a different job from the one costed before, and
+a better-shaped one: this family already decoded the transport in the client
+direction (open-rfc-go's NI/RFC/CPIC, vsp's `pkg/sapcompress` for SAP-LZH and
+LZC, and the DIAG sibling carries the LZH *writer*, which is what a server
+needs in order to compress what it sends). Going from a decoded client to a
+server is a smaller step than inventing a protocol, which is what the earlier
+"weeks, with a real chance of never converging" assumed.
+
+It does not make it small. A logon, a session, the serialization of those
+structures and the compression are all real. But the thing that made the old
+estimate frightening — a logon-accept that is a function of the client's init
+and cannot be replayed — stops being the obstacle once the plan is to
+implement rather than to replay.
+
+### And it gives the split a consumer
+
+The RFC front would be Go (that is where the transport lives) and the façade
+is Node (that is where abaplint and the transpiler live). The payload between
+them is literally an HTTP request and an HTTP response, so the seam between
+the two halves needs no invention: it is HTTP. Whoever is weighing whether
+`adt-server-facade` should be its own thing now has a concrete consumer for
+the boundary rather than a tidiness argument.
+
 ## What starts first, when it starts
 
 Wave 0, and within it the session before the resources. The slice that
