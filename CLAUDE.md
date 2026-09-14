@@ -150,7 +150,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   fork, never fires it; `ci.yml` and `web.yml` do have `pull_request`, which
   is why such a PR still looks green. The check that did not run and the
   check that passed are the same colour. After pushing a branch, confirm
-  **Regression** is in the checks list and not only **CI**. The queue of what is
+  **Regression** is in the checks list and not only **CI**. That rule holds for
+  `abaplint/transpiler`, where we have push rights; it **cannot** be followed for
+  `abaplint/abaplint`, where we do not, and whose regression workflow skips forks
+  by an explicit condition. `npm run parked` prints which rule applies to which
+  repository, so nobody has to remember. The queue of what is
   waiting to go is `npm run parked`, which derives it from the branches in the
   clone and the entries in ANORMALIES rather than from a list somebody keeps:
   it names each parked branch, its commits, whether it has ever been pushed,

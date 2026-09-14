@@ -207,9 +207,25 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 - Regression-test location: `test/builtin/cos.ts` — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
 - Upstream version containing a fix: `unknown`
 
+### DEBT-2026-09-14-no-push-to-abaplint — We can push a branch to the transpiler and not to abaplint
+
+- Status: `open`
+- Discovery date: `2026-09-14`
+- Affected versions: n/a, a process fact
+- Affected ABAP statement, runtime API or adapter: none
+- Minimal ABAP reproducer: none
+- Exact command used to run it: `gh api repos/abaplint/abaplint --jq .permissions` against `gh api repos/abaplint/transpiler --jq .permissions`
+- Expected SAP behaviour: n/a
+- Actual behaviour: `abaplint/transpiler` gives us `push: true`, `abaplint/abaplint` gives `push: false`. So Lars's advice — make the PR from a branch inside the repo, or the regression and performance workflows never run — **can be followed for the transpiler and cannot be followed for abaplint**. Their `regression.yml` skips forks by an explicit condition, `github.repository == 'abaplint/abaplint'`, with a comment in the file saying as much, and `coverage.yml` is push-only too. A fork PR there runs `main.yml` and `playground.yml` and nothing else
+- Impact on open-steamgate: our first core fix, `fix/arithmetic-calculation-type`, cannot arrive with the evidence a transpiler PR arrives with. The mitigation is to run `.github/regression/run.js` locally, which is what the workflow does — build the CLI before and after and compare across real repositories — and put the result in the PR body. Roughly a thirty-minute job and it needs the network
+- Smallest safe workaround: ask Lars for push access to `abaplint/abaplint`, or accept the fork and carry the regression by hand
+- Upstream issue: none; nothing to file, this is about our access
+- Regression-test location: `npm run parked` prints the constraint against each repository, so nobody has to remember which of the two rules applies
+- Upstream version containing a fix: `n/a`
+
 ### ANOMALY-2026-09-14-arithmetic-typed-as-character — Arithmetic with a character literal is typed by the literal
 
-- Status: `open`, upstream
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/core 2.120.50`
 - Affected ABAP statement, runtime API or adapter: the inferred type of `DATA(x) = <arithmetic expression>`
@@ -227,7 +243,9 @@ DATA(c) = lv_f * 2.        " typed f, correct
 - Actual open-abap behaviour: the inline declaration takes the character literal's type **and its length**, so `sin( x ) * '0.25'` yields `c(4)` and `lv_pulse * '0.3'` yields `c(3)`. An integer literal does not do this
 - Impact on open-steamgate: two ways, and the quiet one is worse. Loud: appending such a variable to a table of `f` raised `CX_SY_CONVERSION_NO_NUMBER` and killed her channel at bar 6. Quiet: the value is truncated to the literal's length, so her dance bars were computed from `9,4` instead of `9.4983552631578956` — right shape, two significant digits, no complaint from anything
 - Smallest safe workaround: `CONV f( '0.25' )` in the expression, or declare the variable rather than inferring it
-- Upstream issue: none yet, needs an issue on `abaplint/abaplint`. This is `@abaplint/core`, not the transpiler: the transpiler asks the scope for the variable's type and faithfully emits the answer it gets. Reproduced independently by open-steamgate on 2026-09-14 with a fourth line that narrows it further: `DATA(d) = lv_f * CONV f( '0.25' ).` gives `f`, so it is the bare character literal that poisons the inference and not the mixed arithmetic
+- Upstream issue: none yet, branch `fix/arithmetic-calculation-type` in the `abaplint/abaplint` clone, commit `e54b349`. This is `@abaplint/core`, not the transpiler: the transpiler asks the scope for the variable's type and faithfully emits the answer it gets. Reproduced independently by open-steamgate on 2026-09-14 with a fourth line that narrows it: `DATA(d) = lv_f * CONV f( '0.25' ).` gives `f`, so it is the bare character literal, not the mixed arithmetic. Two cases wider than the report, both found while fixing: `lv_f * lv_c` with a character **variable** gave `Character(10)`, and `lv_p * '0.25'` gave a character field rather than packed
+- What the fix does: `Source.runSyntax` walked the operands and let each one replace the running context, so the last operand won. It now records that an `ArithOperator` has been seen and from that point combines rather than replaces, using ABAP's calculation type — decfloat34, decfloat16, f, p, int8, i — with character-like operands transparent. Outside arithmetic nothing changes, and the concatenation path still returns `StringType`. Conservative in two places: when neither operand is numeric the previous behaviour stands, and a void or unknown operand wins, because not knowing an operand means not knowing the result
+- Verification: abaplint core's own suite, 10977 passing and none failing before, 10984 and none failing after, lint clean. Seven new tests in `basic_variables`, five of which fail without the change; the other two are the cases that were already right and could plausibly have broken
 - Regression-test location: none here; belongs upstream
 - Upstream version containing a fix: `unknown`
 
