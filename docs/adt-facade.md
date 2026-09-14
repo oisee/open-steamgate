@@ -460,6 +460,72 @@ check runs, the debugger. Of those, discovery, the compatibility graph,
 source reads, object structures, search and the package tree already answer
 here.
 
+### What the call actually carries: BXML, and a flag that says whether it is packed
+
+Measured 2026-09-14 against a live Eclipse and a captured session, 762 frames
+carrying the parameter, no exceptions either way.
+
+The call to `SADT_REST_RFC_ENDPOINT` does not carry its parameters as CPIC
+parameter name/value fields (`0x0201`/`0x0203`), and not as the xRFC recursive
+parameter this project had been expecting (`0x3c02` boundaries with plain XML
+in `0x3c05` chunks). It uses a family of tags nothing here had seen:
+
+| tag | in a request | in a response |
+| --- | --- | --- |
+| `0x4000` | `01 00`, two bytes | `01 01` |
+| `0x4001` | the payload | absent |
+| `0x4002` | absent | the payload, in 16 KB chunks |
+| `0x4004` | empty, a terminator | empty |
+
+So the direction is in the tag — `0x4001` inbound, `0x4002` outbound — and the
+second byte of `0x4000` is a compression flag. It correlates perfectly with
+whether the payload begins with the magic: every one of the 382 requests has
+`01 00` and starts `BXML`, and every one of the 380 responses has `01 01` and
+does not. The compression is not zlib, not raw deflate, and carries no SAP
+compression signature at the start of a chunk, so it is not `sapcompress`
+either as that package recognises it.
+
+**The payload is SAP Binary XML.** The header reads
+
+```
+BXML ? VER 0.7 ? ENC utf-8 + asx + http://www.sap.com/abapxml: …
+```
+
+and the document is an ordinary ABAP XML serialization — `asx:abap` /
+`asx:values` around a structure whose root element is the parameter's name.
+That is why "the name is only in the root element, never on the wire" was
+right about the shape and wrong about the encoding: the name is in the
+document, and the document is binary.
+
+Decoded, one request is exactly what an ADT façade needs:
+
+```
+values < REQUEST < REQUEST_LINE < METHOD  T "GET"
+                                  URI     T "/sap/bc/adt/core/discovery"
+                                  VERSION T "HTTP/1.1" >
+                   HEADER_FIELDS < lines @ 3
+                                   item < NAME  T "sap-adt-request-id" … > … >
+```
+
+Single-byte tokens carry the structure: `+` defines a name, `<` opens an
+element, `>` closes it, `T` introduces text, `@` an attribute, `A` its value.
+Names are defined once and referenced afterwards, which is where most of the
+saving comes from.
+
+**What this means for a server.** Two pieces of work, and a question that one
+attempt answers:
+
+1. a BXML reader, to get the request out of `0x4001`;
+2. a BXML writer, to put a response into `0x4002`;
+3. whether a response may declare `0x4000 = 01 00` and go out uncompressed.
+   The flag is ours to set. If Eclipse honours it, no compressor is needed at
+   all — which matters, because the SAP-LZH *writer* is not in any repository
+   here (vsp has the reader). If it does not honour it, that is the next
+   thing to build and it is identifiable in one round trip.
+
+The chunking is worth noting for the writer: responses are split at 16384
+bytes across several `0x4002` fields, reassembled in order.
+
 ### And it gives the split a consumer
 
 The RFC front would be Go (that is where the transport lives) and the façade
