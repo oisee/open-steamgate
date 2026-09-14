@@ -69,7 +69,11 @@ function report(repo) {
     rows.push({
       branch,
       commits,
-      pushed: git("rev-parse", "--verify", `origin/${branch}`) !== "",
+      // any remote, not only origin: a repository we cannot push to is
+      // contributed to from a fork, and saying "not pushed" about a branch
+      // that is already a pull request is the kind of lie this tool exists
+      // to catch elsewhere
+      pushed: pushedTo(git, branch),
       behind: Number(git("rev-list", "--count", `${branch}..main`) || 0),
       // exact branch names, not substrings: "fix/conv-builtin-type" is a
       // prefix of "fix/conv-builtin-type-name", and a prefix match had each
@@ -86,8 +90,10 @@ function report(repo) {
   console.log(`  ${repo.note}\n`);
   for (const row of rows.sort((a, b) => a.branch.localeCompare(b.branch))) {
     const marks = [];
-    if (row.pushed === false) {
+    if (row.pushed === undefined) {
       marks.push("not pushed");
+    } else if (row.pushed !== "origin") {
+      marks.push(`pushed to ${row.pushed}`);
     }
     if (row.behind > 0) {
       marks.push(`${row.behind} behind main`);
@@ -113,7 +119,7 @@ function report(repo) {
     }
     console.log("");
   }
-  const waiting = rows.filter(r => r.pushed === false).length;
+  const waiting = rows.filter(r => r.pushed === undefined).length;
   console.log(`  ${rows.length} branch${rows.length === 1 ? "" : "es"} parked here, ${waiting} never pushed.\n`);
 }
 
@@ -140,6 +146,15 @@ function owedIssues() {
   for (const entry of owed) {
     console.log(`    ${entry.id}  [${entry.status}]`);
   }
+}
+
+function pushedTo(git, branch) {
+  for (const remote of git("remote").split("\n").filter(r => r !== "")) {
+    if (git("rev-parse", "--verify", `${remote}/${branch}`) !== "") {
+      return remote;
+    }
+  }
+  return undefined;
 }
 
 function gitIn(cwd) {
