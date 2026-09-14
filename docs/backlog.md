@@ -436,11 +436,22 @@ open  revisions: reading them out of git instead of a system.
      └─ external: Lars merges; PR only, never merge ourselves
      └─ blocks nothing here; the branch feat/database-duckdb lives until then
 
-9.2  transpiler: a release after 2.13.86                              [T]
-     └─ external: Lars publishes; #1836 (flat concat chain) is merged but
-        not on npm
-     └─ unblocks 9.3, and lets both generators drop the 200-line SADL rule
-        (segw-gen's sadlXml and my zcl_stg_segw_gen_dpc)
+9.2  transpiler: 2.13.87 is out (2026-09-14)                          [T]
+     └─ DONE as far as publishing goes: 2.13.87 carries #1836 (flat concat
+        chain) and #1843, so both generators can drop the 200-line SADL
+        rule (segw-gen's sadlXml and zcl_stg_segw_gen_dpc). T's files
+     └─ it does NOT let us leave the linked local build, which is what it
+        looked like it would do. Checked against the open pull requests:
+        #1846 (a W3MI object keyed on its name, not its file name) and
+        #1845 (a binary file survives the copy to output) are both still
+        open, and the whole media path rests on them. Without #1846 the
+        registry is written abap.W3MI["zork-mini%2ez3"] while
+        WWWDATA_IMPORT asks for "ZORK-MINI.Z3" and finds nothing; without
+        #1845 the bytes beside the module are corrupt
+     └─ so do NOT record the dependency by bumping package.json to
+        ^2.13.87. ^2.13.86 already resolves there, and an npm install would
+        replace the link and take the media down without saying so. The
+        debt stays named instead: DEBT-2026-09-13-linked-transpiler
 
 9.3  open-abap-core: BAPI_TRANSACTION_COMMIT / ROLLBACK over the LUW   [T]
      └─ written, eb0bedd on branch bapi-transaction in the fork, unpushed

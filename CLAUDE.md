@@ -178,9 +178,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `general_get_random_int` work is the worked example. One session found
   `ASSERT high > low` by calling `cl_abap_random_int` and watching it fail at
   range 1; the other found `ASSERT low >= 0` one line below by reading the
-  file they had been pointed at. The first assertion complicated the design,
-  the second killed it, and either method alone would have shipped a patch
-  that was wrong in a way its own tests passed.
+  file they had been pointed at. The first assertion complicated the design
+  and the second killed it. Reading alone would have missed nothing here;
+  running alone would have shipped the negative range broken. The tests
+  written from the A4H measurement do catch that, which is the part worth
+  keeping: measuring the contract is what made the tests able to fail.
 - Media out of SMW0 works (`docs/adt-facade.md`): a `*.w3mi.*` object in the
   transpile input becomes a row of `wwwparams` plus a file beside the
   modules, and `WWWDATA_IMPORT` + `SCMS_BINARY_TO_XSTRING` carry it into a
