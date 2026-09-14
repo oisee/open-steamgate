@@ -23,7 +23,7 @@
       "folder": "/.local/lars/express-icf-shim"
     },
     {
-      "url": "",
+      "url": "https://github.com/oisee/open-abap-apc",
       "folder": "/.local/lars/open-abap-apc",
       "files": [
         "/src/apc/**",
