@@ -477,7 +477,19 @@ open  revisions: reading them out of git instead of a system.
      └─ what this makes cheap: excluding the two *.prog.abap files is a
         glob, and then vivid-vibes can BE the input instead of being
         curated into two folders by hand
-     └─ external: Alice's repository, a patch there is the fix
+     └─ DEMONSTRATED, not merely argued: with vivid-vibes as the only o4d
+        input and four entries added to exclude_filter — the two .prog
+        files, zcl_o4d_mountains_oops_a and zcl_o4d_composer — the tree
+        transpiles clean, 1094 objects and **83 effect classes against the
+        54 the demo ships today**. Config only; nothing in her repository
+        had to change. Reverted afterwards, because what the demo contains
+        is Alice's call and two effects are dropped by name to get there
+     └─ so the recommendation is not a lean/extended branch split but one
+        input and four excludes; local/o4d and local/o4d-apc then go, and
+        the hand-kept duplicate goes with them
+     └─ external: Alice's repository, a patch there is the fix — the two
+        real errors in zcl_o4d_composer, and mountains_oops_a once
+        abaplint #4291 lands or its two methods are written
 
 9.6  Bun, measured rather than assumed                                [T]
      └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms
