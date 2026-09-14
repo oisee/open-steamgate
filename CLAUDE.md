@@ -166,7 +166,21 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   their Upstream line, and `parked` lists those separately.
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
-  `abaplint/transpiler` or `open-abap-core`.
+  `abaplint/transpiler` or `open-abap-core`. Before offering anything to any of
+  the three upstreams, run that repository's own `lint`, in a clone with
+  nothing uncommitted in it. Two lint errors sat in the shared
+  open-abap-core checkout for a day because neither session had run abaplint
+  there, and one was an **em dash in an ABAP comment** — ABAP source is
+  7-bit ASCII, and the prose style used everywhere else here is the thing
+  most likely to break it. The rule is not "write plainer comments", it is
+  "run the lint": the check already existed and nobody had asked it.
+- **Running it and reading it find different things.** The
+  `general_get_random_int` work is the worked example. One session found
+  `ASSERT high > low` by calling `cl_abap_random_int` and watching it fail at
+  range 1; the other found `ASSERT low >= 0` one line below by reading the
+  file they had been pointed at. The first assertion complicated the design,
+  the second killed it, and either method alone would have shipped a patch
+  that was wrong in a way its own tests passed.
 - Media out of SMW0 works (`docs/adt-facade.md`): a `*.w3mi.*` object in the
   transpile input becomes a row of `wwwparams` plus a file beside the
   modules, and `WWWDATA_IMPORT` + `SCMS_BINARY_TO_XSTRING` carry it into a
