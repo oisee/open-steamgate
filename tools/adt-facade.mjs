@@ -24,6 +24,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
+import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
 import {ADT_TYPE, classDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
@@ -974,6 +975,13 @@ export function adtRouter(options = {}) {
           res.type("application/vnd.sap.adt.oo.classes.v4+xml").send(
             classDocument(found, {includes: store.classIncludes?.(found.name) ?? []}),
           );
+        });
+      });
+    } else if (SOURCE_PROPERTY_MIME[type] !== undefined) {
+      router.get(`${BASE}/${adt}/:name`, (req, res) => {
+        answer(res, () => {
+          const object = store.read(type, req.params.name);
+          res.type(SOURCE_PROPERTY_MIME[type]).send(sourcePropertiesDocument(type, object));
         });
       });
     } else {
