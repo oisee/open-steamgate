@@ -130,7 +130,10 @@ const ACCEPT = {
   "oo/classes": ["application/vnd.sap.adt.oo.classes.v4+xml"],
   "oo/interfaces": ["application/vnd.sap.adt.oo.interfaces.v2+xml"],
   "functions/groups": ["application/vnd.sap.adt.functions.groups.v3+xml"],
-  "packages": ["application/vnd.sap.adt.packages.v1+xml"],
+  // Both, newest first, the way A4H advertises them: a client picks the
+  // highest it knows and a façade that offers only v1 tells a modern one
+  // that there is nothing here it can open.
+  "packages": ["application/vnd.sap.adt.packages.v2+xml", "application/vnd.sap.adt.packages.v1+xml"],
   "cts/transportchecks": ["application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData"],
 };
 
@@ -931,7 +934,11 @@ export function adtRouter(options = {}) {
   advertise("packages");
   router.get(`${BASE}/packages/:name`, (req, res) => {
     answer(res, () => {
-      res.type("application/vnd.sap.adt.packages.v1+xml").send(packageDocument(packageOf(store, req.params.name)));
+      // Answered at the version asked for. The document is the same either
+      // way; what differs is whether the client recognises it.
+      const wants2 = String(req.headers.accept ?? "").includes("packages.v2+xml");
+      res.type(`application/vnd.sap.adt.packages.v${wants2 ? 2 : 1}+xml`)
+        .send(packageDocument(packageOf(store, req.params.name)));
     });
   });
 
