@@ -399,8 +399,9 @@ open  revisions: reading them out of git instead of a system.
         every packaging target, or the binary becomes a second runtime
         with no second check
 8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
-     └─ from T, 2026-09-14: the transpiler already emits them,
-        `write_source_map` in abap_transpile.json, off by default. 341 maps
+     └─ from T, 2026-09-14, half done already: `write_source_map` is
+        ALREADY true in our abap_transpile.json and output/ carries the
+        .mjs.map files, so only the consumer side is missing. 341 maps
         on this tree, resolving to the statement rather than the object:
         zcl_o4d_sales_dance.clas.mjs:1346 -> .clas.abap:119, which is the
         line the demo actually died on
@@ -454,11 +455,29 @@ open  revisions: reading them out of git instead of a system.
      └─ external: Lars merges; until then open-abap-apc ships its own copy
         and leaves core's src/tcp out of its dependency
 
-9.5  oisee/vivid-vibes: 154 unimplemented interface methods           [A/T]
-     └─ zif_o4d_effect declares get_required_media and one more; 2 of 85
-        effect classes implement them, so 75 classes do not transpile
+9.5  oisee/vivid-vibes: what actually stops the full package       [A/T]
+     └─ MEASURED 2026-09-14, and the old entry ("2 of 85 implement them,
+        so 75 do not transpile") was wrong. Transpiling local/vivid-vibes
+        as the only o4d input fails with 17 errors, and they are not what
+        was assumed:
+        ├─ ~13 of them are two dev-time report programs, not the demo:
+        │  zo4d_render_demo.prog.abap and zo4d_offline_export.prog.abap,
+        │  which call cl_gui_frontend_services (SAP GUI, absent in
+        │  open-abap) and use X255. They are export tooling and have no
+        │  business in a browser build
+        ├─ implement_methods on exactly ONE class,
+        │  zcl_o4d_mountains_oops_a (get_required_media, is_loopable) —
+        │  that is the DEFAULT IGNORE family, abaplint #4291
+        └─ two real errors in zcl_o4d_composer ("field frame does not
+           exist in structure")
+     └─ so the full 85-effect package is two programs and two classes away
+        from building, not 75 classes away. The 31 effects absent from the
+        current build are absent because nobody copied them into
+        local/o4d-apc, not because they fail
+     └─ what this makes cheap: excluding the two *.prog.abap files is a
+        glob, and then vivid-vibes can BE the input instead of being
+        curated into two folders by hand
      └─ external: Alice's repository, a patch there is the fix
-     └─ blocks only the demo payload for APC, nothing structural
 
 9.6  Bun, measured rather than assumed                                [T]
      └─ done in part 2026-09-13: it runs, and twenty reads took 220 ms
