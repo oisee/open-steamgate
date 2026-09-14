@@ -3,6 +3,36 @@ import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
+// Wait for the worker to take control, and say what happened when it does not.
+//
+// The bare wait was `waitForFunction(() => controller !== null)` with a
+// timeout, which reports "Timeout 30000ms exceeded" and nothing else. That
+// sentence is the same whether the registration was refused, the worker is
+// still installing, or the browser cannot open service-worker storage at
+// all — three different faults with one face. web/index.html already catches
+// a registration failure and renders it into the page; nobody was reading it.
+//
+// Suggested by a Codex review of exactly this problem, and it is the day's
+// lesson again in a new place: a check that says nothing when it fails is
+// barely a check.
+async function controlled(page, timeout = 60000) {
+  try {
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout});
+  } catch (waited) {
+    const said = await page.evaluate(() => ({
+      body: document.body.innerText.replace(/\s+/g, " ").slice(0, 600),
+      registrations: navigator.serviceWorker.getRegistrations === undefined
+        ? "getRegistrations is not available"
+        : undefined,
+    })).catch((reason) => ({body: `the page could not be read: ${reason.message}`}));
+    const states = await page.evaluate(async () => {
+      const all = await navigator.serviceWorker.getRegistrations();
+      return all.map((r) => `scope=${r.scope} installing=${r.installing?.state ?? "-"} waiting=${r.waiting?.state ?? "-"} active=${r.active?.state ?? "-"}`);
+    }).catch((reason) => [`registrations could not be read: ${reason.message}`]);
+    throw new Error(`the worker never took control in ${timeout}ms.\n  page said: ${said.body}\n  registrations: ${states.length === 0 ? "(none)" : states.join(" | ")}\n  original: ${waited.message.split("\n")[0]}`);
+  }
+}
+
 // Which bundle is answering. This runs first on purpose.
 //
 // Three times in one day a check passed against something other than what it
@@ -25,7 +55,7 @@ test("the worker answering is the worker that was just built", async () => {
   try {
     const page = await context.newPage();
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     // land somewhere stable first. index.html is the installer and navigates
     // to the app the moment the worker is in control, so anything evaluated
     // on it races that navigation and dies as "execution context was
@@ -124,7 +154,7 @@ test("an ICF service is served by the worker too, page and all", async () => {
     // evaluate that runs mid-navigation dies with "execution context was
     // destroyed" and reads like a worker fault rather than a race
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     await page.goto("http://localhost:3031/sap/bc/zork");
     await page.waitForLoadState("domcontentloaded");
 
@@ -158,7 +188,7 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     // the installer page navigates away once the worker is registered, so
     // land on a page the worker serves and stay there
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     await page.goto("http://localhost:3031/sap/bc/zork");
     await page.waitForLoadState("domcontentloaded");
 
@@ -222,7 +252,7 @@ test("SMW0 objects are served from the bundle, byte for byte", async () => {
   try {
     const page = await context.newPage();
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     // somewhere the worker serves and nothing else happens: the Zork page
     // opens its channel on load, and a handler that boots a Z-machine in the
     // worker holds the only thread there is, so waiting for that page's load
@@ -285,7 +315,7 @@ test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async
   try {
     const page = await context.newPage();
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     // domcontentloaded, not load: the page connects as it loads and the
     // handler boots a Z-machine in the worker, which is the only thread
     // there is, so waiting for the load event is waiting for the game
@@ -380,7 +410,7 @@ test("the MiniZork walkthrough plays the same in the bundle", async () => {
   try {
     const page = await context.newPage();
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
     await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/walkthrough", {waitUntil: "domcontentloaded"});
 
     const answers = await page.evaluate(async (script) => {
@@ -492,7 +522,7 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
   try {
     const page = await context.newPage();
     await page.goto("http://localhost:3031/index.html?stay=1");
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {timeout: 30000});
+    await controlled(page);
 
     await page.goto("http://localhost:3031/app/flp.html", {waitUntil: "domcontentloaded", timeout: 60000});
     await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
