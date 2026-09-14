@@ -270,26 +270,36 @@ export function structureOf(store, type, name) {
 // the editor a tab that fails when clicked.
 export function classDocument(object, options = {}) {
   const name = object.name;
-  const lower = encodeURIComponent(String(name).toLowerCase());
   const when = object.changedAt ?? "1970-01-01T00:00:00Z";
   const who = object.changedBy ?? "OSD";
 
+  // Relative, as the real system writes them, and that is the whole of why a
+  // class would not open. A client resolves these against the object's own
+  // address; handed an absolute path it resolves to somewhere else or to
+  // nothing. Measured: A4H's main include is sourceUri="source/main" and its
+  // structure link is href="objectstructure", both relative, and there is no
+  // plain source link on the root at all — the main source is an *include*,
+  // which is the part that is not obvious.
   const link = (href, rel, type, title) =>
     `  <atom:link href="${xmlEscape(href)}" rel="${xmlEscape(rel)}"` +
     (type === undefined ? "" : ` type="${xmlEscape(type)}"`) +
     (title === undefined ? "" : ` title="${xmlEscape(title)}"`) +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>';
 
-  const include = (kind, href) =>
-    `  <class:include class:includeType="${kind}" abapsource:sourceUri="${href}"` +
+  const include = (kind, sourceUri) =>
+    `  <class:include class:includeType="${kind}" abapsource:sourceUri="${sourceUri}"` +
     ` adtcore:name="${xmlEscape(name)}" adtcore:type="CLAS/I"` +
     ` adtcore:changedAt="${when}" adtcore:version="active"` +
     ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
-    `    <atom:link href="${href}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
+    `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
     "  </class:include>";
 
-  const parts = ["main", ...(options.includes ?? [])];
+  // main first, as the system writes it last but a client looks for it by
+  // type rather than by position; the rest are whatever this class has.
+  const parts = [["main", "source/main"],
+    ...(options.includes ?? []).map((part) => [part, `includes/${part}`])];
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes"
                  xmlns:abapoo="http://www.sap.com/adt/oo"
@@ -316,12 +326,8 @@ export function classDocument(object, options = {}) {
                  adtcore:changedBy="${xmlEscape(who)}"
                  adtcore:descriptionTextLimit="60"
                  adtcore:description="${xmlEscape(object.description ?? "")}">
-${link(`/sap/bc/adt/oo/classes/${lower}/source/main`, "http://www.sap.com/adt/relations/source", "text/plain")}
-${link(`/sap/bc/adt/oo/classes/${lower}/objectstructure`, "http://www.sap.com/adt/relations/objectstructure", "application/vnd.sap.adt.elementinfo+xml")}
-${parts.map((part) => include(part === "main" ? "main" : part,
-    part === "main"
-      ? `/sap/bc/adt/oo/classes/${lower}/source/main`
-      : `/sap/bc/adt/oo/classes/${lower}/includes/${part}/source/main`)).join("\n")}
+${link("objectstructure", "http://www.sap.com/adt/relations/objectstructure", "application/vnd.sap.adt.objectstructure.v2+xml")}
+${parts.map(([kind, uri]) => include(kind, uri)).join("\n")}
 </class:abapClass>
 `;
 }
