@@ -944,29 +944,28 @@ export function adtRouter(options = {}) {
     };
     router.get(`${BASE}/${adt}/:name/objectstructure`, structure);
 
-    // One address, two clients, two documents — and both are right.
+    // A class answers as a class here, whatever the client asked for.
     //
-    // abap-adt-api, which VS Code uses, calls objectStructure() on the
-    // object's own address and expects the structure back; there is a test
-    // for it, written when a class would not open in VS Code because this
-    // path fell through to the catch-all. Eclipse asks the same URL for
-    // class:abapClass, the properties document whose source link it follows
-    // to open the editor, and gets no further without it.
+    // This went through two wrong versions before the oracle settled it. The
+    // first served the object structure, on a note saying abap-adt-api GETs
+    // this address expecting one — written when a class would not open in VS
+    // Code. The second served whichever the Accept header named, on the
+    // reasoning that Eclipse and abap-adt-api want different things and both
+    // could be right.
     //
-    // They are distinguishable, so neither has to lose: Eclipse says what it
-    // wants — Accept: application/vnd.sap.adt.oo.classes.v4+xml — and
-    // abap-adt-api does not. Answering the type that was asked for serves
-    // both, and is what the header is for.
+    // They do not want different things. VS Code, handed the structure, said
+    // "Operation not supported for object CLAS/OC CL_ICF_TREE" — it had
+    // recognised the type and refused, because it wanted a class document
+    // too. And the real system does not negotiate at all: asked with
+    // Accept: */* and asked with the versioned class type, A4H answers
+    // class:abapClass both times.
     //
-    // Only classes have a document of their own here so far. The rest keep
-    // the structure at both spellings, which is likely wrong in the same way
-    // and has not been measured against a real answer yet.
+    // So content negotiation here was a dialect no system speaks, invented to
+    // reconcile a conflict that did not exist. The structure keeps its own
+    // address under /objectstructure, which is where a client that wants one
+    // asks.
     if (type === "CLAS") {
       router.get(`${BASE}/${adt}/:name`, (req, res) => {
-        if (String(req.headers.accept ?? "").includes("oo.classes") === false) {
-          structure(req, res);
-          return;
-        }
         answer(res, () => {
           const found = store.find(type, req.params.name);
           if (found === undefined) {
@@ -1134,7 +1133,44 @@ export function adtRouter(options = {}) {
     const body = await rawBody(req);
     answer(res, () => {
       const objects = checkObjectsIn(body, collections);
+
+      // A package is a legitimate thing to check, and this used to call it an
+      // invalid request. Eclipse checks the package as soon as its editor
+      // opens, so the first thing a person does after opening one produced
+      // "Checking object... encountered a problem".
+      //
+      // A real system checks everything beneath it. This checks what is in
+      // the package itself, not its subpackages: the tree here can be several
+      // thousand objects deep and a check that takes a minute is reported as
+      // a hang rather than as thoroughness.
+      const packages = [...body.toString("utf8").matchAll(
+        new RegExp(`adtcore:uri="${BASE}/packages/([^"]+)"`, "g"))].map((m) => decodeURIComponent(m[1]));
+      for (const name of packages) {
+        try {
+          for (const object of store.package(name.toUpperCase()).objects) {
+            const adt = TYPES[object.type]?.adt;
+            if (adt !== undefined) {
+              objects.push({
+                type: object.type,
+                name: object.name,
+                uri: `${BASE}/${adt}/${encodeURIComponent(object.name.toLowerCase())}`,
+              });
+            }
+          }
+        } catch {
+          // a package that is not here checks as nothing, and the empty
+          // report below says so without claiming the request was malformed
+        }
+      }
+
       if (objects.length === 0) {
+        // Nothing to check is not the same as a request that made no sense.
+        // An empty report is the honest answer for an empty package, and the
+        // 400 stays for a body that named no object at all.
+        if (packages.length > 0) {
+          res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument([]));
+          return;
+        }
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
       }

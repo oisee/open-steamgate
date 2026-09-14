@@ -430,35 +430,42 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(await res.text()).to.contain('adtcore:type="INTF/OI"');
     });
 
-    // the resource VS Code opens a class with. abap-adt-api's
-    // objectStructure() GETs the object's own address, not the
-    // /objectstructure spelling vsp uses, so this path met the catch-all and
-    // a class would not open although the whole tree had already rendered
+    // This used to assert that a class answers at its own address with an
+    // object structure, written when a class would not open in VS Code
+    // because the path met the catch-all. Routing it was the fix; the
+    // document was the part that was guessed.
+    //
+    // Both halves of that guess are now disproved. VS Code, handed the
+    // structure, refuses with "Operation not supported for object CLAS/OC" —
+    // it recognises the type and wants a class document. And A4H, asked with
+    // Accept: */* and with the versioned class type, answers class:abapClass
+    // to both, so there is nothing to negotiate.
     it("an object answers at its own address, which is how a class opens", async () => {
       const res = await call("/oo/classes/ZCL_STG_DISPATCHER");
       expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.match(/oo\.classes\.v4\+xml/);
+
       const xml = await res.text();
-      expect(xml).to.contain("objectStructureElement");
-      // the root carries where the source is, and a client follows it
-      expect(xml).to.contain('abapsource:sourceUri="source/main"');
+      expect(xml).to.contain("<class:abapClass");
+      // the link a client follows to the source, which is the point of asking
+      expect(xml).to.match(/rel="http:\/\/www\.sap\.com\/adt\/relations\/source"/);
     });
 
-    it("both spellings of the object answer the same document", async () => {
-      const bare = await (await call("/oo/classes/ZCL_STG_DISPATCHER")).text();
-      const suffixed = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
-      expect(bare).to.equal(suffixed);
+    // A class at its own address and its structure under /objectstructure are
+    // two documents for two questions. They used to be the same one.
+    it("the structure keeps its own address, and is not the class document", async () => {
+      const object = await (await call("/oo/classes/ZCL_STG_DISPATCHER")).text();
+      const structure = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
+      expect(object).to.contain("<class:abapClass");
+      expect(structure).to.contain("objectStructureElement");
+      expect(object).to.not.equal(structure);
     });
 
-    // The same address, asked differently, by a different client.
-    //
-    // Eclipse opens a class by reading class:abapClass and following its
-    // source link; it never gets as far as the structure. abap-adt-api asks
-    // the same URL for the structure and the test above pins that. Both are
-    // right and they are distinguishable, because Eclipse says which type it
-    // wants and abap-adt-api does not.
-    it("answers a class as a class when a client asks for one", async () => {
+    // The same document whichever way it is asked for, because that is what
+    // the real system does and a client should not have to know which.
+    it("answers a class as a class however the question is phrased", async () => {
       const res = await call("/oo/classes/ZCL_STG_DISPATCHER", {
-        headers: {Accept: "application/vnd.sap.adt.oo.classes.v4+xml"},
+        headers: {Accept: "*/*"},
       });
       expect(res.status).to.equal(200);
       expect(res.headers.get("content-type")).to.match(/oo\.classes\.v4\+xml/);
