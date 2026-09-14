@@ -398,6 +398,17 @@ open  revisions: reading them out of git instead of a system.
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
+8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
+     └─ from T, 2026-09-14: the transpiler already emits them,
+        `write_source_map` in abap_transpile.json, off by default. 341 maps
+        on this tree, resolving to the statement rather than the object:
+        zcl_o4d_sales_dance.clas.mjs:1346 -> .clas.abap:119, which is the
+        line the demo actually died on
+     └─ the consumer is here: tools/osd-apc.mjs `describe(error)` already
+        names the exception class and the frames from output/. With maps on
+        and findSourceMap over the thrown object's stack it can name the
+        ABAP statement instead. Costs a flag and some disk
+
 8.5  the preview suite flakes on a worker-served page        [S] FIXED
      └─ seen on 2026-09-14, a different test each run, mostly a page.goto
         timing out or "execution context was destroyed". Diagnosed rather
@@ -474,6 +485,9 @@ open  revisions: reading them out of git instead of a system.
         copies still shipped `?image=`. Now built and verified by content:
         two occurrences of `'?img='+n+'.PNG'`, none of `?image=`
      └─ the dev player, line 443, was always right, which is how it hid
+     └─ T confirmed 2026-09-14 and corrected their own copy of the claim:
+        they had repeated `?image=` out of her page as fact without ever
+        requesting it
      └─ external: Alice's repository, a one-line patch there is the fix
 
 9.8  local/vivid-vibes is a shadow copy, not a duplicate input        [A]

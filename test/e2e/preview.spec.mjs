@@ -298,6 +298,24 @@ test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async
     // file out of SMW0 interpreted by the ABAP Z-machine
     await expect(page.getByText("Z-Machine V3 Interpreter in ABAP")).toBeVisible({timeout: 60000});
     await expect(page.getByText("West of House")).toBeVisible({timeout: 60000});
+
+    // and it answers. Typed into the page's own terminal rather than pushed
+    // down a socket this test opened, so the path under test is the one a
+    // player uses: xterm -> the injected shim -> the worker -> on_message.
+    const type = async (command) => {
+      await page.locator("#terminal").click();
+      await page.keyboard.type(command);
+      await page.keyboard.press("Enter");
+    };
+    await type("open mailbox");
+    await expect(page.getByText("Opening the small mailbox reveals a leaflet.")).toBeVisible({timeout: 60000});
+
+    // the second command is the point. It can only work if the mailbox is
+    // still open, which is state the previous message left behind — one
+    // handler object for the conversation, which is what stateful APC means
+    // and what a fresh handler per message would fail here.
+    await type("read leaflet");
+    await expect(page.getByText("WELCOME TO ZORK", {exact: false})).toBeVisible({timeout: 60000});
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
