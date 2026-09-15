@@ -300,6 +300,40 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml, "the class itself is a child, as it is in a real structure").to.contain('adtcore:type="CLAS/OCX"');
     });
 
+    // A program's structure is never empty either, for the same reader.
+    it("gives a two-line report a structure with its text elements, and nothing invented", async () => {
+      const xml = await (await call("/programs/programs/zdemo_editor/objectstructure?version=active")).text();
+      const children = [...xml.matchAll(/adtcore:type="(PROG\/[A-Z]+)"/g)].map((m) => m[1]).slice(1);
+      expect(children, "PROG/PX is what the system lists for a program, and all this one has").to.deep.equal(["PROG/PX"]);
+    });
+
+    // The parts a program does have are named by the workbench's own codes
+    // (the type registry of a real system: PU subroutine, PE event, PL and
+    // PP local class), each pointing into the source.
+    it("lists a program's subroutines, events and local classes by the workbench's codes", async () => {
+      const {mkdtempSync, mkdirSync, copyFileSync} = await import("node:fs");
+      const {join} = await import("node:path");
+      const {tmpdir} = await import("node:os");
+      const {ObjectStore} = await import("../tools/osd-store.mjs");
+      const {structureOf} = await import("../tools/adt-documents.mjs");
+      const root = mkdtempSync(join(tmpdir(), "osd-parts-"));
+      mkdirSync(join(root, "osd"));
+      copyFileSync("abaplint.jsonc", join(root, "abaplint.jsonc"));
+      const store = new ObjectStore({root});
+      store.write("PROG", "ZOSD_PARTS",
+        "REPORT zosd_parts.\nCLASS lcl_x DEFINITION.\nENDCLASS.\nCLASS lcl_x IMPLEMENTATION.\nENDCLASS.\n" +
+        "INITIALIZATION.\n  WRITE 1.\nSTART-OF-SELECTION.\n  PERFORM go.\nFORM go.\n  WRITE 2.\nENDFORM.\n");
+      const parts = structureOf(store, "PROG", "ZOSD_PARTS").children.map((c) => `${c.type} ${c.name}`);
+      expect(parts).to.include("PROG/PU GO");
+      expect(parts).to.include("PROG/PE START-OF-SELECTION");
+      expect(parts).to.include("PROG/PE INITIALIZATION");
+      expect(parts).to.include("PROG/PL LCL_X");
+      expect(parts).to.include("PROG/PP LCL_X");
+      expect(parts[parts.length - 1]).to.equal("PROG/PX ZOSD_PARTS");
+      const form = structureOf(store, "PROG", "ZOSD_PARTS").children.find((c) => c.name === "GO");
+      expect(form.uri).to.match(/^source\/main#start=\d+,\d+;end=\d+,\d+$/);
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");

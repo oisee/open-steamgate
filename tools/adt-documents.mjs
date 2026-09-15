@@ -164,6 +164,65 @@ function declarationRows(object) {
   return rows;
 }
 
+// Every node of the given structure or statement kinds, in source order.
+function findNodes(node, kinds, out = []) {
+  const kind = node.get?.()?.constructor?.name;
+  if (kinds.includes(kind)) {
+    out.push(node);
+  }
+  for (const child of node.getChildren?.() ?? []) {
+    findNodes(child, kinds, out);
+  }
+  return out;
+}
+
+// The parts of a program, as the workbench names them (type codes and labels
+// from the system's own type registry, a4h-adt-2026-09-14T2205.jsonl:22):
+// subroutines PROG/PU, events PROG/PE, local classes PROG/PL and PROG/PP.
+// The text elements PROG/PX come last and always, the way a class always
+// carries its CLAS/OCX: the client's outline reads result[0] without a
+// length check, and a two-line report has nothing else to list.
+const PROGRAM_PARTS = {
+  Form: "PROG/PU",
+  ClassDefinition: "PROG/PL",
+  ClassImplementation: "PROG/PP",
+};
+const PROGRAM_EVENTS = ["Initialization", "StartOfSelection", "EndOfSelection", "AtSelectionScreen",
+  "AtSelectionScreenOutput", "TopOfPage", "EndOfPage", "AtLineSelection", "AtUserCommand", "LoadOfProgram"];
+function programParts(object) {
+  const parts = [];
+  const file = object?.getMainABAPFile?.();
+  const structure = file?.getStructure?.();
+  if (structure === undefined || structure === null) {
+    return parts;
+  }
+  const span = (first, last) => {
+    const start = first?.getStart?.();
+    const end = last?.getEnd?.() ?? last?.getStart?.();
+    return start === undefined || end === undefined ? undefined
+      : {row: start.getRow(), col: start.getCol(), endRow: end.getRow(), endCol: end.getCol()};
+  };
+  for (const node of findNodes(structure, Object.keys(PROGRAM_PARTS))) {
+    const kind = node.get().constructor.name;
+    const at = span(node.getFirstToken?.(), node.getLastToken?.());
+    const tokens = node.getFirstStatement?.()?.getTokens?.() ?? [];
+    const name = (tokens[1]?.getStr() ?? "").toUpperCase();
+    if (name !== "" && at !== undefined) {
+      parts.push({name, type: PROGRAM_PARTS[kind], uri: rangeUri(at)});
+    }
+  }
+  for (const statement of file.getStatements?.() ?? []) {
+    const kind = statement.get?.()?.constructor?.name;
+    if (PROGRAM_EVENTS.includes(kind)) {
+      const at = span(statement.getFirstToken?.(), statement.getLastToken?.());
+      if (at !== undefined) {
+        parts.push({name: statement.concatTokens?.().toUpperCase().replace(/\.$/, "") ?? kind, type: "PROG/PE", uri: rangeUri(at)});
+      }
+    }
+  }
+  return parts;
+}
+
 function findMethods(node, out = []) {
   if (node.get?.()?.constructor?.name === "Method") {
     out.push(node);
@@ -286,6 +345,10 @@ export function structureOf(store, type, name) {
   // the outline provider above from throwing on it.
   if (type === "CLAS") {
     children.push({name: entry.name, type: "CLAS/OCX", uri: "source/main"});
+  }
+  if (type === "PROG" || type === "INCL") {
+    children.push(...programParts(object));
+    children.push({name: entry.name, type: "PROG/PX", uri: "source/main"});
   }
 
   return {name: entry.name, type: ADT_TYPE[type] ?? type, children};
