@@ -508,7 +508,7 @@ ${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.n
 // A type with no evidenced code is emitted without a folder rather than under
 // an invented one: an ungrouped object is visible and slightly untidy, and a
 // wrong DEVC code is a folder a client may refuse to draw at all.
-const TREE_FOLDER = {
+export const TREE_FOLDER = {
   DEVC: ["DEVC/K", "Subpackages"],
   CLAS: ["DEVC/OC", "Classes"],
   INTF: ["DEVC/OI", "Interfaces"],
@@ -520,7 +520,7 @@ const TREE_FOLDER = {
 // Which drawer of the workbench a type belongs in. The earlier OSD response
 // at .local/capture/oracle/osd-adt.jsonl:340 uses source_library and other for
 // this tree; it is evidence of working OSD output, not an A4H measurement.
-const TREE_CATEGORY = {
+export const TREE_CATEGORY = {
   CLAS: "source_library", INTF: "source_library", PROG: "source_library",
   FUGR: "source_library", INCL: "source_library", MSAG: "source_library",
   TABL: "dictionary", DTEL: "dictionary", DOMA: "dictionary",
@@ -535,14 +535,14 @@ const TREE_CATEGORY = {
 // known singular label belongs here instead of leaving the drawer blank.
 // The "???" fallback is in the separate virtual-folders provider and is not
 // caused by an empty label in this package tree.
-const TREE_TYPE_LABEL = {
+export const TREE_TYPE_LABEL = {
   INCL: "Includes", MSAG: "Message Classes",
   TABL: "Database Tables", DTEL: "Data Elements", DOMA: "Domains",
   TTYP: "Table Types", DDLS: "Data Definitions",
   SRVD: "Service Definitions", VIEW: "Views", SHLP: "Search Helps",
 };
 
-const TREE_CATEGORY_LABEL = {
+export const TREE_CATEGORY_LABEL = {
   source_library: "Source Code Library",
   dictionary: "Dictionary",
   other: "Others",

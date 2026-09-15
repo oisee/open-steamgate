@@ -846,6 +846,100 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     });
   });
 
+  // The tree of a cloud project, one request per level, each checked against
+  // the capture line it is modelled on (.local/capture/oracle/a4h-adt.jsonl).
+  // Shapes, not strings: a drawer is an element with these attributes, a
+  // count is a number, a link points where the system's does.
+  describe("virtual folders, the cloud tree", () => {
+    const REQ = '<vfs:virtualFoldersRequest xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders" objectSearchPattern="*">';
+    const pre = (facet, ...values) => `<vfs:preselection facet="${facet}">` +
+      values.map((v) => `<vfs:value>${v}</vfs:value>`).join("") + "</vfs:preselection>";
+    const order = (...facets) => "<vfs:facetorder>" + facets.map((f) => `<vfs:facet>${f}</vfs:facet>`).join("") + "</vfs:facetorder>";
+    const ask = async (...parts) => {
+      const res = await call("/repository/informationsystem/virtualfolders/contents", {
+        method: "POST", headers: {"content-type": "application/xml"}, body: REQ + parts.join("") + "</vfs:virtualFoldersRequest>",
+      });
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      const attrs = (tag) => [...xml.matchAll(new RegExp(`<vfs:${tag} ([^>]*)>`, "g"))]
+        .map((m) => Object.fromEntries([...m[1].matchAll(/(\w+)="([^"]*)"/g)].map((a) => [a[1], a[2]])));
+      return {xml, count: Number(/objectCount="(\d+)"/.exec(xml)[1]), folders: attrs("virtualFolder"), objects: attrs("object")};
+    };
+
+    // a4h-adt.jsonl:44 and :232 — one package selected, package level asked
+    it("opens one package to its subpackages, and to a ..drawer for its own objects", async () => {
+      const {xml, folders, count} = await ask(pre("package", "$STG_SEGW"), order("package", "group", "type"));
+      expect(xml).to.contain('<vfs:preselectionInfo facet="PACKAGE" hasChildrenOfSameFacet="true"/>');
+      const names = folders.map((f) => f.name);
+      expect(names, "the subpackage is a drawer").to.include("$STG_SEGW_DDIC");
+      expect(names, "objects of the package itself sit in a ..drawer, first").to.include("..$STG_SEGW");
+      expect(names[0]).to.equal("..$STG_SEGW");
+      for (const f of folders) {
+        expect(f.facet).to.equal("PACKAGE");
+        expect(f.uri, f.name).to.match(/^\/sap\/bc\/adt\/packages\//);
+        expect(Number(f.counter), f.name).to.be.a("number");
+      }
+      expect(folders.find((f) => f.name === "..$STG_SEGW").text).to.equal("directly assigned objects");
+      // the drawer's link selects the child alone, not the parent and the child
+      expect(xml).to.contain("selection=" + encodeURIComponent("package:$STG_SEGW_DDIC"));
+      expect(count, "objectCount is the subtree, which is what the client shows beside the package")
+        .to.equal(folders.reduce((n, f) => n + Number(f.counter), 0));
+    });
+
+    // a4h-adt.jsonl:231 — several packages selected, package level asked
+    it("opens several packages to themselves, with no preselection info", async () => {
+      const {xml, folders} = await ask(pre("package", "$STG_SEGW", "$STG_GEN"), order("package", "group", "type"));
+      expect(xml).to.not.contain("preselectionInfo");
+      expect(folders.map((f) => f.name)).to.deep.equal(["$STG_SEGW", "$STG_GEN"]);
+      expect(folders[0].hasChildrenOfSameFacet, "$STG_SEGW has a subpackage").to.equal("true");
+    });
+
+    // a4h-adt.jsonl:233 — the direct-only spelling
+    it("reads ..P as the objects assigned to P directly, not its subtree", async () => {
+      const direct = await ask(pre("package", "..$STG_SEGW"), order("group", "type"));
+      const deep = await ask(pre("package", "$STG_SEGW"), order("group", "type"));
+      expect(direct.xml).to.not.contain("preselectionInfo");
+      expect(direct.count).to.be.greaterThan(0);
+      expect(deep.count, "the subtree holds the DDIC subpackage's objects too").to.be.greaterThan(direct.count);
+      const group = direct.folders.find((f) => f.name === "SOURCE_LIBRARY");
+      expect(group, "a group drawer").to.not.equal(undefined);
+      expect(group.facet).to.equal("GROUP");
+      expect(group.displayName).to.equal("Source Code Library");
+    });
+
+    // a4h-adt.jsonl:91 — group and package fixed, type level asked
+    it("names a type drawer the way the workbench does", async () => {
+      const {folders} = await ask(pre("group", "SOURCE_LIBRARY"), pre("package", "$STG_SEGW"), order("type"));
+      const clas = folders.find((f) => f.name === "CLAS");
+      expect(clas, "classes drawer").to.not.equal(undefined);
+      expect(clas.facet).to.equal("TYPE");
+      expect(clas.displayName).to.equal("Classes");
+      expect(Number(clas.counter)).to.be.greaterThan(0);
+      expect(clas.text).to.equal("");
+    });
+
+    // a4h-adt.jsonl:92 — everything fixed, the objects themselves
+    it("lists objects with a description, a type code and no link it cannot serve", async () => {
+      const {objects, count} = await ask(pre("group", "SOURCE_LIBRARY"), pre("package", "$STG_SEGW"), pre("type", "CLAS"), order());
+      expect(objects.length).to.equal(count);
+      expect(objects.length).to.be.greaterThan(0);
+      for (const o of objects) {
+        expect(o.type).to.equal("CLAS/OC");
+        expect(o.expandable).to.equal("true");
+        expect(o.package).to.equal("$STG_SEGW");
+        expect(o.uri).to.match(/^\/sap\/bc\/adt\/oo\/classes\//);
+        expect(o, "vituri points at SAP GUI for HTML, which is not here").to.not.have.property("vituri");
+      }
+    });
+
+    // a4h-adt.jsonl:30 — the released-objects tree, which this façade cannot fill
+    it("answers the api facet empty rather than calling everything released", async () => {
+      const {folders, count} = await ask(pre("api", "USE_IN_CLOUD_DEVELOPMENT"), order("api", "group", "type"));
+      expect(count).to.equal(0);
+      expect(folders).to.deep.equal([]);
+    });
+  });
+
   describe("what the client infers from a shape", () => {
     it("a write without a token is the only 403 the façade gives", async () => {
       const res = await fetch(ADT + "/datapreview/freestyle", {method: "POST", body: "SELECT * FROM zstg_demo"});
