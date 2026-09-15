@@ -1,6 +1,9 @@
 import {expect} from "chai";
 import express from "express";
-import {existsSync, rmSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
@@ -514,5 +517,119 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await (await call("/discovery")).text();
       expect(xml).to.contain('href="/sap/bc/adt/activation"');
     });
+  });
+});
+
+
+describe("tools/adt-facade: create and delete over the wire", () => {
+  let server;
+  let port;
+  let root;
+  let store;
+  let token;
+  let context;
+
+  before(async function () {
+    this.timeout(120000);
+    // a temporary system, so a created object never lands in this repo
+    root = mkdtempSync(join(tmpdir(), "osd-adt-"));
+    mkdirSync(join(root, "src", "demo"), {recursive: true});
+    writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
+    writeFileSync(join(root, "src", "demo", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap>
+</abapGit>
+`);
+    store = new ObjectStore({root, libs: []});
+    const app = express();
+    app.disable("x-powered-by");
+    app.use(express.raw({type: "*/*", limit: "16mb"}));
+    app.use(adtRouter({store, transpileOnActivate: false}).router);
+    await new Promise((resolve) => {
+      server = app.listen(0, resolve);
+      server.keepAliveTimeout = 120000;
+      server.headersTimeout = 125000;
+    });
+    port = server.address().port;
+    const res = await fetch(`http://localhost:${port}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+    token = res.headers.get("x-csrf-token");
+    context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+  });
+
+  after(() => {
+    store.unwatch();
+    server.close();
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  const call = (path, options = {}) => fetch(`http://localhost:${port}/sap/bc/adt${path}`, {
+    ...options,
+    headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token, "x-sap-adt-sessiontype": "stateful", ...(options.headers ?? {})},
+  });
+
+  const createBody = (type, name, description, pkg) => {
+    const roots = {CLAS: "class:abapClass", INTF: "intf:abapInterface", PROG: "program:abapProgram", DDLS: "ddl:ddlSource"};
+    const el = roots[type];
+    const ns = el.split(":")[0];
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<${el} xmlns:${ns}="http://www.sap.com/adt/x" xmlns:adtcore="http://www.sap.com/adt/core"
+  adtcore:description="${description}" adtcore:name="${name}" adtcore:type="${type}" adtcore:responsible="OSD">
+  <adtcore:packageRef adtcore:name="${pkg}"/>
+</${el}>`;
+  };
+
+  it("POST to the class collection creates the object on disk and answers 201 with its URI", async () => {
+    const res = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", "ZCL_MADE_ADT", "made over the wire", "$STG_DEMO")});
+    expect(res.status, await res.text().catch(() => "")).to.equal(201);
+    expect(res.headers.get("location")).to.equal("/sap/bc/adt/oo/classes/zcl_made_adt");
+    // it is on disk, in the folder of its package, with the header beside it
+    expect(existsSync(join(root, "src/demo/zcl_made_adt.clas.abap"))).to.equal(true);
+    expect(readFileSync(join(root, "src/demo/zcl_made_adt.clas.xml"), "utf8")).to.contain("made over the wire");
+    // and the façade now reads it back, inactive until activated
+    const doc = await call("/oo/classes/zcl_made_adt");
+    expect(doc.status).to.equal(200);
+    expect(await doc.text()).to.contain('adtcore:name="ZCL_MADE_ADT"');
+  });
+
+  it("a create for a package that is not there is a refusal a client can read", async () => {
+    const res = await call("/oo/interfaces", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("INTF", "ZIF_NOWHERE", "x", "$NOPE")});
+    expect(res.status).to.equal(404);
+    expect(await res.text()).to.contain("ExceptionResourceNotFound");
+  });
+
+  it("a second create of the same object is a conflict", async () => {
+    await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});
+    const again = await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});
+    expect(again.status).to.equal(409);
+    expect(await again.text()).to.contain("ExceptionResourceIsModified");
+  });
+
+  it("DELETE on the object removes it and its header, and a second delete is a 404", async () => {
+    await call("/ddic/ddl/sources", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("DDLS", "ZOSD_MADE_CDS", "a view", "$STG_DEMO")});
+    expect(existsSync(join(root, "src/demo/zosd_made_cds.ddls.asddls"))).to.equal(true);
+    const gone = await call("/ddic/ddl/sources/zosd_made_cds", {method: "DELETE"});
+    expect(gone.status).to.equal(200);
+    expect(existsSync(join(root, "src/demo/zosd_made_cds.ddls.asddls"))).to.equal(false);
+    expect(existsSync(join(root, "src/demo/zosd_made_cds.ddls.xml")), "the header went too").to.equal(false);
+    const twice = await call("/ddic/ddl/sources/zosd_made_cds", {method: "DELETE"});
+    expect(twice.status).to.equal(404);
+  });
+
+  it("what abapGit writes on disk, the façade serves without a restart", async () => {
+    expect((await call("/oo/interfaces/zif_from_git")).status).to.equal(404);
+    writeFileSync(join(root, "src/demo/zif_from_git.intf.abap"), "INTERFACE zif_from_git PUBLIC.\nENDINTERFACE.\n");
+    writeFileSync(join(root, "src/demo/zif_from_git.intf.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_INTF" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><VSEOINTERF><CLSNAME>ZIF_FROM_GIT</CLSNAME><LANGU>E</LANGU><DESCRIPT>pulled</DESCRIPT><EXPOSURE>2</EXPOSURE><STATE>1</STATE><UNICODE>X</UNICODE></VSEOINTERF></asx:values></asx:abap>
+</abapGit>
+`);
+    let status = 404;
+    for (let i = 0; i < 50 && status === 404; i++) {
+      status = (await call("/oo/interfaces/zif_from_git")).status;
+      if (status === 404) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    expect(status, "the watcher noticed the new files").to.equal(200);
   });
 });

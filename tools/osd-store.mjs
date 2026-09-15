@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -349,6 +349,107 @@ export class ObjectStore {
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
 
+  // A new object, in the folder of the package it is asked for. The two
+  // files are the ones abapGit would write: the source and the header
+  // beside it, so a repository made here is one abapGit can pull, and an
+  // object made by abapGit is one this finds. The source is a skeleton the
+  // client overwrites on its first save, which is what every ADT client
+  // does after a create; a caller that has the source hands it in.
+  //
+  // The folder comes from the package and not the other way round: a
+  // package here IS a folder (#packagesOf), so an object of $ZOSD_TEST_SRC
+  // lands in src/zosd_test/src/, and a new package is a new folder under
+  // its parent's, named after the last link of its name. A package whose
+  // name does not continue its parent's cannot be a folder, and is refused
+  // rather than misfiled.
+  create(type, name, options = {}) {
+    const meta = TYPES[type];
+    if (meta === undefined || CREATABLE[type] === undefined) {
+      throw new NotSupported(`creating an object of type ${type}`);
+    }
+    const upper = String(name).toUpperCase();
+    if (this.find(type, upper) !== undefined) {
+      throw new Conflict(type, upper);
+    }
+    const parent = String(options.package ?? "").toUpperCase();
+    const home = this.find("DEVC", parent);
+    if (parent === "" || home === undefined) {
+      throw new NotFound("DEVC", parent === "" ? "(no package named)" : parent);
+    }
+    if (home.writable === false) {
+      throw new ReadOnly("DEVC", parent);
+    }
+    const folder = dirname(home.file);
+    const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
+    const description = String(options.description ?? "");
+    let file;
+    if (type === "DEVC") {
+      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+        throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
+      }
+      file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
+    } else {
+      file = join(folder, fileOf(upper) + meta.ext);
+    }
+    if (existsSync(join(this.root, file))) {
+      throw new Conflict(type, upper);
+    }
+    mkdirSync(join(this.root, dirname(file)), {recursive: true});
+    const made = CREATABLE[type](upper, description, options.source);
+    for (const [suffix, content] of Object.entries(made)) {
+      const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
+      writeFileSync(join(this.root, target), content);
+    }
+    const packages = this.#packagesOf(file, root);
+    const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
+                   imported: root.imported === true, description,
+                   package: type === "DEVC" ? parent : packages[packages.length - 1], packages};
+    this.#entries().set(`${type} ${upper}`, entry);
+    if (type !== "DEVC") {
+      this.inactive.add(`${type} ${upper}`);
+    }
+    this.#forget();
+    return {...entry, ...this.stateOf(entry), created: true};
+  }
+
+  // The disk is the other editor. A file that appears, changes or goes
+  // under a writable root (a git checkout, an abapGit pull, an editor that
+  // is not ADT) is noticed here, and the next request rebuilds the index
+  // and the registry rather than answering from what was true at start.
+  // Coarse on purpose: any change forgets everything, because the walk is
+  // milliseconds and the parse is what the next check pays anyway.
+  // persistent:false so a store in a test does not keep the process alive.
+  watch() {
+    if (this.watchers !== undefined) {
+      return this;
+    }
+    this.watchers = [];
+    for (const root of this.roots.filter((r) => r.writable)) {
+      try {
+        const watcher = watch(join(this.root, root.path), {recursive: true, persistent: false}, (event, file) => {
+          if (file === undefined || /\.(abap|xml|asddls|json)$/.test(file) === false) {
+            return;
+          }
+          this.index = undefined;
+          this.#forget();
+        });
+        watcher.on("error", () => {});
+        this.watchers.push(watcher);
+      } catch {
+        // a file system without recursive watching answers as before: from
+        // the index built at start
+      }
+    }
+    return this;
+  }
+
+  unwatch() {
+    for (const w of this.watchers ?? []) {
+      w.close();
+    }
+    this.watchers = undefined;
+  }
+
   delete(type, name) {
     const entry = this.find(type, name);
     if (entry === undefined) {
@@ -357,15 +458,30 @@ export class ObjectStore {
     if (entry.writable === false) {
       throw new ReadOnly(type, name);
     }
-    for (const suffix of [undefined, ...Object.values(INCLUDES)]) {
-      const file = suffix === undefined ? entry.file : entry.file.replace(/\.clas\.abap$/, suffix);
-      if (file !== entry.file || suffix === undefined) {
-        if (existsSync(join(this.root, file))) {
-          unlinkSync(join(this.root, file));
-        }
+    const meta = TYPES[type];
+    const files = [entry.file];
+    if (type === "CLAS") {
+      files.push(...Object.values(INCLUDES).map((suffix) => entry.file.replace(/\.clas\.abap$/, suffix)));
+    }
+    if (type === "DEVC") {
+      // a package goes only once it is empty: its objects are not deleted
+      // by implication, the way a real system refuses to delete a package
+      // that still has content
+      const inside = [...this.#entries().values()].filter((e) => e.type !== "DEVC" ? e.package === entry.name : e.package === entry.name && e.name !== entry.name);
+      if (inside.length > 0) {
+        throw new NotSupported(`deleting ${entry.name} while it still holds ${inside.length} object(s)`);
+      }
+    } else if (meta.ext.endsWith(".abap") || meta.ext.endsWith(".asddls")) {
+      // the abapGit header beside the source
+      files.push(entry.file.slice(0, -meta.ext.length) + meta.ext.replace(/\.(abap|asddls)$/, ".xml"));
+    }
+    for (const file of files) {
+      if (existsSync(join(this.root, file))) {
+        unlinkSync(join(this.root, file));
       }
     }
     this.#entries().delete(`${entry.type} ${entry.name}`);
+    this.inactive.delete(`${entry.type} ${entry.name}`);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -806,6 +922,96 @@ export class ObjectStore {
       });
     });
     return this.building;
+  }
+}
+
+// what a create writes, per type: the abapGit header and a source skeleton
+// (the client's first save replaces the skeleton). Header fields are the
+// ones abapGit serializes for a fresh object of the kind.
+const abapGitHeader = (serializer, inner) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="${serializer}" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+${inner}
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+const xmlText = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const textPool = (text) => text === "" ? "" : `
+   <TPOOL>
+    <item>
+     <ID>R</ID>
+     <ENTRY>${xmlText(text)}</ENTRY>
+     <LENGTH>${String(text).length}</LENGTH>
+    </item>
+   </TPOOL>`;
+const CREATABLE = {
+  CLAS: (name, text, source) => ({
+    ".clas.abap": source ?? `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\nENDCLASS.\n\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\nENDCLASS.\n`,
+    ".clas.xml": abapGitHeader("LCL_OBJECT_CLAS", `   <VSEOCLASS>
+    <CLSNAME>${name}</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>${xmlText(text)}</DESCRIPT>
+    <STATE>1</STATE>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>`),
+  }),
+  INTF: (name, text, source) => ({
+    ".intf.abap": source ?? `INTERFACE ${name.toLowerCase()} PUBLIC.\nENDINTERFACE.\n`,
+    ".intf.xml": abapGitHeader("LCL_OBJECT_INTF", `   <VSEOINTERF>
+    <CLSNAME>${name}</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>${xmlText(text)}</DESCRIPT>
+    <EXPOSURE>2</EXPOSURE>
+    <STATE>1</STATE>
+    <UNICODE>X</UNICODE>
+   </VSEOINTERF>`),
+  }),
+  PROG: (name, text, source) => ({
+    ".prog.abap": source ?? `REPORT ${name.toLowerCase()}.\n`,
+    ".prog.xml": abapGitHeader("LCL_OBJECT_PROG", `   <PROGDIR>
+    <NAME>${name}</NAME>
+    <DBAPL>S</DBAPL>
+    <SUBC>1</SUBC>
+    <FIXPT>X</FIXPT>
+    <LDBNAME>D$S</LDBNAME>
+    <UCCHECK>X</UCCHECK>
+   </PROGDIR>${textPool(text)}`),
+  }),
+  INCL: (name, text, source) => ({
+    ".prog.abap": source ?? `*&---------------------------------------------------------------------*\n*& Include ${name}\n*&---------------------------------------------------------------------*\n`,
+    ".prog.xml": abapGitHeader("LCL_OBJECT_PROG", `   <PROGDIR>
+    <NAME>${name}</NAME>
+    <SUBC>I</SUBC>
+    <APPL>S</APPL>
+    <FIXPT>X</FIXPT>
+    <UCCHECK>X</UCCHECK>
+   </PROGDIR>${textPool(text)}`),
+  }),
+  DDLS: (name, text, source) => ({
+    ".ddls.asddls": source ?? `@EndUserText.label: '${String(text).replaceAll("'", "''")}'\ndefine view entity ${name} as select from zosd_test_item\n{\n  key item_id\n}\n`,
+    ".ddls.xml": abapGitHeader("LCL_OBJECT_DDLS", `   <DDLS>
+    <DDLNAME>${name}</DDLNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <DDTEXT>${xmlText(text)}</DDTEXT>
+   </DDLS>`),
+  }),
+  DEVC: (name, text) => ({
+    "package.devc.xml": abapGitHeader("LCL_OBJECT_DEVC", `   <DEVC>
+    <CTEXT>${xmlText(text)}</CTEXT>
+   </DEVC>`),
+  }),
+};
+
+export class Conflict extends Error {
+  constructor(type, name) {
+    super(`${type} ${name} already exists`);
+    this.code = "CONFLICT";
+    this.objectType = type;
+    this.objectName = name;
   }
 }
 

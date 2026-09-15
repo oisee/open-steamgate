@@ -25,7 +25,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
-import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
+import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
@@ -119,6 +119,14 @@ const COMPATIBILITY = {
   "COM.SAP.ADT.ACTIVATION": ["activate", "check"],
   "COM.SAP.ADT.CORE": ["checkruns", "checkrunsVendorContentType", "xmlFormat", "xmlNameSpace"],
   "COM.SAP.ADT.DDIC": ["ddic"],
+  // The DDL editor asks for DDLSOURCES/ddlSources before it opens anything
+  // (cds.ddl.ui!DdlSourceEditor#getFeatureNamespaceForInitialCheck), and a
+  // double click on a CDS view sent no request at all while it was absent.
+  // ddlParserV1 is deliberately not promised: it would make the client
+  // fetch the system's own DDL grammar, which is not served here; without
+  // the promise the client parses with its built-in version.
+  "COM.SAP.ADT.DDIC.DDLSOURCES": ["ddlSources"],
+  "COM.SAP.ADT.DDIC.VIEWS": ["views"],
   "COM.SAP.ADT.FUNCTIONS": ["fmodulesSignatureEditable", "functionGroupIncludes",
     "functionGroupIncludesXmlSchemaConform", "functionGroups", "functionModules",
     "functionModulesXmlSchemaConform", "functions"],
@@ -454,6 +462,11 @@ const STARTED = new Date().toISOString();
 
 export function adtRouter(options = {}) {
   const store = options.store ?? new ObjectStore({root: options.root});
+  if (options.watch !== false && typeof store.watch === "function") {
+    // the disk is the other editor: see ObjectStore#watch. A host may hand
+    // in a stand-in store that does not watch, and that is not an error
+    store.watch();
+  }
   const sessions = options.sessions ?? new Sessions();
   const data = options.data ?? store.data();
   const router = express.Router();
@@ -1270,6 +1283,49 @@ export function adtRouter(options = {}) {
   // sequencing bugs look like.
   const collections = SOURCE_TYPES.map(({type, adt}) => [type, adt]);
 
+  // CREATE is a POST on the collection, DELETE a DELETE on the object.
+  // The create body is the object's own document with nothing in it but a
+  // name, a description and the package it goes to (vsp!crud.go
+  // buildCreateObjectBody; Eclipse's wizards send the same); the answer is
+  // 201 with the object's URI in Location, and the client's next move is
+  // the ordinary lock / PUT / activate, which is why a create writes a
+  // skeleton and not a source. A package is created the same way under
+  // /packages, with its parent in pack:superPackage. Function groups and
+  // modules are not created here yet: a group is a folder of includes with
+  // a header of its own, and nothing has asked for one.
+  const attribute = (xml, element, name) => {
+    const scope = element === undefined ? xml : (new RegExp(`<${element}\\b[^>]*>`).exec(xml)?.[0] ?? "");
+    return new RegExp(`\\b${name}="([^"]*)"`).exec(scope)?.[1];
+  };
+  for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
+    router.post(`${BASE}/${adt}`, async (req, res) => {
+      const body = (await rawBody(req)).toString("utf8");
+      answer(res, () => {
+        const name = attribute(body, undefined, "adtcore:name");
+        if (name === undefined || name === "") {
+          res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "the create body names no object"));
+          return;
+        }
+        const home = type === "DEVC"
+          ? attribute(body, "pack:superPackage", "adtcore:name")
+          : attribute(body, "adtcore:packageRef", "adtcore:name") ?? attribute(body, "adtcore:packageRef", "adtcore:packageName");
+        const made = store.create(type, name, {
+          description: attribute(body, undefined, "adtcore:description") ?? "",
+          package: home ?? "",
+        });
+        res.status(201)
+          .set("Location", `${BASE}/${adt}/${encodeURIComponent(made.name.toLowerCase())}`)
+          .end();
+      });
+    });
+    router.delete(`${BASE}/${adt}/:name`, (req, res) => {
+      answer(res, () => {
+        store.delete(type, decodeURIComponent(req.params.name));
+        res.status(200).end();
+      });
+    });
+  }
+
   for (const {type, adt} of SOURCE_TYPES) {
     // LOCK and UNLOCK arrive on the object's own URI, told apart by _action
     router.post(`${BASE}/${adt}/:name`, (req, res) => {
@@ -1866,6 +1922,10 @@ function answered(res, body, record) {
       refuse(res, 405, "ExceptionResourceNoAccess", e.message);
     } else if (e instanceof NotSupported) {
       refuse(res, 501, "ExceptionResourceNoAccess", e.message);
+    } else if (e instanceof Conflict) {
+      // the id is the one the client shows for "already exists" on a
+      // save over a changed object; there is no closer one in its vocabulary
+      refuse(res, 409, "ExceptionResourceIsModified", e.message);
     } else {
       refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e),
         {namespace: "org.open-steamgate.osd"});
