@@ -52,14 +52,31 @@ A.3  Data preview                                                        [S]
      ├─ /sap/bc/adt/datapreview/ddic?… and /datapreview/ddic/<T>/metadata
      └─ the SADL runtime already does the query half; this is the wrapper
 
-A.4  The metadata bootstrap, proven live                                 [R]
-     ├─ RFC_GET_FUNCTION_INTERFACE + DDIF_FIELDINFO_GET are implemented and
-     │  shape-verified offline against a capture, but have NEVER run live:
-     │  the Eclipse that tested had them cached
-     ├─ do: a fresh workspace / new destination, watch the two calls land
-     └─ open question it settles: does the client accept uncompressed 0303
-        DFIES rows? The system compresses large tables as 0305 (SAP-LZH) and
-        there is no LZH *writer* on this side — see C.3, they share it
+A.4  The metadata bootstrap, proven live                            [R] DONE
+     ├─ was: implemented and shape-verified offline, never run live, because
+     │  the Eclipse that tested it had the answers cached
+     ├─ done 2026-09-16 by pointing a plain RFC client (the `rfc` CLI in
+     │  open-rfc-go) at the bridge: `rfc describe SADT_REST_RFC_ENDPOINT`
+     │  returns the interface with both parameters typed
+     ├─ it found a defect on the way: the gateway header's communication and
+     │  connection index were constant. Eclipse never looks, an RFC client
+     │  does, and refused every reply. A reply carries communication index
+     │  zero and the connection index the call came in on — echoing the
+     │  request's 0xffff "unset" is equally wrong
+     ├─ and a gap: an RFC client resolves structures with RFC_METADATA_GET
+     │  then RFC_GET_STRUCTURE_DEFINITION, not DDIF_FIELDINFO_GET. The
+     │  latter is now answered from the same dictionary
+     └─ STILL OPEN, and still shared with C.3: whether a client accepts
+        uncompressed 0303 rows for a LARGE table. Both tables exercised so
+        far are small enough that the system sends them uncompressed too
+
+A.4b An RFC client that can CALL it, not only describe it                [R]
+     ├─ `rfc call SADT_REST_RFC_ENDPOINT` stops in the client's own classic
+     │  structure codec: "classic RFC type v is not implemented"
+     ├─ this function's parameters are recursive and travel as BASXML; the
+     │  client has that codec (internal/xrfc) but `rfc call` does not use it
+     └─ the bridge is not in the way — this is client work, and it would make
+        the bridge drivable from a script as well as from Eclipse
 
 A.5  Stateful session affinity across parallel connections               [R]
      ├─ Eclipse opens many RFC connections at once; each gets its own cookie
