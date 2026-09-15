@@ -173,28 +173,35 @@ C.1  Decide the smallest honest goal                                     [A]
      │  carrying one message, and stays connected long enough to read it
      └─ non-goal, explicitly: a usable GUI, transactions, or input handling
 
-C.2  Read the oracle properly                                           [R]
-     ├─ the capture decodes today only as far as "these frames are LZH"
-     ├─ do: decompress each, and write down the DIAG item grammar the way
-     │  bxml was written down — token, length, meaning, measured
-     └─ deliverable: docs/diag-notes.md, protocol facts only
+C.2  Read the oracle properly                                       [R] DONE
+     ├─ done 2026-09-16: docs/diag-notes.md. Frame = 8-byte header + body,
+     │  body optionally SAP-LZH (flag in the header; setup frames are
+     │  UNCOMPRESSED, so a stub needs no writer). Items are (type, id, sid,
+     │  len, value); 0x10 APPL / 0x12 APPL4 / 0x0c end. The screen chrome
+     │  (title, menu, geometry, session/status) is mapped
+     ├─ the SAPGUI capability shipped (9d232e5) made SAP GUI actually connect:
+     │  it sends an NI route request carrying _NAVIGATION=…;D_WB_ACTION=EXECUTE
+     │  and waits for a screen. diag-catch records it and never replies
+     └─ ONE unknown left: the DYNT/DYNT_ATOM field-item layout, the text
+        *in* a screen. That is the gap between reading a screen and writing
+        one, and it is what C.4 needs
 
-C.3  The LZH *writer* question                                           [A]
-     ├─ we can DECODE SAP-LZH (vsp pkg/sapcompress); we cannot WRITE it,
-     │  and the writer lives in a private sibling
-     ├─ so: may a DIAG response be sent UNCOMPRESSED? If yes, the whole
-     │  side quest needs no writer and C.4 is small
-     ├─ if no: either the private writer comes across, or a literal/"store"
-     │  mode is built (LZ formats usually have one; output is longer than
-     │  input but formally correct, and throughput does not matter here)
-     └─ this same question gates A.4, which is the better place to answer
-        it because the metadata tables are smaller and already understood
+C.3  The LZH *writer* question                                     [A] ANSWERED
+     └─ answered by the measurement in C.2: a DIAG setup frame is sent
+        UNCOMPRESSED (the header's compress flag is zero), so a stub needs
+        no LZH writer at all. The writer stays a want for parity with a real
+        system's traffic, not a blocker for C.4
 
 C.4  A dispatcher listener that says one thing                           [R]
-     ├─ accept on 32NN, answer the route request and the handshake, push
-     │  one screen, hold the connection
-     └─ "Sorry — the guru meditates" as the message, which is the correct
-        amount of ambition for a first frame
+     ├─ accept on 32NN, answer the NI route request, emit ONE uncompressed
+     │  DIAG frame: a title, a screen geometry, one DYNT_ATOM with the text,
+     │  the end marker; hold the connection
+     ├─ blocked only on the DYNT_ATOM layout (C.2's one remaining unknown):
+     │  measure it from the oracle's screen frames, or lift the screen
+     │  writer from the private DIAG sibling (layers-we-own.md: ready there)
+     ├─ recorder diag-catch already stands on 3202/3203; the reply is the work
+     └─ "Sorry — the guru meditates" as the message, the right ambition for
+        a first frame
 
 C.5  Then, and only then, decide whether it goes further                 [A]
      └─ a real DIAG server is a large thing; this track is allowed to stop
