@@ -179,6 +179,23 @@ ENDCLASS.
     expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_OSD_PROBE"]);
   });
 
+  it("a new object joins the package tree without rebuilding the index", () => {
+    expect(store.packages()).to.deep.equal([]);
+
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+
+    const packages = store.packages();
+    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD"]);
+    expect(packages.find((pkg) => pkg.name === "$STG_OSD").objects).to.equal(1);
+    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$STG"]);
+    expect(store.package("$STG_OSD").objects).to.deep.include({
+      type: "CLAS",
+      name: "ZCL_OSD_PROBE",
+      library: false,
+      writable: true,
+    });
+  });
+
   it("writing again replaces the source, and the includes go beside it", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("hello", "goodbye"));

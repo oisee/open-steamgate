@@ -1383,11 +1383,12 @@ export function adtRouter(options = {}) {
 
   // the tree, one level at a time, which is how a client walks it
   advertise("repository/nodestructure");
-  router.post(`${BASE}/repository/nodestructure`, (req, res) => {
+  router.post(`${BASE}/repository/nodestructure`, async (req, res) => {
+    const body = await rawBody(req);
     answer(res, () => {
       const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
       const parentType = req.query.parent_type ?? req.query.parentType;
-      const nodeKeys = [...String(req.body ?? "").matchAll(/<TV_NODEKEY>([^<]+)<\/TV_NODEKEY>/g)]
+      const nodeKeys = [...body.toString("utf8").matchAll(/<TV_NODEKEY>([^<]+)<\/TV_NODEKEY>/g)]
         .map((match) => match[1]).filter((key) => key !== "000000");
       // Answered in the type the client asked for, which is not the one this
       // resource is named after.
@@ -1546,7 +1547,7 @@ function facadeBuildStamp() {
   }
   const here = dirname(fileURLToPath(import.meta.url));
   const digest = createHash("sha256");
-  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "osd-store.mjs"]) {
+  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs"]) {
     try {
       digest.update(readFileSync(join(here, file)));
     } catch {

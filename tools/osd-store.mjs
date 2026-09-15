@@ -290,8 +290,9 @@ export class ObjectStore {
     if (entry === undefined) {
       const root = this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
+      const packages = this.#packagesOf(file, root);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,
-               imported: root.imported === true, package: this.#packagesOf(file, root).pop()};
+               imported: root.imported === true, package: packages[packages.length - 1], packages};
       this.#entries().set(`${entry.type} ${entry.name}`, entry);
     }
     let file = entry.file;

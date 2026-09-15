@@ -1,6 +1,9 @@
 import {expect} from "chai";
+import express from "express";
 import {existsSync} from "node:fs";
 import {startServer} from "./start.mjs";
+import {nodeStructureDocument} from "../tools/adt-documents.mjs";
+import {adtRouter} from "../tools/adt-facade.mjs";
 
 // The façade against the real server, the way a client meets it: the same
 // listener that serves OData also serves /sap/bc/adt/**, which is the whole
@@ -697,7 +700,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.not.contain("<NODE_ID>");
     });
 
-    it("labels an ungrouped DDIC type instead of rendering it as question marks", async () => {
+    it("labels an ungrouped DDIC type instead of leaving its drawer blank", async () => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" +
         encodeURIComponent("$EXPRESS_ICF_SHIM_DDIC"), {method: "POST"})).text();
       expect(xml).to.contain("<OBJECT_TYPE>DTEL/DE</OBJECT_TYPE>");
@@ -705,6 +708,13 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<OBJECT_TYPE_LABEL>Data Elements</OBJECT_TYPE_LABEL>");
       expect(xml).to.contain("<CATEGORY>dictionary</CATEGORY>");
       expect(xml).to.contain("<CATEGORY_LABEL>Dictionary</CATEGORY_LABEL>");
+    });
+
+    it("does not expose an unknown object-type code as a human label", () => {
+      const xml = nodeStructureDocument([{type: "UNKNOWN/X", name: "ONE", uri: "/objects/one"}]);
+      expect(xml).to.contain("<OBJECT_TYPE>UNKNOWN/X</OBJECT_TYPE>");
+      expect(xml).to.contain("<OBJECT_TYPE_LABEL/>");
+      expect(xml).to.not.contain("<OBJECT_TYPE_LABEL>UNKNOWN</OBJECT_TYPE_LABEL>");
     });
 
     it("returns only objects selected by a virtual tree node key", async () => {
@@ -846,5 +856,45 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
       expect(res.status).to.equal(200);
     });
+  });
+});
+
+describe("tools/adt-facade: a host without a body parser", () => {
+  it("still reads the node key that selects a lazy tree drawer", async () => {
+    const store = {
+      package: () => ({
+        name: "$TEST", subpackages: [], objects: [
+          {type: "CLAS", name: "ZCL_ONE", library: false},
+          {type: "INTF", name: "ZIF_TWO", library: false},
+        ],
+      }),
+    };
+    const app = express();
+    app.use(adtRouter({store, data: {}, logMisses: false}).router);
+    const server = await new Promise((resolve) => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+      const login = await fetch(base + "/core/discovery", {headers: {"x-csrf-token": "fetch"}});
+      const token = login.headers.get("x-csrf-token");
+      const cookie = (login.headers.getSetCookie?.() ?? [login.headers.get("set-cookie")])
+        .filter(Boolean).map((value) => value.split(";", 1)[0]).join("; ");
+      const path = base + "/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TEST";
+      const initial = await (await fetch(path, {method: "POST", headers: {"x-csrf-token": token, cookie}})).text();
+      const classType = /<SEU_ADT_OBJECT_TYPE_INFO><OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>[\s\S]*?<NODE_ID>([^<]+)<\/NODE_ID>/.exec(initial)?.[1];
+      expect(classType).to.match(/^\d{6}$/);
+
+      const selected = await (await fetch(path, {
+        method: "POST",
+        headers: {"x-csrf-token": token, cookie, "content-type": "application/vnd.sap.as+xml"},
+        body: `<asx:abap><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
+      })).text();
+      expect(selected).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
+      expect(selected).to.not.contain("<OBJECT_TYPE>INTF/OI</OBJECT_TYPE>");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

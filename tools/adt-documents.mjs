@@ -276,9 +276,10 @@ export function classDocument(object, options = {}) {
   // Relative, as the real system writes them, and that is the whole of why a
   // class would not open. A client resolves these against the object's own
   // address; handed an absolute path it resolves to somewhere else or to
-  // nothing. Measured: A4H's main include is sourceUri="source/main" and its
-  // structure link is href="objectstructure", both relative, and there is no
-  // plain source link on the root at all — the main source is an *include*,
+  // nothing. A4H's captured class document has sourceUri="source/main" and
+  // href="objectstructure", both relative
+  // (.local/capture/oracle/a4h-adt.jsonl:108), and no plain source link on the
+  // root at all — the main source is an *include*,
   // which is the part that is not obvious.
   const link = (href, rel, type, title) =>
     `  <atom:link href="${xmlEscape(href)}" rel="${xmlEscape(rel)}"` +
@@ -487,8 +488,9 @@ ${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.n
 // asks for a package and gets its subpackages and its objects, each with the
 // URI to ask about next.
 //
-// Measured against A4H on 2026-09-14, which corrects the note that used to
-// stand here saying the shape was unconfirmed.
+// This shape is preserved from an earlier working OSD response
+// (.local/capture/oracle/osd-adt.jsonl:340), not measured from A4H. It
+// corrects the note that used to stand here saying the shape was unconfirmed.
 //
 // The document has three tables, and this used to send one. TREE_CONTENT
 // alone is why package contents did not appear: the objects were all there
@@ -502,10 +504,10 @@ ${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.n
 // structure, which is why sending the objects by themselves produced a
 // package that looked empty rather than one that looked wrong.
 //
-// The folder codes below are the ones seen on a real system. A type with no
-// measured code is emitted without a folder rather than under an invented
-// one: an ungrouped object is visible and slightly untidy, and a wrong DEVC
-// code is a folder a client may refuse to draw at all.
+// The folder codes below are the ones retained in that earlier OSD response.
+// A type with no evidenced code is emitted without a folder rather than under
+// an invented one: an ungrouped object is visible and slightly untidy, and a
+// wrong DEVC code is a folder a client may refuse to draw at all.
 const TREE_FOLDER = {
   DEVC: ["DEVC/K", "Subpackages"],
   CLAS: ["DEVC/OC", "Classes"],
@@ -515,8 +517,9 @@ const TREE_FOLDER = {
   TRAN: ["DEVC/T", "Transactions"],
 };
 
-// Which drawer of the workbench a type belongs in. Measured: source_library
-// and other are the two a package of ours can land in.
+// Which drawer of the workbench a type belongs in. The earlier OSD response
+// at .local/capture/oracle/osd-adt.jsonl:340 uses source_library and other for
+// this tree; it is evidence of working OSD output, not an A4H measurement.
 const TREE_CATEGORY = {
   CLAS: "source_library", INTF: "source_library", PROG: "source_library",
   FUGR: "source_library", INCL: "source_library", MSAG: "source_library",
@@ -525,10 +528,13 @@ const TREE_CATEGORY = {
   VIEW: "dictionary", SHLP: "dictionary",
 };
 
-// A measured DEVC/xx grouping node supplies the visible plural label for the
-// types that have one. Types without such a node must label themselves: an
-// empty OBJECT_TYPE_LABEL is rendered by Eclipse as "???" even though the
-// global type registry knows the type.
+// An earlier OSD response, not an A4H measurement, shows DEVC/xx grouping
+// nodes supplying these visible labels
+// (.local/capture/oracle/osd-adt.jsonl:340). For an ungrouped type, Eclipse's
+// AbapRepositoryTypeFolderNode returns OBJECT_TYPE_LABEL unchanged, so a
+// known singular label belongs here instead of leaving the drawer blank.
+// The "???" fallback is in the separate virtual-folders provider and is not
+// caused by an empty label in this package tree.
 const TREE_TYPE_LABEL = {
   INCL: "Includes", MSAG: "Message Classes",
   TABL: "Database Tables", DTEL: "Data Elements", DOMA: "Domains",
@@ -569,7 +575,7 @@ export function nodeStructureDocument(nodes, options = {}) {
     const typeNode = id();
     kindByNode.set(typeNode, kind);
     objectTypes.push({type: typeOf, category,
-      label: options.leaf === true ? "" : folder === undefined ? (TREE_TYPE_LABEL[kind] ?? kind) : "",
+      label: options.leaf === true ? "" : folder === undefined ? (TREE_TYPE_LABEL[kind] ?? "") : "",
       node: typeNode});
     if (folder !== undefined) {
       const node = id();
@@ -584,11 +590,12 @@ export function nodeStructureDocument(nodes, options = {}) {
       value === "" ? `<${name}/>` : `<${name}>${xmlEscape(String(value))}</${name}>`).join("") +
     "</SEU_ADT_REPOSITORY_OBJ_NODE>";
 
-  // The DEVC root is not a package and has no virtual drawers. A measured
-  // working response lists the packages directly and omits CATEGORIES,
-  // OBJECT_TYPES and NODE_ID altogether. Adding a synthetic "Subpackages"
-  // type node here makes Eclipse bind every displayed package to the first
-  // DEVC/K object, so clicking $STG asks the server for an unrelated sibling.
+  // The DEVC root is not a package and has no virtual drawers. An earlier
+  // working OSD response, not an A4H measurement, lists packages directly
+  // and omits CATEGORIES, OBJECT_TYPES and NODE_ID
+  // (.local/capture/oracle/cloud-adt.jsonl:132). Adding a synthetic
+  // "Subpackages" type node here makes Eclipse bind every displayed package
+  // to the first DEVC/K object, so clicking $STG asks for another sibling.
   if (options.flat === true) {
     const flatRow = (n) => row({
       OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name,
@@ -608,9 +615,10 @@ ${nodes.map(flatRow).join("\n")}
   // answer. On expansion Eclipse asks for one or several of them. Repeating
   // the complete package makes every drawer recursively contain itself and
   // leaves the UI at "Loading repository tree...". A selected drawer gets
-  // only its concrete objects. A measured A4H leaf still carries category
-  // and type metadata, but no virtual folder row; its node keys are local to
-  // this new answer.
+  // only its concrete objects. An earlier OSD leaf response, not an A4H
+  // measurement, still carries category and type metadata but no virtual
+  // folder row; its node keys are local to this new answer
+  // (.local/capture/oracle/osd-adt.jsonl:399).
   if ((options.nodeKeys?.length ?? 0) > 0) {
     const kinds = new Set(options.nodeKeys.map((node) => kindByNode.get(node)).filter(Boolean));
     return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {leaf: true});
@@ -766,12 +774,11 @@ function classNodesOf(store, name) {
 // as much as the messages: a client reads "processed" as "this ran", and a
 // report that could not run must not look like a report that found nothing.
 export function checkReportDocument(reports) {
-  // position and text are both attributes, which is the shape real ADT emits
-  // and the shape a client reads: a message whose text is a child element
-  // arrives as a finding with no text, which is worse than no finding at all.
-  // The fragment on the URI says the position a second time and is what a
-  // person following the link lands on.
-  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:line="${issue.line ?? 1}" chkrun:column="${issue.column ?? 1}" chkrun:category="${xmlEscape(issue.rule ?? "syntax")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
+  // A4H puts the message text in shortText and the position only in the URI
+  // fragment; it emits no line, column or category attributes
+  // (.local/capture/oracle/a4h-adt.jsonl:154). A message whose text is a
+  // child element reaches the client as a finding with no words in it.
+  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
 
   const report = (r) => `  <chkrun:checkReport chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
     <chkrun:checkMessageList>

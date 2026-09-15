@@ -226,13 +226,14 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await res.text();
       expect(xml).to.contain("<chkrun:checkMessage ");
       expect(xml).to.contain('chkrun:type="E"');
-      // a client reads the severity, the position and the text as attributes,
-      // which is where real ADT puts them; text in a child element reaches a
-      // client as a finding with no words in it
-      expect(xml).to.match(/chkrun:line="\d+"/);
-      expect(xml).to.match(/chkrun:column="\d+"/);
+      // A4H puts severity and text in attributes, and the position only in
+      // the URI fragment; text in a child element reaches a client as a
+      // finding with no words in it.
       expect(xml).to.match(/chkrun:shortText="[^"]+"/);
       expect(xml).to.match(/chkrun:uri="[^"]+#start=\d+,\d+"/);
+      expect(xml).to.not.contain("chkrun:line=");
+      expect(xml).to.not.contain("chkrun:column=");
+      expect(xml).to.not.contain("chkrun:category=");
       expect(xml).to.not.contain("adtcore:uri=");
       expect(xml).to.not.contain("<shortText>");
       // the point of a check run: the file is untouched by it
@@ -294,7 +295,7 @@ describe("tools/adt-facade: the development loop", () => {
 
     it("returns the package result Eclipse looks up instead of only child reports", async function () {
       this.timeout(60000);
-      const packageName = (store.packages().find((pkg) => pkg.objects.length === 0) ?? store.packages()[0]).name;
+      const packageName = (store.packages().find((pkg) => pkg.objects === 0) ?? store.packages()[0]).name;
       const uri = `/sap/bc/adt/packages/${encodeURIComponent(packageName.toLowerCase())}`;
       const res = await call("/checkruns", {
         method: "POST",
