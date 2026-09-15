@@ -735,7 +735,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("the local package opens straight to the roots, and holds nothing itself", async () => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {method: "POST"})).text();
       const rows = [...xml.matchAll(/<OBJECT_TYPE>([^<]*)<\/OBJECT_TYPE><OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/g)].map((m) => `${m[1]} ${m[2]}`);
-      expect(rows, "every root, with no package in between").to.include.members(["DEVC/K $STG", "DEVC/K $OSD", "DEVC/K $ZTEST"]);
+      expect(rows, "every root, with no package in between").to.include.members(["DEVC/K $STG", "DEVC/K $OSD", "DEVC/K $ZOSD_TEST"]);
       const doc = await (await call("/packages/$TMP")).text();
       expect(doc).to.contain('adtcore:name="$TMP"');
     });
@@ -1069,6 +1069,52 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const {folders, count} = await ask(pre("api", "USE_IN_CLOUD_DEVELOPMENT"), order("api", "group", "type"));
       expect(count).to.equal(0);
       expect(folders).to.deep.equal([]);
+    });
+  });
+
+  // A table as the editor and the data preview read it, by the capture:
+  // the object (a4h-adt.jsonl:403), its DDL (:405), the columns (:642) and
+  // the rows (:643).
+  describe("a table, opened and previewed", () => {
+    it("is an object with a DDL source behind it", async () => {
+      const res = await call("/ddic/tables/zstg_photo");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/vnd.sap.adt.tables.v2+xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<blue:blueSource ");
+      expect(xml).to.contain('adtcore:type="TABL/DT"');
+      expect(xml).to.contain('abapsource:sourceUri="./zstg_photo/source/main"');
+      const src = await call("/ddic/tables/zstg_photo/source/main");
+      expect(src.headers.get("content-type")).to.contain("text/plain");
+      const ddl = await src.text();
+      expect(ddl).to.contain("define table zstg_photo {");
+      expect(ddl).to.contain("key mandt");
+      expect(ddl).to.match(/key mandt\s+: mandt not null;/);
+      expect(ddl).to.match(/travel_id\s+: abap\.char\(8\) not null;/);
+      expect(ddl).to.match(/content\s+: abap\.rawstring\(0\);/);
+    });
+
+    it("describes its columns from the dictionary, not from the first row", async () => {
+      const res = await call("/datapreview/ddic/ZSTG_PHOTO/metadata");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/vnd.sap.adt.datapreview.table.v1+xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<dataPreview:name>ZSTG_PHOTO</dataPreview:name>");
+      expect(xml).to.match(/dataPreview:name="MANDT" dataPreview:type="C" [^/]*dataPreview:colType="CLNT"[^/]*dataPreview:length="3"/);
+      expect(xml).to.match(/dataPreview:name="CONTENT" dataPreview:type="y" [^/]*dataPreview:colType="RSTR"/);
+      expect(xml, "the metadata carries no rows").to.not.contain("<dataPreview:data>");
+    });
+
+    it("answers F8 with the rows of the table under the same columns", async () => {
+      const res = await call("/datapreview/ddic?rowNumber=5&ddicEntityName=ZSTG_PHOTO", {method: "POST",
+        body: "SELECT ZSTG_PHOTO~MANDT, ZSTG_PHOTO~TRAVEL_ID, ZSTG_PHOTO~MIME_TYPE FROM ZSTG_PHOTO"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.match(/dataPreview:name="TRAVEL_ID" dataPreview:type="C" [^/]*dataPreview:colType="CHAR"[^/]*dataPreview:length="8"/);
+      expect((xml.match(/<dataPreview:data>/g) ?? []).length, "rows came back").to.be.greaterThan(0);
+      const whole = await call("/datapreview/ddic?rowNumber=5&ddicEntityName=ZSTG_PHOTO", {method: "POST", body: ""});
+      expect(whole.status, "no SELECT means the whole table").to.equal(200);
+      expect((await call("/ddic/tables/parser/info")).status, "the system's grammar is not ours to serve").to.equal(404);
     });
   });
 

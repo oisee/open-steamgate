@@ -82,8 +82,8 @@
     },
     "skip": [
       {
-        "object": "ZCL_ZTEST_DEMO",
-        "class": "ltcl_ztest_demo",
+        "object": "ZCL_ZOSD_TEST_DEMO",
+        "class": "ltcl_zosd_test_demo",
         "method": "deliberate_failure"
       }
     ]

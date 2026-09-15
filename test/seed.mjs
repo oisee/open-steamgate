@@ -50,7 +50,7 @@ export function seedStatements(dataDir = "data", ddicDir = "src/ddic") {
     const table = file.slice(0, -".tabu.json".length).toLowerCase();
     const rows = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
     let lengths = new Map();
-    for (const dir of [ddicDir, "src/segw/ddic"]) {
+    for (const dir of [ddicDir, "src/segw/ddic", "src/zosd_test/ddic"]) {
       try {
         lengths = fieldLengths(readFileSync(join(dir, table + ".tabl.xml"), "utf8"));
         break;

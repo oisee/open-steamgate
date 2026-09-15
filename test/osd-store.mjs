@@ -69,6 +69,23 @@ describe("tools/osd-store: the objects of the local system", function () {
     expect(active.active).to.equal(true);
   });
 
+  it("an include activates as itself: the registry files it as a program, and the check follows it there", () => {
+    // INCL and PROG share a file and abaplint knows only PROG; asking the
+    // registry for INCL found nothing and called every clean include broken
+    const verdict = store.activate("INCL", "ZOSD_TEST_DEMO_INC");
+    expect(verdict.issues, JSON.stringify(verdict.issues)).to.deep.equal([]);
+    expect(verdict.active).to.equal(true);
+  });
+
+  it("a dependent of a kind the store does not index is checked, not thrown over", () => {
+    // the SEGW project (IWPR) names the MPC_EXT it maps; it is in the
+    // registry and not in TYPES, so the dependents walk used to reach
+    // find() and 404 the whole activation with "IWPR ... does not exist"
+    const kinds = store.dependents("CLAS", "ZCL_ZOSD_TEST_MPC_EXT").map((d) => d.type);
+    expect(kinds).to.include("IWPR");
+    expect(store.activate("CLAS", "ZCL_ZOSD_TEST_MPC_EXT").active).to.equal(true);
+  });
+
   it("packages come from the tree, and every parent is one a folder really has", () => {
     const all = store.packages();
     expect(all.length).to.be.greaterThan(50);
@@ -79,7 +96,7 @@ describe("tools/osd-store: the objects of the local system", function () {
         expect(names, `${node.name} -> ${node.parent}`).to.include(node.parent);
       }
     }
-    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE", "$ZTEST"]);
+    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE", "$ZOSD_TEST"]);
     // the name is the chain joined, so an underscore in a folder invents no
     // parent: src/demo_sadl sits under $STG, not under $STG_DEMO, and the
     // library roots do not sprout a $OPEN above them
@@ -95,7 +112,7 @@ describe("tools/osd-store: the objects of the local system", function () {
     // package and OSD had nothing to answer with
     const tops = store.rootPackages();
     expect(tops.length).to.be.greaterThan(3);
-    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD", "$ZTEST"]);
+    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD", "$ZOSD_TEST"]);
     for (const node of tops) {
       expect(node.parent, node.name).to.equal(undefined);
     }

@@ -26,7 +26,7 @@ import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {ADT_TYPE, dataElementDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -222,8 +222,18 @@ export function tableDataDocument(answer, options = {}) {
     return typeof first === "number" ? "I" : typeof first === "object" && first !== null ? "X" : "C";
   };
 
+  // The dictionary's own metadata when the table is known (a4h-adt.jsonl:642:
+  // type letter, colType, length, description per column), the guess from
+  // the first row for freestyle SQL, whose columns are whatever was selected.
+  const known = new Map((options.fields ?? []).map((f) => [f.name.toUpperCase(), f]));
+  const metadata = (name) => {
+    const f = known.get(name.toUpperCase());
+    return f === undefined
+      ? `dataPreview:type="${type(name)}" dataPreview:description="${xmlEscape(name.toUpperCase())}" dataPreview:keyAttribute="false" dataPreview:colType="" dataPreview:isKeyFigure="false"`
+      : `dataPreview:type="${xmlEscape(f.letter)}" dataPreview:description="${xmlEscape(f.description || f.name)}" dataPreview:keyAttribute="false" dataPreview:colType="${xmlEscape(f.dataType)}" dataPreview:isKeyFigure="false" dataPreview:length="${f.length}" dataPreview:caseSensitive="false"`;
+  };
   const body = columns.map((name) => `  <dataPreview:columns>
-    <dataPreview:metadata dataPreview:name="${xmlEscape(name.toUpperCase())}" dataPreview:type="${type(name)}" dataPreview:description="${xmlEscape(name.toUpperCase())}" dataPreview:keyAttribute="false" dataPreview:colType="" dataPreview:isKeyFigure="false"/>
+    <dataPreview:metadata dataPreview:name="${xmlEscape(name.toUpperCase())}" ${metadata(name)}/>
     <dataPreview:dataSet>
 ${rows.map((r) => `      <dataPreview:data>${xmlEscape(render(r[name]))}</dataPreview:data>`).join("\n")}
     </dataPreview:dataSet>
@@ -231,7 +241,8 @@ ${rows.map((r) => `      <dataPreview:data>${xmlEscape(render(r[name]))}</dataPr
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <dataPreview:tableData xmlns:dataPreview="http://www.sap.com/adt/dataPreview">
-  <dataPreview:totalRows>${rows.length}</dataPreview:totalRows>
+  <dataPreview:totalRows>${rows.length}</dataPreview:totalRows>${options.name === undefined ? "" : `
+  <dataPreview:name>${xmlEscape(options.name)}</dataPreview:name>`}
   <dataPreview:isHanaAnalyticalView>false</dataPreview:isHanaAnalyticalView>
   <dataPreview:executedQueryString>${xmlEscape(answer.sql ?? "")}</dataPreview:executedQueryString>
   <dataPreview:queryExecutionTime>${options.ms ?? 0}</dataPreview:queryExecutionTime>
@@ -264,6 +275,7 @@ const ACCEPT = {
   "packages": ["application/vnd.sap.adt.packages.v2+xml", "application/vnd.sap.adt.packages.v1+xml"],
   "cts/transportchecks": ["application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData"],
   "ddic/dataelements": ["application/vnd.sap.adt.dataelements.v2+xml"],
+  "ddic/tables": ["application/vnd.sap.adt.tables.v2+xml"],
   // the run configurations the system says it takes (a4h-adt.jsonl discovery),
   // which is also what tells the client to talk to this resource the typed way
   "abapunit/testruns": ["application/vnd.sap.adt.abapunit.testruns.config.v1+xml",
@@ -296,6 +308,8 @@ const CATEGORY = {
   // collection under this scheme and term it offered to install software
   // instead — "/sap/bc/adt/ddic/dataelements/icfname is not installed".
   "ddic/dataelements": ["dtelde", "http://www.sap.com/wbobj/dictionary"],
+  // F8 on a table: the system's own term and scheme (a4h-adt.jsonl discovery)
+  "datapreview/ddic": ["DatapreviewDdic", "http://www.sap.com/adt/categories/datapreview"],
   "abapunit/testruns": ["unittestruns", "http://www.sap.com/adt/categories/abapunit"],
   "activation": ["activationruns", "http://www.sap.com/adt/categories/activation"],
   "checkruns": ["checkruns", "http://www.sap.com/adt/categories/check"],
@@ -353,6 +367,12 @@ const TEMPLATE_LINKS = {
   "datapreview/freestyle": [
     ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
   ],
+  // the two of the system's four templates that are answered here; colcount
+  // and hana are not, and are not offered
+  "datapreview/ddic": [
+    ["http://www.sap.com/adt/categories/datapreview/ddic/metadata", "/sap/bc/adt/datapreview/ddic/{object_name}/metadata"],
+    ["http://www.sap.com/adt/categories/datapreview/ddic", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName}"],
+  ],
   "checkruns": [
     ["http://www.sap.com/adt/categories/check/relations/reporters", "/sap/bc/adt/checkruns{?reporters}"],
   ],
@@ -391,6 +411,8 @@ const TITLE = {
   "oo/interfaces": "Interfaces",
   "ddic/ddl/sources": "CDS DDL Sources",
   "ddic/dataelements": "Data Element",
+  "ddic/tables": "Database Table",
+  "datapreview/ddic": "Modelled Data Preview for DDIC",
   "ddic/srvd/sources": "Service Definitions",
   "datapreview/freestyle": "Data Preview (freestyle SQL)",
   "repository/informationsystem/search": "Object Search",
@@ -1661,6 +1683,68 @@ export function adtRouter(options = {}) {
 
   // ---- reading table contents: freestyle SQL in the body, rows back. This
   // is how the client's whole graph layer works, not only its table preview.
+  // ---- a table as an object, and its content on F8.
+  //
+  // The client's table editor is source-shaped: it reads the object
+  // (a4h-adt.jsonl:403) and then a DDL source (:405). Its parser
+  // information — a 30 KB grammar the system ships for the editor's
+  // highlighting — is the system's and not served here; what the editor does
+  // without it is the next thing to observe.
+  advertise("ddic/tables");
+  router.get(`${BASE}/ddic/tables/parser/info`, (req, res) => {
+    record(req, "resource");
+    refuse(res, 404, "ExceptionResourceNotFound", "the DDL parser information is the system's own and is not served here");
+  });
+  router.get(`${BASE}/ddic/tables/:name`, (req, res) => {
+    answer(res, () => {
+      const entry = store.read("TABL", req.params.name);
+      const table = tableFieldsOf(store, entry);
+      res.type("application/vnd.sap.adt.tables.v2+xml; charset=utf-8");
+      sendEntity(req, res, tableDocument(entry, {description: table.description}));
+    });
+  });
+  router.get(`${BASE}/ddic/tables/:name/source/main`, (req, res) => {
+    answer(res, () => {
+      const entry = store.read("TABL", req.params.name);
+      res.type("text/plain; charset=utf-8");
+      sendEntity(req, res, tableSourceDocument(tableFieldsOf(store, entry)));
+    });
+  });
+  // F8: the columns first (a4h-adt.jsonl:642), then the rows for a SELECT
+  // the client writes over the table (:643) — or over the whole table when
+  // it sends none.
+  advertise("datapreview/ddic");
+  router.get(`${BASE}/datapreview/ddic/:name/metadata`, (req, res) => {
+    answer(res, () => {
+      const entry = store.read("TABL", req.params.name);
+      const table = tableFieldsOf(store, entry);
+      res.type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
+        .send(tableDataDocument({rows: [], columns: table.fields.map((f) => f.name)}, {fields: table.fields, name: entry.name}));
+    });
+  });
+  router.post(`${BASE}/datapreview/ddic`, async (req, res) => {
+    const name = String(req.query.ddicEntityName ?? "").toUpperCase();
+    const asked = (await rawBody(req)).toString("utf8").trim();
+    let table;
+    try {
+      table = tableFieldsOf(store, store.read("TABL", name));
+    } catch (e) {
+      refuse(res, 404, "ExceptionResourceNotFound", `TABL ${name} does not exist`);
+      return;
+    }
+    const query = asked === "" ? `SELECT * FROM ${name}` : asked;
+    const started = Date.now();
+    try {
+      const result = await data.query(query, {max: Number(req.query.rowNumber ?? 100)});
+      res.status(200).type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
+        .send(tableDataDocument(result, {ms: Date.now() - started, fields: table.fields, name}));
+    } catch (e) {
+      refuse(res, e?.code === "NOT_BUILT" ? 503 : 400,
+        e?.code === "NOT_BUILT" ? "ExceptionResourceNoAccess" : "ExceptionResourceWrongData",
+        String(e?.message ?? e));
+    }
+  });
+
   advertise("datapreview/freestyle");
   router.post(`${BASE}/datapreview/freestyle`, async (req, res) => {
     const query = (await rawBody(req)).toString("utf8");

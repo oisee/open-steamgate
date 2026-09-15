@@ -76,7 +76,7 @@ const ROOT_PACKAGES = {
 // A folder that is a package of its own rather than a child of the root
 // above it. The demo package lives inside src but is not part of $STG.
 const FOLDER_PACKAGES = {
-  "src/ztest": "$ZTEST",
+  "src/zosd_test": "$ZOSD_TEST",
 };
 
 // A package above all of ours, if one is wanted. It was tried as $Z and
@@ -650,7 +650,9 @@ export class ObjectStore {
 
   // the issues of one object, in the shape the façade returns
   #issues(registry, type, name) {
-    const object = registry.getObject(type, name);
+    // an include is a program to abaplint: the registry files it as PROG,
+    // and asking for INCL finds nothing and calls a clean include broken
+    const object = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);
     if (object === undefined) {
       return {type, name, issues: [{severity: "E", message: `${type} ${name} is not in the registry`, line: 1, column: 1}]};
     }
@@ -761,7 +763,10 @@ export class ObjectStore {
     // verdict.
     const broken = [];
     for (const dependent of this.dependents(type, name)) {
-      const checked = this.check(dependent.type, dependent.name);
+      // straight off the registry, not through find(): a dependent may be of
+      // a type the store does not index (an IWPR naming the class it maps),
+      // and it is in the registry by construction, so it is checked there
+      const checked = this.#issues(this.registry(), dependent.type, dependent.name);
       if (checked.issues.length > 0) {
         broken.push(checked);
       }

@@ -884,6 +884,136 @@ ${label("short", dd("SCRTEXT_S"), int("SCRLEN1") || 10, 10)}${label("medium", dd
 }
 const xmlUnescape = (t) => String(t).replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
+// The fields of a table, out of abapGit's DD02V/DD03P. A field names its
+// type either by data element (ROLLNAME, resolved here to that element's
+// DATATYPE/LENG/DECIMALS and text) or inline (DATATYPE/LENG). The ABAP type
+// letter is the dictionary's own convention for its built-in types; the
+// data preview shows it as dataPreview:type.
+const ABAP_TYPE_LETTER = {
+  CHAR: "C", CLNT: "C", CUKY: "C", LANG: "C", UNIT: "C", ACCP: "C", NUMC: "N", DATS: "D", TIMS: "T",
+  INT1: "b", INT2: "s", INT4: "X", INT8: "8", DEC: "P", CURR: "P", QUAN: "P", FLTP: "F",
+  RAW: "X", RSTR: "y", STRG: "g", SSTR: "g", LRAW: "X", LCHR: "C", DF16_DEC: "a", DF34_DEC: "e",
+};
+export function tableFieldsOf(store, entry) {
+  const xml = String(entry.source ?? "");
+  const tag = (block, name) => {
+    const m = new RegExp(`<${name}>([^<]*)</${name}>`).exec(block);
+    return m === null ? "" : m[1].replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  };
+  const head = xml.split("<DD03P_TABLE>")[0];
+  const table = {
+    name: entry.name,
+    description: tag(head, "DDTEXT"),
+    deliveryClass: tag(head, "CONTFLAG") || "A",
+    maintenance: tag(head, "MAINFLAG") === "X" ? "#ALLOWED" : "#RESTRICTED",
+    fields: [],
+  };
+  for (const block of xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)) {
+    const f = block[1];
+    const field = {
+      name: tag(f, "FIELDNAME"),
+      key: tag(f, "KEYFLAG") === "X",
+      notNull: tag(f, "NOTNULL") === "X",
+      element: tag(f, "ROLLNAME"),
+      dataType: tag(f, "DATATYPE"),
+      length: Number.parseInt(tag(f, "LENG") || "0", 10),
+      decimals: Number.parseInt(tag(f, "DECIMALS") || "0", 10),
+      description: tag(f, "DDTEXT"),
+    };
+    if (field.name === "" || field.name.startsWith(".")) {
+      continue;
+    }
+    if (field.element !== "" && field.dataType === "") {
+      try {
+        const dtel = String(store.read("DTEL", field.element).source ?? "");
+        field.dataType = tag(dtel, "DATATYPE");
+        field.length = Number.parseInt(tag(dtel, "LENG") || "0", 10);
+        field.decimals = Number.parseInt(tag(dtel, "DECIMALS") || "0", 10);
+        field.description = field.description || tag(dtel, "DDTEXT") || tag(dtel, "SCRTEXT_M");
+      } catch {
+        // an element this tree does not hold: the field keeps its name and
+        // the preview shows it as text, which is what it is on the wire
+      }
+    }
+    field.letter = ABAP_TYPE_LETTER[field.dataType] ?? tag(f, "INTTYPE") ?? "C";
+    table.fields.push(field);
+  }
+  return table;
+}
+
+// A table as the client's table editor reads it: the same source-shaped
+// document the system serves (a4h-adt.jsonl:403, blue:blueSource under
+// http://www.sap.com/wbobj/blue, TABL/DT) pointing at a DDL source. The
+// links the system carries and this façade cannot answer — versions,
+// technical settings, indexes, documentation, activation log — are not
+// offered; a link that 404s is worse than one absent.
+export function tableDocument(entry, options = {}) {
+  const who = xmlEscape(options.who ?? "OSD");
+  const when = xmlEscape(entry.changedAt ?? options.when ?? "1970-01-01T00:00:00Z");
+  const lower = encodeURIComponent(String(entry.name).toLowerCase());
+  return `<?xml version="1.0" encoding="utf-8"?>
+<blue:blueSource xmlns:blue="http://www.sap.com/wbobj/blue"
+                 xmlns:abapsource="http://www.sap.com/adt/abapsource"
+                 xmlns:adtcore="http://www.sap.com/adt/core"
+                 xmlns:atom="http://www.w3.org/2005/Atom"
+                 abapsource:sourceUri="./${lower}/source/main"
+                 abapsource:fixPointArithmetic="false" abapsource:activeUnicodeCheck="false"
+                 adtcore:responsible="${who}" adtcore:masterLanguage="EN" adtcore:abapLanguageVersion="standard"
+                 adtcore:name="${xmlEscape(entry.name)}" adtcore:type="TABL/DT"
+                 adtcore:changedAt="${when}" adtcore:version="${entry.version ?? "active"}" adtcore:createdAt="${when}"
+                 adtcore:changedBy="${who}" adtcore:createdBy="${who}"
+                 adtcore:description="${xmlEscape(options.description ?? "")}" adtcore:language="EN">
+  <atom:link href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=${encodeURIComponent(`/sap/bc/adt/ddic/tables/${String(entry.name).toLowerCase()}`)}" rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions" type="application/vnd.sap.adt.nameditems.v1+xml" title="Allowed ABAP language versions"/>
+  <atom:link href="./${lower}/source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain" title="Source Content"/>
+  <adtcore:packageRef adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(entry.package ?? "").toLowerCase())}" adtcore:type="DEVC/K" adtcore:name="${xmlEscape(entry.package ?? "")}"/>
+</blue:blueSource>
+`;
+}
+
+// The DDL of a table, the way the editor shows it (a4h-adt.jsonl:405 is one
+// the system wrote): annotations, then one line per field, a data element
+// by name or a built-in type with its length.
+export function tableSourceDocument(table) {
+  const width = Math.max(0, ...table.fields.map((f) => f.name.length));
+  // the DDL names of the built-in types, which are not the DDIC codes:
+  // RSTR is abap.rawstring(0) in the editor (a4h-adt.jsonl:405)
+  const DDL_TYPE = {
+    CHAR: "char", NUMC: "numc", RAW: "raw", LCHR: "lchr", LRAW: "lraw",
+    DEC: "dec", CURR: "curr", QUAN: "quan",
+    RSTR: "rawstring", STRG: "string", SSTR: "sstring",
+    CLNT: "clnt", LANG: "lang", CUKY: "cuky", UNIT: "unit", ACCP: "accp",
+    DATS: "dats", TIMS: "tims", FLTP: "fltp", INT1: "int1", INT2: "int2", INT4: "int4", INT8: "int8",
+    DF16_DEC: "df16_dec", DF34_DEC: "df34_dec",
+  };
+  const typeOf = (f) => {
+    if (f.element !== "") {
+      return f.element.toLowerCase();
+    }
+    const kind = f.dataType.toUpperCase();
+    const name = DDL_TYPE[kind] ?? kind.toLowerCase();
+    if (["DEC", "CURR", "QUAN", "DF16_DEC", "DF34_DEC"].includes(kind)) {
+      return `abap.${name}(${f.length},${f.decimals})`;
+    }
+    if (["CHAR", "NUMC", "RAW", "LCHR", "LRAW", "RSTR", "STRG", "SSTR"].includes(kind)) {
+      return `abap.${name}(${f.length})`;
+    }
+    return `abap.${name}`;
+  };
+  const lines = table.fields.map((f) =>
+    `  ${f.key ? "key " : "    "}${f.name.toLowerCase().padEnd(width)} : ${typeOf(f)}${f.notNull ? " not null" : ""};`);
+  return `@EndUserText.label : '${table.description.replaceAll("'", "''")}'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #${table.deliveryClass}
+@AbapCatalog.dataMaintenance : ${table.maintenance}
+define table ${table.name.toLowerCase()} {
+
+${lines.join("\n")}
+
+}
+`;
+}
+
 export function packageOf(store, name) {
   const wanted = String(name ?? "").toUpperCase();
   try {

@@ -1,0 +1,27 @@
+# The smallest SEGW project that is still a service: one entity set over the
+# dictionary table of this package, served by SADL, so that
+# /sap/opu/odata/sap/ZOSD_TEST_SRV/ answers $metadata and ItemSet without a
+# line of hand-written DPC code.
+#
+# `npm run stg:compile -- src/zosd_test/segw/zosd_test.stg.yaml --out src/zosd_test/segw`
+# is what wrote the IWPR, the IWSV/IWMO and the four classes beside this
+# file; `stg-compile --all` (part of `npm run transpile`) then keeps them,
+# because src/ already holds the objects.
+project: ZOSD_TEST
+service: ZOSD_TEST_SRV
+model: ZOSD_TEST_MDL
+description: "ZOSD_TEST: the demo items of the reference package, as OData"
+
+entities:
+  Item:
+    set: ItemSet
+    description: "the rows of ZOSD_TEST_ITEM"
+    source: {table: ZOSD_TEST_ITEM}
+    keys: [ItemId]
+    searchable: true
+    properties:
+      ItemId: {type: String(8), field: ITEM_ID, label: Item}
+      Name: {type: String(40), field: NAME, label: Name}
+      Status: {type: String(1), field: STATUS, label: Status}
+      Quantity: {type: Int32, field: QUANTITY, label: Quantity}
+      CreatedOn: {type: DateTime, digits: 0, field: CREATED_ON, label: Created on}
