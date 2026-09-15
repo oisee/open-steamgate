@@ -30,6 +30,23 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-09-15-srvd-not-allowed — The transpiler refuses SRVD objects
+
+- Status: `open`
+- Discovery date: `2026-09-15`
+- Affected versions: `@abaplint/transpiler-cli` as pinned in package.json (see `npm ls @abaplint/transpiler-cli`)
+- Affected ABAP statement, runtime API or adapter: object type `SRVD` (service definition) in the transpile input
+- Minimal ABAP reproducer: any `<name>.srvd.srvdsrv` + `<name>.srvd.xml` under `src/`
+- Exact command used to run it: `npm run transpile`
+- Expected SAP behaviour: a service definition is an ordinary repository object; abaplint knows the type
+- Actual open-abap behaviour: `Error: allowed_object_types, Object type SRVD not allowed` — `SRVD` is absent from the transpiler's `defaultAllowedObjectTypes`
+- Impact on open-steamgate: the `$ZTEST` demo package cannot hold a service definition; the ADT façade lists the type (`osd-store.mjs` TYPES) but no object can exist behind it
+- Smallest safe workaround: `none` — the object files were removed from `src/ztest/`
+- Upstream issue: needs an issue in `abaplint/transpiler` (not yet filed)
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
+
 ### ANOMALY-2026-09-11-no-implicit-mandt — Client-dependent tables are read across all clients
 
 - Status: `open`

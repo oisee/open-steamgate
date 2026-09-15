@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <AREAT>ZTEST: demo function group</AREAT>
+   <INCLUDES>
+    <SOBJ_NAME>LZTEST_FGTOP</SOBJ_NAME>
+    <SOBJ_NAME>SAPLZTEST_FG</SOBJ_NAME>
+   </INCLUDES>
+   <FUNCTIONS>
+    <item>
+     <FUNCNAME>Z_TEST_STATUS_TEXT</FUNCNAME>
+     <SHORT_TEXT>ZTEST: text of an item status</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IV_STATUS</PARAMETER>
+       <TYP>ZTEST_STATUS</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>EV_TEXT</PARAMETER>
+       <TYP>STRING</TYP>
+      </RSEXP>
+     </EXPORT>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IV_STATUS</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Item status</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_TEXT</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Status text</STEXT>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+   </FUNCTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>

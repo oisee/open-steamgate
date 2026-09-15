@@ -1,0 +1,8 @@
+[
+  {"mandt": "123", "item_id": "I0001", "name": "Bearing, 6203-2RS", "status": "N", "quantity": 12, "created_on": "20260901"},
+  {"mandt": "123", "item_id": "I0002", "name": "Gasket, copper", "status": "O", "quantity": 40, "created_on": "20260902"},
+  {"mandt": "123", "item_id": "I0003", "name": "Shaft, 12 mm", "status": "O", "quantity": 7, "created_on": "20260903"},
+  {"mandt": "123", "item_id": "I0004", "name": "Spring, tension", "status": "C", "quantity": 0, "created_on": "20260904"},
+  {"mandt": "123", "item_id": "I0005", "name": "Washer, nylon", "status": "N", "quantity": 250, "created_on": "20260905"},
+  {"mandt": "123", "item_id": "I0006", "name": "Pin, dowel 4x20", "status": "C", "quantity": 96, "created_on": "20260906"}
+]

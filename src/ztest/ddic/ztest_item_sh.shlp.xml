@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_SHLP" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD30V>
+    <SHLPNAME>ZTEST_ITEM_SH</SHLPNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <DDTEXT>ZTEST: demo item</DDTEXT>
+    <ISSIMPLE>X</ISSIMPLE>
+    <SELMTYPE>T</SELMTYPE>
+    <SELMETHOD>ZTEST_ITEM</SELMETHOD>
+    <DIALOGTYPE>D</DIALOGTYPE>
+   </DD30V>
+   <DD32P_TABLE>
+    <DD32P>
+     <SHLPNAME>ZTEST_ITEM_SH</SHLPNAME>
+     <FIELDNAME>ITEM_ID</FIELDNAME>
+     <FLPOSITION>0001</FLPOSITION>
+     <SHLPINPUT>X</SHLPINPUT>
+     <SHLPOUTPUT>X</SHLPOUTPUT>
+     <SHLPSELPOS>01</SHLPSELPOS>
+     <SHLPLISPOS>01</SHLPLISPOS>
+     <ROLLCHANGE>N</ROLLCHANGE>
+    </DD32P>
+    <DD32P>
+     <SHLPNAME>ZTEST_ITEM_SH</SHLPNAME>
+     <FIELDNAME>NAME</FIELDNAME>
+     <FLPOSITION>0002</FLPOSITION>
+     <SHLPINPUT>X</SHLPINPUT>
+     <SHLPOUTPUT>X</SHLPOUTPUT>
+     <SHLPSELPOS>02</SHLPSELPOS>
+     <SHLPLISPOS>02</SHLPLISPOS>
+     <ROLLCHANGE>N</ROLLCHANGE>
+    </DD32P>
+   </DD32P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>
