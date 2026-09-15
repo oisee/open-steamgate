@@ -7,9 +7,186 @@ decided and why; this is the list.
 Owners: **S** open-steamgate (this session's repository), **T** the
 transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 **V** vsp (the Go bridge, the only thing that touches a real system),
+**R** open-rfc-go (the RFC/CPIC transport and the ADT bridge),
 **A** Alice — a decision nobody else can take.
 
 ---
+
+# Where it is going next — three tracks
+
+Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
+the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The
+numbered tree below this is still the standing list; these three are the
+direction.
+
+The tracks are independent on purpose. **A** widens what a client may ask,
+**B** deepens what the answers are made of, **C** is a small strange thing
+worth doing because it is cheap and it proves a point.
+
+---
+
+## Track A — ADT coverage surface
+
+*Make more of what a real client asks answerable. The measure is not a count of
+endpoints: it is how far an ordinary session gets before something 404s.*
+
+The catch-all under the façade already records every unanswered path by method
+(`Refusals`, `adt-surface.md`), so **the worklist writes itself** — run a
+client, read what it asked for and did not get. That is the method for this
+whole track; everything below is what it has produced so far.
+
+```
+A.1  Editor documents for the object types that have none                [S]
+     ├─ FUGR, MSAG, DOMA, TTYP, VIEW, SHLP — each has its own editor format
+     ├─ the object is already in the tree and in the search; opening it 404s
+     ├─ test/zosd-test.mjs lists exactly which
+     └─ order by what a client opens first, not alphabetically
+
+A.2  Function groups and modules as create targets                       [S]
+     └─ a group is a folder of includes with a header of its own
+     └─ blocked on nothing; nothing has asked for one yet
+
+A.3  Data preview                                                        [S]
+     ├─ seen live 2026-09-15: Eclipse says "Data Preview is not supported
+     │  in this system" on a CDS view served by us; A4H answers it
+     ├─ /sap/bc/adt/datapreview/ddic?… and /datapreview/ddic/<T>/metadata
+     └─ the SADL runtime already does the query half; this is the wrapper
+
+A.4  The metadata bootstrap, proven live                                 [R]
+     ├─ RFC_GET_FUNCTION_INTERFACE + DDIF_FIELDINFO_GET are implemented and
+     │  shape-verified offline against a capture, but have NEVER run live:
+     │  the Eclipse that tested had them cached
+     ├─ do: a fresh workspace / new destination, watch the two calls land
+     └─ open question it settles: does the client accept uncompressed 0303
+        DFIES rows? The system compresses large tables as 0305 (SAP-LZH) and
+        there is no LZH *writer* on this side — see C.3, they share it
+
+A.5  Stateful session affinity across parallel connections               [R]
+     ├─ Eclipse opens many RFC connections at once; each gets its own cookie
+     │  jar and CSRF token today, which is correct for isolation and wrong
+     │  for a lock/write/activate that must land in one ADT context
+     ├─ the real client carries sap-adt-connection-id; we do not use it
+     └─ needed before writes-over-RFC are trustworthy, not before reads
+
+A.6  Debugger endpoints                                                  [S]
+     ├─ debugger/listeners is a long poll and the second most frequent call
+     │  in a real session; breakpoints is a POST
+     └─ answering them emptily is most of the value: it stops the client
+        retrying, and debugging can stay unimplemented for a long time
+
+A.7  ATC, refactorings, quick fixes, where-used                          [S]
+     └─ not started, not blocking; listed so a 404 reads as a plan
+
+A.8  CTS                                                                 [S]
+     └─ deliberately absent: there is no transport system here, and the
+        boundary to a real system is an abapGit archive from a git ref
+```
+
+---
+
+## Track B — the runtime underneath
+
+*Deepen what the answers are made of: OData, SADL, RFC, and the database seam.*
+
+```
+B.1  SADL beyond read-only                                               [S]
+     ├─ today: CDS projections, an analytics cube, $select -> GROUP BY,
+     │  and writes only on a projection of exactly one table
+     └─ next: associations in a projection, and a write path that is not
+        the single-table special case
+
+B.2  BOPF / RAP / drafts                                                 [S]
+     ├─ still out, as stated on day one
+     ├─ oracles planned but not built: docs/oracle-rap.md, oracle-draft.md
+     └─ gated on 0.4 / 0.5 (Alice: build sample objects on the sandbox?)
+
+B.3  OData v4                                                            [S]
+     └─ the serializer is v2; v4 is a second shape over the same model, and
+        nothing in the dispatcher assumes v2 except the JSON writer
+
+B.4  The RFC runtime, both directions                                    [R]
+     ├─ today: destinations resolve local / replay / live / record / fallback
+     ├─ the bridge is an RFC *server* for exactly one function module
+     └─ next: serve more than SADT_REST_RFC_ENDPOINT, so a real RFC client
+        (SM59 test, an external caller) reaches a transpiled function module
+
+B.5  Multi-record framing, properly measured                             [R]
+     ├─ splitting works and a 606 KB answer was accepted in two records
+     └─ but the operation-info length on a *continued* record is inferred
+        from single-record captures; capture a real long answer and check
+
+B.6  The client/MANDT story                                             [S+T]
+     └─ unchanged and still first-order: fixed client 123, no implicit
+        MANDT (ANORMALIES.md). The demo keeps T0009 visible on purpose
+
+B.7  Database seam                                                       [S]
+     └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
+        (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+```
+
+---
+
+## Track C — the side quest: RFC in, DIAG out
+
+*Answer SAP GUI on the dispatcher port with a screen. Start by showing one
+picture and nothing else.*
+
+The point is not to implement DIAG. It is that this project already speaks the
+gateway half of a system's front door, and the other half — the one SAP GUI
+knocks on — is a protocol we can already *read*. Answering it at all, even with
+one static screen that says the guru meditates, turns "an OData runtime with an
+ADT façade" into "something a SAP client connects to", and tells us exactly how
+big the real thing would be.
+
+**What the oracle says.** A SAP GUI logon against a sandbox was captured
+through a passive tap (40 frames, dispatcher port 3200, kept under `.local/`,
+never here):
+
+- the conversation is **NI-framed**, like RFC, and opens with the same
+  `ffffffff` route request;
+- **30 of 37 payload frames are SAP-LZH compressed** — the `1f 9d` magic with
+  algorithm byte `0x12`, the same container `pkg/sapcompress` in vsp already
+  decodes;
+- the handshake frames that are *not* compressed carry readable items: the
+  codepage (`4110`, `utf-8`), the protocol level (`4103`), a session id.
+
+```
+C.1  Decide the smallest honest goal                                     [A]
+     ├─ proposal: SAP GUI connects, gets a logon screen or a single dynpro
+     │  carrying one message, and stays connected long enough to read it
+     └─ non-goal, explicitly: a usable GUI, transactions, or input handling
+
+C.2  Read the oracle properly                                           [R]
+     ├─ the capture decodes today only as far as "these frames are LZH"
+     ├─ do: decompress each, and write down the DIAG item grammar the way
+     │  bxml was written down — token, length, meaning, measured
+     └─ deliverable: docs/diag-notes.md, protocol facts only
+
+C.3  The LZH *writer* question                                           [A]
+     ├─ we can DECODE SAP-LZH (vsp pkg/sapcompress); we cannot WRITE it,
+     │  and the writer lives in a private sibling
+     ├─ so: may a DIAG response be sent UNCOMPRESSED? If yes, the whole
+     │  side quest needs no writer and C.4 is small
+     ├─ if no: either the private writer comes across, or a literal/"store"
+     │  mode is built (LZ formats usually have one; output is longer than
+     │  input but formally correct, and throughput does not matter here)
+     └─ this same question gates A.4, which is the better place to answer
+        it because the metadata tables are smaller and already understood
+
+C.4  A dispatcher listener that says one thing                           [R]
+     ├─ accept on 32NN, answer the route request and the handshake, push
+     │  one screen, hold the connection
+     └─ "Sorry — the guru meditates" as the message, which is the correct
+        amount of ambition for a first frame
+
+C.5  Then, and only then, decide whether it goes further                 [A]
+     └─ a real DIAG server is a large thing; this track is allowed to stop
+        at C.4 having proved the point
+```
+
+---
+
+# The standing list
 
 ## 0. Decisions waiting on Alice
 
