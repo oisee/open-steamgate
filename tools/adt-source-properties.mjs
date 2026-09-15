@@ -33,7 +33,7 @@ export function sourcePropertiesDocument(type, object) {
 ${intf ? ' xmlns:abapoo="http://www.sap.com/adt/oo"' : ""}
  xmlns:atom="http://www.w3.org/2005/Atom" ${properties}
  adtcore:name="${escape(object.name)}" adtcore:type="${program ? "PROG/P" : intf ? "INTF/OI" : "DDLS/DF"}"
- adtcore:description="${escape(object.description)}" adtcore:version="active"
+ adtcore:description="${escape(object.description)}" adtcore:version="${object.version ?? "active"}"
  adtcore:language="EN" adtcore:masterLanguage="EN" adtcore:abapLanguageVersion="standard"
  adtcore:createdAt="${when}" adtcore:changedAt="${when}"
  adtcore:createdBy="${who}" adtcore:changedBy="${who}" adtcore:responsible="${who}"

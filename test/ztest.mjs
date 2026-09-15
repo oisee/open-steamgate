@@ -11,8 +11,7 @@ import {TREE_CATEGORY, TREE_TYPE_LABEL, TREE_FOLDER, ADT_TYPE} from "../tools/ad
 // about the façade's answer for a real object on disk under src/ztest/, not
 // about a fixture built in the test.
 //
-// $ZTEST is a root of its own (FOLDER_PACKAGES in osd-store.mjs), under $Z
-// like every package this façade holds.
+// $ZTEST is a root of its own (FOLDER_PACKAGES in osd-store.mjs).
 // tools/osd-store.mjs maps src -> $STG) and does not read DEVCLASS out of
 // package.devc.xml. The folder layout is the one the brief asked for; the
 // names are what this façade makes of it today.
@@ -104,7 +103,7 @@ describe("src/ztest: the demo package of every type the façade shows", () => {
       const packages = store.packages();
       const root = packages.find((p) => p.name === ROOT);
       expect(root, ROOT).to.not.equal(undefined);
-      expect(root.parent, "its own root, under the one package above all of ours").to.equal("$Z");
+      expect(root.parent, "a root of its own").to.equal(undefined);
       expect(root.subpackages).to.have.members([DDIC, SRC, CDS]);
       // the text comes from package.devc.xml, which is the only thing that
       // file is read for today

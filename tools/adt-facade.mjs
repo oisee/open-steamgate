@@ -1175,7 +1175,10 @@ export function adtRouter(options = {}) {
           if (found === undefined) {
             throw new NotFound(type, req.params.name);
           }
-          const document = classDocument(found, {includes: store.classIncludes?.(found.name) ?? []});
+          // with its state: written and not activated reads as inactive, and
+          // the document changes with it, which is what the client re-reads
+          // for after a save
+          const document = classDocument({...found, ...store.stateOf(found)}, {includes: store.classIncludes?.(found.name) ?? []});
           res.type("application/vnd.sap.adt.oo.classes.v4+xml");
           sendEntity(req, res, document);
         });

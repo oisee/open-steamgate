@@ -428,6 +428,27 @@ describe("tools/adt-facade: the development loop", () => {
     // messages — the system's own answer (a4h-adt.jsonl:489). This test used
     // to expect an empty body, on the note that a successful activation
     // "answers nothing at all"; the capture says otherwise.
+    // A save changes the object, not only its source. The client re-reads
+    // the object after a save and expects a newer one back — a system has an
+    // inactive version now (a4h-adt.jsonl:486-487: PUT, then the class
+    // document 200 with a new tag). Read back unchanged, with the same tag,
+    // the client took its own copy for the newer one and showed nothing.
+    it("a written object reads as inactive with a new tag, and as active again once activated", async function () {
+      this.timeout(120000);
+      const before = await call(`/oo/classes/${SCRATCH.toLowerCase()}`);
+      const tagBefore = before.headers.get("etag");
+      const {handle} = await lock();
+      await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE + "* touched\n"});
+      const after = await call(`/oo/classes/${SCRATCH.toLowerCase()}?version=inactive`);
+      expect(after.status).to.equal(200);
+      expect(after.headers.get("etag"), "a save is a change to the object").to.not.equal(tagBefore);
+      expect(await after.text()).to.contain('adtcore:version="inactive"');
+      const activated = await activate(SCRATCH);
+      expect(activated.status).to.equal(200);
+      const again = await call(`/oo/classes/${SCRATCH.toLowerCase()}?version=workingArea`);
+      expect(await again.text()).to.contain('adtcore:version="active"');
+    });
+
     it("source that holds activates, and says so with its properties", async function () {
       this.timeout(60000);
       const {handle} = await lock();

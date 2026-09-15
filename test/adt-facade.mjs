@@ -732,10 +732,10 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     // holds it from the first logon — so it opens to the package above all
     // of ours, and from there to everything. Nothing is invented beyond
     // that one link: $TMP holds no objects of its own.
-    it("the local package opens to the package above all of ours, and holds nothing itself", async () => {
+    it("the local package opens straight to the roots, and holds nothing itself", async () => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {method: "POST"})).text();
       const rows = [...xml.matchAll(/<OBJECT_TYPE>([^<]*)<\/OBJECT_TYPE><OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/g)].map((m) => `${m[1]} ${m[2]}`);
-      expect(rows).to.deep.equal(["DEVC/K $Z"]);
+      expect(rows, "every root, with no package in between").to.include.members(["DEVC/K $STG", "DEVC/K $OSD", "DEVC/K $ZTEST"]);
       const doc = await (await call("/packages/$TMP")).text();
       expect(doc).to.contain('adtcore:name="$TMP"');
     });
@@ -779,17 +779,26 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       })).text();
       const rows = [...xml.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)]
         .map((match) => match[1]);
-      // the root is one package now, the one above all of ours; the
-      // sibling packages sit under it, and the rule about names holds there
-      expect(rows.map((row) => /<OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/.exec(row)?.[1])).to.deep.equal(["$Z"]);
+      expect(rows.length, "the root fixture must exercise sibling packages").to.be.greaterThan(1);
+      expect(rows.every((row) => /<OBJECT_NAME>[^<]+<\/OBJECT_NAME>/.test(row)),
+        "a synthetic empty DEVC/K row aliases real package nodes").to.equal(true);
       expect(xml).to.not.contain("<CATEGORIES>");
       expect(xml).to.not.contain("<OBJECT_TYPES>");
       expect(xml).to.not.contain("<NODE_ID>");
-      const under = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24Z", {method: "POST"})).text();
-      const siblings = [...under.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)].map((m) => m[1]);
-      expect(siblings.length, "the fixture must exercise sibling packages").to.be.greaterThan(1);
-      expect(siblings.every((row) => /<OBJECT_NAME>[^<]+<\/OBJECT_NAME>/.test(row)),
-        "a synthetic empty DEVC/K row aliases real package nodes").to.equal(true);
+    });
+
+    // A subpackage is a row, not a drawer. Whenever DEVC/K appeared in
+    // OBJECT_TYPES the client bound every package row to the first one — a
+    // click on $STG_SEGW asked for $STG_APC — and where it was absent
+    // packages opened as themselves. And the rows carry no NODE_ID, as the
+    // system's do not (a4h-adt.jsonl:253): ids belong to the type entries.
+    it("describes no type for subpackages, and gives object rows no node id", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24STG", {method: "POST"})).text();
+      expect(xml).to.match(/<OBJECT_TYPE>DEVC\/K<\/OBJECT_TYPE><OBJECT_NAME>\$STG_SEGW<\/OBJECT_NAME>/);
+      const types = [...xml.matchAll(/<SEU_ADT_OBJECT_TYPE_INFO><OBJECT_TYPE>([^<]*)<\/OBJECT_TYPE>/g)].map((m) => m[1]);
+      expect(types).to.not.include("DEVC/K");
+      const rows = [...xml.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)].map((m) => m[1]);
+      expect(rows.every((row) => row.includes("<NODE_ID/>")), "an object row has no id of its own").to.equal(true);
     });
 
     it("labels an ungrouped DDIC type instead of leaving its drawer blank", async () => {

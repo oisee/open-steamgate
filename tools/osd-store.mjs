@@ -79,12 +79,11 @@ const FOLDER_PACKAGES = {
   "src/ztest": "$ZTEST",
 };
 
-// The one package above all of ours. A client shows the packages a system
-// answers for its root as the system library, side by side with the
-// system's own; one super-package keeps everything this façade holds under
-// one node there, which is also the node a person adds to their favourites.
-// "$" because nothing here is transportable. null turns it off.
-const SUPER_PACKAGE = "$Z";
+// A package above all of ours, if one is wanted. It was tried as $Z and
+// taken out again the same day: one more level to click through, in the
+// system library and in the favourites alike, bought nothing a person
+// wanted. null means the roots are the roots.
+const SUPER_PACKAGE = null;
 
 const DEFAULT_ROOTS = [
   {path: "src", writable: true, library: false},
@@ -119,6 +118,23 @@ export class ObjectStore {
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
     this.parsed = undefined;
+    // What has been written and not activated since. A system keeps an
+    // inactive version of such an object and says so in its documents; a
+    // client that saved and then read the object back unchanged took its
+    // own copy for the newer one and showed an empty editor over a save
+    // that had succeeded. Written marks it, a clean activation clears it.
+    this.inactive = new Set();
+  }
+
+  // the state of one object as its documents report it
+  stateOf(entry) {
+    let changedAt;
+    try {
+      changedAt = statSync(join(this.root, entry.file)).mtime.toISOString().replace(/\.\d{3}Z$/, "Z");
+    } catch {
+      changedAt = undefined;
+    }
+    return {changedAt, version: this.inactive.has(`${entry.type} ${entry.name}`) ? "inactive" : "active"};
   }
 
   // ---------------------------------------------------------------- index
@@ -328,8 +344,9 @@ export class ObjectStore {
     // sixty-three-line diff with no comment in it. A system stores source
     // by line, not by terminator, and so does this tree.
     writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+    this.inactive.add(`${entry.type} ${entry.name}`);
     this.#forget();
-    return {...entry, include, file, bytes: Buffer.byteLength(source, "utf8")};
+    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
 
   delete(type, name) {
@@ -402,6 +419,10 @@ export class ObjectStore {
           }
         }
       });
+      // a root package's own object is the package, not something in it
+      if (entry.type === "DEVC" && entry.name === entry.package) {
+        continue;
+      }
       const own = packages.get(entry.package);
       own.objects = own.objects + 1;
     }
@@ -458,8 +479,9 @@ export class ObjectStore {
     }
     const objects = [];
     for (const entry of this.#entries().values()) {
-      if (entry.package === wanted) {
-        objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable});
+      if (entry.package === wanted && !(entry.type === "DEVC" && entry.name === wanted)) {
+        objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable,
+          version: this.stateOf(entry).version});
       }
     }
     return {
@@ -743,6 +765,9 @@ export class ObjectStore {
       if (checked.issues.length > 0) {
         broken.push(checked);
       }
+    }
+    if (broken.length === 0) {
+      this.inactive.delete(`${type} ${String(name).toUpperCase()}`);
     }
     return {...result, active: broken.length === 0, dependents: broken};
   }

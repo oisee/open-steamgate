@@ -420,7 +420,7 @@ export function classDocument(object, options = {}) {
   const include = (kind, sourceUri) =>
     `  <class:include class:includeType="${kind}" abapsource:sourceUri="${sourceUri}"` +
     ' adtcore:name="" adtcore:type="CLAS/I"' +
-    ` adtcore:changedAt="${when}" adtcore:version="active"` +
+    ` adtcore:changedAt="${when}" adtcore:version="${object.version ?? "active"}"` +
     ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
     `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
@@ -448,7 +448,7 @@ export function classDocument(object, options = {}) {
                  abapsource:activeUnicodeCheck="true"
                  adtcore:name="${xmlEscape(name)}"
                  adtcore:type="CLAS/OC"
-                 adtcore:version="active"
+                 adtcore:version="${object.version ?? "active"}"
                  adtcore:language="EN"
                  adtcore:masterLanguage="EN"
                  adtcore:abapLanguageVersion="standard"
@@ -667,6 +667,17 @@ export function nodeStructureDocument(nodes, options = {}) {
   const present = [];
   for (const n of nodes) {
     const kind = bare(n.type);
+    // A subpackage is a row of the tree and not a drawer. Whenever DEVC/K
+    // appeared in OBJECT_TYPES the client bound every package row to the
+    // first one — a click on $STG_SEGW asked the server for $STG_APC, a
+    // click on $STG for the first root — and wherever it was absent (the
+    // flat root) packages opened as themselves. Three observations, one
+    // rule: the package rows stay in TREE_CONTENT, and no type describes
+    // them; the client handles package rows on its own
+    // (removePackageNodesIfNecessary in the tree contract).
+    if (kind === "DEVC") {
+      continue;
+    }
     if (present.includes(kind) === false) {
       present.push(kind);
     }
@@ -755,19 +766,17 @@ ${nodes.map(flatRow).join("\n")}
 
   const objectRow = (n) => row({
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
-    // Every row gets an id of its own. An empty NODE_ID is not "none", it is
-    // the same id on every row that has none, and the contract shows the
-    // client comparing node ids to tell nodes apart
-    // (.local/sessions/2026-09-15-tree-contract-from-client.md, §3): with
-    // every package row carrying "", a click on one subpackage asked the
-    // server for its sibling.
-    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: id(),
+    // No NODE_ID on an object row: the system sends none (a4h-adt.jsonl:253,
+    // every row <NODE_ID/>), ids belong to the OBJECT_TYPES entries alone,
+    // and giving rows their own — tried as a cure for the package binding —
+    // changed nothing there.
+    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
     PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
     // One letter, not a word. The client's row parser
     // (com.sap.adt.ris.search.jar!RepositoryObjectListItem#accept@535-593)
     // sets the version only for "I" and "A" and leaves it unset for anything
     // else, so "active" was read as "no version" on every object in the tree.
-    VERSION: "A", INACTIVE_TYPE: "",
+    VERSION: n.version === "inactive" ? "I" : "A", INACTIVE_TYPE: "",
   });
 
   const typeRow = (t) => "    <SEU_ADT_OBJECT_TYPE_INFO>" +
@@ -886,13 +895,13 @@ export function packageOf(store, name) {
       throw error;
     }
     // $TMP is the one package a client shows without being asked — it sits
-    // in Favorite Packages from the first logon — so the package above all
-    // of ours is its child here: opening the default favourite opens
-    // everything. $Z stays a root of the system library as well; a package
-    // reachable from two places is a convenience, a package reachable from
-    // none was the complaint.
-    const above = store.superPackage === undefined || store.superPackage === null ? [] : [store.superPackage];
-    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: above, library: false, simulated: true};
+    // in Favorite Packages from the first logon — so every root package is
+    // its child here: opening the default favourite opens everything, with
+    // no package in between. The roots stay roots of the system library as
+    // well; a package reachable from two places is a convenience, a package
+    // reachable from none was the complaint.
+    const roots = store.rootPackages().map((node) => node.name);
+    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: roots, library: false, simulated: true};
   }
 }
 
@@ -944,6 +953,7 @@ export function nodesOf(store, name, type, options = {}) {
       // they ask for (see the nodestructure route). Every other kind is a
       // leaf for everyone: an arrow that opens nothing is worse than none.
       expandable: object.type === "CLAS" && options.classFolders === true,
+      version: object.version,
       description: object.library === true ? "library object" : undefined,
     });
   }

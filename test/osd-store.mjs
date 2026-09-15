@@ -79,10 +79,7 @@ describe("tools/osd-store: the objects of the local system", function () {
         expect(names, `${node.name} -> ${node.parent}`).to.include(node.parent);
       }
     }
-    // one package above all of ours, and the former roots hang under it
-    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.deep.equal(["$Z"]);
-    expect(all.find((p) => p.name === "$STG").parent).to.equal("$Z");
-    expect(all.find((p) => p.name === "$OPEN_ABAP_CORE").parent).to.equal("$Z");
+    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE", "$ZTEST"]);
     // the name is the chain joined, so an underscore in a folder invents no
     // parent: src/demo_sadl sits under $STG, not under $STG_DEMO, and the
     // library roots do not sprout a $OPEN above them
@@ -97,9 +94,11 @@ describe("tools/osd-store: the objects of the local system", function () {
     // 'adt://osd/System Library'": the client asks for the node above every
     // package and OSD had nothing to answer with
     const tops = store.rootPackages();
-    expect(tops.map((p) => p.name), "one node under the system library, not a scatter of roots").to.deep.equal(["$Z"]);
-    expect(tops[0].parent).to.equal(undefined);
-    expect(store.package("$Z").subpackages).to.include.members(["$STG", "$OSD", "$ZTEST", "$OPEN_ABAP_CORE"]);
+    expect(tops.length).to.be.greaterThan(3);
+    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD", "$ZTEST"]);
+    for (const node of tops) {
+      expect(node.parent, node.name).to.equal(undefined);
+    }
 
     // and the same thing by the name a client uses for it: no package
     const root = store.package("");
@@ -128,7 +127,10 @@ describe("tools/osd-store: the objects of the local system", function () {
     expect(store.package("$STG_SEGW").library).to.equal(false);
     // every object of the system is in exactly one package
     const counted = store.packages().reduce((n, p) => n + p.objects, 0);
-    expect(counted).to.equal(store.list().length);
+    // every entry is counted in exactly one package, except a root
+    // package's own object: the package is not something inside itself
+    const rootsWithOwnObject = store.rootPackages().filter((r) => store.find("DEVC", r.name) !== undefined).length;
+    expect(counted).to.equal(store.list().length - rootsWithOwnObject);
   });
 
   it("abapGit's file names and object names convert both ways", () => {
@@ -186,14 +188,16 @@ ENDCLASS.
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
 
     const packages = store.packages();
-    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD", "$Z"]);
+    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD"]);
     expect(packages.find((pkg) => pkg.name === "$STG_OSD").objects).to.equal(1);
-    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$Z"]);
+    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$STG"]);
     expect(store.package("$STG_OSD").objects).to.deep.include({
       type: "CLAS",
       name: "ZCL_OSD_PROBE",
       library: false,
       writable: true,
+      // just written, and so not activated yet
+      version: "inactive",
     });
   });
 
