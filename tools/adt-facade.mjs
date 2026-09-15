@@ -19,7 +19,7 @@
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
 import express from "express";
-import {readFileSync} from "node:fs";
+import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
@@ -504,6 +504,39 @@ export function adtRouter(options = {}) {
   // app as the OData front, and a CSRF gate over somebody else's POST is a
   // 403 they never asked for
   router.use(BASE, sessions.middleware());
+
+  // STG_ADT_DUMP=<file.jsonl> records every exchange under the façade in
+  // the shape of the A4H oracle captures: method, url, request headers and
+  // body, response status, headers and body, both bodies base64. It exists
+  // because the thing a client actually sent is the one thing a replay of
+  // "what it must have sent" cannot show, and the proxy the client goes
+  // through is on another machine. Off unless asked; a capture carries
+  // logons and goes under .local/, never into the tree.
+  const dump = options.dump ?? process.env.STG_ADT_DUMP;
+  if (dump !== undefined && dump !== "") {
+    let seq = 0;
+    router.use(BASE, (req, res, next) => {
+      const startedAt = new Date();
+      const chunks = [];
+      const write = res.write.bind(res);
+      const end = res.end.bind(res);
+      res.write = (chunk, ...rest) => { if (chunk) chunks.push(Buffer.from(chunk)); return write(chunk, ...rest); };
+      res.end = (chunk, ...rest) => {
+        if (chunk && typeof chunk !== "function") chunks.push(Buffer.from(chunk));
+        rawBody(req).then((body) => {
+          const line = {
+            at: startedAt.toISOString(), seq: ++seq, ms: Date.now() - startedAt.getTime(),
+            method: req.method, url: req.originalUrl,
+            request: {headers: req.headers, body: {bytes: body.length, base64: body.toString("base64")}},
+            response: {status: res.statusCode, headers: res.getHeaders(), body: {bytes: Buffer.concat(chunks).length, base64: Buffer.concat(chunks).toString("base64")}},
+          };
+          appendFileSync(dump, JSON.stringify(line) + "\n");
+        }).catch(() => {});
+        return end(chunk, ...rest);
+      };
+      next();
+    });
+  }
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //
@@ -1748,9 +1781,11 @@ export function adtRouter(options = {}) {
       res.status(200).type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
         .send(tableDataDocument(result, {ms: Date.now() - started, fields: table.fields, name}));
     } catch (e) {
+      // a refusal with an empty message told nobody anything: the database
+      // client's error carries its text in a field of its own, or nowhere
       refuse(res, e?.code === "NOT_BUILT" ? 503 : 400,
         e?.code === "NOT_BUILT" ? "ExceptionResourceNoAccess" : "ExceptionResourceWrongData",
-        String(e?.message ?? e));
+        String(e?.message || e?.cause?.message || e?.code || `the statement was refused: ${query}`));
     }
   });
 
