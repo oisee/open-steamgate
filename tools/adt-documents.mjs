@@ -528,13 +528,9 @@ export const TREE_CATEGORY = {
   VIEW: "dictionary", SHLP: "dictionary",
 };
 
-// An earlier OSD response, not an A4H measurement, shows DEVC/xx grouping
-// nodes supplying these visible labels
-// (.local/capture/oracle/osd-adt.jsonl:340). For an ungrouped type, Eclipse's
-// AbapRepositoryTypeFolderNode returns OBJECT_TYPE_LABEL unchanged, so a
-// known singular label belongs here instead of leaving the drawer blank.
-// The "???" fallback is in the separate virtual-folders provider and is not
-// caused by an empty label in this package tree.
+// The label of a type's drawer, for the kinds that have no folder label
+// above. Read by the client from OBJECT_TYPE_LABEL on the type's own row;
+// an empty one shows the bare type in angle brackets.
 export const TREE_TYPE_LABEL = {
   INCL: "Includes", MSAG: "Message Classes",
   TABL: "Database Tables", DTEL: "Data Elements", DOMA: "Domains",
@@ -563,26 +559,34 @@ export function nodeStructureDocument(nodes, options = {}) {
     }
   }
 
-  const folders = [];
+  // The drawers are the client's to build, not ours to send.
+  //
+  // This used to add a row per kind to TREE_CONTENT — DEVC/OC "Classes",
+  // DEVC/K "Subpackages" — with the label on that row and nothing on the
+  // type's own entry in OBJECT_TYPES. The client never reads those rows as
+  // drawers: it groups TREE_CONTENT by OBJECT_TYPE itself and names each
+  // drawer from that type's OBJECT_TYPE_LABEL and CATEGORY
+  // (.local/sessions/2026-09-15-tree-contract-from-client.md, §2-§4:
+  // createUniqueCategoryNodeMap keys on the category label, the type drawer
+  // falls back to the bare type when its label is empty). So the invented
+  // rows appeared as what they were — a package with no name, shown as
+  // "???", and a class type shown as "<CLAS/OC>" — while the labels meant
+  // for them sat on rows nobody used. Now each type carries its own
+  // category and label, and TREE_CONTENT holds objects and nothing else.
   const objectTypes = [];
   const categories = new Set();
   const kindByNode = new Map();
   for (const kind of present) {
-    const folder = options.leaf === true ? undefined : TREE_FOLDER[kind];
     const category = TREE_CATEGORY[kind] ?? "other";
     categories.add(category);
     const typeOf = nodes.find((n) => bare(n.type) === kind)?.type ?? kind;
     const typeNode = id();
     kindByNode.set(typeNode, kind);
     objectTypes.push({type: typeOf, category,
-      label: options.leaf === true ? "" : folder === undefined ? (TREE_TYPE_LABEL[kind] ?? "") : "",
+      // a kind with no label of its own gets none: the client then shows the
+      // bare type, which is at least not a code dressed up as a name
+      label: TREE_FOLDER[kind]?.[1] ?? TREE_TYPE_LABEL[kind] ?? "",
       node: typeNode});
-    if (folder !== undefined) {
-      const node = id();
-      kindByNode.set(node, kind);
-      folders.push({type: folder[0], node});
-      objectTypes.push({type: folder[0], category: "", label: folder[1], node});
-    }
   }
 
   const row = (fields) => "    <SEU_ADT_REPOSITORY_OBJ_NODE>" +
@@ -636,12 +640,6 @@ ${nodes.map(flatRow).join("\n")}
     return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {leaf: true});
   }
 
-  const folderRow = (f) => row({
-    OBJECT_TYPE: f.type, OBJECT_NAME: "", TECH_NAME: "", OBJECT_URI: "", OBJECT_VIT_URI: "",
-    EXPANDABLE: "X", NODE_ID: f.node, PARENT_NAME: "", DESCRIPTION: "", DESCRIPTION_TYPE: "",
-    VERSION: "", INACTIVE_TYPE: "",
-  });
-
   const objectRow = (n) => row({
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
     OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
@@ -670,7 +668,7 @@ ${nodes.map(flatRow).join("\n")}
   <asx:values>
     <DATA>
       <TREE_CONTENT>
-${[...folders.map(folderRow), ...nodes.map(objectRow)].join("\n")}
+${nodes.map(objectRow).join("\n")}
       </TREE_CONTENT>
       <CATEGORIES>
 ${[...categories].map(categoryRow).join("\n")}
