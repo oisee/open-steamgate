@@ -331,6 +331,27 @@ describe("tools/adt-facade: the development loop", () => {
 </aunit:runConfiguration>`,
     });
 
+    // The ABAP Unit view has a handler for the result under one name and
+    // not the other: "No content-handler found for content-type
+    // ...api.junit.run-result.v1+xml" was the whole of Ctrl+Shift+F10. The
+    // document is the same either way; the name follows what is asked for.
+    it("names the run result the way the ABAP Unit view knows it, and the junit way on request", async function () {
+      this.timeout(120000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <external><coverage active="false"/></external>
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_export"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const eclipse = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/xml"}});
+      expect(eclipse.status).to.equal(200);
+      expect(eclipse.headers.get("content-type")).to.contain("application/vnd.sap.adt.abapunit.testruns.result.v1+xml");
+      const vsp = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.api.junit.run-result.v1+xml"}});
+      expect(vsp.headers.get("content-type")).to.contain("application/vnd.sap.adt.api.junit.run-result.v1+xml");
+      expect(await vsp.text(), "the same document under either name").to.contain("<aunit:runResult");
+    });
+
     it("a class with tests comes back as a tree of classes and methods", async function () {
       this.timeout(180000);
       const res = await testRun("ZCL_STG_SEGW_TEST");

@@ -755,7 +755,13 @@ ${nodes.map(flatRow).join("\n")}
 
   const objectRow = (n) => row({
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
-    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
+    // Every row gets an id of its own. An empty NODE_ID is not "none", it is
+    // the same id on every row that has none, and the contract shows the
+    // client comparing node ids to tell nodes apart
+    // (.local/sessions/2026-09-15-tree-contract-from-client.md, §3): with
+    // every package row carrying "", a click on one subpackage asked the
+    // server for its sibling.
+    OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: id(),
     PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
     // One letter, not a word. The client's row parser
     // (com.sap.adt.ris.search.jar!RepositoryObjectListItem#accept@535-593)

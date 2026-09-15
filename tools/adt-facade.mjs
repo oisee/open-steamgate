@@ -1507,7 +1507,15 @@ export function adtRouter(options = {}) {
     try {
       const runner = await store.unit();
       const run = await runner.runDetached(named[0].type, named[0].name);
-      res.status(200).type("application/vnd.sap.adt.api.junit.run-result.v1+xml")
+      // The document is the classic aunit:runResult either way; only its
+      // name differs by client. Eclipse's ABAP Unit view has a handler for
+      // abapunit.testruns.result (v1 and v2 in com.sap.adt.abapunit, no
+      // other) and reported "No content-handler found for content-type
+      // ...api.junit.run-result.v1+xml" for the name vsp asks by. A client
+      // that asks for the junit name still gets it.
+      res.status(200).type(/junit\.run-result/.test(String(req.headers.accept ?? ""))
+        ? "application/vnd.sap.adt.api.junit.run-result.v1+xml"
+        : "application/vnd.sap.adt.abapunit.testruns.result.v1+xml")
         .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
     } catch (e) {
       res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
