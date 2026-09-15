@@ -800,6 +800,62 @@ ${objectTypes.map(typeRow).join("\n")}
 // because nothing in this tree was created without a package.
 export const LOCAL_PACKAGE = "$TMP";
 
+// A data element as the client's editor reads it.
+//
+// The shape is the client's own model (com.sap.adt.ddic.dataelement, EMF:
+// blue:wbobj in http://www.sap.com/wbobj/dictionary/dtel wrapping
+// dtel:dataElement in http://www.sap.com/adt/dictionary/dataelements, every
+// property a child element, lengths integers), because no capture holds a
+// real answer: the client never asked A4H for one while the recorder ran.
+// The values come from abapGit's DD04V. Type kinds are the model's enum
+// literals; how DD04V's REFKIND/REFTYPE map onto the three reference kinds
+// is this façade's reading of the DDIC fields, not a measured fact.
+export function dataElementDocument(entry, options = {}) {
+  const dd = (tag) => {
+    const m = new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(String(entry.source ?? ""));
+    return m === null ? "" : xmlUnescape(m[1]);
+  };
+  const int = (tag) => Number.parseInt(dd(tag) || "0", 10);
+  const domain = dd("DOMNAME");
+  const refKind = dd("REFKIND");
+  const refType = dd("REFTYPE");
+  const typeKind = refKind === "R" ? (refType === "C" || refType === "I" ? "refToClifType" : "refToPredefinedAbapType")
+    : refKind === "D" ? "refToDictionaryType"
+    : domain !== "" ? "domain" : "predefinedAbapType";
+  const typeName = domain !== "" ? domain : dd("ROLLNAME");
+  const who = xmlEscape(options.who ?? "OSD");
+  const when = xmlEscape(options.when ?? "1970-01-01T00:00:00Z");
+  const label = (name, text, length, max) =>
+    `    <dtel:${name}FieldLabel>${xmlEscape(text)}</dtel:${name}FieldLabel>\n` +
+    `    <dtel:${name}FieldLength>${length}</dtel:${name}FieldLength>\n` +
+    `    <dtel:${name}FieldMaxLength>${max}</dtel:${name}FieldMaxLength>\n`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<blue:wbobj xmlns:blue="http://www.sap.com/wbobj/dictionary/dtel"
+            xmlns:adtcore="http://www.sap.com/adt/core"
+            xmlns:atom="http://www.w3.org/2005/Atom"
+            adtcore:name="${xmlEscape(entry.name)}" adtcore:type="DTEL/DE"
+            adtcore:version="active" adtcore:masterLanguage="EN" adtcore:language="EN"
+            adtcore:responsible="${who}" adtcore:changedBy="${who}" adtcore:createdBy="${who}"
+            adtcore:changedAt="${when}" adtcore:createdAt="${when}"
+            adtcore:description="${xmlEscape(dd("DDTEXT"))}" adtcore:abapLanguageVersion="standard">
+  <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain"/>
+  <adtcore:packageRef adtcore:name="${xmlEscape(entry.package ?? "")}" adtcore:type="DEVC/K"
+   adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(entry.package ?? "").toLowerCase())}"/>
+  <dtel:dataElement xmlns:dtel="http://www.sap.com/adt/dictionary/dataelements">
+    <dtel:typeKind>${typeKind}</dtel:typeKind>
+    <dtel:typeName>${xmlEscape(typeName)}</dtel:typeName>
+    <dtel:dataType>${xmlEscape(dd("DATATYPE"))}</dtel:dataType>
+    <dtel:dataTypeLength>${int("LENG")}</dtel:dataTypeLength>
+    <dtel:dataTypeDecimals>${int("DECIMALS")}</dtel:dataTypeDecimals>
+${label("short", dd("SCRTEXT_S"), int("SCRLEN1") || 10, 10)}${label("medium", dd("SCRTEXT_M"), int("SCRLEN2") || 20, 20)}${label("long", dd("SCRTEXT_L"), int("SCRLEN3") || 40, 40)}${label("heading", dd("REPTEXT"), int("HEADLEN") || 55, 55)}    <dtel:searchHelp>${xmlEscape(dd("SHLPNAME"))}</dtel:searchHelp>
+    <dtel:setGetParameter>${xmlEscape(dd("MEMORYID"))}</dtel:setGetParameter>
+    <dtel:changeDocument>${dd("LOGFLAG") === "X"}</dtel:changeDocument>
+  </dtel:dataElement>
+</blue:wbobj>
+`;
+}
+const xmlUnescape = (t) => String(t).replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+
 export function packageOf(store, name) {
   const wanted = String(name ?? "").toUpperCase();
   try {
@@ -814,7 +870,7 @@ export function packageOf(store, name) {
   }
 }
 
-export function nodesOf(store, name, type) {
+export function nodesOf(store, name, type, options = {}) {
   // A class is a folder, and that is not cosmetic.
   //
   // vscode-abap-fs names a file from the object it was built for, and it has
@@ -852,10 +908,16 @@ export function nodesOf(store, name, type) {
       type: ADT_TYPE[object.type] ?? object.type,
       name: object.name,
       uri: uriOf(object.type, object.name),
-      // only a class: the parts of one are objects in their own right and
-      // both clients go looking for them. Everything else here is a leaf,
-      // and saying otherwise buys an expansion arrow that opens nothing.
-      expandable: object.type === "CLAS",
+      // Whether a class is a folder depends on who is asking, and the
+      // choice is deliberate. The Project Explorer opens a class into its
+      // outline, which is parked for a later wave; offering it the arrow
+      // buys "Loading outline structure ..." and nothing behind it, so it
+      // gets none. vscode-abap-fs builds its own tree and reads this flag to
+      // name a class's files — a class that is not a folder there is
+      // ZCL_X.abap — so it keeps it. The façade tells them apart by what
+      // they ask for (see the nodestructure route). Every other kind is a
+      // leaf for everyone: an arrow that opens nothing is worse than none.
+      expandable: object.type === "CLAS" && options.classFolders === true,
       description: object.library === true ? "library object" : undefined,
     });
   }

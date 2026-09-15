@@ -824,12 +824,43 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       }
     });
 
-    it("a class is a folder, because its main include is what carries the name", async () => {
-      const parent = await (await call("/repository/nodestructure?parent_name=" +
-        encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
-      const row = /<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>(?:(?!SEU_ADT_REPOSITORY_OBJ_NODE>)[\s\S])*?<EXPANDABLE>([^<]*)<\/EXPANDABLE>/.exec(parent);
-      expect(row, "no class in the package the test reads").to.not.equal(null);
-      expect(row[1], "a class that is not expandable is named ZCL_X.abap").to.equal("X");
+    it("a class is a folder for a client that builds its own tree, and a leaf for the Project Explorer", async () => {
+      // an empty field is a self-closed element, so the flag is "" or "X"
+      const row = (xml) => {
+        const m = /<OBJECT_TYPE>CLAS\/OC<\/OBJECT_TYPE>(?:(?!SEU_ADT_REPOSITORY_OBJ_NODE>)[\s\S])*?(?:<EXPANDABLE>([^<]*)<\/EXPANDABLE>|<EXPANDABLE\/>)/.exec(xml);
+        return m === null ? null : [m[0], m[1] ?? ""];
+      };
+      const own = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_SEGW"),
+        {method: "POST", headers: {accept: "*/*"}})).text();
+      expect(row(own), "no class in the package the test reads").to.not.equal(null);
+      expect(row(own)[1], "vscode-abap-fs names a class that is not a folder ZCL_X.abap").to.equal("X");
+      const explorer = await (await call("/repository/nodestructure?parent_name=" + encodeURIComponent("$STG_SEGW"),
+        {method: "POST", headers: {accept: "application/vnd.sap.as+xml;charset=UTF-8;dataname=com.sap.adt.RepositoryObjectTreeContent"}})).text();
+      expect(row(explorer)[1], "the outline behind the arrow is parked, so no arrow").to.equal("");
+    });
+
+    // The data element editor opens on discovery alone: the client looks the
+    // object's category up there before it sends anything, and without this
+    // collection it offered to install software. The document is the
+    // client's own model, filled from abapGit's DD04V.
+    it("advertises data elements under the dictionary scheme, and serves one", async () => {
+      const disco = await (await call("/discovery")).text();
+      const coll = /<app:collection[^>]*href="\/sap\/bc\/adt\/ddic\/dataelements"[^>]*>([\s\S]*?)<\/app:collection>/.exec(disco);
+      expect(coll, "the collection").to.not.equal(null);
+      expect(coll[1]).to.contain('term="dtelde"');
+      expect(coll[1]).to.contain('scheme="http://www.sap.com/wbobj/dictionary"');
+      expect(coll[1]).to.contain("application/vnd.sap.adt.dataelements.v2+xml");
+      const res = await call("/ddic/dataelements/icfname");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/vnd.sap.adt.dataelements.v2+xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<blue:wbobj ");
+      expect(xml).to.contain('adtcore:type="DTEL/DE"');
+      expect(xml).to.contain("<dtel:typeKind>predefinedAbapType</dtel:typeKind>");
+      expect(xml).to.contain("<dtel:dataType>CHAR</dtel:dataType>");
+      expect(xml).to.contain("<dtel:dataTypeLength>15</dtel:dataTypeLength>");
+      expect(xml).to.contain("<dtel:shortFieldLabel>Name</dtel:shortFieldLabel>");
+      expect(xml).to.contain("<dtel:mediumFieldLabel>Service name</dtel:mediumFieldLabel>");
     });
 
     // One link is not a list, and the client does not check.

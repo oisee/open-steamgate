@@ -26,7 +26,7 @@ import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {ADT_TYPE, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, dataElementDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -263,6 +263,7 @@ const ACCEPT = {
   // that there is nothing here it can open.
   "packages": ["application/vnd.sap.adt.packages.v2+xml", "application/vnd.sap.adt.packages.v1+xml"],
   "cts/transportchecks": ["application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData"],
+  "ddic/dataelements": ["application/vnd.sap.adt.dataelements.v2+xml"],
 };
 
 // which workspace a collection is filed under in the discovery document
@@ -283,6 +284,12 @@ const CATEGORY = {
   "functions/groups": ["groups", "http://www.sap.com/adt/categories/functions"],
   "packages": ["devck", "http://www.sap.com/wbobj/packages"],
   "ddic/tables": ["tabldt", "http://www.sap.com/wbobj/dictionary"],
+  // What opens a data element is this line. The client's navigation looks
+  // the object's category up in discovery (BlueObjectTypeUtil
+  // #getBlueObjectTypeInfo@78-155) before it sends anything, and with no
+  // collection under this scheme and term it offered to install software
+  // instead — "/sap/bc/adt/ddic/dataelements/icfname is not installed".
+  "ddic/dataelements": ["dtelde", "http://www.sap.com/wbobj/dictionary"],
   "abapunit/testruns": ["unittestruns", "http://www.sap.com/adt/categories/abapunit"],
   "activation": ["activationruns", "http://www.sap.com/adt/categories/activation"],
   "checkruns": ["checkruns", "http://www.sap.com/adt/categories/check"],
@@ -327,6 +334,12 @@ const SEARCH_TEMPLATE =
   "{&userName*}{&releaseState*}{&language*}{&system*}{&version*}{&docu*}{&fav*}{&created*}{&month*}{&date*}{&comp*}";
 
 const TEMPLATE_LINKS = {
+  // the system's own template for a data element (a4h-adt.jsonl:121):
+  // the lock handle and transport it carries are for the editor's save
+  "ddic/dataelements": [
+    ["http://www.sap.com/wbobj/dictionary/dtelde/properties",
+      "/sap/bc/adt/ddic/dataelements/{object_name}{?corrNr,lockHandle,version,accessMode,_action}"],
+  ],
   "repository/informationsystem/search": [
     ["http://www.sap.com/adt/relations/informationsystem/search/quicksearch", SEARCH_TEMPLATE],
     ["http://www.sap.com/adt/relations/informationsystem/search/whitelisting", SEARCH_TEMPLATE],
@@ -371,6 +384,7 @@ const TITLE = {
   "oo/classes": "Classes",
   "oo/interfaces": "Interfaces",
   "ddic/ddl/sources": "CDS DDL Sources",
+  "ddic/dataelements": "Data Element",
   "ddic/srvd/sources": "Service Definitions",
   "datapreview/freestyle": "Data Preview (freestyle SQL)",
   "repository/informationsystem/search": "Object Search",
@@ -1497,6 +1511,16 @@ export function adtRouter(options = {}) {
   });
 
   // the tree, one level at a time, which is how a client walks it
+  // A data element, for the client's form editor. Read-only: the editor
+  // opens on this document and the flags it needs to save are not offered.
+  advertise("ddic/dataelements");
+  router.get(`${BASE}/ddic/dataelements/:name`, (req, res) => {
+    answer(res, () => {
+      const entry = store.read("DTEL", req.params.name);
+      res.type("application/vnd.sap.adt.dataelements.v2+xml; charset=utf-8").send(dataElementDocument(entry));
+    });
+  });
+
   advertise("repository/nodestructure");
   router.post(`${BASE}/repository/nodestructure`, async (req, res) => {
     const body = await rawBody(req);
@@ -1516,7 +1540,13 @@ export function adtRouter(options = {}) {
       // document it would have understood. The dataname is the client's own
       // name for the shape it expects; echoing it is the whole fix.
       res.type(asXmlTypeFor(req, "com.sap.adt.RepositoryObjectTreeContent"))
-        .send(nodeStructureDocument(nodesOf(store, name, parentType), {
+        // Who is asking decides whether a class is a folder: the Project
+        // Explorer names the exact shape it wants and gets leaves, because
+        // its outline is parked; a client that accepts anything builds its
+        // own tree from this and needs the flag to name a class's files.
+        .send(nodeStructureDocument(nodesOf(store, name, parentType, {
+          classFolders: /dataname=com\.sap\.adt\.RepositoryObjectTreeContent/i.test(String(req.headers.accept ?? "")) === false,
+        }), {
           flat: name === "" && parentType === "DEVC",
           nodeKeys,
         }));
