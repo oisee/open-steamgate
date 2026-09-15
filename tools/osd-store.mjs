@@ -304,7 +304,11 @@ export class ObjectStore {
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
-    writeFileSync(join(this.root, file), source);
+    // One line ending, the repository's. An editor on Windows sends CRLF,
+    // and a save that wrote it as it came turned a one-line comment into a
+    // sixty-three-line diff with no comment in it. A system stores source
+    // by line, not by terminator, and so does this tree.
+    writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
     this.#forget();
     return {...entry, include, file, bytes: Buffer.byteLength(source, "utf8")};
   }

@@ -307,4 +307,20 @@ ENDCLASS.
     expect(() => store.check("CLAS", "ZCL_OSD_UNBORN")).to.throw(NotFound);
   });
 
+
+  // An editor on Windows sends CRLF. Stored as it came, a saved comment
+  // became a diff of every line in the file, with the comment nowhere in it.
+  it("stores what an editor saves with the repository's line endings", async () => {
+    const {mkdtempSync, mkdirSync, copyFileSync, readFileSync} = await import("node:fs");
+    const {join} = await import("node:path");
+    const {tmpdir} = await import("node:os");
+    const root = mkdtempSync(join(tmpdir(), "osd-crlf-"));
+    mkdirSync(join(root, "osd"));
+    copyFileSync("abaplint.jsonc", join(root, "abaplint.jsonc"));
+    const store = new ObjectStore({root});
+    store.write("PROG", "ZOSD_CRLF", "REPORT zosd_crlf.\r\n* typed on Windows\r\nWRITE 1.\r\n");
+    const onDisk = readFileSync(join(root, store.find("PROG", "ZOSD_CRLF").file), "utf8");
+    expect(onDisk).to.equal("REPORT zosd_crlf.\n* typed on Windows\nWRITE 1.\n");
+    expect(store.read("PROG", "ZOSD_CRLF").source).to.not.contain("\r");
+  });
 });
