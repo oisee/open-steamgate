@@ -885,7 +885,14 @@ export function packageOf(store, name) {
     if (wanted !== LOCAL_PACKAGE || error?.code !== "NOT_FOUND") {
       throw error;
     }
-    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: [], library: false, simulated: true};
+    // $TMP is the one package a client shows without being asked — it sits
+    // in Favorite Packages from the first logon — so the package above all
+    // of ours is its child here: opening the default favourite opens
+    // everything. $Z stays a root of the system library as well; a package
+    // reachable from two places is a convenience, a package reachable from
+    // none was the complaint.
+    const above = store.superPackage === undefined || store.superPackage === null ? [] : [store.superPackage];
+    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: above, library: false, simulated: true};
   }
 }
 

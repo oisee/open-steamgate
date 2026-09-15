@@ -728,14 +728,16 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(await res.text()).to.contain("$TMP");
     });
 
-    it("the local package expands, and is empty rather than invented", async () => {
-      const res = await fetch(ADT + "/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {
-        method: "POST",
-        headers: {"x-csrf-token": token, cookie: `sap-contextid=${context}`},
-      });
-      expect(res.status).to.equal(200);
-      const xml = await res.text();
-      expect(xml).to.not.contain("<OBJECT_NAME>ZCL");
+    // $TMP is what a client shows without being asked — Favorite Packages
+    // holds it from the first logon — so it opens to the package above all
+    // of ours, and from there to everything. Nothing is invented beyond
+    // that one link: $TMP holds no objects of its own.
+    it("the local package opens to the package above all of ours, and holds nothing itself", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {method: "POST"})).text();
+      const rows = [...xml.matchAll(/<OBJECT_TYPE>([^<]*)<\/OBJECT_TYPE><OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/g)].map((m) => `${m[1]} ${m[2]}`);
+      expect(rows).to.deep.equal(["DEVC/K $Z"]);
+      const doc = await (await call("/packages/$TMP")).text();
+      expect(doc).to.contain('adtcore:name="$TMP"');
     });
 
     // the simulation is one name and one failure: anything else the store
