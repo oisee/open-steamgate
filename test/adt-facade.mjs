@@ -751,6 +751,21 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     // to it always looked right because AbapInterface does carry its own
     // extension — which is how we knew the difference was expandability and
     // not the type code, since both codes were already what the client wanted.
+    // The client's row parser accepts exactly two spellings of a version,
+    // "A" and "I" (RepositoryObjectListItem#accept@535-593 in the 3.60.3
+    // client), and silently leaves the version unset for anything else. So
+    // "active", which reads fine to a person and to every other document
+    // here, was "no version" on every object in the tree.
+    it("spells an object's version the one way the client reads it", async () => {
+      const xml = await (await call("/repository/nodestructure?parent_name=" +
+        encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();
+      const versions = [...xml.matchAll(/<VERSION>([^<]*)<\/VERSION>/g)].map((m) => m[1]);
+      expect(versions.length, "no object rows carry a version").to.be.greaterThan(0);
+      for (const v of versions) {
+        expect(["A", "I"], `VERSION=${v}`).to.include(v);
+      }
+    });
+
     it("a class is a folder, because its main include is what carries the name", async () => {
       const parent = await (await call("/repository/nodestructure?parent_name=" +
         encodeURIComponent("$STG_SEGW"), {method: "POST"})).text();

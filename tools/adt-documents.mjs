@@ -596,6 +596,12 @@ export function nodeStructureDocument(nodes, options = {}) {
   // (.local/capture/oracle/cloud-adt.jsonl:132). Adding a synthetic
   // "Subpackages" type node here makes Eclipse bind every displayed package
   // to the first DEVC/K object, so clicking $STG asks for another sibling.
+  //
+  // This is our rule, not the client's. Its RepositoryTreeService has no
+  // root-versus-package branch and reads every answer through the same
+  // parser (.local/sessions/2026-09-15-tree-contract-from-client.md, §5);
+  // the flat answer is kept for the symptom above, not because the client
+  // asks for it, and it could go if a full answer stops binding wrong.
   if (options.flat === true) {
     const flatRow = (n) => row({
       OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name,
@@ -619,6 +625,12 @@ ${nodes.map(flatRow).join("\n")}
   // measurement, still carries category and type metadata but no virtual
   // folder row; its node keys are local to this new answer
   // (.local/capture/oracle/osd-adt.jsonl:399).
+  //
+  // Mapping a key back to a kind is our assumption too: the client sends the
+  // NODE_IDs it was given, "000000" among them, and nothing in its service
+  // says what the server must do with them (same file, §1 and §4). A key we
+  // cannot map yields an empty set, which is the honest answer for one we
+  // never issued.
   if ((options.nodeKeys?.length ?? 0) > 0) {
     const kinds = new Set(options.nodeKeys.map((node) => kindByNode.get(node)).filter(Boolean));
     return nodeStructureDocument(nodes.filter((n) => kinds.has(bare(n.type))), {leaf: true});
@@ -634,7 +646,11 @@ ${nodes.map(flatRow).join("\n")}
     OBJECT_TYPE: n.type, OBJECT_NAME: n.name, TECH_NAME: n.name, OBJECT_URI: n.uri ?? "",
     OBJECT_VIT_URI: "", EXPANDABLE: n.expandable === true ? "X" : "", NODE_ID: "",
     PARENT_NAME: "", DESCRIPTION: n.description ?? "", DESCRIPTION_TYPE: "",
-    VERSION: "active", INACTIVE_TYPE: "",
+    // One letter, not a word. The client's row parser
+    // (com.sap.adt.ris.search.jar!RepositoryObjectListItem#accept@535-593)
+    // sets the version only for "I" and "A" and leaves it unset for anything
+    // else, so "active" was read as "no version" on every object in the tree.
+    VERSION: "A", INACTIVE_TYPE: "",
   });
 
   const typeRow = (t) => "    <SEU_ADT_OBJECT_TYPE_INFO>" +
