@@ -816,14 +816,14 @@ export const LOCAL_PACKAGE = "$TMP";
 
 // A data element as the client's editor reads it.
 //
-// The shape is the client's own model (com.sap.adt.ddic.dataelement, EMF:
-// blue:wbobj in http://www.sap.com/wbobj/dictionary/dtel wrapping
-// dtel:dataElement in http://www.sap.com/adt/dictionary/dataelements, every
-// property a child element, lengths integers), because no capture holds a
-// real answer: the client never asked A4H for one while the recorder ran.
-// The values come from abapGit's DD04V. Type kinds are the model's enum
-// literals; how DD04V's REFKIND/REFTYPE map onto the three reference kinds
-// is this façade's reading of the DDIC fields, not a measured fact.
+// The shape was read off the client's model (com.sap.adt.ddic.dataelement:
+// blue:wbobj wrapping dtel:dataElement, every property a child element) and
+// then measured: a4h-adt.jsonl:394 is a real answer, and it matches — type
+// kinds are the lower-case enum literals ("domain"), lengths are numbers
+// the system zero-pads and the client parses as int either way. The values
+// come from abapGit's DD04V. How DD04V's REFKIND/REFTYPE map onto the three
+// reference kinds is still this façade's reading, not a measured fact: the
+// capture holds a domain-typed element only.
 export function dataElementDocument(entry, options = {}) {
   const dd = (tag) => {
     const m = new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(String(entry.source ?? ""));
@@ -862,8 +862,13 @@ export function dataElementDocument(entry, options = {}) {
     <dtel:dataTypeLength>${int("LENG")}</dtel:dataTypeLength>
     <dtel:dataTypeDecimals>${int("DECIMALS")}</dtel:dataTypeDecimals>
 ${label("short", dd("SCRTEXT_S"), int("SCRLEN1") || 10, 10)}${label("medium", dd("SCRTEXT_M"), int("SCRLEN2") || 20, 20)}${label("long", dd("SCRTEXT_L"), int("SCRLEN3") || 40, 40)}${label("heading", dd("REPTEXT"), int("HEADLEN") || 55, 55)}    <dtel:searchHelp>${xmlEscape(dd("SHLPNAME"))}</dtel:searchHelp>
+    <dtel:searchHelpParameter>${xmlEscape(dd("SHLPFIELD"))}</dtel:searchHelpParameter>
     <dtel:setGetParameter>${xmlEscape(dd("MEMORYID"))}</dtel:setGetParameter>
+    <dtel:defaultComponentName>${xmlEscape(dd("DEFFDNAME"))}</dtel:defaultComponentName>
+    <dtel:deactivateInputHistory>${dd("NOHISTORY") === "X"}</dtel:deactivateInputHistory>
     <dtel:changeDocument>${dd("LOGFLAG") === "X"}</dtel:changeDocument>
+    <dtel:leftToRightDirection>${dd("LTRFLDDIS") === "X"}</dtel:leftToRightDirection>
+    <dtel:deactivateBIDIFiltering>${dd("BIDICTRLC") === "X"}</dtel:deactivateBIDIFiltering>
   </dtel:dataElement>
 </blue:wbobj>
 `;
