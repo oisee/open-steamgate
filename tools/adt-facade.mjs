@@ -116,6 +116,26 @@ const COMPATIBILITY = {
   // there and none of them were ever called.
   "COM.SAP.ADT.COMPATIBILITY": ["compatibilityAvailable"],
   "COM.SAP.ADT.ABAPUNIT": ["abapunit", "uriBasedAbapUnit", "xmlVersion2"],
+  // The one promise in this map with nothing behind it yet, made on purpose.
+  //
+  // Without this namespace the client says "Navigation to ABAP in Eclipse
+  // might not work correctly in this system" and offers SAP GUI for Java,
+  // which is the one GUI not installed on the machine that asks. With it the
+  // client reaches for SAP GUI for Windows instead, which is installed, and
+  // that GUI then opens DIAG to the dispatcher port of whatever instance the
+  // project names — where, today, nothing is listening.
+  //
+  // So this does not make F8 work, and is not meant to. It converts a dialog
+  // that ends the story into a real client knocking on a real port, which is
+  // a thing that can be recorded and answered. That recording is the first
+  // step of the DIAG side quest (docs/backlog.md, track C); until C.4 stands
+  // up a listener, the honest reading of this entry is "we intend to".
+  //
+  // reentranceTickets is included because there is a resource behind it —
+  // /sap/bc/adt/core/http/reentranceticket — and because matching the three
+  // a real system declares is a better bet than guessing which one the client
+  // keys on.
+  "COM.SAP.ADT.SAPGUI": ["navigationEvents", "reentranceTickets", "sapguiForWindows"],
   "COM.SAP.ADT.ACTIVATION": ["activate", "check"],
   "COM.SAP.ADT.CORE": ["checkruns", "checkrunsVendorContentType", "xmlFormat", "xmlNameSpace"],
   "COM.SAP.ADT.DDIC": ["ddic"],
