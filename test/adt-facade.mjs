@@ -104,6 +104,16 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(info.systemID).to.be.a("string").with.length(3);
     });
 
+    it("the system id is OS2 unless the start asks otherwise, so a bare restart keeps a project's logon", async () => {
+      // a client compares the id it stored when the project was made with
+      // the one the system reports now, and refuses the logon on a mismatch
+      const info = await (await call("/core/http/systeminformation")).json();
+      expect(info.systemID).to.equal(process.env.STG_ADT_SID ?? "OS2");
+      // and the feeds name the same system as their contributor
+      const dumps = await (await call("/runtime/dumps")).text();
+      expect(dumps).to.contain(`<atom:contributor><atom:name>${info.systemID}</atom:name></atom:contributor>`);
+    });
+
     // A quarter of a working session's traffic, on a timer, and every one of
     // them empty because nothing had gone wrong. 404 here makes a client
     // report an error where the real answer is "nothing to report".

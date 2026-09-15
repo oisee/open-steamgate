@@ -516,8 +516,17 @@ export function adtRouter(options = {}) {
   // The fourth is /sap/public/bc/icf/virtualhost, which is not here because
   // the right answer to it is 404 and that is what an unmounted path already
   // gives. A4H answers the same, and the wizard carries on regardless.
+  //
+  // The system id is OS2, not OSD, and it is the default rather than an
+  // environment variable. A client logs on to a project by comparing the id
+  // the system reports with the one the project was created against, and
+  // refuses the logon when they differ ("Logon was not performed to the
+  // service instance of the project OS2, but to service instance: OSD").
+  // The id was set by STG_ADT_SID alone, so a restart without it renamed
+  // the system under a working project and locked its owner out, twice.
+  // OSD is the product; OS2 is what it answers to on the wire.
   const identity = {
-    systemID: options.systemID ?? "OSD",
+    systemID: options.systemID ?? "OS2",
     userName: options.userName ?? "DEVELOPER",
     userFullName: options.userFullName ?? "Off-Stack Doppelganger",
     client: options.client ?? "001",

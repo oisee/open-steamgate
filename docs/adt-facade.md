@@ -69,6 +69,12 @@ mis-reads rather than reports.
   fetch`; vsp falls back to `GET` if HEAD is refused. A stateful request
   also carries `X-sap-adt-sessiontype: stateful`. A heal attempt sends an
   empty `Cookie: sap-contextid=` to force a fresh context.
+- **System id:** the façade answers as system `OS2` (`systeminformation`,
+  the feeds' contributor, the `SAP_SESSIONID_OS2_001` cookie). `STG_ADT_SID`
+  renames it. A client refuses a logon when the id it stored at project
+  creation differs from the one reported, so the id is a default in the code
+  and not something a restart has to remember; change it only together with
+  the projects that point at it. `OSD` is the product, `OS2` the system.
 - **Required back:** an `X-CSRF-Token` header whose value is **not** the
   literal `Required` (vsp reads that as "no token yet"), and `Set-Cookie`
   for `sap-contextid` and `SAP_SESSIONID`.
