@@ -777,12 +777,17 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       })).text();
       const rows = [...xml.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)]
         .map((match) => match[1]);
-      expect(rows.length, "the root fixture must exercise sibling packages").to.be.greaterThan(1);
-      expect(rows.every((row) => /<OBJECT_NAME>[^<]+<\/OBJECT_NAME>/.test(row)),
-        "a synthetic empty DEVC/K row aliases real package nodes").to.equal(true);
+      // the root is one package now, the one above all of ours; the
+      // sibling packages sit under it, and the rule about names holds there
+      expect(rows.map((row) => /<OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/.exec(row)?.[1])).to.deep.equal(["$Z"]);
       expect(xml).to.not.contain("<CATEGORIES>");
       expect(xml).to.not.contain("<OBJECT_TYPES>");
       expect(xml).to.not.contain("<NODE_ID>");
+      const under = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24Z", {method: "POST"})).text();
+      const siblings = [...under.matchAll(/<SEU_ADT_REPOSITORY_OBJ_NODE>([\s\S]*?)<\/SEU_ADT_REPOSITORY_OBJ_NODE>/g)].map((m) => m[1]);
+      expect(siblings.length, "the fixture must exercise sibling packages").to.be.greaterThan(1);
+      expect(siblings.every((row) => /<OBJECT_NAME>[^<]+<\/OBJECT_NAME>/.test(row)),
+        "a synthetic empty DEVC/K row aliases real package nodes").to.equal(true);
     });
 
     it("labels an ungrouped DDIC type instead of leaving its drawer blank", async () => {

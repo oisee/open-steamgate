@@ -363,9 +363,14 @@ describe("tools/adt-facade: the development loop", () => {
     <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_export"/>
   </adtcore:objectReferences>
 </aunit:runConfiguration>`;
+      // Accept: application/xml is what the view sent before this façade
+      // advertised the run configurations it takes; its handler for the
+      // result is registered for v2, so that is the answer to an unversioned ask
       const eclipse = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/xml"}});
       expect(eclipse.status).to.equal(200);
-      expect(eclipse.headers.get("content-type")).to.contain("application/vnd.sap.adt.abapunit.testruns.result.v1+xml");
+      expect(eclipse.headers.get("content-type")).to.contain("application/vnd.sap.adt.abapunit.testruns.result.v2+xml");
+      const v1 = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.abapunit.testruns.result.v1+xml"}});
+      expect(v1.headers.get("content-type"), "a version asked for is the version answered").to.contain("testruns.result.v1+xml");
       const v2 = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.abapunit.testruns.result.v2+xml"}});
       expect(v2.headers.get("content-type"), "the version the client asks by").to.contain("testruns.result.v2+xml");
       const vsp = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.api.junit.run-result.v1+xml"}});

@@ -73,6 +73,19 @@ const ROOT_PACKAGES = {
   gen: "$STG_GEN",
 };
 
+// A folder that is a package of its own rather than a child of the root
+// above it. The demo package lives inside src but is not part of $STG.
+const FOLDER_PACKAGES = {
+  "src/ztest": "$ZTEST",
+};
+
+// The one package above all of ours. A client shows the packages a system
+// answers for its root as the system library, side by side with the
+// system's own; one super-package keeps everything this façade holds under
+// one node there, which is also the node a person adds to their favourites.
+// "$" because nothing here is transportable. null turns it off.
+const SUPER_PACKAGE = "$Z";
+
 const DEFAULT_ROOTS = [
   {path: "src", writable: true, library: false},
   // what was brought in from a repository: objects of the local system that
@@ -102,6 +115,7 @@ export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
     this.roots = options.roots ?? DEFAULT_ROOTS;
+    this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
     this.parsed = undefined;
@@ -135,8 +149,10 @@ export class ObjectStore {
   // link joined up, so a name that happens to hold an underscore does not
   // invent a parent that is not there.
   #packagesOf(file, root) {
-    const base = ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-    const inside = file.slice(root.path.length).split("/").filter((p) => p !== "");
+    const own = Object.keys(FOLDER_PACKAGES).find((folder) => file.startsWith(folder + "/"));
+    const base = own !== undefined ? FOLDER_PACKAGES[own]
+      : ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    const inside = file.slice((own ?? root.path).length).split("/").filter((p) => p !== "");
     inside.pop();
     const chain = [base];
     for (const folder of inside) {
@@ -167,8 +183,11 @@ export class ObjectStore {
           if (!index.has(key)) {
             // a package is an object of the package above it, the way a
             // system holds it, so its own folder is not also its home
-            const home = type === "DEVC" && objectName === chain[chain.length - 1] && chain.length > 1
-              ? chain.slice(0, -1)
+            const own = type === "DEVC" && objectName === chain[chain.length - 1];
+            const home = own && chain.length > 1 ? chain.slice(0, -1)
+              // a root package's own object goes to the package above every
+              // root, when there is one; a root holds no object of itself
+              : own && this.superPackage ? [this.superPackage]
               : chain;
             index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library,
                             imported: root.imported === true, package: home[home.length - 1], packages: home});
@@ -385,6 +404,20 @@ export class ObjectStore {
       });
       const own = packages.get(entry.package);
       own.objects = own.objects + 1;
+    }
+    // everything that had no package above it now has the super-package
+    const tops = [...packages.values()]
+      .filter((node) => node.parent === undefined && node.name !== this.superPackage).map((node) => node.name);
+    // and not on an empty system: a super-package over nothing is a package
+    // that holds nothing, which is not what "no packages" means
+    if (this.superPackage !== null && this.superPackage !== undefined && tops.length > 0) {
+      const top = ensure(this.superPackage, undefined);
+      top.library = false;
+      top.description = "Packages served by this system";
+      for (const name of tops) {
+        packages.get(name).parent = this.superPackage;
+        top.subpackages.push(name);
+      }
     }
     for (const node of packages.values()) {
       node.subpackages.sort();

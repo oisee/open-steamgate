@@ -11,15 +11,15 @@ import {TREE_CATEGORY, TREE_TYPE_LABEL, TREE_FOLDER, ADT_TYPE} from "../tools/ad
 // about the façade's answer for a real object on disk under src/ztest/, not
 // about a fixture built in the test.
 //
-// The package names are $STG_ZTEST and its children rather than $ZTEST: the
-// store derives a package name from the folder chain (ROOT_PACKAGES in
+// $ZTEST is a root of its own (FOLDER_PACKAGES in osd-store.mjs), under $Z
+// like every package this façade holds.
 // tools/osd-store.mjs maps src -> $STG) and does not read DEVCLASS out of
 // package.devc.xml. The folder layout is the one the brief asked for; the
 // names are what this façade makes of it today.
-const ROOT = "$STG_ZTEST";
-const DDIC = "$STG_ZTEST_DDIC";
-const SRC = "$STG_ZTEST_SRC";
-const CDS = "$STG_ZTEST_CDS";
+const ROOT = "$ZTEST";
+const DDIC = "$ZTEST_DDIC";
+const SRC = "$ZTEST_SRC";
+const CDS = "$ZTEST_CDS";
 
 // type -> the object of that type the package carries. This list is the
 // point of the whole package: a type that falls out of the tree fails here
@@ -104,7 +104,7 @@ describe("src/ztest: the demo package of every type the façade shows", () => {
       const packages = store.packages();
       const root = packages.find((p) => p.name === ROOT);
       expect(root, ROOT).to.not.equal(undefined);
-      expect(root.parent).to.equal("$STG");
+      expect(root.parent, "its own root, under the one package above all of ours").to.equal("$Z");
       expect(root.subpackages).to.have.members([DDIC, SRC, CDS]);
       // the text comes from package.devc.xml, which is the only thing that
       // file is read for today

@@ -264,6 +264,12 @@ const ACCEPT = {
   "packages": ["application/vnd.sap.adt.packages.v2+xml", "application/vnd.sap.adt.packages.v1+xml"],
   "cts/transportchecks": ["application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData"],
   "ddic/dataelements": ["application/vnd.sap.adt.dataelements.v2+xml"],
+  // the run configurations the system says it takes (a4h-adt.jsonl discovery),
+  // which is also what tells the client to talk to this resource the typed way
+  "abapunit/testruns": ["application/vnd.sap.adt.abapunit.testruns.config.v1+xml",
+    "application/vnd.sap.adt.abapunit.testruns.config.v2+xml",
+    "application/vnd.sap.adt.abapunit.testruns.config.v3+xml",
+    "application/vnd.sap.adt.abapunit.testruns.config.v4+xml", "application/xml"],
 };
 
 // which workspace a collection is filed under in the discovery document
@@ -1514,7 +1520,11 @@ export function adtRouter(options = {}) {
     if (/junit\.run-result/.test(accept)) {
       return "application/vnd.sap.adt.api.junit.run-result.v1+xml";
     }
-    const version = /testruns\.(?:evaluation\.)?result\.v(\d)/.exec(accept)?.[1] ?? "1";
+    // v2 unless a version is asked for: the view's handler for its result
+    // type is registered for v2, and a v1-named answer to a client that
+    // sent Accept: application/xml was "No content-handler found for
+    // content-type ...testruns.result.v1+xml and data-type IAbapUnitResult"
+    const version = /testruns\.(?:evaluation\.)?result\.v(\d)/.exec(accept)?.[1] ?? "2";
     return `application/vnd.sap.adt.abapunit.testruns.${kind}.v${version}+xml`;
   };
 
