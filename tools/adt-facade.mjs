@@ -1130,7 +1130,14 @@ export function adtRouter(options = {}) {
         if (found === undefined) {
           throw new NotFound(type, req.params.name);
         }
-        res.type("application/vnd.sap.adt.objectstructure.v2+xml").send(objectStructureDocument(found));
+        // xml:base on the root is not decoration. The client merges this
+        // structure with its own parse of the source and, first thing, takes
+        // getBaseLinks().get(0) — a list filled only from xml:base
+        // (abapsource!AdtStructuralInfoService#mergeOutlineContentWithRndBasedOutline@78-93,
+        // ObjectStructureContentHandler#parseRecursively@135-231). Without it:
+        // "Index 0 out of bounds for length 0" on every keystroke in the editor.
+        res.type("application/vnd.sap.adt.objectstructure.v2+xml")
+          .send(objectStructureDocument(found, {base: req.originalUrl}));
       });
     };
     router.get(`${BASE}/${adt}/:name/objectstructure`, structure);
@@ -1257,6 +1264,14 @@ export function adtRouter(options = {}) {
             store.read(type, req.params.name, include);
           }
           store.write(type, req.params.name, body.toString("utf8"), include);
+          // The tag of what was just written, computed from what a read now
+          // returns so that it is the tag the next GET will carry. The
+          // client files it beside the source it saved; a save answered
+          // without one left "Properties file content do not contain an
+          // entity tag for the source file" in the log and an editor that
+          // showed nothing at all after the save had in fact succeeded.
+          const stored = store.read(type, req.params.name, include).source;
+          res.set("ETag", createHash("sha256").update(Buffer.from(String(stored))).digest("hex").slice(0, 32));
           res.status(200).type("text/plain").send("");
         });
       });
@@ -1343,7 +1358,15 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/checkruns`, async (req, res) => {
     const body = await rawBody(req);
     answer(res, () => {
-      const objects = checkObjectsIn(body, collections);
+      // Every object this façade serves may be checked, not only the ones
+      // with source. The data element editor checks its object the moment
+      // it opens, and a URI it did not recognise here was a 400 — "Checking
+      // object... has encountered a problem" as the first thing a person saw
+      // after the editor finally opened. A dictionary object has no syntax
+      // to check; what is reported for one is that it is here and readable,
+      // and the status text says so rather than implying a check it did not
+      // get.
+      const objects = checkObjectsIn(body, Object.entries(TYPES).map(([type, meta]) => [type, meta.adt]));
 
       // A package is a legitimate thing to check, and this used to call it an
       // invalid request. Eclipse checks the package as soon as its editor
@@ -1389,6 +1412,14 @@ export function adtRouter(options = {}) {
         return;
       }
       const reports = [...packageReports, ...objects.map((o) => {
+        if (TYPES[o.type]?.source !== true) {
+          try {
+            store.read(o.type, o.name);
+            return {uri: o.uri, issues: [], statusText: "no dictionary check here; the object is present and readable"};
+          } catch (e) {
+            return {uri: o.uri, issues: [], status: "notProcessed", statusText: String(e?.message ?? e)};
+          }
+        }
         try {
           const result = store.check(o.type, o.name, {
             source: o.source,

@@ -56,6 +56,13 @@ describe("tools/adt-facade: the development loop", () => {
     app.use(facade.router);
     await new Promise((resolve) => {
       server = app.listen(0, resolve);
+      // The tests here pause for seconds between requests on one kept-alive
+      // socket — a transpile, a check — and Node closes an idle keep-alive
+      // connection after five. The next request on it then dies with
+      // ECONNRESET, which is what "fetch failed" in a test that passed a
+      // minute ago meant. The window is widened past any pause a test takes.
+      server.keepAliveTimeout = 120000;
+      server.headersTimeout = 125000;
     });
     port = server.address().port;
 

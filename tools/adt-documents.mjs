@@ -71,7 +71,7 @@ const VISIBILITY = {
 // as `#start=row,col`, and a client that wants one method asks for
 // `source/main#start=…`. We answer the whole source and let the client cut,
 // which is what it does anyway: the fragment never reaches a server.
-export function objectStructureDocument(object) {
+export function objectStructureDocument(object, options = {}) {
   const element = (e, indent) => {
     const pad = " ".repeat(indent);
     const attributes = [
@@ -80,8 +80,14 @@ export function objectStructureDocument(object) {
       e.visibility === undefined ? undefined : `abapsource:visibility="${e.visibility}"`,
       e.modifiers === undefined ? undefined : `abapsource:modifiers="${e.modifiers}"`,
       e.uri === undefined ? undefined : `abapsource:sourceUri="${xmlEscape(e.uri)}"`,
+      ...Object.entries(e.extra ?? {}).map(([k, v]) => `${k}="${xmlEscape(v)}"`),
     ].filter((a) => a !== undefined).join(" ");
-    const links = (e.links ?? []).map((l) => `${pad}  <atom:link rel="http://www.sap.com/adt/relations/source/${xmlEscape(l.rel)}" href="${xmlEscape(l.href)}"/>`);
+    // The client looks a member up by its identifier links, not its block
+    // links (ObjectStructureContentHandler rewrites only definitionIdentifier
+    // and implementationIdentifier to the short names getLink searches for);
+    // both point at the same range here, so each block link has its twin.
+    const twin = (l) => l.rel.endsWith("Block") ? [l, {rel: l.rel.replace(/Block$/, "Identifier"), href: l.href}] : [l];
+    const links = (e.links ?? []).flatMap(twin).map((l) => `${pad}  <atom:link rel="http://www.sap.com/adt/relations/source/${xmlEscape(l.rel)}" href="${xmlEscape(l.href)}"/>`);
     const inner = [...links, ...(e.children ?? []).map((c) => element(c, indent + 2))];
     if (inner.length === 0) {
       return `${pad}<abapsource:objectStructureElement ${attributes}/>`;
@@ -94,7 +100,8 @@ ${pad}</abapsource:objectStructureElement>`;
   return `<?xml version="1.0" encoding="utf-8"?>
 <abapsource:objectStructureElement xmlns:abapsource="http://www.sap.com/adt/abapsource"
                                    xmlns:adtcore="http://www.sap.com/adt/core"
-                                   xmlns:atom="http://www.w3.org/2005/Atom"
+                                   xmlns:atom="http://www.w3.org/2005/Atom"${options.base === undefined ? "" : `
+                                   xml:base="${xmlEscape(options.base)}"`}
                                    adtcore:name="${xmlEscape(object.name)}"
                                    adtcore:type="${xmlEscape(object.type)}"
                                    abapsource:sourceUri="source/main">
@@ -344,7 +351,8 @@ export function structureOf(store, type, name) {
   // also what keeps the structure of an empty class from being empty, and
   // the outline provider above from throwing on it.
   if (type === "CLAS") {
-    children.push({name: entry.name, type: "CLAS/OCX", uri: "source/main"});
+    children.push({name: entry.name, type: "CLAS/OCX", uri: "source/main",
+      extra: {isExternalRef: "true", description: "Text Elements"}});
   }
   if (type === "PROG" || type === "INCL") {
     children.push(...programParts(object));

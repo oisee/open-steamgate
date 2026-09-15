@@ -78,6 +78,34 @@ describe("ADT editor follows typed property documents to their sources", () => {
     expect(response.headers.get("content-type")).to.contain("text/plain");
     expect(await response.text()).to.contain("CLASS ltcl_editor");
   });
+  // A save is answered with the tag of what was saved. The client files it
+  // beside the source; without one it logged "Properties file content do not
+  // contain an entity tag for the source file" and showed an empty editor
+  // after a save that had in fact succeeded.
+  it("answers a save with the entity tag the next read will carry", async () => {
+    const url = base + "/sap/bc/adt/oo/classes/zcl_editor";
+    const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});
+    const headers = {
+      cookie: seed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),
+      "x-csrf-token": seed.headers.get("x-csrf-token"),
+      "x-sap-adt-sessiontype": "stateful", "content-type": "text/plain",
+    };
+    const locked = await fetch(url + "?_action=LOCK&accessMode=MODIFY", {method: "POST", headers});
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    const before = await (await fetch(url + "/source/main")).text();
+    const saved = await fetch(url + "/source/main?lockHandle=" + encodeURIComponent(handle),
+      {method: "PUT", headers, body: before + "* saved once more\n"});
+    expect(saved.status).to.equal(200);
+    const tag = saved.headers.get("etag");
+    expect(tag, "a save carries a tag").to.be.a("string").with.length.greaterThan(0);
+    const read = await fetch(url + "/source/main");
+    expect(read.headers.get("etag"), "the same tag the read carries").to.equal(tag);
+    const again = await fetch(url + "/source/main", {headers: {"if-none-match": tag}});
+    expect(again.status, "which is what lets the client skip the download").to.equal(304);
+    await fetch(url + "/source/main?lockHandle=" + encodeURIComponent(handle), {method: "PUT", headers, body: before});
+    await fetch(url + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(handle), {method: "POST", headers});
+  });
+
   it("writes the include using its parent lock without overwriting main source", async () => {
     const url = base + "/sap/bc/adt/oo/classes/zcl_editor";
     const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});

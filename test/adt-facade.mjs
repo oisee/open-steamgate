@@ -334,6 +334,33 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(form.uri).to.match(/^source\/main#start=\d+,\d+;end=\d+,\d+$/);
     });
 
+    // The data element editor checks its object as soon as it opens, and a
+    // 400 for a URI the check did not recognise was the first thing a person
+    // saw after the editor finally opened.
+    it("checks a dictionary object by its presence, rather than refusing the request", async () => {
+      const res = await call("/checkruns?reporters=abapCheckRun", {method: "POST",
+        body: '<chkrun:checkObjectList xmlns:adtcore="http://www.sap.com/adt/core" xmlns:chkrun="http://www.sap.com/adt/checkrun">' +
+          '<chkrun:checkObject adtcore:uri="/sap/bc/adt/ddic/dataelements/icfname" chkrun:version="active"/></chkrun:checkObjectList>'});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain('chkrun:triggeringUri="/sap/bc/adt/ddic/dataelements/icfname"');
+      expect(xml).to.contain('chkrun:status="processed"');
+      expect(xml, "no message invented for an object that was not really checked").to.not.contain("<chkrun:checkMessage ");
+    });
+
+    // The editor merges this structure with its own parse and, first thing,
+    // takes the base link — filled only from xml:base on the root. Without
+    // it: "Index 0 out of bounds for length 0" on every keystroke.
+    it("roots the structure at its own address, and names members the way the client looks them up", async () => {
+      const path = "/oo/classes/zcl_stg_segw_export/objectstructure?version=active&withShortDescriptions=true";
+      const xml = await (await call(path)).text();
+      // the address as an attribute: the & is escaped, which is how the system writes it too
+      expect(xml).to.contain('xml:base="/sap/bc/adt' + path.replace("&", "&amp;") + '"');
+      expect(xml, "the identifier link is the one getLink searches for").to.contain("relations/source/implementationIdentifier");
+      expect(xml).to.contain("relations/source/definitionIdentifier");
+      expect(xml, "text elements are an external reference, as in a real structure").to.match(/CLAS\/OCX"[^>]*isExternalRef="true"/);
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");
