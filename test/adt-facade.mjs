@@ -727,6 +727,23 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(names.filter((n) => n === "$STG_SEGW_DDIC")).to.have.length(1);
     });
 
+    it("no row carries an empty OBJECT_URI or OBJECT_VIT_URI, so no two nodes collide as URI('')", async () => {
+      // proven cause of clicking one package opening another, of the
+      // neighbours being jerked, and of a node stuck on "Loading repository
+      // tree ...": the client parses OBJECT_URI and OBJECT_VIT_URI as
+      // new URI(value) with no empty guard, and compares nodes by their
+      // path, so every empty one equals every other and the expander takes
+      // the first (.local/scratch/answer-tree-identity.md). Every row here
+      // must carry a distinct OBJECT_URI and omit OBJECT_VIT_URI when empty.
+      for (const parent of ["$STG_SEGW", "$ZOSD_TEST", "$STG"]) {
+        const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=" + encodeURIComponent(parent), {method: "POST"})).text();
+        expect(xml, `${parent}: an empty OBJECT_VIT_URI collides every node`).to.not.contain("<OBJECT_VIT_URI/>");
+        expect(xml, `${parent}: an empty OBJECT_URI collides every node`).to.not.contain("<OBJECT_URI/>");
+        const uris = [...xml.matchAll(/<OBJECT_URI>([^<]+)<\/OBJECT_URI>/g)].map((m) => m[1]);
+        expect(new Set(uris).size, `${parent}: every node URI is distinct`).to.equal(uris.length);
+      }
+    });
+
     // $TMP is the local package of every ABAP system, so a client asks for
     // it by name without ever having been told it is there. The store has
     // none, because our packages are folders; the façade answers the

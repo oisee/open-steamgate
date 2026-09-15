@@ -713,9 +713,24 @@ export function nodeStructureDocument(nodes, options = {}) {
       node: typeNode});
   }
 
+  // A URI element must never be sent empty. The client's row parser does
+  // `new URI(getSimpleValue())` for OBJECT_URI and OBJECT_VIT_URI with no
+  // empty-string guard (RepositoryObjectListItem.accept@42-64), so an empty
+  // <OBJECT_VIT_URI/> becomes URI(""), and AbapRepositoryBaseNode.
+  // objectReferencesAreEqual compares nodes by URI.getPath() — "" equals ""
+  // — so every row collides with the first, and TreeExpanderJob returns
+  // list.get(0). That is the whole of "clicking $STG_SEGW opens $STG_APC",
+  // "the neighbours get jerked", and "Loading repository tree ..." with no
+  // request: the clicked node never resolves to itself. Proven by byte-code
+  // (.local/scratch/answer-tree-identity.md). The other empty elements —
+  // NODE_ID, PARENT_NAME — the client reads through a guard and are kept
+  // self-closed, because the A4H oracle sends them that way.
+  const OMIT_WHEN_EMPTY = new Set(["OBJECT_URI", "OBJECT_VIT_URI"]);
   const row = (fields) => "    <SEU_ADT_REPOSITORY_OBJ_NODE>" +
-    Object.entries(fields).map(([name, value]) =>
-      value === "" ? `<${name}/>` : `<${name}>${xmlEscape(String(value))}</${name}>`).join("") +
+    Object.entries(fields).flatMap(([name, value]) =>
+      value === ""
+        ? (OMIT_WHEN_EMPTY.has(name) ? [] : [`<${name}/>`])
+        : [`<${name}>${xmlEscape(String(value))}</${name}>`]).join("") +
     "</SEU_ADT_REPOSITORY_OBJ_NODE>";
 
   // The DEVC root is not a package and has no virtual drawers. An earlier
