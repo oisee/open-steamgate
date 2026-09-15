@@ -132,6 +132,16 @@ const COMPATIBILITY = {
   // nodestructure, informationsystem/search and typestructure.
   "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData"],
   "COM.SAP.ADT.RIS": ["ris", "search"],
+  // The outline of a class or interface is gated here, not at the resource.
+  // The client's outline provider asks the graph for this node before it
+  // does anything else (abapsource.ui!AdtOutlineTreeContentProvider
+  // #isObjectStructureResourceAvailable@34-58) and, told no, cancels its job
+  // without a request, an error or a refresh — "Loading outline structure
+  // ..." forever, nothing in the log. The objectstructure resource behind
+  // it had been answering the whole time. Declared without the obligatory
+  // edge the system carries (outline -> outlineBlockInformation), because
+  // block information is not served here and a promise of it would be false.
+  "COM.SAP.ADT.SOURCESERVICES": ["outline"],
 };
 
 // [source namespace, source, target namespace, target, obligatory]

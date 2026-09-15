@@ -230,6 +230,40 @@ export function structureOf(store, type, name) {
     }
   }
 
+  // A method the class implements without declaring: one it takes from an
+  // interface. abaplint lists a class's own METHODS and not those, so a
+  // class that is nothing but an interface implementation — an APC handler,
+  // a BAdI — had no children here at all. That is not a cosmetic gap: the
+  // client's class outline reads result[0] without checking the length
+  // (oo.ui!AbapClassOutlineExplorerTreeContentProvider#getChildren@14-16),
+  // so an empty structure is an exception rather than an empty tree.
+  //
+  // Read from the parsed file, not from the definition: a class whose
+  // superclass is not in this tree has no definition at all, and its
+  // bodies are still right there in the source.
+  if (object !== undefined) {
+    const listed = new Set(children.map((c) => c.name));
+    for (const [name, body] of implementationRows(object)) {
+      if (listed.has(name) === false) {
+        children.push({name, type: METHOD, visibility: "public", uri: rangeUri(body),
+          links: [{rel: "implementationBlock", href: rangeUri(body)}]});
+      }
+    }
+  }
+  if (definition !== undefined) {
+    // the attributes, which a real structure lists beside the methods
+    // (a4h-adt-2026-09-14T2205.jsonl:112 has seven CLAS/OA to five CLAS/OM)
+    for (const attribute of definition.getAttributes?.()?.getAll?.() ?? []) {
+      const at = attribute.getStart?.();
+      children.push({
+        name: attribute.getName().toUpperCase(),
+        type: "CLAS/OA",
+        visibility: VISIBILITY[attribute.getVisibility?.()] ?? "public",
+        uri: at === undefined ? "source/main" : rangeUri({row: at.getRow(), col: at.getCol(), endRow: at.getRow(), endCol: at.getCol()}),
+      });
+    }
+  }
+
   // a class carries more than one file, and ADT calls them includes; a client
   // reads one through the includes resource rather than through source/main
   if (type === "CLAS") {
@@ -244,6 +278,14 @@ export function structureOf(store, type, name) {
         uri: `includes/${include}/source/main`,
       });
     }
+  }
+
+  // The class itself, as one more child, which a real structure always
+  // carries (the same capture: one CLAS/OCX named after the class). It is
+  // also what keeps the structure of an empty class from being empty, and
+  // the outline provider above from throwing on it.
+  if (type === "CLAS") {
+    children.push({name: entry.name, type: "CLAS/OCX", uri: "source/main"});
   }
 
   return {name: entry.name, type: ADT_TYPE[type] ?? type, children};

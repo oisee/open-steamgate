@@ -276,6 +276,30 @@ describe("tools/adt-facade: OSD answers ADT", () => {
         .to.match(/<node nameSpace="COM\.SAP\.ADT\.COMPATIBILITY" name="compatibilityAvailable"\/>/);
     });
 
+    // The outline is gated by the graph, not by the resource behind it.
+    // The client's outline provider resolves SOURCESERVICES/outline before
+    // it sends anything and, told no, cancels its job silently — so a class
+    // node read "Loading outline structure ..." forever while
+    // /objectstructure answered 200 to anyone who asked.
+    it("declares the outline, which is what makes a class node open", async () => {
+      const xml = await (await call("/compatibility/graph")).text();
+      expect(xml).to.match(/<node nameSpace="COM\.SAP\.ADT\.SOURCESERVICES" name="outline"\/>/);
+    });
+
+    // And behind the gate the answer must not be empty: the class outline
+    // provider reads result[0] without a length check. A class made only of
+    // interface implementations used to have no children, because abaplint
+    // lists a class's own methods and not the ones it takes from an
+    // interface.
+    it("gives a class that only implements an interface a structure with its methods", async () => {
+      const xml = await (await call("/oo/classes/zcl_stg_apc_demo/objectstructure?version=active&withShortDescriptions=true")).text();
+      const methods = [...xml.matchAll(/adtcore:type="CLAS\/OM"[^>]*/g)].map((m) => m[0]);
+      expect(methods.length, "an APC handler has methods, all of them from its interface").to.be.greaterThan(0);
+      expect(xml).to.contain('adtcore:name="IF_APC_WSP_EXTENSION~ON_START"');
+      expect(xml, "a method points into the source").to.match(/adtcore:type="CLAS\/OM"[^>]*abapsource:sourceUri="source\/main#start=\d+,\d+;end=\d+,\d+"/);
+      expect(xml, "the class itself is a child, as it is in a real structure").to.contain('adtcore:type="CLAS/OCX"');
+    });
+
     it("it answers at both of its names, because a client uses both", async () => {
       const core = await call("/core/discovery");
       const plain = await call("/discovery");
