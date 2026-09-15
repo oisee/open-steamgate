@@ -106,6 +106,29 @@ describe("ADT editor follows typed property documents to their sources", () => {
     await fetch(url + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(handle), {method: "POST", headers});
   });
 
+  // The lock result is named as the client asks for it and shaped as the
+  // system shapes it (a4h-adt.jsonl:480): dataname com.sap.adt.lock.Result2,
+  // MODIFICATION_SUPPORT "NoModification" — which is about the modification
+  // assistant, not about whether the object may be written.
+  it("answers a lock in the shape and under the name the system uses", async () => {
+    const url = base + "/sap/bc/adt/oo/classes/zcl_editor";
+    const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});
+    const headers = {
+      cookie: seed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),
+      "x-csrf-token": seed.headers.get("x-csrf-token"),
+      "x-sap-adt-sessiontype": "stateful",
+      accept: "application/vnd.sap.as+xml;charset=UTF-8;dataname=com.sap.adt.lock.Result2",
+    };
+    const locked = await fetch(url + "?_action=LOCK&accessMode=MODIFY", {method: "POST", headers});
+    expect(locked.status).to.equal(200);
+    expect(locked.headers.get("content-type")).to.contain("dataname=com.sap.adt.lock.Result2");
+    const xml = await locked.text();
+    expect(xml).to.contain("<MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT>");
+    expect(xml).to.contain("<CORR_LOCKS/>");
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(xml)?.[1];
+    await fetch(url + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(handle), {method: "POST", headers});
+  });
+
   it("writes the include using its parent lock without overwriting main source", async () => {
     const url = base + "/sap/bc/adt/oo/classes/zcl_editor";
     const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});

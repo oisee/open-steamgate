@@ -335,6 +335,25 @@ describe("tools/adt-facade: the development loop", () => {
     // not the other: "No content-handler found for content-type
     // ...api.junit.run-result.v1+xml" was the whole of Ctrl+Shift+F10. The
     // document is the same either way; the name follows what is asked for.
+    // After a run the client asks for its evaluation — the same result for
+    // the objects named, with the test class and method as a fragment — to
+    // show the report and navigate from a result (a4h-adt.jsonl:497).
+    it("evaluates a run for the method a report points at", async function () {
+      this.timeout(120000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit">
+  <options><uriType value="semantic"/><withNavigationUri enabled="true"/></options>
+  <adtcore:objectSets xmlns:adtcore="http://www.sap.com/adt/core"><objectSet kind="inclusive"><adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_export#testclass=LTCL_EXPORT;testmethod=SOMETHING"/>
+  </adtcore:objectReferences></objectSet></adtcore:objectSets>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns/evaluation", {method: "POST", body,
+        headers: {accept: "application/vnd.sap.adt.abapunit.testruns.evaluation.result.v2+xml;q=0.9"}});
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/vnd.sap.adt.abapunit.testruns.evaluation.result.v2+xml");
+      expect(await res.text()).to.contain("<aunit:runResult");
+    });
+
     it("names the run result the way the ABAP Unit view knows it, and the junit way on request", async function () {
       this.timeout(120000);
       const body = `<?xml version="1.0" encoding="UTF-8"?>
@@ -347,6 +366,8 @@ describe("tools/adt-facade: the development loop", () => {
       const eclipse = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/xml"}});
       expect(eclipse.status).to.equal(200);
       expect(eclipse.headers.get("content-type")).to.contain("application/vnd.sap.adt.abapunit.testruns.result.v1+xml");
+      const v2 = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.abapunit.testruns.result.v2+xml"}});
+      expect(v2.headers.get("content-type"), "the version the client asks by").to.contain("testruns.result.v2+xml");
       const vsp = await call("/abapunit/testruns", {method: "POST", body, headers: {accept: "application/vnd.sap.adt.api.junit.run-result.v1+xml"}});
       expect(vsp.headers.get("content-type")).to.contain("application/vnd.sap.adt.api.junit.run-result.v1+xml");
       expect(await vsp.text(), "the same document under either name").to.contain("<aunit:runResult");
@@ -398,13 +419,21 @@ describe("tools/adt-facade: the development loop", () => {
 </adtcore:objectReferences>`,
     });
 
-    it("source that holds activates, and says so by saying nothing", async function () {
+    // A clean activation is answered with its properties, all true, and no
+    // messages — the system's own answer (a4h-adt.jsonl:489). This test used
+    // to expect an empty body, on the note that a successful activation
+    // "answers nothing at all"; the capture says otherwise.
+    it("source that holds activates, and says so with its properties", async function () {
       this.timeout(60000);
       const {handle} = await lock();
       await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
       const res = await activate(SCRATCH);
       expect(res.status).to.equal(200);
-      expect((await res.text()).trim()).to.equal("");
+      expect(res.headers.get("content-type")).to.contain("application/xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<chkl:messages ");
+      expect(xml).to.match(/<chkl:properties [^>]*activationExecuted="true"/);
+      expect(xml, "no messages for a clean activation").to.not.contain("<chkl:msg");
     });
 
     it("source that does not hold comes back as messages, not as an empty success", async function () {

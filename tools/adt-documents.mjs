@@ -1054,7 +1054,11 @@ export function lockResultDocument(handle, options = {}) {
       <CORRTEXT/>
       <IS_LOCAL>${options.local === false ? "" : "X"}</IS_LOCAL>
       <IS_LINK_UP/>
-      <MODIFICATION_SUPPORT>${options.modifiable === false ? "" : "X"}</MODIFICATION_SUPPORT>
+      <MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT>
+      <LINK_UP_MODE/>
+      <CORR_LOCKS/>
+      <CORR_CONTENTS/>
+      <SCOPE_MESSAGES/>
     </DATA>
   </asx:values>
 </asx:abap>
@@ -1073,6 +1077,17 @@ export function exceptionDocument(type, message, options = {}) {
   <localizedMessage lang="EN">${xmlEscape(message)}</localizedMessage>
   <properties/>
 </exc:exception>
+`;
+}
+
+// The answer to an activation that happened. Three properties, all true,
+// and no messages: the system's own answer for a clean activation
+// (a4h-adt.jsonl:489), where a message list would carry the findings.
+export function activationSuccessDocument() {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist">
+  <chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/>
+</chkl:messages>
 `;
 }
 

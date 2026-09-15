@@ -26,7 +26,7 @@ import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported} from "./osd-store.mjs";
-import {ADT_TYPE, dataElementDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, dataElementDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1218,14 +1218,14 @@ export function adtRouter(options = {}) {
           // Deliberately not MODIFICATION_SUPPORT: a real system returns
           // NoModification for perfectly writable local objects, so a client
           // that trusted that field would find nothing writable at all.
-          res.status(200).type("application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.lock.result")
+          res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2"))
             .send(lockResultDocument("", {modifiable: false}));
           return;
         }
         const held = [...session.locks.values()].find((l) => l.type === entry.type && l.name === entry.name);
         const handle = held?.handle ?? randomUUID();
         session.locks.set(handle, {handle, type: entry.type, name: entry.name, since: Date.now()});
-        res.status(200).type("application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.lock.result").send(lockResultDocument(handle));
+        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(handle));
         return;
       }
 
@@ -1464,7 +1464,11 @@ export function adtRouter(options = {}) {
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
-        res.status(200).type("text/plain").send("");
+        // A successful activation answers with its properties, not with
+        // nothing: checkExecuted, activationExecuted and generationExecuted,
+        // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
+        // to stand here, that a clean activation "answers nothing at all", was wrong.
+        res.status(200).type("application/xml").send(activationSuccessDocument());
       }
       return;
     }
@@ -1484,7 +1488,11 @@ export function adtRouter(options = {}) {
         ));
         return;
       }
-      res.status(200).type("text/plain").send("");
+      // A successful activation answers with its properties, not with
+      // nothing: checkExecuted, activationExecuted and generationExecuted,
+      // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
+      // to stand here, that a clean activation "answers nothing at all", was wrong.
+      res.status(200).type("application/xml").send(activationSuccessDocument());
     } catch (e) {
       res.status(200).type("application/xml").send(activationFailureDocument(
         named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(e?.message ?? e), severity: "E", line: 1, column: 1}]})),
@@ -1497,6 +1505,41 @@ export function adtRouter(options = {}) {
   // server is answering requests from, so a client's test data must not land
   // in the gateway's rows. About a second for one class.
   advertise("abapunit/testruns");
+  // The name of a run result follows what the client asks by. Eclipse's
+  // ABAP Unit view asks for abapunit.testruns.result.v2 (a4h-adt.jsonl:495)
+  // and has handlers for v1 and v2 and nothing else; vsp asks by the junit
+  // name. The document is the classic aunit:runResult in every case.
+  const unitResultType = (req, kind) => {
+    const accept = String(req.headers.accept ?? "");
+    if (/junit\.run-result/.test(accept)) {
+      return "application/vnd.sap.adt.api.junit.run-result.v1+xml";
+    }
+    const version = /testruns\.(?:evaluation\.)?result\.v(\d)/.exec(accept)?.[1] ?? "1";
+    return `application/vnd.sap.adt.abapunit.testruns.${kind}.v${version}+xml`;
+  };
+
+  // The evaluation of a run: the same result for the objects named, which
+  // the client asks for after the run to show the report and to navigate
+  // from a result to its method (a4h-adt.jsonl:497). Its references carry
+  // the test class and method as a fragment; the run is that of the object.
+  router.post(`${BASE}/abapunit/testruns/evaluation`, async (req, res) => {
+    const body = await rawBody(req);
+    const named = objectReferencesIn(body.toString("utf8").replaceAll(/#testclass=[^"]*/g, ""), collections);
+    if (named.length === 0) {
+      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const run = await runner.runDetached(named[0].type, named[0].name);
+      res.status(200).type(unitResultType(req, "evaluation.result"))
+        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+    } catch (e) {
+      res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
+        .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
+    }
+  });
+
   router.post(`${BASE}/abapunit/testruns`, async (req, res) => {
     const body = await rawBody(req);
     const named = objectReferencesIn(body, collections);
@@ -1513,9 +1556,7 @@ export function adtRouter(options = {}) {
       // other) and reported "No content-handler found for content-type
       // ...api.junit.run-result.v1+xml" for the name vsp asks by. A client
       // that asks for the junit name still gets it.
-      res.status(200).type(/junit\.run-result/.test(String(req.headers.accept ?? ""))
-        ? "application/vnd.sap.adt.api.junit.run-result.v1+xml"
-        : "application/vnd.sap.adt.abapunit.testruns.result.v1+xml")
+      res.status(200).type(unitResultType(req, "result"))
         .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
     } catch (e) {
       res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
