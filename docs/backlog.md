@@ -97,6 +97,30 @@ A.6  Debugger endpoints                                                  [S]
 A.7  ATC, refactorings, quick fixes, where-used                          [S]
      └─ not started, not blocking; listed so a 404 reads as a plan
 
+A.10 What the client complains about while it works                      [S]
+     Free findings: with CDS data preview and the package tree working
+     (2026-09-16), Eclipse's own Workspace Log still carries three OSD
+     complaints. None of them stops anything today; each is a thing the
+     client wanted and did not get.
+     ├─ "Couldn't get URI from discovery for CDS Annotation ADT Resource",
+     │  repeated on every CDS editor open. A4H answers
+     │  /sap/bc/adt/ddic/cds/annotation/definitions with 188 KB of CDATA —
+     │  the annotation grammar, which is what feeds code completion and the
+     │  syntax colouring of @-annotations in the DDL editor. We answer 404.
+     │  Note before copying: that document is SAP's own content, so it is
+     │  not ours to bundle (clean-room, CLAUDE.md). What we can serve is the
+     │  annotations our own runtime understands, which is a smaller and
+     │  honest document
+     ├─ "Properties file content do not contain an entity tag for the source
+     │  file" (determineEtagForSourceFile), on every source open. Our
+     │  source-properties document carries no ETag at all
+     │  (tools/adt-source-properties.mjs); the source response does. Cheap,
+     │  and it is the value the client wants to send back on a save
+     └─ "An exception occurred invoking extension
+        com.sap.adt.semanticfs.packageContent" for the project object, with
+        "Unhandled event loop exception" beside it. Unread; the semantic
+        filesystem asks for package content in a shape we have not measured
+
 A.9  "No authorization to create objects in the system"                   [S]
      ├─ seen live 2026-09-16: Eclipse's New ABAP Repository Object wizard
      │  refuses before asking for anything — the project is picked, the type
