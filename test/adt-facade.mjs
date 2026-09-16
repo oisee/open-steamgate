@@ -1143,6 +1143,45 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(whole.status, "no SELECT means the whole table").to.equal(200);
       expect((await call("/ddic/tables/parser/info")).status, "the system's grammar is not ours to serve").to.equal(404);
     });
+
+    it("describes a CDS view by its element names, not its columns", async () => {
+      const res = await call("/datapreview/cds/ZC_STG_BOOKING/metadata");
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/vnd.sap.adt.datapreview.table.v1+xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<dataPreview:cdsEntityName>ZC_STG_BOOKING</dataPreview:cdsEntityName>");
+      // the element is TravelId in the source and TRAVELID in the database,
+      // and the client shows both
+      expect(xml).to.match(/dataPreview:name="TRAVELID" dataPreview:camelCaseName="TravelId"/);
+      // the type comes from the base table's field, because a projection
+      // does not restate it
+      expect(xml).to.match(/dataPreview:camelCaseName="TravelId"[^/]*dataPreview:colType="CHAR"[^/]*dataPreview:length="8"/);
+      expect(xml, "a key of the view is marked as one").to.match(/dataPreview:name="BOOKINGID"[^/]*dataPreview:keyAttribute="true"/);
+      expect(xml, "the metadata carries no rows").to.not.contain("<dataPreview:data>");
+      expect(xml, "and offers the row-count link the client uses").to.contain("datapreview/cds/metadata/maxrows");
+    });
+
+    it("answers F8 on a CDS view with rows from the generated view", async () => {
+      const res = await call("/datapreview/cds?rowNumber=3&ddlSourceName=ZC_STG_BOOKING", {method: "POST",
+        body: "SELECT ZC_STG_BOOKING~TRAVELID, ZC_STG_BOOKING~BOOKINGID FROM ZC_STG_BOOKING"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<dataPreview:cdsCamelCaseName>");
+      expect((xml.match(/<dataPreview:data>/g) ?? []).length, "rows came back").to.be.greaterThan(0);
+      const whole = await call("/datapreview/cds?rowNumber=2&ddlSourceName=ZC_STG_BOOKING", {method: "POST", body: ""});
+      expect(whole.status, "no SELECT means the whole entity").to.equal(200);
+      const missing = await call("/datapreview/cds?ddlSourceName=ZC_NO_SUCH_VIEW", {method: "POST", body: ""});
+      expect(missing.status, "a view that is not there is a 404, not an empty preview").to.equal(404);
+    });
+
+    it("advertises the CDS preview with the system's own term and templates", async () => {
+      const xml = await (await call("/discovery")).text();
+      expect(xml).to.contain('href="/sap/bc/adt/datapreview/cds"');
+      expect(xml).to.contain('term="DatapreviewCds"');
+      expect(xml).to.contain("/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}");
+      expect(xml, "the association walks are not served, so they are not offered")
+        .to.not.contain("datapreview/cds/associationlist");
+    });
   });
 
   describe("what the client infers from a shape", () => {

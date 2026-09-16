@@ -26,6 +26,7 @@ import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
+import {cdsEntityOf} from "./adt-cds.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
@@ -258,7 +259,11 @@ export function tableDataDocument(answer, options = {}) {
     const f = known.get(name.toUpperCase());
     return f === undefined
       ? `dataPreview:type="${type(name)}" dataPreview:description="${xmlEscape(name.toUpperCase())}" dataPreview:keyAttribute="false" dataPreview:colType="" dataPreview:isKeyFigure="false"`
-      : `dataPreview:type="${xmlEscape(f.letter)}" dataPreview:description="${xmlEscape(f.description || f.name)}" dataPreview:keyAttribute="false" dataPreview:colType="${xmlEscape(f.dataType)}" dataPreview:isKeyFigure="false" dataPreview:length="${f.length}" dataPreview:caseSensitive="false"`;
+      // camelCaseName is what makes a CDS preview a CDS preview: the element
+      // is named in the source in mixed case and the client shows that, while
+      // the column it selects is the upper-case one. A table has no such name
+      // and the attribute is left off rather than filled with the column.
+      : `${f.camelCaseName === undefined ? "" : `dataPreview:camelCaseName="${xmlEscape(f.camelCaseName)}" `}dataPreview:type="${xmlEscape(f.letter)}" dataPreview:description="${xmlEscape(f.description || f.name)}" dataPreview:keyAttribute="${f.key === true}" dataPreview:colType="${xmlEscape(f.dataType)}" dataPreview:isKeyFigure="false" dataPreview:length="${f.length}" dataPreview:caseSensitive="false"`;
   };
   const body = columns.map((name) => `  <dataPreview:columns>
     <dataPreview:metadata dataPreview:name="${xmlEscape(name.toUpperCase())}" ${metadata(name)}/>
@@ -271,7 +276,11 @@ ${rows.map((r) => `      <dataPreview:data>${xmlEscape(render(r[name]))}</dataPr
 <dataPreview:tableData xmlns:dataPreview="http://www.sap.com/adt/dataPreview">
   <dataPreview:totalRows>${rows.length}</dataPreview:totalRows>${options.name === undefined ? "" : `
   <dataPreview:name>${xmlEscape(options.name)}</dataPreview:name>`}
-  <dataPreview:isHanaAnalyticalView>false</dataPreview:isHanaAnalyticalView>
+${options.cdsEntityName === undefined ? "" : `
+  <dataPreview:cdsEntityName>${xmlEscape(options.cdsEntityName)}</dataPreview:cdsEntityName>`}${options.cdsCamelCaseName === undefined ? "" : `
+  <dataPreview:cdsCamelCaseName>${xmlEscape(options.cdsCamelCaseName)}</dataPreview:cdsCamelCaseName>`}
+  <dataPreview:isHanaAnalyticalView>false</dataPreview:isHanaAnalyticalView>${options.maxRowsLink !== true ? "" : `
+  <atom:link rel="http://www.sap.com/adt/categories/datapreview/cds/metadata/maxrows" title="Max Rows Increase" xmlns:atom="http://www.w3.org/2005/Atom"/>`}
   <dataPreview:executedQueryString>${xmlEscape(answer.sql ?? "")}</dataPreview:executedQueryString>
   <dataPreview:queryExecutionTime>${options.ms ?? 0}</dataPreview:queryExecutionTime>
 ${body}
@@ -338,6 +347,8 @@ const CATEGORY = {
   "ddic/dataelements": ["dtelde", "http://www.sap.com/wbobj/dictionary"],
   // F8 on a table: the system's own term and scheme (a4h-adt.jsonl discovery)
   "datapreview/ddic": ["DatapreviewDdic", "http://www.sap.com/adt/categories/datapreview"],
+  // F8 on a CDS view, the same scheme with the system's CDS term
+  "datapreview/cds": ["DatapreviewCds", "http://www.sap.com/adt/categories/datapreview"],
   "abapunit/testruns": ["unittestruns", "http://www.sap.com/adt/categories/abapunit"],
   "activation": ["activationruns", "http://www.sap.com/adt/categories/activation"],
   "checkruns": ["checkruns", "http://www.sap.com/adt/categories/check"],
@@ -401,6 +412,14 @@ const TEMPLATE_LINKS = {
     ["http://www.sap.com/adt/categories/datapreview/ddic/metadata", "/sap/bc/adt/datapreview/ddic/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/ddic", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName}"],
   ],
+  // two of the system's nine: the ones a preview needs. The association
+  // links (list, navigation, follow, refresh) are how the client walks from
+  // a row into a related entity, and none of that is served yet, so none of
+  // it is offered — a template we advertise is a promise.
+  "datapreview/cds": [
+    ["http://www.sap.com/adt/categories/datapreview/cds/metadata", "/sap/bc/adt/datapreview/cds/{object_name}/metadata"],
+    ["http://www.sap.com/adt/categories/datapreview/cds", "/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}"],
+  ],
   "checkruns": [
     ["http://www.sap.com/adt/categories/check/relations/reporters", "/sap/bc/adt/checkruns{?reporters}"],
   ],
@@ -441,6 +460,7 @@ const TITLE = {
   "ddic/dataelements": "Data Element",
   "ddic/tables": "Database Table",
   "datapreview/ddic": "Modelled Data Preview for DDIC",
+  "datapreview/cds": "Data Preview for CDS",
   "ddic/srvd/sources": "Service Definitions",
   "datapreview/freestyle": "Data Preview (freestyle SQL)",
   "repository/informationsystem/search": "Object Search",
@@ -1859,6 +1879,44 @@ export function adtRouter(options = {}) {
     } catch (e) {
       // a refusal with an empty message told nobody anything: the database
       // client's error carries its text in a field of its own, or nowhere
+      refuse(res, e?.code === "NOT_BUILT" ? 503 : 400,
+        e?.code === "NOT_BUILT" ? "ExceptionResourceNoAccess" : "ExceptionResourceWrongData",
+        String(e?.message || e?.cause?.message || e?.code || `the statement was refused: ${query}`));
+    }
+  });
+
+  // F8 on a CDS view. The rows come from the view the transpiler generated
+  // under the entity's own name, so a client that writes "FROM ZC_STG_TRAVEL"
+  // is answered by the database, not by a translation of it.
+  advertise("datapreview/cds");
+  router.get(`${BASE}/datapreview/cds/:name/metadata`, (req, res) => {
+    answer(res, () => {
+      const entity = cdsEntityOf(store, req.params.name);
+      if (entity === undefined) {
+        refuse(res, 404, "ExceptionResourceNotFound", `DDLS ${String(req.params.name).toUpperCase()} does not exist`);
+        return;
+      }
+      res.type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
+        .send(tableDataDocument({rows: [], columns: entity.fields.map((f) => f.name)},
+          {fields: entity.fields, name: entity.name, cdsEntityName: entity.name, maxRowsLink: true}));
+    });
+  });
+  router.post(`${BASE}/datapreview/cds`, async (req, res) => {
+    const name = String(req.query.ddlSourceName ?? "").toUpperCase();
+    const entity = cdsEntityOf(store, name);
+    if (entity === undefined) {
+      refuse(res, 404, "ExceptionResourceNotFound", `DDLS ${name} does not exist`);
+      return;
+    }
+    const asked = (await rawBody(req)).toString("utf8").trim();
+    const query = asked === "" ? `SELECT * FROM ${entity.name}` : asked;
+    const started = Date.now();
+    try {
+      const result = await data.query(query, {max: Number(req.query.rowNumber ?? 100)});
+      res.status(200).type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
+        .send(tableDataDocument(result, {ms: Date.now() - started, fields: entity.fields, name: entity.name,
+          cdsEntityName: entity.name, cdsCamelCaseName: entity.name}));
+    } catch (e) {
       refuse(res, e?.code === "NOT_BUILT" ? 503 : 400,
         e?.code === "NOT_BUILT" ? "ExceptionResourceNoAccess" : "ExceptionResourceWrongData",
         String(e?.message || e?.cause?.message || e?.code || `the statement was refused: ${query}`));
