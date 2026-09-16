@@ -211,6 +211,20 @@ B.6  The client/MANDT story                                             [S+T]
      └─ unchanged and still first-order: fixed client 123, no implicit
         MANDT (ANORMALIES.md). The demo keeps T0009 visible on purpose
 
+B.8  SICF and SM59 as applications, the way SEGW is one                  [S]
+     ├─ Alice, 2026-09-16: a SICF editor over the *.sicf.xml / *.sapc.xml the
+     │  tree carries (tools/osd-icf.mjs already lists and mounts them), the
+     │  way src/segw is SEGW as an application over its own tables
+     ├─ a node may point at an ABAP handler (if_http_extension, served by the
+     │  child through the shim, as today) OR at a JS — later maybe Go —
+     │  implementation: the door (POST /osd/sql) is already a node answered
+     │  by JS, so the shape exists; missing is declaring it in a *.sicf.xml
+     │  and an editor over the set
+     └─ SM59 in the same manner later: destinations as objects with an
+        editor, over the .local/rfc-destinations.json the RFC runtime reads
+        (local / replay / live / record / fallback); track D's gateway makes
+        the outbound half real
+
 B.7  Database seam                                                       [S]
      └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
         (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1

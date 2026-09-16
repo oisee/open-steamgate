@@ -63,6 +63,24 @@ app.get("/osd/serving", function (req, res) {
   });
 });
 
+// The end of a dialog step. An AS ABAP commits the database implicitly
+// when a request's work is done and rolls it back when the request ends in
+// an uncaught exception; a DPC that inserts without a COMMIT WORK of its
+// own relies on that. The in-memory client hid the rule — its export at
+// exit committed whatever was open — and the file client does not, so an
+// OData write once vanished at the recycle. This is the rule, said once.
+const connection = () => globalThis.abap.context.databaseConnections.DEFAULT;
+async function dialogStep(work) {
+  try {
+    const result = await work();
+    await connection().commit?.();
+    return result;
+  } catch (e) {
+    await connection().rollback?.();
+    throw e;
+  }
+}
+
 // The door for the rows: the façade's data preview asks here instead of
 // booting a second runtime of its own, so what a client sees in a preview
 // is what the application serves, from the same connection. SELECT only,
@@ -86,19 +104,19 @@ app.post("/osd/sql", async function (req, res) {
 // SICF: every other ICF service the tree carries, answered here by the
 // same shim the OData front uses. The parent lists the same paths and
 // proxies them, so an activated handler goes live with the recycle.
-const icf = mountServices(app, (args) => cl_express_icf_shim.run({
+const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.run({
   ...args,
   base: new globalThis.abap.types.String().set(args.base),
-}), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+})), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
 
 app.all("/sap/opu/odata/sap/*", async function (req, res) {
   try {
-    await cl_express_icf_shim.run({
+    await dialogStep(() => cl_express_icf_shim.run({
       req,
       res,
       class: "ZCL_STG_HTTP_HANDLER",
       base: new globalThis.abap.types.String().set("/sap/opu/odata/sap"),
-    });
+    }));
   } catch (e) {
     // a runtime error is not an ABAP exception the dispatcher can catch;
     // answer rather than leave the client hanging
@@ -134,8 +152,26 @@ process.on("message", (message) => {
   if (message?.type !== "quiesce") {
     return;
   }
-  server.close(() => process.exit(0));
+  // The open LUW is committed before the process goes, whichever client
+  // holds it. Then the two kinds part ways: a client that persists by
+  // exporting at exit (sql.js, tools/osd-persist.mjs) must stay open for
+  // the exit hook that exports it — closing it first is how a recycle once
+  // lost every row — while the file client is closed here so it commits
+  // and checkpoints, which process.exit alone would not do.
+  const leave = async () => {
+    const db = connection();
+    try {
+      await db.commit?.();
+      if (typeof db.export !== "function") {
+        await db.disconnect?.();
+      }
+    } catch {
+      // leaving anyway; the supervisor has a new runtime answering
+    }
+    process.exit(0);
+  };
+  server.close(leave);
   // a client holding a connection open must not keep a replaced runtime
   // alive; the supervisor already has a new one answering
-  setTimeout(() => process.exit(0), Number(message.grace ?? 2000)).unref();
+  setTimeout(leave, Number(message.grace ?? 2000)).unref();
 });

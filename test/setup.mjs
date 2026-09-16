@@ -45,6 +45,47 @@ export async function setup(abap, schemas, insert) {
     await db.commit();
     return;
   }
+  // STG_DB=file: a real SQLite file, written while the process runs, WAL
+  // (tools/sqlite-file-client.mjs). The rows survive a crash and a recycle,
+  // and a second connection can read them. The default path keeps them
+  // beside the tree, out of git.
+  if (process.env.STG_DB === "file") {
+    const {FileSqliteClient} = await import("../tools/sqlite-file-client.mjs");
+    const {fingerprintOf, SchemaDrift} = await import("../tools/osd-persist.mjs");
+    const {existsSync, renameSync} = await import("node:fs");
+    const path = process.env.STG_DB_PATH ?? ".local/db/osd.sqlite";
+    db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
+    abap.context.databaseConnections["DEFAULT"] = db;
+    await db.connect();
+    const wanted = fingerprintOf(schemas.sqlite);
+    const found = await db.stampedSchema();
+    if (found === wanted) {
+      return; // the rows are already there, made for this DDIC
+    }
+    if (found !== undefined || existsSync(path) && (await db.query("SELECT COUNT(*) AS n FROM sqlite_master"))[0]?.n > 0) {
+      // a file made for another DDIC, or one nobody stamped: not this
+      // instance's data. Moved aside with the schema it was made for in
+      // its name, never dropped — the rows may be somebody's
+      const said = `${path} was made for schema ${found ?? "nobody recorded which"} and this runtime generates ${wanted}`;
+      if (process.env.STG_DB_STRICT === "1") {
+        throw new SchemaDrift(`${said}: refusing to touch it (STG_DB_STRICT=1)`);
+      }
+      await db.disconnect();
+      const aside = `${path}.${found ?? "unstamped"}.drift`;
+      renameSync(path, aside);
+      console.log(`${said}: moved to ${aside}, starting with an empty database`);
+      db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
+      abap.context.databaseConnections["DEFAULT"] = db;
+      await db.connect();
+    }
+    await db.execute(schemas.sqlite);
+    await db.execute(insert);
+    await db.execute(seedStatements());
+    await loadScaledData(db, "sqlite");
+    await db.stamp(schemas.sqlite);
+    await db.commit();
+    return;
+  }
   db = new SQLiteDatabaseClient();
   abap.context.databaseConnections["DEFAULT"] = db;
   // STG_DB_PATH keeps the rows between runs for SQLite too, which is what

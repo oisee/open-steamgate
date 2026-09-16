@@ -25,6 +25,7 @@
     "e2e": "npm run transpile && playwright test",
     "e2e:install": "playwright install chromium",
     "cds": "node tools/cds2ddic.mjs",
+    "unit:file": "npm run transpile && rm -f .local/db/unit.sqlite* && echo RUNNING on a SQLite file && STG_DB=file STG_DB_PATH=.local/db/unit.sqlite node --expose-gc output/index.mjs && echo OK",
     "unit:duckdb": "npm run transpile && echo RUNNING on DuckDB && STG_DB=duckdb node --expose-gc output/index.mjs && echo OK",
     "integration:duckdb": "STG_DB=duckdb mocha test/mocha.mjs",
     "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",

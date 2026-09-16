@@ -3,6 +3,9 @@
 // client reaches must still be there — through a proxy or a door.
 import {expect} from "chai";
 import {spawn} from "node:child_process";
+import {mkdtempSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
 
 const PORT = Number(process.env.STG_PORT ?? 3091) + 7;
@@ -18,7 +21,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
 
   before(async () => {
     child = spawn(process.execPath, ["test/run.mjs"], {
-      env: {...process.env, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined},
+      // its own database file, never the tree's default one
+      env: {...process.env, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined, STG_DB_PATH: join(mkdtempSync(join(tmpdir(), "osd-child-")), "osd.sqlite")},
       stdio: ["ignore", "pipe", "pipe"],
     });
     delete child.spawnargs; // keep the env clean: STG_SERVE unset means run.mjs picks child
