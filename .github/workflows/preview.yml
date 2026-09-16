@@ -34,6 +34,7 @@ jobs:
       PREVIEW_DIRECTORY: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}"
       # The commit of the transpiler this deployment is pinned to, or empty
       # to use whatever npm resolves. See the step below.
+      OSD_CORE_REF: "52ba51a5662b93bd5093a9c1adef64bd438ce7f0"
       OSD_TRANSPILER_REF: "88ab85390646c4ef730bfeaa50053edb9aa02936"
     steps:
       - uses: actions/checkout@v4
@@ -91,6 +92,20 @@ jobs:
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
           node tools/osd-transpiler.mjs
+      # The library patches this tree holds until they land upstream. The
+      # media path runs on SCMS_BINARY_TO_XSTRING, which open-abap-core does
+      # not have, and on a WWWDATA_IMPORT that consumes its remainder; a
+      # runner that clones upstream gets a handler that raises on every
+      # picture and on the Zork story (500 in the browser check, measured
+      # 2026-09-17 after the objid fix turned the 404 into a 500). So the
+      # library is taken from the same integration branch the workstation
+      # runs, at a commit, into the folder abap_transpile.json names first.
+      # DEBT-2026-09-14-ci-pinned-transpiler covers this pin as well: it
+      # goes when the pull requests to open-abap-core are released.
+      - name: The library patches this deployment is pinned to
+        run: |
+          git clone --filter=blob:none https://github.com/oisee/open-abap-core.git .local/lars/open-abap-core
+          git -C .local/lars/open-abap-core checkout -q "$OSD_CORE_REF"
       # The packs: the demo and Zork are not in this repository, they are
       # fetched from theirs at the commit each pack's manifest pins
       # (tools/osd-fetch.mjs), and the pack's own folder layers over that.
