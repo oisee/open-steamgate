@@ -80,7 +80,9 @@ export function packAt(root, dir) {
     // the package this pack's objects live in, so a tree shows a pack as a
     // package of its own rather than as "$SRC"
     package: String(declared.package ?? "$" + name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")),
-    abap: abap.slice(0, 1),
+    // one folder unless the manifest names several, in its order; "src" is
+    // abapGit's default and "." is a pack that is itself a repository folder
+    abap: declaredAbap === undefined ? abap.slice(0, 1) : abap,
     data: inside(declared.data, "data"),
     ddic: inside(declared.ddic, join(relative(dir, abap[0] ?? dir), "ddic")),
     webapp: inside(declared.webapp, "webapp"),

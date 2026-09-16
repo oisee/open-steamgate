@@ -16,11 +16,19 @@
 // nothing here has to know the application exists. That is the same trick the
 // SEGW registry plays with `*.iwsv.xml`, for the same reason: the object in
 // the tree is the source of truth, and the registry is derived.
-import {readdirSync, readFileSync, statSync} from "node:fs";
+import {existsSync, readdirSync, readFileSync, statSync} from "node:fs";
+import {inputFoldersOf} from "./osd-packs.mjs";
 import {join} from "node:path";
 
-// where a service node can live: the same roots the store reads objects from
-const ROOTS = ["src", "local", "test", "gen"];
+// Where a service node can live: the layers, which is what the store reads
+// and what the transpiler is handed (tools/osd-packs.mjs, backlog E.1/E.2).
+// It used to be a list of its own, ["src", "local", "test", "gen"], and a
+// pack that brought a *.sicf.xml was then invisible while its class was not.
+function ROOTS(root) {
+  const file = join(root, "abap_transpile.json");
+  const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src", "local", "test", "gen"]};
+  return [...new Set([...inputFoldersOf(root, config), "gen"])];
+}
 
 function walk(dir, out) {
   let entries;
@@ -103,7 +111,7 @@ export function channelOf(xml, source) {
 
 function scan(root, options, suffix, parse) {
   const found = [];
-  for (const dir of options.roots ?? ROOTS) {
+  for (const dir of options.roots ?? ROOTS(root)) {
     for (const file of walk(join(root, dir), [])) {
       if (file.endsWith(suffix) === false) {
         continue;
