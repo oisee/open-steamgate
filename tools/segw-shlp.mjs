@@ -12,6 +12,7 @@
 // builds a zcl_oao_shlp_ddic per elementary search help and registers it.
 // Collective search helps (DD31S, no ISSIMPLE) are listed as not registered.
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
+import {contentFoldersOf} from "./osd-packs.mjs";
 import {join} from "node:path";
 
 const OUT = "gen/segw";
@@ -143,7 +144,7 @@ ENDCLASS.
 if (process.argv[1] && /segw-shlp\.mjs$/.test(process.argv[1])) {
   const folders = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const list = process.argv.includes("--list");
-  const helps = searchHelps(folders.length > 0 ? folders : ["src", "gen"]);
+  const helps = searchHelps(folders.length > 0 ? folders : [...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()), "gen"]);
   for (const h of helps) {
     const how = h.collective || !h.simple ? "collective, skipped" : h.selmethod ? "table " + h.selmethod : h.selmexit ? "exit " + h.selmexit : "no source";
     console.log(`segw-shlp: ${h.name} -> ${how}, ${h.parameters.length} parameters${h.description ? " (" + h.description + ")" : ""}`);

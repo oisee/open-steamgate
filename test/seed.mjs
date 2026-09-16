@@ -4,6 +4,7 @@
 // DDIC length because the runtime stores them padded (Character.set pads).
 // No abapGit dependency: the JSON is a plain array of row objects.
 import {readdirSync, readFileSync} from "node:fs";
+import {dataDirsOf, ddicDirsOf} from "../tools/osd-packs.mjs";
 import {join} from "node:path";
 
 function fieldLengths(tablXml) {
@@ -41,16 +42,28 @@ function quote(value, pad) {
   return "'" + s.replaceAll("'", "''") + "'";
 }
 
-export function seedStatements(dataDir = "data", ddicDir = "src/ddic") {
+// Every folder of seed rows, the tree's own and each pack's, in layer order
+// so a pack's rows for a table it shares are inserted after (backlog E.2).
+// Called with a folder it seeds only that one, which is what the tools do.
+export function seedStatements(dataDir, ddicDir) {
+  if (dataDir !== undefined) {
+    return seedFrom(dataDir, [ddicDir ?? "src/ddic", "src/segw/ddic", "src/zosd_test/ddic"]);
+  }
+  const root = process.env.OSD_ROOT ?? process.cwd();
+  const ddic = ddicDirsOf(root);
+  return dataDirsOf(root).flatMap((dir) => seedFrom(dir, ddic));
+}
+
+function seedFrom(dataDir, ddicDirs) {
   const statements = [];
-  for (const file of readdirSync(dataDir)) {
+  for (const file of readdirSync(dataDir).sort()) {
     if (!file.endsWith(".tabu.json")) {
       continue;
     }
     const table = file.slice(0, -".tabu.json".length).toLowerCase();
     const rows = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
     let lengths = new Map();
-    for (const dir of [ddicDir, "src/segw/ddic", "src/zosd_test/ddic"]) {
+    for (const dir of ddicDirs) {
       try {
         lengths = fieldLengths(readFileSync(join(dir, table + ".tabl.xml"), "utf8"));
         break;

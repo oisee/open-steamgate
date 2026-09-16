@@ -51,6 +51,7 @@
 //       for: Travel
 //       parameters: {TravelId: String(8)}
 import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {contentFoldersOf} from "./osd-packs.mjs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
@@ -997,7 +998,7 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
   const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
   if (args.includes("--all")) {
-    for (const r of compileAll("src", "gen/stg", libs, ["gen/cds"])) {
+    for (const r of compileAll("src", "gen/stg", libs, ["gen/cds", ...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).filter((f) => f !== "src")])) {
       console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} kept from src/)` : ""}`);
       for (const w of r.warnings) {
         console.log(`  warning: ${w}`);

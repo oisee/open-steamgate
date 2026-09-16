@@ -26,6 +26,7 @@
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
+import {inputFoldersOf} from "./osd-packs.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
@@ -76,7 +77,9 @@ export function filesIn(base, folder) {
 // the layers as the config lists them, resolved: which folder owns each
 // object, which files an earlier layer hides, and where nothing decides
 export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8"))) {
-  const folders = config.input_folder ?? config.input_folders ?? [];
+  // the config lists the tree's own folders; a pack is a directory found
+  // at start and layered after them (tools/osd-packs.mjs, backlog E.2)
+  const folders = inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config);
   const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
   // the same file name twice inside one folder: no order decides, so nothing does
   const duplicates = [];

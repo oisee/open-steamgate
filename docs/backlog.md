@@ -465,20 +465,30 @@ E.1  Ordered source roots, and a duplicate that does not keep quiet     [S]  DON
      │  to the list (`Import#enlist`), the newest layer
      └─ `node tools/osd-inputs.mjs` prints overrides, duplicates and shadows
 
-E.2  A pack is a directory, not a rebuild                                [S]
-     ├─ the split document's promise: content packs are directories beside
-     │  the binary, read at start, added without rebuilding it
-     ├─ Alice, 2026-09-16: a layer may also be a repository, named by URL
-     │  and fetched when the ADT/runtime starts, the way abap_transpile.json
-     │  already fetches a lib (`url` + `folder`), through osd-git without a
-     │  git binary, cached under .local/layers/ and listed in order like a
-     │  folder. The store already imports from git (Import.fromGit); what is
-     │  missing is the config entry and the fetch at start
-     ├─ the demo delivery's extra packages (abapGit, cpm, vivid-vibes) were
-     │  moved out of local/ on 2026-09-16 (.local/trash/2026-09-16/) and come
-     │  back later as $Z* packs, referenced rather than copied
-     └─ needs E.1, and the generation hash already covers a new root —
-        adding a pack is a new generation, which is right
+E.2  A pack is a directory, not a rebuild                                [S]  DONE 2026-09-16
+     ├─ a pack is a directory with an osd-pack.json in it: ABAP (src/ by
+     │  default), seed rows (data/), table definitions (src/ddic), a page
+     │  (webapp/), a name and an order. tools/osd-packs.mjs is the only
+     │  place that knows this, and everything else asks it
+     ├─ found in <root>/packs/ and in every directory OSD_PACKS names (a
+     │  pack itself or a container of them); layered after the folders
+     │  abap_transpile.json lists, so a pack wins a name it shares and the
+     │  build reports the override with both files (E.1)
+     ├─ what a pack brings: its ABAP to the transpile and to the ADT tree
+     │  as a package of its own ($VIBES, not $SRC), its rows to the seed,
+     │  its tables to the DDIC lookup, its page to /app/<name>
+     ├─ proven with the compiled binary: build/osd built before the pack
+     │  existed serves its class through ADT, its rows through the door and
+     │  its page over HTTP, with nothing rebuilt but the generation
+     ├─ found on the way and fixed: a generator that read every layer
+     │  picked up a CDS fixture under test/ and failed the build, so
+     │  generators read content (src + packs), not layers; and cds2ddic now
+     │  removes what it no longer generates, because a pack taken away left
+     │  its table accessor behind and the next build failed on a table that
+     │  did not exist
+     └─ a pack that adds generated objects settles on the second build: the
+        hash is taken before the generators run and gen/ is an input. The
+        dev loop does that second build by itself
 
 E.3  What a pack may carry                                               [S]
      └─ ABAP and DDIC (today), SEGW projects and CDS (today, through the

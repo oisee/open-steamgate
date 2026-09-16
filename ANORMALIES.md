@@ -10,6 +10,44 @@ upgrading `@abaplint/*` and before every release.
 
 Format adapted from `larshp/hithub` (MIT).
 
+## The published transpiler names a W3MI object by its escaped file name
+
+**Found** 2026-09-16, while building content packs (backlog E.2).
+
+`local/o4d` carries media whose object name holds a dot: the file is
+`zo4d_00_sales%2epng.w3mi.xml`, abapGit's escaping of `ZO4D_00_SALES.PNG`.
+
+With the **published** `@abaplint/transpiler` 2.13.87 the object keeps the
+escaped form as its name, `ZO4D_00_SALES%2EPNG`, and `init.mjs` then imports
+`./zo4d_00_sales%2epng.w3mi.mjs`. A module specifier is a URL, so Node
+decodes `%2e` to a dot and looks for `zo4d_00_sales.png.w3mi.mjs`, which is
+not the file on disk:
+
+```
+ERR_MODULE_NOT_FOUND  zo4d_00_sales%2epng.w3mi.mjs
+```
+
+Bun resolves the specifier literally and finds the file, so the compiled
+binary serves the generation and every Node host fails on it — the same
+divergence as `ANOMALY-2026-09-13-bun-percent-encoded-specifier`, with the
+signs the other way round.
+
+With the **local build** in `~/dev/transpiler` the name is decoded,
+`ZO4D_00_SALES.PNG`, and the specifier is written `%252e`, which decodes to
+the literal `%2e` of the file name. That is the correct escaping and both
+runtimes resolve it.
+
+**How it reached us:** `npm i --no-save postject` (for a Node single
+executable experiment) rewrote `node_modules` and replaced the link to the
+local build with the published package. Nothing said so; the next build was
+simply unusable under Node while the binary kept working. `npm run
+transpiler:local && npm run runtime:local` puts the links back, and
+`node tools/osd-transpiler.mjs` prints which is in use.
+
+**Upstream:** the fix is in the local tree and not in 2.13.87, so it needs an
+issue and a pull request before this repository can drop the link.
+
+
 ## Entry template
 
 ### ANOMALY-YYYY-MM-DD-short-name — Short title

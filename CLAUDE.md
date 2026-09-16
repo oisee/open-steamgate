@@ -363,6 +363,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   binary, where a module target makes both constructs legal, and where the
   `%23` defect turned out **not** to block packaging: `Bun.build({compile,
   plugins})` with a five-line `onResolve` builds a binary that runs.
+- **A pack is a directory, not a rebuild** (backlog E.2, `tools/osd-packs.mjs`):
+  a folder with an `osd-pack.json` in it, holding ABAP (`src/`), seed rows
+  (`data/`), table definitions (`src/ddic/`) and a page (`webapp/`). Packs are
+  found in `packs/` and in whatever `OSD_PACKS` names, and layered after the
+  folders `abap_transpile.json` lists, so a pack wins a name it shares and the
+  build says so. A pack's objects live in a package of its own, its rows are
+  seeded, its page is served at `/app/<name>`, and the generation hash covers
+  it — `node tools/osd-packs.mjs` lists what is there. Generators read
+  **content** (`src` plus each pack), never the whole layer list: one that read
+  `test/` picked up a CDS fixture and failed the build.
 - **The binary is `npm run binary` → `build/osd`** (`bin/osd.mjs`,
   `scripts/build-binary.mjs`, `docs/bun-spike.md` part three, 2026-09-16):
   `build/osd up|serve|build|gen <tool>|unit|doctor`. Four facts a change

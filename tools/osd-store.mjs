@@ -13,6 +13,7 @@
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {packRootsOf} from "./osd-packs.mjs";
 
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -128,10 +129,10 @@ export function rootsOf(root) {
   if (Array.isArray(folders) === false || folders.length === 0) {
     return DEFAULT_ROOTS;
   }
-  return folders.map((path) => ({
+  return [...folders.map((path) => ({
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
-  }));
+  })), ...packRootsOf(root)];
 }
 
 export class ObjectStore {
@@ -204,6 +205,8 @@ export class ObjectStore {
   #packagesOf(file, root) {
     const own = Object.keys(FOLDER_PACKAGES).find((folder) => file.startsWith(folder + "/"));
     const bases = own !== undefined ? [FOLDER_PACKAGES[own]]
+      // a pack says which package it is (tools/osd-packs.mjs)
+      : root.package !== undefined ? [root.package]
       : ROOT_PACKAGES[root.path] !== undefined ? [ROOT_PACKAGES[root.path]]
       // an imported repository is a package of its own under the one that
       // holds every import: local/o4d is $OSD_O4D under $OSD, as it was

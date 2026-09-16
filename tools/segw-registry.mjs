@@ -13,6 +13,7 @@
 // e.g. "zui5_code_search_srv               0001.iwsv.xml"; the names are
 // taken from the XML, not from the file name.
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
+import {contentFoldersOf} from "./osd-packs.mjs";
 import {join} from "node:path";
 
 const OUT = "gen/segw";
@@ -102,7 +103,7 @@ ENDCLASS.
 if (process.argv[1] && /segw-registry\.mjs$/.test(process.argv[1])) {
   const folders = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const list = process.argv.includes("--list");
-  const entries = segwRegistrations(folders.length > 0 ? folders : ["src", "gen"]);
+  const entries = segwRegistrations(folders.length > 0 ? folders : [...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()), "gen"]);
   for (const e of entries) {
     console.log(`segw-registry: ${e.external} -> MPC ${e.mpc || "?"}, DPC ${e.dpc || "?"}${e.description ? " (" + e.description + ")" : ""}`);
   }

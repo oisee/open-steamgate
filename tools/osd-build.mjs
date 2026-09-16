@@ -32,6 +32,7 @@ import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
+import {inputFoldersOf} from "./osd-packs.mjs";
 import {toolCommand} from "./osd-host.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
@@ -107,7 +108,7 @@ function walk(dir, out = []) {
 
 // what a generation is made of, and the hash that names it
 export function inputsOf(root, config = loadConfig(root)) {
-  const folders = (config.input_folder ?? []).map((f) => join(root, f)).filter(existsSync);
+  const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
   const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "").map((f) => join(root, f));
   return {folders, libs, config: layout(root).config};
 }
@@ -360,6 +361,9 @@ export async function build(options = {}) {
     // earlier layer hides are kept from it here
     const own = {
       ...config,
+      // the packs are layers of this build, so the transpiler is handed them
+      // with the tree's own folders (backlog E.2)
+      input_folder: inputFoldersOf(root, config),
       output_folder: relative(root, join(tmp, "output")),
       exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
     };

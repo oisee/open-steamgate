@@ -16,7 +16,8 @@
 // The DDLS objects themselves stay out of the transpiler input (it rejects
 // the object type); abaplint lints them.
 import * as abaplint from "@abaplint/core";
-import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, statSync} from "node:fs";
+import {contentFoldersOf} from "./osd-packs.mjs";
+import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync} from "node:fs";
 import {join} from "node:path";
 
 const OUT = "gen/cds";
@@ -626,29 +627,39 @@ function main() {
   })));
   const mains = [];
   // every CDS view and every table of the repository, wherever it lives under src/
-  mains.push(...walk("src").filter((f) => /\.(ddls\.asddls|ddls\.xml|tabl\.xml|dtel\.xml|doma\.xml|ttyp\.xml)$/.test(f)));
+  mains.push(...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).flatMap((f) => walk(f)).filter((f) => /\.(ddls\.asddls|ddls\.xml|tabl\.xml|dtel\.xml|doma\.xml|ttyp\.xml)$/.test(f)));
   reg.addFiles(mem(mains));
   reg.addDependencies(mem(LIBS.filter(existsSync).flatMap((l) => walk(l))));
   reg.parse();
 
   mkdirSync(OUT, {recursive: true});
+  // What this run writes, so what it does not write can go. gen/ is an input
+  // to the build and to the generation hash, so a file left over from another
+  // set of inputs is not dead weight, it is a wrong object: a pack taken away
+  // left its generated table accessor behind and the next build failed on a
+  // table that no longer existed (2026-09-16, backlog E.2).
+  const written = new Set();
+  const write = (file, contents) => {
+    written.add(file);
+    writeFileSync(join(OUT, file), contents);
+  };
   const entities = [];
   for (const obj of reg.getObjectsByType("DDLS")) {
     const e = parseDDLS(obj, reg);
     if (!e) continue;
     if (e.skip) { console.log(`cds2ddic: ${e.name}: skipped (${e.skip})`); continue; }
     entities.push(e);
-    writeFileSync(join(OUT, e.sqlView.toLowerCase() + ".view.xml"), viewXml(e));
+    write(e.sqlView.toLowerCase() + ".view.xml", viewXml(e));
     // on a system the CDS entity name is a type and a select source of its own
     // (SELECT FROM zc_stg_travel, TYPES x TYPE zc_stg_travel); the SQL view is
     // the technical twin. Both exist here, over the same columns.
     if (e.name.toUpperCase() !== e.sqlView.toUpperCase()) {
-      writeFileSync(join(OUT, e.name.toLowerCase() + ".view.xml"), viewXml({...e, sqlView: e.name.toUpperCase()}));
+      write(e.name.toLowerCase() + ".view.xml", viewXml({...e, sqlView: e.name.toUpperCase()}));
     }
-    writeFileSync(join(OUT, "zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap"), sourceClass(e));
+    write("zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap", sourceClass(e));
     let published = "";
     if (e.viewAnnotations.some((a) => /@OData\.publish:\s*true/i.test(a))) {
-      writeFileSync(join(OUT, e.name.toLowerCase() + "_cds.stg.yaml"), publishedYaml(e));
+      write(e.name.toLowerCase() + "_cds.stg.yaml", publishedYaml(e));
       published = `, published as ${e.name}_CDS`;
     }
     console.log(`cds2ddic: ${e.name} -> ${e.sqlView} (${e.fields.length} fields, ${e.associations.length} associations)${published}`);
@@ -658,9 +669,13 @@ function main() {
     const t = parseTABL(obj, reg);
     if (!t) continue;
     entities.push(t);
-    writeFileSync(join(OUT, "zcl_stg_tab_" + t.name.toLowerCase() + ".clas.abap"), tableSourceClass(t));
+    write("zcl_stg_tab_" + t.name.toLowerCase() + ".clas.abap", tableSourceClass(t));
     console.log(`cds2ddic: table ${t.name} (${t.fields.length} fields, keys ${t.fields.filter((f) => f.key).map((f) => f.name).join(",")})`);
   }
-  writeFileSync(join(OUT, "zcl_stg_cds_registry.clas.abap"), registryClass(entities));
+  write("zcl_stg_cds_registry.clas.abap", registryClass(entities));
+  for (const stale of readdirSync(OUT).filter((f) => written.has(f) === false)) {
+    rmSync(join(OUT, stale), {recursive: true, force: true});
+    console.log(`cds2ddic: removed ${stale}, nothing generates it any more`);
+  }
 }
 main();
