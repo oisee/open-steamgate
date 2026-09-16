@@ -84,6 +84,14 @@ gantt
   Gate · left, right, or neither                    :milestone, g1, 2026-10-30, 0d
 ```
 
+> **Revised 2026-09-16, after the disk-first turn.** ADT coverage is paused;
+> the disk is the other editor. Sprint 1 becomes the dev loop from
+> [`generations.md`](generations.md): build to the side with a content hash
+> and a live pointer, `npm run dev` with the check-first rule, the
+> generation named in every answer — then N1, then base images and forks.
+> N4 is no longer a separate item; it is that design's rename and its
+> check-first rule. N5 waits with the port.
+
 ### Sprint 1 · L1 by default (21–25 Sep)
 
 *Goal: the shape both reports assume becomes the shape that runs, and an
