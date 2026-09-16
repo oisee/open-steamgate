@@ -32,7 +32,12 @@ own browser. Every request the apps make is answered there.
 | Zork | a Z-machine interpreter in ABAP, the story file loaded out of SMW0 |
 
 The last two are not UI5 at all: they are pages an ABAP class writes, served
-from the ICF path by the same runtime. That is the point of them.
+from the ICF path by the same runtime. That is the point of them. Neither is
+in this repository: [`packs/o4d`](packs/o4d) and [`packs/zork`](packs/zork)
+are two manifests that name
+[vivid-vibes](https://github.com/oisee/vivid-vibes) and
+[zork-abap](https://github.com/oisee/zork-abap) at a commit, and the
+deployment fetches them the way you would fetch any pack of your own.
 
 First visit installs the worker and takes a moment; after that it works
 offline. It needs a browser that allows service workers — a private window
@@ -223,7 +228,12 @@ static files — dropped into `packs/` or named by `OSD_PACKS`. Its objects join
 the system in a package of their own and are editable from Eclipse, its rows
 are seeded, its ICF nodes and push channels are mounted, its CDS and services
 are generated like the tree's own. Layers are ordered and a collision is
-reported with both files rather than guessed.
+reported with both files rather than guessed. A pack may **fetch** instead
+of carrying: `sources` in its manifest names a repository, a commit and a
+path, `node tools/osd-fetch.mjs` copies that under the pack, and the pack's
+own folder layers over it — so a repository you do not own runs here with
+the few files it needs changed as an overlay, and a build refuses a pack
+that was not fetched rather than building a smaller system.
 
 **A tile** for a pack goes in the pack's own manifest: the launchpad asks the
 server which tiles the packs want and adds them, so nothing in this repository
@@ -234,6 +244,12 @@ directory with a single-file binary, a Node single executable, a private Node,
 the content, the packs and one prebuilt generation. Measured on a second
 machine with neither Node 22 nor Bun installed: it serves the same generation,
 and the demo's frame stream is byte-identical.
+
+The [release assessment](docs/osd-release-assessment-astra.md) explains what
+that deployment proves, why the Node forms carry a runtime package directory,
+and the checks for an independent installation. The Bun host is self-contained
+for the tested runtime path; application content and writable data remain
+outside the executable.
 
 ## What the demo is made of
 

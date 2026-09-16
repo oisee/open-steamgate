@@ -63,7 +63,7 @@ Ordered by what breaks without them, most first.
    converts it. One commit on a worktree at `.local/pr-compare-char`, based on
    `origin/main`, the runtime's tests (10) and lint green, a regression test
    in `packages/runtime/test/compare.ts`. Found by comparing the demo frame by
-   frame with a real system. Issue #1859, filed 2026-09-17; the PR is next.
+   frame with a real system. Issue #1859; **PR #1862**, 2026-09-17.
 4. **`fix/binary-file-copy`** — `ANOMALY-2026-09-13-binary-file-to-output`.
    A binary file survives the copy to output (read and written as latin1).
    Needs an issue.
@@ -102,8 +102,8 @@ Ordered by what breaks without them, most first.
   `ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero` (`-0.5` to `i`
   is 0, `Math.round`; a system says −1) is #1861. Both fixed on a branch
   (`fix/mod-float-result`, `fix/integer-round-half-away`), one commit each
-  with the test, runtime tests and lint green; PRs from inside the
-  repository, "Fixes #…" in the message.
+  with the test, runtime tests and lint green; **PRs #1863 and #1864**,
+  2026-09-17, from inside the repository.
 - **The order was test, issue, fix (Alice, 2026-09-17):** the reproducers
   went first, with the A4H measurement, so the issue could say what a
   system answers; the fixes followed the same day for the two runtime
