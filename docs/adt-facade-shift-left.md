@@ -616,4 +616,5 @@ unit cycle crosses the seam.
 - [`db-backends.md`](db-backends.md) — the eleven-method seam a third client fits
 - [`diag-notes.md`](diag-notes.md) — F8 on a program, the other key
 - [`bun-spike.md`](bun-spike.md) — the JS binary this leaves in place
+- [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md) — the other two directions, and what to do before choosing one
 - [`backlog.md`](backlog.md) — tracks A–D; this is a candidate track E
