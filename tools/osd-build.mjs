@@ -33,6 +33,7 @@ import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
+import {toolCommand} from "./osd-host.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -358,7 +359,8 @@ export async function build(options = {}) {
 
     for (const [script, ...args] of GENERATORS) {
       log(`${script} ${args.join(" ")}`.trim());
-      output += run(process.execPath, [join(TOOLS, script), ...args], root);
+      const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
+      output += run(cmd, argv, root);
     }
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
@@ -443,7 +445,7 @@ export function gc(root, options = {}) {
   return removed;
 }
 
-async function main(args) {
+export async function main(args) {
   const root = process.env.OSD_ROOT ?? process.cwd();
   const say = (m) => console.log(`osd-build: ${m}`);
   const cmd = args.find((a) => !a.startsWith("--")) ?? "build";

@@ -21,6 +21,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
+import {hostModules} from "./osd-host.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -214,7 +215,8 @@ export async function transpile(options = {}) {
   const config = options.config;
   const log = options.log ?? (() => {});
   const started = Date.now();
-  const {Transpiler, core, plugin, version} = options.modules ?? modulesOf(root);
+  // a binary registered its bundled transpiler and core; a checkout resolves them
+  const {Transpiler, core, plugin, version} = options.modules ?? hostModules() ?? modulesOf(root);
   const {files, skipped} = await loadFiles(root, config);
   log(`${files.length} files added from source, ${skipped} skipped`);
   const libs = await loadLibs(root, config, log);

@@ -19,6 +19,7 @@
 // parse, not from the generated index, so a test that was written and not
 // yet transpiled is reported as such instead of silently missing.
 import {existsSync, readFileSync, rmSync} from "node:fs";
+import {unitCommand} from "./osd-host.mjs";
 import {spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
@@ -266,7 +267,7 @@ export class UnitRun {
   runDetached(type, name, options = {}) {
     const plan = options.plan ?? this.classes(type, name);
     return new Promise((resolve, reject) => {
-      const args = [new URL(import.meta.url).pathname, type, name, "--json", "--plan-stdin"];
+      const args = [type, name, "--json", "--plan-stdin"];
       if (options.testClass !== undefined) {
         args.push("--class", options.testClass);
       }
@@ -280,7 +281,8 @@ export class UnitRun {
       // the base image, made by its own setup — and the file goes when the
       // run does. Isolation is the point of a detached run; this keeps it.
       const own = join(tmpdir(), `osd-unit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sqlite`);
-      const child = spawn(process.execPath, args, {
+      const [cmd, ...argv] = unitCommand(new URL(import.meta.url).pathname, args);
+      const child = spawn(cmd, argv, {
         cwd: this.store.root,
         stdio: ["pipe", "pipe", "pipe"],
         env: {...process.env, STG_DB: process.env.STG_DB === "duckdb" ? "duckdb" : "file", STG_DB_PATH: own},
@@ -425,7 +427,7 @@ export class RunFailed extends Error {
   }
 }
 
-async function main(args) {
+export async function main(args) {
   const [type, name] = args;
   if (name === undefined) {
     console.log("usage: osd-unit.mjs TYPE NAME [--class LTCL_X] [--method DOES_Y] [--json] [--detached]");

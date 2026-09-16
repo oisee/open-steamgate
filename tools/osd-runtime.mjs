@@ -24,6 +24,7 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {liveHash} from "./osd-build.mjs";
+import {serveCommand} from "./osd-host.mjs";
 
 const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 
@@ -64,7 +65,8 @@ function reapOnExit() {
 export class ServingRuntime {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
-    this.command = options.command ?? [process.execPath, CHILD];
+    // the child by path under Node, `<binary> serve` when compiled
+    this.command = options.command ?? serveCommand(CHILD);
     // a fixed port for an instance someone has to reach by name; the
     // default is whatever the system gives, because a supervised runtime is
     // reached through the supervisor

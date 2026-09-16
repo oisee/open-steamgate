@@ -1,5 +1,6 @@
 import express from "express";
 import {createServer as createHttpsServer} from "node:https";
+import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
@@ -63,7 +64,8 @@ export function startServer(quiet) {
   });
 
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
-  app.use("/app", express.static(fileURLToPath(new URL("../webapp", import.meta.url))));
+  // the tree's webapp, not the module's: in a binary the module has no folder
+  app.use("/app", express.static(join(process.cwd(), "webapp")));
 
   // the SEGW editor's dev-time seam (webapp/segw/): the files GenerateSet
   // gives, written to gen/segw-editor/<project>/ (Generate, Import and
