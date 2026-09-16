@@ -50,10 +50,10 @@ export async function setup(abap, schemas, insert) {
   // and a second connection can read them. The default path keeps them
   // beside the tree, out of git.
   if (process.env.STG_DB === "file") {
-    const {FileSqliteClient} = await import("../tools/sqlite-file-client.mjs");
+    const {FileSqliteClient, DEFAULT_DATABASE} = await import("../tools/sqlite-file-client.mjs");
     const {fingerprintOf, SchemaDrift} = await import("../tools/osd-persist.mjs");
     const {existsSync, renameSync} = await import("node:fs");
-    const path = process.env.STG_DB_PATH ?? ".local/db/osd.sqlite";
+    const path = process.env.STG_DB_PATH ?? DEFAULT_DATABASE;
     db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
     abap.context.databaseConnections["DEFAULT"] = db;
     await db.connect();

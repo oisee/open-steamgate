@@ -5,6 +5,7 @@ import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
+import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
@@ -94,8 +95,13 @@ export function startServer(quiet) {
   // different cache entry, and the cheapest way to tell a stale cache from a
   // wrong answer.
   const store = new ObjectStore({root: process.cwd()});
+  // the database is named here and handed to the child, so the registry and
+  // the build endpoint say the same file the child opens — including the
+  // default one, which used to be chosen inside the child and reported as
+  // "memory" outside it
+  const database = process.env.STG_DB_PATH ?? (process.env.STG_DB === "file" ? DEFAULT_DATABASE : undefined);
   const runtime = MODE === "child"
-    ? store.serving({root: process.cwd(), database: process.env.STG_DB_PATH})
+    ? store.serving({root: process.cwd(), database})
     : undefined;
   const data = MODE === "child"
     ? new Data({root: process.cwd(), runtime})

@@ -20,6 +20,11 @@ import {fingerprintOf} from "./osd-persist.mjs";
 
 const STAMP = "osd_schema";
 
+// where the rows live when nobody says: beside the tree, out of git. One
+// constant, so the supervisor that names the database and the child that
+// opens it cannot disagree about which file that is.
+export const DEFAULT_DATABASE = ".local/db/osd.sqlite";
+
 function rewriteSelect(select, primaryKey) {
   let s = select.replace(/ UP TO (\d+) ROWS(.*)/i, "$2 LIMIT $1");
   s = primaryKey

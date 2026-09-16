@@ -59,7 +59,8 @@ app.get("/osd/serving", function (req, res) {
     since: started,
     generation: process.env.OSD_GENERATION ?? "0",
     root,
-    database: process.env.STG_DB_PATH ?? ":memory:",
+    // the connection's own path, not the environment's guess about it
+    database: globalThis.abap?.context?.databaseConnections?.DEFAULT?.path ?? process.env.STG_DB_PATH ?? ":memory:",
   });
 });
 
