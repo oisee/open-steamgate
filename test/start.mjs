@@ -10,6 +10,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 import {odataProxy} from "../tools/osd-proxy.mjs";
+import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
 import {zcl_apc_host} from "../output/zcl_apc_host.clas.mjs";
@@ -60,7 +61,18 @@ export function startServer(quiet) {
   // the data layer of OSD boots its own runtime when it is used from a
   // command line; here one is already up, so it is handed the connection
   // rather than starting a second and re-running the seed under a live server
-  const facade = adtRouter({data: new Data({client: abap.context.databaseConnections["DEFAULT"]})});
+  // STG_ADT_SID renames the system this façade says it is.
+  //
+  // A client keys its cached compatibility metadata by system id, not by
+  // project — which is why creating project after project against a system
+  // whose graph had changed kept reading the graph from the first time it
+  // asked, and why "make a new project" never helped. A different id is a
+  // different cache entry, and the cheapest way to tell a stale cache from a
+  // wrong answer.
+  const facade = adtRouter({
+    data: new Data({client: abap.context.databaseConnections["DEFAULT"]}),
+    systemID: process.env.STG_ADT_SID,
+  });
   app.use(facade.router);
   // what a client asked the façade for and did not get, on demand: point a
   // strange client at OSD, then read this to learn what it wanted
@@ -119,6 +131,14 @@ export function startServer(quiet) {
 
   if (runtime !== undefined) {
     app.all("/sap/opu/odata/sap/*", odataProxy(runtime));
+    // STG_DEV=1: the disk is the other editor. A save becomes a check, a
+    // build and a recycle of this runtime (tools/osd-dev.mjs), and the
+    // runtime is started now rather than at the first request, so the first
+    // save has something to recycle and the app is up when you look.
+    if (process.env.STG_DEV === "1") {
+      devLoop({store: facade.store});
+      runtime.start().then((r) => console.log(`serving generation ${r.generation} on ${r.url}`), (e) => console.error(`runtime: ${e.message}`));
+    }
   } else {
     app.all("/sap/opu/odata/sap/*", async function (req, res) {
       try {

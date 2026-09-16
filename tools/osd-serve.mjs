@@ -39,6 +39,12 @@ const app = express();
 app.disable("x-powered-by");
 app.set("etag", false);
 app.use(express.raw({type: "*/*", limit: "16mb"}));
+// every answer says which code produced it: the generation the supervisor
+// named when it started this process (the live build's hash)
+app.use((req, res, next) => {
+  res.set("X-OSD-Generation", process.env.OSD_GENERATION ?? "0");
+  next();
+});
 
 // how a supervisor knows this runtime is alive and which generation of the
 // code it carries; not part of any ADT or OData surface

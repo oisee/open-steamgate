@@ -264,6 +264,8 @@ result names it; `/core/http/build` keeps naming the façade and gains a
 
 - **Step 1 is built** (2026-09-16): `tools/osd-build.mjs`, `store.transpile()` on it, `npm run transpile` / `rebuild` / `builds`. First generation 10.4 s, 1,090 objects; a rebuild with nothing changed 0.44 s; a broken source fails in its own directory and leaves live untouched, proven by test. The store, supervisor and façade suites pass through the symlink.
 
+- **Steps 2 and 3 are built** (2026-09-16): `npm run dev` (`tools/osd-dev.mjs`, mounted by `test/start.mjs` under `STG_DEV=1` over the child runtime) and the generation on every answer. Measured live: a comment appended to a class → `1 file changed: CLAS ZCL_ZOSD_TEST_DPC_EXT` → check clean in 4.5 s → built in 8.3 s → recycled in 1.2 s, and the `X-OSD-Generation` on OData went from `a6bcce…` to `382321…`. A change that breaks a dependent is reported with file and line and nothing is built (test). `/core/http/build` answers `system: {source, live, serving, synchronized}` — the three names, and whether they agree; `npm run ps` lists the registry (`.local/instances.json`, pruned of dead pids on every write). The supervisor's `generation` is the live build's hash; `epoch` counts its processes, so a recycle over unchanged code keeps its name, which is the truth.
+
 ## The order of work
 
 1. **Build to the side, with the hash and the pointer.** The builder, the

@@ -432,6 +432,9 @@ export class ObjectStore {
           }
           this.index = undefined;
           this.#forget();
+          for (const listener of this.listeners ?? []) {
+            listener({event, file: join(root.path, String(file)), root: root.path});
+          }
         });
         watcher.on("error", () => {});
         this.watchers.push(watcher);
@@ -441,6 +444,16 @@ export class ObjectStore {
       }
     }
     return this;
+  }
+
+  // who wants to know when the disk changed: the dev loop, which turns a
+  // save in any editor into a check, a build and a recycle. The watcher
+  // itself only invalidates; what to do about a change is the caller's.
+  onChange(listener) {
+    this.listeners = [...(this.listeners ?? []), listener];
+    return () => {
+      this.listeners = (this.listeners ?? []).filter((l) => l !== listener);
+    };
   }
 
   unwatch() {

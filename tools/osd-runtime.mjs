@@ -20,7 +20,10 @@
 // assumes there is one of them. Two of these can run side by side over two
 // worktrees, which is what a branch under test would be.
 import {spawn} from "node:child_process";
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {join} from "node:path";
 import {fileURLToPath} from "node:url";
+import {liveHash} from "./osd-build.mjs";
 
 const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 
@@ -74,7 +77,12 @@ export class ServingRuntime {
     this.env = options.env ?? {};
     this.timeout = options.timeout ?? 60000;
     this.grace = options.grace ?? 2000;
-    this.generation = 0;
+    // epoch counts the processes this supervisor started; generation names
+    // the code the current one runs — the live generation's hash when there
+    // is one (tools/osd-build.mjs), the epoch as a string when there is not.
+    // A recycle over unchanged code keeps its generation, which is the truth
+    this.epoch = 0;
+    this.generation = undefined;
     this.child = undefined;
     this.ready = undefined;
     this.recycling = undefined;
@@ -103,7 +111,7 @@ export class ServingRuntime {
 
   async start() {
     if (this.running === true) {
-      return {url: this.url, generation: this.generation, started: false};
+      return {url: this.url, generation: this.generation, epoch: this.epoch, started: false};
     }
     return this.#spawn();
   }
@@ -163,7 +171,8 @@ export class ServingRuntime {
 
   #spawn(options = {}) {
     return new Promise((resolve, reject) => {
-      const generation = this.generation + 1;
+      const epoch = this.epoch + 1;
+      const generation = liveHash(this.root) ?? String(epoch);
       const child = spawn(this.command[0], this.command.slice(1), {
         cwd: this.root,
         env: {
@@ -174,7 +183,7 @@ export class ServingRuntime {
           ...(this.wanted === undefined ? {} : {OSD_SERVE_PORT: String(this.wanted)}),
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
-          OSD_GENERATION: String(generation),
+          OSD_GENERATION: generation,
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
@@ -202,8 +211,12 @@ export class ServingRuntime {
         this.died = undefined;
         this.child = child;
         this.port = message.port;
+        this.epoch = epoch;
         this.generation = generation;
-        const answer = {url: this.url, port: this.port, generation, pid: message.pid, ms: message.ms, started: true};
+        registryUpdate(this.root, (list) => [...list.filter((e) => e.pid !== message.pid), {
+          pid: message.pid, port: this.port, generation, root: this.root, database: this.database ?? "memory", since: new Date().toISOString(),
+        }]);
+        const answer = {url: this.url, port: this.port, generation, epoch, pid: message.pid, ms: message.ms, started: true};
         this.ready = Promise.resolve(answer);
         options.announce?.resolve(answer);
         resolve(answer);
@@ -212,6 +225,7 @@ export class ServingRuntime {
       child.once("exit", (code, signal) => {
         clearTimeout(timer);
         CHILDREN.delete(child);
+        registryUpdate(this.root, (list) => list.filter((e) => e.pid !== child.pid));
         // a recycle and a stop clear this.child before the exit arrives, so
         // reaching here with it still set means the runtime died on its own.
         // Then the readiness goes too: it described a process that is gone,
@@ -222,7 +236,7 @@ export class ServingRuntime {
           this.port = undefined;
           if (this.recycling === undefined) {
             this.ready = undefined;
-            this.died = {generation, code, signal, at: Date.now(), output: out.slice(-2000)};
+            this.died = {generation, epoch, code, signal, at: Date.now(), output: out.slice(-2000)};
           }
         }
         // an exit before "ready" is a runtime that could not come up, and
@@ -261,6 +275,54 @@ export class ServingRuntime {
   }
 }
 
+// The registry: which runtimes exist, so twenty of them are a list and not
+// a surprise. One JSON file per tree under .local/, rewritten whole by the
+// supervisor on every start and exit; `osd-runtime.mjs ps` reads it and
+// says which entries still answer to their pid.
+export function registryPath(root) {
+  return join(root, ".local", "instances.json");
+}
+
+export function registryRead(root) {
+  try {
+    return JSON.parse(readFileSync(registryPath(root), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function registryUpdate(root, change) {
+  try {
+    mkdirSync(join(root, ".local"), {recursive: true});
+    // a process that died without its supervisor (a SIGKILL in a test, a
+    // crash) never removed itself; every write drops what no longer answers
+    const living = registryRead(root).filter((e) => {
+      try {
+        process.kill(e.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    writeFileSync(registryPath(root), JSON.stringify(change(living), null, 2) + "\n");
+  } catch {
+    // a tree without a writable .local/ is served all the same
+  }
+}
+
+export function instances(root) {
+  return registryRead(root).map((e) => {
+    let alive = false;
+    try {
+      process.kill(e.pid, 0);
+      alive = true;
+    } catch {
+      alive = false;
+    }
+    return {...e, alive};
+  });
+}
+
 export class NotServing extends Error {
   constructor(message = "no serving runtime is up") {
     super(message);
@@ -269,6 +331,16 @@ export class NotServing extends Error {
 }
 
 async function main(args) {
+  if (args[0] === "ps") {
+    const list = instances(process.cwd());
+    if (list.length === 0) {
+      console.log("no runtimes registered");
+    }
+    for (const e of list) {
+      console.log(`${e.alive ? "*" : "†"} pid ${e.pid}  :${e.port}  ${e.generation}  ${e.database}  since ${e.since}`);
+    }
+    return 0;
+  }
   const runtime = new ServingRuntime();
   const first = await runtime.start();
   console.log(`serving generation ${first.generation} on ${first.url} after ${first.ms} ms`);

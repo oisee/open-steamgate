@@ -34,11 +34,12 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     const runtime = new ServingRuntime();
     try {
       const first = await runtime.start();
-      expect(first).to.include({generation: 1, started: true});
+      expect(first).to.include({epoch: 1, started: true});
+      expect(first.generation, "the generation is the live build's name").to.be.a("string");
       expect(runtime.url).to.match(/^http:\/\/127\.0\.0\.1:\d+$/);
 
       const alive = await get(runtime.url, "/osd/serving");
-      expect(JSON.parse(alive.text)).to.include({ready: true, generation: "1"});
+      expect(JSON.parse(alive.text)).to.include({ready: true, generation: first.generation});
 
       // the real front, not only the health answer
       const metadata = await get(runtime.url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata");
@@ -46,7 +47,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       expect(metadata.text).to.contain('Namespace="ZSTG_DEMO_SRV"');
 
       // starting twice is the same runtime, not a second process
-      expect(await runtime.start()).to.include({started: false, generation: 1});
+      expect(await runtime.start()).to.include({started: false, epoch: 1, generation: first.generation});
     } finally {
       await runtime.stop();
     }
@@ -61,7 +62,8 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       const before = first.port;
       const again = await runtime.recycle();
 
-      expect(again.generation).to.equal(2);
+      expect(again.epoch, "a new process; the same code, so the same generation").to.equal(2);
+      expect(again.generation).to.equal(first.generation);
       expect(again.pid).to.not.equal(first.pid);
       expect(again.ms, "a recycle is about a second, not a minute").to.be.lessThan(30000);
 
@@ -101,6 +103,24 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       expect(await name(runtime.url), "the new process must see it").to.equal("XancelTravel");
     } finally {
       writeFileSync(module, before);
+      await runtime.stop();
+    }
+  });
+
+  it("every answer names its generation, and the registry knows the process", async () => {
+    const {instances} = await import("../tools/osd-runtime.mjs");
+    const runtime = new ServingRuntime();
+    try {
+      const first = await runtime.start();
+      const answer = await fetch(`${first.url}/osd/serving`);
+      expect(answer.headers.get("x-osd-generation"), "the child names the generation it was started with").to.equal(first.generation);
+      expect(first.generation, "a name, not a counter, when there is a live build").to.match(/^[0-9a-f]{16}$|^\d+$/);
+      const mine = instances(process.cwd()).filter((e) => e.pid === first.pid);
+      expect(mine.length, "registered while running").to.equal(1);
+      expect(mine[0]).to.include({port: first.port, generation: first.generation, alive: true});
+      await runtime.stop();
+      expect(instances(process.cwd()).some((e) => e.pid === first.pid), "gone from the registry once stopped").to.equal(false);
+    } finally {
       await runtime.stop();
     }
   });
@@ -150,7 +170,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
 
       expect(runtime.running).to.equal(false);
       expect(runtime.url).to.equal(undefined);
-      expect(runtime.died).to.include({signal: "SIGKILL", generation: 1});
+      expect(runtime.died).to.include({signal: "SIGKILL", epoch: 1});
 
       let resolved;
       await runtime.whenReady().then((a) => {
@@ -163,7 +183,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       // and a proxy that only wants something serving gets it, with a
       // generation that says a crash happened rather than hiding it
       const back = await runtime.ensure();
-      expect(back.generation).to.equal(2);
+      expect(back.epoch, "a new process after the crash; the code did not change").to.equal(2);
       expect((await get(runtime.url, "/osd/serving")).status).to.equal(200);
       expect(runtime.died).to.equal(undefined);
     } finally {

@@ -222,6 +222,10 @@ export function linkRoots(root, generation, config = loadConfig(root), log = () 
 }
 
 export function liveHash(root) {
+  // a store that is not over a tree (a test's stand-in) has no generation
+  if (root === undefined || root === null || root === "") {
+    return undefined;
+  }
   const paths = layout(root);
   try {
     return basename(readlinkSync(paths.live));

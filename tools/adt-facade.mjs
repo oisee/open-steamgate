@@ -27,6 +27,7 @@ import {Sessions} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
+import {hashOf, liveHash} from "./osd-build.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 
 export const BASE = "/sap/bc/adt";
@@ -557,6 +558,14 @@ export function adtRouter(options = {}) {
   // app as the OData front, and a CSRF gate over somebody else's POST is a
   // 403 they never asked for
   router.use(BASE, sessions.middleware());
+  // every answer names the generation of the system it describes
+  router.use(BASE, (req, res, next) => {
+    const generation = liveHash(store.root);
+    if (generation !== undefined) {
+      res.set("X-OSD-Generation", generation);
+    }
+    next();
+  });
 
   // STG_ADT_DUMP=<file.jsonl> records every exchange under the façade in
   // the shape of the A4H oracle captures: method, url, request headers and
@@ -1033,6 +1042,23 @@ export function adtRouter(options = {}) {
   router.get(`${BASE}/core/http/build`, (req, res) => {
     res.type("application/json; charset=utf-8").send(JSON.stringify({
       build: facadeBuildStamp(),
+      generation: liveHash(store.root),
+      // Are we serving what we are running? Three names, and they are
+      // synchronized when all three agree. source is what a build of the
+      // tree would produce now (105 ms to compute); live is the build on
+      // disk; serving is the code the runtime child actually runs. source
+      // ahead of live means unbuilt saves; live ahead of serving means a
+      // build that went live without a recycle — a pinned runtime, or one
+      // that failed to come up and was rolled back.
+      system: (() => {
+        if (store.root === undefined) {
+          return undefined;
+        }
+        const source = hashOf(store.root);
+        const live = liveHash(store.root);
+        const serving = store.served?.running === true ? store.served.generation : undefined;
+        return {source, live, serving, synchronized: source === live && (serving === undefined || serving === live)};
+      })(),
       started: STARTED,
       identity,
     }));
