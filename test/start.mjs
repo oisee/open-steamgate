@@ -210,7 +210,20 @@ export function startServer(quiet) {
     // app is there when you look, the registry names it, and the build
     // endpoint has a serving generation to compare with from the start
     runtime.start().then(
-      (r) => quiet === true || console.log(`serving generation ${r.generation} on ${r.url} (${r.pid}), rows in ${database ?? "memory"}`),
+      (r) => {
+        // a pool answers with one entry per work process; one runtime with
+        // an answer of its own, as before (tools/osd-pool.mjs)
+        const started = Array.isArray(r) ? r : [r];
+        if (quiet === true) {
+          return;
+        }
+        for (const one of started) {
+          console.log(`serving generation ${one.generation} on ${one.url} (${one.pid}), rows in ${database ?? "memory"}`);
+        }
+        if (started.length > 1) {
+          console.log(`${started.length} work processes; a push channel is pinned to one for the life of its socket`);
+        }
+      },
       (e) => console.error(`runtime: ${e.message}`),
     );
   } else {

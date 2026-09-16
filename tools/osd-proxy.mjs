@@ -149,14 +149,18 @@ export function upgradeProxy(runtime, paths, log = () => {}) {
       socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
       return;
     }
+    // one socket, one work process, for as long as the socket lasts: a
+    // channel handler holds state, so a session cannot wander between them
+    // (tools/osd-pool.mjs, backlog B.12). One runtime behaves as before.
+    const chosen = typeof runtime.next === "function" ? runtime.next() : runtime;
     try {
-      await runtime.ensure();
+      await chosen.ensure();
     } catch (e) {
       log(`APC ${path}: no serving runtime (${e?.message ?? e})`);
       socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
       return;
     }
-    const port = Number(new URL(runtime.url).port);
+    const port = Number(new URL(chosen.url).port);
     const upstream = connect(port, "127.0.0.1", () => {
       const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
       for (const [name, value] of Object.entries(req.headers)) {

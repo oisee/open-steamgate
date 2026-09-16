@@ -99,6 +99,9 @@ cd "$here"
 export OSD_PACKS="\${OSD_PACKS:-$here/packs}"
 export STG_PORT="\${STG_PORT:-3030}"
 export STG_DB_PATH="\${STG_DB_PATH:-$here/.osd.sqlite}"
+# work processes: one per core up to four, unless told otherwise (backlog B.12)
+cores=$(nproc 2>/dev/null || echo 1)
+export OSD_WORKERS="\${OSD_WORKERS:-$([ "$cores" -gt 4 ] && echo 4 || echo "$cores")}"
 case "\${1:-bun}" in
   bun)    exec ./osd up ;;
   sea)    exec ./osd-sea up ;;

@@ -112,7 +112,10 @@ describe("tools/osd-store: the objects of the local system", function () {
     // package and OSD had nothing to answer with
     const tops = store.rootPackages();
     expect(tops.length).to.be.greaterThan(3);
-    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD", "$ZOSD_TEST"]);
+    // $OSD is the root of what was imported into local/; since 2026-09-16
+    // that content travels as packs and local/ may be empty, so only the
+    // tree's own roots are promised here
+    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$ZOSD_TEST"]);
     for (const node of tops) {
       expect(node.parent, node.name).to.equal(undefined);
     }

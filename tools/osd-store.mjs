@@ -19,6 +19,7 @@ import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
 import {ServingRuntime} from "./osd-runtime.mjs";
+import {RuntimePool} from "./osd-pool.mjs";
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -700,7 +701,13 @@ export class ObjectStore {
   // is not something a store should do behind a caller's back.
   serving(options = {}) {
     if (this.served === undefined) {
-      this.served = new ServingRuntime({root: this.root, ...options});
+      // more than one work process when asked for one (OSD_WORKERS,
+      // tools/osd-pool.mjs): the pool behaves as a runtime for everything
+      // that used one, and offers next() to whoever pins a session
+      const size = Math.max(1, Number(options.workers ?? process.env.OSD_WORKERS ?? 1));
+      this.served = size > 1
+        ? new RuntimePool({root: this.root, size, ...options})
+        : new ServingRuntime({root: this.root, ...options});
     }
     return this.served;
   }
