@@ -130,16 +130,40 @@ export class Import {
       this.#copy(file, target, written, object);
     }
 
+    // the folder joins the layers: listed last in abap_transpile.json, so
+    // the build and the index both see it, and as the last layer it wins
+    // a name it shares, which the build reports by file
+    const listed = this.#enlist(target);
+    this.store.reroot();
     this.store.build();
     return {
       folder,
       config,
       target,
+      listed,
       written: written.length,
       objects: written.filter((w) => w.type !== undefined).length,
       packages: packages.size,
       skipped,
     };
+  }
+
+  // the target becomes an input of the transpiler, appended, the newest
+  // layer (tools/osd-inputs.mjs); a tree without the config, a test's, is
+  // left alone, and a folder already listed too
+  #enlist(target) {
+    const path = join(this.store.root, "abap_transpile.json");
+    if (existsSync(path) === false) {
+      return false;
+    }
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    const folders = Array.isArray(config.input_folder) ? config.input_folder : [];
+    if (folders.includes(target)) {
+      return false;
+    }
+    config.input_folder = [...folders, target];
+    writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+    return true;
   }
 
   // a repository nobody has yet. OSD fetches it itself; the files land in

@@ -375,11 +375,18 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   against a stale `build/sw.js`; and a fix "confirmed" by grepping for a
   comment webpack strips. A deployed bundle is checked by content, and a
   test must exercise the real path rather than simulate it. Backlog 8.4.
-- Objects are not deduplicated across input folders and collisions are
-  silent. `local/o4d/` and `local/vivid-vibes/` both carry
-  `ZCL_O4D_HTTP_HANDLER`; whichever the directory walk reaches first wins.
-  Until layers are explicit (backlog 1.5) a duplicate is a hazard, not a
-  convenience.
+- **The `input_folder` list of `abap_transpile.json` is the layer order,
+  and the later folder wins** — for the transpiler, the builder and the
+  object store alike (backlog E.1, 2026-09-16). Only listed folders are the
+  system: a folder under `local/` that is not listed is in nobody's tree,
+  and an import appends its folder to the list. The builder hands the
+  transpiler the winner of a name only (the rest go into the build's
+  `exclude_filter`) and logs every override with both files; the same file
+  name twice inside one folder refuses the build. `node tools/osd-inputs.mjs`
+  prints overrides, duplicates and shadows. Measured before deciding: the
+  raw transpiler writes the later folder's module last, and abaplint's
+  registry files the first and calls the second "already defined" — a
+  duplicate left to either is a guess.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 - **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in

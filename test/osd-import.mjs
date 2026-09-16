@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {Import, NotARepository, objectOf, repositoryConfig} from "../tools/osd-import.mjs";
@@ -77,6 +77,26 @@ ENDCLASS.
     expect(existsSync(join(root, "local", "demo", "zcl_imported.clas.xml"))).to.equal(true);
     // and what belongs to no object stayed behind
     expect(result.skipped.map((s) => s.file)).to.deep.equal(["notes.txt"]);
+  });
+
+  // the folder joins the layers: an import that the build never saw was
+  // the shadow copy of tools/osd-inputs.mjs, and 2026-09-16 the tree held
+  // three of them. Listed last, so what was there first still wins
+  it("lists the repository's folder as the last transpiler input, once", () => {
+    const config = join(root, "abap_transpile.json");
+    writeFileSync(config, JSON.stringify({input_folder: ["src"], exclude_filter: ["\\.mjs$"]}, null, 2) + "\n");
+    const first = new Import(store).fromFolder(repo, {name: "demo"});
+    expect(first.listed).to.equal(true);
+    expect(JSON.parse(readFileSync(config, "utf8"))).to.deep.equal({input_folder: ["src", "local/demo"], exclude_filter: ["\\.mjs$"]});
+    const again = new Import(store).fromFolder(repo, {name: "demo", overwrite: true});
+    expect(again.listed).to.equal(false);
+    expect(JSON.parse(readFileSync(config, "utf8")).input_folder).to.deep.equal(["src", "local/demo"]);
+  });
+
+  it("a tree without the config is imported all the same", () => {
+    const result = new Import(store).fromFolder(repo, {name: "demo"});
+    expect(result.listed).to.equal(false);
+    expect(existsSync(join(root, "abap_transpile.json"))).to.equal(false);
   });
 
   it("an imported object is writable but marked as not ours", () => {

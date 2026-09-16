@@ -407,15 +407,27 @@ Added 2026-09-16 (Alice), to give the split document's piece E a track of
 its own; the letters of the two lists agree from here on.
 
 ```
-E.1  Ordered source roots, and a duplicate that does not keep quiet     [S]
-     ├─ backlog 1.5, the trap CLAUDE.md records: local/o4d and
-     │  local/vivid-vibes both carry ZCL_O4D_HTTP_HANDLER, and whichever the
-     │  walk reaches first is the one that runs
-     ├─ tools/osd-inputs.mjs already reports clashes and shadows; the store
-     │  and the builder do not act on them
-     └─ an ordered list of roots (later wins, like a layer), a report of
-        every collision naming both files, and a refusal when the order
-        does not say which — never a guess
+E.1  Ordered source roots, and a duplicate that does not keep quiet     [S]  DONE 2026-09-16
+     ├─ one list, one order: the input_folder of abap_transpile.json is the
+     │  layer order for the store and the builder alike, and the LATER
+     │  folder wins, as 1.5 says (tools/osd-inputs.mjs `layers`,
+     │  tools/osd-store.mjs `rootsOf`). Measured before deciding: the
+     │  transpiler on its own writes the later folder's module last, while
+     │  abaplint's registry in memory files the first and calls the second
+     │  "already defined" — so the winner is decided here and not left to
+     │  either. A library is not a layer: it fills only what no root has
+     ├─ the builder hands the transpiler the winner only: every file of a
+     │  hidden object goes into the build's exclude_filter, the manifest
+     │  lists `overridden`, the log says "overridden: CLAS X: <file> hidden
+     │  by local/used". Proven with the real transpiler over a two-layer
+     │  tree: the winner's method in output, the loser's absent
+     ├─ the same file name twice inside one folder is refused before a lock
+     │  is taken, both files named (code DUPLICATE; test/osd-build.mjs)
+     ├─ local/ is no longer one root: only listed folders are the system, so
+     │  677 objects of local/abapgit, local/cpm, local/vivid-vibes left the
+     │  ADT tree, which no build ever had. An import now appends its folder
+     │  to the list (`Import#enlist`), the newest layer
+     └─ `node tools/osd-inputs.mjs` prints overrides, duplicates and shadows
 
 E.2  A pack is a directory, not a rebuild                                [S]
      ├─ the split document's promise: content packs are directories beside
@@ -505,7 +517,7 @@ Nothing below them starts until the answer.
      └─ open-abap-apc as an outside library, cloned into .local/lars
      └─ not gated on Lars: the library ships its own copy of the SAP-named
         part today and works; the PR (9.4) only makes it prettier
-1.5  layers: the binary takes an ordered list of abapGit src paths   [S+A]
+1.5  layers: the binary takes an ordered list of abapGit src paths   [S+A]  (E.1 done 2026-09-16: the list is abap_transpile.json, later wins; the binary's argument is E.2)
      └─ Alice's formulation, 2026-09-14: later layers win on a name
         collision, and data layers (data/*.tabu.json) apply the same way
      └─ the argument is not theoretical: local/o4d/ and local/vivid-vibes/

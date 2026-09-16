@@ -1,21 +1,30 @@
-// What the transpiler is actually given, said out loud before it runs.
+// The layers of the system: what the transpiler is given, in what order,
+// and who wins when two folders hold the same object.
 //
-// Two ways to edit ABAP and change nothing, both of which cost a day:
+// The order is the input_folder list of abap_transpile.json and nothing
+// else, and the LATER folder wins, the way a layer does. That is what the
+// transpiler does on its own when it is handed the same class twice
+// (measured 2026-09-16 over a two-folder tree: the module written last is
+// the later folder's; abaplint's registry in memory files the first as the
+// main file and calls the second "already defined", so nothing about a
+// duplicate is safe to leave to it), what Alice's formulation of backlog
+// 1.5 says, and what the object store now does (tools/osd-store.mjs
+// rootsOf reads the same list; ours-over-a-library's still holds, because a
+// library is not a layer and never wins over an input). The builder hands
+// the transpiler the winner only: every file of a hidden object goes into
+// the build's exclude_filter (tools/osd-build.mjs), so what runs is decided
+// here and not by which file the transpiler happened to write last. The
+// same file name twice inside ONE folder, where no order can decide,
+// refuses the build with both files named.
 //
-// A folder that looks like an input and is not. local/vivid-vibes is a
-// complete abapGit package, 237 files, sitting beside local/o4d which holds
-// the same objects — and only local/o4d is listed in abap_transpile.json. An
-// edit to the other one transpiles nothing, builds nothing, and reports
-// nothing. It is worse than a missing file, because a missing file errors.
-//
-// And the same object in two folders that ARE inputs, where whichever the
-// walk reaches first wins and the other is discarded in silence.
-//
-// Neither is an error: a shadow copy may be a deliberate reference, a
-// duplicate may be a deliberate override. Both are things a person should be
-// told, so this prints and never fails the build.
+// Two more ways to edit ABAP and change nothing, both of which cost a day:
+// a folder that looks like an input and is not (local/vivid-vibes beside
+// local/o4d, only the latter listed: 237 files, an edit there transpiles
+// nothing and reports nothing), and an object hidden by a later layer.
+// Neither is an error; both are said out loud, here and in the builder's
+// log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -39,72 +48,115 @@ export function objectOf(filename) {
   return `${parts[1].toUpperCase()} ${name.toUpperCase()}`;
 }
 
-function objectsIn(folder) {
-  const found = new Map();
+// every file of a folder that belongs to an object, the paths relative to
+// the base and written with forward slashes, the way the transpiler globs
+// them. A package file (package.devc.xml) belongs to its folder rather than
+// to a name, so it is no object here and never a duplicate.
+export function filesIn(base, folder) {
+  const out = [];
   const walk = (dir) => {
-    for (const entry of readdirSync(dir)) {
-      const path = join(dir, entry);
-      if (statSync(path).isDirectory()) {
+    for (const entry of readdirSync(resolve(base, dir)).sort()) {
+      const path = `${dir}/${entry}`;
+      if (statSync(resolve(base, path)).isDirectory()) {
         walk(path);
-      } else {
+      } else if (/\.devc\.xml$/i.test(entry) === false) {
         const object = objectOf(entry);
         if (object !== undefined) {
-          found.set(object, path);
+          out.push({file: path, name: entry, object});
         }
       }
     }
   };
-  if (existsSync(folder)) {
+  if (existsSync(resolve(base, folder))) {
     walk(folder);
   }
-  return found;
+  return out;
 }
 
-export function report(configPath = resolve(root, "abap_transpile.json"), options = {}) {
-  const base = options.root ?? root;
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
+// the layers as the config lists them, resolved: which folder owns each
+// object, which files an earlier layer hides, and where nothing decides
+export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8"))) {
   const folders = config.input_folder ?? config.input_folders ?? [];
-  const byFolder = folders.map((f) => ({folder: f, objects: objectsIn(resolve(base, f))}));
-
-  // the same object in more than one input: the later folder wins, because
-  // that is the order the transpiler is handed them
-  const seen = new Map();
-  const clashes = [];
-  for (const {folder, objects} of byFolder) {
-    for (const object of objects.keys()) {
-      const earlier = seen.get(object);
-      if (earlier !== undefined) {
-        clashes.push({object, earlier, winner: folder});
+  const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
+  // the same file name twice inside one folder: no order decides, so nothing does
+  const duplicates = [];
+  for (const {folder, files} of byFolder) {
+    const byName = new Map();
+    for (const {file, name} of files) {
+      byName.set(name, [...(byName.get(name) ?? []), file]);
+    }
+    for (const [name, paths] of byName) {
+      if (paths.length > 1) {
+        duplicates.push({object: objectOf(name), folder, files: paths});
       }
-      seen.set(object, folder);
     }
   }
-
+  // across folders the latest wins, and every file of the object in an
+  // earlier folder is hidden, the XML and the includes with the source
+  const owner = new Map();
+  const all = new Map();
+  for (const {folder, files} of byFolder) {
+    for (const {file, object} of files) {
+      owner.set(object, folder);
+      all.set(object, [...(all.get(object) ?? []), {folder, file}]);
+    }
+  }
+  const overridden = [];
+  const hidden = [];
+  for (const [object, files] of all) {
+    const winner = owner.get(object);
+    const losers = files.filter((f) => f.folder !== winner).map((f) => f.file);
+    if (losers.length > 0) {
+      overridden.push({object, winner, hidden: losers});
+      hidden.push(...losers);
+    }
+  }
   // a folder beside the inputs that holds objects the inputs also hold, and
   // is not an input itself
   const shadows = [];
   const container = resolve(base, "local");
   if (existsSync(container)) {
-    for (const entry of readdirSync(container)) {
+    for (const entry of readdirSync(container).sort()) {
       const candidate = `local/${entry}`;
       if (folders.includes(candidate) || statSync(resolve(base, candidate)).isDirectory() === false) {
         continue;
       }
-      const objects = objectsIn(resolve(base, candidate));
-      const shared = [...objects.keys()].filter((o) => seen.has(o));
+      const objects = new Set(filesIn(base, candidate).map((f) => f.object));
+      const shared = [...objects].filter((o) => owner.has(o));
       if (objects.size > 0) {
         shadows.push({folder: candidate, total: objects.size, shared});
       }
     }
   }
-  return {folders, clashes, shadows, total: seen.size};
+  return {folders, owner, overridden, hidden, duplicates, shadows, total: owner.size};
+}
+
+// the exclude_filter lines that keep hidden files from the transpiler: one
+// anchored pattern per file, matched against the path it globs
+export function excludePatterns(hidden) {
+  return hidden.map((file) => `(^|/)${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+}
+
+// what a duplicate says when the build refuses over it
+export function describeDuplicates(duplicates) {
+  return duplicates.map((d) => `${d.object} is in ${d.folder} twice, and no order decides: ${d.files.join(", ")}`).join("; ");
+}
+
+export function report(configPath = resolve(root, "abap_transpile.json"), options = {}) {
+  const base = options.root ?? root;
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const {folders, overridden, hidden, duplicates, shadows, total} = layers(base, config);
+  return {folders, clashes: overridden, hidden, duplicates, shadows, total};
 }
 
 function main() {
-  const {folders, clashes, shadows, total} = report();
-  console.log(`Inputs: ${folders.join(", ")} — ${total} objects`);
-  for (const {object, earlier, winner} of clashes) {
-    console.log(`  overridden: ${object} in ${earlier}, ${winner} wins (later input)`);
+  const {folders, clashes, duplicates, shadows, total} = report();
+  console.log(`Inputs: ${folders.join(", ")} — ${total} objects, the later folder wins`);
+  for (const {object, winner, hidden} of clashes) {
+    console.log(`  overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
+  }
+  for (const duplicate of duplicates) {
+    console.log(`  duplicate: ${describeDuplicates([duplicate])} — the build refuses`);
   }
   for (const {folder, total: count, shared} of shadows) {
     const also = shared.length === 0 ? "none of them in the build" : `${shared.length} of them also in the build`;

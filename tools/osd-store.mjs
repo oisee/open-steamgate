@@ -110,10 +110,35 @@ const DEFAULT_LIBS = [
 // anything is written. A façade that makes a store per request pays once.
 const PARSED = new Map();
 
+const packageWord = (s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+
+// The roots as the transpiler lists them: the input_folder of
+// abap_transpile.json, in its order, so that the index and the build resolve
+// a name to the same file (tools/osd-inputs.mjs: the later root wins in
+// both, the way a layer does; a library never wins over a root). A tree
+// without the config is read the old way. gen/ is never written by hand,
+// and what sits under local/ was imported, not written here.
+export function rootsOf(root) {
+  let folders;
+  try {
+    folders = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8")).input_folder;
+  } catch {
+    return DEFAULT_ROOTS;
+  }
+  if (Array.isArray(folders) === false || folders.length === 0) {
+    return DEFAULT_ROOTS;
+  }
+  return folders.map((path) => ({
+    path, writable: path !== "gen", library: false,
+    ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
+  }));
+}
+
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
-    this.roots = options.roots ?? DEFAULT_ROOTS;
+    this.explicitRoots = options.roots !== undefined;
+    this.roots = options.roots ?? rootsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
@@ -124,6 +149,17 @@ export class ObjectStore {
     // own copy for the newer one and showed an empty editor over a save
     // that had succeeded. Written marks it, a clean activation clears it.
     this.inactive = new Set();
+  }
+
+  // the config changed under us (an import listed its folder as an input):
+  // the roots are read again, unless a caller chose them
+  reroot() {
+    if (this.explicitRoots === false) {
+      this.roots = rootsOf(this.root);
+    }
+    this.index = undefined;
+    this.#forget();
+    return this.roots;
   }
 
   // the state of one object as its documents report it
@@ -142,7 +178,8 @@ export class ObjectStore {
   #walk(dir, out) {
     let entries;
     try {
-      entries = readdirSync(join(this.root, dir));
+      // sorted, so two walks of one tree index it the same way
+      entries = readdirSync(join(this.root, dir)).sort();
     } catch {
       return out;
     }
@@ -166,11 +203,16 @@ export class ObjectStore {
   // invent a parent that is not there.
   #packagesOf(file, root) {
     const own = Object.keys(FOLDER_PACKAGES).find((folder) => file.startsWith(folder + "/"));
-    const base = own !== undefined ? FOLDER_PACKAGES[own]
-      : ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    const bases = own !== undefined ? [FOLDER_PACKAGES[own]]
+      : ROOT_PACKAGES[root.path] !== undefined ? [ROOT_PACKAGES[root.path]]
+      // an imported repository is a package of its own under the one that
+      // holds every import: local/o4d is $OSD_O4D under $OSD, as it was
+      // when local/ was one root rather than one root per repository
+      : root.path.startsWith("local/") ? [ROOT_PACKAGES.local, `${ROOT_PACKAGES.local}_${packageWord(root.path.slice("local/".length))}`]
+      : ["$" + packageWord(root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path)];
     const inside = file.slice((own ?? root.path).length).split("/").filter((p) => p !== "");
     inside.pop();
-    const chain = [base];
+    const chain = [...bases];
     for (const folder of inside) {
       chain.push(`${chain[chain.length - 1]}_${folder.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
     }
@@ -195,8 +237,10 @@ export class ObjectStore {
             ? chain[chain.length - 1]
             : nameOf(name.slice(0, -meta.ext.length));
           const key = `${type} ${objectName}`;
-          // ours wins over a library's, src wins over gen
-          if (!index.has(key)) {
+          // a later root wins over an earlier one, the way the build resolves
+          // the same list (tools/osd-inputs.mjs); a library is not a layer,
+          // so it fills only what no root has
+          if (root.library !== true || !index.has(key)) {
             // a package is an object of the package above it, the way a
             // system holds it, so its own folder is not also its home
             const own = type === "DEVC" && objectName === chain[chain.length - 1];

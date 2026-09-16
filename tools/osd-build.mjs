@@ -31,6 +31,7 @@ import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, read
 import {basename, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
+import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -110,6 +111,9 @@ const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap)$/i;
 export function hashOf(root, inputs = inputsOf(root)) {
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(describeBuild(root))).update("\0");
+  // the rule that decides a name held by two inputs is part of what the
+  // output is: a generation built under another rule is another generation
+  h.update("layers\0later-wins\0");
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
   for (const dir of [...inputs.folders, ...inputs.libs]) {
     const files = existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : [];
@@ -310,6 +314,20 @@ export async function build(options = {}) {
   const paths = layout(root);
   const started = Date.now();
   const config = loadConfig(root);
+  // the layers, resolved before anything else (tools/osd-inputs.mjs): the
+  // same file name twice inside one folder is a refusal naming both files,
+  // never a guess, and it is refused before a lock is taken or a generator
+  // runs; an object an earlier layer hides is said, and hidden below
+  const stack = layers(root, config);
+  if (stack.duplicates.length > 0) {
+    const e = new Error(`the build refuses: ${describeDuplicates(stack.duplicates)}`);
+    e.code = "DUPLICATE";
+    e.duplicates = stack.duplicates;
+    throw e;
+  }
+  for (const {object, winner, hidden} of stack.overridden) {
+    log(`overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
+  }
   const inputs = inputsOf(root, config);
   const hash = hashOf(root, inputs);
   const target = join(paths.byInput, hash);
@@ -330,8 +348,15 @@ export async function build(options = {}) {
     rmSync(tmp, {recursive: true, force: true});
     mkdirSync(join(tmp, "output"), {recursive: true});
     // the same config, aimed at this build's own directory. The path is
-    // root-relative because the transpiler joins it to its working directory
-    const own = {...config, output_folder: relative(root, join(tmp, "output"))};
+    // root-relative because the transpiler joins it to its working directory.
+    // The transpiler is handed the winner of every name only: a class in two
+    // inputs is "already defined" to it, not an override, so the files an
+    // earlier layer hides are kept from it here
+    const own = {
+      ...config,
+      output_folder: relative(root, join(tmp, "output")),
+      exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
+    };
     writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
 
     for (const [script, ...args] of GENERATORS) {
@@ -350,14 +375,21 @@ export async function build(options = {}) {
       objects,
       transpiler: describeBuild(root),
       inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f))},
+      overridden: stack.overridden,
     };
     writeFileSync(join(tmp, "manifest.json"), JSON.stringify(manifest, null, 2));
     linkRoots(root, tmp, config, log);
 
     mkdirSync(paths.byInput, {recursive: true});
-    if (existsSync(target)) {
-      // a build of the same inputs finished while this one ran (force, or a
-      // race the lock did not cover); theirs is as good as ours
+    if (existsSync(target) && options.force === true) {
+      // asked to build again over a generation that exists: the new one
+      // replaces it, which is what "again" means. Found 2026-09-16 when a
+      // forced rebuild reported the new rule and left the old output
+      rmSync(target, {recursive: true, force: true});
+      renameSync(tmp, target);
+    } else if (existsSync(target)) {
+      // a build of the same inputs finished while this one ran (a race the
+      // lock did not cover); theirs is as good as ours
       rmSync(tmp, {recursive: true, force: true});
     } else {
       renameSync(tmp, target);

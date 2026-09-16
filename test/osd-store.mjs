@@ -420,4 +420,62 @@ ENDCLASS.
     expect(onDisk).to.equal("REPORT zosd_crlf.\n* typed on Windows\nWRITE 1.\n");
     expect(store.read("PROG", "ZOSD_CRLF").source).to.not.contain("\r");
   });
+  // The roots are the transpiler's inputs, in the transpiler's order, so the
+  // object ADT opens is the object that runs. Before 2026-09-16 the store
+  // walked src, local, test, gen and the transpiler src, test, gen, local/*,
+  // and local/ as a whole put 677 objects in the tree that no build had.
+  describe("roots are the layers of abap_transpile.json", () => {
+    let tree;
+    const write = (file, text = "") => {
+      mkdirSync(join(tree, file, ".."), {recursive: true});
+      writeFileSync(join(tree, file), text);
+    };
+    const CLASS = (name, method) => `CLASS ${name} DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS ${method}.\nENDCLASS.\nCLASS ${name} IMPLEMENTATION.\n  METHOD ${method}.\n  ENDMETHOD.\nENDCLASS.\n`;
+
+    beforeEach(() => {
+      tree = mkdtempSync(join(tmpdir(), "osd-layers-"));
+      writeFileSync(join(tree, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen", "local/used"]}, null, 2) + "\n");
+      write("src/zcl_ours.clas.abap", CLASS("zcl_ours", "first"));
+      write("gen/zcl_ours.clas.abap", CLASS("zcl_ours", "generated"));
+      write("local/used/zcl_ours.clas.abap", CLASS("zcl_ours", "imported"));
+      write("local/used/zcl_theirs.clas.abap", CLASS("zcl_theirs", "run"));
+      write("local/shadow/zcl_shadow.clas.abap", CLASS("zcl_shadow", "run"));
+    });
+
+    afterEach(() => rmSync(tree, {recursive: true, force: true}));
+
+    it("reads the inputs in their order, and the later one wins, as in the build", () => {
+      const own = new ObjectStore({root: tree, libs: []});
+      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "gen", "local/used"]);
+      expect(own.find("CLAS", "ZCL_OURS")).to.include({file: "local/used/zcl_ours.clas.abap", writable: true, imported: true});
+      expect(own.find("CLAS", "ZCL_THEIRS")).to.include({file: "local/used/zcl_theirs.clas.abap", writable: true, imported: true});
+      expect(own.find("CLAS", "ZCL_SHADOW"), "a folder that is not an input is not the system").to.equal(undefined);
+      // gen is generated, never edited; an imported repository is a package under $OSD
+      expect(own.roots.find((r) => r.path === "gen").writable).to.equal(false);
+      expect(own.find("CLAS", "ZCL_THEIRS").packages).to.deep.equal(["$OSD", "$OSD_USED"]);
+      // a library is not a layer: it fills only what no root has
+      const withLib = new ObjectStore({root: tree, roots: [{path: "src", writable: true, library: false}], libs: ["local/used"]});
+      expect(withLib.find("CLAS", "ZCL_OURS")).to.include({file: "src/zcl_ours.clas.abap", library: false});
+      expect(withLib.find("CLAS", "ZCL_THEIRS")).to.include({file: "local/used/zcl_theirs.clas.abap", library: true});
+    });
+
+    it("rereads the list when told, and keeps roots a caller chose", () => {
+      const own = new ObjectStore({root: tree, libs: []});
+      writeFileSync(join(tree, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen", "local/used", "local/shadow"]}));
+      expect(own.find("CLAS", "ZCL_SHADOW")).to.equal(undefined);
+      own.reroot();
+      expect(own.find("CLAS", "ZCL_SHADOW")).to.include({file: "local/shadow/zcl_shadow.clas.abap"});
+      const chosen = new ObjectStore({root: tree, roots: [{path: "gen", writable: false, library: false}], libs: []});
+      chosen.reroot();
+      expect(chosen.roots.map((r) => r.path)).to.deep.equal(["gen"]);
+      expect(chosen.find("CLAS", "ZCL_OURS")).to.include({file: "gen/zcl_ours.clas.abap"});
+    });
+
+    it("a tree without the config is read the old way", () => {
+      rmSync(join(tree, "abap_transpile.json"));
+      const own = new ObjectStore({root: tree, libs: []});
+      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "local", "test", "gen"]);
+      expect(own.find("CLAS", "ZCL_SHADOW")).to.include({file: "local/shadow/zcl_shadow.clas.abap"});
+    });
+  });
 });

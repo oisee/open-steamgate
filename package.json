@@ -14,7 +14,7 @@
     "ps": "node tools/osd-runtime.mjs ps",
     "dbs": "node tools/osd-db.mjs list",
     "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
-    "integration": "mocha test/mocha.mjs test/analytics.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/rfc-live.mjs test/segw-shlp.mjs test/stg-compile.mjs test/segw-tree.mjs test/osd-store.mjs test/osd-xref.mjs test/osd-data.mjs test/osd-unit.mjs test/osd-git.mjs test/osd-runtime.mjs test/osd-proxy.mjs test/osd-icf.mjs test/osd-inputs.mjs test/osd-closure.mjs test/osd-apc.mjs test/osd-persist.mjs test/adt-session.mjs test/adt-facade.mjs test/adt-devloop.mjs test/adt-editor.mjs test/zosd-test.mjs",
+    "integration": "mocha test/mocha.mjs test/analytics.mjs test/segw.mjs test/segw-gen.mjs test/rfc-replay.mjs test/rfc-live.mjs test/segw-shlp.mjs test/stg-compile.mjs test/segw-tree.mjs test/osd-store.mjs test/osd-xref.mjs test/osd-data.mjs test/osd-unit.mjs test/osd-git.mjs test/osd-runtime.mjs test/osd-proxy.mjs test/osd-icf.mjs test/osd-inputs.mjs test/osd-build.mjs test/osd-closure.mjs test/osd-apc.mjs test/osd-persist.mjs test/adt-session.mjs test/adt-facade.mjs test/adt-devloop.mjs test/adt-editor.mjs test/zosd-test.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
     "osd:serve": "npm run transpile && STG_SERVE=child STG_PORT=8099 node test/run.mjs",
