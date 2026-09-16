@@ -1,0 +1,312 @@
+# Using OSD: services, CDS, packs and tiles
+
+OSD is an ABAP application server you run on your own machine. It transpiles
+the ABAP in front of it, serves the result as OData v2 and as ICF paths, and
+answers ADT so Eclipse can edit it. This is the working guide: how to start
+it, how to add a Gateway service by hand or from CDS, how to bring content in
+as a pack, and how to put any of it on the launchpad.
+
+Everything below is measured against the system as it is, not planned.
+
+---
+
+## 1. Starting it
+
+```
+npm start                 # transpile, then serve on 3030
+npm run dev               # the same, and rebuild + recycle whenever ABAP changes
+```
+
+Open `http://localhost:3030/` and the launchpad answers. Behind it:
+
+| path | what is there |
+| --- | --- |
+| `/app/flp.html` | the launchpad, every app and demo as a tile |
+| `/sap/opu/odata/sap/<SERVICE>/` | the OData v2 services |
+| `/sap/bc/adt/…` | the ADT façade, which is what Eclipse talks to |
+| `/sap/bc/<node>` | whatever the ICF nodes in the content serve |
+
+Useful while working:
+
+```
+npm run builds            # the generations built so far, live marked
+npm run ps                # which runtimes are up, on what port and database
+npm run transpile         # build a generation without serving
+npm run rebuild           # build it again even if the inputs did not change
+```
+
+Every answer carries `X-OSD-Generation`, and `/sap/bc/adt/core/http/build`
+reports three names — the source on disk, the generation built from it, and
+the one actually serving — plus whether they agree. When they do not, the
+build or the recycle is the thing to look at.
+
+---
+
+## 2. A Gateway service of your own
+
+There are three ways in, and they end in the same place: a service the
+dispatcher serves and Eclipse can see.
+
+### From a YAML file, which is SEGW without the GUI
+
+One file describes the project, the service, the entities and what they read.
+`src/demo/zstg_demo.stg.yaml` is the worked example; the shape is:
+
+```yaml
+project: ZMY_PROJECT
+service: ZMY_SRV
+model: ZMY_MDL
+description: "what this service is"
+
+entities:
+  Item:
+    set: ItemSet
+    keys: [ItemId]
+    table: ZMY_ITEM              # or cds: ZC_MY_VIEW, or nothing and write the DPC
+    properties:
+      ItemId: {type: String(8), field: ITEM_ID, label: Item}
+      Name:   {type: String(40), label: Name}
+```
+
+Compile it:
+
+```
+npm run stg:compile -- src/my/zmy_srv.stg.yaml --out gen/stg
+```
+
+That writes the SEGW project tree (the IWPR), the registration objects (IWSV
+and IWMO) and the `_MPC` / `_DPC` classes SEGW would have generated, plus the
+`_EXT` pair if it is not there yet. The `_EXT` classes are yours: that is
+where hand-written `GET_ENTITYSET` goes.
+
+A YAML under `src/` is compiled by every build, so in practice you write the
+file and run `npm run transpile`. If `src/` already holds an object the YAML
+would generate, yours wins and the generated copy is removed.
+
+What a source can be, per entity: nothing (you write the DPC), `struct:`,
+`table:` or `cds:` (served generically, no DPC needed), or `service:` plus
+`set:` to read another service of the same system. Per operation you can map
+`function:` (an RFC-style function module) or `searchhelp:`. Annotations for
+Fiori Elements — line items, selection fields, facets, value helps — go under
+`annotations:` and become an `ZCL_<project>_MPC_ANN` class, so the app needs
+no local annotation file.
+
+### From the SEGW editor, in the browser
+
+`http://localhost:3030/app/segw/` is SEGW as an application: the project tree
+in SEGW's own shape, every node edited in place, Create and Delete, Import of
+an `.iwpr.xml`, Export back out, and Generate. "Save to gen/" writes what
+Generate produced into `gen/segw-editor/`, which the next build picks up.
+
+### From an existing project
+
+```
+npm run segw:tree import <project>.iwpr.xml     # into the tables OSD serves
+npm run segw:tree export ZMY_PROJECT            # byte-identical back out
+npm run segw:gen -- <folder> --check            # what would be generated, vs what is there
+```
+
+---
+
+## 3. OData out of CDS
+
+Write the view under `src/cds/` (or inside a pack) as `*.ddls.asddls`, with
+its abapGit companion `*.ddls.xml`, and mark it:
+
+```abap
+@AbapCatalog.sqlViewName: 'ZVMYVIEW'
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'My view'
+@OData.publish: true
+define view ZC_MY_VIEW as select from zmy_item {
+  key item_id as ItemId,
+      name    as Name
+}
+```
+
+Then build. `npm run cds` (part of `npm run transpile`) turns every view into
+a DDIC view under its SQL view name **and** under the CDS name, a source
+class, and the registry; `@OData.publish: true` additionally writes
+`gen/cds/<view>_cds.stg.yaml`, which the same build compiles into a service.
+The service is then `Z<VIEW>_CDS` and is served like any other.
+
+Three things worth knowing:
+
+- **A projection of one table can be written**, not only read: put
+  `@ObjectModel.writeEnabled: true` on it and POST, PUT and DELETE work. A
+  write the model does not allow answers 405 rather than failing oddly.
+- **Analytics**: `@Analytics.dataCategory: #CUBE` with
+  `@Aggregation.default: #SUM` makes `$select` become `GROUP BY`, which is
+  what the Analytical List Page in `webapp/analytics/` uses.
+- **A virtual element** (`@ObjectModel.virtualElement` with
+  `virtualElementCalculatedBy: 'ABAP:ZCL_X'`) is a field an ABAP class fills
+  after the read.
+
+For a plain table with no view at all there is nothing to write: every TABL in
+the content gets a generic read/insert/update/delete class, so `table:` in a
+YAML is enough.
+
+---
+
+## 4. Packs: bringing content in without touching this repository
+
+A pack is a **directory**, and adding one is not a rebuild of anything but the
+generation. It looks like this:
+
+```
+packs/my-pack/
+  osd-pack.json
+  src/                  ABAP, abapGit-named   (the pack's layer)
+  src/ddic/             the tables its rows belong to
+  data/                 *.tabu.json seed rows
+  webapp/               static files, served at /app/my-pack/
+```
+
+`osd-pack.json`, all fields optional except by convention:
+
+```json
+{
+  "name": "my-pack",
+  "description": "what this pack is",
+  "order": 100,
+  "abap": ["src"],
+  "tiles": [
+    {
+      "title": "My pack",
+      "subtitle": "what it does",
+      "info": "$MY_PACK",
+      "icon": "sap-icon://palette",
+      "url": "/app/my-pack/index.html"
+    }
+  ]
+}
+```
+
+Where packs are found: `packs/` beside the tree, and every directory
+`OSD_PACKS` names (a pack itself, or a folder full of them, colon-separated).
+
+```
+OSD_PACKS=/somewhere/packs npm start
+node tools/osd-packs.mjs            # what is found, in layer order
+```
+
+What a pack brings, and where it lands:
+
+| in the pack | in the system |
+| --- | --- |
+| `src/**.abap`, `*.xml` | objects of the system, in a package named after the pack (`$MY_PACK`), editable from Eclipse |
+| `src/ddic/*.tabl.xml` | tables of the database |
+| `data/*.tabu.json` | rows, seeded at start |
+| `*.sicf.xml` | an ICF node, served at its path |
+| `*.sapc.xml` | a push channel, mounted at its path |
+| `*.ddls.asddls`, `*.stg.yaml` | CDS and services, generated like the tree's own |
+| `webapp/` | static files at `/app/<name>/` |
+| `tiles` | tiles on the launchpad |
+
+**Layer order.** The `input_folder` list of `abap_transpile.json` is the
+tree's own content; packs come after it, sorted by `order` then name. The
+**later layer wins** a name it shares, and the build says so with both files
+named. The same file name twice inside one folder is refused rather than
+guessed. `node tools/osd-inputs.mjs` prints overrides, duplicates, and folders
+that look like inputs and are not.
+
+**Adding a pack is a new generation**, because the generation is the hash of
+everything that went into it. That is the point: the system you were serving
+and the system with the pack in it have different names, and the switch is
+deliberate. A pack that adds generated objects (CDS, a YAML service) settles
+on the second build, because the generators write into `gen/`, which is
+itself an input; `npm run dev` does that second build by itself.
+
+**Activating.** Editing ABAP in a pack is editing ABAP: with `npm run dev`
+running, a save is checked, built and recycled, and the generation on the next
+answer is a new one. From Eclipse, activate as usual — the pack's objects are
+writable, the store finds them where the pack is. A check that fails leaves
+the live generation untouched, so a broken save never takes the system down.
+
+**Removing** a pack is deleting the directory (or unsetting `OSD_PACKS`) and
+building again.
+
+---
+
+## 5. Tiles on the launchpad
+
+Two ways, depending on whose the tile is.
+
+**A pack's own tile** goes in its `osd-pack.json`, as above. The launchpad
+asks the server for `./packs.json` when it starts and adds a "Content packs"
+group from the answer, so no file in this repository needs to know the pack
+exists. `url` may be anything this system serves: the pack's own page, an ICF
+path an ABAP class writes, a UI5 app.
+
+**A built-in tile** — one of this repository's own apps — is declared in
+`webapp/flp.html`, in two places that belong together:
+
+```js
+// the tile, in window["stg-launchpad-groups"]
+{
+  id: "myapp",
+  tileType: "sap.ushell.ui.tile.StaticTile",
+  properties: {
+    title: "My app", subtitle: "what it is", info: "ZMY_SRV",
+    icon: "sap-icon://table-view", targetURL: "#MyApp-manage"
+  }
+}
+
+// what that intent resolves to, in applications
+"MyApp-manage": {
+  title: "My app",
+  additionalInformation: "SAPUI5.Component=stg.myapp",   // a UI5 component
+  applicationType: "SAPUI5",
+  url: "./myapp/"
+}
+```
+
+For a page that is not UI5 — anything an ABAP class writes — leave
+`additionalInformation` out and give it `applicationType: "URL"` with
+`navigationMode: "embedded"`. That is how the ZO4D demo and Zork are on the
+launchpad: a tile is a launchpad's way of pointing at a service, and what is
+behind it does not have to be UI5 to belong there.
+
+---
+
+## 6. Running it somewhere else
+
+```
+bun scripts/build-binary.mjs          # build/osd, one file, runtime inside
+bun scripts/make-release.mjs          # a directory to copy anywhere
+```
+
+The release directory carries the binary, a Node single executable, a bundle
+with a private Node, the content, the packs, one prebuilt generation and a
+`run.sh` that picks a host. On the far machine:
+
+```
+./run.sh          # the Bun binary — needs nothing installed
+./run.sh sea      # a Node single executable
+./run.sh node     # the bundle on the private Node
+```
+
+Then open `http://<that machine>:3030/`. Measured on a second machine with
+Node 18 and no Bun: all three serve the same generation, and the demo's frame
+stream is byte-identical to the one recorded here.
+
+---
+
+## 7. When something is wrong
+
+```
+npm run ps                                   # what is running
+curl localhost:3030/sap/bc/adt/core/http/build   # source / live / serving, and whether they agree
+node tools/osd-inputs.mjs                    # layers, overrides, shadows
+node tools/osd-packs.mjs                     # packs, in order
+node tools/osd-transpiler.mjs                # which transpiler and runtime are in use
+curl localhost:<child port>/osd/dumps        # the last runtime errors, each naming its ABAP statement
+```
+
+A request that dies in ABAP answers with the statement that raised it and the
+ABAP frames under it, because the transpile carries source maps. `npm run dev`
+prints what it rebuilt and why it refused when a check failed.
+
+See also: [`generations.md`](generations.md) for what a generation is and how
+the dev loop decides, [`backlog.md`](backlog.md) for what is not done, and
+[`bun-spike.md`](bun-spike.md) for the packaging measurements.

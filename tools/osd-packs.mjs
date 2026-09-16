@@ -86,6 +86,18 @@ export function packAt(root, dir) {
     data: inside(declared.data, "data"),
     ddic: inside(declared.ddic, join(relative(dir, abap[0] ?? dir), "ddic")),
     webapp: inside(declared.webapp, "webapp"),
+    // what the launchpad should show for this pack: a tile per entry, each
+    // pointing at a URL this system serves (its own page, an app, an ICF
+    // path). The launchpad asks for these at start, so a pack appears on it
+    // without anybody editing webapp/flp.html.
+    tiles: [declared.tiles ?? []].flat().filter((t) => t !== null && typeof t === "object").map((t, i) => ({
+      id: String(t.id ?? `${name}-${i + 1}`),
+      title: String(t.title ?? name),
+      subtitle: t.subtitle === undefined ? undefined : String(t.subtitle),
+      info: t.info === undefined ? undefined : String(t.info),
+      icon: String(t.icon ?? "sap-icon://product"),
+      url: String(t.url ?? `/app/${name}/`),
+    })),
   };
 }
 
@@ -154,6 +166,11 @@ export function dataDirsOf(root, env = process.env) {
 export function ddicDirsOf(root, env = process.env) {
   const own = ["src/ddic", "src/segw/ddic", "src/zosd_test/ddic"].map((d) => join(root, d));
   return [...own, ...packsOf(root, env).map((p) => p.ddic).filter((d) => d !== undefined)];
+}
+
+/** every tile the packs ask the launchpad for, in pack order */
+export function tilesOf(root, env = process.env) {
+  return packsOf(root, env).flatMap((p) => p.tiles.map((t) => ({...t, pack: p.name, description: p.description})));
 }
 
 /** the static folders a pack brings, each served under /app/<name> */

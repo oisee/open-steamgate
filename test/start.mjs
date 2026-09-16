@@ -1,6 +1,6 @@
 import express from "express";
 import {existsSync} from "node:fs";
-import {webappsOf} from "../tools/osd-packs.mjs";
+import {tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {createServer as createHttpsServer} from "node:https";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -75,6 +75,11 @@ export function startServer(quiet) {
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   // the tree's webapp, not the module's: in a binary the module has no folder
   app.use("/app", express.static(join(process.cwd(), "webapp")));
+  // what the launchpad asks for at start: the tiles the packs declare, so a
+  // pack appears on it without anybody editing webapp/flp.html (backlog E.2)
+  app.get("/app/packs.json", function (req, res) {
+    res.json({tiles: tilesOf(process.cwd())});
+  });
   // a pack brings its own static files, served under its name (backlog E.2)
   for (const pack of webappsOf(process.cwd())) {
     app.use(`/app/${pack.name}`, express.static(pack.dir));

@@ -186,8 +186,8 @@ Node 22 or 24.
 ```sh
 git clone https://github.com/oisee/open-steamgate && cd open-steamgate
 npm ci
-npm start                    # transpile + serve: http://localhost:3030/app/index.html
-                             # the launchpad with both apps: http://localhost:3030/app/flp.html
+npm start                    # transpile + serve: http://localhost:3030/ is the launchpad
+npm run dev                  # the same, rebuilding and recycling as you edit ABAP
 npm test                     # abaplint + ABAP Unit + mocha over the wire
 npm run e2e:install && npm run e2e         # Playwright against localhost:3030
 npm run web:preview && npm run web:serve   # the browser-only build on :3031
@@ -197,6 +197,43 @@ npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out gen/demo   # SEGW witho
 
 The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
 `open-abap-odata` from GitHub unless `.local/` already holds them.
+
+## Build on it
+
+**[`docs/using-osd.md`](docs/using-osd.md) is the working guide**: starting it,
+adding a Gateway service, publishing OData from CDS, bringing content in as a
+pack, and putting any of it on the launchpad. The short version:
+
+**A service of your own** is one YAML file — SEGW without the GUI. It compiles
+into the project tree (IWPR), the registration objects (IWSV, IWMO) and the
+`_MPC` / `_DPC` classes SEGW would generate; the `_EXT` pair is yours to write
+in. An entity reads from a table, a CDS view, a function module, a search help
+or another service, or from a `GET_ENTITYSET` you write by hand. Or edit the
+tree in the browser: `/app/segw/` is the Service Builder as an application.
+
+**OData from CDS** is one annotation. `@OData.publish: true` on a view under
+`src/cds/` makes the build write the DDIC views, the source class and a
+service around it. `@ObjectModel.writeEnabled` on a projection of one table
+makes it writable; `@Analytics.dataCategory: #CUBE` turns `$select` into
+`GROUP BY`, which is what the analytical app runs on.
+
+**Content arrives as a pack, which is a directory, not a rebuild.** A folder
+with an `osd-pack.json` in it, holding ABAP, its tables, its seed rows, its
+static files — dropped into `packs/` or named by `OSD_PACKS`. Its objects join
+the system in a package of their own and are editable from Eclipse, its rows
+are seeded, its ICF nodes and push channels are mounted, its CDS and services
+are generated like the tree's own. Layers are ordered and a collision is
+reported with both files rather than guessed.
+
+**A tile** for a pack goes in the pack's own manifest: the launchpad asks the
+server which tiles the packs want and adds them, so nothing in this repository
+has to know a pack exists.
+
+**Take it to another machine** with `bun scripts/make-release.mjs`: a
+directory with a single-file binary, a Node single executable, a private Node,
+the content, the packs and one prebuilt generation. Measured on a second
+machine with neither Node 22 nor Bun installed: it serves the same generation,
+and the demo's frame stream is byte-identical.
 
 ## What the demo is made of
 

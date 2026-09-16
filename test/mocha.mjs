@@ -32,6 +32,21 @@ describe("wire", () => {
     expect(page, "zork behind its tile").to.contain("../sap/bc/zork");
   });
 
+  // A pack reaches the launchpad by declaring tiles in its osd-pack.json;
+  // the page asks for them at start, so neither flp.html nor launchpad.js
+  // knows a pack's name (backlog E.2).
+  it("the launchpad is told which tiles the packs ask for", async () => {
+    const res = await fetch(`http://localhost:${PORT}/app/packs.json`);
+    expect(res.status).to.equal(200);
+    const {tiles} = await res.json();
+    expect(tiles).to.be.an("array");
+    for (const tile of tiles) {
+      expect(tile, JSON.stringify(tile)).to.include.keys("id", "title", "icon", "url", "pack");
+    }
+    const page = await (await fetch(`http://localhost:${PORT}/app/launchpad.js`)).text();
+    expect(page, "the launchpad asks for them").to.contain("packs.json");
+  });
+
   it("$metadata", async () => {
     const res = await fetch(BASE + "/$metadata");
     expect(res.status).to.equal(200);
