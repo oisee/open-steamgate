@@ -97,6 +97,29 @@ A.6  Debugger endpoints                                                  [S]
 A.7  ATC, refactorings, quick fixes, where-used                          [S]
      └─ not started, not blocking; listed so a 404 reads as a plan
 
+A.9  "No authorization to create objects in the system"                   [S]
+     ├─ seen live 2026-09-16: Eclipse's New ABAP Repository Object wizard
+     │  refuses before asking for anything — the project is picked, the type
+     │  list is empty, and the red line is an AUTHORIZATION message, not a
+     │  "nothing to create" one. So the client is gating itself again
+     ├─ what it is NOT, measured against the corpus:
+     │  ├─ not the object-type list being short. A4H answers
+     │  │  informationsystem/objecttypes with 303 types and OSD with 15, but
+     │  │  the wizard does not read that list: its usedBy values are only
+     │  │  quick_search, virtual_folders and source_search, and the word
+     │  │  "wizard" appears in no entry of the A4H document
+     │  └─ but note a real difference while passing: every A4H namedItem
+     │     carries <nameditem:data>type:WGRP;usedBy:...</nameditem:data> and
+     │     ours carries none. Cheap to add, and it may matter elsewhere
+     ├─ next measurement, and it is a small one: run the façade with
+     │  STG_ADT_DUMP set, open the wizard, and read what it asked for and
+     │  did not get. The catch-all already records every miss by method and
+     │  path (adt-surface.md, "Refusals"), so the wizard's own request is
+     │  the answer and nobody has to guess
+     └─ suspects to check against the A4H discovery once the miss is known:
+        a collection the wizard needs that we do not advertise, or an
+        authorization/permission resource answered 404 where A4H answers 200
+
 A.8  CTS                                                                 [S]
      └─ deliberately absent: there is no transport system here, and the
         boundary to a real system is an abapGit archive from a git ref
