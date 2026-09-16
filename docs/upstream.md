@@ -85,7 +85,19 @@ Ordered by what breaks without them, most first.
 
 ## Beside the transpiler
 
-- **`@abaplint/core`**: nothing owed today.
+- **`@abaplint/core`**: one owed, and it is not a table edit.
+  `ANOMALY-2026-09-16-numeric-builtins-typed-integer` — `frac`, `abs`,
+  `floor`, `ceil`, `trunc` and `sign` are declared with a fixed integer
+  return type, and ABAP gives them the type of their argument. It is the
+  last three of sixty differing frames of the demo. The return type has to
+  come from the argument where the call is typed
+  (`expressions/method_call_chain.ts`); a fork PR into `abaplint/abaplint`,
+  with a syntax test for `frac( f )` typed `f` and `frac( i )` still `i`.
+- **`@abaplint/runtime`, two more, found by probing around it and not yet
+  measured on a system**: `ANOMALY-2026-09-16-mod-result-integer` (`MOD`
+  with a float operand returns an integer) and
+  `ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero` (`-0.5` to `i`
+  is 0, `Math.round`). Both one-line fixes with a test; both need an issue.
 - **open-abap-core**: `W3MIMETABTYPE` (#1218) and `get_source_position`
   (#1219) are merged; `SCMS_BINARY_TO_XSTRING` and the `WWWDATA_IMPORT` walk
   are in `.local/lars/open-abap-core` and still to send — a fork there, since

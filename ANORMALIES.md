@@ -30,6 +30,73 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-09-16-numeric-builtins-typed-integer — `frac`, `abs`, `floor`, `ceil`, `trunc`, `sign` of a float are typed as integers
+
+- Status: `open, needs an issue`
+- Discovery date: `2026-09-16`
+- Affected versions: `@abaplint/core 2.120.50` and 2.120.54 (`build/src/abap/5_syntax/_builtin.js`, entries `FRAC`, `FLOOR`, `CEIL`, `TRUNC`, `ABS`, `SIGN`: `return: IntegerType.get()`), and so every transpile
+- Affected ABAP statement, runtime API or adapter: an inline declaration from one of the six numeric functions — `DATA(lv_phase) = frac( lv_time / lv_step )`, `DATA(lv_d) = abs( lv_x - lv_y )` — and anything else that takes the function's type from the syntax analysis rather than from the value
+- Minimal ABAP reproducer:
+
+```abap
+DATA time TYPE f VALUE '8.25'.
+DATA(phase) = frac( time ).     " SAP: f, 0.25 — open-abap: i, 0
+DATA(dist)  = abs( CONV f( '-2.5' ) ).  " SAP: f, 2.5 — open-abap: i, 3
+```
+
+- Exact command used to run it: the ZO4D demo compared frame by frame with A4H after `ANOMALY-2026-09-16-float-vs-character-compare` was fixed: 3 frames of 60 still differed, all in the beat pulse `1 / ( 1 + lv_phase16 * 12 )`; on A4H `lv_phase16` runs 0, 0.25, 0.5, 0.75 and here 0, 0, 1, 1. The generated module declares it `new abap.types.Integer({qualifiedName: "I"})` and `abap.builtin.frac` returns a `Float` of 0.25 into it. Then the core table, read directly.
+- Expected SAP behaviour: the numeric functions `abs`, `ceil`, `floor`, `frac`, `sign` and `trunc` return a value **of the type of their argument** (ABAP keyword documentation, "Numeric Functions"); `frac( f )` is `f`.
+- Actual open-abap behaviour: the six are declared with a fixed integer return type in core's built-in table, whatever the argument. The runtime's `frac` returns a float and the variable it lands in rounds it, so the value is right for a moment and wrong at rest.
+- Impact on open-steamgate: the last three of sixty differing frames of the demo; more generally any 7.40-style ABAP that declares inline from these functions over a float gets an integer without a word from the compiler. Business code, which mostly applies them to `i` and `p`, is not hit — for `i` the rule and the table agree.
+- Smallest safe workaround: declare the variable — `DATA lv_phase16 TYPE f.` before the assignment — which is what the demo's author would not write on a system.
+- Upstream issue: none yet, **needs an issue** in `abaplint/abaplint` (core, not the transpiler). The fix is not a table edit: `IBuiltinMethod.return` is one static `AbstractType`, so the six need their return type taken from the argument where the call is typed: `expressions/method_call_chain.ts` sets `context` to the declared return (line 101 of 2.120.52) *before* `MethodCallParam.runSyntax` analyses the argument; for these six, `context` should be the argument's type once that has run. A fork PR, since `oisee` has no write access there (`DEBT-2026-09-14-no-push-to-abaplint`).
+- Regression-test location: none yet; `packages/core/test/abap/5_syntax` — an inline declaration from `frac( f )` typed as `f`, and from `frac( i )` still as `i`
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
+
+- Status: `open, needs an issue`
+- Discovery date: `2026-09-16`
+- Affected versions: `@abaplint/runtime 2.13.86` (`operators/mod.ts`)
+- Affected ABAP statement, runtime API or adapter: `a MOD b` where either operand is a float (or a packed number with decimals)
+- Minimal ABAP reproducer:
+
+```abap
+DATA r TYPE f.
+r = CONV f( '2.75' ) MOD 1.   " SAP: 0.75 — open-abap: 1
+```
+
+- Exact command used to run it: the runtime asked directly, `abap.operators.mod(Float 2.75, Integer 1)` — the value is computed as 0.75 and returned in an `Integer`, which rounds it to 1. Found while probing the arithmetic around `ANOMALY-2026-09-16-numeric-builtins-typed-integer`; **not yet measured on a system**, the expectation is the documented calculation-type rule.
+- Expected SAP behaviour: the calculation type of the operands decides — with a float operand the result is a float, 0.75.
+- Actual open-abap behaviour: `mod()` returns `new Integer().set(val)` for anything that is not `Integer8`, and the integer rounds the remainder.
+- Impact on open-steamgate: none seen in the demo; every effect that keeps a phase with `MOD` on floats would be quantised the way the pulse was.
+- Smallest safe workaround: `frac( a / b ) * b` in ABAP, which stays float
+- Upstream issue: none yet, **needs an issue**. The fix returns a `Float` when either operand is one, beside the `Integer8` case that already exists.
+- Regression-test location: none yet; `packages/runtime/test/operators`
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero — A float of −0.5 assigned to an integer becomes 0
+
+- Status: `open, needs an issue`
+- Discovery date: `2026-09-16`
+- Affected versions: `@abaplint/runtime 2.13.86` (`types/integer.ts`, `set()` with `Math.round`)
+- Affected ABAP statement, runtime API or adapter: any move of a negative float exactly on a half to an integer — `lv_i = lv_f` with `lv_f = -0.5`, `-1.5`, …
+- Minimal ABAP reproducer:
+
+```abap
+DATA i TYPE i.
+i = CONV f( '-0.5' ).   " SAP: -1 — open-abap: 0
+```
+
+- Exact command used to run it: the runtime asked directly, `Integer.set(Float -0.5)` gives 0; +0.5, 1.5, 2.5 are right. `Math.round(-0.5)` is `-0` in JavaScript, which rounds a half towards positive infinity, and ABAP rounds a half away from zero. **Not yet measured on a system**; the rule is the documented one for conversions to `i`.
+- Expected SAP behaviour: −1
+- Actual open-abap behaviour: 0
+- Impact on open-steamgate: none seen; it is a half of a unit, exactly, on the negative side, which is rare and silent
+- Smallest safe workaround: none needed
+- Upstream issue: none yet, **needs an issue**. `Math.sign(v) * Math.round(Math.abs(v))` in place of `Math.round(v)`, in `Integer.set` and wherever `toInteger` rounds.
+- Regression-test location: none yet; `packages/runtime/test/types/integer.ts`
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
 
 - Status: `fixed locally, PR parked`
