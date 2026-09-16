@@ -55,7 +55,7 @@ DATA(dist)  = abs( CONV f( '-2.5' ) ).  " SAP: f, 2.5 — open-abap: i, 3
 
 ### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
 
-- Status: `open, issue filed`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`operators/mod.ts`)
 - Affected ABAP statement, runtime API or adapter: `a MOD b` where either operand is a float (or a packed number with decimals)
@@ -71,13 +71,13 @@ r = CONV f( '2.75' ) MOD 1.   " SAP: 0.75 — open-abap: 1
 - Actual open-abap behaviour: `mod()` returns `new Integer().set(val)` for anything that is not `Integer8`, and the integer rounds the remainder.
 - Impact on open-steamgate: none seen in the demo; every effect that keeps a phase with `MOD` on floats would be quantised the way the pulse was.
 - Smallest safe workaround: `frac( a / b ) * b` in ABAP, which stays float
-- Upstream issue: [abaplint/transpiler#1860](https://github.com/abaplint/transpiler/issues/1860), filed 2026-09-17. Branch `fix/mod-float-result` (worktree `.local/pr-mod-float-result` of the transpiler clone, based on `origin/main`) carries the test only, no fix; the fix returns a `Float` when either operand is one, beside the `Integer8` case that already exists.
-- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "MOD with a float operand answers a float", failing on 2.13.87: `expected Integer{ value: 1 } to be an instance of Float`
+- Upstream issue: [abaplint/transpiler#1860](https://github.com/abaplint/transpiler/issues/1860), filed 2026-09-17. Branch `fix/mod-float-result` (worktree `.local/pr-mod-float-result` of the transpiler clone, based on `origin/main`), one commit with the fix and the test (2026-09-17, after Alice asked why the tests went without fixes): a `Float` result when either operand is one or the remainder is not whole, beside the `Integer8` case that already exists; the runtime's tests and lint green.
+- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "MOD with a float operand answers a float" (failed on 2.13.87 with `expected Integer{ value: 1 } to be an instance of Float`, passes with the fix)
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero — A float of −0.5 assigned to an integer becomes 0
 
-- Status: `open, issue filed`
+- Status: `fixed locally, PR parked`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`types/integer.ts`, `set()` with `Math.round`)
 - Affected ABAP statement, runtime API or adapter: any move of a negative float exactly on a half to an integer — `lv_i = lv_f` with `lv_f = -0.5`, `-1.5`, …
@@ -93,8 +93,8 @@ i = CONV f( '-0.5' ).   " SAP: -1 — open-abap: 0
 - Actual open-abap behaviour: 0
 - Impact on open-steamgate: none seen; it is a half of a unit, exactly, on the negative side, which is rare and silent
 - Smallest safe workaround: none needed
-- Upstream issue: [abaplint/transpiler#1861](https://github.com/abaplint/transpiler/issues/1861), filed 2026-09-17. Branch `fix/integer-round-half-away` (worktree `.local/pr-integer-round-half-away`, based on `origin/main`) carries the test only, no fix; `Math.sign(v) * Math.round(Math.abs(v))` in place of `Math.round(v)`, in `Integer.set` and wherever `toInteger` rounds.
-- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "a negative half moved to an integer rounds away from zero", failing on 2.13.87: `expected -0 to equal -1`
+- Upstream issue: [abaplint/transpiler#1861](https://github.com/abaplint/transpiler/issues/1861), filed 2026-09-17. Branch `fix/integer-round-half-away` (worktree `.local/pr-integer-round-half-away`, based on `origin/main`), one commit with the fix and the test (2026-09-17): `roundHalfAwayFromZero` on `Integer` (`-Math.round(-v)` for a negative, `-0` made `0`), used by `Integer.set` for numbers and floats, by `toInteger` for strings and by `Integer8.set` for floats; `Float.getRaw` already rounded this way. The runtime's tests and lint green.
+- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "a negative half moved to an integer rounds away from zero" (failed on 2.13.87 with `expected -0 to equal -1`, passes with the fix)
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
