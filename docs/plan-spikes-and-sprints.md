@@ -11,7 +11,10 @@ V vsp, R open-rfc-go, A Alice). A **spike** is a time-boxed question whose
 output is a *measurement and a written answer* — a note in `docs/` or an
 entry in `ANORMALIES.md` — never a feature; when the box runs out, the
 answer is "not in a day", which is also an answer. Sizes are session-days
-at the pace measured in this repository. Each sprint has a **definition
+at the pace measured in this repository; a session-day here has run at
+three to four conventional person-days on comparable work (the two reports
+give the ratio), and the plan is in session-days because that is the unit
+that gets scheduled. Each sprint has a **definition
 of done** that a test or a screen can show, not a list of things touched.
 
 The sets, for reference:
@@ -36,8 +39,11 @@ The sets, for reference:
 | **SP5** Go in front | one route (discovery) answered by a Go reverse proxy in front of the JS façade, Eclipse logging on through it, the RFC bridge calling it in-process through a public package | Eclipse logon yes/no; lines of Go | 1 | S + R | whether the strangler order works before phase 1 is paid for |
 | **SP6** the field item | one measured `DYNT_ATOM` layout from a DIAG capture, or the writer lifted from the private sibling | the byte layout, written into `diag-notes.md` | 0.5 | S, needs A | whether C.4 is a day or a week |
 | **SP7** the long answer | one RFC answer longer than one record from A4H, to settle the continued-record length (B.5) | the header bytes, written down | 0.5 | R, needs A | multi-record framing, shared by the bridge and track D |
+| **SP8** the warm compiler | does a `compile` process kept alive across recycles give the same diagnostics as the in-process registry, and what happens when two checks with different unsaved text for one file arrive at once? Today `#withSource` swaps the file synchronously and nothing can interleave; over a boundary something can | issue lists diffed over every object in the tree; the race reproduced, or shown impossible by the API's shape | 1 | S | the door's shape, before the door is built |
+| **SP9** RFC affinity | a lock on one connection and the write on another, under `sap-adt-connection-id`; two clients side by side, isolated | the lock landing or not; what the bridge must map | 1 | R | how A.5 is implemented, or whether the mapping is enough |
 
-SP6 and SP7 need a capture from the sandbox and start whenever Alice
+SP8 was Astra's addition and SP9 its consequence for A.5: both go before
+the work they shape, not after. SP6 and SP7 need a capture from the sandbox and start whenever Alice
 makes one; they are not on the critical path.
 
 ---
@@ -59,15 +65,15 @@ gantt
   SP2 the referee's shape                           :crit, s2b, after s2a, 1d
   N5 conformance suite, corpus replay               :s2c, after s2b, 2d
   section S3 · the door
-  The door and the three osd modes                  :s3a, 2026-10-05, 2d
+  SP8 the warm compiler                             :crit, s3z, 2026-10-05, 1d
+  The door and the three osd modes                  :s3a, after s3z, 2d
   R · public package for rfcserver                  :s3b, 2026-10-05, 1d
   CDS data preview, the dialog                      :s3c, after s3a, 1d
-  Debugger answered empty                           :s3d, after s3c, 1d
   section S4 · surface
-  The other corpus refusals                         :s4a, 2026-10-12, 1d
+  The other corpus refusals, debugger answered empty :s4a, 2026-10-12, 1d
   Where-used route over osd-xref                    :s4b, after s4a, 1d
   SP3 one document in ABAP                          :crit, s4c, after s4b, 2d
-  R · session affinity over RFC                     :s4d, 2026-10-12, 1d
+  R · SP9 RFC affinity, then A.5                    :s4d, 2026-10-12, 2d
   section S5 · documents
   Editor documents, five remaining types            :s5a, 2026-10-19, 3d
   SP4 Bun helper                                    :crit, s5b, after s5a, 1d
@@ -80,13 +86,15 @@ gantt
 
 ### Sprint 1 · L1 by default (21–25 Sep)
 
-*Goal: the shape both reports assume becomes the shape that runs.*
+*Goal: the shape both reports assume becomes the shape that runs, and an
+activation's verdict is bound to the revision it was computed on.*
 
 | item | lane | size |
 | --- | --- | ---: |
+| day 0: reproduce the corpus refusals against the current tree, and check every backlog claim this plan leans on against the code — the two reports found six stale claims between them, and a plan built on a seventh is a plan for the wrong tree | S | 0.5 |
 | N2 the workbench-only entry point: `STG_SERVE=child` is the default, `test/start.mjs` has no top-level ABAP initialisation, the preview's data path takes its connection from the child | S | 1 |
 | N3 `store.transpile` calls `@abaplint/transpiler` as a library; no `npx` | S | 0.5 |
-| N4 activation: the inactive mark clears only after the transpile succeeds; activations serialised per tree; a save during a build cannot become active by the older build finishing | S | 1.5 |
+| N4 activation — the handler already awaits publication; what is left is the inactive mark clearing only after the transpile succeeds, activations serialised per tree, and a save during a build never becoming active because the older build finished | S | 1.5 |
 | SP1 real SQLite | S | 1 |
 | unpin: the transpiler releases that let CI stop building from an unmerged branch (DEBT-2026-09-14) | T | — |
 
@@ -101,12 +109,13 @@ two concurrent activations produce one build (a test); SP1's note is in
 
 | item | lane | size |
 | --- | --- | ---: |
-| N1 the real-SQLite client, shaped by SP1: the default when supervised, `journal_mode=WAL`, the persistence tests moved onto it | S | 2 |
+| N1 the real-SQLite client, shaped by SP1: the default when supervised, `journal_mode=WAL`, the persistence tests moved onto it. Its reason is durability — rows are written at exit today — not the split, which reads rows through the door either way | S | 2 |
 | SP2 the referee's shape | S | 1 |
 | N5 the conformance suite: the 47 requests against a base URL; corpus replay with a diff report; runs in CI against the JS façade | S | 2 |
 
-**Done when:** a runtime killed with SIGKILL loses no committed row (a
-test); the suite is green against the JS façade over the real listener;
+**Done when:** a runtime killed with SIGKILL loses no committed row, a
+rolled-back LUW leaves none, and an application write is visible to the
+next data preview (three tests); the suite is green against the JS façade over the real listener;
 `npm run conformance -- --base <url>` exists and the corpus replay prints
 its diff.
 
@@ -116,15 +125,15 @@ its diff.
 
 | item | lane | size |
 | --- | --- | ---: |
-| the door: `check`, `activate`, `transpile`, `structure` on an `osd compile` mode that outlives recycles; `sql` on `osd serve`; `unit` as `osd unit`, one process per run; the façade calls them and boots nothing in-process | S | 2 |
+| SP8 the warm compiler, first | S | 1 |
+| the door, shaped by SP8: `check`, `activate`, `transpile`, `structure` on an `osd compile` mode that outlives recycles; `sql` on `osd serve`; `unit` as `osd unit`, one process per run; the façade calls them and boots nothing in-process | S | 2 |
 | a public package for the RFC server, so anything but `open-rfc-go`'s own `main` can mount it | R | 1 |
-| CDS data preview: `POST datapreview/cds` and its metadata, over the generated views and SADL | S | 1 |
-| `debugger/listeners` and `breakpoints` answered empty | S | 0.5 |
+| CDS data preview: `POST datapreview/cds` and its metadata, through the door's `sql`, over the generated views and SADL | S | 1 |
 
 **Done when:** vsp checks and unit-tests a tree with no façade running
 (one command, documented); Eclipse opens Data Preview on the CDS view that
-showed the dialog on 2026-09-15; the corpus shows the debugger operations
-answered 200.
+showed the dialog on 2026-09-15; SP8's note is in `docs/` with the parity
+diff and the race's verdict.
 
 ### Sprint 4 · surface (12–16 Oct)
 
@@ -132,14 +141,14 @@ answered 200.
 
 | item | lane | size |
 | --- | --- | ---: |
-| the remaining corpus refusals: `virtualfolders` on the bare path, the two `checkruns` 400s, the unknown-session DELETE | S | 1 |
+| the remaining corpus refusals: `virtualfolders` on the bare path, the two `checkruns` 400s, the unknown-session DELETE; and `debugger/listeners` and `breakpoints` answered empty (A.6) — a deliberate untruth that stops the client's retry loop, allowed only while the compatibility graph does not advertise debugging, so nothing answered empty was ever promised | S | 1.5 |
 | where-used: `usageReferences` over `osd-xref.mjs` | S | 1 |
 | SP3 one document in ABAP, inside A.1 | S + T | 1.5 |
-| dumps in ST22 shape on `runtime/dumps` | S | 0.5 |
-| session affinity over RFC: honour `sap-adt-connection-id` so a lock-write-activate lands in one context (A.5) | R | 1 |
+| SP9 first, then A.5: honour `sap-adt-connection-id` so a lock-write-activate lands in one context — it touches sessions and locks, which is why the spike goes first | R | 1 + 1 |
 
 **Done when:** the corpus comparison lists zero operations refused by OSD
-and answered by A4H; where-used works from Eclipse on a class; SP3's note
+and answered by A4H — the corpus is what recorded sessions asked for, not
+the whole surface, and every new session extends it; where-used works from Eclipse on a class; SP3's note
 answers the three questions with numbers; a write over RFC from Eclipse
 lands in the same session as its lock.
 
@@ -179,7 +188,7 @@ One decision, taken on evidence that exists by then:
 | --- | --- | --- |
 | the suite, green on the JS façade | N5 | there is a referee |
 | the rows in a real file, measured | N1, SP1 | whether Go could ever read them directly |
-| the door in use by vsp | sprint 3 | the semantics are a service |
+| the door in use by vsp, its diagnostics at parity | sprint 3, SP8 | the semantics are a service, and the same service |
 | one document family in ABAP, measured | SP3 | whether the right shift is worth a second family |
 | the helper loading a later build | SP4 | whether a self-contained release can be promised |
 | Eclipse through the Go proxy | SP5 | whether the strangler order holds |
@@ -191,7 +200,7 @@ flowchart LR
   G{"gate, 30 Oct"}
   G -- "left: SP5 held,<br/>the suite is trusted" --> L["sprints 7–11<br/>Go phases 1–5 of the left report<br/>store · state · documents · door · release"]
   G -- "right: SP3 was clean<br/>and the loop bearable" --> R["sprints 7–9<br/>document families in ABAP,<br/>source as a content pack,<br/>the in-browser ADT server"]
-  G -- "neither, or not yet" --> N["sprints 7–11, set 3<br/>SADL joins and writes · track D<br/>DIAG stub (after SP6) · gateway leftovers<br/>B.5 (after SP7)"]
+  G -- "neither, or not yet" --> N["sprints 7–11, set 3<br/>SADL joins and writes · track D<br/>DIAG stub (after SP6) · gateway leftovers<br/>dumps in ST22 shape · B.5 (after SP7)"]
   classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
   classDef abap fill:#fff7e6,stroke:#e8590c,color:#111
   classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
