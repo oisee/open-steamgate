@@ -53,6 +53,7 @@ ENDIF.
 - Smallest safe workaround: write the literal as a float, `CONV f( '0.5' )`, which compares float with float. Not applied to the demo: the ABAP is right as written.
 - Upstream issue: none yet, **needs an issue**. Branch `fix/compare-character-literal` in `abaplint/transpiler` (worktree `.local/pr-compare-char`, based on `origin/main` 7daf28f2): `parse()` in place of `parseInt` in both branches of `gt`'s tail, one commit, the runtime's tests and lint green.
 - Regression-test location: `packages/runtime/test/compare.ts`, "float against a character literal with a fraction", on the branch
+- **Verified, 2026-09-16.** With the fix cherry-picked onto `local/osd-build` and the runtime rebuilt, the same sixty frames against A4H differ in 3 instead of 59, and none of them by a label; what remains is the field `p` on frames 33 to 35, which is a different question and is being looked at.
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-15-srvd-not-allowed — The transpiler refuses SRVD objects
