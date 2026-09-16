@@ -49,30 +49,36 @@ would have to be invented.
 
 ## The pieces
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  F. Front            webapp/  — Fiori apps, launchpad, SEGW editor    │  static files
-├──────────────────────────────────────────────────────────────────────┤
-│  B. ADT façade       /sap/bc/adt over a SOURCE TREE                   │  Node
-│     browse · read · edit · lock · activate · search · unit · F8       │
-│              │ supervises, for unit/F8 only                           │
-├──────────────▼───────────────────────────────────────────────────────┤
-│  A. OSD runtime      transpiled ABAP + ICF + APC over a DATABASE      │  Node | SW | Bun binary
-│     gateway (OData) · sadl (plug-in) · apc · user code                │
-│              │ eleven methods                                         │
-│  ┌───────────▼──────────┐                                             │
-│  │ sqlite │ duckdb │ sql.js                                            │
-│  └──────────────────────┘                                             │
-├──────────────────────────────────────────────────────────────────────┤
-│  C. SEGW toolchain   yaml/iwpr/fugr ──▶ ABAP classes + XML            │  Node, file in / file out
-│  E. Content packs    demo · zork · o4d · zosd_test · demo_sadl · odc  │  ABAP + data + webapp folders
-│  G. Dev/ops          leak-scan · tls-proxy · closure probes · bench   │  scripts
-└──────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────────┐
-│  D. Transport (Go)   orfc · orfc-srv · adt-rfc-bridge · (diag stub)   │  one module graph
-│     + vsp            adt client · MCP · sapcompress · datacluster     │  already imports D
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph JS["JavaScript · open-steamgate"]
+    direction TB
+    F["<b>F · Front</b><br/>webapp/ — Fiori apps, launchpad, SEGW editor<br/><i>static files</i>"]
+    B["<b>B · ADT façade</b><br/>/sap/bc/adt over a <b>source tree</b><br/>browse · read · edit · lock · activate · search · unit · F8<br/><i>Node</i>"]
+    A["<b>A · OSD runtime</b><br/>transpiled ABAP + ICF + APC over a <b>database</b><br/>gateway (OData) · sadl (plug-in) · apc · user code<br/><i>Node | service worker | Bun binary</i>"]
+    DB[("sqlite · duckdb · sql.js<br/><i>the eleven-method seam</i>")]
+    C["<b>C · SEGW toolchain</b><br/>yaml / iwpr / fugr ⟶ ABAP classes + XML<br/><i>Node, file in / file out</i>"]
+    E["<b>E · Content packs</b><br/>demo · zork · o4d · zosd_test · demo_sadl · odc<br/><i>ABAP + data + webapp folders</i>"]
+    G["<b>G · Dev/ops</b><br/>leak-scan · tls-proxy · closure probes · bench<br/><i>scripts</i>"]
+    F --> B
+    B -- "supervises, for unit / F8 only" --> A
+    A -- "eleven methods" --> DB
+    C -. "emits the classes A runs<br/>(build-time, not runtime)" .-> A
+    E -. "transpile input" .-> A
+  end
+  subgraph GO["Go · one module graph"]
+    direction LR
+    V["<b>vsp</b><br/>adt client · MCP · sapcompress · datacluster"]
+    D["<b>D · Transports</b><br/>orfc · orfc-srv · adt-rfc-bridge · (diag stub)"]
+    V -- "already imports" --> D
+  end
+  D -- "HTTP only, via the backend flag" --> A
+  classDef unit fill:#eef3ff,stroke:#3b5bdb,color:#111
+  classDef tool fill:#f6f6f6,stroke:#888,color:#111
+  classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
+  class A,B unit
+  class F,C,E,G tool
+  class D,V go
 ```
 
 ### A. The OSD runtime — "the system"
@@ -193,14 +199,46 @@ Two lines that look tempting and should **not** be drawn:
 
 The shape falls out of facts 6 and 7. Two binaries, one command:
 
-```
-vsp-osd (Go)                                 osd (Bun-compiled JS)
-├─ vsp        ADT client, MCP, deploy-back   ├─ A. runtime: gateway+sadl+apc, ICF
-├─ orfc       RFC client, MCP                │            over sqlite (in-binary)
-├─ orfc-srv   RFC server front door          ├─ B. ADT façade (optional, same
-├─ adt-rfc-bridge  RFC ──▶ HTTP              │    process or second port)
-├─ diag stub  32NN, one screen (track C)     └─ E. packs, unpacked beside it
-└─ supervises ──────────────────────────────▶ launches, --backend http://127.0.0.1:NNNN
+```mermaid
+flowchart LR
+  subgraph clients[" "]
+    direction TB
+    ECL(["Eclipse<br/><i>Custom Application Server</i>"])
+    GUI(["SAP GUI"])
+    SM59(["SM59 destination<br/>CALL FUNCTION … DESTINATION"])
+    MCP(["MCP client<br/><i>an assistant</i>"])
+  end
+  subgraph GOBIN["<b>vsp-osd</b> (Go, one binary)"]
+    direction TB
+    vsp["vsp<br/>ADT client · MCP · deploy-back"]
+    orfc["orfc<br/>RFC client · MCP"]
+    srv["orfc-srv<br/>RFC server front door"]
+    bridge["adt-rfc-bridge<br/>RFC ⟶ HTTP"]
+    diag["diag stub<br/>one screen · track C"]
+    sup["supervisor<br/><i>ServingRuntime, in Go</i>"]
+  end
+  subgraph JSBIN["<b>osd</b> (Bun-compiled JS)"]
+    direction TB
+    RT["A · runtime<br/>gateway + sadl + apc · ICF<br/>over sqlite, in-binary"]
+    FAC["B · ADT façade<br/><i>optional, same process or a second port</i>"]
+    PACKS["E · content packs<br/><i>directories beside the binary,<br/>added without a rebuild</i>"]
+    FAC --> RT
+    PACKS -.-> RT
+  end
+  ECL -- "RFC · gateway port 33NN" --> bridge
+  GUI -- "DIAG · dispatcher port 32NN" --> diag
+  SM59 -- "RFC" --> srv
+  MCP --> orfc
+  MCP --> vsp
+  sup == "launches, waits for /sap/bc/adt/core/discovery,<br/>recycles on request" ==> RT
+  bridge -- "HTTP, backend = http://127.0.0.1:NNNN" --> FAC
+  srv -. "track D: dispatch to a transpiled FM" .-> RT
+  classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
+  classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
+  classDef cli fill:#fff7e6,stroke:#e8590c,color:#111
+  class vsp,orfc,srv,bridge,diag,sup go
+  class RT,FAC,PACKS js
+  class ECL,GUI,SM59,MCP cli
 ```
 
 **The Go binary** is already one module graph; `vsp-osd` is a `main` that
