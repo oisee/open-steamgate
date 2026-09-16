@@ -252,6 +252,28 @@ B.10 The base image is named by the schema alone                         [S]
         a persistent user database is never reseeded by this, only the
         image a new database is copied from
 
+B.12 One work process, and a channel that never waits                    [S]
+     ├─ measured 2026-09-16 on a 16-core machine: one core at 100 %, the
+     │  other fifteen at 1 %, load average 1.04. The serving runtime is one
+     │  process with one JavaScript thread, so every session's ABAP runs on
+     │  the same core — that is one dialog work process, not a pool
+     ├─ a frame costs 0.7 ms direct and 1.3 ms through the façade on an idle
+     │  server; with a second session playing the demo it is 55 ms at the
+     │  median. The cost is contention, not the ABAP
+     ├─ and the demo's page never waits: it fires a frame request every
+     │  24.6 ms and draws whatever comes back. Over a slow link 247 requests
+     │  produced 43 drawn frames and 205 outstanding, replies 4 s behind —
+     │  which is why an effect plays slowly and the next one rushes. Two
+     │  independent defects: no back-pressure in the page, one core here
+     ├─ the pool: the supervisor already owns process lifecycle (recycle,
+     │  reap, registry), so N children with sessions pinned to one of them
+     │  is the shape — SAP's dispatcher and its dialog work processes, and
+     │  what makes APC and the ABAP Daemon Framework scale on a real system
+     └─ for this demo specifically a frame is a pure function of (demo,
+        tick) through the JSON path, so the per-session state that matters
+        is small (which demo, running or not) and frames are cacheable by
+        key — the page already has a CACHED mode
+
 B.11 The binary beyond the checkout                                      [S]
      ├─ measured on a second machine 2026-09-16 (bun-spike.md part five):
      │  the Bun binary needs nothing; the Node hosts need a closure of four
