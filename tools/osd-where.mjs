@@ -49,6 +49,22 @@ export function abapFrames(from, options = {}) {
   return out;
 }
 
+/** A short dump: what was raised, where in ABAP, and the ABAP frames under
+ * it — the object a runtime keeps and a client reads, the way ST22 keeps
+ * one. `where` is describe()'s line; `frames` are abapFrames()' entries. */
+export function dumpOf(error, options = {}) {
+  const frames = abapFrames(error, {...options, keepUnmapped: options.keepUnmapped ?? false});
+  const name = error?.constructor?.name?.toUpperCase?.() || "error";
+  return {
+    at: new Date().toISOString(),
+    name,
+    message: String(error?.message?.get?.() ?? error?.message ?? error ?? ""),
+    where: describe(error, options),
+    frames,
+    request: options.request,
+  };
+}
+
 /** One line for a log: what was raised and where, in ABAP. */
 export function describe(error, options = {}) {
   // `??` does not fire on "", and an ABAP exception can reach JavaScript with

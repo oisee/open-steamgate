@@ -165,7 +165,13 @@ export function mountServices(app, run, options = {}) {
         if (res.headersSent === false) {
           res.status(500).type("text/plain").send(`${service.handler}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
         }
-        console.error(`ICF ${service.path} (${service.handler}):`, e);
+        // the host that mounted us keeps the dumps and knows the ABAP
+        // position; without one, the generated stack is what there is
+        if (options.onError !== undefined) {
+          options.onError(service, e, req);
+        } else {
+          console.error(`ICF ${service.path} (${service.handler}):`, e);
+        }
       }
     };
     app.all(service.path, handler);

@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {abapFrames, describe as describeError, statementAfter} from "../tools/osd-where.mjs";
+import {abapFrames, describe as describeError, dumpOf, statementAfter} from "../tools/osd-where.mjs";
 
 describe("osd-where, a stack in ABAP terms", () => {
   let folder = "";
@@ -52,6 +52,18 @@ describe("osd-where, a stack in ABAP terms", () => {
     const [frame] = abapFrames(stack);
     expect(frame.mapped).to.equal(false);
     expect(frame.file).to.equal("zcl_nomap.clas.mjs");
+  });
+
+  it("a dump is the error, where it happened in ABAP, and the frames under it", () => {
+    const error = new Error("boom");
+    error.stack = `Error: boom\n    at foo (${join(folder, "zcl_x.clas.mjs")}:2:1)`;
+    const d = dumpOf(error, {request: "GET /sap/opu/odata/sap/X/Set"});
+    expect(d.name).to.equal("ERROR");
+    expect(d.message).to.equal("boom");
+    expect(d.where).to.contain("zcl_x.clas.abap:5").and.contain("APPEND lv_val TO rt_values.");
+    expect(d.frames[0]).to.include({file: "zcl_x.clas.abap", line: 5, mapped: true});
+    expect(d.request).to.equal("GET /sap/opu/odata/sap/X/Set");
+    expect(d.at).to.match(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("no ABAP anywhere says so rather than guessing", () => {

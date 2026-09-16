@@ -18,6 +18,7 @@ import {pathToFileURL} from "node:url";
 import {mountServices, channels} from "./osd-icf.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
+import {dumpOf} from "./osd-where.mjs";
 
 const started = Date.now();
 
@@ -62,6 +63,30 @@ app.get("/osd/serving", function (req, res) {
     // the connection's own path, not the environment's guess about it
     database: globalThis.abap?.context?.databaseConnections?.DEFAULT?.path ?? process.env.STG_DB_PATH ?? ":memory:",
   });
+});
+
+// Short dumps: a runtime error is kept, with its ABAP position and frames,
+// the way ST22 keeps one — the last hundred, in memory, readable at
+// /osd/dumps — and said in the log as the ABAP statement it happened on,
+// not as a line of generated JavaScript. tools/osd-where.mjs resolves the
+// generated position through the source map beside each module; the maps
+// are written by the transpiler (write_source_map) and point back into the
+// tree from wherever the generation lives.
+const dumps = [];
+function dump(error, request) {
+  const d = dumpOf(error, {request});
+  dumps.push(d);
+  if (dumps.length > 100) {
+    dumps.shift();
+  }
+  console.error(`runtime error: ${d.where}${request ? `  (${request})` : ""}`);
+  for (const f of d.frames.slice(1, 6)) {
+    console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
+  }
+  return d;
+}
+app.get("/osd/dumps", function (req, res) {
+  res.json(dumps.slice().reverse());
 });
 
 // The end of a dialog step. An AS ABAP commits the database implicitly
@@ -121,10 +146,15 @@ app.all("/sap/opu/odata/sap/*", async function (req, res) {
   } catch (e) {
     // a runtime error is not an ABAP exception the dispatcher can catch;
     // answer rather than leave the client hanging
+    const d = dump(e, `${req.method} ${req.originalUrl}`);
     if (!res.headersSent) {
-      res.status(500).type("application/json").send(JSON.stringify({error: {code: "STG/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
+      // the OData error, with the ABAP position where a client can read it
+      res.status(500).type("application/json").send(JSON.stringify({error: {
+        code: "STG/RUNTIME",
+        message: {lang: "en", value: d.message},
+        innererror: {where: d.where, frames: d.frames.map((f) => `${f.file}:${f.line}${f.text ? "  " + f.text : ""}`)},
+      }}));
     }
-    console.error("runtime error:", e);
   }
 });
 
