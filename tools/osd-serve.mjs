@@ -15,6 +15,9 @@
 import express from "express";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
+import {mountServices, channels} from "./osd-icf.mjs";
+import {mountChannels} from "./osd-apc.mjs";
+import {Data} from "./osd-data.mjs";
 
 const started = Date.now();
 
@@ -30,6 +33,7 @@ const {initializeABAP} = await from("init.mjs");
 const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
 const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
 const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
+const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 
 await initializeABAP();
 await zcl_stg_segw_registry.register();
@@ -59,6 +63,34 @@ app.get("/osd/serving", function (req, res) {
   });
 });
 
+// The door for the rows: the façade's data preview asks here instead of
+// booting a second runtime of its own, so what a client sees in a preview
+// is what the application serves, from the same connection. SELECT only,
+// bounded, the same Data the command line uses (tools/osd-data.mjs).
+const data = new Data({root, client: globalThis.abap.context.databaseConnections.DEFAULT});
+app.post("/osd/sql", async function (req, res) {
+  let asked;
+  try {
+    asked = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "{}");
+  } catch {
+    res.status(400).json({error: {code: "BAD_REQUEST", message: "a JSON body with sql and max"}});
+    return;
+  }
+  try {
+    res.json(await data.query(String(asked.sql ?? ""), {max: Number(asked.max ?? 100)}));
+  } catch (e) {
+    res.status(e?.code === "NOT_BUILT" ? 503 : 400).json({error: {code: e?.code ?? "FAILED", message: String(e?.message ?? e)}});
+  }
+});
+
+// SICF: every other ICF service the tree carries, answered here by the
+// same shim the OData front uses. The parent lists the same paths and
+// proxies them, so an activated handler goes live with the recycle.
+const icf = mountServices(app, (args) => cl_express_icf_shim.run({
+  ...args,
+  base: new globalThis.abap.types.String().set(args.base),
+}), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+
 app.all("/sap/opu/odata/sap/*", async function (req, res) {
   try {
     await cl_express_icf_shim.run({
@@ -80,6 +112,13 @@ app.all("/sap/opu/odata/sap/*", async function (req, res) {
 const wanted = Number(process.argv[2] ?? process.env.OSD_SERVE_PORT ?? 0);
 const server = app.listen(wanted, "127.0.0.1", () => {
   const port = server.address().port;
+  // push channels answer their upgrade on this listener; the parent proxies
+  // the upgrade here, so a recycled channel handler is the one that answers
+  const apc = mountChannels(server, channels(root), {host: zcl_apc_host, log: (line) => console.error(line)});
+  if (process.send === undefined) {
+    for (const s of icf) console.log(`ICF service  on http://127.0.0.1:${port}${s.path}  (${s.handler})`);
+    for (const c of apc) console.log(`Push channel on ws://127.0.0.1:${port}${c.path}  (${c.handler})`);
+  }
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {

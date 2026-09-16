@@ -1,28 +1,52 @@
 import express from "express";
 import {createServer as createHttpsServer} from "node:https";
 import {fileURLToPath} from "node:url";
-import {initializeABAP} from "../output/init.mjs";
-import {cl_express_icf_shim} from "../output/cl_express_icf_shim.clas.mjs";
-import {zcl_stg_segw_registry} from "../output/zcl_stg_segw_registry.clas.mjs";
-import {zcl_stg_shlp_registry} from "../output/zcl_stg_shlp_registry.clas.mjs";
 import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
-import {odataProxy} from "../tools/osd-proxy.mjs";
+import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
-import {mountServices, channels as pushChannels} from "../tools/osd-icf.mjs";
+import {mountServices, services as icfServices, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
-import {zcl_apc_host} from "../output/zcl_apc_host.clas.mjs";
 
-await initializeABAP();
+// Two shapes of one listener, and the difference is whether this process
+// contains an ABAP system.
+//
+// Inline is the old shape: the transpiled modules are imported here and
+// answer here. It is what a test wants — no child, no second database —
+// and what the browser preview is built from. Its limit is why the other
+// shape exists: Node pins a module graph for the life of a process, so code
+// activated through the façade, or saved on disk, is never live here.
+//
+// Child is the workbench: this process is the façade, the static files and
+// a proxy, and loads no ABAP at all. The system runs in tools/osd-serve.mjs,
+// a process the supervisor replaces after a successful build — OData, every
+// ICF service, the push channels, and the door the data preview reads
+// through. One generation, one database, and every consumer on them.
+// STG_SERVE=child asks for it; test/run.mjs, the way a server is started,
+// defaults to it; a suite that calls startServer() itself stays inline.
+const MODE = process.env.STG_SERVE === "child" ? "child" : "inline";
 
-// the SEGW registration objects (IWSV/IWMO in src/) say which service is
-// served by which MPC/DPC classes; tools/segw-registry.mjs generated this
-await zcl_stg_segw_registry.register();
-// the search help objects (*.shlp.xml in src/) become value help providers;
-// tools/segw-shlp.mjs generated this
-await zcl_stg_shlp_registry.register();
+async function loadInline() {
+  const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
+  const {initializeABAP} = await from("init.mjs");
+  const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
+  const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
+  const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
+  const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
+  await initializeABAP();
+  // the SEGW registration objects (IWSV/IWMO in src/) say which service is
+  // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
+  await zcl_stg_segw_registry.register();
+  // the search help objects (*.shlp.xml in src/) become value help providers;
+  // tools/segw-shlp.mjs generated this
+  await zcl_stg_shlp_registry.register();
+  return {cl_express_icf_shim, zcl_apc_host};
+}
+const inline = MODE === "inline" ? await loadInline() : undefined;
+
 
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
@@ -69,8 +93,16 @@ export function startServer(quiet) {
   // asked, and why "make a new project" never helped. A different id is a
   // different cache entry, and the cheapest way to tell a stale cache from a
   // wrong answer.
+  const store = new ObjectStore({root: process.cwd()});
+  const runtime = MODE === "child"
+    ? store.serving({root: process.cwd(), database: process.env.STG_DB_PATH})
+    : undefined;
+  const data = MODE === "child"
+    ? new Data({root: process.cwd(), runtime})
+    : new Data({client: abap.context.databaseConnections["DEFAULT"]});
   const facade = adtRouter({
-    data: new Data({client: abap.context.databaseConnections["DEFAULT"]}),
+    store,
+    data,
     systemID: process.env.STG_ADT_SID,
   });
   app.use(facade.router);
@@ -100,13 +132,26 @@ export function startServer(quiet) {
   // brings a *.sicf.xml brings its own route with it, so an application can
   // be imported and served without this file learning its name. Mounted
   // before the OData front only so the reserved prefix below is meaningful.
-  const icf = mountServices(app, (args) => cl_express_icf_shim.run({
-    ...args,
-    base: new abap.types.String().set(args.base),
-  }), {root: process.cwd(), reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+  const reserved = ["/sap/opu/odata", "/sap/bc/adt"];
+  let icf;
+  if (MODE === "inline") {
+    icf = mountServices(app, (args) => inline.cl_express_icf_shim.run({
+      ...args,
+      base: new abap.types.String().set(args.base),
+    }), {root: process.cwd(), reserved});
+  } else {
+    // the same paths, proxied to the child that answers them
+    // the same filter mountServices applies: a reserved prefix, or a node
+    // without a handler (an APC path's SICF entry), is not a service
+    icf = icfServices(process.cwd()).filter((s) => s.handler !== undefined && !reserved.some((prefix) => s.path.startsWith(prefix)));
+    for (const service of icf) {
+      app.all(service.path, odataProxy(runtime));
+      app.all(`${service.path}/*`, odataProxy(runtime));
+    }
+  }
   if (quiet !== true && icf.length > 0) {
     for (const service of icf) {
-      console.log(`ICF service  on http://localhost:${PORT}${service.path}  (${service.handler})`);
+      console.log(`ICF service  on http://localhost:${PORT}${service.path}  (${service.handler})${MODE === "child" ? "  [proxied]" : ""}`);
     }
   }
 
@@ -125,9 +170,6 @@ export function startServer(quiet) {
   // can honestly report that the code is live. STG_SERVE=child asks for it;
   // npm run osd:serve sets it, and nothing else does, so a suite that never
   // activates anything pays nothing for the ability.
-  const runtime = process.env.STG_SERVE === "child"
-    ? facade.store.serving({root: process.cwd(), database: process.env.STG_DB_PATH})
-    : undefined;
 
   if (runtime !== undefined) {
     app.all("/sap/opu/odata/sap/*", odataProxy(runtime));
@@ -142,7 +184,7 @@ export function startServer(quiet) {
   } else {
     app.all("/sap/opu/odata/sap/*", async function (req, res) {
       try {
-        await cl_express_icf_shim.run({
+        await inline.cl_express_icf_shim.run({
           req,
           res,
           class: "ZCL_STG_HTTP_HANDLER",
@@ -170,13 +212,25 @@ export function startServer(quiet) {
   // child, which is a limit worth knowing: an activated push channel does
   // not go live until this process restarts, the way the OData path did
   // before it was proxied. Written down in docs/adt-facade.md.
-  const channels = mountChannels(server, pushChannels(process.cwd()), {
-    host: zcl_apc_host,
-    log: (line) => console.error(line),
-  });
+  const declared = pushChannels(process.cwd());
+  let channels;
+  if (MODE === "inline") {
+    channels = mountChannels(server, declared, {
+      host: inline.zcl_apc_host,
+      log: (line) => console.error(line),
+    });
+  } else {
+    // the upgrade is proxied to the child, which answers it with the
+    // handler of the generation it runs; an activated channel goes live
+    // with the recycle, which the inline shape could never do
+    channels = declared;
+    if (declared.length > 0) {
+      server.on("upgrade", upgradeProxy(runtime, declared.map((c) => c.path), (line) => console.error(line)));
+    }
+  }
   if (quiet !== true) {
     for (const channel of channels) {
-      console.log(`Push channel on ws://localhost:${PORT}${channel.path}  (${channel.handler})`);
+      console.log(`Push channel on ws://localhost:${PORT}${channel.path}  (${channel.handler})${MODE === "child" ? "  [proxied]" : ""}`);
     }
   }
 

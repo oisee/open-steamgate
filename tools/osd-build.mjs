@@ -101,12 +101,18 @@ export function inputsOf(root, config = loadConfig(root)) {
   return {folders, libs, config: layout(root).config};
 }
 
+// What the transpiler and the generators read, and nothing else: a mocha
+// test or a note beside the ABAP is not an input, and a hash that counted
+// it would spend ten seconds building the same output again after an edit
+// to a .mjs. Everything in an input folder counts except these.
+const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap)$/i;
+
 export function hashOf(root, inputs = inputsOf(root)) {
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(describeBuild(root))).update("\0");
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
   for (const dir of [...inputs.folders, ...inputs.libs]) {
-    const files = existsSync(dir) ? walk(dir).sort() : [];
+    const files = existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : [];
     h.update(`dir ${relative(root, dir)} ${files.length}\0`);
     for (const f of files) {
       h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");

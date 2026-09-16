@@ -1056,8 +1056,17 @@ export function adtRouter(options = {}) {
         }
         const source = hashOf(store.root);
         const live = liveHash(store.root);
-        const serving = store.served?.running === true ? store.served.generation : undefined;
-        return {source, live, serving, synchronized: source === live && (serving === undefined || serving === live)};
+        // null, not undefined: JSON drops an undefined field, and "no
+        // runtime is serving yet" is an answer, not an absence
+        const serving = store.served?.running === true ? store.served.generation : null;
+        // and the rows: which file the serving runtime holds, and where the
+        // preview reads — "serving" means through the runtime's door, which
+        // is the only answer in which a preview and the application agree
+        const database = {
+          serving: store.served?.running === true ? (store.served.database ?? "memory") : null,
+          preview: data.source ?? "in-process",
+        };
+        return {source, live, serving, database, synchronized: source === live && (serving === null || serving === live) && database.preview === "serving"};
       })(),
       started: STARTED,
       identity,

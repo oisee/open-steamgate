@@ -13,6 +13,7 @@
 // façade, not here.
 
 import {request} from "node:http";
+import {connect} from "node:net";
 
 // headers that describe this connection rather than this message, and so
 // must not be copied onto the next one
@@ -133,5 +134,47 @@ export function odataProxy(runtime, options = {}) {
       }));
       console.error("OData proxy:", detail);
     }
+  };
+}
+
+// A websocket upgrade forwarded to the child, byte for byte. The parent
+// only decides whether the path is a declared channel and whether a runtime
+// is up; from the first frame on, the two sockets are piped and the child's
+// handler is the one talking. Nothing here parses a frame.
+export function upgradeProxy(runtime, paths, log = () => {}) {
+  const known = new Set(paths.map((p) => p.replace(/\/+$/, "")));
+  return async (req, socket, head) => {
+    const path = req.url.split("?")[0].replace(/\/+$/, "");
+    if (!known.has(path)) {
+      socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
+      return;
+    }
+    try {
+      await runtime.ensure();
+    } catch (e) {
+      log(`APC ${path}: no serving runtime (${e?.message ?? e})`);
+      socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+      return;
+    }
+    const port = Number(new URL(runtime.url).port);
+    const upstream = connect(port, "127.0.0.1", () => {
+      const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
+      for (const [name, value] of Object.entries(req.headers)) {
+        lines.push(`${name}: ${Array.isArray(value) ? value.join(", ") : value}`);
+      }
+      upstream.write(lines.join("\r\n") + "\r\n\r\n");
+      if (head !== undefined && head.length > 0) {
+        upstream.write(head);
+      }
+      socket.pipe(upstream);
+      upstream.pipe(socket);
+    });
+    upstream.on("error", (e) => {
+      log(`APC ${path}: upstream ${e?.message ?? e}`);
+      socket.destroy();
+    });
+    socket.on("error", () => upstream.destroy());
+    socket.on("close", () => upstream.destroy());
+    upstream.on("close", () => socket.destroy());
   };
 }

@@ -16,6 +16,12 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 
 > Scheduled: [`plan-spikes-and-sprints.md`](plan-spikes-and-sprints.md) lays
 > the next six weeks out as sprints and spikes, with a gate at the end.
+> The **N-numbers** (N1 real-file SQLite, N2 the workbench-only entry point,
+> N3 transpile as a library call, N4 activation ordering, N5 the conformance
+> suite) are the "no-regret set" table in
+> [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md);
+> [`generations.md`](generations.md) is the mechanism that absorbed N3 and
+> N4 and delivered N2. Track B below is where they are being done.
 
 Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
 the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The

@@ -46,7 +46,17 @@ export class Data {
     // hands its connection in rather than letting a second runtime boot and
     // re-seed the database underneath it
     this.client = options.client;
+    // or hands the supervised runtime, and every query goes through its
+    // door (POST /osd/sql on tools/osd-serve.mjs): the rows a preview shows
+    // are then the rows the application serves, from one connection, and
+    // this process loads no ABAP at all
+    this.runtime = options.runtime;
     this.booted = this.client === undefined ? undefined : Promise.resolve(this.client);
+  }
+
+  // where the rows come from, for a caller that reports it
+  get source() {
+    return this.runtime !== undefined ? "serving" : this.client !== undefined ? "injected" : "in-process";
   }
 
   // the runtime, once; every later call reuses it
@@ -75,6 +85,9 @@ export class Data {
   // that forgets it should not be able to read a million rows.
   async query(sql, options = {}) {
     const max = options.max ?? 100;
+    if (this.runtime !== undefined) {
+      return this.#throughTheDoor(sql, max);
+    }
     const client = await this.boot();
     const text = openSqlToSql(String(sql).trim().replace(/;$/, ""));
     if (/^select\b/i.test(text) === false) {
@@ -90,6 +103,24 @@ export class Data {
       count: rows.length,
       truncated: rows.length === max,
     };
+  }
+
+  async #throughTheDoor(sql, max) {
+    await this.runtime.ensure();
+    const answer = await fetch(`${this.runtime.url}/osd/sql`, {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({sql: String(sql), max}),
+    });
+    const body = await answer.json().catch(() => ({}));
+    if (!answer.ok) {
+      // the child's refusal, with its code, so the façade answers the
+      // client the way it would have from its own connection
+      const e = new Error(body?.error?.message ?? `the serving runtime answered ${answer.status}`);
+      e.code = body?.error?.code ?? "FAILED";
+      throw e;
+    }
+    return body;
   }
 
   // what a table read is when the client names a table instead of writing SQL
