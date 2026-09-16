@@ -217,6 +217,87 @@ C.5  Then, and only then, decide whether it goes further                 [A]
 
 ---
 
+## Track D — the RFC gateway: expose every RFC-enabled function module
+
+*The ADT bridge terminates RFC for one function module. Make it a real gateway
+for all of them: an external RFC client calls any exposed function module of
+this project as if it were RFC-enabled, and gets a typed answer.*
+
+Added 2026-09-16 (Alice). The point is that the door is already open — the
+bridge is an RFC server, it already answers RFC_GET_FUNCTION_INTERFACE and
+carries typed parameters, and its DefaultDispatcher already has a working
+STFC_CONNECTION handler, which is exactly "call a function module over RFC and
+get a typed answer". What is hardcoded to the one ADT function becomes generic.
+
+What already exists, and is why this is a track and not a project:
+ - OSD transpiles and runs function modules today (FUNCTION z_osd_test_status_text
+   in src/zosd_test/, a FUNCTION-POOL that runs).
+ - the fugr importer already reads a module's signature from a *.fugr.xml
+   (zcl_stg_segw_fugr, tools/segw-gen-mapping.mjs, ZSTG_FM_PARAM).
+ - the bridge has both metadata halves (RFC_GET_FUNCTION_INTERFACE / DDIF /
+   RFC_GET_STRUCTURE_DEFINITION answered) and the codecs that encode arbitrary
+   typed values (internal/xrfc, internal/classicrfc, internal/structure) — all
+   currently driven by one hand-built graph (ADTRestGraph).
+
+The one genuinely new piece: a **signature → metadata graph** builder. Every
+handler today is fed a graph made by hand; a generic gateway builds that graph
+from the module's real signature (its parameters and their DDIC types). That is
+the meat of the track; everything else is wiring what exists.
+
+```
+D.1  A generic "call this module" endpoint in OSD                    [S/T]
+     ├─ POST /sap/bc/.../rfc/call/<FM> {imports, tables} -> {exports,
+     │  tables, exception}: run the transpiled module, return its answer
+     ├─ ABAP already runs; this is a generic CALL FUNCTION over the module
+     │  registry, the same shape as the service registry already here
+     └─ the foundation both modes below stand on
+
+D.2  Which modules are exposed, and finding them                     [S/T]
+     ├─ a registry of remote-enabled modules, the TFDIR/ENLFDIR of this
+     │  project — reuse the *.iwsv-style registration pattern, or a flag in
+     │  the fugr
+     ├─ RFC_FUNCTION_SEARCH answered from it (a name mask -> the matches),
+     │  so SE37's remote test, an SDK, or another system's CALL FUNCTION …
+     │  DESTINATION can discover them
+     └─ mode c) Alice named: a switch that drops the remote-enabled gate and
+        exposes ANY transpiled module, RFC-enabled or not — a dev convenience
+
+D.3  The signature -> metadata graph builder                            [R]
+     ├─ the one new thing: build the bridge's type graph from a module's real
+     │  parameters and their DDIC types, the way ADTRestGraph is built by hand
+     │  for the one function today
+     ├─ feeds the generic metadata handlers (RFC_GET_FUNCTION_INTERFACE, DDIF,
+     │  RFC_GET_STRUCTURE_DEFINITION) so they answer for ANY module
+     └─ and feeds the codecs, so import params decode and exports encode
+
+D.4  The bridge becomes a generic RFC server                            [R]
+     ├─ one handler for any unknown FM name: look up the signature (D.3),
+     │  decode the imports, call OSD (D.1), encode the exports
+     ├─ STFC_CONNECTION and RFC_PING already work; this generalises them
+     └─ result: `rfc call <ANY_FM>` through the bridge reaches a transpiled
+        module. A4.b's "rfc call needs the recursive codec" is the same client
+        gap and is shared
+
+D.5  mode b) the SOAP-RFC facade — likely the easiest first win        [S]
+     ├─ /sap/bc/soap/rfc: a SOAP envelope naming the module and its params ->
+     │  the result, HTTP-only, no RFC transport and no bridge in the path
+     ├─ reuses D.1 directly; provable with curl; the classic way any
+     │  RFC-enabled module is also a web service
+     └─ a good place to START the track: it exercises D.1 + D.3 without the
+        RFC framing, so the marshalling is proven before the transport is
+
+Smallest first win: D.1 + D.5 over the one module that already exists
+(z_osd_test_status_text), reachable by curl. Then D.3/D.4 put it on RFC, where
+`rfc call` and SE37 reach it. The three modes Alice named map to: a) = D.4
+(full RFC gate), b) = D.5 (SOAP-RFC), c) = the switch in D.2.
+
+Recommendation: start at D.5. It proves the generic call and the marshalling
+over plain HTTP, where a failure is a curl and a diff, before any of it has to
+survive RFC framing.
+```
+
+---
+
 # The standing list
 
 ## 0. Decisions waiting on Alice
