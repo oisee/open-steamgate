@@ -185,8 +185,14 @@ export function startServer(quiet) {
     // save has something to recycle and the app is up when you look.
     if (process.env.STG_DEV === "1") {
       devLoop({store: facade.store});
-      runtime.start().then((r) => console.log(`serving generation ${r.generation} on ${r.url}`), (e) => console.error(`runtime: ${e.message}`));
     }
+    // the system comes up with the listener, not at the first request: the
+    // app is there when you look, the registry names it, and the build
+    // endpoint has a serving generation to compare with from the start
+    runtime.start().then(
+      (r) => quiet === true || console.log(`serving generation ${r.generation} on ${r.url} (${r.pid}), rows in ${database ?? "memory"}`),
+      (e) => console.error(`runtime: ${e.message}`),
+    );
   } else {
     app.all("/sap/opu/odata/sap/*", async function (req, res) {
       try {

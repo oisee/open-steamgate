@@ -197,7 +197,11 @@ Two lines that look tempting and should **not** be drawn:
 
 ## The sidecar: `vsp-osd`
 
-The shape falls out of facts 6 and 7. Two binaries, one command:
+The shape falls out of facts 6 and 7. Two binaries, one command. Redrawn
+2026-09-16 after N2 and B4 ([`generations.md`](generations.md)): the JS
+side is no longer one process with an optional façade in it, but a
+workbench parent that holds no ABAP and the system in a child it replaces
+— and the supervisor with its generations already exists, in JavaScript.
 
 ```mermaid
 flowchart LR
@@ -207,39 +211,59 @@ flowchart LR
     GUI(["SAP GUI"])
     SM59(["SM59 destination<br/>CALL FUNCTION … DESTINATION"])
     MCP(["MCP client<br/><i>an assistant</i>"])
+    ANY(["any editor<br/><i>a save on disk</i>"])
   end
-  subgraph GOBIN["<b>vsp-osd</b> (Go, one binary)"]
+  subgraph GOBIN["<b>vsp-osd</b> (Go, one binary) — <i>to build</i>"]
     direction TB
     vsp["vsp<br/>ADT client · MCP · deploy-back"]
     orfc["orfc<br/>RFC client · MCP"]
     srv["orfc-srv<br/>RFC server front door"]
-    bridge["adt-rfc-bridge<br/>RFC ⟶ HTTP"]
-    diag["diag stub<br/>one screen · track C"]
-    sup["supervisor<br/><i>ServingRuntime, in Go</i>"]
+    bridge["adt-rfc-bridge<br/>RFC ⟶ HTTP  ✓"]
+    diag["diag stub<br/>tape error · track C  ✓"]
+    up["<b>vsp-osd up</b><br/>launches the workbench,<br/>points the bridge, listens 33NN/32NN"]
   end
-  subgraph JSBIN["<b>osd</b> (Bun-compiled JS)"]
+  subgraph JSBIN["<b>osd</b> (JS today; Bun binary to build) — <i>the workbench shape, running</i>"]
     direction TB
-    RT["A · runtime<br/>gateway + sadl + apc · ICF<br/>over sqlite, in-binary"]
-    FAC["B · ADT façade<br/><i>optional, same process or a second port</i>"]
-    PACKS["E · content packs<br/><i>directories beside the binary,<br/>added without a rebuild</i>"]
-    FAC --> RT
+    FAC["<b>parent · the workbench</b>  ✓<br/>ADT façade · static · proxy<br/><i>no ABAP loaded</i>"]
+    SUP["supervisor  ✓<br/>generations by content hash<br/>registry · recycle on a successful build"]
+    RT["<b>child · the system</b>  ✓<br/>OData · SADL · ICF · APC<br/>door: /osd/sql"]
+    DB[("rows  ✓<br/>a real SQLite file, WAL<br/>base image per schema · forks")]
+    DEV["dev loop  ✓<br/>save → check → build → recycle"]
+    PACKS["E · content packs<br/><i>to build</i>"]
+    FAC -- "proxy OData · ICF · websocket upgrades" --> RT
+    FAC -- "data preview" --> RT
+    SUP == "spawn · quiesce · replace" ==> RT
+    RT --> DB
+    DEV --> SUP
     PACKS -.-> RT
   end
   ECL -- "RFC · gateway port 33NN" --> bridge
+  ECL -- "HTTPS · 44300" --> FAC
   GUI -- "DIAG · dispatcher port 32NN" --> diag
   SM59 -- "RFC" --> srv
   MCP --> orfc
   MCP --> vsp
-  sup == "launches, waits for /sap/bc/adt/core/discovery,<br/>recycles on request" ==> RT
-  bridge -- "HTTP, backend = http://127.0.0.1:NNNN" --> FAC
-  srv -. "track D: dispatch to a transpiled FM" .-> RT
+  ANY --> DEV
+  up == "starts" ==> FAC
+  bridge -- "HTTP, backend = the workbench" --> FAC
+  srv -. "track D: dispatch to a transpiled FM,<br/>a second door on the child" .-> RT
   classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
   classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
   classDef cli fill:#fff7e6,stroke:#e8590c,color:#111
-  class vsp,orfc,srv,bridge,diag,sup go
-  class RT,FAC,PACKS js
-  class ECL,GUI,SM59,MCP cli
+  classDef db fill:#fff0f0,stroke:#c92a2a,color:#111
+  class vsp,orfc,srv,bridge,diag,up go
+  class FAC,SUP,RT,DEV,PACKS js
+  class ECL,GUI,SM59,MCP,ANY cli
+  class DB db
 ```
+
+What the ✓ marks say: everything on the JS side of this picture runs today,
+started the normal way (`test/run.mjs`), and every answer it gives names its
+generation. What is left on the Go side is one command, `vsp-osd up`, and
+the packaging of both sides into binaries (N3, the transpiler as a library
+call, is the JS binary's precondition). The supervisor is drawn where it
+lives: in JavaScript, with generations — the Go rewrite the first draft
+assumed is not needed for the picture to be true.
 
 **The Go binary** is already one module graph; `vsp-osd` is a `main` that
 registers the existing commands and adds one: `vsp-osd up`, which launches
