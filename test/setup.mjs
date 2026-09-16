@@ -50,14 +50,26 @@ export async function setup(abap, schemas, insert) {
   // and a second connection can read them. The default path keeps them
   // beside the tree, out of git.
   if (process.env.STG_DB === "file") {
-    const {FileSqliteClient, DEFAULT_DATABASE} = await import("../tools/sqlite-file-client.mjs");
+    const {FileSqliteClient, DEFAULT_DATABASE, BASE_DIR} = await import("../tools/sqlite-file-client.mjs");
     const {fingerprintOf, SchemaDrift} = await import("../tools/osd-persist.mjs");
-    const {existsSync, renameSync} = await import("node:fs");
+    const {existsSync, renameSync, copyFileSync, mkdirSync} = await import("node:fs");
+    const {join, dirname} = await import("node:path");
     const path = process.env.STG_DB_PATH ?? DEFAULT_DATABASE;
+    const wanted = fingerprintOf(schemas.sqlite);
+    // A base image: this DDIC's schema and mandatory rows, seeded once and
+    // kept under .local/db/base/<hash>.sqlite. A database that does not exist
+    // yet is a copy of it — milliseconds, and the same bytes every time —
+    // and the first instance of a new DDIC seeds and leaves the image behind
+    // for the next. This is what makes twenty runtimes over twenty files
+    // cheap: each is a copy, and nobody seeds twice.
+    const base = join(BASE_DIR, `${wanted}.sqlite`);
+    if (!existsSync(path) && existsSync(base)) {
+      mkdirSync(dirname(path), {recursive: true});
+      copyFileSync(base, path);
+    }
     db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
     abap.context.databaseConnections["DEFAULT"] = db;
     await db.connect();
-    const wanted = fingerprintOf(schemas.sqlite);
     const found = await db.stampedSchema();
     if (found === wanted) {
       return; // the rows are already there, made for this DDIC
@@ -84,6 +96,15 @@ export async function setup(abap, schemas, insert) {
     await loadScaledData(db, "sqlite");
     await db.stamp(schemas.sqlite);
     await db.commit();
+    // the image for the next instance, unless scaled data made this one a
+    // special case rather than the mandatory rows
+    if (!existsSync(base) && !(Number(process.env.STG_DATA_SCALE ?? 0) > 0)) {
+      try {
+        db.fork(base);
+      } catch (error) {
+        console.error(`the base image could not be written: ${error?.message ?? error}`);
+      }
+    }
     return;
   }
   db = new SQLiteDatabaseClient();

@@ -77,6 +77,28 @@ describe("tools/sqlite-file-client: rows on disk while the process runs", functi
     await writer.disconnect();
   });
 
+  it("a fork carries the last commit and nothing of the open LUW, and is a whole file", async () => {
+    const {forkDatabase} = await import("../tools/sqlite-file-client.mjs");
+    const file = join(dir, "fork-src.sqlite");
+    const writer = new FileSqliteClient({path: file});
+    await writer.connect();
+    await writer.execute(DDL);
+    await writer.insert({table: "t", columns: ["mandt", "id", "name"], values: ["'001'", "'A'", "'a'"]});
+    await writer.commit();
+    await writer.insert({table: "t", columns: ["mandt", "id", "name"], values: ["'001'", "'B'", "'open'"]});
+    const to = join(dir, "forks", "one.sqlite");
+    forkDatabase(file, to);
+    const fork = new FileSqliteClient({path: to});
+    await fork.connect();
+    expect((await fork.select({select: "SELECT id FROM t"})).rows.map((r) => r.id)).to.deep.equal(["A"]);
+    await fork.insert({table: "t", columns: ["mandt", "id", "name"], values: ["'001'", "'Z'", "'mine'"]});
+    await fork.commit();
+    await writer.commit();
+    expect((await writer.select({select: "SELECT id FROM t ORDER BY PRIMARY KEY", primaryKey: ["id"]})).rows.map((r) => r.id), "the source never sees the fork's rows").to.deep.equal(["A", "B"]);
+    await fork.disconnect();
+    await writer.disconnect();
+  });
+
   it("the stamp says which DDIC the rows were made for", async () => {
     const db = new FileSqliteClient({path: join(dir, "stamp.sqlite")});
     await db.connect();

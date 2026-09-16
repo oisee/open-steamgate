@@ -18,8 +18,9 @@
 // gateway serves from. Which classes and methods exist comes from the
 // parse, not from the generated index, so a test that was written and not
 // yet transpiled is reported as such instead of silently missing.
-import {existsSync, readFileSync} from "node:fs";
+import {existsSync, readFileSync, rmSync} from "node:fs";
 import {spawn} from "node:child_process";
+import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {resolveFrame} from "./osd-where.mjs";
 export {statementAfter} from "./osd-where.mjs";
@@ -272,7 +273,23 @@ export class UnitRun {
       if (options.method !== undefined) {
         args.push("--method", options.method);
       }
-      const child = spawn(process.execPath, args, {cwd: this.store.root, stdio: ["pipe", "pipe", "pipe"]});
+      // Its own database, always. A run inherits the server's environment,
+      // and since the server keeps its rows in a file by default, an
+      // inherited STG_DB=file would have the test writing into the rows the
+      // application serves. So the run gets a file of its own — a copy of
+      // the base image, made by its own setup — and the file goes when the
+      // run does. Isolation is the point of a detached run; this keeps it.
+      const own = join(tmpdir(), `osd-unit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sqlite`);
+      const child = spawn(process.execPath, args, {
+        cwd: this.store.root,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {...process.env, STG_DB: process.env.STG_DB === "duckdb" ? "duckdb" : "file", STG_DB_PATH: own},
+      });
+      const tidy = () => {
+        for (const suffix of ["", "-wal", "-shm", ".forking"]) {
+          rmSync(own + suffix, {force: true});
+        }
+      };
       child.stdin.end(JSON.stringify(plan));
       let out = "";
       let err = "";
@@ -283,6 +300,7 @@ export class UnitRun {
         err += d.toString();
       });
       child.on("close", (code) => {
+        tidy();
         const start = out.indexOf("{");
         if (start < 0) {
           reject(new RunFailed(code, `${out}${err}`.slice(-2000)));

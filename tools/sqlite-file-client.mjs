@@ -14,7 +14,7 @@
 // and the browser; DuckDB stays where it is. Same eleven methods, so
 // nothing above the seam knows which of the three it is talking to.
 import {DatabaseSync} from "node:sqlite";
-import {mkdirSync} from "node:fs";
+import {mkdirSync, renameSync} from "node:fs";
 import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
 
@@ -24,6 +24,29 @@ const STAMP = "osd_schema";
 // constant, so the supervisor that names the database and the child that
 // opens it cannot disagree about which file that is.
 export const DEFAULT_DATABASE = ".local/db/osd.sqlite";
+
+// where a seeded database is kept once per DDIC, so the next instance copies
+// it instead of seeding again: .local/db/base/<schema-hash>.sqlite
+export const BASE_DIR = process.env.STG_DB_BASE ?? ".local/db/base";
+
+// A fork: a consistent single-file copy of a database, taken while it is
+// open and even while its writer holds an open LUW — the copy carries the
+// last commit and nothing of the open transaction. VACUUM INTO does that on
+// one connection, which is why a fork is not a cp of a file with a WAL
+// beside it. Written to a temporary name and renamed, so a fork that exists
+// is whole.
+export function forkDatabase(from, to) {
+  mkdirSync(dirname(to), {recursive: true});
+  const temporary = `${to}.forking`;
+  const src = new DatabaseSync(from, {readOnly: true});
+  try {
+    src.exec(`VACUUM INTO '${temporary.replace(/'/g, "''")}'`);
+  } finally {
+    src.close();
+  }
+  renameSync(temporary, to);
+  return to;
+}
 
 function rewriteSelect(select, primaryKey) {
   let s = select.replace(/ UP TO (\d+) ROWS(.*)/i, "$2 LIMIT $1");
@@ -208,6 +231,15 @@ export class FileSqliteClient {
         iterator.return?.();
       },
     };
+  }
+
+  // a fork of this database, from this connection: committed rows only
+  fork(to) {
+    mkdirSync(dirname(to), {recursive: true});
+    const temporary = `${to}.forking`;
+    this.db.exec(`VACUUM INTO '${temporary.replace(/'/g, "''")}'`);
+    renameSync(temporary, to);
+    return to;
   }
 
   // The stamp: which DDIC these rows were made for. The same table and the
