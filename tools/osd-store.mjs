@@ -13,7 +13,7 @@
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
-import {spawn} from "node:child_process";
+
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
@@ -894,33 +894,27 @@ export class ObjectStore {
   }
 
   // the transpile behind an activation: the modules the runtime loads.
-  // Ten seconds over the whole system, so a caller starts it and does not
-  // wait; the promise is there for a caller that wants to know. Not to be
-  // confused with build( ), which is the index of objects.
+  // Built to the side and made live by a rename (tools/osd-build.mjs), so a
+  // build that fails leaves the live generation exactly as it was — which
+  // is the whole reason publish() can promise the truth. The promise is
+  // shared: a second caller while one is running gets the same one, and
+  // {force: true} rebuilds even when the inputs have not changed.
   transpile(options = {}) {
     if (this.building !== undefined && options.force !== true) {
       return this.building;
     }
-    this.building = new Promise((resolve) => {
+    this.building = (async () => {
       const started = Date.now();
-      const child = spawn("npx", ["abap_transpile"], {cwd: this.root, stdio: "pipe"});
-      let output = "";
-      child.stdout.on("data", (d) => {
-        output += d.toString();
-      });
-      child.stderr.on("data", (d) => {
-        output += d.toString();
-      });
-      child.on("close", (code) => {
+      try {
+        const {build} = await import("./osd-build.mjs");
+        const r = await build({root: this.root, force: options.force === true});
+        return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached};
+      } catch (error) {
+        return {ok: false, ms: Date.now() - started, objects: 0, output: String(error.output || error.message).slice(-2000), error: error.message};
+      } finally {
         this.building = undefined;
-        resolve({
-          ok: code === 0,
-          ms: Date.now() - started,
-          objects: Number(/(\d+) objects written to disk/.exec(output)?.[1] ?? 0),
-          output: code === 0 ? undefined : output.slice(-2000),
-        });
-      });
-    });
+      }
+    })();
     return this.building;
   }
 }

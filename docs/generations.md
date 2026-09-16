@@ -224,6 +224,7 @@ result names it; `/core/http/build` keeps naming the façade and gains a
 | `tools/osd-store.mjs` `transpile()` | calls the builder instead of `spawn("npx abap_transpile")`; `publish()` gains the rollback branch |
 | `tools/osd-runtime.mjs` | `generation` is the hash, not a counter; `recycle()` can be asked to restart the previous one |
 | `tools/osd-serve.mjs` | none — it follows the symlink. (`OSD_OUTPUT` as an env override for a host without symlinks) |
+| inside each generation | **found while building it:** the transpiled modules reach outside `output/` for the setup hook the config names as `../test/setup.mjs`, and Node resolves a relative import from the importing file's *real* path, not through the root symlink. So a generation carries a relative link per such root directory (`<gen>/test → ../../../test`), made on build and on switch, only for names that are directories at the root — a literal that merely looks like `../sap/…` names nothing |
 | `tools/osd-persist.mjs` | `baseImage(schema)`: seed into `db/base/<hash>.sqlite` if absent; `fork(from, to)` |
 | `package.json` | `transpile` stops doing `rm -rf output`; `dev` and `rebuild` scripts |
 | `tools/adt-facade.mjs` | the header on every answer; `generation` in `/core/http/build` |
@@ -258,6 +259,10 @@ result names it; `/core/http/build` keeps naming the façade and gains a
   promising it everywhere.
 
 ---
+
+## Status
+
+- **Step 1 is built** (2026-09-16): `tools/osd-build.mjs`, `store.transpile()` on it, `npm run transpile` / `rebuild` / `builds`. First generation 10.4 s, 1,090 objects; a rebuild with nothing changed 0.44 s; a broken source fails in its own directory and leaves live untouched, proven by test. The store, supervisor and façade suites pass through the symlink.
 
 ## The order of work
 
