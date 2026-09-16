@@ -10,7 +10,7 @@ module.exports = {
   target: "webworker",
   entry: path.resolve(__dirname, "web/preview-worker.mjs"),
   output: {
-    path: path.resolve(__dirname, "build"),
+    path: path.resolve(__dirname, "build", "preview"),
     filename: "sw.js",
     clean: true,
   },
@@ -92,6 +92,9 @@ module.exports = {
     }),
     // DuckDB is a native module the browser never takes; keep it out of the bundle
     new webpack.IgnorePlugin({resourceRegExp: /duckdb-client\.mjs$/}),
+    // the same for the SQLite file client: STG_DB=file is a process with a
+    // disk, and node:sqlite is not a thing a service worker can resolve
+    new webpack.IgnorePlugin({resourceRegExp: /sqlite-file-client\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

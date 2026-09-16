@@ -348,7 +348,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   (`SegwProject-manage`); `test/e2e/segw.spec.mjs`. Tests and the
   Playwright config read `STG_PORT` like `test/start.mjs`, so two sessions
   can run their suites side by side on different ports.
-- `npm run web:preview` bundles the gateway into a service worker (`build/`,
+- `npm run web:preview` bundles the gateway into a service worker (`build/preview/`,
   sql.js, no server); `npm run e2e:preview` checks it in Chromium; the
   `preview deployment` workflow publishes `main/` and `pr-<n>/` to GitHub
   Pages. See `docs/preview-deployments.md`. `build/` and `web/generated/` are
@@ -375,6 +375,14 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   it — `node tools/osd-packs.mjs` lists what is there. Generators read
   **content** (`src` plus each pack), never the whole layer list: one that read
   `test/` picked up a CDS fixture and failed the build.
+  A pack may **fetch** a folder instead of carrying it: `sources` in the
+  manifest (repository, commit, path, exclude patterns), `node
+  tools/osd-fetch.mjs` copies it into `<pack>/upstream/` (ignored), the
+  pack's own `src/` layers over it, and a build or a preview refuses a
+  pack that was not fetched (`UNFETCHED`). `packs/o4d` and `packs/zork`
+  are two such manifests plus an overlay; the GitHub Pages workflow
+  fetches them, which is how the demo and Zork are on the public preview
+  without their sources being in this repository (2026-09-17).
 - **The binary is `npm run binary` → `build/osd`** (`bin/osd.mjs`,
   `scripts/build-binary.mjs`, `docs/bun-spike.md` part three, 2026-09-16):
   `build/osd up|serve|build|gen <tool>|unit|doctor`. Four facts a change

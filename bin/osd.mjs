@@ -4,6 +4,7 @@
 //   osd up            the workbench on STG_PORT (test/run.mjs)
 //   osd serve         the serving runtime, as the supervisor starts it
 //   osd build [...]   tools/osd-build.mjs
+//   osd fetch         the folders the packs declare as sources
 //   osd gen <tool>    one generator, as the builder starts it
 //   osd unit ...      a detached ABAP Unit run, as the façade starts it
 //
@@ -103,6 +104,13 @@ switch (mode) {
     await GENERATORS[name]();
     break;
   }
+  case "fetch": {
+    // a pack's declared sources, into the pack (tools/osd-fetch.mjs)
+    process.argv = [process.argv[0], "osd-fetch", ...rest];
+    const {main} = await import("../tools/osd-fetch.mjs");
+    process.exit(await main(rest));
+    break;
+  }
   case "unit": {
     process.argv = [process.argv[0], "osd-host", ...rest];
     const {main} = await import("../tools/osd-unit.mjs");
@@ -127,6 +135,6 @@ switch (mode) {
     break;
   }
   default:
-    console.error(`osd: unknown mode ${mode}; one of up, serve, build, gen, unit, doctor`);
+    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, doctor`);
     process.exit(2);
 }

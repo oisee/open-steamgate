@@ -15,7 +15,7 @@ import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} f
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.static(fileURLToPath(new URL("../build", import.meta.url))));
+app.use(express.static(fileURLToPath(new URL("../build/preview", import.meta.url))));
 
 const port = Number(process.env.STG_PREVIEW_PORT ?? 3031);
 const tlsPort = Number(process.env.STG_PREVIEW_TLS_PORT ?? port + 1);

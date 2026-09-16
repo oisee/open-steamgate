@@ -1,0 +1,23 @@
+{
+  "name": "o4d",
+  "description": "ZO4D: the demos, their media out of SMW0, and the push channel that drives them",
+  "order": 40,
+  "abap": [
+    "upstream",
+    "src"
+  ],
+  "sources": [
+    {
+      "folder": "upstream",
+      "repo": "https://github.com/oisee/vivid-vibes",
+      "ref": "1b9fe6202a819ee8fb51e7cef754429acff5d21c",
+      "path": "src",
+      "exclude": [
+        "^zo4d_offline_export\\.prog\\.",
+        "^zo4d_render_demo\\.prog\\.",
+        "^zcl_o4d_composer\\.clas\\.",
+        "^zcl_o4d_mountains_oops_a\\.clas\\."
+      ]
+    }
+  ]
+}

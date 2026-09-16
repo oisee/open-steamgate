@@ -42,6 +42,21 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(existsSync(join(root, "build"))).to.equal(false);
   });
 
+  it("refuses a pack whose declared source is not fetched, and builds nothing", async () => {
+    write("src/zcl_one.clas.abap", "");
+    write("packs/theirs/osd-pack.json", JSON.stringify({sources: [{folder: "upstream", repo: "https://example.invalid/theirs", ref: "abcdef0123456789", path: "src"}]}));
+    let refused;
+    try {
+      await build({root});
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused?.code).to.equal("UNFETCHED");
+    expect(refused.message).to.contain("pack theirs fetches upstream from https://example.invalid/theirs at abcdef012345");
+    expect(refused.message).to.contain("node tools/osd-fetch.mjs");
+    expect(existsSync(join(root, "build"))).to.equal(false);
+  });
+
   // N3: the transpile is a library call. The CLI is the oracle, run over the
   // same tree into a folder of its own, and the two outputs are compared
   // file by file. The transpiler numbers its temporaries as it goes, so

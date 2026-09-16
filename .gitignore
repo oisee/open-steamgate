@@ -48,3 +48,8 @@ data/d010inc.tabu.json
 
 # objects brought into the local system from a repository (npm run osd:import)
 local/
+
+# what a pack fetches rather than carries (tools/osd-fetch.mjs): the folder
+# named upstream/ by convention, and the marker saying which commit it holds
+packs/*/upstream/
+packs/*/.osd-fetched.json

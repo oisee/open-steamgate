@@ -1,6 +1,6 @@
 import {defineConfig} from "@playwright/test";
 
-// The browser preview build (build/), served as static files: the OData
+// The browser preview build (build/preview/), served as static files: the OData
 // service is answered by the service worker, not by a Node process.
 export default defineConfig({
   testDir: "test/e2e",

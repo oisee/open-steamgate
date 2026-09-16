@@ -33,6 +33,7 @@ import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
+import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand} from "./osd-host.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
@@ -325,6 +326,15 @@ export async function build(options = {}) {
   // same file name twice inside one folder is a refusal naming both files,
   // never a guess, and it is refused before a lock is taken or a generator
   // runs; an object an earlier layer hides is said, and hidden below
+  // a pack that fetches a folder and has not: a smaller system than the
+  // manifest describes, refused before it is built (tools/osd-fetch.mjs)
+  const missing = unfetched(root);
+  if (missing.length > 0) {
+    const e = new Error(`the build refuses: ${describeUnfetched(missing)}`);
+    e.code = "UNFETCHED";
+    e.missing = missing;
+    throw e;
+  }
   const stack = layers(root, config);
   if (stack.duplicates.length > 0) {
     const e = new Error(`the build refuses: ${describeDuplicates(stack.duplicates)}`);

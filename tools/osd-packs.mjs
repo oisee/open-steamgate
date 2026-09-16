@@ -14,6 +14,13 @@
 //     data/              *.tabu.json seed rows (optional)
 //     webapp/            static files, served under /app/<name> (optional)
 //
+// A pack may fetch a folder instead of carrying it: "sources" in the
+// manifest names a repository, a commit and a path, and tools/osd-fetch.mjs
+// copies that into <pack>/<folder>. The pack's own src/ then layers over it
+// (later wins), which is how a repository nobody here owns is run with the
+// few files it needs changed, and how a public build gets the same content
+// as a workstation without the content being in this repository.
+//
 // Found in <root>/packs/ and in every directory OSD_PACKS names (a pack
 // itself, or a container of packs). The order is the manifest's `order`
 // (default 100) then the name, and packs come after the tree's own input
@@ -72,7 +79,30 @@ export function packAt(root, dir) {
   // a pack that is itself a repository folder says "." instead
   const declaredAbap = declared.abap === undefined ? undefined : [declared.abap].flat();
   const abap = (declaredAbap ?? ["src", "."]).map((f) => inside(f)).filter((f) => f !== undefined);
+  // a folder the pack does not carry but fetches: a repository, a commit
+  // and a path in it, copied into <pack>/<folder> by tools/osd-fetch.mjs.
+  // Declared here so the pack is reproducible from its manifest alone, and
+  // so a build can tell a folder nobody fetched from one that is not there
+  const sources = [declared.sources ?? []].flat().filter((s) => s !== null && typeof s === "object").map((s) => {
+    if (typeof s.folder !== "string" || s.folder === "" || typeof s.repo !== "string" || s.repo === "") {
+      throw new BadPack(dir, "a source needs a folder and a repo");
+    }
+    return {
+      folder: s.folder,
+      dir: join(dir, s.folder),
+      repo: s.repo,
+      ref: String(s.ref ?? "main"),
+      path: String(s.path ?? "src").replace(/^\/+|\/+$/g, ""),
+      // what not to copy, as regular expressions over the path inside the
+      // repository folder: a GUI-bound program, a test class, a file loader
+      exclude: [s.exclude ?? []].flat().map((e) => String(e)),
+    };
+  });
   return {
+    sources,
+    // the sources whose folder is not there: an unfetched pack is a
+    // different system, and it is said rather than built smaller
+    missing: sources.filter((s) => isDir(s.dir) === false),
     name,
     description: declared.description === undefined ? undefined : String(declared.description),
     dir,
@@ -201,6 +231,10 @@ function main(args) {
     console.log(`${pack.name}  ${pack.package}  order ${pack.order}  ${parts.join(", ")}`);
     if (pack.description !== undefined) {
       console.log(`  ${pack.description}`);
+    }
+    for (const s of pack.sources) {
+      const state = pack.missing.includes(s) ? "NOT FETCHED: node tools/osd-fetch.mjs" : "fetched";
+      console.log(`  source ${s.folder} <- ${s.repo} ${s.ref.slice(0, 12)} /${s.path}  (${state})`);
     }
   }
   return 0;

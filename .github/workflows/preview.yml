@@ -1,7 +1,7 @@
 name: preview deployment
 
 # Every pull request and every push to main gets a copy of open-steamgate that
-# runs entirely in the browser (build/: the gateway in a service worker, the
+# runs entirely in the browser (build/preview/: the gateway in a service worker, the
 # Fiori demo app), published on GitHub Pages from the gh-pages branch:
 #   main         -> https://oisee.github.io/open-steamgate/main/
 #   PR <n>       -> https://oisee.github.io/open-steamgate/pr-<n>/
@@ -34,7 +34,7 @@ jobs:
       PREVIEW_DIRECTORY: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}"
       # The commit of the transpiler this deployment is pinned to, or empty
       # to use whatever npm resolves. See the step below.
-      OSD_TRANSPILER_REF: "c5a2290ff8b1ef0b680a4f748e3f8b3bdf991124"
+      OSD_TRANSPILER_REF: "88ab85390646c4ef730bfeaa50053edb9aa02936"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,6 +50,10 @@ jobs:
       # On a published transpiler a runner writes no *.w3mi.data.* files at
       # all, so the bundle it builds is not the bundle this repository
       # tests, and the first thing that notices is an ENOENT on a PNG.
+      # The third is the runtime's: a float compared with a character
+      # literal (abaplint/transpiler#1859), which is what made the demo
+      # label its bars on the second frame. The pinned commit carries all
+      # three on top of the published 2.13.87.
       #
       # So the deployment is pinned to a commit of an integration branch,
       # built here and linked the same way a developer links it. Pinned to a
@@ -81,6 +85,14 @@ jobs:
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
           node tools/osd-transpiler.mjs
+      # The packs: the demo and Zork are not in this repository, they are
+      # fetched from theirs at the commit each pack's manifest pins
+      # (tools/osd-fetch.mjs), and the pack's own folder layers over that.
+      # The build refuses a pack that was not fetched, so this step is not
+      # optional: without it the preview would be published smaller than
+      # the manifests say and look complete.
+      - name: Fetch the pack sources
+        run: node tools/osd-fetch.mjs
       - run: npm run web:preview
       - run: npx playwright install --with-deps chromium
       - name: Check the build in a browser
@@ -91,7 +103,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build
+          publish_dir: ./build/preview
           destination_dir: ${{ env.PREVIEW_DIRECTORY }}
           keep_files: true
           commit_message: "Deploy ${{ env.PREVIEW_DIRECTORY }} from ${{ github.sha }}"
@@ -104,7 +116,7 @@ jobs:
           set -euo pipefail
           marker='<!-- open-steamgate-preview -->'
           base="https://oisee.github.io/open-steamgate/pr-$PR_NUMBER"
-          body=$(printf '%s\n\nPreview: [open the Fiori app](%s/app/) - the OData gateway runs in your browser, no server.\n\n[Screenshots](%s/screenshots/) - built from `%s`' \
+          body=$(printf '%s\n\nPreview: [open the launchpad](%s/app/flp.html) - the OData gateway, the demo and Zork run in your browser, no server.\n\n[Screenshots](%s/screenshots/) - built from `%s`' \
             "$marker" "$base" "$base" "${GITHUB_SHA:0:7}")
           comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
             --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\")))][0].id // empty")

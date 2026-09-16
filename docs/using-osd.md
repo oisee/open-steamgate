@@ -202,6 +202,7 @@ What a pack brings, and where it lands:
 | `*.ddls.asddls`, `*.stg.yaml` | CDS and services, generated like the tree's own |
 | `webapp/` | static files at `/app/<name>/` |
 | `tiles` | tiles on the launchpad |
+| `sources` | folders fetched from a repository at a commit, layered under the pack's own (below) |
 
 **Layer order.** The `input_folder` list of `abap_transpile.json` is the
 tree's own content; packs come after it, sorted by `order` then name. The
@@ -225,6 +226,44 @@ the live generation untouched, so a broken save never takes the system down.
 
 **Removing** a pack is deleting the directory (or unsetting `OSD_PACKS`) and
 building again.
+
+**A pack that fetches instead of carrying.** A repository you do not own, or
+one you do not want copied into this tree, is named in the manifest and
+fetched into the pack:
+
+```json
+{
+  "name": "zork",
+  "abap": ["upstream", "src"],
+  "sources": [
+    {
+      "folder": "upstream",
+      "repo": "https://github.com/oisee/zork-abap",
+      "ref": "0c8d96b908f88fc3207e7f9a00bc43f724b32b6f",
+      "path": "src/zork_00",
+      "exclude": ["\\.clas\\.testclasses\\.abap$", "^zcl_ork_00_game_loader_file\\."]
+    }
+  ]
+}
+```
+
+`node tools/osd-fetch.mjs` (or `osd fetch`, `npm run packs:fetch`) copies
+`/src/zork_00` of that repository at that commit into `packs/zork/upstream/`,
+minus the files `exclude` matches (regular expressions over the path inside
+the repository folder: a test class, a program that needs the GUI). The
+pack's own `src/` comes **after** it in `abap`, so the few files a
+repository needs changed to run here are the overlay and nothing else, and
+`git status` of the pack shows exactly what was changed against upstream.
+The fetched folder is not tracked (`packs/*/upstream/` is ignored); a marker
+beside the manifest says which commit it holds, a second run at the same
+commit does nothing, and `--force` fetches again. Pin `ref` to a commit: a
+generation is the hash of its inputs, and an input that moves under a branch
+name is a generation that changes with nobody changing anything. **A build
+refuses a pack whose declared source is not fetched**, naming the
+repository, rather than building a smaller system that looks complete.
+This is how the demo and Zork reach the public preview on GitHub Pages:
+`packs/o4d` and `packs/zork` in this repository are two manifests and an
+overlay, and the workflow fetches the rest.
 
 ---
 

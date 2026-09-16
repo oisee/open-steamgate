@@ -1,4 +1,4 @@
-// Photographs the preview build (build/) into build/screenshots/, so a
+// Photographs the preview build (build/preview/) into build/preview/screenshots/, so a
 // deployment carries pictures of itself: the Fiori list report, the service
 // document and $metadata as the browser renders them.
 import {chromium} from "@playwright/test";
@@ -9,7 +9,7 @@ import {join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const out = resolve(root, "build/screenshots");
+const out = resolve(root, "build/preview/screenshots");
 await mkdir(out, {recursive: true});
 
 const port = 3032;

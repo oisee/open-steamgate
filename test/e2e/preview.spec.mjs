@@ -48,7 +48,7 @@ async function controlled(page, timeout = 60000) {
 test("the worker answering is the worker that was just built", async () => {
   const {readFile} = await import("node:fs/promises");
   const {fileURLToPath} = await import("node:url");
-  const onDisk = JSON.parse(await readFile(fileURLToPath(new URL("../../build/build.json", import.meta.url)), "utf8"));
+  const onDisk = JSON.parse(await readFile(fileURLToPath(new URL("../../build/preview/build.json", import.meta.url)), "utf8"));
 
   const profile = await mkdtemp(join(tmpdir(), "stg-preview-stamp-"));
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
@@ -168,6 +168,43 @@ test("an ICF service is served by the worker too, page and all", async () => {
     // which a static file could not do
     expect(answer.body).toContain('"service":"ZSTG_ICF_DEMO"');
     expect(answer.body).toContain('"path":"/a/b"');
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
+// The demo is a pack, fetched from its own repository at a pinned commit
+// (packs/o4d/osd-pack.json, tools/osd-fetch.mjs), and it reaches the
+// deployment the way Zork does: its ICF node is in the services table, its
+// page is written by ZCL_O4D_HTTP_HANDLER in the worker, its pictures come
+// out of SMW0 through media/. This checks the page and one picture, which
+// is the whole chain short of the socket that the Zork tests cover.
+test("the demo pack is served: its page by the handler, a picture out of SMW0", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-o4d-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await controlled(page);
+    const answer = await page.evaluate(async () => {
+      const res = await fetch("/sap/bc/zo4d_demo/");
+      return {status: res.status, type: res.headers.get("content-type"), body: await res.text()};
+    });
+    expect(answer.status).toBe(200);
+    expect(answer.type).toContain("text/html");
+    expect(answer.body).toContain("VIVID VIBES");
+    // a picture the page asks the handler for, answered from the media folder
+    const picture = await page.evaluate(async () => {
+      const res = await fetch("/sap/bc/zo4d_demo/?img=ZO4D_00_SALES.PNG");
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return {status: res.status, type: res.headers.get("content-type"), head: Array.from(bytes.slice(0, 4))};
+    });
+    expect(picture.status).toBe(200);
+    expect(picture.head).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    // and the launchpad knows the packs
+    const packs = await page.evaluate(async () => (await fetch("/app/packs.json")).json());
+    expect(Array.isArray(packs.tiles)).toBe(true);
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
@@ -540,7 +577,7 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
 
     const {readFile} = await import("node:fs/promises");
     const {fileURLToPath} = await import("node:url");
-    const shipped = await readFile(fileURLToPath(new URL("../../build/app/flp.html", import.meta.url)), "utf8");
+    const shipped = await readFile(fileURLToPath(new URL("../../build/preview/app/flp.html", import.meta.url)), "utf8");
     expect(shipped).toContain('url: "../sap/bc/zork"');
     expect(shipped).toContain('url: "../sap/bc/zo4d_demo"');
   } finally {

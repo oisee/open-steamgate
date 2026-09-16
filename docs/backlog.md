@@ -553,6 +553,23 @@ E.3  What a pack may carry                                               [S]
      └─ ABAP and DDIC (today), SEGW projects and CDS (today, through the
         generators), a Fiori app under webapp/ (2.10: a UI5/BSP object type
         so a client can deploy one), SICF and APC declarations (B.8)
+     └─ a folder fetched from a repository at a commit, with an overlay
+        (sources in the manifest, tools/osd-fetch.mjs) — DONE 2026-09-17;
+        packs/o4d and packs/zork are the worked examples and the public
+        preview builds from them
+
+E.6  A pack cut out of a system                                        [S+A]
+     └─ Alice, 2026-09-17: for vsp, or anything that speaks ADT and the
+        abapGit API — prepare a self-contained pack from a system, with
+        stubs and shims on the perimeter: the objects asked for, their
+        closure inside the package, and a stub for every class, function
+        and table the closure reaches outside it (npm run probe knows the
+        closure; the stub is the ASSERT 1 = 'todo' shape open-abap-core
+        uses, so a missing piece fails loudly and by name). The output is
+        a directory with an osd-pack.json in it, so E.2 needs nothing new.
+     └─ the perimeter is the hard part, not the export: a DPC_EXT's
+        closure is the finding of Sprint 0, and the stubs are what make a
+        pack run before the closure is transpiled
 ```
 
 ---
