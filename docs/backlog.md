@@ -200,8 +200,15 @@ C.4  A dispatcher listener that says one thing                           [R]
      │  measure it from the oracle's screen frames, or lift the screen
      │  writer from the private DIAG sibling (layers-we-own.md: ready there)
      ├─ recorder diag-catch already stands on 3202/3203; the reply is the work
-     └─ "Sorry — the guru meditates" as the message, the right ambition for
-        a first frame
+     ├─ content, Alice 2026-09-16: the Amiga "Guru Meditation" — the red-on-
+     │  black alert box, blinking border, a hex "error code". DIAG has no
+     │  colour or border control like that, so the faithful version is the
+     │  TEXT of it on a plain dynpro: a red status/error line, the title
+     │  "Guru Meditation", a line like "Software Failure. Press left mouse
+     │  button to continue." and a fake code "0000000C.48454C50". A closer
+     │  visual is possible later via a generated image the GUI shows, but the
+     │  first frame is text on a screen
+     └─ "Guru Meditation" as the screen, the right ambition for a first frame
 
 C.5  Then, and only then, decide whether it goes further                 [A]
      └─ a real DIAG server is a large thing; this track is allowed to stop
