@@ -1045,7 +1045,21 @@ export function packageOf(store, name) {
     // no package in between. The roots stay roots of the system library as
     // well; a package reachable from two places is a convenience, a package
     // reachable from none was the complaint.
-    const roots = store.rootPackages().map((node) => node.name);
+    // Which of them, though. Every root under $TMP means the default
+    // favourite opens the whole system, substrate included — seven packages
+    // of somebody else's runtime above the one package a person is working
+    // in. A real system puts its delivered code in the System Library and
+    // keeps $TMP for local objects, so the library roots stay roots and only
+    // the rest are shown here. They lose nothing: a root is in the System
+    // Library either way, which is what made putting them in both places a
+    // convenience rather than a necessity.
+    //
+    // OSD_LOCAL_PACKAGES overrides it with a comma list, for a tree where
+    // the line falls somewhere else — "$ZOSD_TEST" to show exactly one.
+    const asked = (process.env.OSD_LOCAL_PACKAGES ?? "").split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
+    const roots = store.rootPackages()
+      .filter((node) => (asked.length > 0 ? asked.includes(node.name) : node.library !== true))
+      .map((node) => node.name);
     return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: roots, library: false, simulated: true};
   }
 }
