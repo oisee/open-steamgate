@@ -283,3 +283,86 @@ that is E.2's content pack, and the boundary is recorded rather than
 tested around. The plugin, the name restore and the mode dispatch are
 about 60 lines in `bin/osd.mjs` and `tools/osd-host.mjs`; nothing in the
 tools knows it is in a binary except through `osd-host`.
+
+
+# Part four: is Bun the right container? The control groups. Measured 2026-09-16
+
+Part three settled that a Bun binary is the workbench. Alice asked the
+question that deserved an answer rather than an opinion: **was Bun needed at
+all, or would something closer to Node have cost less?** So the same entry
+(`bin/osd.mjs`) was packaged three more ways and put through the same tests.
+`tools/osd-host.mjs` already knew how a tool starts a tool, so a host is now
+just a command, and `scripts/check-hosts.mjs` asks all of them the same
+questions.
+
+## The four hosts, side by side
+
+| host | Zork | OData | `doctor` | generation | start | glue beyond the shared host module |
+| --- | --- | --- | --- | --- | --- | --- |
+| `node bin/osd.mjs` (the source) | 33/33 | ok | 0 | `71670ec4…` | 2.4 s | none |
+| `node build/osd-node/osd.mjs` (a bundle) | 33/33 | ok | 0 | `71670ec4…` | 2.3 s | none |
+| `build/osd` (Bun binary, 89 MB) | 33/33 | ok | 0 | `71670ec4…` | 2.9 s | a resolver plugin, ~15 lines |
+| `build/osd-sea` (Node 26.9 SEA, 158 MB) | 33/33 | ok | 0 | `71670ec4…` | 2.1 s | none |
+
+All four name the **same generation** for the same inputs, and all four play
+Zork: one socket to the push channel, thirty-six commands, thirty-three
+expectations (`tools/zork-speedrun.mjs`). That test is the useful one,
+because it exercises the APC upgrade through the façade to the child, a
+stateful ABAP handler holding a session, the Z-machine interpreter
+transpiled from ABAP, and a story file loaded out of SMW0 — all at once, in
+67 s.
+
+Reads under load, measured separately (`scripts/bench-hosts.mjs`, 100 OData
+reads): the Node bundle is quickest at 3.9 ms median, the Bun binary 5.0 ms,
+and memory favours the Node hosts (389 MB parent against 462 MB).
+
+## Node SEA: refused, then not
+
+The single executable was the interesting one, and it moved twice in one
+evening.
+
+On **Node 26.3** a SEA cannot load a generation at all. Its injected main
+reaches a builtin-only embedder loader, so `import()` of any file outside the
+executable fails with `ERR_UNKNOWN_BUILTIN_MODULE`, the stack naming
+`loadBuiltinModuleForEmbedder`. Measured in every entry shape: CommonJS main,
+ESM main, with and without `useVfs`. A worker thread escapes it (the normal
+loader runs there), and so does one `vm.Script` compiled with
+`vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER`, which hands the import to the
+default ESM loader — that was measured working, with top-level await and a
+`%23` name, and it is the bridge to use if an older Node must be supported.
+
+On **Node 26.9**, released the same day, none of that is needed.
+`mainFormat: "module"` with `useVfs: true` runs the main through the ordinary
+loader: `import.meta.filename` is a VFS path rather than `process.execPath`,
+and a plain `import()` of a module created after the build works, with
+top-level await, a relative dependency and a percent-encoded name.
+`scripts/sea-speedrun.sh` is that measurement in six printed phases, so the
+answer takes one command on the next machine.
+
+So the SEA carries **no glue at all**: the bundle is its main script, and the
+things the Bun binary needed — a plugin to hand the generated code a runtime,
+another to decode `%23`, the class names put back — are all unnecessary,
+because Node resolves `node_modules` beside an external module and does not
+rename a class it bundles. What remains shared by every host is
+`tools/osd-host.mjs` (how this program starts itself) and the sorted
+directory reads, and neither is a packaging cost: the sorts fixed a real
+non-determinism of ours.
+
+## What this changes
+
+Nothing about the work was wasted, and the answer to "was Bun a mistake" is
+no: of the six walls in part three, one was Bun's (the `%23` resolver bug),
+one was the bundler's (renamed classes), three were single-executable
+properties that Node SEA shares, and one — the directory order — was our own
+defect that Bun exposed. The measured cost of Bun over Node is now precisely
+**one resolver plugin**.
+
+But the shortlist has changed. `build/osd-sea` is a single file with Node
+semantics and no adaptation, and the plain Node bundle is 7.9 MB, the
+quickest, and the simplest thing to reason about. Since **gate 4 shows that
+one file still travels with a directory of content** (E.2: `src/`, `webapp/`,
+`data/` and the setup hook are OSD's content, not the workspace's), "one
+file" buys less than it appeared to. The recommendation is therefore to keep
+all four hosts under `scripts/check-hosts.mjs` and let the release decide
+late: the bundle for development, the SEA or the Bun binary for delivery,
+whichever a platform supports — the tests say they are the same system.

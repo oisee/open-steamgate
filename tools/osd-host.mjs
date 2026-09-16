@@ -17,22 +17,35 @@ import {basename} from "node:path";
 
 export const compiled = typeof Bun !== "undefined" && import.meta.url.startsWith("file:///$bunfs/");
 
+// How this very program is started again, as [command, ...args]: set by
+// bin/osd.mjs for whichever host it finds itself on (a Bun binary, a Node
+// single executable, a bundle under node, the source under node), so a
+// tool that starts a tool never has to know. Unset means the plain
+// checkout, where a tool is a file and node runs it.
+function self() {
+  const me = process.env.OSD_SELF;
+  return me === undefined || me === "" ? undefined : JSON.parse(me);
+}
+export function hosted() {
+  return self() !== undefined;
+}
+
 // [command, ...args] that runs a tool script with arguments
 export function toolCommand(script, args = []) {
-  if (compiled) {
-    return [process.execPath, "gen", basename(script), ...args];
-  }
-  return [process.execPath, script, ...args];
+  const me = self();
+  return me !== undefined ? [...me, "gen", basename(script), ...args] : [process.execPath, script, ...args];
 }
 
 // the serving runtime (tools/osd-serve.mjs) as a child of the supervisor
 export function serveCommand(child) {
-  return compiled ? [process.execPath, "serve"] : [process.execPath, child];
+  const me = self();
+  return me !== undefined ? [...me, "serve"] : [process.execPath, child];
 }
 
 // a detached ABAP Unit run (tools/osd-unit.mjs main)
 export function unitCommand(script, args) {
-  return compiled ? [process.execPath, "unit", ...args] : [process.execPath, script, ...args];
+  const me = self();
+  return me !== undefined ? [...me, "unit", ...args] : [process.execPath, script, ...args];
 }
 
 let modules;

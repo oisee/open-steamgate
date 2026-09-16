@@ -11,8 +11,11 @@ import {join} from "node:path";
 // a path that does not exist inside a binary. `npm run binary` builds it;
 // without build/osd the runtime checks are skipped, the static one is not.
 const root = process.cwd();
-const binary = join(root, "build", "osd");
-const built = existsSync(binary);
+// which host: build/osd (the Bun binary) unless OSD_BINARY names another as
+// a JSON array, e.g. '["node","build/osd-node/osd.mjs"]' or '["build/osd-sea"]'
+const self = process.env.OSD_BINARY ? JSON.parse(process.env.OSD_BINARY) : [join(root, "build", "osd")];
+const [binary, ...prefix] = self;
+const built = existsSync(binary) || binary === "node" || binary === process.execPath;
 
 describe("the binary: the same system, one file", function () {
   this.timeout(180000);
@@ -32,7 +35,7 @@ describe("the binary: the same system, one file", function () {
     if (!built) {
       this.skip();
     }
-    const out = execFileSync(binary, ["doctor"], {encoding: "utf8"});
+    const out = execFileSync(binary, [...prefix, "doctor"], {encoding: "utf8"});
     expect(out).to.contain("renamed by the bundle: 0");
   });
 
@@ -41,7 +44,7 @@ describe("the binary: the same system, one file", function () {
       this.skip();
     }
     const byNode = execFileSync(process.execPath, [join(root, "tools", "osd-build.mjs"), "hash"], {encoding: "utf8"}).trim().split(/\s+/).pop();
-    const byBinary = execFileSync(binary, ["build", "hash"], {encoding: "utf8"}).trim().split(/\s+/).pop();
+    const byBinary = execFileSync(binary, [...prefix, "build", "hash"], {encoding: "utf8"}).trim().split(/\s+/).pop();
     expect(byBinary).to.match(/^[0-9a-f]{16}$/);
     expect(byBinary).to.equal(byNode);
   });
@@ -52,7 +55,7 @@ describe("the binary: the same system, one file", function () {
     }
     const port = 3090 + Math.floor(Math.random() * 100);
     const database = join(root, ".local", "db", `binary-test-${process.pid}.sqlite`);
-    const child = spawn(binary, ["up"], {cwd: root, env: {...process.env, STG_PORT: String(port), STG_DB_PATH: database, STG_ADT_SID: "OSX"}, stdio: ["ignore", "pipe", "pipe"]});
+    const child = spawn(binary, [...prefix, "up"], {cwd: root, env: {...process.env, STG_PORT: String(port), STG_DB_PATH: database, STG_ADT_SID: "OSX"}, stdio: ["ignore", "pipe", "pipe"]});
     let log = "";
     child.stdout.on("data", (d) => { log += d; });
     child.stderr.on("data", (d) => { log += d; });
@@ -74,7 +77,12 @@ describe("the binary: the same system, one file", function () {
       expect(build.system.serving).to.equal(build.system.live);
     } finally {
       child.kill("SIGTERM");
-      await new Promise((r) => child.once("exit", r));
+      // a host that will not go is killed rather than waited for: a Node
+      // single executable built before 26.9 hung here for ten minutes
+      await Promise.race([
+        new Promise((r) => child.once("exit", r)),
+        new Promise((r) => setTimeout(r, 8000)).then(() => child.kill("SIGKILL")),
+      ]);
       for (const suffix of ["", "-wal", "-shm"]) {
         try { (await import("node:fs")).rmSync(database + suffix, {force: true}); } catch { /* gone */ }
       }

@@ -20,9 +20,23 @@ import * as core from "@abaplint/core";
 import {Transpiler} from "@abaplint/transpiler";
 import * as setup from "../test/setup.mjs";
 import {dirname, resolve} from "node:path";
-import {setHostModules} from "../tools/osd-host.mjs";
+import {createRequire} from "node:module";
+import {compiled, setHostModules} from "../tools/osd-host.mjs";
 
 const [, , mode = "up", ...rest] = process.argv;
+
+
+// how to start this program again, for every tool that starts a tool
+// (tools/osd-host.mjs): the executable alone when this IS the executable
+// (a Bun binary, a Node single executable), node plus this file otherwise
+const sea = (() => {
+  try {
+    return createRequire(import.meta.url)("node:sea").isSea();
+  } catch {
+    return false;
+  }
+})();
+process.env.OSD_SELF = JSON.stringify(compiled || sea ? [process.execPath] : [process.execPath, resolve(process.argv[1])]);
 
 // The bundle renames a top-level class whose name collides with another
 // (types.Date became Date2, types.String String2, measured with `osd
