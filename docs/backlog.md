@@ -12,7 +12,7 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 
 ---
 
-# Where it is going next — three tracks
+# Where it is going next — five tracks
 
 > Scheduled: [`plan-spikes-and-sprints.md`](plan-spikes-and-sprints.md) lays
 > the next six weeks out as sprints and spikes, with a gate at the end.
@@ -391,6 +391,40 @@ Smallest first win: D.1 + D.5 over the one module that already exists
 Recommendation: start at D.5. It proves the generic call and the marshalling
 over plain HTTP, where a failure is a curl and a diff, before any of it has to
 survive RFC framing.
+```
+
+---
+
+## Track E — content packs and layers: what the tree is made of
+
+*Objects come from more than one folder, and today the first one the disk
+walk reaches wins, silently. Make the layering explicit, and make a pack
+something you add without a rebuild.*
+
+Added 2026-09-16 (Alice), to give the split document's piece E a track of
+its own; the letters of the two lists agree from here on.
+
+```
+E.1  Ordered source roots, and a duplicate that does not keep quiet     [S]
+     ├─ backlog 1.5, the trap CLAUDE.md records: local/o4d and
+     │  local/vivid-vibes both carry ZCL_O4D_HTTP_HANDLER, and whichever the
+     │  walk reaches first is the one that runs
+     ├─ tools/osd-inputs.mjs already reports clashes and shadows; the store
+     │  and the builder do not act on them
+     └─ an ordered list of roots (later wins, like a layer), a report of
+        every collision naming both files, and a refusal when the order
+        does not say which — never a guess
+
+E.2  A pack is a directory, not a rebuild                                [S]
+     ├─ the split document's promise: content packs are directories beside
+     │  the binary, read at start, added without rebuilding it
+     └─ needs E.1, and the generation hash already covers a new root —
+        adding a pack is a new generation, which is right
+
+E.3  What a pack may carry                                               [S]
+     └─ ABAP and DDIC (today), SEGW projects and CDS (today, through the
+        generators), a Fiori app under webapp/ (2.10: a UI5/BSP object type
+        so a client can deploy one), SICF and APC declarations (B.8)
 ```
 
 ---
