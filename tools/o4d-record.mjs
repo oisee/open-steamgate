@@ -62,17 +62,39 @@ export async function record(base, options = {}) {
   return {base, demo, ticks, frames, meta};
 }
 
-/** the two streams, and the first tick at which they part */
+/** every place two values differ, named by its path through the frame */
+export function differences(a, b, path = "", out = []) {
+  if (JSON.stringify(a) === JSON.stringify(b)) {
+    return out;
+  }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
+    out.push({path: path || "(frame)", left: a, right: b});
+    return out;
+  }
+  if (Array.isArray(a) !== Array.isArray(b) || (Array.isArray(a) && a.length !== b.length)) {
+    out.push({path: `${path}.length`, left: Array.isArray(a) ? a.length : typeof a, right: Array.isArray(b) ? b.length : typeof b});
+    return out;
+  }
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    differences(a[key], b[key], path === "" ? key : `${path}.${key}`, out);
+  }
+  return out;
+}
+
+/** the two streams, the first tick at which they part, and what parted.
+ *
+ * A frame is a tree — scene, then rectangles, texts, triangles — so the
+ * useful answer is not "frame 37 differs" but "frame 37, r.2.x is 118.5
+ * here and 118.0 there", which names the ABAP that computed it. */
 export function compare(a, b) {
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) {
-    const left = JSON.stringify(a[i]);
-    const right = JSON.stringify(b[i]);
-    if (left !== right) {
-      return {same: false, at: i, left, right};
+    const found = differences(a[i], b[i]);
+    if (found.length > 0) {
+      return {same: false, at: i, differences: found, left: JSON.stringify(a[i]), right: JSON.stringify(b[i])};
     }
   }
-  return a.length === b.length ? {same: true, frames: n} : {same: false, at: n, left: a[n] ?? "(end)", right: b[n] ?? "(end)"};
+  return a.length === b.length ? {same: true, frames: n} : {same: false, at: n, differences: [{path: "(length)", left: a.length, right: b.length}], left: JSON.stringify(a[n] ?? null), right: JSON.stringify(b[n] ?? null)};
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
@@ -91,7 +113,14 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
     const {readFileSync} = await import("node:fs");
     const theirs = readFileSync(against, "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const verdict = compare(result.frames, theirs);
-    console.log(verdict.same ? `identical to ${against}, ${verdict.frames} frames` : `differs from ${against} at frame ${verdict.at}\n  here:  ${verdict.left}\n  there: ${verdict.right}`);
+    if (verdict.same) {
+      console.log(`identical to ${against}, ${verdict.frames} frames`);
+    } else {
+      console.log(`differs from ${against} at frame ${verdict.at}, ${verdict.differences.length} value${verdict.differences.length === 1 ? "" : "s"}:`);
+      for (const d of verdict.differences.slice(0, 12)) {
+        console.log(`  ${d.path}: ${JSON.stringify(d.left)} here, ${JSON.stringify(d.right)} there`);
+      }
+    }
     process.exit(verdict.same ? 0 : 1);
   }
 }

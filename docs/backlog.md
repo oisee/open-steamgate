@@ -490,6 +490,13 @@ E.2  A pack is a directory, not a rebuild                                [S]  DO
         hash is taken before the generators run and gen/ is an input. The
         dev loop does that second build by itself
 
+E.4  The Zork console does not fit its box                               [S]
+     ├─ Alice, 2026-09-16, from the launchpad tile: a long line runs past
+     │  the right edge of the terminal frame instead of wrapping inside it,
+     │  and the block cursor sits on its own line
+     └─ the page is written by ZCL_ZORK_HTTP_HANDLER (a pack now); the
+        wrapping is the page's, not the Z-machine's
+
 E.3  What a pack may carry                                               [S]
      └─ ABAP and DDIC (today), SEGW projects and CDS (today, through the
         generators), a Fiori app under webapp/ (2.10: a UI5/BSP object type
