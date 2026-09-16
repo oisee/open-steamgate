@@ -103,6 +103,15 @@ Ordered by what breaks without them, most first.
   is 0, `Math.round`; a system says −1) is #1861. Both have a failing test
   on a branch (`fix/mod-float-result`, `fix/integer-round-half-away`) and no
   fix yet; both are one-line fixes to send as PRs from inside the repository.
+- **Alice's own repositories, through the packs** (`packs/*/README.md`
+  says what each overlay changes): `oisee/vivid-vibes`, one line in
+  `zcl_o4d_http_handler` — the megademo page asks `?image=<name>` and the
+  handler serves `?img=<NAME>.PNG`, so no picture loads at the pinned
+  commit; `oisee/zork-abap`, the SMW0 loader finding the story by object
+  id, and three classes with declarations written out for the transpiler
+  (each of those is also a transpiler reproducer waiting to be reduced).
+  A PR to each once the overlay is reviewed; until then the overlay is
+  the diff.
 - **Filed as issues rather than fixed (Alice, 2026-09-17): "можно пока не
   фиксить … а пока сделать тест и завести как issue."** The tests are the
   measured contract; a fix that passes them is the PR.
