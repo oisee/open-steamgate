@@ -21,8 +21,9 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 > suite) are the "no-regret set" table in
 > [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md);
 > [`generations.md`](generations.md) is the mechanism that absorbed N4 and
-> delivered N2 and B4; N3 (the transpiler as a library call) is still open
-> and is the Bun binary's precondition. Track B is done. The one-command
+> delivered N2 and B4; N3 (the transpiler as a library call) is done
+> 2026-09-16 (`tools/osd-transpile.mjs`, the Bun binary's precondition).
+> Track B is done, two gaps Astra named are B.9 and B.10. The one-command
 > launcher is `osd-up` in open-diag-go (`architecture-split.md`, the sidecar).
 
 Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
@@ -226,6 +227,26 @@ B.8  SICF and SM59 as applications, the way SEGW is one                  [S]
         editor, over the .local/rfc-destinations.json the RFC runtime reads
         (local / replay / live / record / fallback); track D's gateway makes
         the outbound half real
+
+B.9  A forced build mutates a generation under its name                 [S]
+     ├─ Astra, 2026-09-16: `--force` replaces the directory build/by-input/<hash>
+     │  holds, so a consumer pinned to that name sees changed content under
+     │  an unchanged name, which is what immutability was for
+     ├─ since 2026-09-16 the swap is two renames (no moment without a live
+     │  generation), and the rule that decides the output is part of the
+     │  hash, so a forced build differs from the cached one only when the
+     │  transpiler or the builder changed under the same inputs
+     └─ still to do: a forced build should check reproducibility (build,
+        compare, report) or publish under a name of its own, never both
+        keep the name and change the bytes
+
+B.10 The base image is named by the schema alone                         [S]
+     ├─ Astra, 2026-09-16: .local/db/base/<schema-hash>.sqlite; a change to
+     │  the seed rows (data/*.tabu.json) or to the seeding rules with the
+     │  same DDIC keeps the name, so a new instance copies old rows
+     └─ the identity is schema + seed data + the loader that applies them;
+        a persistent user database is never reseeded by this, only the
+        image a new database is copied from
 
 B.7  Database seam                                                       [S]
      └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
@@ -432,6 +453,15 @@ E.1  Ordered source roots, and a duplicate that does not keep quiet     [S]  DON
 E.2  A pack is a directory, not a rebuild                                [S]
      ├─ the split document's promise: content packs are directories beside
      │  the binary, read at start, added without rebuilding it
+     ├─ Alice, 2026-09-16: a layer may also be a repository, named by URL
+     │  and fetched when the ADT/runtime starts, the way abap_transpile.json
+     │  already fetches a lib (`url` + `folder`), through osd-git without a
+     │  git binary, cached under .local/layers/ and listed in order like a
+     │  folder. The store already imports from git (Import.fromGit); what is
+     │  missing is the config entry and the fetch at start
+     ├─ the demo delivery's extra packages (abapGit, cpm, vivid-vibes) were
+     │  moved out of local/ on 2026-09-16 (.local/trash/2026-09-16/) and come
+     │  back later as $Z* packs, referenced rather than copied
      └─ needs E.1, and the generation hash already covers a new root —
         adding a pack is a new generation, which is right
 

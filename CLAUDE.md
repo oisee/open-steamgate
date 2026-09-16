@@ -420,7 +420,8 @@ for source reads instead of GitHub fetches.
 
 ## Substrate (when code starts)
 
-What it actually is: Node 22/24, `@abaplint/transpiler-cli` +
+What it actually is: Node 22/24, `@abaplint/transpiler` called as a library
+(`tools/osd-transpile.mjs`, N3; the CLI stays installed for hand runs) +
 `@abaplint/database-sqlite` (+ `@duckdb/node-api`, `sql.js` for the browser),
 `express` with `cl_express_icf_shim`, `mocha`/`chai` and `@playwright/test`.
 No `@sap-ux/*`, no `@ui5/cli`: SAPUI5 comes from SAP's CDN and `webapp/` is

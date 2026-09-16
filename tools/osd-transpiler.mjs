@@ -10,6 +10,7 @@
 // rather than in somebody's memory. A green run here and a red run in CI is
 // then one line apart from being explained.
 import {execFileSync} from "node:child_process";
+import {modulesOf} from "./osd-transpile.mjs";
 import {existsSync, lstatSync, readFileSync, realpathSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {createRequire} from "node:module";
@@ -21,14 +22,16 @@ const require = createRequire(import.meta.url);
 // one arrives on a rebuild and a fix in the other does not, and from the
 // outside they look the same, so both are reported rather than the one we
 // happen to have linked.
-export function packageInUse(root, name) {
-  const at = join(root, "node_modules", "@abaplint", name);
+export function packageInUse(root, name, at = join(root, "node_modules", "@abaplint", name)) {
   if (existsSync(at) === false) {
     return {kind: "missing", where: at};
   }
 
-  const linked = lstatSync(at).isSymbolicLink();
   const real = realpathSync(at);
+  // a link, or a package that lives outside this tree's node_modules
+  // altogether (the transpiler library reached through the CLI's own
+  // location, tools/osd-transpile.mjs): either way a local build
+  const linked = lstatSync(at).isSymbolicLink() || real.startsWith(join(realpathSync(root), "node_modules")) === false;
   const version = JSON.parse(readFileSync(join(real, "package.json"), "utf8")).version;
 
   if (linked === false) {
@@ -54,8 +57,19 @@ export function packageInUse(root, name) {
   return {kind: "linked", version, where: real, branch, commit, dirty};
 }
 
+// the transpiler is the library, since the build calls it in-process (N3);
+// where the library is not installed in this tree it is found the way the
+// CLI finds it, and described from there
 export function transpilerInUse(root = process.cwd()) {
-  return packageInUse(root, "transpiler-cli");
+  const installed = join(root, "node_modules", "@abaplint", "transpiler");
+  if (existsSync(installed)) {
+    return packageInUse(root, "transpiler");
+  }
+  try {
+    return packageInUse(root, "transpiler", modulesOf(root).where);
+  } catch {
+    return {kind: "missing", where: installed};
+  }
 }
 
 export function runtimeInUse(root = process.cwd()) {
@@ -76,7 +90,7 @@ function describeOne(label, pkg, found) {
 }
 
 export function describeTranspiler(root = process.cwd()) {
-  return describeOne("transpiler", "transpiler-cli", transpilerInUse(root));
+  return describeOne("transpiler", "transpiler", transpilerInUse(root));
 }
 
 export function describeRuntime(root = process.cwd()) {

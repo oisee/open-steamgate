@@ -32,6 +32,7 @@ import {basename, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
+import {transpile} from "./osd-transpile.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -177,10 +178,6 @@ function run(cmd, args, cwd) {
   return output;
 }
 
-function transpilerBin(root) {
-  const local = join(root, "node_modules", ".bin", "abap_transpile");
-  return existsSync(local) ? [local, []] : ["npx", ["abap_transpile"]];
-}
 
 // The transpiled modules reach outside output/ for one thing: the setup
 // hook the config names as "../test/setup.mjs" (and whatever else a config
@@ -363,10 +360,12 @@ export async function build(options = {}) {
       log(`${script} ${args.join(" ")}`.trim());
       output += run(process.execPath, [join(TOOLS, script), ...args], root);
     }
-    const [bin, pre] = transpilerBin(root);
-    log("abap_transpile");
-    output += run(bin, [...pre, relative(root, join(tmp, "abap_transpile.json"))], root);
-    const objects = Number(/(\d+) objects written to disk/.exec(output)?.[1] ?? 0);
+    // the transpile itself is a library call in this process (N3,
+    // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
+    // no parsing a count out of its output
+    log("transpile");
+    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; }});
+    const objects = made.objects;
 
     const manifest = {
       hash,
@@ -384,9 +383,14 @@ export async function build(options = {}) {
     if (existsSync(target) && options.force === true) {
       // asked to build again over a generation that exists: the new one
       // replaces it, which is what "again" means. Found 2026-09-16 when a
-      // forced rebuild reported the new rule and left the old output
-      rmSync(target, {recursive: true, force: true});
+      // forced rebuild reported the new rule and left the old output. Two
+      // renames rather than a remove and a rename, so there is no moment
+      // at which the live link points at nothing (backlog B.9 has the rest:
+      // a name that keeps its bytes is what a generation is for)
+      const replaced = `${target}.replaced.${process.pid}`;
+      renameSync(target, replaced);
       renameSync(tmp, target);
+      rmSync(replaced, {recursive: true, force: true});
     } else if (existsSync(target)) {
       // a build of the same inputs finished while this one ran (a race the
       // lock did not cover); theirs is as good as ours
