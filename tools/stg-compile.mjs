@@ -56,8 +56,7 @@ import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
 import {generate} from "./segw-gen.mjs";
 import {loadFunctionGroups} from "./segw-gen-mapping.mjs";
-import {fileURLToPath} from "node:url";
-import {readSpec} from "./segw-tables.mjs";
+import SPEC from "../src/segw/segw-tables.json" with {type: "json"};
 
 // ------------------------------------------------------------- the model
 
@@ -610,7 +609,9 @@ const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").re
 // is a mistake here, not something to write
 let spec;
 function fieldsOf(tag) {
-  spec ??= readSpec(fileURLToPath(new URL("../src/segw/segw-tables.json", import.meta.url)));
+  // the spec travels with the code, not beside it: a static import bundles
+  // into a binary, where the module has no folder to read a file from
+  spec ??= SPEC;
   if (!spec[tag]) {
     throw new Error(`${tag}: not a table of the SEGW project tree`);
   }
@@ -917,7 +918,7 @@ export function compile(text, opts = {}) {
 function walk(dir, out = []) {
   let entries;
   try {
-    entries = readdirSync(dir);
+    entries = readdirSync(dir).sort();
   } catch {
     return out;
   }
@@ -976,7 +977,7 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
     // this one did not write (a renamed class, an object that moved to src/)
     // would otherwise be transpiled as a second copy
     if (existsSync(target)) {
-      for (const name of readdirSync(target)) {
+      for (const name of readdirSync(target).sort()) {
         if (!written.includes(name)) {
           rmSync(join(target, name));
         }

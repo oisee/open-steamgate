@@ -24,7 +24,7 @@ function tag(xml, name) {
 function walk(dir, out = []) {
   let entries = [];
   try {
-    entries = readdirSync(dir);
+    entries = readdirSync(dir).sort();
   } catch {
     return out;
   }

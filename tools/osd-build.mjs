@@ -25,7 +25,6 @@
 // generation is 44 MB; keeping the last few is cheap. docs/generations.md
 // is the design this implements.
 import {createHash} from "node:crypto";
-import {createRequire} from "node:module";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, join, relative, resolve} from "node:path";
@@ -65,15 +64,24 @@ export function layout(root) {
 // the config as the transpiler reads it: its own loader, because the file
 // carries comments the JSON parser refuses, and it is the transpiler's file
 export function loadConfig(root) {
-  const require = createRequire(join(root, "package.json"));
-  const {TranspilerConfig} = require("@abaplint/transpiler-cli/build/config.js");
-  const before = process.cwd();
-  try {
-    process.chdir(root);
-    return TranspilerConfig.find(undefined);
-  } finally {
-    process.chdir(before);
+  // the CLI's loader does exactly this (transpiler-cli/build/config.js:
+  // parse the file when there is one, defaults when there is not), and it
+  // was the last thing in the build path that reached the CLI package —
+  // from inside a binary through the tree's node_modules, which is where
+  // the SP4 binary first fell over
+  const file = layout(root).config;
+  if (existsSync(file)) {
+    return JSON.parse(readFileSync(file, "utf8"));
   }
+  return {
+    input_folder: "src",
+    input_filter: [],
+    output_folder: "output",
+    libs: [{url: "https://github.com/open-abap/open-abap-core"}],
+    write_unit_tests: true,
+    write_source_map: true,
+    options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+  };
 }
 
 function walk(dir, out = []) {

@@ -185,3 +185,101 @@ property.
 Worth doing only for "send someone a file they double-click". Where an
 executable may be run, the binary is better: it is the server, so the https
 that a worker demands off localhost stops being a problem.
+
+# Part three: the binary as the workbench. Measured 2026-09-16
+
+Parts one and two settled that Bun runs the thing and that `Bun.build`
+compiles it. SP4 asked the question the plan wrote down: does a compiled
+binary load a namespaced module generated **after** it was built, on a
+machine without Node, and run the whole workbench around it? Measured on
+Linux x64, Bun 1.4.2, with the checkout as the workspace (gate 4, a clean
+directory, waits for E.2: `src/`, `webapp/`, `data/` and `test/setup.mjs`
+are OSD's content and a binary has to bring them as a pack).
+
+## The answer
+
+**Yes.** `build/osd up` (`bin/osd.mjs` through `scripts/build-binary.mjs`,
+`npm run binary`) is the workbench: the ADT façade, the supervisor, the
+serving child (`osd serve`), the builder with the transpiler in-process
+(N3) and its generators (`osd gen <tool>`), detached ABAP Unit runs
+(`osd unit`). Measured end to end:
+
+| | |
+| --- | --- |
+| binary | 89.4 MB, built in 250–450 ms |
+| cold start, ADT answering / child serving | 2.9 s / 3.0 s |
+| ADT discovery, class source, `$metadata`, entity sets, the demo app, `/app/` | all answer, `X-OSD-Generation` on every OData answer |
+| edit a class → dev loop → built → recycled | 8.7–9.4 s build, 0.6–1.1 s recycle, three names agree |
+| the behaviour changes | `DEFAULT 'Hello'` → `'Hullo'`: `GREETING_PASSES` fails with `got 'Hullo Ada'` on the new generation, passes again after the revert, and the revert comes back under the **same** generation name (content-addressed, cached) |
+| a detached unit run (`osd unit … --detached`, the façade's F9 path) | 3.4 s, spawned as `<binary> unit … --plan-stdin` |
+| a runtime error | the dump names the ABAP statement with its frames (`rs_paging-top = mv_top.` ← `get_paging( )`): source maps work, JavaScriptCore keeps async frames |
+| memory | parent 500 MB RSS (the store's parse of 1,027 objects and the bundle), child 169 MB |
+
+## What had to be true, and was not for free
+
+Six walls, in the order they came, each measured before it was closed.
+
+1. **A compiled binary resolves nothing from a `node_modules` beside an
+   external module** — not even one right next to it — and `Bun.plugin`'s
+   `onResolve` is never invoked for a bare specifier (it is for relative and
+   absolute ones). Interpreted `bun x.mjs` looks as if it worked only because
+   Bun **auto-installs from `~/.bun/install/cache`**; measure with
+   `--no-install`. What works is a runtime plugin's
+   **`build.module("@abaplint/runtime", …)`** returning the binary's own
+   module with `loader: "object"`: the generated code and the host then
+   share one runtime object (`mod.runtimeRef === runtime.ABAP`). The only
+   other bare import generated code makes, `../test/setup.mjs` by path, is
+   intercepted by `onResolve` and answered from the bundle the same way.
+2. **`%23` in a relative specifier**, the part-one anomaly, is alive in the
+   binary's resolver for external files. Closed by the same plugin:
+   `onResolve({filter: /%(23|25)/})` decodes against the importer.
+3. **Every bundled module shares one `import.meta.url`**
+   (`file:///$bunfs/root/<binary>`), `process.execPath` is the binary and
+   `process.argv[1]` its bunfs path. So the five `import.meta.url.endsWith(
+   argv[1])` guards would all fire on import, and every `spawn(process.
+   execPath, <script>)` would start another workbench. `tools/osd-host.mjs`
+   answers "how do I start that tool" (`<binary> gen|serve|unit …` when
+   compiled), and `bin/osd.mjs` sets `argv[1]` to a name no module ends
+   with before importing anything, then dispatches the modes.
+4. **The bundle renamed two runtime classes**: `types.Date` became `Date2`
+   and `types.String` `String2`, colliding with the globals when the graph
+   was hoisted into one chunk — and the runtime tells types apart by
+   `constructor.name` in some four hundred places, so RTTI took every
+   string for "todo" and every request died in `CONVT_NO_NUMBER` at
+   `ASSERT 1 = 'todo_cl_abap_typedescr'`. webpack keeps class names on
+   request (the preview's `keep_classnames`, noted in CLAUDE.md for exactly
+   this reason); Bun has no such switch. A function's name is a
+   configurable property, so `bin/osd.mjs` puts every `runtime.types` name
+   back before anything runs, and **`osd doctor`** lists what a bundle
+   renamed (0 after, 2 before).
+5. **`@duckdb/node-api` as `external`** still fails the binary at start: a
+   compiled bundle evaluates every import, dynamic ones included. It is
+   replaced by a stub module at bundle time; DuckDB is not part of the
+   binary.
+6. **Paths derived from a module's own location**: the CLI's config loader
+   (reached from inside the binary through the tree's node_modules and
+   dragging its requires along — `loadConfig` reads the JSON itself now,
+   the last use of the CLI in the build path), `stg-compile`'s table spec
+   (a static JSON import now, so it travels with the code), `test/start.mjs`'s
+   `webapp` (tree-relative now).
+
+Two things that needed nothing: `node:sqlite` (`DatabaseSync`, the B4
+client) behaves as under Node — types, `changes`, WAL, `VACUUM INTO` — and
+sql.js loads its wasm from inside the bundle (the in-memory unit run).
+Node and the binary name the same generation for the same inputs — after
+one more fix: they did not at first, because the CDS registry listed its
+entities in `readdirSync` order, which is the host's order and differs
+between Bun and Node, and `gen/` is an input to the hash. Every directory
+read in the generators is sorted now (seven of them, six tools), checked
+by forcing a build under each host and diffing `gen/`.
+
+## What this settles, and what it does not
+
+Decision 0.1, Bun packaging: **yes** for Linux x64 with the checkout as
+workspace. Not measured: other platforms (each needs a native run, a
+cross-compile is not a runtime test), APC over the binary, TLS, the
+preview build. Not reachable yet: gate 4, a directory with no checkout —
+that is E.2's content pack, and the boundary is recorded rather than
+tested around. The plugin, the name restore and the mode dispatch are
+about 60 lines in `bin/osd.mjs` and `tools/osd-host.mjs`; nothing in the
+tools knows it is in a binary except through `osd-host`.

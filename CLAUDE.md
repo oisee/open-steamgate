@@ -363,6 +363,27 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   binary, where a module target makes both constructs legal, and where the
   `%23` defect turned out **not** to block packaging: `Bun.build({compile,
   plugins})` with a five-line `onResolve` builds a binary that runs.
+- **The binary is `npm run binary` → `build/osd`** (`bin/osd.mjs`,
+  `scripts/build-binary.mjs`, `docs/bun-spike.md` part three, 2026-09-16):
+  `build/osd up|serve|build|gen <tool>|unit|doctor`. Four facts a change
+  must respect. A compiled Bun binary resolves nothing from a
+  `node_modules` beside an external module and its `onResolve` never sees
+  a bare specifier, so code generated after the build gets
+  `@abaplint/runtime` from a runtime plugin's `build.module` (the binary's
+  own copy, one runtime object for host and generated code) and
+  `../test/setup.mjs` from `onResolve` by path. Every bundled module shares
+  one `import.meta.url` and `process.execPath` is the binary, so a tool
+  starts another tool only through `tools/osd-host.mjs`, never by
+  `spawn(process.execPath, <script>)` or a path off `import.meta.url`
+  (`osd-transpile`'s glob, `stg-compile`'s spec, `start.mjs`'s `webapp`
+  were all moved off it). The bundle renames a class whose name collides
+  (`types.Date` → `Date2`) and the runtime compares `constructor.name`,
+  so `bin/osd.mjs` restores the names and `osd doctor` lists what was
+  renamed. Interpreted `bun x.mjs` auto-installs from `~/.bun` when there
+  is no node_modules — measure with `--no-install`. And a generator's
+  output must not depend on `readdirSync` order (Bun's differs from
+  Node's): `gen/` is an input to the generation hash, and the two hosts
+  named different generations until every directory read was sorted.
 - A page that speaks APC gets `open` before `drain`. A stateful handler
   speaks from `on_start`, so draining what it pushed before signalling open
   delivers a message while the page's socket is still CONNECTING: `onmessage`

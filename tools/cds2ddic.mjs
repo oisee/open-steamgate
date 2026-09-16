@@ -23,7 +23,9 @@ const OUT = "gen/cds";
 const LIBS = [".local/lars/open-abap-core/src", ".local/fork/open-abap-odata/src"];
 
 function walk(dir, out = []) {
-  for (const e of readdirSync(dir, {withFileTypes: true})) {
+  // sorted: the registry this writes lists entities in this order, and a
+  // directory's order is the host's (Bun and Node differ), not the tree's
+  for (const e of readdirSync(dir, {withFileTypes: true}).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const p = join(dir, e.name);
     if (e.isDirectory()) { if (!["node_modules", "output", ".git"].includes(e.name)) walk(p, out); }
     else if (/\.(abap|xml|asddls)$/.test(e.name) && !e.name.endsWith(".clas.testclasses.abap")) out.push(p);

@@ -1627,7 +1627,7 @@ if (process.argv[1] && /segw-gen\.mjs$/.test(process.argv[1])) {
     console.error("usage: segw-gen.mjs <folder with <project>.iwpr.xml> [--check] [--out <dir>] [--lib <folder with *.fugr.xml>]...");
     process.exit(2);
   }
-  const iwpr = readdirSync(folder).find((f) => f.endsWith(".iwpr.xml"));
+  const iwpr = readdirSync(folder).sort().find((f) => f.endsWith(".iwpr.xml"));
   if (!iwpr) {
     console.error("no .iwpr.xml in " + folder);
     process.exit(2);

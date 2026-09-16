@@ -23,7 +23,11 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 > [`generations.md`](generations.md) is the mechanism that absorbed N4 and
 > delivered N2 and B4; N3 (the transpiler as a library call) is done
 > 2026-09-16 (`tools/osd-transpile.mjs`, the Bun binary's precondition).
-> Track B is done, two gaps Astra named are B.9 and B.10. The one-command
+> Track B is done, two gaps Astra named are B.9 and B.10. **SP4 is
+> measured** (2026-09-16, `bun-spike.md` part three): decision 0.1 is
+> **yes** for Linux x64 with the checkout as workspace — `npm run binary`
+> builds `build/osd`, and `build/osd up` is the whole workbench, edits
+> included; a clean directory (gate 4) waits for E.2's content pack. The one-command
 > launcher is `osd-up` in open-diag-go (`architecture-split.md`, the sidecar).
 
 Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
@@ -247,6 +251,17 @@ B.10 The base image is named by the schema alone                         [S]
      └─ the identity is schema + seed data + the loader that applies them;
         a persistent user database is never reseeded by this, only the
         image a new database is copied from
+
+B.11 The binary beyond the checkout                                      [S]
+     ├─ SP4 (bun-spike.md part three) runs the workbench from one binary
+     │  with the checkout as its workspace; a directory with only ABAP in
+     │  it needs src/, webapp/, data/ and test/setup.mjs brought along —
+     │  that is E.2, and the boundary is recorded rather than tested around
+     ├─ not measured: other platforms (each needs a native run), APC over
+     │  the binary, TLS, the preview build; the parent's 500 MB RSS is the
+     │  store's parse plus the bundle and wants a look
+     └─ `osd doctor` lists runtime classes the bundle renamed; a bundler
+        change that renames another one shows up there first
 
 B.7  Database seam                                                       [S]
      └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere

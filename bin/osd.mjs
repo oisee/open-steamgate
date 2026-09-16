@@ -19,9 +19,22 @@ import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
 import {Transpiler} from "@abaplint/transpiler";
 import * as setup from "../test/setup.mjs";
+import {dirname, resolve} from "node:path";
 import {setHostModules} from "../tools/osd-host.mjs";
 
 const [, , mode = "up", ...rest] = process.argv;
+
+// The bundle renames a top-level class whose name collides with another
+// (types.Date became Date2, types.String String2, measured with `osd
+// doctor`), and the runtime tells types apart by constructor.name in some
+// four hundred places, so RTTI took every string for "todo". webpack keeps
+// class names on request; Bun has no such switch, and a function's name is
+// a configurable property, so it is put back here, before anything runs.
+for (const [key, value] of Object.entries(runtime.types ?? {})) {
+  if (typeof value === "function" && value.name !== key) {
+    Object.defineProperty(value, "name", {value: key});
+  }
+}
 
 if (typeof Bun !== "undefined") {
   Bun.plugin({
@@ -29,6 +42,10 @@ if (typeof Bun !== "undefined") {
     setup(build) {
       build.module("@abaplint/runtime", () => ({exports: runtime, loader: "object"}));
       build.onResolve({filter: /\/test\/setup\.mjs$/}, () => ({path: "osd:setup", namespace: "osd-host"}));
+      // the transpiler writes a namespace as %23 in an import and as # in
+      // the file name (a URL against a path), and Bun's resolver takes the
+      // specifier literally: decoded here, against the importing module
+      build.onResolve({filter: /%(23|25)/}, (args) => ({path: resolve(dirname(args.importer), decodeURIComponent(args.path))}));
       build.onLoad({filter: /.*/, namespace: "osd-host"}, () => ({exports: setup, loader: "object"}));
     },
   });
@@ -37,6 +54,7 @@ setHostModules({Transpiler, core, plugin: undefined, where: "bundled", version: 
 
 const GENERATORS = {
   "osd-transpiler.mjs": () => import("../tools/osd-transpiler.mjs"),
+  "osd-inputs.mjs": () => import("../tools/osd-inputs.mjs"),
   "cds2ddic.mjs": () => import("../tools/cds2ddic.mjs"),
   "stg-compile.mjs": () => import("../tools/stg-compile.mjs"),
   "segw-registry.mjs": () => import("../tools/segw-registry.mjs"),
@@ -77,7 +95,24 @@ switch (mode) {
     process.exit(await main(rest));
     break;
   }
+  case "doctor": {
+    // what the bundle did to the runtime: a class the runtime looks up by
+    // its name must still carry that name after bundling
+    const renamed = [];
+    for (const [group, members] of Object.entries({types: runtime.types ?? {}, runtime: runtime})) {
+      for (const [key, value] of Object.entries(members)) {
+        if (typeof value === "function" && value.name !== key && /^[A-Z]/.test(key)) {
+          renamed.push(`${group}.${key} is named ${JSON.stringify(value.name)}`);
+        }
+      }
+    }
+    console.log(`runtime classes renamed by the bundle: ${renamed.length}`);
+    for (const line of renamed.slice(0, 20)) {
+      console.log("  " + line);
+    }
+    break;
+  }
   default:
-    console.error(`osd: unknown mode ${mode}; one of up, serve, build, gen, unit`);
+    console.error(`osd: unknown mode ${mode}; one of up, serve, build, gen, unit, doctor`);
     process.exit(2);
 }

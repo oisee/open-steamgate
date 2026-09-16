@@ -62,6 +62,9 @@ export function dumpOf(error, options = {}) {
     where: describe(error, options),
     frames,
     request: options.request,
+    // no ABAP frame at all: the JavaScript stack is still a place, and under
+    // a runtime that keeps no async frames (JavaScriptCore) it is the only one
+    ...(frames.length === 0 ? {stack: String(error?.stack ?? "").split("\n").slice(0, 10)} : {}),
   };
 }
 
