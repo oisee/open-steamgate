@@ -10,6 +10,43 @@ upgrading `@abaplint/*` and before every release.
 
 Format adapted from `larshp/hithub` (MIT).
 
+## A float compared with a character literal is compared with an integer
+
+**Found** 2026-09-16, comparing the ZO4D demo frame by frame with the same
+ABAP on A4H (`tools/o4d-record.mjs --compare`): 59 of 60 frames differed,
+every one of them by a quarter label the demo draws here and not there.
+The label is behind `IF lv_bar_prog > '0.5'`, a float against a
+character literal, and the bar's progress on the second frame is 0.06.
+
+Measured directly against the runtime, `@abaplint/runtime` 2.13.86:
+
+```
+f 0.06 > '0.5'   true    (SAP: false)
+f 0.06 < '0.5'   false   (SAP: true)
+f 0.6  > '0.5'   true
+f 1.5  > '1'     true
+f 0.06 > f 0.5   false   (right)
+```
+
+Every answer is what you get with `'0.5'` read as 0: in the generic tail
+of `compare/gt.ts` (and `lt`, `ge`, `le`, the same lines), a numeric left
+and a string right end in `r = parseInt(r, 10)`. ABAP converts a
+character operand to the type of the numeric operand it is compared
+with — here `f`, so `'0.5'` is 0.5 — and the runtime's own
+`operators/_parse.ts` already does exactly that (`parseFloat` when the
+string holds a point). The fix is that helper in place of `parseInt`,
+in the four comparisons, with a test for each direction.
+
+**Why it stayed hidden:** comparing with a character literal that has a
+fractional part is idiomatic in demo code (`> '0.5'`, `< '0.3'`) and rare
+in business code, where the literal is an integer and `parseInt` happens
+to be right.
+
+**Upstream:** `@abaplint/runtime`, `packages/runtime/src/compare/{gt,lt,ge,le}.ts`.
+Until it lands, a frame of this demo is not the frame a system draws, and
+the comparison tool says so at the first label.
+
+
 ## The published transpiler names a W3MI object by its escaped file name
 
 **Found** 2026-09-16, while building content packs (backlog E.2).

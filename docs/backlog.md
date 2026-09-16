@@ -533,6 +533,15 @@ E.2  A pack is a directory, not a rebuild                                [S]  DO
         hash is taken before the generators run and gen/ is an input. The
         dev loop does that second build by itself
 
+E.5  The launchpad sandbox asks for a config we do not serve             [S]
+     ├─ Alice, 2026-09-16, from the browser console on the second machine:
+     │  GET /appconfig/fioriSandboxConfig.json answers 404 on every open,
+     │  red in the console and harmless — the ushell sandbox looks for its
+     │  own file before it takes window["sap-ushell-config"]
+     └─ answer it with {} from test/start.mjs, or set the sandbox's config
+        URL to something we serve; either stops the noise without a change
+        to flp.html
+
 E.4  The Zork console does not fit its box                               [S]
      ├─ Alice, 2026-09-16, from the launchpad tile: a long line runs past
      │  the right edge of the terminal frame instead of wrapping inside it,

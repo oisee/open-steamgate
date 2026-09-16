@@ -18,7 +18,15 @@ const CHANNEL = "/sap/bc/apc/sap/zo4d_demo";
 export async function record(base, options = {}) {
   const ticks = options.ticks ?? 120;
   const demo = options.demo ?? "main";
-  const socket = new WebSocket(base.replace(/^http/, "ws") + CHANNEL);
+  // the oracle is a real system: ICF takes the logon on the URL, and the
+  // credentials come from the environment so that no command line and no
+  // recording carries them (OSD_SAP_USER, OSD_SAP_PASSWORD, OSD_SAP_CLIENT)
+  const logon = process.env.OSD_SAP_USER === undefined ? "" : "?" + new URLSearchParams({
+    "sap-client": process.env.OSD_SAP_CLIENT ?? "001",
+    "sap-user": process.env.OSD_SAP_USER,
+    "sap-password": process.env.OSD_SAP_PASSWORD ?? "",
+  }).toString();
+  const socket = new WebSocket(base.replace(/^http/, "ws").replace(/\/$/, "") + CHANNEL + logon);
   const frames = [];
   const meta = {};
   let resolve;
@@ -62,9 +70,20 @@ export async function record(base, options = {}) {
   return {base, demo, ticks, frames, meta};
 }
 
-/** every place two values differ, named by its path through the frame */
+/** every place two values differ, named by its path through the frame.
+ *
+ * A number is the same number within a relative 1e-9: the two runtimes
+ * print a float with a different number of digits (17 on a real system,
+ * 15 here, ANORMALIES), and that is not a difference in what was drawn. */
 export function differences(a, b, path = "", out = []) {
   if (JSON.stringify(a) === JSON.stringify(b)) {
+    return out;
+  }
+  if (typeof a === "number" && typeof b === "number") {
+    if (Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b))) {
+      return out;
+    }
+    out.push({path: path || "(frame)", left: a, right: b});
     return out;
   }
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
@@ -97,8 +116,46 @@ export function compare(a, b) {
   return a.length === b.length ? {same: true, frames: n} : {same: false, at: n, differences: [{path: "(length)", left: a.length, right: b.length}], left: JSON.stringify(a[n] ?? null), right: JSON.stringify(b[n] ?? null)};
 }
 
+/** two recordings side by side: every frame, every path, how often */
+export function summarize(a, b) {
+  const n = Math.min(a.length, b.length);
+  const byPath = new Map();
+  let framesDiffering = 0;
+  let first;
+  for (let i = 0; i < n; i++) {
+    const found = differences(a[i], b[i]);
+    if (found.length === 0) {
+      continue;
+    }
+    framesDiffering++;
+    first ??= {at: i, differences: found};
+    for (const d of found) {
+      // an index inside a list is the same kind of difference at any index
+      const key = d.path.replace(/\.\d+(?=\.|$)/g, ".*");
+      byPath.set(key, (byPath.get(key) ?? 0) + 1);
+    }
+  }
+  return {frames: n, framesDiffering, byPath: [...byPath].sort((x, y) => y[1] - x[1]), first, lengths: [a.length, b.length]};
+}
+
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
   const args = process.argv.slice(2);
+  if (args[0] === "--compare") {
+    const {readFileSync} = await import("node:fs");
+    const load = (f) => readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const sum = summarize(load(args[1]), load(args[2]));
+    console.log(`${sum.frames} frames compared (${sum.lengths.join(" vs ")} recorded): ${sum.framesDiffering} differ`);
+    for (const [path, count] of sum.byPath) {
+      console.log(`  ${path}: ${count} frame${count === 1 ? "" : "s"}`);
+    }
+    if (sum.first) {
+      console.log(`first at frame ${sum.first.at}:`);
+      for (const d of sum.first.differences.slice(0, 8)) {
+        console.log(`  ${d.path}: ${JSON.stringify(d.left)} vs ${JSON.stringify(d.right)}`);
+      }
+    }
+    process.exit(sum.framesDiffering === 0 ? 0 : 1);
+  }
   const at = (flag, fallback) => {
     const i = args.indexOf(flag);
     return i === -1 ? fallback : args[i + 1];
