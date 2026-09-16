@@ -153,15 +153,21 @@ function identifiers(root) {
 // failed twice. So the range is walked commit by commit and every version of
 // every blob it touches is read, along with the messages, which are published
 // too and are the easiest place to paste an address into.
-function blobsInRange(root, range) {
+function blobsInRange(root, rangeArgs) {
   let commits;
   try {
-    commits = execFileSync("git", ["rev-list", range], {
+    // rangeArgs is passed to rev-list whole, so a range that is more than one
+    // token survives. The pre-push hook checks the commits actually going out
+    // with `<local> --not --remotes=origin`, and reading only the first token
+    // dropped the exclusion and walked the entire history instead — which
+    // re-flagged every already-public identifier on every push and taught the
+    // gate to be ignored, the one failure its own design warns against.
+    commits = execFileSync("git", ["rev-list", ...rangeArgs], {
       cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     }).split("\n").filter(Boolean);
   } catch (error) {
     // A hook that dies with a stack trace teaches people to pass --no-verify.
-    console.error(`osd-leak-scan: не смог прочитать диапазон ${range}: ${error.message.trim().split("\n")[0]}`);
+    console.error(`osd-leak-scan: не смог прочитать диапазон ${rangeArgs.join(" ")}: ${error.message.trim().split("\n")[0]}`);
     process.exit(1);
   }
   const out = [];
@@ -257,13 +263,17 @@ function trackedFiles(root) {
 }
 
 const args = process.argv.slice(2);
-const root = resolve(args.find((a) => !a.startsWith("--")) ?? ".");
+const rootArg = args.find((a) => !a.startsWith("--")) ?? ".";
+const root = resolve(rootArg);
 const all = args.includes("--all");
 const rangeAt = args.indexOf("--range");
-const range = rangeAt >= 0 ? args[rangeAt + 1] : null;
+// everything after --range is passed to rev-list, minus the root positional
+// wherever it landed: `--range <local> --not --remotes=origin` is three tokens,
+// and only the whole of it names the commits a push actually adds.
+const rangeArgs = rangeAt >= 0 ? args.slice(rangeAt + 1).filter((a) => a !== rootArg) : null;
 
 const names = identifiers(root);
-const files = range ? blobsInRange(root, range) : all ? trackedFiles(root) : stagedFiles(root);
+const files = rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
 const hits = scan(root, files, names);
 
 if (!names) {
