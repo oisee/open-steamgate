@@ -100,9 +100,15 @@ Ordered by what breaks without them, most first.
   on A4H 2026-09-17**: `ANOMALY-2026-09-16-mod-result-integer` (`MOD`
   with a float operand returns an integer; a system says 0.75) is #1860 and
   `ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero` (`-0.5` to `i`
-  is 0, `Math.round`; a system says −1) is #1861. Both have a failing test
-  on a branch (`fix/mod-float-result`, `fix/integer-round-half-away`) and no
-  fix yet; both are one-line fixes to send as PRs from inside the repository.
+  is 0, `Math.round`; a system says −1) is #1861. Both fixed on a branch
+  (`fix/mod-float-result`, `fix/integer-round-half-away`), one commit each
+  with the test, runtime tests and lint green; PRs from inside the
+  repository, "Fixes #…" in the message.
+- **The order was test, issue, fix (Alice, 2026-09-17):** the reproducers
+  went first, with the A4H measurement, so the issue could say what a
+  system answers; the fixes followed the same day for the two runtime
+  ones. The core one (#4302) is still test-only: its fix is not a table
+  edit and belongs in the syntax pass.
 - **Alice's own repositories, through the packs** (`packs/*/README.md`
   says what each overlay changes): `oisee/vivid-vibes`, one line in
   `zcl_o4d_http_handler` — the megademo page asks `?image=<name>` and the
