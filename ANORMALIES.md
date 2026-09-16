@@ -10,83 +10,6 @@ upgrading `@abaplint/*` and before every release.
 
 Format adapted from `larshp/hithub` (MIT).
 
-## A float compared with a character literal is compared with an integer
-
-**Found** 2026-09-16, comparing the ZO4D demo frame by frame with the same
-ABAP on A4H (`tools/o4d-record.mjs --compare`): 59 of 60 frames differed,
-every one of them by a quarter label the demo draws here and not there.
-The label is behind `IF lv_bar_prog > '0.5'`, a float against a
-character literal, and the bar's progress on the second frame is 0.06.
-
-Measured directly against the runtime, `@abaplint/runtime` 2.13.86:
-
-```
-f 0.06 > '0.5'   true    (SAP: false)
-f 0.06 < '0.5'   false   (SAP: true)
-f 0.6  > '0.5'   true
-f 1.5  > '1'     true
-f 0.06 > f 0.5   false   (right)
-```
-
-Every answer is what you get with `'0.5'` read as 0: in the generic tail
-of `compare/gt.ts` a numeric operand against a string one ends in
-`parseInt(…, 10)` (lines 97 and 103 of 2.13.86), and `compare/eq.ts` has
-the same line (330); `lt`, `ge` and `le` are written in terms of `gt`,
-so they inherit it. ABAP converts a
-character operand to the type of the numeric operand it is compared
-with — here `f`, so `'0.5'` is 0.5 — and the runtime's own
-`operators/_parse.ts` already does exactly that (`parseFloat` when the
-string holds a point). The fix is that helper in place of `parseInt`,
-in `gt` and `eq`, with a test for each direction and for a literal with and without a point.
-
-**Why it stayed hidden:** comparing with a character literal that has a
-fractional part is idiomatic in demo code (`> '0.5'`, `< '0.3'`) and rare
-in business code, where the literal is an integer and `parseInt` happens
-to be right.
-
-**Upstream:** `@abaplint/runtime`, `packages/runtime/src/compare/gt.ts` and `eq.ts`.
-Until it lands, a frame of this demo is not the frame a system draws, and
-the comparison tool says so at the first label.
-
-
-## The published transpiler names a W3MI object by its escaped file name
-
-**Found** 2026-09-16, while building content packs (backlog E.2).
-
-`local/o4d` carries media whose object name holds a dot: the file is
-`zo4d_00_sales%2epng.w3mi.xml`, abapGit's escaping of `ZO4D_00_SALES.PNG`.
-
-With the **published** `@abaplint/transpiler` 2.13.87 the object keeps the
-escaped form as its name, `ZO4D_00_SALES%2EPNG`, and `init.mjs` then imports
-`./zo4d_00_sales%2epng.w3mi.mjs`. A module specifier is a URL, so Node
-decodes `%2e` to a dot and looks for `zo4d_00_sales.png.w3mi.mjs`, which is
-not the file on disk:
-
-```
-ERR_MODULE_NOT_FOUND  zo4d_00_sales%2epng.w3mi.mjs
-```
-
-Bun resolves the specifier literally and finds the file, so the compiled
-binary serves the generation and every Node host fails on it — the same
-divergence as `ANOMALY-2026-09-13-bun-percent-encoded-specifier`, with the
-signs the other way round.
-
-With the **local build** in `~/dev/transpiler` the name is decoded,
-`ZO4D_00_SALES.PNG`, and the specifier is written `%252e`, which decodes to
-the literal `%2e` of the file name. That is the correct escaping and both
-runtimes resolve it.
-
-**How it reached us:** `npm i --no-save postject` (for a Node single
-executable experiment) rewrote `node_modules` and replaced the link to the
-local build with the published package. Nothing said so; the next build was
-simply unusable under Node while the binary kept working. `npm run
-transpiler:local && npm run runtime:local` puts the links back, and
-`node tools/osd-transpiler.mjs` prints which is in use.
-
-**Upstream:** the fix is in the local tree and not in 2.13.87, so it needs an
-issue and a pull request before this repository can drop the link.
-
-
 ## Entry template
 
 ### ANOMALY-YYYY-MM-DD-short-name — Short title
@@ -106,6 +29,31 @@ issue and a pull request before this repository can drop the link.
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+
+### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-16`
+- Affected versions: `@abaplint/runtime 2.13.86` (and 2.13.87: `compare/gt.ts` is unchanged there)
+- Affected ABAP statement, runtime API or adapter: every comparison of a numeric operand with a character or string one — `IF f > '0.5'`, `f < '0.3'` — through `compare.gt` and, written in terms of it, `lt`, `ge`, `le`. `eq` is not affected: it already reads a point.
+- Minimal ABAP reproducer:
+
+```abap
+DATA prog TYPE f.
+prog = '0.06'.
+IF prog > '0.5'.
+  WRITE 'label'.   " open-abap writes it; SAP does not
+ENDIF.
+```
+
+- Exact command used to run it: `tools/o4d-record.mjs --compare` of the ZO4D demo recorded on A4H and here — 59 frames of 60 differ, every one by a quarter label the demo draws here from the second frame on and a system never does. Then the runtime asked directly: `abap.compare.gt(Float 0.06, Character '0.5')` is `true`, `lt` is `false`, `gt(Float 0.06, Float 0.5)` is `false`.
+- Expected SAP behaviour: the character operand is converted to the type of the numeric operand it is compared with — `f` here, so `'0.5'` is 0.5 and the label waits until the bar is half grown.
+- Actual open-abap behaviour: in the generic tail of `compare/gt.ts` a numeric left against a string right (and the mirror) ended in `parseInt(…, 10)`, so `'0.5'` was 0 and every fraction compared as its integer part. The runtime's own `operators/_parse.ts` has the right rule (`parseFloat` when the string holds a point) and was not called.
+- Impact on open-steamgate: the demo's `Sales Dance` scene labels its bars on the second frame instead of halfway through the intro, and the frame stream is not the system's from frame 1 (`ANOMALY-2026-09-16-*` is the first anomaly found by the frame comparison rather than by a crash). Any ABAP that compares a float with a literal carrying a fraction is affected; business code, which compares with integer literals, happens not to be.
+- Smallest safe workaround: write the literal as a float, `CONV f( '0.5' )`, which compares float with float. Not applied to the demo: the ABAP is right as written.
+- Upstream issue: none yet, **needs an issue**. Branch `fix/compare-character-literal` in `abaplint/transpiler` (worktree `.local/pr-compare-char`, based on `origin/main` 7daf28f2): `parse()` in place of `parseInt` in both branches of `gt`'s tail, one commit, the runtime's tests and lint green.
+- Regression-test location: `packages/runtime/test/compare.ts`, "float against a character literal with a fraction", on the branch
+- Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-15-srvd-not-allowed — The transpiler refuses SRVD objects
 
@@ -229,7 +177,7 @@ issue and a pull request before this repository can drop the link.
 
 ### ANOMALY-2026-09-13-conv-second-in-expression — The second constructor expression in one expression has no type
 
-- Status: `PR open: abaplint/transpiler#1842`
+- Status: `fixed upstream: abaplint/transpiler#1842`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`, `@abaplint/core 2.120.5`
 - Affected ABAP statement, runtime API or adapter: `CONV` (and any constructor expression resolved through an inferred type) when more than one appears in one expression
@@ -241,11 +189,11 @@ issue and a pull request before this repository can drop the link.
 - Smallest safe workaround: split the expression into two statements
 - Upstream issue: **PR [abaplint/transpiler#1842](https://github.com/abaplint/transpiler/pull/1842)**, opened 2026-09-14 from branch `fix/conv-builtin-type-name` inside the repo, so Regression runs. A built-in type name that names exactly one type (`i`, `f`, `string`, `xstring`, `d`, `t`, `int8`, `utclong`, `decfloat16/34`) is enough on its own when no reference was recorded
 - Regression-test location: the transpiler's `test/single_statements.ts`, local branch
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `unreleased, on main after 2.13.87`
 
 ### ANOMALY-2026-09-13-paren-before-conv — A parenthesised group before `* CONV ... /` generates unbalanced JavaScript
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1843`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: arithmetic where a constructor expression sits between two operators
@@ -257,7 +205,7 @@ issue and a pull request before this repository can drop the link.
 - Smallest safe workaround: assign the constructor expression to a variable first
 - Upstream issue: none yet, branch `fix/rearranger-constructor-operand`, next in the queue. The head of the flattened chain is wrapped back into one Source before it is hoisted
 - Regression-test location: the transpiler's `test/single_statements.ts`, local branch
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `2.13.87`
 
 ### ANOMALY-2026-09-13-builtin-as-method — A built-in function in such an expression is emitted as a method of the class
 
@@ -383,7 +331,7 @@ DATA(c) = lv_f * 2.        " typed f, correct
 
 ### ANOMALY-2026-09-14-float-separator-not-inverse — A float could not read back what it had just written
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1847`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/runtime 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `Float.get`/`Float.set`, `DecFloat34.get`/`DecFloat34.set`, so any move of a float through a character field
@@ -405,7 +353,7 @@ back = ch.       " CX_SY_CONVERSION_NO_NUMBER
 - Smallest safe workaround: none needed now
 - Upstream issue: none yet, branch `fix/float-separator` in `abaplint/transpiler`. `set()` accepts both separators — the comma because that is what `get()` writes, the point because ABAP source literals carry one and `CONV f( '0.25' )` is everywhere. `get()` is unchanged: `test/statements/write.ts:209` asserts the comma at ABAP level, so the output side was verified against a system
 - Regression-test location: `test/types/float.ts` (round trip, point still a point, `'1,2,3'` still raises) and `test/types/decfloat34.ts`
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `2.13.87`
 
 ### ANOMALY-2026-09-14-source-position-without-raise — `get_source_position( )` crashes on an exception the runtime raised
 
@@ -436,7 +384,7 @@ ENDTRY.
 
 ### ANOMALY-2026-09-14-sy-tabix-hashed — `sy-tabix` is a row number in a loop over a hashed table
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1848`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/runtime 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `LOOP AT` over a hashed table, and `LOOP AT ... USING KEY` with a hash secondary key
@@ -456,11 +404,11 @@ ENDLOOP.
 - Smallest safe workaround: do not read `sy-tabix` in a loop over a hashed table, which is also the rule on a system
 - Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, alongside the restore fix, since the two are siblings and one test file covers both
 - Regression-test location: `test/statements/loop.ts`, two cases: hashed gives `000`, sorted still gives `12`
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `unreleased, on main after 2.13.87`
 
 ### ANOMALY-2026-09-13-sy-tabix-not-restored — An inner loop keeps the outer loop's `sy-tabix`
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1848`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/runtime 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `LOOP AT` and `sy-tabix`
@@ -481,7 +429,7 @@ ENDLOOP.
 - Smallest safe workaround: read `sy-tabix` into a variable as the first statement of the loop body, before anything that might loop
 - Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, commit `be5d4db9`. Save on entry, restore in the `finally` that already runs, so every exit path is covered by construction. Full suite 2224/133 before, 2227/130 after, and the three that moved are the new tests
 - Regression-test location: `test/statements/loop.ts`, three cases: nested, inner loop left with `EXIT`, and a method that loops called from a loop
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `unreleased, on main after 2.13.87`
 
 ### DEBT-2026-09-13-runtime-not-linked — The transpiler is linked from our clone, the runtime is not
 
@@ -585,6 +533,7 @@ ENDLOOP.
 - Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name, `ZOISEE-EAR-02%2EMP3`, while the object's own XML carries `ZOISEE-EAR-02.MP3`, so a handler that asks the way SAP's API is asked finds nothing and returns empty rather than failing. The percent-escape is an abapGit filename spelling that should never have become a key
 - Impact on open-steamgate: this is what stops the audio in the running demo. The images work only because they were asked for by the encoded name while testing, which is the failure mode in miniature: the wrong key looks like a working one until someone uses the right one
 - Smallest safe workaround: ask with the encoded name
+- **Addendum, 2026-09-16.** Seen again, from the other side: `npm i --no-save postject` (for a Node single-executable experiment) rewrote `node_modules` and replaced the link to the local build with the published `@abaplint/transpiler` 2.13.87, which does not carry this fix. The next build named the object `ZO4D_00_SALES%2EPNG` and `init.mjs` imported `./zo4d_00_sales%2epng.w3mi.mjs`, which Node decodes to a dot and cannot find while Bun resolves literally and can — so the compiled binary served the generation and every Node host failed at boot. `npm run transpiler:local` puts the link back; `node tools/osd-transpiler.mjs` says which build is in use. Both halves of the W3MI naming, this entry and `ANOMALY-2026-09-13-percent-in-filename`, are still local only, and this is the cost of that.
 - Upstream issue: none yet, branch `fix/w3mi-objid` in `abaplint/transpiler`. The registry, `wwwparams` and `tadir` are all keyed on `<NAME>` now. Corrected 2026-09-14: this was the transpiler's code all along, not open-steamgate's, and saying otherwise nearly left it unowned
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`

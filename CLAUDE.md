@@ -164,6 +164,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   keeps the note on the branch where it cannot drift from it. Entries whose
   fix belongs upstream in abaplint rather than here say **needs an issue** in
   their Upstream line, and `parked` lists those separately.
+  `docs/upstream.md` is the dossier: every local fix, its entry, its branch,
+  its test and what to do next, in sending order.
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
   `abaplint/transpiler` or `open-abap-core`. Before offering anything to any of
