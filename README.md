@@ -40,6 +40,59 @@ usually does not.
 
 ---
 
+## ▶ Eclipse connects to it. Over RFC.
+
+**A stock Eclipse ABAP project logs on to this thing, expands the repository
+tree and opens a source — and it does not know it is not a SAP system.**
+
+There are two kinds of ABAP project. A *Cloud Project* opens HTTPS and talks to
+the ICM, and this project has answered that since the façade was built
+([`docs/adt-surface.md`](docs/adt-surface.md)). A **Custom Application Server**
+project does something else entirely: it never opens an HTTP port at all. It
+logs on over **RFC**, on the gateway port, and tunnels every ADT request inside
+a single RFC call. On a full captured session, 579 KB crossed the gateway and
+not one byte crossed the ICM.
+
+That path now works end to end:
+
+```
+Eclipse ──RFC/CPIC──▶ gateway port ──▶ bridge ──HTTP──▶ open-steamgate
+```
+
+Logon, `core/discovery`, `compatibility/graph`, `discovery`, `feeds`, the
+object-type list, `repository/typestructure`, five `repository/nodestructure`
+calls that expand the tree, then `ddic/ddl/sources/<name>` and `/source/main`
+that open a CDS view with its source — sixteen 200s and one 304, no errors.
+Unit-test metadata and check runs answer too.
+
+The bridge is Go and lives in the sibling
+[open-rfc-go](https://github.com/oisee/open-rfc-go) (`cmd/adt-rfc-bridge`),
+because that is where the NI / RFC / CPIC transport already was. What it took
+is written down in [`docs/adt-over-rfc.md`](docs/adt-over-rfc.md), and the
+short version is four things that each refuse in silence:
+
+1. **A dictionary.** Eclipse will not call a function it has not been
+   described, so `RFC_GET_FUNCTION_INTERFACE` and `DDIF_FIELDINFO_GET` have to
+   be answered first — and in the *function's* parameter order, not the
+   caller's.
+2. **SAP Binary XML.** The request does not travel as the text xRFC the rest of
+   the protocol uses. It travels in its own tag family, raw-DEFLATE compressed,
+   as a token stream whose name references are index-plus-two and whose lengths
+   are byte counts written as UTF-8 scalars.
+3. **The right record header.** Responses wear one of two shapes, belonging to
+   two *connection roles*. Send the other one and the client refuses the whole
+   answer at the CPIC layer without reading it.
+4. **The CSRF dance.** Over HTTPS Eclipse does it itself. Over RFC it cannot —
+   there is no HTTP session on its side — so the bridge owns the session, its
+   cookies and its token, or every read works and the first write is a 403.
+
+Point it at this project or at a real system with one flag, which is what makes
+it testable: against a real system it proves the transport, because the backend
+is known good; against this project it proves the façade, because the transport
+already is.
+
+---
+
 ## Thanks
 
 This is grown on **[Lars Hvam](https://github.com/larshp)**'s work, and would
@@ -51,7 +104,10 @@ is how code gets in and out. The substrate was there, mature and MIT — this
 project only builds the Gateway on top of it, which is the one part that did
 not exist.
 
-> **Status: CRUD, `$batch`, navigation, `$expand`, deep insert, function
+> **Status: a stock Eclipse ABAP project reaches it two ways — over HTTPS as a
+> Cloud Project, and over **RFC** as a Custom Application Server, logging on,
+> expanding the repository tree and opening a source through a gateway bridge
+> ([`docs/adt-over-rfc.md`](docs/adt-over-rfc.md)). CRUD, `$batch`, navigation, `$expand`, deep insert, function
 > imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
 > text arrangement), an object page (bookings via navigation, Edit/Save as
 > MERGE with Gateway semantics, Create below the parent as
@@ -361,7 +417,10 @@ Public siblings:
   (EXPORT cluster parser) and the `ZADT_VSP` bridge. abapGit deploy-back — the
   last mile into a real system — is already its territory.
 - **[open-rfc-go](https://github.com/oisee/open-rfc-go)** — pure-Go NI / RFC /
-  CPIC transport, sniffer/proxy, RFC client and type-3 server.
+  CPIC transport, sniffer/proxy, RFC client and type-3 server. Now also
+  `cmd/adt-rfc-bridge`, the gateway that lets a Custom Application Server
+  project in Eclipse reach this project over RFC
+  ([`docs/adt-over-rfc.md`](docs/adt-over-rfc.md)).
 
 Two further siblings (a DIAG-protocol project carrying the SAP-LZH **writer**,
 and a shared SAP knowledge base) are private; the reusable protocol facts they

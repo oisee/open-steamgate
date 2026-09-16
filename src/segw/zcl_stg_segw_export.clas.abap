@@ -40,6 +40,7 @@ ENDCLASS.
 CLASS zcl_stg_segw_export IMPLEMENTATION.
 
   METHOD export.
+    " ekeууу
     DATA lt_tags TYPE string_table.
     DATA lv_tag  TYPE string.
     DATA lv_nl   TYPE string.

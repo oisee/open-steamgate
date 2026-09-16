@@ -79,7 +79,14 @@
     "setup": {
       "filename": "../test/setup.mjs",
       "preFunction": "setup"
-    }
+    },
+    "skip": [
+      {
+        "object": "ZCL_ZOSD_TEST_DEMO",
+        "class": "ltcl_zosd_test_demo",
+        "method": "deliberate_failure"
+      }
+    ]
   },
   "exclude_filter": [
     "/test/e2e/",

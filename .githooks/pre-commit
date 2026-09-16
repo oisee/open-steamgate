@@ -1,0 +1,27 @@
+#!/bin/sh
+# Look at what is staged before it becomes a commit. See tools/osd-leak-scan.mjs.
+#
+# This one only tells you. It does not stop the commit, because a local commit
+# goes nowhere and stopping it buys nothing but friction — the gate that counts
+# is pre-push, which checks everything the push would actually publish. Commit
+# as freely as you like and clean the history before it leaves.
+root=$(git rev-parse --show-toplevel)
+
+# The scanner may not live in the repository being pushed. A sibling Go clone
+# takes the same captures and deserves the same check, and the way to give it
+# one is a shared core.hooksPath — so the tool is looked for next to this hook
+# first, and only then in the repository itself.
+hook_dir=$(cd "$(dirname "$0")" && pwd)
+for candidate in "$hook_dir/../tools/osd-leak-scan.mjs" "$root/tools/osd-leak-scan.mjs"; do
+  if [ -f "$candidate" ]; then scanner="$candidate"; break; fi
+done
+if [ -z "${scanner:-}" ]; then
+  echo "osd-leak-scan: не нашёл сканер рядом с хуком — проверка не выполнена" >&2
+  exit 0
+fi
+
+node "$scanner" "$root"
+if [ $? -ne 0 ]; then
+  echo "Это только предупреждение — коммит пройдёт. Остановит pre-push."
+fi
+exit 0

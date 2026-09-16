@@ -69,6 +69,12 @@ mis-reads rather than reports.
   fetch`; vsp falls back to `GET` if HEAD is refused. A stateful request
   also carries `X-sap-adt-sessiontype: stateful`. A heal attempt sends an
   empty `Cookie: sap-contextid=` to force a fresh context.
+- **System id:** the façade answers as system `OS2` (`systeminformation`,
+  the feeds' contributor, the `SAP_SESSIONID_OS2_001` cookie). `STG_ADT_SID`
+  renames it. A client refuses a logon when the id it stored at project
+  creation differs from the one reported, so the id is a default in the code
+  and not something a restart has to remember; change it only together with
+  the projects that point at it. `OSD` is the product, `OS2` the system.
 - **Required back:** an `X-CSRF-Token` header whose value is **not** the
   literal `Required` (vsp reads that as "no token yet"), and `Set-Cookie`
   for `sap-contextid` and `SAP_SESSIONID`.
@@ -459,6 +465,125 @@ compatibility graph, the reentrance ticket, the virtual folders, sources,
 check runs, the debugger. Of those, discovery, the compatibility graph,
 source reads, object structures, search and the package tree already answer
 here.
+
+### What the call actually carries: BXML, and a flag that says whether it is packed
+
+Measured 2026-09-14 against a live Eclipse and a captured session, 762 frames
+carrying the parameter, no exceptions either way.
+
+The call to `SADT_REST_RFC_ENDPOINT` does not carry its parameters as CPIC
+parameter name/value fields (`0x0201`/`0x0203`), and not as the xRFC recursive
+parameter this project had been expecting (`0x3c02` boundaries with plain XML
+in `0x3c05` chunks). It uses a family of tags nothing here had seen:
+
+| tag | in a request | in a response |
+| --- | --- | --- |
+| `0x4000` | `01 00`, two bytes | `01 01` |
+| `0x4001` | the payload | absent |
+| `0x4002` | absent | the payload, in 16 KB chunks |
+| `0x4004` | empty, a terminator | empty |
+
+So the direction is in the tag — `0x4001` inbound, `0x4002` outbound — and the
+second byte of `0x4000` is a compression flag. It correlates perfectly with
+whether the payload begins with the magic: every one of the 382 requests has
+`01 00` and starts `BXML`, and every one of the 380 responses has `01 01` and
+does not. The compression is not zlib, not raw deflate, and carries no SAP
+compression signature at the start of a chunk, so it is not `sapcompress`
+either as that package recognises it.
+
+**The payload is SAP Binary XML.** The header reads
+
+```
+BXML ? VER 0.7 ? ENC utf-8 + asx + http://www.sap.com/abapxml: …
+```
+
+and the document is an ordinary ABAP XML serialization — `asx:abap` /
+`asx:values` around a structure whose root element is the parameter's name.
+That is why "the name is only in the root element, never on the wire" was
+right about the shape and wrong about the encoding: the name is in the
+document, and the document is binary.
+
+Decoded, one request is exactly what an ADT façade needs:
+
+```
+values < REQUEST < REQUEST_LINE < METHOD  T "GET"
+                                  URI     T "/sap/bc/adt/core/discovery"
+                                  VERSION T "HTTP/1.1" >
+                   HEADER_FIELDS < lines @ 3
+                                   item < NAME  T "sap-adt-request-id" … > … >
+```
+
+Single-byte tokens carry the structure, and the grammar is complete for the
+request side — a parser written from these reads 384 captured documents out of
+384 and consumes each to its last byte, which is the check: an incomplete
+grammar stops somewhere, and this one did, twice.
+
+| token | byte | what follows |
+| --- | --- | --- |
+| define a name | `+` `0x2b` | length, then the name |
+| open an element | `<` `0x3c` | two bytes, a reference to a defined name |
+| close | `>` `0x3e` | — |
+| text | `T` `0x54` | length, then UTF-8 |
+| attribute | `@` `0x40` | two bytes |
+| attribute value | `A` `0x41` | length, then the value |
+| bind a namespace | `:` `0x3a` | two bytes |
+| message body | `B` `0x42` | length, then the content |
+| header pair | `?` `0x3f` | length+key, length+value |
+
+Names are defined once and referenced afterwards, which is where most of the
+saving comes from.
+
+**Lengths are code points written as UTF-8**, which the header's `ENC utf-8`
+turns out to mean literally: a length under 0x80 is one byte, and above it two
+— `c2 97` is U+0097, 151, and `c3 84` is U+00C4, 196, both confirmed against
+the actual length of the string that followed. This is the kind of detail that
+cannot be guessed from a structure diagram and falls straight out of measuring
+one field.
+
+The two stops are worth recording because both were the same mistake in
+miniature: assuming a byte belonged to the data. The namespace declaration
+reads `+ 1a "http://www.sap.com/abapxml"` and is followed by `:` — the colon
+looks like the end of the URI and is a token. Then `B`, which turned out to
+open the request body and had gone unseen because only some requests carry
+one.
+
+### What a working session actually asks for
+
+384 calls in the captured session, 39 distinct shapes. Not a wish list — this
+is what Eclipse asked while the session worked, opening a program's source and
+a function group's, running unit tests and previewing a table.
+
+The shape of the traffic is the surprise. **Over a quarter of all calls are
+`/runtime/dumps` (108) and `/runtime/systemmessages` (54)**, both polled on a
+timer and both content-free in a healthy system: a façade that answers them
+with an empty list sheds most of its load before implementing anything
+interesting. `/debugger/listeners` is the next heaviest at 72 POSTs, which is
+a long poll rather than real work.
+
+`/security/reentranceticket` appears 8 times, which settles it: it was on the
+list of sixteen unimplemented resources as a guess, and it is genuinely asked
+for. `/abapunit/testruns` confirms that unit tests travel this path and need
+no DIAG, matching what the dispatcher experiment showed from the other side.
+
+The rest is the expected surface: `core/discovery` and `discovery`,
+`compatibility/graph`, `repository/informationsystem/*` (search, objecttypes,
+objectproperties, releasestates, virtualfolders), `checkruns`, `feeds`,
+`packages/settings`, `ddic/tables/*`, `datapreview/ddic`, and
+`programs/programs/<name>` with `/source/main` beneath it.
+
+**What this means for a server.** Two pieces of work, and a question that one
+attempt answers:
+
+1. a BXML reader, to get the request out of `0x4001`;
+2. a BXML writer, to put a response into `0x4002`;
+3. whether a response may declare `0x4000 = 01 00` and go out uncompressed.
+   The flag is ours to set. If Eclipse honours it, no compressor is needed at
+   all — which matters, because the SAP-LZH *writer* is not in any repository
+   here (vsp has the reader). If it does not honour it, that is the next
+   thing to build and it is identifiable in one round trip.
+
+The chunking is worth noting for the writer: responses are split at 16384
+bytes across several `0x4002` fields, reassembled in order.
 
 ### And it gives the split a consumer
 

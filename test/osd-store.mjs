@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {NotFound, ObjectStore, ReadOnly, fileOf, nameOf} from "../tools/osd-store.mjs";
@@ -69,6 +69,23 @@ describe("tools/osd-store: the objects of the local system", function () {
     expect(active.active).to.equal(true);
   });
 
+  it("an include activates as itself: the registry files it as a program, and the check follows it there", () => {
+    // INCL and PROG share a file and abaplint knows only PROG; asking the
+    // registry for INCL found nothing and called every clean include broken
+    const verdict = store.activate("INCL", "ZOSD_TEST_DEMO_INC");
+    expect(verdict.issues, JSON.stringify(verdict.issues)).to.deep.equal([]);
+    expect(verdict.active).to.equal(true);
+  });
+
+  it("a dependent of a kind the store does not index is checked, not thrown over", () => {
+    // the SEGW project (IWPR) names the MPC_EXT it maps; it is in the
+    // registry and not in TYPES, so the dependents walk used to reach
+    // find() and 404 the whole activation with "IWPR ... does not exist"
+    const kinds = store.dependents("CLAS", "ZCL_ZOSD_TEST_MPC_EXT").map((d) => d.type);
+    expect(kinds).to.include("IWPR");
+    expect(store.activate("CLAS", "ZCL_ZOSD_TEST_MPC_EXT").active).to.equal(true);
+  });
+
   it("packages come from the tree, and every parent is one a folder really has", () => {
     const all = store.packages();
     expect(all.length).to.be.greaterThan(50);
@@ -79,7 +96,7 @@ describe("tools/osd-store: the objects of the local system", function () {
         expect(names, `${node.name} -> ${node.parent}`).to.include(node.parent);
       }
     }
-    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE"]);
+    expect(all.filter((p) => p.parent === undefined).map((p) => p.name)).to.include.members(["$STG", "$OPEN_ABAP_CORE", "$ZOSD_TEST"]);
     // the name is the chain joined, so an underscore in a folder invents no
     // parent: src/demo_sadl sits under $STG, not under $STG_DEMO, and the
     // library roots do not sprout a $OPEN above them
@@ -95,7 +112,7 @@ describe("tools/osd-store: the objects of the local system", function () {
     // package and OSD had nothing to answer with
     const tops = store.rootPackages();
     expect(tops.length).to.be.greaterThan(3);
-    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD"]);
+    expect(tops.map((p) => p.name)).to.include.members(["$STG", "$OSD", "$ZOSD_TEST"]);
     for (const node of tops) {
       expect(node.parent, node.name).to.equal(undefined);
     }
@@ -127,7 +144,10 @@ describe("tools/osd-store: the objects of the local system", function () {
     expect(store.package("$STG_SEGW").library).to.equal(false);
     // every object of the system is in exactly one package
     const counted = store.packages().reduce((n, p) => n + p.objects, 0);
-    expect(counted).to.equal(store.list().length);
+    // every entry is counted in exactly one package, except a root
+    // package's own object: the package is not something inside itself
+    const rootsWithOwnObject = store.rootPackages().filter((r) => store.find("DEVC", r.name) !== undefined).length;
+    expect(counted).to.equal(store.list().length - rootsWithOwnObject);
   });
 
   it("abapGit's file names and object names convert both ways", () => {
@@ -179,6 +199,25 @@ ENDCLASS.
     expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_OSD_PROBE"]);
   });
 
+  it("a new object joins the package tree without rebuilding the index", () => {
+    expect(store.packages()).to.deep.equal([]);
+
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+
+    const packages = store.packages();
+    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD"]);
+    expect(packages.find((pkg) => pkg.name === "$STG_OSD").objects).to.equal(1);
+    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$STG"]);
+    expect(store.package("$STG_OSD").objects).to.deep.include({
+      type: "CLAS",
+      name: "ZCL_OSD_PROBE",
+      library: false,
+      writable: true,
+      // just written, and so not activated yet
+      version: "inactive",
+    });
+  });
+
   it("writing again replaces the source, and the includes go beside it", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("hello", "goodbye"));
@@ -186,6 +225,81 @@ ENDCLASS.
     store.write("CLAS", "ZCL_OSD_PROBE", "CLASS ltcl DEFINITION FOR TESTING.\nENDCLASS.\n", "testclasses");
     expect(store.read("CLAS", "ZCL_OSD_PROBE", "testclasses").source).to.contain("ltcl");
     expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("goodbye");
+  });
+
+  it("a created object lands in the folder of its package, with the abapGit header beside it", () => {
+    // a package is a folder: the parent's header names the folder
+    mkdirSync(join(root, "src", "demo"), {recursive: true});
+    writeFileSync(join(root, "src", "demo", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap>
+</abapGit>
+`);
+    const made = store.create("CLAS", "zcl_osd_made", {description: "made by a test", package: "$STG_DEMO"});
+    expect(made.file).to.equal("src/demo/zcl_osd_made.clas.abap");
+    expect(made.package).to.equal("$STG_DEMO");
+    expect(made.version, "a created object is inactive until activated").to.equal("inactive");
+    expect(existsSync(join(root, "src/demo/zcl_osd_made.clas.xml"))).to.equal(true);
+    expect(readFileSync(join(root, "src/demo/zcl_osd_made.clas.xml"), "utf8")).to.contain("<DESCRIPT>made by a test</DESCRIPT>");
+    expect(store.read("CLAS", "ZCL_OSD_MADE").source).to.contain("CLASS zcl_osd_made DEFINITION PUBLIC");
+    expect(store.package("$STG_DEMO").objects.map((o) => o.name)).to.include("ZCL_OSD_MADE");
+    // the skeleton checks clean, so the next save is the first real source
+    expect(store.check("CLAS", "ZCL_OSD_MADE").issues).to.deep.equal([]);
+
+    // twice is a conflict, a package that is not there is not found
+    expect(() => store.create("CLAS", "ZCL_OSD_MADE", {package: "$STG_DEMO"})).to.throw(/already exists/);
+    expect(() => store.create("INTF", "ZIF_X", {package: "$NOWHERE"})).to.throw(/does not exist/);
+    expect(() => store.create("FUGR", "ZFG", {package: "$STG_DEMO"})).to.throw(/not supported/);
+
+    // a package is a folder under its parent's, named after its last link
+    const sub = store.create("DEVC", "$STG_DEMO_SUB", {description: "a subpackage", package: "$STG_DEMO"});
+    expect(sub.file).to.equal("src/demo/sub/package.devc.xml");
+    expect(store.packages().map((p) => p.name)).to.include("$STG_DEMO_SUB");
+    expect(() => store.create("DEVC", "$OTHER", {package: "$STG_DEMO"})).to.throw(/named \$STG_DEMO_<FOLDER>/);
+    const prog = store.create("PROG", "ZOSD_MADE_PROG", {description: "a report", package: "$STG_DEMO_SUB"});
+    expect(prog.file).to.equal("src/demo/sub/zosd_made_prog.prog.abap");
+    expect(readFileSync(join(root, "src/demo/sub/zosd_made_prog.prog.xml"), "utf8")).to.contain("<ENTRY>a report</ENTRY>");
+    const incl = store.create("INCL", "ZOSD_MADE_INC", {package: "$STG_DEMO_SUB"});
+    expect(readFileSync(join(root, incl.file.replace(/\.abap$/, ".xml")), "utf8")).to.contain("<SUBC>I</SUBC>");
+    expect(store.find("INCL", "ZOSD_MADE_INC")).to.not.equal(undefined);
+  });
+
+  it("a deleted object takes its header with it, and a package goes only once it is empty", () => {
+    mkdirSync(join(root, "src", "demo"), {recursive: true});
+    writeFileSync(join(root, "src", "demo", "package.devc.xml"), "<abapGit><asx:abap><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap></abapGit>");
+    const sub = store.create("DEVC", "$STG_DEMO_SUB", {package: "$STG_DEMO"});
+    const made = store.create("CLAS", "ZCL_OSD_GONE", {package: "$STG_DEMO_SUB"});
+    expect(() => store.delete("DEVC", "$STG_DEMO_SUB")).to.throw(/still holds 1 object/);
+    expect(store.delete("CLAS", "ZCL_OSD_GONE")).to.deep.include({deleted: true});
+    expect(existsSync(join(root, made.file))).to.equal(false);
+    expect(existsSync(join(root, made.file.replace(/\.abap$/, ".xml"))), "the header went too").to.equal(false);
+    expect(store.find("CLAS", "ZCL_OSD_GONE")).to.equal(undefined);
+    expect(store.delete("DEVC", "$STG_DEMO_SUB")).to.deep.include({deleted: true});
+    expect(existsSync(join(root, sub.file))).to.equal(false);
+    expect(() => store.delete("CLAS", "ZCL_OSD_GONE")).to.throw(/does not exist/);
+  });
+
+  it("a file that appears on disk is an object here, once the store watches", async () => {
+    store.watch();
+    try {
+      expect(store.find("CLAS", "ZCL_OSD_FROM_DISK")).to.equal(undefined);
+      mkdirSync(join(root, "src", "osd"), {recursive: true});
+      writeFileSync(join(root, "src/osd/zcl_osd_from_disk.clas.abap"), CLASS.replaceAll("zcl_osd_probe", "zcl_osd_from_disk"));
+      // the watcher is an event away, not a call away
+      for (let i = 0; i < 50 && store.find("CLAS", "ZCL_OSD_FROM_DISK") === undefined; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(store.find("CLAS", "ZCL_OSD_FROM_DISK")?.file).to.equal("src/osd/zcl_osd_from_disk.clas.abap");
+      expect(store.check("CLAS", "ZCL_OSD_FROM_DISK").issues, "the registry saw it too").to.deep.equal([]);
+      // and a change on disk is the source the next read gets, and the registry checks
+      writeFileSync(join(root, "src/osd/zcl_osd_from_disk.clas.abap"), "CLASS zcl_osd_from_disk DEFINITION PUBLIC.\nENDCLASS.\nCLASS zcl_osd_from_disk IMPLEMENTATION.\n  METHOD nope.\n  ENDMETHOD.\nENDCLASS.\n");
+      for (let i = 0; i < 50 && store.check("CLAS", "ZCL_OSD_FROM_DISK").issues.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(store.check("CLAS", "ZCL_OSD_FROM_DISK").issues.length, "a broken edit on disk is a broken object here").to.be.greaterThan(0);
+    } finally {
+      store.unwatch();
+    }
   });
 
   it("a namespaced name becomes an abapGit file name", () => {
@@ -290,4 +404,20 @@ ENDCLASS.
     expect(() => store.check("CLAS", "ZCL_OSD_UNBORN")).to.throw(NotFound);
   });
 
+
+  // An editor on Windows sends CRLF. Stored as it came, a saved comment
+  // became a diff of every line in the file, with the comment nowhere in it.
+  it("stores what an editor saves with the repository's line endings", async () => {
+    const {mkdtempSync, mkdirSync, copyFileSync, readFileSync} = await import("node:fs");
+    const {join} = await import("node:path");
+    const {tmpdir} = await import("node:os");
+    const root = mkdtempSync(join(tmpdir(), "osd-crlf-"));
+    mkdirSync(join(root, "osd"));
+    copyFileSync("abaplint.jsonc", join(root, "abaplint.jsonc"));
+    const store = new ObjectStore({root});
+    store.write("PROG", "ZOSD_CRLF", "REPORT zosd_crlf.\r\n* typed on Windows\r\nWRITE 1.\r\n");
+    const onDisk = readFileSync(join(root, store.find("PROG", "ZOSD_CRLF").file), "utf8");
+    expect(onDisk).to.equal("REPORT zosd_crlf.\n* typed on Windows\nWRITE 1.\n");
+    expect(store.read("PROG", "ZOSD_CRLF").source).to.not.contain("\r");
+  });
 });

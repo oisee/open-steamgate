@@ -7,9 +7,298 @@ decided and why; this is the list.
 Owners: **S** open-steamgate (this session's repository), **T** the
 transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 **V** vsp (the Go bridge, the only thing that touches a real system),
+**R** open-rfc-go (the RFC/CPIC transport and the ADT bridge),
 **A** Alice — a decision nobody else can take.
 
 ---
+
+# Where it is going next — three tracks
+
+Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
+the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The
+numbered tree below this is still the standing list; these three are the
+direction.
+
+The tracks are independent on purpose. **A** widens what a client may ask,
+**B** deepens what the answers are made of, **C** is a small strange thing
+worth doing because it is cheap and it proves a point.
+
+---
+
+## Track A — ADT coverage surface
+
+*Make more of what a real client asks answerable. The measure is not a count of
+endpoints: it is how far an ordinary session gets before something 404s.*
+
+The catch-all under the façade already records every unanswered path by method
+(`Refusals`, `adt-surface.md`), so **the worklist writes itself** — run a
+client, read what it asked for and did not get. That is the method for this
+whole track; everything below is what it has produced so far.
+
+```
+A.1  Editor documents for the object types that have none                [S]
+     ├─ FUGR, MSAG, DOMA, TTYP, VIEW, SHLP — each has its own editor format
+     ├─ the object is already in the tree and in the search; opening it 404s
+     ├─ test/zosd-test.mjs lists exactly which
+     └─ order by what a client opens first, not alphabetically
+
+A.2  Function groups and modules as create targets                       [S]
+     └─ a group is a folder of includes with a header of its own
+     └─ blocked on nothing; nothing has asked for one yet
+
+A.3  Data preview                                                        [S]
+     ├─ seen live 2026-09-15: Eclipse says "Data Preview is not supported
+     │  in this system" on a CDS view served by us; A4H answers it
+     ├─ /sap/bc/adt/datapreview/ddic?… and /datapreview/ddic/<T>/metadata
+     └─ the SADL runtime already does the query half; this is the wrapper
+
+A.4  The metadata bootstrap, proven live                            [R] DONE
+     ├─ was: implemented and shape-verified offline, never run live, because
+     │  the Eclipse that tested it had the answers cached
+     ├─ done 2026-09-16 by pointing a plain RFC client (the `rfc` CLI in
+     │  open-rfc-go) at the bridge: `rfc describe SADT_REST_RFC_ENDPOINT`
+     │  returns the interface with both parameters typed
+     ├─ it found a defect on the way: the gateway header's communication and
+     │  connection index were constant. Eclipse never looks, an RFC client
+     │  does, and refused every reply. A reply carries communication index
+     │  zero and the connection index the call came in on — echoing the
+     │  request's 0xffff "unset" is equally wrong
+     ├─ and a gap: an RFC client resolves structures with RFC_METADATA_GET
+     │  then RFC_GET_STRUCTURE_DEFINITION, not DDIF_FIELDINFO_GET. The
+     │  latter is now answered from the same dictionary
+     └─ STILL OPEN, and still shared with C.3: whether a client accepts
+        uncompressed 0303 rows for a LARGE table. Both tables exercised so
+        far are small enough that the system sends them uncompressed too
+
+A.4b An RFC client that can CALL it, not only describe it                [R]
+     ├─ `rfc call SADT_REST_RFC_ENDPOINT` stops in the client's own classic
+     │  structure codec: "classic RFC type v is not implemented"
+     ├─ this function's parameters are recursive and travel as BASXML; the
+     │  client has that codec (internal/xrfc) but `rfc call` does not use it
+     └─ the bridge is not in the way — this is client work, and it would make
+        the bridge drivable from a script as well as from Eclipse
+
+A.5  Stateful session affinity across parallel connections               [R]
+     ├─ Eclipse opens many RFC connections at once; each gets its own cookie
+     │  jar and CSRF token today, which is correct for isolation and wrong
+     │  for a lock/write/activate that must land in one ADT context
+     ├─ the real client carries sap-adt-connection-id; we do not use it
+     └─ needed before writes-over-RFC are trustworthy, not before reads
+
+A.6  Debugger endpoints                                                  [S]
+     ├─ debugger/listeners is a long poll and the second most frequent call
+     │  in a real session; breakpoints is a POST
+     └─ answering them emptily is most of the value: it stops the client
+        retrying, and debugging can stay unimplemented for a long time
+
+A.7  ATC, refactorings, quick fixes, where-used                          [S]
+     └─ not started, not blocking; listed so a 404 reads as a plan
+
+A.8  CTS                                                                 [S]
+     └─ deliberately absent: there is no transport system here, and the
+        boundary to a real system is an abapGit archive from a git ref
+```
+
+---
+
+## Track B — the runtime underneath
+
+*Deepen what the answers are made of: OData, SADL, RFC, and the database seam.*
+
+```
+B.1  SADL beyond read-only                                               [S]
+     ├─ today: CDS projections, an analytics cube, $select -> GROUP BY,
+     │  and writes only on a projection of exactly one table
+     └─ next: associations in a projection, and a write path that is not
+        the single-table special case
+
+B.2  BOPF / RAP / drafts                                                 [S]
+     ├─ still out, as stated on day one
+     ├─ oracles planned but not built: docs/oracle-rap.md, oracle-draft.md
+     └─ gated on 0.4 / 0.5 (Alice: build sample objects on the sandbox?)
+
+B.3  OData v4                                                            [S]
+     └─ the serializer is v2; v4 is a second shape over the same model, and
+        nothing in the dispatcher assumes v2 except the JSON writer
+
+B.4  The RFC runtime, both directions                                    [R]
+     ├─ today: destinations resolve local / replay / live / record / fallback
+     ├─ the bridge is an RFC *server* for exactly one function module
+     └─ next: serve more than SADT_REST_RFC_ENDPOINT, so a real RFC client
+        (SM59 test, an external caller) reaches a transpiled function module
+
+B.5  Multi-record framing, properly measured                             [R]
+     ├─ splitting works and a 606 KB answer was accepted in two records
+     └─ but the operation-info length on a *continued* record is inferred
+        from single-record captures; capture a real long answer and check
+
+B.6  The client/MANDT story                                             [S+T]
+     └─ unchanged and still first-order: fixed client 123, no implicit
+        MANDT (ANORMALIES.md). The demo keeps T0009 visible on purpose
+
+B.7  Database seam                                                       [S]
+     └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
+        (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+```
+
+---
+
+## Track C — the side quest: RFC in, DIAG out
+
+*Answer SAP GUI on the dispatcher port with a screen. Start by showing one
+picture and nothing else.*
+
+The point is not to implement DIAG. It is that this project already speaks the
+gateway half of a system's front door, and the other half — the one SAP GUI
+knocks on — is a protocol we can already *read*. Answering it at all, even with
+one static screen that says the guru meditates, turns "an OData runtime with an
+ADT façade" into "something a SAP client connects to", and tells us exactly how
+big the real thing would be.
+
+**What the oracle says.** A SAP GUI logon against a sandbox was captured
+through a passive tap (40 frames, dispatcher port 3200, kept under `.local/`,
+never here):
+
+- the conversation is **NI-framed**, like RFC, and opens with the same
+  `ffffffff` route request;
+- **30 of 37 payload frames are SAP-LZH compressed** — the `1f 9d` magic with
+  algorithm byte `0x12`, the same container `pkg/sapcompress` in vsp already
+  decodes;
+- the handshake frames that are *not* compressed carry readable items: the
+  codepage (`4110`, `utf-8`), the protocol level (`4103`), a session id.
+
+```
+C.1  Decide the smallest honest goal                                     [A]
+     ├─ proposal: SAP GUI connects, gets a logon screen or a single dynpro
+     │  carrying one message, and stays connected long enough to read it
+     └─ non-goal, explicitly: a usable GUI, transactions, or input handling
+
+C.2  Read the oracle properly                                       [R] DONE
+     ├─ done 2026-09-16: docs/diag-notes.md. Frame = 8-byte header + body,
+     │  body optionally SAP-LZH (flag in the header; setup frames are
+     │  UNCOMPRESSED, so a stub needs no writer). Items are (type, id, sid,
+     │  len, value); 0x10 APPL / 0x12 APPL4 / 0x0c end. The screen chrome
+     │  (title, menu, geometry, session/status) is mapped
+     ├─ the SAPGUI capability shipped (9d232e5) made SAP GUI actually connect:
+     │  it sends an NI route request carrying _NAVIGATION=…;D_WB_ACTION=EXECUTE
+     │  and waits for a screen. diag-catch records it and never replies
+     └─ ONE unknown left: the DYNT/DYNT_ATOM field-item layout, the text
+        *in* a screen. That is the gap between reading a screen and writing
+        one, and it is what C.4 needs
+
+C.3  The LZH *writer* question                                     [A] ANSWERED
+     └─ answered by the measurement in C.2: a DIAG setup frame is sent
+        UNCOMPRESSED (the header's compress flag is zero), so a stub needs
+        no LZH writer at all. The writer stays a want for parity with a real
+        system's traffic, not a blocker for C.4
+
+C.4  A dispatcher listener that says one thing                           [R]
+     ├─ accept on 32NN, answer the NI route request, emit ONE uncompressed
+     │  DIAG frame: a title, a screen geometry, one DYNT_ATOM with the text,
+     │  the end marker; hold the connection
+     ├─ blocked only on the DYNT_ATOM layout (C.2's one remaining unknown):
+     │  measure it from the oracle's screen frames, or lift the screen
+     │  writer from the private DIAG sibling (layers-we-own.md: ready there)
+     ├─ recorder diag-catch already stands on 3202/3203; the reply is the work
+     ├─ content, Alice 2026-09-16: the Amiga "Guru Meditation" — the red-on-
+     │  black alert box, blinking border, a hex "error code". DIAG has no
+     │  colour or border control like that, so the faithful version is the
+     │  TEXT of it on a plain dynpro: a red status/error line, the title
+     │  "Guru Meditation", a line like "Software Failure. Press left mouse
+     │  button to continue." and a fake code "0000000C.48454C50". A closer
+     │  visual is possible later via a generated image the GUI shows, but the
+     │  first frame is text on a screen
+     └─ "Guru Meditation" as the screen, the right ambition for a first frame
+
+C.5  Then, and only then, decide whether it goes further                 [A]
+     └─ a real DIAG server is a large thing; this track is allowed to stop
+        at C.4 having proved the point
+```
+
+---
+
+## Track D — the RFC gateway: expose every RFC-enabled function module
+
+*The ADT bridge terminates RFC for one function module. Make it a real gateway
+for all of them: an external RFC client calls any exposed function module of
+this project as if it were RFC-enabled, and gets a typed answer.*
+
+Added 2026-09-16 (Alice). The point is that the door is already open — the
+bridge is an RFC server, it already answers RFC_GET_FUNCTION_INTERFACE and
+carries typed parameters, and its DefaultDispatcher already has a working
+STFC_CONNECTION handler, which is exactly "call a function module over RFC and
+get a typed answer". What is hardcoded to the one ADT function becomes generic.
+
+What already exists, and is why this is a track and not a project:
+ - OSD transpiles and runs function modules today (FUNCTION z_osd_test_status_text
+   in src/zosd_test/, a FUNCTION-POOL that runs).
+ - the fugr importer already reads a module's signature from a *.fugr.xml
+   (zcl_stg_segw_fugr, tools/segw-gen-mapping.mjs, ZSTG_FM_PARAM).
+ - the bridge has both metadata halves (RFC_GET_FUNCTION_INTERFACE / DDIF /
+   RFC_GET_STRUCTURE_DEFINITION answered) and the codecs that encode arbitrary
+   typed values (internal/xrfc, internal/classicrfc, internal/structure) — all
+   currently driven by one hand-built graph (ADTRestGraph).
+
+The one genuinely new piece: a **signature → metadata graph** builder. Every
+handler today is fed a graph made by hand; a generic gateway builds that graph
+from the module's real signature (its parameters and their DDIC types). That is
+the meat of the track; everything else is wiring what exists.
+
+```
+D.1  A generic "call this module" endpoint in OSD                    [S/T]
+     ├─ POST /sap/bc/.../rfc/call/<FM> {imports, tables} -> {exports,
+     │  tables, exception}: run the transpiled module, return its answer
+     ├─ ABAP already runs; this is a generic CALL FUNCTION over the module
+     │  registry, the same shape as the service registry already here
+     └─ the foundation both modes below stand on
+
+D.2  Which modules are exposed, and finding them                     [S/T]
+     ├─ a registry of remote-enabled modules, the TFDIR/ENLFDIR of this
+     │  project — reuse the *.iwsv-style registration pattern, or a flag in
+     │  the fugr
+     ├─ RFC_FUNCTION_SEARCH answered from it (a name mask -> the matches),
+     │  so SE37's remote test, an SDK, or another system's CALL FUNCTION …
+     │  DESTINATION can discover them
+     └─ mode c) Alice named: a switch that drops the remote-enabled gate and
+        exposes ANY transpiled module, RFC-enabled or not — a dev convenience
+
+D.3  The signature -> metadata graph builder                            [R]
+     ├─ the one new thing: build the bridge's type graph from a module's real
+     │  parameters and their DDIC types, the way ADTRestGraph is built by hand
+     │  for the one function today
+     ├─ feeds the generic metadata handlers (RFC_GET_FUNCTION_INTERFACE, DDIF,
+     │  RFC_GET_STRUCTURE_DEFINITION) so they answer for ANY module
+     └─ and feeds the codecs, so import params decode and exports encode
+
+D.4  The bridge becomes a generic RFC server                            [R]
+     ├─ one handler for any unknown FM name: look up the signature (D.3),
+     │  decode the imports, call OSD (D.1), encode the exports
+     ├─ STFC_CONNECTION and RFC_PING already work; this generalises them
+     └─ result: `rfc call <ANY_FM>` through the bridge reaches a transpiled
+        module. A4.b's "rfc call needs the recursive codec" is the same client
+        gap and is shared
+
+D.5  mode b) the SOAP-RFC facade — likely the easiest first win        [S]
+     ├─ /sap/bc/soap/rfc: a SOAP envelope naming the module and its params ->
+     │  the result, HTTP-only, no RFC transport and no bridge in the path
+     ├─ reuses D.1 directly; provable with curl; the classic way any
+     │  RFC-enabled module is also a web service
+     └─ a good place to START the track: it exercises D.1 + D.3 without the
+        RFC framing, so the marshalling is proven before the transport is
+
+Smallest first win: D.1 + D.5 over the one module that already exists
+(z_osd_test_status_text), reachable by curl. Then D.3/D.4 put it on RFC, where
+`rfc call` and SE37 reach it. The three modes Alice named map to: a) = D.4
+(full RFC gate), b) = D.5 (SOAP-RFC), c) = the switch in D.2.
+
+Recommendation: start at D.5. It proves the generic call and the marshalling
+over plain HTTP, where a failure is a curl and a diff, before any of it has to
+survive RFC framing.
+```
+
+---
+
+# The standing list
 
 ## 0. Decisions waiting on Alice
 
@@ -423,7 +712,7 @@ open  revisions: reading them out of git instead of a system.
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
-8.7  a leak detector on the way out, not a rule in a document        [S]
+8.7  a leak detector on the way out, not a rule in a document   [СДЕЛАНО]
      └─ 2026-09-14: a wire capture was about to go into open-rfc-go, a
         public repository, as a test fixture. It contained two LAN
         addresses, a host name, an Eclipse project name, a machine id and
@@ -445,6 +734,29 @@ open  revisions: reading them out of git instead of a system.
         are per-clone and silently absent on a fresh one — so the same check
         belongs in CI where it cannot be skipped
      └─ Alice's call, 2026-09-14, and the right one
+     └─ built 2026-09-14, `tools/osd-leak-scan.mjs`, `npm run leak`, hook in
+        `.githooks/pre-commit`, CI in `.github/workflows/leak-scan.yml`
+     └─ and it caught one the same hour, in the repository it was written
+        for. A 746-byte logon template committed to open-rfc-go carried the
+        captured system's host name, instance, address, logon string and
+        user, all in UTF-16LE — and a hand scan run over that very file had
+        reported it clean an hour earlier, because it looked for runs of
+        printable ASCII and a NUL after every character is enough to hide a
+        host name from a grep. The design lesson is one line: decode first,
+        match second, over every encoding a file plausibly has
+     └─ a sixth identifier was not text at all. The last six bytes of a
+        session GUID are the client's own IPv4 packed into the uuid node
+        field, which is how a LAN address travels through a public
+        repository without ever spelling itself out. Matched in binary now,
+        and only on two-byte prefixes: 10.x is one byte, any random blob
+        produces one per 256, and the first run turned up seven of those and
+        nothing real. A check that cries wolf is read once
+     └─ its first real catch was the comment I wrote explaining the scrub. I
+        cleaned the data and spelled both identifiers out in the prose beside
+        it. Nothing was pushed, so nothing was public
+     └─ what it finds on open-rfc-go's public main is Alice's to decide: two
+        of her LAN addresses, her surname, and the stock A4H appliance host
+        name, in files that predate this branch
 
 8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
      └─ from T, 2026-09-14, half done already: `write_source_map` is

@@ -1,0 +1,28 @@
+# The same check the pre-commit hook runs, where it cannot be skipped.
+#
+# A hook lives in a clone. It is absent on a fresh one, absent for anybody who
+# has not run `git config core.hooksPath .githooks`, and gone the moment
+# somebody passes --no-verify. None of that is a reason not to have the hook —
+# it is the fast feedback — but it is the reason this file exists.
+name: leak scan
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The identifier list is gitignored and not on a runner, so CI runs the
+      # structural rules only: private addresses in any encoding, the same
+      # addresses packed into four bytes, uuid shapes, and any capture staged
+      # at all. Exit 2 means "ran without the names", which is the expected
+      # state here rather than a failure.
+      - name: scan every tracked file
+        run: |
+          node tools/osd-leak-scan.mjs . --all || [ $? -eq 2 ]

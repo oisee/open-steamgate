@@ -116,9 +116,27 @@ export class Sessions {
     return (req, res, next) => {
       this.#sweep();
       const cookies = parseCookies(req.headers.cookie);
-      const asked = cookies[CONTEXT_COOKIE];
 
-      // an empty context cookie is a heal attempt: the client believes the
+      // Two cookies name the same session, and which one comes back depends
+      // on how the client is using it.
+      //
+      // sap-contextid is the stateful context, and a client that has not
+      // asked for a stateful session is right not to keep it. An ABAP Cloud
+      // Project never does: measured over a whole session, every request came
+      // back with SAP_SESSIONID_* and sap-usercontext and never once with
+      // sap-contextid. Reading only the context cookie made every request a
+      // new session with a new token, so the token the client had just been
+      // handed always belonged to a session that no longer existed, and every
+      // write was refused with a CSRF failure that no amount of re-fetching
+      // could fix. The client was doing everything right.
+      //
+      // So the context cookie wins when present, because it is the one that
+      // carries statefulness, and the session cookie answers for everyone
+      // else. That is also how the real thing behaves: A4H binds its token to
+      // the session it issued at logon.
+      const asked = cookies[CONTEXT_COOKIE] || cookies[SESSION_COOKIE];
+
+      // an empty cookie is a heal attempt: the client believes the
       // context is gone and wants a new one rather than an error
       let session = asked === undefined || asked === "" ? undefined : this.get(asked);
       const fresh = session === undefined;

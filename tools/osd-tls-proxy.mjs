@@ -109,6 +109,10 @@ export function startProxy(options = {}) {
         request: {headers: req.headers, body: log.keep(inBody, inBytes)},
         response: {status: answer.statusCode, headers: answer.headers, body: log.keep(out, outBytes)},
       }));
+      // A reset partway through an answer has no 502 to give: the status is
+      // already sent. Ending the response is all that is left, and the point
+      // is that the process survives to serve the next request.
+      answer.on("error", () => res.destroy());
       answer.pipe(res);
     });
     upstream.on("error", (e) => {
@@ -117,6 +121,10 @@ export function startProxy(options = {}) {
       }
       res.end(`the far end did not answer: ${e?.message ?? e}`);
     });
+    // A client that walks away mid-request, which Eclipse does routinely when
+    // it cancels a long poll.
+    req.on("error", () => upstream.destroy());
+    res.on("error", () => upstream.destroy());
     req.pipe(upstream);
   };
 
@@ -126,6 +134,25 @@ export function startProxy(options = {}) {
 
   // an ADT client may open a websocket for its push channel; without this
   // the connection is refused rather than forwarded
+  // Nothing a peer does may take this process down.
+  //
+  // It went down for exactly that: the backend was restarted, the forwarded
+  // socket reset, and an unhandled ECONNRESET on a stream nobody was
+  // listening to killed the proxy. A debugging instrument that dies when the
+  // thing it is watching hiccups is worse than no instrument, because it
+  // fails silently and the next reading is simply absent — and it had already
+  // cost one confusing "502 Bad Gateway" in a live session before anybody
+  // looked at its log.
+  server.on("clientError", (error, socket) => {
+    if (socket.writable) {
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    }
+    socket.destroy();
+  });
+  server.on("tlsClientError", (error, socket) => socket.destroy());
+  server.on("connection", (socket) => socket.on("error", () => socket.destroy()));
+  server.on("secureConnection", (socket) => socket.on("error", () => socket.destroy()));
+
   server.on("upgrade", (req, socket, head) => {
     const headers = {...req.headers, host: target.host};
     const upstream = forward({

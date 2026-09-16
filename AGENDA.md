@@ -7,6 +7,45 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
 > was decided and why.
 
+## Milestone — the ADT surface (OSD as a real ABAP Cloud system), 2026-09-15
+
+Eclipse ADT 3.60 and vsp treat OSD as a system: log on, browse the package
+tree to any depth, open and edit every source kind, save, activate, run unit
+tests, preview table and CDS data on F8, and create and delete objects — and
+every change lands on the git tree as abapGit files. The server side of the
+surface is catalogued in [`docs/adt-surface.md`](docs/adt-surface.md), each
+capability with its resource, its shape, and the client gate it satisfies; the
+client contract it was built against is [`docs/adt-facade.md`](docs/adt-facade.md).
+
+What made it work, in order of how invisible the cause was:
+- **The compatibility graph is the gate.** A missing `compatibilityAvailable`
+  node makes the client read every feature as absent and send nothing; the
+  same is true per feature (`SOURCESERVICES/outline` for the outline,
+  `DDIC.DDLSOURCES/ddlSources` for opening a CDS view). Most failures were
+  decided in the client before a socket opened.
+- **An empty `<OBJECT_VIT_URI/>` made every tree node the same node.** The
+  client parses it as `new URI("")` and compares nodes by path, so clicking
+  one package opened another and deeper nodes hung on "Loading repository
+  tree ...". Omitting the empty element fixed browsing to any depth. Proven by
+  byte-code, not guessed.
+- **Save kept content only once a written object read back inactive** with a
+  new ETag; a 304 wiped the editor.
+- **F8 rows** needed Open SQL (comma-less field lists, `UP TO n ROWS`)
+  translated at the data layer.
+- **Create/delete** write and remove the abapGit files a package's folder
+  holds, and a file that appears on disk is served without a restart.
+
+Method that carried it: read the client's jars for the gate, pull fresh A4H
+captures as oracles, and record what the live client actually sent
+(`STG_ADT_DUMP`) rather than replay what it "must have" sent. The system is
+**OS2** by default so a bare restart keeps a project's logon.
+
+Open next: the editor documents for FUGR/MSAG/DOMA/TTYP/VIEW/SHLP (each its
+own format), function-group create, and the RFC → ADT bridge (Eclipse's
+non-cloud logon travels over RFC, not HTTP; oracle capture on the gateway
+port is the first step, `~/dev/open-rfc-go` carries the transport and an
+`adt-rfc-bridge` skeleton).
+
 ## Decided (2026-09-11)
 
 - **Repo created** as the OData/Gateway member of the SAP-protocol family

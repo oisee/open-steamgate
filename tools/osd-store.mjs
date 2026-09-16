@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
 import {basename, dirname, join} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -73,6 +73,18 @@ const ROOT_PACKAGES = {
   gen: "$STG_GEN",
 };
 
+// A folder that is a package of its own rather than a child of the root
+// above it. The demo package lives inside src but is not part of $STG.
+const FOLDER_PACKAGES = {
+  "src/zosd_test": "$ZOSD_TEST",
+};
+
+// A package above all of ours, if one is wanted. It was tried as $Z and
+// taken out again the same day: one more level to click through, in the
+// system library and in the favourites alike, bought nothing a person
+// wanted. null means the roots are the roots.
+const SUPER_PACKAGE = null;
+
 const DEFAULT_ROOTS = [
   {path: "src", writable: true, library: false},
   // what was brought in from a repository: objects of the local system that
@@ -102,9 +114,27 @@ export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
     this.roots = options.roots ?? DEFAULT_ROOTS;
+    this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
     this.parsed = undefined;
+    // What has been written and not activated since. A system keeps an
+    // inactive version of such an object and says so in its documents; a
+    // client that saved and then read the object back unchanged took its
+    // own copy for the newer one and showed an empty editor over a save
+    // that had succeeded. Written marks it, a clean activation clears it.
+    this.inactive = new Set();
+  }
+
+  // the state of one object as its documents report it
+  stateOf(entry) {
+    let changedAt;
+    try {
+      changedAt = statSync(join(this.root, entry.file)).mtime.toISOString().replace(/\.\d{3}Z$/, "Z");
+    } catch {
+      changedAt = undefined;
+    }
+    return {changedAt, version: this.inactive.has(`${entry.type} ${entry.name}`) ? "inactive" : "active"};
   }
 
   // ---------------------------------------------------------------- index
@@ -135,8 +165,10 @@ export class ObjectStore {
   // link joined up, so a name that happens to hold an underscore does not
   // invent a parent that is not there.
   #packagesOf(file, root) {
-    const base = ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-    const inside = file.slice(root.path.length).split("/").filter((p) => p !== "");
+    const own = Object.keys(FOLDER_PACKAGES).find((folder) => file.startsWith(folder + "/"));
+    const base = own !== undefined ? FOLDER_PACKAGES[own]
+      : ROOT_PACKAGES[root.path] ?? "$" + (root.path.split("/").filter((p) => p !== "src" && p !== "." && p !== ".local" && p !== "lars").pop() ?? root.path).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    const inside = file.slice((own ?? root.path).length).split("/").filter((p) => p !== "");
     inside.pop();
     const chain = [base];
     for (const folder of inside) {
@@ -167,8 +199,11 @@ export class ObjectStore {
           if (!index.has(key)) {
             // a package is an object of the package above it, the way a
             // system holds it, so its own folder is not also its home
-            const home = type === "DEVC" && objectName === chain[chain.length - 1] && chain.length > 1
-              ? chain.slice(0, -1)
+            const own = type === "DEVC" && objectName === chain[chain.length - 1];
+            const home = own && chain.length > 1 ? chain.slice(0, -1)
+              // a root package's own object goes to the package above every
+              // root, when there is one; a root holds no object of itself
+              : own && this.superPackage ? [this.superPackage]
               : chain;
             index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library,
                             imported: root.imported === true, package: home[home.length - 1], packages: home});
@@ -234,6 +269,30 @@ export class ObjectStore {
   }
 
   // the source of an object, or of one of a class's includes
+  // Which includes a class actually has on disk.
+  //
+  // A client builds the class's file list from this: against a real system a
+  // class appears as a folder holding .clas.abap beside .clas.locals_def.abap
+  // and its siblings, and a class document that lists only main gets a single
+  // flat file. Reporting an include that is not there would be worse — a file
+  // in the tree that opens empty.
+  classIncludes(name) {
+    const entry = this.find("CLAS", name);
+    if (entry === undefined) {
+      return [];
+    }
+    const present = [];
+    for (const [include, suffix] of Object.entries(INCLUDES)) {
+      if (include === "main") {
+        continue;
+      }
+      if (existsSync(join(this.root, entry.file.replace(/\.clas\.abap$/, suffix)))) {
+        present.push(include);
+      }
+    }
+    return present;
+  }
+
   read(type, name, include = "main") {
     const entry = this.find(type, name);
     if (entry === undefined) {
@@ -266,8 +325,9 @@ export class ObjectStore {
     if (entry === undefined) {
       const root = this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
+      const packages = this.#packagesOf(file, root);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,
-               imported: root.imported === true, package: this.#packagesOf(file, root).pop()};
+               imported: root.imported === true, package: packages[packages.length - 1], packages};
       this.#entries().set(`${entry.type} ${entry.name}`, entry);
     }
     let file = entry.file;
@@ -279,9 +339,115 @@ export class ObjectStore {
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
-    writeFileSync(join(this.root, file), source);
+    // One line ending, the repository's. An editor on Windows sends CRLF,
+    // and a save that wrote it as it came turned a one-line comment into a
+    // sixty-three-line diff with no comment in it. A system stores source
+    // by line, not by terminator, and so does this tree.
+    writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+    this.inactive.add(`${entry.type} ${entry.name}`);
     this.#forget();
-    return {...entry, include, file, bytes: Buffer.byteLength(source, "utf8")};
+    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
+  }
+
+  // A new object, in the folder of the package it is asked for. The two
+  // files are the ones abapGit would write: the source and the header
+  // beside it, so a repository made here is one abapGit can pull, and an
+  // object made by abapGit is one this finds. The source is a skeleton the
+  // client overwrites on its first save, which is what every ADT client
+  // does after a create; a caller that has the source hands it in.
+  //
+  // The folder comes from the package and not the other way round: a
+  // package here IS a folder (#packagesOf), so an object of $ZOSD_TEST_SRC
+  // lands in src/zosd_test/src/, and a new package is a new folder under
+  // its parent's, named after the last link of its name. A package whose
+  // name does not continue its parent's cannot be a folder, and is refused
+  // rather than misfiled.
+  create(type, name, options = {}) {
+    const meta = TYPES[type];
+    if (meta === undefined || CREATABLE[type] === undefined) {
+      throw new NotSupported(`creating an object of type ${type}`);
+    }
+    const upper = String(name).toUpperCase();
+    if (this.find(type, upper) !== undefined) {
+      throw new Conflict(type, upper);
+    }
+    const parent = String(options.package ?? "").toUpperCase();
+    const home = this.find("DEVC", parent);
+    if (parent === "" || home === undefined) {
+      throw new NotFound("DEVC", parent === "" ? "(no package named)" : parent);
+    }
+    if (home.writable === false) {
+      throw new ReadOnly("DEVC", parent);
+    }
+    const folder = dirname(home.file);
+    const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
+    const description = String(options.description ?? "");
+    let file;
+    if (type === "DEVC") {
+      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+        throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
+      }
+      file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
+    } else {
+      file = join(folder, fileOf(upper) + meta.ext);
+    }
+    if (existsSync(join(this.root, file))) {
+      throw new Conflict(type, upper);
+    }
+    mkdirSync(join(this.root, dirname(file)), {recursive: true});
+    const made = CREATABLE[type](upper, description, options.source);
+    for (const [suffix, content] of Object.entries(made)) {
+      const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
+      writeFileSync(join(this.root, target), content);
+    }
+    const packages = this.#packagesOf(file, root);
+    const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
+                   imported: root.imported === true, description,
+                   package: type === "DEVC" ? parent : packages[packages.length - 1], packages};
+    this.#entries().set(`${type} ${upper}`, entry);
+    if (type !== "DEVC") {
+      this.inactive.add(`${type} ${upper}`);
+    }
+    this.#forget();
+    return {...entry, ...this.stateOf(entry), created: true};
+  }
+
+  // The disk is the other editor. A file that appears, changes or goes
+  // under a writable root (a git checkout, an abapGit pull, an editor that
+  // is not ADT) is noticed here, and the next request rebuilds the index
+  // and the registry rather than answering from what was true at start.
+  // Coarse on purpose: any change forgets everything, because the walk is
+  // milliseconds and the parse is what the next check pays anyway.
+  // persistent:false so a store in a test does not keep the process alive.
+  watch() {
+    if (this.watchers !== undefined) {
+      return this;
+    }
+    this.watchers = [];
+    for (const root of this.roots.filter((r) => r.writable)) {
+      try {
+        const watcher = watch(join(this.root, root.path), {recursive: true, persistent: false}, (event, file) => {
+          if (file === undefined || /\.(abap|xml|asddls|json)$/.test(file) === false) {
+            return;
+          }
+          this.index = undefined;
+          this.#forget();
+        });
+        watcher.on("error", () => {});
+        this.watchers.push(watcher);
+      } catch {
+        // a file system without recursive watching answers as before: from
+        // the index built at start
+      }
+    }
+    return this;
+  }
+
+  unwatch() {
+    for (const w of this.watchers ?? []) {
+      w.close();
+    }
+    this.watchers = undefined;
   }
 
   delete(type, name) {
@@ -292,15 +458,30 @@ export class ObjectStore {
     if (entry.writable === false) {
       throw new ReadOnly(type, name);
     }
-    for (const suffix of [undefined, ...Object.values(INCLUDES)]) {
-      const file = suffix === undefined ? entry.file : entry.file.replace(/\.clas\.abap$/, suffix);
-      if (file !== entry.file || suffix === undefined) {
-        if (existsSync(join(this.root, file))) {
-          unlinkSync(join(this.root, file));
-        }
+    const meta = TYPES[type];
+    const files = [entry.file];
+    if (type === "CLAS") {
+      files.push(...Object.values(INCLUDES).map((suffix) => entry.file.replace(/\.clas\.abap$/, suffix)));
+    }
+    if (type === "DEVC") {
+      // a package goes only once it is empty: its objects are not deleted
+      // by implication, the way a real system refuses to delete a package
+      // that still has content
+      const inside = [...this.#entries().values()].filter((e) => e.type !== "DEVC" ? e.package === entry.name : e.package === entry.name && e.name !== entry.name);
+      if (inside.length > 0) {
+        throw new NotSupported(`deleting ${entry.name} while it still holds ${inside.length} object(s)`);
+      }
+    } else if (meta.ext.endsWith(".abap") || meta.ext.endsWith(".asddls")) {
+      // the abapGit header beside the source
+      files.push(entry.file.slice(0, -meta.ext.length) + meta.ext.replace(/\.(abap|asddls)$/, ".xml"));
+    }
+    for (const file of files) {
+      if (existsSync(join(this.root, file))) {
+        unlinkSync(join(this.root, file));
       }
     }
     this.#entries().delete(`${entry.type} ${entry.name}`);
+    this.inactive.delete(`${entry.type} ${entry.name}`);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -354,8 +535,26 @@ export class ObjectStore {
           }
         }
       });
+      // a root package's own object is the package, not something in it
+      if (entry.type === "DEVC" && entry.name === entry.package) {
+        continue;
+      }
       const own = packages.get(entry.package);
       own.objects = own.objects + 1;
+    }
+    // everything that had no package above it now has the super-package
+    const tops = [...packages.values()]
+      .filter((node) => node.parent === undefined && node.name !== this.superPackage).map((node) => node.name);
+    // and not on an empty system: a super-package over nothing is a package
+    // that holds nothing, which is not what "no packages" means
+    if (this.superPackage !== null && this.superPackage !== undefined && tops.length > 0) {
+      const top = ensure(this.superPackage, undefined);
+      top.library = false;
+      top.description = "Packages served by this system";
+      for (const name of tops) {
+        packages.get(name).parent = this.superPackage;
+        top.subpackages.push(name);
+      }
     }
     for (const node of packages.values()) {
       node.subpackages.sort();
@@ -396,8 +595,9 @@ export class ObjectStore {
     }
     const objects = [];
     for (const entry of this.#entries().values()) {
-      if (entry.package === wanted) {
-        objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable});
+      if (entry.package === wanted && !(entry.type === "DEVC" && entry.name === wanted)) {
+        objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable,
+          version: this.stateOf(entry).version});
       }
     }
     return {
@@ -566,7 +766,9 @@ export class ObjectStore {
 
   // the issues of one object, in the shape the façade returns
   #issues(registry, type, name) {
-    const object = registry.getObject(type, name);
+    // an include is a program to abaplint: the registry files it as PROG,
+    // and asking for INCL finds nothing and calls a clean include broken
+    const object = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);
     if (object === undefined) {
       return {type, name, issues: [{severity: "E", message: `${type} ${name} is not in the registry`, line: 1, column: 1}]};
     }
@@ -677,10 +879,16 @@ export class ObjectStore {
     // verdict.
     const broken = [];
     for (const dependent of this.dependents(type, name)) {
-      const checked = this.check(dependent.type, dependent.name);
+      // straight off the registry, not through find(): a dependent may be of
+      // a type the store does not index (an IWPR naming the class it maps),
+      // and it is in the registry by construction, so it is checked there
+      const checked = this.#issues(this.registry(), dependent.type, dependent.name);
       if (checked.issues.length > 0) {
         broken.push(checked);
       }
+    }
+    if (broken.length === 0) {
+      this.inactive.delete(`${type} ${String(name).toUpperCase()}`);
     }
     return {...result, active: broken.length === 0, dependents: broken};
   }
@@ -714,6 +922,96 @@ export class ObjectStore {
       });
     });
     return this.building;
+  }
+}
+
+// what a create writes, per type: the abapGit header and a source skeleton
+// (the client's first save replaces the skeleton). Header fields are the
+// ones abapGit serializes for a fresh object of the kind.
+const abapGitHeader = (serializer, inner) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="${serializer}" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+${inner}
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+const xmlText = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const textPool = (text) => text === "" ? "" : `
+   <TPOOL>
+    <item>
+     <ID>R</ID>
+     <ENTRY>${xmlText(text)}</ENTRY>
+     <LENGTH>${String(text).length}</LENGTH>
+    </item>
+   </TPOOL>`;
+const CREATABLE = {
+  CLAS: (name, text, source) => ({
+    ".clas.abap": source ?? `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\nENDCLASS.\n\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\nENDCLASS.\n`,
+    ".clas.xml": abapGitHeader("LCL_OBJECT_CLAS", `   <VSEOCLASS>
+    <CLSNAME>${name}</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>${xmlText(text)}</DESCRIPT>
+    <STATE>1</STATE>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>`),
+  }),
+  INTF: (name, text, source) => ({
+    ".intf.abap": source ?? `INTERFACE ${name.toLowerCase()} PUBLIC.\nENDINTERFACE.\n`,
+    ".intf.xml": abapGitHeader("LCL_OBJECT_INTF", `   <VSEOINTERF>
+    <CLSNAME>${name}</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>${xmlText(text)}</DESCRIPT>
+    <EXPOSURE>2</EXPOSURE>
+    <STATE>1</STATE>
+    <UNICODE>X</UNICODE>
+   </VSEOINTERF>`),
+  }),
+  PROG: (name, text, source) => ({
+    ".prog.abap": source ?? `REPORT ${name.toLowerCase()}.\n`,
+    ".prog.xml": abapGitHeader("LCL_OBJECT_PROG", `   <PROGDIR>
+    <NAME>${name}</NAME>
+    <DBAPL>S</DBAPL>
+    <SUBC>1</SUBC>
+    <FIXPT>X</FIXPT>
+    <LDBNAME>D$S</LDBNAME>
+    <UCCHECK>X</UCCHECK>
+   </PROGDIR>${textPool(text)}`),
+  }),
+  INCL: (name, text, source) => ({
+    ".prog.abap": source ?? `*&---------------------------------------------------------------------*\n*& Include ${name}\n*&---------------------------------------------------------------------*\n`,
+    ".prog.xml": abapGitHeader("LCL_OBJECT_PROG", `   <PROGDIR>
+    <NAME>${name}</NAME>
+    <SUBC>I</SUBC>
+    <APPL>S</APPL>
+    <FIXPT>X</FIXPT>
+    <UCCHECK>X</UCCHECK>
+   </PROGDIR>${textPool(text)}`),
+  }),
+  DDLS: (name, text, source) => ({
+    ".ddls.asddls": source ?? `@EndUserText.label: '${String(text).replaceAll("'", "''")}'\ndefine view entity ${name} as select from zosd_test_item\n{\n  key item_id\n}\n`,
+    ".ddls.xml": abapGitHeader("LCL_OBJECT_DDLS", `   <DDLS>
+    <DDLNAME>${name}</DDLNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <DDTEXT>${xmlText(text)}</DDTEXT>
+   </DDLS>`),
+  }),
+  DEVC: (name, text) => ({
+    "package.devc.xml": abapGitHeader("LCL_OBJECT_DEVC", `   <DEVC>
+    <CTEXT>${xmlText(text)}</CTEXT>
+   </DEVC>`),
+  }),
+};
+
+export class Conflict extends Error {
+  constructor(type, name) {
+    super(`${type} ${name} already exists`);
+    this.code = "CONFLICT";
+    this.objectType = type;
+    this.objectName = name;
   }
 }
 

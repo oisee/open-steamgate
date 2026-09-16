@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TRAN" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <TSTC>
+    <TCODE>ZOSD_TEST_DEMO</TCODE>
+    <PGMNA>ZOSD_TEST_DEMO_PROG</PGMNA>
+   </TSTC>
+   <TSTCC>
+    <TCODE>ZOSD_TEST_DEMO</TCODE>
+    <S_WEBGUI>2</S_WEBGUI>
+   </TSTCC>
+   <TSTCT>
+    <SPRSL>E</SPRSL>
+    <TCODE>ZOSD_TEST_DEMO</TCODE>
+    <TTEXT>ZOSD_TEST: run the demo report</TTEXT>
+   </TSTCT>
+  </asx:values>
+ </asx:abap>
+</abapGit>

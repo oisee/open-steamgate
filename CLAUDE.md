@@ -382,6 +382,28 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   convenience.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
+- **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in
+  `.githooks/`, CI in `leak-scan.yml`) looks for live identifiers in what is
+  about to be published. It exists because a 746-byte logon template was
+  committed to a public repo carrying a system's host name, instance, address,
+  logon string and user, and a hand scan written to catch exactly that called
+  it clean: the scan looked for runs of printable ASCII and every string in the
+  structure was **UTF-16LE**. A NUL after each character hides a host name from
+  a grep and from an eye. So the tool builds every byte view a file plausibly
+  has — the text, the hex runs in it, the base64 blocks, each read as ASCII and
+  as UTF-16LE — and matches over all of them. A sixth identifier was not a
+  string at all: the last six bytes of a session GUID are the client's own IPv4
+  packed into the uuid's node field, which no text search can see, so private
+  addresses are matched in binary too (the two-byte prefixes only — a 10.x
+  match is one byte and any random blob produces one per 256, and a check that
+  cries wolf gets ignored). The identifier list is gitignored
+  (`.local/leak-identifiers.json`): a list of what must not be published cannot
+  itself be published, and the tool says so and exits 2 rather than passing
+  quietly when it is absent. `.leak-allow.json` **is** tracked and every entry
+  needs a reason, so an exception can be told from a way of making the build
+  green. The rule "no live identifiers" had been in this file since the first
+  week and did no work at all; both times it was attention that caught the
+  leak, and attention is what runs out.
 
 ## Local clones
 

@@ -13,6 +13,32 @@
 import {existsSync} from "node:fs";
 import {join} from "node:path";
 
+// What a client sends is Open SQL, and the database speaks SQL. The one
+// difference that reaches this door: Eclipse's data preview writes the
+// field list of a table the way a 7.x report does, blank-separated and
+// without commas ("SELECT T~A T~B FROM T"), which SQLite refuses as a
+// syntax error; the A4H oracle of the same request has commas, because a
+// newer release writes them. Both are Open SQL, so both are accepted here:
+// a list with no comma in it is split on blanks and joined with commas.
+// The tilde is the database client's to translate. "UP TO n ROWS" is the
+// Open SQL row limit and becomes the SQL one. Nothing else is rewritten;
+// a WHERE clause the client writes travels as written.
+export function openSqlToSql(text) {
+  let out = text;
+  const head = /^(select\s+(?:distinct\s+)?)(.+?)(\s+from\s+)/is.exec(out);
+  if (head !== null) {
+    const [, keyword, list, from] = head;
+    if (!list.includes(",") && list.trim() !== "*" && /\s/.test(list.trim())) {
+      out = keyword + list.trim().split(/\s+/).join(", ") + from + out.slice(head[0].length);
+    }
+  }
+  const upTo = /\s+up\s+to\s+(\d+)\s+rows\b/i.exec(out);
+  if (upTo !== null) {
+    out = out.replace(upTo[0], "") + ` LIMIT ${upTo[1]}`;
+  }
+  return out;
+}
+
 export class Data {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
@@ -50,7 +76,7 @@ export class Data {
   async query(sql, options = {}) {
     const max = options.max ?? 100;
     const client = await this.boot();
-    const text = String(sql).trim().replace(/;$/, "");
+    const text = openSqlToSql(String(sql).trim().replace(/;$/, ""));
     if (/^select\b/i.test(text) === false) {
       throw new NotAllowed(text.split(/\s+/)[0] ?? "");
     }
