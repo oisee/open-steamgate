@@ -27,8 +27,8 @@ content of this repository: `packs/o4d/osd-pack.json` and
 `packs/zork/osd-pack.json` name their repositories and a commit, and the
 workflow runs `node tools/osd-fetch.mjs` before the build, which copies each
 one into `packs/<name>/upstream/` and lets the pack's own `src/` layer over
-it (the Zork overlay is the APC handler, the ICF node, the story file and
-four classes changed for the transpiler). `scripts/build-preview.mjs` then
+it (the Zork overlay is the APC handler and the ICF node; the story files
+are fetched from the same repository). `scripts/build-preview.mjs` then
 takes the packs' ICF nodes and channels into `services.mjs`, their SMW0
 objects into `media/`, their pages into `app/<name>/` and their tiles into
 `app/packs.json`, and refuses to build when a declared source is not there.

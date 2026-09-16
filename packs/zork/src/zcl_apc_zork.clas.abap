@@ -12,7 +12,7 @@ CLASS zcl_apc_zork DEFINITION
 
   PRIVATE SECTION.
     CONSTANTS c_crlf TYPE string VALUE cl_abap_char_utilities=>cr_lf.
-    CONSTANTS c_game_id TYPE string VALUE 'ZORK-MINI.Z3'.
+    CONSTANTS c_game_id TYPE string VALUE 'ZORK-MINI-Z3'.
 
     DATA mo_zmachine TYPE REF TO zcl_ork_00_zmachine.
     DATA mv_input_buffer TYPE string.

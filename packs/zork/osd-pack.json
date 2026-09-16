@@ -2,7 +2,7 @@
   "name": "zork",
   "description": "Zork: a Z-machine V3 interpreter in ABAP, the story file out of SMW0",
   "order": 45,
-  "abap": ["upstream", "src"],
+  "abap": ["upstream", "games", "src"],
   "sources": [
     {
       "folder": "upstream",
@@ -15,6 +15,13 @@
         "^zcl_ork_00_game_loader_file\\.clas\\.",
         "^zcl_ork_00_script_loader_file\\.clas\\."
       ]
+    },
+    {
+      "folder": "games",
+      "repo": "https://github.com/oisee/zork-abap",
+      "ref": "0c8d96b908f88fc3207e7f9a00bc43f724b32b6f",
+      "path": "src/zork_02",
+      "exclude": ["^package\\.devc\\.xml$", "^zduckme"]
     }
   ]
 }

@@ -107,11 +107,10 @@ Ordered by what breaks without them, most first.
   says what each overlay changes): `oisee/vivid-vibes`, one line in
   `zcl_o4d_http_handler` — the megademo page asks `?image=<name>` and the
   handler serves `?img=<NAME>.PNG`, so no picture loads at the pinned
-  commit; `oisee/zork-abap`, the SMW0 loader finding the story by object
-  id, and three classes with declarations written out for the transpiler
-  (each of those is also a transpiler reproducer waiting to be reduced).
-  A PR to each once the overlay is reviewed; until then the overlay is
-  the diff.
+  commit. `oisee/zork-abap` needs nothing: the pack runs its HEAD as is
+  (an earlier pack carried five classes from an older commit, which is why
+  it looked patched). A PR to vivid-vibes once the line is reviewed; until
+  then the overlay is the diff.
 - **Filed as issues rather than fixed (Alice, 2026-09-17): "можно пока не
   фиксить … а пока сделать тест и завести как issue."** The tests are the
   measured contract; a fix that passes them is the PR.
