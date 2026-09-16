@@ -195,25 +195,33 @@ C.3  The LZH *writer* question                                     [A] ANSWERED
         no LZH writer at all. The writer stays a want for parity with a real
         system's traffic, not a blocker for C.4
 
-C.4  A dispatcher listener that says one thing                           [R]
-     ├─ accept on 32NN, answer the NI route request, emit ONE uncompressed
-     │  DIAG frame: a title, a screen geometry, one DYNT_ATOM with the text,
-     │  the end marker; hold the connection
-     ├─ blocked only on the DYNT_ATOM layout (C.2's one remaining unknown):
-     │  measure it from the oracle's screen frames, or lift the screen
-     │  writer from the private DIAG sibling (layers-we-own.md: ready there)
-     ├─ recorder diag-catch already stands on 3202/3203; the reply is the work
-     ├─ content, Alice 2026-09-16: the Amiga "Guru Meditation" — the red-on-
-     │  black alert box, blinking border, a hex "error code". DIAG has no
-     │  colour or border control like that, so the faithful version is the
-     │  TEXT of it on a plain dynpro: a red status/error line, the title
-     │  "Guru Meditation", a line like "Software Failure. Press left mouse
-     │  button to continue." and a fake code "0000000C.48454C50". A closer
-     │  visual is possible later via a generated image the GUI shows, but the
-     │  first frame is text on a screen
-     └─ "Guru Meditation" as the screen, the right ambition for a first frame
+C.4  A dispatcher listener that says one thing                     [R] DONE
+     ├─ done 2026-09-16, and not the way it was sized: nothing had to be
+     │  measured. open-diag-go's lsd already is a self-contained DIAG server
+     │  with an embedded, scrubbed wrapper and a screen writer; one flag,
+     │  -stub guru|spectrum, makes it answer every frame with one still
+     │  screen and end cleanly on close (branch osd-stub there)
+     ├─ measured with Eclipse: F8 on ZOSD_TEST_DEMO_PROG hands SAP GUI to
+     │  :3201 with a reentrance ticket in the hello, and the guru is painted.
+     │  Three client frames, each answered with the same screen
+     ├─ the local lab: façade :3030, bridge :3301, stub :3201, one instance
+     │  (01) on one WSL address; the Eclipse project is Custom Application
+     │  Server with that host and instance
+     └─ docs/diag-notes.md: the stub as built, and what the hello carries
 
-C.5  Then, and only then, decide whether it goes further                 [A]
+C.5  One ticket, three doors: SSO across HTTP, RFC and DIAG               [S+R]
+     ├─ measured: the GUI logs on by cookie (<LOGIN COOKIE=…/> in the hello),
+     │  RFC has a credential tag for a ticket (0x0670, open-rfc-go writes it),
+     │  HTTP takes it as a cookie. Every door exists; no authority does
+     ├─ the façade mints a signed claim (user, client, issued, nonce; HMAC,
+     │  60 s, single use) instead of 24 random bytes; the stub, the bridge
+     │  and the HTTP middleware verify with the shared secret, offline
+     ├─ then the bridge checks a logon for the first time, the stub knows
+     │  who pressed F8, and a page on the façade can jump into SAP GUI the
+     │  way Eclipse does
+     └─ docs/diag-notes.md, "SSO across the three doors"; about a session-day
+
+C.6  Then, and only then, decide whether it goes further                 [A]
      └─ a real DIAG server is a large thing; this track is allowed to stop
         at C.4 having proved the point
 ```
