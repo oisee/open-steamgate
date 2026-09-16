@@ -14,6 +14,9 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 
 # Where it is going next — three tracks
 
+> Scheduled: [`plan-spikes-and-sprints.md`](plan-spikes-and-sprints.md) lays
+> the next six weeks out as sprints and spikes, with a gate at the end.
+
 Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
 the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The
 numbered tree below this is still the standing list; these three are the
