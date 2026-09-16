@@ -366,3 +366,50 @@ file" buys less than it appeared to. The recommendation is therefore to keep
 all four hosts under `scripts/check-hosts.mjs` and let the release decide
 late: the bundle for development, the SEA or the Bun binary for delivery,
 whichever a platform supports — the tests say they are the same system.
+
+
+# Part five: a second machine, and what "self-contained" turned out to mean
+
+Measured 2026-09-16 by deploying to another Linux x64 machine over ssh —
+Node 18 on it, no Bun, no checkout, nothing of this repository.
+`scripts/make-release.mjs` assembles what goes over; `run.sh` picks a host.
+
+| host | on a machine with nothing installed |
+| --- | --- |
+| `./run.sh` (the Bun binary) | works, and needs no `node_modules` at all |
+| `./run.sh sea` (Node single executable) | works **with** the runtime closure beside it |
+| `./run.sh node` (bundle on a private Node) | works with the same closure |
+| `./run.sh system` (bundle on the machine's Node 18) | refuses, as it should |
+
+All of them serve the launchpad, both demos and OData from the same
+generation, `db11b3a9bb69dea8`. The ZO4D frame stream recorded on the
+second machine is **byte-identical** to this one's, sixty frames
+(`tools/o4d-record.mjs --against`), which is the property that makes an
+oracle comparison mean anything.
+
+## The thing that passed locally and was not true
+
+`scripts/check-hosts.mjs` had all four hosts green here. That proved they
+agree with each other; it did not prove any of them self-contained,
+because this tree has a `node_modules` and Node resolves through it. On a
+machine without one, the Node hosts die the moment a request needs ABAP:
+the launchpad still serves, every app answers 503, and the child says
+
+```
+Cannot find package '@abaplint/runtime' imported from …/output/init.mjs
+```
+
+Generated code imports the runtime **by name**, and `test/setup.mjs`
+imports the database adapter, and neither is bundled outside Bun — the
+Bun hosts get both from a plugin (`bin/osd.mjs`), the Node hosts must find
+them on disk. So a Node release carries a closure of four packages
+(`@abaplint/runtime`, `@abaplint/database-sqlite`, `sql.js`,
+`temporal-polyfill`), which `make-release.mjs` puts there and says so.
+
+That is the honest scoreboard for the packaging question: **only the Bun
+binary is a single file in the strict sense.** The Node single executable
+is one file plus a package directory, which is exactly the
+"executable plus a versioned support directory" that Astra's vendoring
+note called the intermediate product. Neither is a reason to prefer one:
+the release ships a directory either way, because OSD's own `src/`,
+`webapp/` and `data/` travel with it until B.11.

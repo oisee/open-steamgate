@@ -253,6 +253,14 @@ B.10 The base image is named by the schema alone                         [S]
         image a new database is copied from
 
 B.11 The binary beyond the checkout                                      [S]
+     ├─ measured on a second machine 2026-09-16 (bun-spike.md part five):
+     │  the Bun binary needs nothing; the Node hosts need a closure of four
+     │  packages beside the workspace, because generated code imports the
+     │  runtime by name and setup.mjs imports the database adapter, and
+     │  neither is bundled outside Bun. scripts/make-release.mjs assembles
+     │  a directory that works for all of them
+     ├─ what still travels beside any host: src/, webapp/, data/ and the
+     │  setup hook — OSD's own content, which wants to be a pack of its own
      ├─ SP4 (bun-spike.md part three) runs the workbench from one binary
      │  with the checkout as its workspace; a directory with only ABAP in
      │  it needs src/, webapp/, data/ and test/setup.mjs brought along —
