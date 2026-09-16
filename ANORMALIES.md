@@ -29,20 +29,22 @@ f 0.06 > f 0.5   false   (right)
 ```
 
 Every answer is what you get with `'0.5'` read as 0: in the generic tail
-of `compare/gt.ts` (and `lt`, `ge`, `le`, the same lines), a numeric left
-and a string right end in `r = parseInt(r, 10)`. ABAP converts a
+of `compare/gt.ts` a numeric operand against a string one ends in
+`parseInt(…, 10)` (lines 97 and 103 of 2.13.86), and `compare/eq.ts` has
+the same line (330); `lt`, `ge` and `le` are written in terms of `gt`,
+so they inherit it. ABAP converts a
 character operand to the type of the numeric operand it is compared
 with — here `f`, so `'0.5'` is 0.5 — and the runtime's own
 `operators/_parse.ts` already does exactly that (`parseFloat` when the
 string holds a point). The fix is that helper in place of `parseInt`,
-in the four comparisons, with a test for each direction.
+in `gt` and `eq`, with a test for each direction and for a literal with and without a point.
 
 **Why it stayed hidden:** comparing with a character literal that has a
 fractional part is idiomatic in demo code (`> '0.5'`, `< '0.3'`) and rare
 in business code, where the literal is an integer and `parseInt` happens
 to be right.
 
-**Upstream:** `@abaplint/runtime`, `packages/runtime/src/compare/{gt,lt,ge,le}.ts`.
+**Upstream:** `@abaplint/runtime`, `packages/runtime/src/compare/gt.ts` and `eq.ts`.
 Until it lands, a frame of this demo is not the frame a system draws, and
 the comparison tool says so at the first label.
 
