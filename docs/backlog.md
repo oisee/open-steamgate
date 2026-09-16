@@ -891,7 +891,19 @@ open  revisions: reading them out of git instead of a system.
         of her LAN addresses, her surname, and the stock A4H appliance host
         name, in files that predate this branch
 
-8.6  source maps, so a failure names her ABAP line not our .mjs      [S]
+8.6  source maps, so a failure names her ABAP line not our .mjs      [S] DONE
+     ├─ done 2026-09-16 — and most of it already was: the transpiler writes
+     │  a map beside every module (write_source_map), and osd-where.mjs
+     │  resolves a generated position to the ABAP statement; the unit
+     │  runner has named ABAP lines in its alerts for a while
+     ├─ what was missing was the runtime: a request that died in ABAP was
+     │  logged as a JavaScript stack. The child keeps short dumps now —
+     │  what, where in ABAP, the frames under it — says the ABAP statement
+     │  in its log, puts the position into the OData error's innererror,
+     │  and answers them at GET /osd/dumps; ICF services report through
+     │  the same door
+     └─ the ADT runtime/dumps route reading them in ST22 shape is 2.6,
+        ADT work, later
      └─ from T, 2026-09-14, half done already: `write_source_map` is
         ALREADY true in our abap_transpile.json and output/ carries the
         .mjs.map files, so only the consumer side is missing. 341 maps
