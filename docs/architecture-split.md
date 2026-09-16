@@ -265,6 +265,19 @@ call, is the JS binary's precondition). The supervisor is drawn where it
 lives: in JavaScript, with generations — the Go rewrite the first draft
 assumed is not needed for the picture to be true.
 
+**`osd-up` exists** (2026-09-16), in open-diag-go rather than vsp, and the
+module graph decided that: open-diag-go already imports both siblings
+(`open-rfc-go/ni`, `vibing-steampunk/pkg/sapcompress`) through local
+replaces, so vsp importing it would close a cycle. `open-rfc-go/pkg/adtbridge`
+is the bridge as a library — `internal/rfcserver` stays internal and the
+bridge command itself now runs on the package — and `open-diag-go/pkg/lsd`
+is the stub as one. `osd-up -root ../open-steamgate -instance 6` starts the
+workbench under Node, waits for its discovery document, mounts the bridge on
+33NN and the stub on 32NN in the same process, prints the three values a
+project needs, and takes all of it down on Ctrl-C. Measured: discovery 200,
+`orfc describe SADT_REST_RFC_ENDPOINT` through the bridge, the tape screen
+through the stub, and every port free after the stop.
+
 **The Go binary** is already one module graph; `vsp-osd` is a `main` that
 registers the existing commands and adds one: `vsp-osd up`, which launches
 the OSD binary, waits for `/sap/bc/adt/core/discovery`, points

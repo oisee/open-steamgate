@@ -20,8 +20,10 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 > N3 transpile as a library call, N4 activation ordering, N5 the conformance
 > suite) are the "no-regret set" table in
 > [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md);
-> [`generations.md`](generations.md) is the mechanism that absorbed N3 and
-> N4 and delivered N2. Track B below is where they are being done.
+> [`generations.md`](generations.md) is the mechanism that absorbed N4 and
+> delivered N2 and B4; N3 (the transpiler as a library call) is still open
+> and is the Bun binary's precondition. Track B is done. The one-command
+> launcher is `osd-up` in open-diag-go (`architecture-split.md`, the sidecar).
 
 Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
 the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The
