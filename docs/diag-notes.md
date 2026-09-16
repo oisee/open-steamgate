@@ -108,6 +108,73 @@ it is the failure mode of every stub that thinks it is a game: it treated the
 GUI's second frame as a keypress and froze mid-scene, which is the "junk"
 screen a plain SAP GUI showed on a double-click.
 
+## What it took to make it stable, and what each defect taught
+
+The first screen appeared within the hour. Making it survive a second F8
+took five more defects, and every one of them was found by measurement —
+the tap on the dispatcher port, which records both directions, and once,
+decisively, SAP GUI's own crash dump. None was visible by reading the code.
+
+| what was wrong | how it showed | how it was found |
+| --- | --- | --- |
+| `isClose` knew only the OK-code `/i` | the stub answered the goodbye with another screen and the GUI tore down its command pipe | the closing frame in our capture carries `/NEX`, not `/i` |
+| every frame had 200 bytes cut off its front | `compress=72` on a frame that is not compressed, the body failing to decompress, and a screen sent in reply to something we had not understood | the log line, once the capture showed the frame was well formed |
+| the page was painted 24×80 | the first F8 was clean and the second glitched: columns past our width kept the previous session | the wrapper's `CHL` declares 26 rows and 120 columns, twice |
+| the whole wrapper was re-sent every frame | SAP GUI died painting a toolbar button it had already freed | **the crash dump**: an access violation in `COldToolBar::DoPaintExternalButton` by way of `CMyPFBitmapButton::SetSystemToolbarIconTextWithKey`, with `CTextfield2::Parse: Invalid object type!` beside it |
+| the stub waited to be closed | Eclipse reported a broken pipe on every second and third F8 | the control experiment, below |
+
+The first of those is the reason the DP header matters at all: **the
+client's first frame carries a 200-byte DP header and no later one does**,
+so "have we answered yet" has to be its own flag. The light-show could
+infer it from whether it had started pushing frames; a stub starts nothing.
+
+### The one that needed a control experiment
+
+The pipe complaint survived every protocol fix, and our farewell frame was
+byte-identical to the real system's — `000a000000010000`, header only —
+with the client sending nothing after it. Measurement inside our own
+capture had run out.
+
+So: the same jump against a real system. It was clean. That made it ours,
+and told us where to look — not at how we answer the close, but at whether
+the close should happen at all.
+
+**A real F8 session ends server-side.** In the whole A4H capture the client
+never sends `/NEX`. The server answers the last exchange, the `RFC_TR`
+payload disappears because there is nothing more to show, and about two
+seconds later it sends the bare end-of-session frame on its own. SAP GUI
+then shuts its own window and hands control back to Eclipse. That is what
+"jumping into SAP GUI and back" is.
+
+Our stub sat there until somebody closed the window, and *that* path — the
+client asking to leave — is the one Eclipse complains about. So the stub
+holds its screen for a while and then ends the session itself. Which is
+also the better experience: F8 shows the tape error for a few seconds and
+puts you back in the editor.
+
+### Where the line fell: a dynpro, not a list
+
+The classic list channel gives what a dynpro cannot — a fixed-pitch grid,
+colour bands that are foreground and background together, and therefore a
+filled screen and a border. The Spectrum's striped loading border came out
+of it exactly right, all four bands confirmed on the wire.
+
+It also has more to go wrong, and it did: a list is cumulative, it is
+written a row at a time and never painted over, and it has a declared page
+geometry that must be filled. Each of those was a defect of its own.
+
+So the default is the least the protocol can be asked to do: one dynpro, a
+group box and a line of text, 4.6 KB against the list's 9.6. A group box
+is a single atom and needs no colour, so the border survives the move to
+monochrome. The list version is a flag (`-stub-list`), because it is a
+thing to opt into rather than a thing to inherit.
+
+```
+lsd -listen :3201                  # one still screen, a frame, and the tape error
+lsd -listen :3201 -stub-list       # the same in colour, with the striped border
+lsd -listen :3201 -stub-hold 0     # wait for the window to be closed instead
+```
+
 ## Who is calling: the session identity in the hello
 
 The two client frames of the F8 oracle (a real system, tapped on its
