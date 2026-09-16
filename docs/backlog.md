@@ -265,6 +265,12 @@ B.12 One work process, and a channel that never waits                    [S]
      │  produced 43 drawn frames and 205 outstanding, replies 4 s behind —
      │  which is why an effect plays slowly and the next one rushes. Two
      │  independent defects: no back-pressure in the page, one core here
+     ├─ the client's fan-out buys nothing, which is the proof: the demo's
+     │  PRELOAD pulls frames on four sockets at once, and the server stays
+     │  at one core (109 % of one, the rest of sixteen idle). Measured on an
+     │  idle server here: 474 frames/s on one socket, 599 on two, 491 on
+     │  four — flat, and four sockets are slightly worse than one. Four
+     │  throats, one work process
      ├─ the pool: the supervisor already owns process lifecycle (recycle,
      │  reap, registry), so N children with sessions pinned to one of them
      │  is the shape — SAP's dispatcher and its dialog work processes, and
