@@ -63,7 +63,7 @@ Ordered by what breaks without them, most first.
    converts it. One commit on a worktree at `.local/pr-compare-char`, based on
    `origin/main`, the runtime's tests (10) and lint green, a regression test
    in `packages/runtime/test/compare.ts`. Found by comparing the demo frame by
-   frame with a real system. Needs an issue.
+   frame with a real system. Issue #1859, filed 2026-09-17; the PR is next.
 4. **`fix/binary-file-copy`** — `ANOMALY-2026-09-13-binary-file-to-output`.
    A binary file survives the copy to output (read and written as latin1).
    Needs an issue.
@@ -91,13 +91,21 @@ Ordered by what breaks without them, most first.
   return type, and ABAP gives them the type of their argument. It is the
   last three of sixty differing frames of the demo. The return type has to
   come from the argument where the call is typed
-  (`expressions/method_call_chain.ts`); a fork PR into `abaplint/abaplint`,
-  with a syntax test for `frac( f )` typed `f` and `frac( i )` still `i`.
-- **`@abaplint/runtime`, two more, found by probing around it and not yet
-  measured on a system**: `ANOMALY-2026-09-16-mod-result-integer` (`MOD`
-  with a float operand returns an integer) and
+  (`expressions/method_call_chain.ts`). Issue abaplint/abaplint#4302, filed
+  2026-09-17 with the A4H measurement; the three syntax tests (`frac( f )`
+  typed `f`, `abs( f )` typed `f`, `frac( i )` still `i`) sit on
+  `fix/numeric-builtins-argument-type` in the fork worktree, without a fix.
+  A fork PR when the fix is written.
+- **`@abaplint/runtime`, two more, found by probing around it and measured
+  on A4H 2026-09-17**: `ANOMALY-2026-09-16-mod-result-integer` (`MOD`
+  with a float operand returns an integer; a system says 0.75) is #1860 and
   `ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero` (`-0.5` to `i`
-  is 0, `Math.round`). Both one-line fixes with a test; both need an issue.
+  is 0, `Math.round`; a system says −1) is #1861. Both have a failing test
+  on a branch (`fix/mod-float-result`, `fix/integer-round-half-away`) and no
+  fix yet; both are one-line fixes to send as PRs from inside the repository.
+- **Filed as issues rather than fixed (Alice, 2026-09-17): "можно пока не
+  фиксить … а пока сделать тест и завести как issue."** The tests are the
+  measured contract; a fix that passes them is the PR.
 - **open-abap-core**: `W3MIMETABTYPE` (#1218) and `get_source_position`
   (#1219) are merged; `SCMS_BINARY_TO_XSTRING` and the `WWWDATA_IMPORT` walk
   are in `.local/lars/open-abap-core` and still to send — a fork there, since

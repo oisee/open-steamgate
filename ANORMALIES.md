@@ -32,7 +32,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-16-numeric-builtins-typed-integer — `frac`, `abs`, `floor`, `ceil`, `trunc`, `sign` of a float are typed as integers
 
-- Status: `open, needs an issue`
+- Status: `open, issue filed`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/core 2.120.50` and 2.120.54 (`build/src/abap/5_syntax/_builtin.js`, entries `FRAC`, `FLOOR`, `CEIL`, `TRUNC`, `ABS`, `SIGN`: `return: IntegerType.get()`), and so every transpile
 - Affected ABAP statement, runtime API or adapter: an inline declaration from one of the six numeric functions — `DATA(lv_phase) = frac( lv_time / lv_step )`, `DATA(lv_d) = abs( lv_x - lv_y )` — and anything else that takes the function's type from the syntax analysis rather than from the value
@@ -44,20 +44,20 @@ DATA(phase) = frac( time ).     " SAP: f, 0.25 — open-abap: i, 0
 DATA(dist)  = abs( CONV f( '-2.5' ) ).  " SAP: f, 2.5 — open-abap: i, 3
 ```
 
-- Exact command used to run it: the ZO4D demo compared frame by frame with A4H after `ANOMALY-2026-09-16-float-vs-character-compare` was fixed: 3 frames of 60 still differed, all in the beat pulse `1 / ( 1 + lv_phase16 * 12 )`; on A4H `lv_phase16` runs 0, 0.25, 0.5, 0.75 and here 0, 0, 1, 1. The generated module declares it `new abap.types.Integer({qualifiedName: "I"})` and `abap.builtin.frac` returns a `Float` of 0.25 into it. Then the core table, read directly.
+- Exact command used to run it: the ZO4D demo compared frame by frame with A4H after `ANOMALY-2026-09-16-float-vs-character-compare` was fixed: 3 frames of 60 still differed, all in the beat pulse `1 / ( 1 + lv_phase16 * 12 )`; on A4H `lv_phase16` runs 0, 0.25, 0.5, 0.75 and here 0, 0, 1, 1. The generated module declares it `new abap.types.Integer({qualifiedName: "I"})` and `abap.builtin.frac` returns a `Float` of 0.25 into it. Then the core table, read directly. **Measured on A4H, 2026-09-17**, with an ABAP Unit class asking `cl_abap_typedescr=>describe_by_data( )->type_kind` of the inline variable: `frac( f )` and `abs( f )` are `typekind_float`, `frac( 7 )` is `typekind_int`; the probe class was deleted afterwards.
 - Expected SAP behaviour: the numeric functions `abs`, `ceil`, `floor`, `frac`, `sign` and `trunc` return a value **of the type of their argument** (ABAP keyword documentation, "Numeric Functions"); `frac( f )` is `f`.
 - Actual open-abap behaviour: the six are declared with a fixed integer return type in core's built-in table, whatever the argument. The runtime's `frac` returns a float and the variable it lands in rounds it, so the value is right for a moment and wrong at rest.
 - Impact on open-steamgate: the last three of sixty differing frames of the demo; more generally any 7.40-style ABAP that declares inline from these functions over a float gets an integer without a word from the compiler. Business code, which mostly applies them to `i` and `p`, is not hit — for `i` the rule and the table agree.
 - Smallest safe workaround: declare the variable — `DATA lv_phase16 TYPE f.` before the assignment — which is what the demo's author would not write on a system.
-- Upstream issue: none yet, **needs an issue** in `abaplint/abaplint` (core, not the transpiler). The fix is not a table edit: `IBuiltinMethod.return` is one static `AbstractType`, so the six need their return type taken from the argument where the call is typed: `expressions/method_call_chain.ts` sets `context` to the declared return (line 101 of 2.120.52) *before* `MethodCallParam.runSyntax` analyses the argument; for these six, `context` should be the argument's type once that has run. A fork PR, since `oisee` has no write access there (`DEBT-2026-09-14-no-push-to-abaplint`).
-- Regression-test location: none yet; `packages/core/test/abap/5_syntax` — an inline declaration from `frac( f )` typed as `f`, and from `frac( i )` still as `i`
+- Upstream issue: [abaplint/abaplint#4302](https://github.com/abaplint/abaplint/issues/4302), filed 2026-09-17 with the measurement and the three tests. Branch `fix/numeric-builtins-argument-type` in the fork worktree (`~/dev/abaplint/.local/pr-numeric-builtins`, based on `origin/main`) carries the tests only, no fix yet. The fix is not a table edit: `IBuiltinMethod.return` is one static `AbstractType`, so the six need their return type taken from the argument where the call is typed: `expressions/method_call_chain.ts` sets `context` to the declared return (line 101 of 2.120.52) *before* `MethodCallParam.runSyntax` analyses the argument; for these six, `context` should be the argument's type once that has run. A fork PR, since `oisee` has no write access there (`DEBT-2026-09-14-no-push-to-abaplint`).
+- Regression-test location: `packages/core/test/abap/syntax/basic_variables.ts` on the branch — "inline DATA from frac( f ) is a float", "… abs( f ) …" (both failing on 2.120.54: `expected IntegerType to be an instance of FloatType`) and "frac( i ) stays an integer" (passing)
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
 
-- Status: `open, needs an issue`
+- Status: `open, issue filed`
 - Discovery date: `2026-09-16`
-- Affected versions: `@abaplint/runtime 2.13.86` (`operators/mod.ts`)
+- Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`operators/mod.ts`)
 - Affected ABAP statement, runtime API or adapter: `a MOD b` where either operand is a float (or a packed number with decimals)
 - Minimal ABAP reproducer:
 
@@ -66,20 +66,20 @@ DATA r TYPE f.
 r = CONV f( '2.75' ) MOD 1.   " SAP: 0.75 — open-abap: 1
 ```
 
-- Exact command used to run it: the runtime asked directly, `abap.operators.mod(Float 2.75, Integer 1)` — the value is computed as 0.75 and returned in an `Integer`, which rounds it to 1. Found while probing the arithmetic around `ANOMALY-2026-09-16-numeric-builtins-typed-integer`; **not yet measured on a system**, the expectation is the documented calculation-type rule.
+- Exact command used to run it: the runtime asked directly, `abap.operators.mod(Float 2.75, Integer 1)` — the value is computed as 0.75 and returned in an `Integer`, which rounds it to 1. Found while probing the arithmetic around `ANOMALY-2026-09-16-numeric-builtins-typed-integer`. **Measured on A4H, 2026-09-17** (ABAP Unit, `lv_f = '2.75'. rv_r = lv_f MOD 1.` into an `f`): 0.75.
 - Expected SAP behaviour: the calculation type of the operands decides — with a float operand the result is a float, 0.75.
 - Actual open-abap behaviour: `mod()` returns `new Integer().set(val)` for anything that is not `Integer8`, and the integer rounds the remainder.
 - Impact on open-steamgate: none seen in the demo; every effect that keeps a phase with `MOD` on floats would be quantised the way the pulse was.
 - Smallest safe workaround: `frac( a / b ) * b` in ABAP, which stays float
-- Upstream issue: none yet, **needs an issue**. The fix returns a `Float` when either operand is one, beside the `Integer8` case that already exists.
-- Regression-test location: none yet; `packages/runtime/test/operators`
+- Upstream issue: [abaplint/transpiler#1860](https://github.com/abaplint/transpiler/issues/1860), filed 2026-09-17. Branch `fix/mod-float-result` (worktree `.local/pr-mod-float-result` of the transpiler clone, based on `origin/main`) carries the test only, no fix; the fix returns a `Float` when either operand is one, beside the `Integer8` case that already exists.
+- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "MOD with a float operand answers a float", failing on 2.13.87: `expected Integer{ value: 1 } to be an instance of Float`
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero — A float of −0.5 assigned to an integer becomes 0
 
-- Status: `open, needs an issue`
+- Status: `open, issue filed`
 - Discovery date: `2026-09-16`
-- Affected versions: `@abaplint/runtime 2.13.86` (`types/integer.ts`, `set()` with `Math.round`)
+- Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`types/integer.ts`, `set()` with `Math.round`)
 - Affected ABAP statement, runtime API or adapter: any move of a negative float exactly on a half to an integer — `lv_i = lv_f` with `lv_f = -0.5`, `-1.5`, …
 - Minimal ABAP reproducer:
 
@@ -88,13 +88,13 @@ DATA i TYPE i.
 i = CONV f( '-0.5' ).   " SAP: -1 — open-abap: 0
 ```
 
-- Exact command used to run it: the runtime asked directly, `Integer.set(Float -0.5)` gives 0; +0.5, 1.5, 2.5 are right. `Math.round(-0.5)` is `-0` in JavaScript, which rounds a half towards positive infinity, and ABAP rounds a half away from zero. **Not yet measured on a system**; the rule is the documented one for conversions to `i`.
+- Exact command used to run it: the runtime asked directly, `Integer.set(Float -0.5)` gives 0; +0.5, 1.5, 2.5 are right. `Math.round(-0.5)` is `-0` in JavaScript, which rounds a half towards positive infinity, and ABAP rounds a half away from zero. **Measured on A4H, 2026-09-17** (ABAP Unit, `lv_f = '-0.5'. rv_i = lv_f.`): −1.
 - Expected SAP behaviour: −1
 - Actual open-abap behaviour: 0
 - Impact on open-steamgate: none seen; it is a half of a unit, exactly, on the negative side, which is rare and silent
 - Smallest safe workaround: none needed
-- Upstream issue: none yet, **needs an issue**. `Math.sign(v) * Math.round(Math.abs(v))` in place of `Math.round(v)`, in `Integer.set` and wherever `toInteger` rounds.
-- Regression-test location: none yet; `packages/runtime/test/types/integer.ts`
+- Upstream issue: [abaplint/transpiler#1861](https://github.com/abaplint/transpiler/issues/1861), filed 2026-09-17. Branch `fix/integer-round-half-away` (worktree `.local/pr-integer-round-half-away`, based on `origin/main`) carries the test only, no fix; `Math.sign(v) * Math.round(Math.abs(v))` in place of `Math.round(v)`, in `Integer.set` and wherever `toInteger` rounds.
+- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "a negative half moved to an integer rounds away from zero", failing on 2.13.87: `expected -0 to equal -1`
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
@@ -118,7 +118,7 @@ ENDIF.
 - Actual open-abap behaviour: in the generic tail of `compare/gt.ts` a numeric left against a string right (and the mirror) ended in `parseInt(…, 10)`, so `'0.5'` was 0 and every fraction compared as its integer part. The runtime's own `operators/_parse.ts` has the right rule (`parseFloat` when the string holds a point) and was not called.
 - Impact on open-steamgate: the demo's `Sales Dance` scene labels its bars on the second frame instead of halfway through the intro, and the frame stream is not the system's from frame 1 (`ANOMALY-2026-09-16-*` is the first anomaly found by the frame comparison rather than by a crash). Any ABAP that compares a float with a literal carrying a fraction is affected; business code, which compares with integer literals, happens not to be.
 - Smallest safe workaround: write the literal as a float, `CONV f( '0.5' )`, which compares float with float. Not applied to the demo: the ABAP is right as written.
-- Upstream issue: none yet, **needs an issue**. Branch `fix/compare-character-literal` in `abaplint/transpiler` (worktree `.local/pr-compare-char`, based on `origin/main` 7daf28f2): `parse()` in place of `parseInt` in both branches of `gt`'s tail, one commit, the runtime's tests and lint green.
+- Upstream issue: [abaplint/transpiler#1859](https://github.com/abaplint/transpiler/issues/1859), filed 2026-09-17 with the frame count before and after; the PR is next. Branch `fix/compare-character-literal` in `abaplint/transpiler` (worktree `.local/pr-compare-char`, based on `origin/main` 7daf28f2): `parse()` in place of `parseInt` in both branches of `gt`'s tail, one commit, the runtime's tests and lint green.
 - Regression-test location: `packages/runtime/test/compare.ts`, "float against a character literal with a fraction", on the branch
 - **Verified, 2026-09-16.** With the fix cherry-picked onto `local/osd-build` and the runtime rebuilt, the same sixty frames against A4H differ in 3 instead of 59, and none of them by a label; what remains is the field `p` on frames 33 to 35, which is a different question and is being looked at.
 - Upstream version containing a fix: `unknown`
