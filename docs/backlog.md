@@ -252,7 +252,14 @@ B.10 The base image is named by the schema alone                         [S]
         a persistent user database is never reseeded by this, only the
         image a new database is copied from
 
-B.12 One work process, and a channel that never waits                    [S]
+B.12 One work process, and a channel that never waits                    [S]  pool DONE 2026-09-16
+     ├─ tools/osd-pool.mjs: OSD_WORKERS children, a push channel pinned to
+     │  one for the life of its socket, HTTP on the primary. Deployed to
+     │  the second machine with four: over the network 111 frames/s on one
+     │  socket, 369 on four, three processes busy at once instead of one
+     │  core at 100 %. Nothing in the ABAP or the page changed. Still open
+     │  below: HTTP across workers (needs a decision about what a session
+     │  is), and the page's missing back-pressure, which is the demo's
      ├─ measured 2026-09-16 on a 16-core machine: one core at 100 %, the
      │  other fifteen at 1 %, load average 1.04. The serving runtime is one
      │  process with one JavaScript thread, so every session's ABAP runs on
