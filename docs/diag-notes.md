@@ -144,6 +144,48 @@ What to run and who asks. `D_REQUEST_USER` is what the client *claims*; the
 and Office versions (`ST_USER.1f/20/21`), a `DYNN` item and a 263-byte
 `DATAMANAGER` XML.
 
+**But that hello is not the one that reaches us.** The 403-byte hello with
+the `LOGIN COOKIE` is the *initial, authenticated* logon (connection 1 of the
+oracle). A reconnection an hour later (connection 3) is **317 bytes and
+carries no `ST_USER.14` at all** — no cookie, just the UUIDs and the
+language. And 317-bytes-no-cookie is exactly what a stock Eclipse sent our
+own recorder, and the stub, on F8 against OSD. So the honest state of things:
+
+| where | first hello | cookie present |
+| --- | --- | --- |
+| Eclipse → real A4H, initial logon | 403 bytes, `ST_USER.14` | yes, `<LOGIN … COOKIE=…/>` |
+| Eclipse → real A4H, later reconnect | 317 bytes | no |
+| Eclipse → OSD (bridge + stub), F8 | 317 bytes | **no** |
+
+That means **a ticket check bolted on today would reject Eclipse**, because
+Eclipse is not sending us a ticket — it opens SAP GUI against OSD anonymously
+and it works only because the stub admits everyone. The cookie is real and
+measured, but it is the real system's *initial* logon, and we have not made
+Eclipse produce it against us.
+
+Why the difference is client-side: Eclipse builds the SAP GUI connection
+(the shortcut it hands the GUI) from what it knows about the system's
+authentication. Against A4H it had an SSO ticket to pass; against OSD it
+decided none was needed. So "make SSO work" is two steps, not one, and the
+check is the *second*:
+
+1. **Make the launch carry the ticket.** This is the missing half and it is
+   about what ADT tells Eclipse at the `COM.SAP.ADT.SAPGUI` navigation event
+   and the reentrance endpoint, so that Eclipse puts a ticket in the GUI
+   connection. It has to be measured — the 403 hello is the target, and the
+   difference between the A4H navigation response and ours is where it lives.
+   Until this lands, there is nothing to verify.
+2. **Then verify it.** Once the cookie arrives, the check below is what makes
+   it mean something.
+
+Beware the two "reentrance tickets" are not obviously the same one. The
+`GET …/core/http/reentranceticket` we serve answers with a **307 redirect to
+a loopback URL** carrying the ticket in its query — that is for Eclipse's
+*embedded browser* to re-enter the HTTP session (a Fiori or Web Dynpro view
+inside Eclipse), measured on both A4H and OSD. Whether the SAP-GUI `COOKIE`
+is the same value by another road, or a distinct MYSAPSSO2, is the first
+thing step 1 must settle.
+
 **Two things worth knowing about that cookie.** The hello is uncompressed,
 so the ticket lies on the wire in clear — compression was never protection,
 and the protection DIAG has is SNC, which is out of scope here. And a
@@ -160,13 +202,16 @@ door a system has, and this project now has all three doors:
 | --- | --- | --- | --- |
 | HTTP (ADT, OData, a Web GUI page) | the façade, `:3030` / `:44300` | a cookie on the request | the façade mints a reentrance ticket (24 random bytes, base64url) and forgets it: bound to nothing, checked by nobody |
 | RFC (Eclipse over the gateway port, an RFC client) | the bridge, `:33NN` | the logon record's credential field as `TagTicket` (0x0670): a ticket instead of a password. `open-rfc-go` already encodes it on the client side (`internal/cpic/logon.go`, `Ticket`) | the bridge checks no logon at all — every caller is anonymous |
-| DIAG (SAP GUI, F8) | the stub, `:32NN` | `<LOGIN … COOKIE="…"/>` in the hello — **measured** | the stub reads nothing and lets everyone in |
+| DIAG (SAP GUI, F8) | the stub, `:32NN` | `<LOGIN … COOKIE="…"/>` in the hello — **measured against A4H's initial logon, but not yet produced against OSD** | the stub reads nothing and lets everyone in; today's F8 hello carries no cookie |
 
-So the answer to "can we enter SAP GUI by cookie" is yes, it is the only way
-the GUI enters on F8; and "RFC under the same cookie" is yes as well, the
-wire has a tag for it and our client already writes it. What is missing is
-not a channel, it is an **authority**: one place that mints tickets and one
-rule that verifies them, shared by all three doors.
+So "can we enter SAP GUI by cookie" is yes in principle — the wire has the
+field and a real system uses it — but two things are missing, not one. An
+**authority**: one place that mints tickets and one rule that verifies them,
+shared by all three doors. And, for DIAG specifically, the **launch path**:
+Eclipse must be made to put the ticket in the GUI connection, which it does
+against a real system and does not yet against us (see above). RFC is further
+along: the wire has the tag (0x0670) and our client already writes it, so
+there the only gap is the authority.
 
 **The design, small on purpose.** The façade is the identity authority; it
 already owns sessions, CSRF and the reentrance endpoint.
