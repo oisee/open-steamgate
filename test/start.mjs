@@ -1,4 +1,5 @@
 import express from "express";
+import {existsSync} from "node:fs";
 import {webappsOf} from "../tools/osd-packs.mjs";
 import {createServer as createHttpsServer} from "node:https";
 import {join} from "node:path";
@@ -60,7 +61,14 @@ export function startServer(quiet) {
   // an IWPR of a real SEGW project is a few hundred KB (ImportSet takes it as JSON)
   app.use(express.raw({type: "*/*", limit: "16mb"}));
 
+  // The port's front door is the launchpad when there is one: every app and
+  // every demo this system serves is a tile on it, which is what a person
+  // opening a system expects to find rather than a paragraph of paths.
   app.get("/", function (req, res) {
+    if (existsSync(join(process.cwd(), "webapp", "flp.html"))) {
+      res.redirect(302, "/app/flp.html");
+      return;
+    }
     res.send('open-steamgate: OData v2 services live under /sap/opu/odata/sap/, the demo Fiori app under <a href="/app/index.html">/app/</a>');
   });
 

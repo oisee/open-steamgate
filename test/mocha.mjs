@@ -16,9 +16,20 @@ describe("wire", () => {
     server.close();
   });
 
-  it("root answers", async () => {
-    const res = await fetch(`http://localhost:${PORT}/`);
-    expect(res.status).to.equal(200);
+  // The front door is the launchpad: every app and every demo the system
+  // serves is a tile on it, the UI5 ones as components and the ABAP-written
+  // pages as plain URLs, which is the honest shape — a tile points at a
+  // service and what is behind it need not be UI5 to belong on the page.
+  it("root is the launchpad, and the launchpad names what this system serves", async () => {
+    const res = await fetch(`http://localhost:${PORT}/`, {redirect: "manual"});
+    expect(res.status).to.equal(302);
+    expect(res.headers.get("location")).to.equal("/app/flp.html");
+    const page = await (await fetch(`http://localhost:${PORT}/app/flp.html`)).text();
+    for (const tile of ["Travels", "Bookings", "Flight analytics", "SEGW", "Vivid Vibes", "Zork"]) {
+      expect(page, tile).to.contain(tile);
+    }
+    expect(page, "the demo behind its tile").to.contain("../sap/bc/zo4d_demo");
+    expect(page, "zork behind its tile").to.contain("../sap/bc/zork");
   });
 
   it("$metadata", async () => {
