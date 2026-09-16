@@ -68,6 +68,28 @@
                         icon: "sap-icon://tree",
                         targetURL: "#SegwProject-manage"
                       }
+                    },
+                    {
+                      id: "vividvibes",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Vivid Vibes",
+                        subtitle: "a demo, in ABAP",
+                        info: "ZCL_O4D_HTTP_HANDLER",
+                        icon: "sap-icon://video",
+                        targetURL: "#VividVibes-play"
+                      }
+                    },
+                    {
+                      id: "zork",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Zork",
+                        subtitle: "a Z-machine, in ABAP",
+                        info: "ZCL_APC_ZORK",
+                        icon: "sap-icon://keyboard-and-mouse",
+                        targetURL: "#Zork-play"
+                      }
                     }
                   ]
                 }
@@ -116,6 +138,29 @@
           additionalInformation: "SAPUI5.Component=stg.segw",
           applicationType: "URL",
           url: "./segw/",
+          navigationMode: "embedded"
+        },
+        // Two that are not UI5 at all.
+        //
+        // The four above are components the launchpad loads. These two are
+        // pages an ABAP class writes, served from the ICF path by the same
+        // runtime — on Node behind the express shim, in the preview by the
+        // service worker. No additionalInformation, so the sandbox treats
+        // them as plain URLs and frames them, which is the honest shape: the
+        // tile is a launchpad's way of pointing at a service, and what is
+        // behind it does not have to be UI5 to belong on the page.
+        "VividVibes-play": {
+          title: "Vivid Vibes",
+          description: "WebGL and audio, driven from ABAP over a push channel",
+          applicationType: "URL",
+          url: "../sap/bc/zo4d_demo",
+          navigationMode: "embedded"
+        },
+        "Zork-play": {
+          title: "Zork",
+          description: "a Z-machine interpreter in ABAP, the story file out of SMW0",
+          applicationType: "URL",
+          url: "../sap/bc/zork",
           navigationMode: "embedded"
         }
       },

@@ -44,6 +44,19 @@
         fail("The preview could not be installed", String(error));
         return;
       }
+      // Install and stay put, on request.
+      //
+      // This page's whole job is to register the worker and get out of the
+      // way, and the redirect is what a visitor wants. It is also a second
+      // navigation racing whatever the opener does next: a test that waits
+      // for the controller and then goes somewhere collides with it, and the
+      // collision surfaces as "execution context was destroyed" on an
+      // unrelated line. So a caller can ask to be left here.
+      if (new URLSearchParams(location.search).has("stay")) {
+        heading.textContent = "open-steamgate is installed";
+        detail.textContent = "The gateway is answering in this browser. Open the app below, or any service path directly.";
+        return;
+      }
       location.replace("app/");
     })();
   </script>
