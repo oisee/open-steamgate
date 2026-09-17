@@ -629,7 +629,7 @@ U.1  The user's path, measured                                      [S]  DONE 20
         missing period points at the next statement (abaplint's wording);
         the failed line sits among the generators' output.
 
-A.8  SRVD and a minimal SRVB: the service definition as an input        [S+A]
+A.12 SRVD and a minimal SRVB: the service definition as an input       [S+A]
      └─ Alice asked 2026-09-17 whether to take CAP-like syntax; the
         answer is that ABAP already has it and it is native:
         `define service N { expose E as A; }` in a SRVD, with a SRVB
@@ -652,7 +652,7 @@ A.8  SRVD and a minimal SRVB: the service definition as an input        [S+A]
         DDIC-based CDS views are obsolete), so this is the one that
         stays
 
-A.7  A service of several CDS views, without a hand-written class       [S+A]
+A.11 A service of several CDS views, without a hand-written class      [S+A]
      └─ today: @OData.publish gives one view one service and no
         navigation (publishedYaml() in tools/cds2ddic.mjs never emits an
         association, though the parser reads them); several CDS entities
@@ -689,6 +689,14 @@ A.7  A service of several CDS views, without a hand-written class       [S+A]
         same service. Note it changes existing services (ZC_STG_TRAVEL_CDS
         would gain the booking entity and to_Bookings), so it is a
         decision, not only a patch
+
+B.15 Does our CDS pipeline read a view entity?                           [S]
+     └─ every view here is DDIC-based (`define view` + sqlViewName);
+        the modern shape is `define view entity` with no SQL view, and
+        that is what a system now wants. parseDDLS takes the view's own
+        name when there is no sqlViewName, so it may already work -
+        nobody has run one through. Write one, build, and either record
+        that it works or fix it (docs/cds-publish.md, "Unverified here")
 
 B.14 A cast in a CDS view drops the field                                [S]
      └─ found 2026-09-17 building the status service:

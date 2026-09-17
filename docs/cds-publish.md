@@ -169,6 +169,47 @@ up in `zcl_stg_cds_registry`, and its ON pairs become the WHERE. That is the
 measured convention inverted, not a guess, and it only runs when the
 definition is silent.
 
+## Which path to use, and how obsolete `@OData.publish` really is
+
+Two different obsolescences get mixed up, and only one of them is about
+this annotation:
+
+- **DDIC-based CDS views** (`define view` with `@AbapCatalog.sqlViewName`)
+  are the ones the sandbox warns about — "DDIC-based CDS views are
+  obsolete". The replacement is a **view entity** (`define view entity`,
+  no SQL view behind it). That warning is about the *view*, not about
+  publishing.
+- **`@OData.publish`** is the older way to turn a view into a service. It
+  still works on a classic stack — measured today — but it is not the path
+  SAP develops any more, and in ABAP Cloud (Steampunk, public cloud) it is
+  simply not available. Its replacement is a **service definition** (SRVD)
+  plus a **service binding** (SRVB), which also removes the manual
+  `/IWFND/MAINT_SERVICE` step: a binding publishes.
+
+So the correct shape on a modern system, read-only, is three files and no
+annotation of this kind:
+
+```abap
+define view entity ZC_X as select from … { … }         " the data
+define service ZSRV { expose ZC_X as X; }              " the service face
+"                                                        + a binding: OData V2 or V4
+```
+
+**How we treat it here.** `@OData.publish` stays, because our gateway is
+OData V2 of the classic kind, because plenty of real systems still run
+services made this way, and because it gave us a measured specification to
+match. It is the **compatibility** path. The recommended one becomes SRVD
+plus a minimal binding when backlog A.12 lands; the YAML
+(`docs/stg-compile.md`) stays for what a service definition cannot say —
+RFC-mapped operations, function imports, a service consumed from another
+service — which is SEGW's territory, not RAP's.
+
+**Unverified here:** whether our own CDS pipeline parses `define view
+entity` at all. Every view in this tree is DDIC-based, `parseDDLS` reads
+`sqlViewName` with the view's own name as the fallback (which is what a
+view entity would want), but nobody has run one through. One build would
+settle it; backlog B.15.
+
 ## Not yet
 
 The `IWVB` service variant the annotation also writes on a system has no
