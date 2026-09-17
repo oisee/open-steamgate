@@ -83,6 +83,73 @@ Ordered by what breaks without them, most first.
    #1848 took the sy-tabix half; this half is still local. Rebase the branch
    on `origin/main` and it is one commit. Needs an issue.
 
+## The performance track, in sending order
+
+*Opened 2026-09-17 after `docs/demo-profile.md` and `docs/abap-hot-code.md`.*
+
+These are not defects and they have no `ANORMALIES.md` entry, because
+nothing here computes a different answer from a real kernel — the answers
+are right and they are slow. `npm run parked` therefore does not claim
+these branches, so **this section is their only record**, and each branch
+carries its reason in `git branch --edit-description`, which is the rule
+for a branch that is not a defect fix.
+
+What they are all about: an ABAP arithmetic operation costs about 30 ns
+here and about 1 ns in plain JavaScript, and one frame of the demo's
+`sdf_blobs` performs 1.97 million of them. The cost is the protocol around
+the operation — dispatch on the operand types, parse each operand, allocate
+the result — and not the arithmetic. Seven of twenty-six demo scenes miss
+their frame budget because of it.
+
+**The order below is by gain against risk, and it is deliberately not the
+order somebody would guess.** Each item goes as one issue with the
+measurement, then one pull request with one commit, one test and one number,
+through the critic gate (CLAUDE.md).
+
+| # | what | where | gain, measured | state |
+| --- | --- | --- | --- | --- |
+| 0 | the anchor issue: the arithmetic protocol dominates compute-bound ABAP, with the profile and the ranked list | an issue only, `abaplint/transpiler` | — | to write |
+| 1 | a constant `Character` remembers the number it parses to | runtime, `operators/_parse.ts` + the character factory | 22 % of an `sdf_blobs` frame | in progress |
+| 2 | a `Float`/`Float` branch at the head of `add`/`minus`/`multiply`/`divide` | runtime, `operators/` | 9–17 % of every heavy frame | in progress |
+| 3 | plain JavaScript arithmetic when the operand types are proven | transpiler, `expressions/source.ts` + a new type walk | 110–200 ns to about 1 | in progress |
+| 4 | a synchronous `LOOP AT` when the body contains no `await` | runtime + codegen | 172–349 ns a row to 74 | design question, unwritten |
+| 5 | method inlining | transpiler | 123 ns to 67, and 206 to 67 for a structure return | unwritten, high risk |
+
+Notes that belong with them, so they are not rediscovered:
+
+- **Item 1 and item 3 overlap on purpose.** Folding `'0.5'` in code
+  generation makes it disappear; caching it in the runtime makes it cheap
+  for every caller that the code generator cannot prove. Both are worth
+  having, and item 1 is five lines against a project.
+- **Item 3's admission rule is the whole safety argument**: every operand
+  a `Float`, an `Integer` or a numeric literal, and at least one proven
+  `Float`. One proven float means the calculation-type flag can never
+  produce an `Integer` result, which is what makes the rest fall away.
+  Packed, `decfloat34`, `int8`, hex, date, time and character variables
+  are refused.
+- **`Integer.set(number)` and `Integer.set(Float)` are equivalent**, both
+  through `roundHalfAwayFromZero`, and the integer overflow check below
+  them is commented out. Read in the source, 2026-09-17. That is what makes
+  handing `.set()` a raw number safe, and it is the fact item 3 rests on.
+- **What is deliberately not in this list**, so that nobody proposes it
+  again: a lookup table for a function over a proven range, and any
+  "fast maths" library. Measured, not argued — `sin( )` is 19 ns and a
+  `READ TABLE INDEX` lookup is 71, so a table is four times slower than the
+  function it would replace, and no table equals `Math.sin` at the sampled
+  points, which breaks the frame comparison against a real system. For the
+  same reason, hand-expanding `**` into multiplications is a pessimisation:
+  `** 8` is 44 ns and three multiplies are 83.
+- **The demo's own ABAP is not part of this stream.** Rewriting three
+  scenes by the same rules took 28 to 38 % off a frame with every frame
+  identical, which measures the ceiling a compiler could reach on its own.
+  It is a measurement, not a patch to send (Alice, 2026-09-17).
+
+Every item's evidence is `docs/demo-profile.md` (where the time goes) and
+`docs/abap-hot-code.md` (what each idiom costs, and what the code generator
+would have to know). The oracle — `tools/o4d-record.mjs --compare` against a
+recording made with the unmodified transpiler — is the acceptance test for
+all of them: a performance change that alters one frame is wrong.
+
 ## Not for sending
 
 - `fix/conv-builtin-type` — superseded 2026-09-14, split into the branches
