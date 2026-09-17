@@ -668,6 +668,17 @@ B.14 A cast in a CDS view drops the field                                [S]
         it is fixed, change the type in the stg.yaml instead. A test over
         a casted element in tools/cds2ddic.mjs would pin it.
 
+U.2  The status app on the browser deployment                            [S]
+     └─ Alice, 2026-09-17: the launchpad on GitHub Pages has the tile and
+        the app, but nothing fills the five tables there — no façade, no
+        pool, no listeners. What the worker does know and could write at
+        boot: host kind (a service worker), one "process" (itself), the
+        generation (build.json), every service and channel (the generated
+        services.mjs), the packs (packs.json), the objects per pack;
+        ports would be honestly empty with a note. web/preview-backend.mjs
+        is the place, ZCL_OSD_STATUS=>REFRESH the door, and the JSON
+        contract already exists (tools/osd-status.mjs)
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a
