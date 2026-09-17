@@ -32,7 +32,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-17-integer-division-not-rounded — In integer arithmetic, a division keeps its fraction until the end of the expression
 
-- Status: `open, needs an issue`
+- Status: `open, issue filed`
 - Discovery date: `2026-09-17`
 - Affected versions: `@abaplint/transpiler` 2.13.87 and `@abaplint/runtime` 2.13.87 together: the transpiler emits `abap.operators.divide( )` for every `/`, and the runtime's `divide` answers a `Float` for two integers; nothing rounds until the target is assigned
 - Affected ABAP statement, runtime API or adapter: any arithmetic expression whose calculation type is `i` (every operand and the target are integers) with a `/` in it that is not the last operation — `( a / 3 + b ) MOD 256`, `7 / 2 + 7 / 2`, `( 7 / 2 ) * 2`
@@ -52,13 +52,13 @@ f = 7 / 2 + 7 / 2.              " SAP: 7 — open-abap: 7 (the target makes the 
 - Actual open-abap behaviour: the intermediate is a float, rounded once at the assignment
 - Impact on open-steamgate: 7 of 256 plasma frames, one wrong row each; any ABAP that does integer arithmetic with a division inside a longer expression — index computations, bucketing, `MOD` after a division — silently differs by one
 - Smallest safe workaround: none in ABAP that a system would want; the code is right as written
-- Upstream issue: none yet, **needs an issue** in `abaplint/transpiler`. The fix is not in the runtime alone: whether `7 / 2` is 4 or 3.5 depends on the calculation type of the whole statement, which the target decides too, so the transpiler has to emit a rounding division (a `divide` with an integer flag, or `abap.operators.div_i`) when the expression's calculation type is `i`, and core knows that type. A design question for Lars; the reproducer is the four lines above as a transpiler test.
+- Upstream issue: [abaplint/transpiler#1866](https://github.com/abaplint/transpiler/issues/1866), filed 2026-09-17 as a question with the six measured lines, after a critic pass. The fix is not in the runtime alone: whether `7 / 2` is 4 or 3.5 depends on the calculation type of the whole statement, which the target decides too, so the transpiler has to emit a rounding division (a `divide` with an integer flag, or `abap.operators.div_i`) when the expression's calculation type is `i`, and core knows that type. A design question for Lars; the reproducer is the four lines above as a transpiler test.
 - Regression-test location: none yet; `packages/transpiler/test` over the reproducer
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-09-17-append-number-rounded — `APPEND sin( x ) TO` a float table appends 0
+### ANOMALY-2026-09-17-append-number-rounded — `APPEND sin( x ) TO` a float table rounds the value to an integer
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed locally, PR open`
 - Discovery date: `2026-09-17`
 - Affected versions: `@abaplint/runtime 2.13.87` (`types/table.ts`, `cloneRow`, twice)
 - Affected ABAP statement, runtime API or adapter: `APPEND <numeric function>( … ) TO itab` where the row type is `f` (or `p`, or anything with a fraction) — `sin`, `cos`, `sqrt`, `abs`, `floor`, `ceil`, `trunc`, `sign`, `log`, `exp` return a raw JavaScript number from the runtime
@@ -69,15 +69,16 @@ DATA sines TYPE STANDARD TABLE OF f WITH EMPTY KEY.
 DO 256 TIMES.
   APPEND sin( ( sy-index - 1 ) * '6.283185' / 256 ) TO sines.
 ENDDO.
-READ TABLE sines INDEX 65 INTO DATA(quarter).   " SAP: 1.0 — open-abap: 0
+READ TABLE sines INDEX 2 INTO DATA(second).   " SAP: 0.024541227323353419 — open-abap: 0
+READ TABLE sines INDEX 7 INTO DATA(seventh).  " SAP: 0.14673046733376413 — open-abap: 0 (index 65, sin of a quarter turn, is 1 on both, which is why the first draft of the issue reproduced nothing)
 ```
 
-- Exact command used to run it: `tools/o4d-record.mjs --scene plasma --ticks 256` on the lab and on A4H, then `--compare`: 256 of 256 frames differ, every rectangle's `f` (its colour) — 7 distinct colours here across 641 rectangles and 169 there, frame 0 all `rgb(20,201,201)` here (hue 180, what the formula gives when every sine is 0). Then the runtime asked directly: `append({source: abap.builtin.sin({val: Float 0.5}), target: <float table>})` leaves a row of `0`; `append({source: Float 0.479})` keeps it.
+- Exact command used to run it: `tools/o4d-record.mjs --scene plasma --ticks 256` on the lab and on A4H, then `--compare`: 256 of 256 frames differ, every rectangle's `f` (its colour) — 7 distinct colours here across 641 rectangles and 169 there, frame 0 all `rgb(20,201,201)` here (hue 180: the row's four sines are 0 after rounding). Then the runtime asked directly: `append({source: abap.builtin.sin({val: Float 0.5}), target: <float table>})` leaves a row of `0`; `append({source: Float 0.479})` keeps it. The values of indexes 2, 7 and 65 were measured on A4H with an ABAP Unit probe (0.0245…, 0.1467…, 0.99999…97); the old wrapping makes them 0, 0, 1. The critic pass before the issue caught the first draft claiming "all zeros": the table holds −1, 0 and 1.
 - Expected SAP behaviour: the sine value in the row
-- Actual open-abap behaviour: `cloneRow` wraps a raw number as `new Integer().set(item)` before setting the row, so the fraction is rounded away before the float row sees it
-- Impact on open-steamgate: the plasma scene of the demo is one colour per frame instead of a plasma; any ABAP that tabulates a numeric function
+- Actual open-abap behaviour: `cloneRow` wraps a raw number as `new Integer().set(item)` before setting the row, so the value is rounded to the nearest integer before the float row sees it
+- Impact on open-steamgate: the plasma scene of the demo has 7 colours across a frame instead of 169; any ABAP that tabulates a numeric function
 - Smallest safe workaround: assign to an `f` variable first and append that
-- Upstream issue: none yet, **needs an issue**. Branch `fix/append-number-float` (worktree `.local/pr-append-number` of the transpiler clone, based on `origin/main`, be1bb514): a whole number stays an `Integer`, anything else goes through a `Float`; cherry-picked onto `local/osd-build`. Runtime tests and lint green.
+- Upstream issue: [abaplint/transpiler#1865](https://github.com/abaplint/transpiler/issues/1865), filed 2026-09-17 after a critic pass; PR [#1867](https://github.com/abaplint/transpiler/pull/1867) the same day. Branch `fix/append-number-float` (worktree `.local/pr-append-number` of the transpiler clone, based on `origin/main`, 283a48d8): a whole number stays an `Integer`, anything else goes through a `Float`; cherry-picked onto `local/osd-build`. Runtime tests and lint green.
 - Regression-test location: `packages/runtime/test/statements/append_number.ts` on the branch
 - **Verified, 2026-09-17.** With the fix on `local/osd-build` and the runtime rebuilt, the plasma scene against A4H goes from 256 differing frames of 256 to 18: 12 of them the pulse `p` (`ANOMALY-2026-09-16-numeric-builtins-typed-integer`), 7 one row each (`ANOMALY-2026-09-17-integer-division-not-rounded`).
 - Upstream version containing a fix: `unknown`

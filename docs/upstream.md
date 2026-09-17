@@ -106,11 +106,11 @@ Ordered by what breaks without them, most first.
   2026-09-17, from inside the repository.
 - **`@abaplint/runtime`, from the plasma scene (2026-09-17)**:
   `ANOMALY-2026-09-17-append-number-rounded` — `APPEND sin( x ) TO` a
-  float table appends 0, because `cloneRow` wraps a raw number as an
-  `Integer` first. Branch `fix/append-number-float`, one commit with a
+  float table rounds every value to an integer, because `cloneRow` wraps
+  a raw number as an `Integer` first. Branch `fix/append-number-float`, one commit with a
   test (`packages/runtime/test/statements/append_number.ts`), runtime
-  tests and lint green; needs an issue, then a PR from inside the
-  repository. Cherry-picked onto `local/osd-build`.
+  tests and lint green; issue #1865 and **PR #1867**, 2026-09-17, after
+  the critic pass Alice asked for. Cherry-picked onto `local/osd-build`.
 - **`@abaplint/core`, from the mountains scene (2026-09-17)**:
   `ANOMALY-2026-09-17-character-literal-calc-type` — already fixed
   upstream by #4293 in 2.120.52; the pin was behind. `local/osd-build`
@@ -121,8 +121,8 @@ Ordered by what breaks without them, most first.
   `i` a system rounds every `/` to an integer before the next operation
   (`7 / 2 + 7 / 2` is 8 there, 7 here; measured on A4H). The fix needs
   the statement's calculation type, so it is the transpiler's, not the
-  runtime's: a design question to put to Lars as an issue with the four
-  measured lines. Not started.
+  runtime's: put to Lars as issue #1866 with the six measured lines,
+  2026-09-17. Not started.
 - **The order was test, issue, fix (Alice, 2026-09-17):** the reproducers
   went first, with the A4H measurement, so the issue could say what a
   system answers; the fixes followed the same day for the two runtime

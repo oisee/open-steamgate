@@ -166,6 +166,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   their Upstream line, and `parked` lists those separately.
   `docs/upstream.md` is the dossier: every local fix, its entry, its branch,
   its test and what to do next, in sending order.
+  **Sending upstream is gated by a critic, not by an ask** (Alice,
+  2026-09-17): before an issue or a PR goes to any of the three upstreams,
+  a separate agent reads the drafts against the branch diff (claims vs
+  diff, reproducers, live identifiers, tone, whether "no fix proposed" is
+  honest); what it flags is fixed, then it is sent and the verdict is
+  reported. A merge, a force-push over somebody else's work, or a push to
+  a repository that is not ours still asks first.
   The performance test itself is #1837. Pushing a branch there is not
   merging: `main` is still his, and nothing of ours is merged by us in
   `abaplint/transpiler` or `open-abap-core`. Before offering anything to any of
