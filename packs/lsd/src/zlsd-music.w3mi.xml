@@ -2,20 +2,20 @@
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_W3MI" serializer_version="v2.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
-   <NAME>ZLSD-SHOW</NAME>
-   <TEXT>sap-lsd show, screens as styled runs</TEXT>
+   <NAME>ZLSD-MUSIC</NAME>
+   <TEXT>soniqat-a x soniqat-a (Mashup)</TEXT>
    <PARAMS>
     <WWWPARAMS>
      <NAME>fileextension</NAME>
-     <VALUE>.ndjson</VALUE>
+     <VALUE>.m4a</VALUE>
     </WWWPARAMS>
     <WWWPARAMS>
      <NAME>filename</NAME>
-     <VALUE>show.ndjson</VALUE>
+     <VALUE>music.m4a</VALUE>
     </WWWPARAMS>
     <WWWPARAMS>
      <NAME>mimetype</NAME>
-     <VALUE>application/x-ndjson</VALUE>
+     <VALUE>audio/mp4</VALUE>
     </WWWPARAMS>
    </PARAMS>
   </asx:values>

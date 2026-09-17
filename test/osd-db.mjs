@@ -24,8 +24,11 @@ describe("tools/osd-db: base images and forks", function () {
     expect(first.status, first.stderr).to.equal(0);
     const {stamp} = JSON.parse(first.stdout.trim().split("\n").pop());
     expect(stamp).to.match(/^[0-9a-f]{16}$/);
-    const image = join(base, `${stamp}.sqlite`);
-    expect(existsSync(image), "the image is there after the first boot").to.equal(true);
+    // the image is named by the schema and the rows that went into it, not
+    // by the stamp alone (B.13): there is one, whatever its name
+    const images = readdirSync(base).filter((f) => f.endsWith(".sqlite"));
+    expect(images, "the image is there after the first boot").to.have.length(1);
+    const image = join(base, images[0]);
     const before = statSync(image).mtimeMs;
     const t0 = Date.now();
     const second = boot({STG_DB_PATH: join(dir, "two.sqlite"), STG_DB_BASE: base});

@@ -1,14 +1,5 @@
 {
   "name": "lsd",
   "description": "SAP LSD: the light-show a rogue dispatcher plays to SAP GUI, recorded screen by screen and replayed over a push channel",
-  "order": 50,
-  "tiles": [
-    {
-      "title": "SAP LSD",
-      "subtitle": "a light-show, as SAP GUI screens",
-      "info": "ZCL_LSD_APC_HANDLER",
-      "icon": "sap-icon://sys-monitor",
-      "url": "/sap/bc/lsd/"
-    }
-  ]
+  "order": 50
 }

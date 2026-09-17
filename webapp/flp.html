@@ -92,6 +92,17 @@
                       }
                     },
                     {
+                      id: "lsd",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "SAP LSD",
+                        subtitle: "a light-show, as SAP GUI screens",
+                        info: "ZCL_LSD_APC_HANDLER",
+                        icon: "sap-icon://sys-monitor",
+                        targetURL: "#Lsd-play"
+                      }
+                    },
+                    {
                       id: "source",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -183,6 +194,13 @@
           description: "a Z-machine interpreter in ABAP, the story file out of SMW0",
           applicationType: "URL",
           url: "../sap/bc/zork",
+          navigationMode: "embedded"
+        },
+        "Lsd-play": {
+          title: "SAP LSD",
+          description: "the sap-lsd light-show, recorded as SAP GUI screens and replayed over a push channel",
+          applicationType: "URL",
+          url: "../sap/bc/lsd",
           navigationMode: "embedded"
         },
         "Source-open": {

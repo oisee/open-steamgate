@@ -62,7 +62,17 @@ export async function setup(abap, schemas, insert) {
     // and the first instance of a new DDIC seeds and leaves the image behind
     // for the next. This is what makes twenty runtimes over twenty files
     // cheap: each is a copy, and nobody seeds twice.
-    const base = join(BASE_DIR, `${wanted}.sqlite`);
+    //
+    // The image is named by the schema *and* the rows that went into it: the
+    // generation's mandatory rows (the wwwparams of every SMW0 object) and
+    // the seed. Named by the schema alone, an image made before a pack
+    // brought a new media object was copied for every later database, and
+    // the object was in the generation and not in the table (B.13,
+    // 2026-09-17). The stamp inside the file stays the schema's, which is
+    // what drift means.
+    const seeded = seedStatements();
+    const imageOf = fingerprintOf([schemas.sqlite, ...insert, ...seeded]);
+    const base = join(BASE_DIR, `${imageOf}.sqlite`);
     if (!existsSync(path) && existsSync(base)) {
       mkdirSync(dirname(path), {recursive: true});
       copyFileSync(base, path);
@@ -72,7 +82,13 @@ export async function setup(abap, schemas, insert) {
     await db.connect();
     const found = await db.stampedSchema();
     if (found === wanted) {
-      return; // the rows are already there, made for this DDIC
+      // the rows are already there, made for this DDIC. The tables the
+      // generation writes at start (wwwparams: which SMW0 objects exist and
+      // what they are called) are the generation's, not the user's, so they
+      // follow it: an object a pack added since this file was made is put
+      // in, one the pack dropped is taken out.
+      await refreshGenerated(db, insert);
+      return;
     }
     if (found !== undefined || existsSync(path) && (await db.query("SELECT COUNT(*) AS n FROM sqlite_master"))[0]?.n > 0) {
       // a file made for another DDIC, or one nobody stamped: not this
@@ -92,7 +108,7 @@ export async function setup(abap, schemas, insert) {
     }
     await db.execute(schemas.sqlite);
     await db.execute(insert);
-    await db.execute(seedStatements());
+    await db.execute(seeded);
     await loadScaledData(db, "sqlite");
     await db.stamp(schemas.sqlite);
     await db.commit();
@@ -136,4 +152,27 @@ async function loadScaledData(db, kind) {
     const {loadFlightFacts} = await import("../tools/gen-data.mjs");
     await loadFlightFacts(db, scale, kind);
   }
+}
+
+// The tables the generation's own INSERTs fill are rewritten from the
+// generation on every boot over an existing file: delete what is there for
+// each of those tables, insert what the generation says. Nothing else in the
+// file is touched.
+async function refreshGenerated(db, insert) {
+  const statements = Array.isArray(insert) ? insert : String(insert ?? "").split("\n").filter((s) => s.trim() !== "");
+  const tables = new Set();
+  for (const s of statements) {
+    const m = /^INSERT INTO "([^"]+)"/i.exec(s.trim());
+    if (m) {
+      tables.add(m[1]);
+    }
+  }
+  if (tables.size === 0) {
+    return;
+  }
+  for (const table of tables) {
+    await db.execute(`DELETE FROM "${table}";`);
+  }
+  await db.execute(statements.filter((s) => /^INSERT INTO "/i.test(s.trim())));
+  await db.commit();
 }

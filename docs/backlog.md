@@ -599,6 +599,17 @@ D.9  docs/adt-facade.md, the version #7880 links to                       [S]
         STG_DB_STRICT, unit-run alerts, the shim's pseudo-headers).
         Alice: "потом перепишешь" — parked.
 
+B.13 A new SMW0 object never reaches an existing database file           [S]
+     └─ found 2026-09-17 with the lsd pack: with STG_DB=file the rows of
+        wwwparams are seeded when the file is created, so an object added
+        to a pack later (ZLSD-MUSIC) is in the generation and not in the
+        table, WWWDATA_IMPORT finds no parameters, and the page answers
+        404 while a fresh database serves it. The seed (or the schema
+        fingerprint) has to notice a generation's W3MI set changing, or
+        the media rows should be read from the generation rather than
+        from the table. Until then: delete the file (or use another
+        STG_DB_PATH) after adding media to a pack.
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a

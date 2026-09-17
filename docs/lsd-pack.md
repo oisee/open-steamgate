@@ -15,7 +15,7 @@ the way the ZO4D demo hands out its frames.
 
 ## The recording
 
-`sap-tui --record show.jsonl.gz --size 36x120 --record-seconds 118` (the
+`sap-tui --record show.ndjson.gz --size 36x120 --record-seconds 118` (the
 flag added for this) connects to a running `sap-lsd`, composes every screen
 the server sends for a fixed 36×120 terminal, and writes one JSON object per
 line:
@@ -32,7 +32,7 @@ previous frame are written. Colours are the xterm 256-colour indexes the
 viewer already uses; flags are 1 bold, 2 underline, 4 reverse. The whole
 show, 118 seconds and 1278 screens, is 2.8 MB raw and 141 KB gzipped.
 
-The recording is an SMW0 object of the pack, `ZLSD-SHOW`, kept uncompressed
+The recording is an SMW0 object of the pack, `ZLSD-SHOW`, kept uncompressed (as `.ndjson`: `*.jsonl` is what this repository never commits, captures)
 because the runtime's `cl_abap_gzip` is Node's zlib and the browser preview
 has none; the wire stays small anyway, since a frame is its changed rows.
 Compressing the stored object is the obvious next step once the browser

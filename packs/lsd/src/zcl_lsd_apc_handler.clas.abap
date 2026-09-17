@@ -78,40 +78,15 @@ CLASS zcl_lsd_apc_handler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD load.
-    DATA: lt_mime   TYPE w3mimetabtype,
-          ls_key    TYPE wwwdatatab,
-          lt_params TYPE STANDARD TABLE OF wwwparams,
-          lv_size   TYPE i,
-          lv_data   TYPE xstring.
-
+    DATA: lv_data TYPE xstring, lv_size TYPE i.
     IF mt_lines IS NOT INITIAL.
       rv_lines = lines( mt_lines ).
       RETURN.
     ENDIF.
-    ls_key-relid = 'MI'.
-    ls_key-objid = c_object.
-    SELECT * FROM wwwparams INTO TABLE lt_params WHERE relid = ls_key-relid AND objid = ls_key-objid.
-    READ TABLE lt_params INTO DATA(ls_param) WITH KEY name = 'filesize'.
-    IF sy-subrc = 0.
-      lv_size = ls_param-value.
-    ENDIF.
-    CALL FUNCTION 'WWWDATA_IMPORT'
-      EXPORTING
-        key    = ls_key
-      TABLES
-        mime   = lt_mime
-      EXCEPTIONS
-        OTHERS = 1.
-    IF sy-subrc <> 0.
+    zcl_lsd_media=>load( EXPORTING iv_name = c_object IMPORTING ev_data = lv_data ev_size = lv_size ).
+    IF lv_data IS INITIAL.
       RETURN.
     ENDIF.
-    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
-      EXPORTING
-        input_length = lv_size
-      IMPORTING
-        buffer       = lv_data
-      TABLES
-        binary_tab   = lt_mime.
     DATA(lv_text) = cl_abap_codepage=>convert_from( lv_data ).
     SPLIT lv_text AT cl_abap_char_utilities=>newline INTO TABLE mt_lines.
     " a trailing newline leaves an empty last line, which is no frame
