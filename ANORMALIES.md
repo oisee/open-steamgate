@@ -129,6 +129,50 @@ DATA(dist)  = abs( CONV f( '-2.5' ) ).  " SAP: f, 2.5 — open-abap: i, 3
 - Regression-test location: `packages/core/test/abap/syntax/basic_variables.ts` on the branch — "inline DATA from frac( f ) is a float", "… abs( f ) …" (both failing on 2.120.54: `expected IntegerType to be an instance of FloatType`) and "frac( i ) stays an integer" (passing)
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-17-release-bundle-slower-than-source — The release bundle runs ABAP arithmetic three and a half times slower than the same build on plain Node
+
+- Status: `measured, not diagnosed`
+- Discovery date: `2026-09-17`
+- Affected versions: this tree's own `scripts/build-sea.mjs` bundle (`osd.mjs`) and, by extension, the Bun binary and every release deployed from them
+- Affected ABAP statement, runtime API or adapter: none in particular — arithmetic-heavy ABAP, measured on the demo
+- Minimal reproducer: serve one generation two ways and profile the same scene.
+
+```
+node tools/o4d-profile.mjs http://127.0.0.1:<port> --scene quat_julia --ticks 60
+# the ordinary source host (test/run.mjs -> tools/osd-serve.mjs):   100.4 ms a frame
+# the release bundle (.local/release-*/osd.mjs serve):              363.3 ms a frame
+```
+
+- Exact command used to run it: found while re-measuring the code-generation
+  feature with five interleaved rounds a side, 2026-09-17. The same cached
+  generation, the same machine, the same scene. Node was ruled out as the
+  cause: the source host under the release tree's own private Node 26.9 gives
+  98.6-101.5 ms, indistinguishable from system Node 26.3 at 100.4.
+- Expected behaviour: a bundle of the same code runs at roughly the speed of
+  the code.
+- Actual behaviour: **3.5x slower**, and not uniformly. The penalty falls on
+  the `@abaplint/runtime` operator protocol specifically: with the transpiler's
+  typed-arithmetic flag **off** the bundle costs 3.6x (100 -> 363 ms), with it
+  **on** only 2.0x (59 -> 119 ms). Whatever the bundling does, it does it to
+  the operators.
+- Impact on open-steamgate: **this is what the i7 and every release run.**
+  The demo on a deployed release is several times slower than the same code
+  served from a checkout, and the work-process pool (B.12) was measured on the
+  source host. It also silently inflates any performance comparison taken
+  through a release: a change that removes protocol work looks better than it
+  is, which is how a -41 % improvement read as -63 % before this was found.
+- Smallest safe workaround: measure on the source host. For deployment there
+  is none yet, because the cause is unknown.
+- Suspects, none confirmed: Terser's mangling of the runtime's hot classes
+  (`keep_classnames`/`keep_fnames` are set for a correctness reason, so the
+  shape V8 sees may still differ), the bundle's single-chunk module wrapper
+  defeating inlining, or the generated code reaching the runtime through the
+  plugin's `build.module` copy rather than a normal import (CLAUDE.md, the
+  binary's four facts).
+- Upstream issue: none; this is ours.
+- Regression-test location: none yet
+- Upstream version containing a fix: n/a
+
 ### ANOMALY-2026-09-17-character-operand-calculation-type — A character literal in arithmetic gives a different type on each side, and neither is the kernel's
 
 - Status: `measured, not fixed`
