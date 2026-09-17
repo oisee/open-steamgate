@@ -10,13 +10,18 @@ CLASS ltcl_media IMPLEMENTATION.
   METHOD the_show_is_there.
     DATA: lv_data TYPE xstring, lv_size TYPE i.
     zcl_lsd_media=>load( EXPORTING iv_name = 'ZLSD-SHOW' IMPORTING ev_data = lv_data ev_size = lv_size ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_size > 1000000 ) ).
+    " the recording is gzip since 2026-09-17: 225 KB where the text was 5.2 MB.
+    " The page inflates it with DecompressionStream, so nothing here does, and
+    " what this test can still check is that the object arrived whole and is
+    " the kind of file the page expects.
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_size > 100000 ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_size < 1000000 ) ).
     cl_abap_unit_assert=>assert_equals( act = xstrlen( lv_data ) exp = lv_size ).
-    " the recording starts with its header line
-    DATA lv_first TYPE xstring.
-    lv_first = lv_data+0(20).
-    DATA(lv_head) = cl_abap_codepage=>convert_from( lv_first ).
-    cl_abap_unit_assert=>assert_equals( act = substring( val = lv_head len = 6 ) exp = '{"cols' ).
+    " gzip's magic number, so a plain-text recording put back by mistake fails
+    " here rather than in a browser
+    DATA lv_magic TYPE xstring.
+    lv_magic = lv_data+0(2).
+    cl_abap_unit_assert=>assert_equals( act = lv_magic exp = '1F8B' ).
   ENDMETHOD.
 
   METHOD the_music_is_there.

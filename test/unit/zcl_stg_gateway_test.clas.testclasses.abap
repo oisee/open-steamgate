@@ -267,11 +267,18 @@ CLASS ltcl_dispatch IMPLEMENTATION.
   METHOD paging_and_inlinecount.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
 
+* The seeded rows are T0001, T0002, T0003 and T0009. Ordered descending that
+* is T0009, T0003, T0002, T0001, so skipping one and taking one is T0003.
+* Until 2026-09-17 this test expected T0002, which is what the *ascending*
+* order gives: the hand-written DPC was handed the ordering in it_order and
+* ignored it, so the test had been written from what came back rather than
+* from what was asked for (backlog B.16).
     ls_response = get( iv_path  = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet'
-                       iv_query = '$top=1&$skip=1&$inlinecount=allpages&$orderby=TravelId%20desc' ).
+                       iv_query = '$top=1&$skip=1&$inlinecount=allpages&$orderby=TravelId desc' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 200 ).
-    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0002"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"TravelId":"T0003"' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0009"' ) ).
     cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '"TravelId":"T0001"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"__count":"1"' ) ).
   ENDMETHOD.

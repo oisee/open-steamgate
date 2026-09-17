@@ -55,7 +55,7 @@ B — the runtime underneath: what the answers are made of
 ├─ B.13 a new SMW0 object never reaches an existing database        DONE 09-17
 ├─ B.14 a cast in a CDS view drops the field                        open, small
 ├─ B.15 does our pipeline read a view entity?                       open, one build
-├─ B.16 the demo DPC ignores $orderby                               open, small
+├─ B.16 the demo DPC ignores $orderby                               DONE 09-17
 ├─ B.17 the arithmetic protocol: 30 ns an operation, and who        measured,
 │       fixes it                                                    ranked
 └─ B.18 the release bundle runs 3.5x slower than the same build     measured,
@@ -771,7 +771,7 @@ A.11 A service of several CDS views, without a hand-written class [S+A] DONE 202
         would gain the booking entity and to_Bookings), so it is a
         decision, not only a patch
 
-B.16 The demo DPC ignores $orderby                                       [S]
+B.16 The demo DPC ignores $orderby                          [S]  DONE 09-17
      └─ found 2026-09-17 writing the conformance suite: a hand-written
         `_DPC_EXT` gets the ordering in `io_tech_request_context` and
         `zcl_zstg_demo_dpc_ext` never applies it, so

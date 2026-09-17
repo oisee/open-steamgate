@@ -43,6 +43,45 @@ CLASS zcl_zstg_demo_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zstg_demo_dpc 
       CHANGING
         ct_travel TYPE zcl_zstg_demo_mpc=>tt_travel.
 
+* $orderby, applied the way a hand-written DPC has to apply it. The ordering
+* arrives in it_order as the model's property names, and ABAP has no dynamic
+* SORT the transpiler supports, so each set spells its own properties out.
+* The terms are applied from the last to the first, which gives the same rows
+* as one multi-key SORT because the sort is stable. A property the entity set
+* does not have is a client error, not a silent no-op: that is what a system
+* answers, and the alternative is a request that quietly ignores half of what
+* it was asked for.
+    METHODS order_travel
+      IMPORTING
+        it_order  TYPE /iwbep/t_mgw_sorting_order
+      CHANGING
+        ct_travel TYPE zcl_zstg_demo_mpc=>tt_travel
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
+    METHODS order_booking
+      IMPORTING
+        it_order   TYPE /iwbep/t_mgw_sorting_order
+      CHANGING
+        ct_booking TYPE zcl_zstg_demo_mpc=>tt_booking
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
+    METHODS order_photo
+      IMPORTING
+        it_order TYPE /iwbep/t_mgw_sorting_order
+      CHANGING
+        ct_photo TYPE zcl_zstg_demo_mpc=>tt_photo
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
+    METHODS unknown_order_property
+      IMPORTING
+        iv_property TYPE string
+        iv_set      TYPE string
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
     METHODS photo_url
       IMPORTING
         iv_travel_id  TYPE ty_travel_id
@@ -139,6 +178,10 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     fill_status_text( CHANGING ct_travel = et_entityset ).
     fill_photo_url( CHANGING ct_travel = et_entityset ).
 
+* $orderby, after the derived properties are filled, so StatusText can be
+* sorted on, and before paging, so skip and top count the ordered rows
+    order_travel( EXPORTING it_order = it_order CHANGING ct_travel = et_entityset ).
+
 * paging the way most hand-written DPCs do it: after the SELECT
     lv_skip = is_paging-skip.
     lv_top  = is_paging-top.
@@ -153,6 +196,135 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
         DELETE et_entityset INDEX lv_index.
       ENDWHILE.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD unknown_order_property.
+    RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+      EXPORTING
+        message = |$orderby: { iv_set } has no property { iv_property }|.
+  ENDMETHOD.
+
+  METHOD order_travel.
+    DATA lv_index TYPE i.
+    DATA ls_order TYPE /iwbep/s_mgw_sorting_order.
+    DATA lv_desc  TYPE abap_bool.
+
+    lv_index = lines( it_order ).
+    WHILE lv_index >= 1.
+      READ TABLE it_order INDEX lv_index INTO ls_order.
+      lv_desc = boolc( to_lower( ls_order-order ) = 'desc' ).
+      CASE to_upper( ls_order-property ).
+        WHEN 'TRAVELID'.
+          IF lv_desc = abap_true.
+            SORT ct_travel BY travel_id DESCENDING.
+          ELSE.
+            SORT ct_travel BY travel_id ASCENDING.
+          ENDIF.
+        WHEN 'DESCRIPTION'.
+          IF lv_desc = abap_true.
+            SORT ct_travel BY description DESCENDING.
+          ELSE.
+            SORT ct_travel BY description ASCENDING.
+          ENDIF.
+        WHEN 'STATUS'.
+          IF lv_desc = abap_true.
+            SORT ct_travel BY status DESCENDING.
+          ELSE.
+            SORT ct_travel BY status ASCENDING.
+          ENDIF.
+        WHEN 'SEATS'.
+          IF lv_desc = abap_true.
+            SORT ct_travel BY seats DESCENDING.
+          ELSE.
+            SORT ct_travel BY seats ASCENDING.
+          ENDIF.
+        WHEN 'STATUSTEXT'.
+          IF lv_desc = abap_true.
+            SORT ct_travel BY status_text DESCENDING.
+          ELSE.
+            SORT ct_travel BY status_text ASCENDING.
+          ENDIF.
+        WHEN OTHERS.
+          unknown_order_property( iv_property = ls_order-property iv_set = 'TravelSet' ).
+      ENDCASE.
+      lv_index = lv_index - 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD order_booking.
+    DATA lv_index TYPE i.
+    DATA ls_order TYPE /iwbep/s_mgw_sorting_order.
+    DATA lv_desc  TYPE abap_bool.
+
+    lv_index = lines( it_order ).
+    WHILE lv_index >= 1.
+      READ TABLE it_order INDEX lv_index INTO ls_order.
+      lv_desc = boolc( to_lower( ls_order-order ) = 'desc' ).
+      CASE to_upper( ls_order-property ).
+        WHEN 'TRAVELID'.
+          IF lv_desc = abap_true.
+            SORT ct_booking BY travel_id DESCENDING.
+          ELSE.
+            SORT ct_booking BY travel_id ASCENDING.
+          ENDIF.
+        WHEN 'BOOKINGID'.
+          IF lv_desc = abap_true.
+            SORT ct_booking BY booking_id DESCENDING.
+          ELSE.
+            SORT ct_booking BY booking_id ASCENDING.
+          ENDIF.
+        WHEN 'CUSTOMER'.
+          IF lv_desc = abap_true.
+            SORT ct_booking BY customer DESCENDING.
+          ELSE.
+            SORT ct_booking BY customer ASCENDING.
+          ENDIF.
+        WHEN 'FLIGHTDATE'.
+          IF lv_desc = abap_true.
+            SORT ct_booking BY flight_date DESCENDING.
+          ELSE.
+            SORT ct_booking BY flight_date ASCENDING.
+          ENDIF.
+        WHEN OTHERS.
+          unknown_order_property( iv_property = ls_order-property iv_set = 'BookingSet' ).
+      ENDCASE.
+      lv_index = lv_index - 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD order_photo.
+    DATA lv_index TYPE i.
+    DATA ls_order TYPE /iwbep/s_mgw_sorting_order.
+    DATA lv_desc  TYPE abap_bool.
+
+    lv_index = lines( it_order ).
+    WHILE lv_index >= 1.
+      READ TABLE it_order INDEX lv_index INTO ls_order.
+      lv_desc = boolc( to_lower( ls_order-order ) = 'desc' ).
+      CASE to_upper( ls_order-property ).
+        WHEN 'TRAVELID'.
+          IF lv_desc = abap_true.
+            SORT ct_photo BY travel_id DESCENDING.
+          ELSE.
+            SORT ct_photo BY travel_id ASCENDING.
+          ENDIF.
+        WHEN 'MIMETYPE'.
+          IF lv_desc = abap_true.
+            SORT ct_photo BY mime_type DESCENDING.
+          ELSE.
+            SORT ct_photo BY mime_type ASCENDING.
+          ENDIF.
+        WHEN 'FILENAME'.
+          IF lv_desc = abap_true.
+            SORT ct_photo BY file_name DESCENDING.
+          ELSE.
+            SORT ct_photo BY file_name ASCENDING.
+          ENDIF.
+        WHEN OTHERS.
+          unknown_order_property( iv_property = ls_order-property iv_set = 'PhotoSet' ).
+      ENDCASE.
+      lv_index = lv_index - 1.
+    ENDWHILE.
   ENDMETHOD.
 
   METHOD key_from.
@@ -424,6 +596,8 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       INTO CORRESPONDING FIELDS OF TABLE et_entityset
       WHERE travel_id IN lt_travel_id
       ORDER BY travel_id booking_id.
+
+    order_booking( EXPORTING it_order = it_order CHANGING ct_booking = et_entityset ).
   ENDMETHOD.
 
   METHOD bookingset_get_entity.
@@ -488,6 +662,8 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
       FROM zstg_photo
       INTO CORRESPONDING FIELDS OF TABLE et_entityset
       ORDER BY travel_id.
+
+    order_photo( EXPORTING it_order = it_order CHANGING ct_photo = et_entityset ).
   ENDMETHOD.
 
   METHOD photoset_get_entity.
