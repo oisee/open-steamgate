@@ -109,13 +109,39 @@ through the critic gate (CLAUDE.md).
 | # | what | where | gain, measured | state |
 | --- | --- | --- | --- | --- |
 | 0 | the anchor issue: the arithmetic protocol dominates compute-bound ABAP, with the profile and the ranked list | an issue only, `abaplint/transpiler` | — | to write |
-| 1 | a constant `Character` remembers the number it parses to | runtime, `operators/_parse.ts` + the character factory | 22 % of an `sdf_blobs` frame | in progress |
-| 2 | a `Float`/`Float` branch at the head of `add`/`minus`/`multiply`/`divide` | runtime, `operators/` | 9–17 % of every heavy frame | in progress |
-| 3 | plain JavaScript arithmetic when the operand types are proven | transpiler, `expressions/source.ts` + a new type walk | 110–200 ns to about 1 | in progress |
+| 1 | a constant `Character` remembers the number it parses to | runtime, `types/character.ts` + `operators/_parse.ts` | -45 % on the operation, inside the noise on the demo | branch `perf/character-constant-numeric` 3046b03e, at the critic |
+| 2 | a `Float`/`Float` branch in `add`/`minus`/`multiply` | runtime, `operators/` | -4 to -13 % of a heavy frame's CPU | branch `perf/float-fast-path` b10dcf31, at the critic |
+| 3 | plain JavaScript arithmetic when the operand types are proven | transpiler, `expressions/source.ts` + a new type walk, behind a feature flag | 110-200 ns to about 1 | in progress |
 | 4 | a synchronous `LOOP AT` when the body contains no `await` | runtime + codegen | 172–349 ns a row to 74 | design question, unwritten |
 | 5 | method inlining | transpiler | 123 ns to 67, and 206 to 67 for a structure return | unwritten, high risk |
 
 Notes that belong with them, so they are not rediscovered:
+
+**What measuring changed about items 1 and 2, 2026-09-17.** Both were
+written, tested and measured before either was sent, and both moved:
+
+- The fast path went **under** the integer branch, not at the head of it,
+  and `divide` was left alone. At the head it is worth more on the demo
+  (-13.9 % against -13.3 % on `sdf_blobs`, -19.2 against -9.8 on
+  `quat_julia`) and it takes integer division from 10.4 ns to 16.4, three
+  runs running, which is more than two `instanceof` can explain and looks
+  like an inlining threshold. A change that speeds up floats by slowing
+  integer division is not one to offer, so the branch carries the
+  placement that regresses nothing, and the issue puts both columns in
+  front of Lars, whose weighting of integer division is not ours to
+  assume.
+- Item 1 is large per operation (a constant literal operand costs 45 %
+  less) and **invisible on the demo, inside the noise**. The draft says so
+  rather than hiding it. The reason is the more interesting finding: the
+  operators convert a character operand with
+  `Number.isInteger(Number(left.get()))` before they ever reach `parse()`,
+  so the cache removes the second conversion of two.
+- Found while measuring, not implemented and **not yet measured on a
+  system**: the calculation type of `lv_i * '2'` depends on which side the
+  literal is on (`Integer` on the left, `Float` on the right, and `minus`
+  the same), and `divide` has no character branch at all. Until it is
+  measured on A4H it is a candidate in an issue and not an anomaly,
+  because this project measures a discrepancy before it claims one.
 
 - **Item 1 and item 3 overlap on purpose.** Folding `'0.5'` in code
   generation makes it disappear; caching it in the runtime makes it cheap
