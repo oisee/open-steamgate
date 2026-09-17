@@ -48,6 +48,25 @@
       "url": "https://github.com/abapGit/abapGit",
       "folder": "/.local/lars/abapgit",
       "files": "/{src/{git/{*.*,v2/*.*},utils/*.*,objects/aff_types/*.*,ui/progress/zif_abapgit_progress.*,zcx_abapgit_exception.*,zcx_abapgit_not_found.*,zcx_abapgit_type_not_supported.*,zif_abapgit_definitions.*,zif_abapgit_version.*},deps/{progname.dtel.xml,trobjtype.dtel.xml,trnspace.tabl.xml,dokil.tabl.xml}}"
+    },
+    {
+      // The SAP GUI control classes as ABAP substitutes: cl_gui_html_viewer,
+      // the containers, cl_gui_alv_grid, the trees, cl_gui_frontend_services.
+      // Same shape as open-abap-core above -- SAP-namespace shim code, a
+      // library and not a pack (docs/webgui.md).
+      //
+      // Only /src is the library. The repository also carries /scaffold (162
+      // example programs and a dynpro host of its own) and /test, and neither
+      // belongs in this tree. Three files under /scaffold are the exception:
+      // /src refers to them by name, so they are closure and not example --
+      // cl_ctmenu and cl_gui_toolbar keep their items in
+      // zcl_gg_context_menu_state, and the tree and grid controls render
+      // through zcl_gg_host_surface, which asks zcl_gg_host_html for a CSS
+      // class. They would be library files upstream; naming them here costs
+      // three lines and keeps the other 159 out.
+      "url": "https://github.com/oisee/open-abap-gui",
+      "folder": "/.local/lars/open-abap-gui",
+      "files": "/{src/**/*.*,scaffold/zcl_gg_context_menu_state.clas.abap,scaffold/zcl_gg_host_html.clas.abap,scaffold/host/zcl_gg_host_surface.clas.abap}"
     }
   ],
   "syntax": {

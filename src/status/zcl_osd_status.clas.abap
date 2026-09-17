@@ -13,7 +13,7 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
 *    "processes":[{"pid":..,"role":..,"port":..,"generation":..,"epoch":..,
 *                  "since":..,"sockets":..,"rss_mb":..,"alive":true}],
 *    "ports":[{"port":..,"protocol":..,"purpose":..,"state":..,"note":..}],
-*    "services":[{"path":..,"kind":..,"handler":..,"pack":..}],
+*    "services":[{"path":..,"kind":..,"handler":..,"text":..,"pack":..}],
 *    "packs":[{"name":..,"order":..,"objects":..,"folders":..,
 *              "description":..}]}
 *
@@ -64,6 +64,7 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
              path    TYPE string,
              kind    TYPE string,
              handler TYPE string,
+             text    TYPE string,
              pack    TYPE string,
            END OF ty_service.
     TYPES tt_service TYPE STANDARD TABLE OF ty_service WITH DEFAULT KEY.
@@ -197,6 +198,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
       ls_svc-path    = ls_svc_in-path.
       ls_svc-kind    = ls_svc_in-kind.
       ls_svc-handler = ls_svc_in-handler.
+      ls_svc-text    = ls_svc_in-text.
       ls_svc-pack    = ls_svc_in-pack.
       READ TABLE lt_svc WITH KEY path = ls_svc-path TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
@@ -299,6 +301,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
       ls_svc_out-path    = ls_svc-path.
       ls_svc_out-kind    = ls_svc-kind.
       ls_svc_out-handler = ls_svc-handler.
+      ls_svc_out-text    = ls_svc-text.
       ls_svc_out-pack    = ls_svc-pack.
       APPEND ls_svc_out TO ls_snap-services.
     ENDSELECT.

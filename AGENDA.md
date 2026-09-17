@@ -7,6 +7,57 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
 > was decided and why.
 
+## SAP Easy Access, and the GUI substitutes wired in, 2026-09-18
+
+The system has an entry screen. `/sap/bc/gui/sap/its/webgui/` — the path the
+real ITS webgui answers on, used on purpose — serves the classic SAP Easy
+Access screen, drawn by `ZCL_OSD_WEBGUI` (`src/webgui/`) behind a
+`*.sicf.xml`, the same ICF pattern as `packs/lsd`. Title bar, command field,
+folder tree with the disclosure triangles, the tall image panel with the
+bulge down the right-hand side, message in the status bar. No JavaScript:
+the folders are `<details>`, the command field is a GET form, a node is an
+anchor. `docs/webgui.md` is the whole of it; the tile is on the launchpad;
+`test/webgui.mjs`, `test/e2e/webgui.spec.mjs` and two ABAP Unit classes are
+the tests. Backlog track **G**.
+
+**The menu is the system, not a copy of it.** Everything below the fixed
+folders is read in ABAP out of the five status tables that `ZOSD_STATUS_SRV`
+already serves — OData services, ICF nodes, push channels, UI5 apps, content
+packs — because a menu that can disagree with the system status is a menu
+that is wrong somewhere, and there should be only one list to be wrong. Two
+things were added to that inventory rather than to the menu: `ZOSD_SVC-TEXT`
+(the name a human calls a service, which every source already carried and
+`servicesOf()` was dropping), and `KIND = 'APP'` rows read from each app's own
+`manifest.json`, pointed at the launchpad with the app's **own** inbound
+intent. The refresh `ZOSD_STATUS_SRV` pays for is now registered for the
+Easy Access path too, before the SICF mount, because that mount answers
+instead of passing on.
+
+**A node has a kind** — FOLDER / APP / SERVICE / TRANSACTION — and the third
+one exists before anything needs it. `ZABAPGIT` is the single transaction and
+it answers "not runnable yet". That is the seam: abapGit should eventually
+arrive as a transaction you type the name of, not as a bespoke page, because
+that is how a system works.
+
+**`open-abap-gui` is in as a library** (not a pack: it is SAP-namespace shim
+code like `open-abap-core`), from our fork at `ed96e89`, `/src` only plus the
+three `scaffold` files `/src` names by name. **+301 objects**, 1173 → 1474,
+which is exactly `/src` and the three: none of the 162 examples, none of the
+test tree. The screen escapes its text through `cl_gui_control=>escape_html`,
+so the library is called rather than only compiled against.
+
+**What is next, and the one thing it needs first (G.2).** The outbound half of
+`sapevent` is real and tested here: `cl_gui_control` rewrites
+`<a href="sapevent:X">` into a form that posts. The inbound half does not
+exist — **nothing in `open-abap-gui` ever raises the `sapevent` event**; the
+one example that registers a handler has a handler that cannot fire, and the
+scaffold host folds the click into its own `gg_action` dispatch instead. So
+before anything about running abapGit through the substitutes: take the POST,
+raise `sapevent` with `action` and `postdata` the way SAP fills them, and
+prove a click comes back **against abapGit's own HTML**, not a synthetic
+anchor. One class and one test. Running abapGit itself was deliberately not
+started.
+
 ## Milestone — the demo as an oracle, packs from repositories, Pages alive, 2026-09-17
 
 Status at the close of the 16/17 session (the narrative is

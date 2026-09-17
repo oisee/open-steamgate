@@ -58,6 +58,16 @@
       ]
     },
     {
+      "url": "https://github.com/oisee/open-abap-gui",
+      "folder": "/.local/lars/open-abap-gui",
+      "files": [
+        "/src/**",
+        "/scaffold/zcl_gg_context_menu_state.clas.abap",
+        "/scaffold/zcl_gg_host_html.clas.abap",
+        "/scaffold/host/zcl_gg_host_surface.clas.abap"
+      ]
+    },
+    {
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
       "files": [

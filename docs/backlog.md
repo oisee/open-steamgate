@@ -86,6 +86,12 @@ E — content packs and layers: what the tree is made of
 ├─ E.8  a DIAG stream as a demo                                     milestone 1 DONE
 └─ E.9  a pack has a page of its own                                open
 
+G — the classic screens, and the GUI substitutes under them
+├─ G.1  SAP Easy Access, served by ABAP                             DONE 09-18
+├─ G.2  prove a sapevent click comes back                           next
+├─ G.3  a transaction node that actually runs                       open
+└─ G.4  abapGit through the substitutes                             blocked on G.2
+
 U — the user, and the thing itself
 ├─ U.1  the user's path, measured by a stranger                     DONE 09-17
 └─ U.2  the status app on the browser deployment                    DONE 09-17
@@ -962,6 +968,61 @@ E.6  A pack cut out of a system                                        [S+A]
      └─ the perimeter is the hard part, not the export: a DPC_EXT's
         closure is the finding of Sprint 0, and the stubs are what make a
         pack run before the closure is transpiled
+```
+
+---
+
+## Track G — the classic screens, and the GUI substitutes under them
+
+*A system has an entry screen, and things you reach by typing their name. The
+substrate for drawing them is `open-abap-gui`, wired in as a library at
+`ed96e89` (`docs/webgui.md`).*
+
+```
+G.1  SAP Easy Access, served by ABAP                     [S] DONE 2026-09-18
+     ├─ /sap/bc/gui/sap/its/webgui/, the path the real ITS webgui answers
+     │  on, which is the nod and not an accident
+     ├─ ZCL_OSD_WEBGUI (src/webgui/) behind a *.sicf.xml, the same ICF
+     │  pattern as packs/lsd and src/icf
+     ├─ the tree is read out of the five status tables, so a service added
+     │  anywhere appears with no change here; ZOSD_SVC gained a TEXT column
+     │  and KIND='APP' rows, both derived from sources that already had them
+     ├─ a node has a kind: FOLDER / APP / SERVICE / TRANSACTION
+     ├─ the command field resolves server-side against the same node list
+     └─ open-abap-gui in as a lib: +301 objects, /src plus three scaffold
+        files /src names; escaping on the page is cl_gui_control=>escape_html
+
+G.2  Prove a sapevent click comes back                                   [S]
+     ├─ the gap, measured: cl_gui_control rewrites <a href="sapevent:X">
+     │  into a form that posts, and NOTHING in open-abap-gui ever raises
+     │  the sapevent event -- grep "RAISE EVENT" finds toolbars, timers,
+     │  grids, trees, never the HTML viewer. scaffold/examples/zcl_gg_ex_151
+     │  registers a handler that therefore cannot fire; the scaffold host
+     │  folds the POST into its own gg_action/ucomm dispatch instead
+     ├─ so: take the POST, raise sapevent on the viewer with action and
+     │  postdata filled the way SAP fills them, and show a registered
+     │  handler run. One class and one test, not a track
+     ├─ do it against abapGit's OWN HTML, not a synthetic anchor: the
+     │  synthetic one is already covered by
+     │  src/webgui/zcl_osd_webgui.clas.testclasses.abap (ltcl_substrate)
+     └─ upstream candidate once it works: the raise belongs in
+        open-abap-gui, not here
+
+G.3  A transaction node that actually runs                               [S]
+     ├─ the kind exists and answers "not yet" (ZABAPGIT is the one entry)
+     ├─ find the object by name (*.tran.xml joining the layers the way
+     │  *.sicf.xml did, or a convention), decide it is executable, run it,
+     │  render what it drew through cl_gui_control=>render_html
+     └─ the part with no precedent is state between two HTTP requests: a
+        transaction has a screen sequence, a function call does not
+
+G.4  abapGit through the substitutes                                   [S+A]
+     └─ blocked on G.2 by choice. It should arrive as a transaction rather
+        than as a page with a URL of its own, because that is how a system
+        works; and what stops it is not the GUI layer (31 todo stubs in
+        open-abap-gui/src, 20 of them in cl_salv_form_*, none in the
+        container/viewer/frontend-services path) but the SAP APIs abapGit
+        wants underneath. That is a closure audit, not a screen.
 ```
 
 ---

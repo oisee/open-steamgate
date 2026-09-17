@@ -83,7 +83,7 @@ entities:
 
   Service:
     set: ServiceSet
-    description: "the OData, ICF and push services this system serves"
+    description: "the OData, ICF, push and UI5 services this system serves"
     source: {cds: ZC_OSD_SERVICE, struct: "ZCL_STG_CDS_ZVOSDSVC=>TY_ROW"}
     keys: [Path]
     creatable: false
@@ -94,6 +94,7 @@ entities:
       Path: {type: String(120), field: PATH, readonly: true, label: Path}
       Kind: {type: String(8), field: KIND, readonly: true, label: Kind}
       Handler: {type: String(60), field: HANDLER, readonly: true, label: Handler}
+      Text: {type: String(120), field: TEXT, readonly: true, label: Name}
       Pack: {type: String(30), field: PACK, readonly: true, label: Pack}
 
   Pack:
@@ -218,14 +219,16 @@ annotations:
     lineItem:
       - {value: Path, label: Path}
       - {value: Kind, label: Kind}
+      - {value: Text, label: Name}
       - {value: Handler, label: Handler}
       - {value: Pack, label: Pack}
     facets:
       - {id: ServiceGeneral, label: General, fieldGroup: General}
     fieldGroups:
-      General: [Path, Kind, Handler, Pack]
+      General: [Path, Kind, Text, Handler, Pack]
   Service/Path: {label: Path}
   Service/Kind: {label: Kind}
+  Service/Text: {label: Name}
   Service/Handler: {label: Handler}
   Service/Pack: {label: Pack}
 

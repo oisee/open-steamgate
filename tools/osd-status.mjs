@@ -14,7 +14,7 @@
 //    "processes":[{"pid","role","port","generation","epoch","since",
 //                  "sockets","rss_mb","alive"}],
 //    "ports":[{"port","protocol","purpose","state","note"}],
-//    "services":[{"path","kind","handler","pack"}],
+//    "services":[{"path","kind","handler","text","pack"}],
 //    "packs":[{"name","order","objects","folders","description"}]}
 //
 // Counts only. No host names, no user names, no addresses, no absolute
@@ -24,13 +24,13 @@
 // basename and nothing above it.
 import {createConnection} from "node:net";
 import {basename, join, resolve} from "node:path";
-import {readFileSync} from "node:fs";
+import {readFileSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
 import {liveHash} from "./osd-build.mjs";
 import {instances} from "./osd-runtime.mjs";
 import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
-import {contentFoldersOf, folderOf, packsOf} from "./osd-packs.mjs";
+import {contentFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
 
 const PAGE = 4096;
@@ -116,7 +116,57 @@ function runtimesOf(runtime) {
   return Array.isArray(runtime.runtimes) ? runtime.runtimes : [runtime];
 }
 
-/** the OData services the SEGW registration objects declare, with their pack */
+// The UI5 applications this tree serves, out of their own manifests.
+//
+// An app is a folder with a `manifest.json` in it: `webapp/` itself is one
+// (stg.travel), every folder below it is another, and a pack that brings a
+// webapp is served the same way. The manifest already says everything a
+// listing needs -- `sap.app.id` is the component that answers, `title` is
+// what a human calls it -- so nothing here is a second list that can drift
+// from the first.
+//
+// The path is the launchpad with the app's own inbound intent
+// (`crossNavigation.inbounds`), not the folder: `webapp/booking` has no
+// index.html at all and is only ever reached through the launchpad, and a
+// system's menu should point where the launchpad points rather than at a
+// folder that happens to have a page in it.
+export function appsOf(root, env = process.env) {
+  const out = [];
+  const folders = [{name: "", dir: join(root, "webapp"), pack: ""}];
+  try {
+    for (const entry of readdirSync(join(root, "webapp"), {withFileTypes: true})) {
+      if (entry.isDirectory()) {
+        folders.push({name: entry.name, dir: join(root, "webapp", entry.name), pack: ""});
+      }
+    }
+  } catch {
+    // no webapp folder: a tree that serves no UI5 app is a tree with no apps
+  }
+  for (const one of webappsOf(root, env)) {
+    folders.push({name: one.name, dir: one.dir, pack: one.name});
+  }
+  for (const folder of folders) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(join(folder.dir, "manifest.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    const app = manifest["sap.app"] ?? {};
+    const intent = Object.keys(app.crossNavigation?.inbounds ?? {})[0];
+    const page = folder.name === "" ? "/app/index.html" : `/app/${folder.name}/index.html`;
+    out.push({
+      path: intent === undefined ? page : `/app/flp.html#${intent}`,
+      kind: "APP",
+      handler: String(app.id ?? ""),
+      text: String(app.title ?? app.id ?? folder.name),
+      pack: folder.pack,
+    });
+  }
+  return out;
+}
+
+/** the OData, ICF, push and UI5 services this tree serves, each with its pack */
 export function servicesOf(root, env = process.env) {
   const out = [];
   const packs = packsOf(root, env);
@@ -130,6 +180,7 @@ export function servicesOf(root, env = process.env) {
       path: `/sap/opu/odata/sap/${one.external}`,
       kind: "ODATA",
       handler: one.dpc ?? "",
+      text: one.description ?? "",
       pack: packOf(one.file),
     });
   }
@@ -137,11 +188,12 @@ export function servicesOf(root, env = process.env) {
     if (one.handler === undefined) {
       continue;
     }
-    out.push({path: one.path, kind: "ICF", handler: one.handler, pack: packOf(one.source)});
+    out.push({path: one.path, kind: "ICF", handler: one.handler, text: one.description ?? "", pack: packOf(one.source)});
   }
   for (const one of pushChannels(root)) {
-    out.push({path: one.path, kind: "APC", handler: one.handler, pack: packOf(one.source)});
+    out.push({path: one.path, kind: "APC", handler: one.handler, text: one.description ?? "", pack: packOf(one.source)});
   }
+  out.push(...appsOf(root, env));
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 

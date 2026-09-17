@@ -249,7 +249,10 @@ export async function closeChannel(id) {
 // The generation is the worker's own stamp, the digest the build wrote into
 // the bundle, so gen_live and gen_serving are the same by construction: a
 // bundle cannot be serving anything but itself.
-const STATUS_SERVICE = /^\/sap\/opu\/odata\/sap\/ZOSD_STATUS_SRV(\/|$)/i;
+// The two readers of the five status tables: the status service itself, and
+// the Easy Access menu, which builds its tree out of the same rows
+// (src/webgui/, docs/webgui.md). Both take the snapshot that answers them.
+const STATUS_SERVICE = /^(\/sap\/opu\/odata\/sap\/ZOSD_STATUS_SRV|\/sap\/bc\/gui\/sap\/its\/webgui)(\/|$)/i;
 // the real clock, not the pinned one the rest of the bundle sees
 const bootedAt = realNow();
 // the worker fills these in when it starts the backend; the fallbacks are for
@@ -259,8 +262,8 @@ let identity = {stamp: buildId, rootHint: "preview"};
 function statusSnapshot() {
   const since = bootedAt.toISOString();
   const rows = [
-    ...services.map((s) => ({path: s.path, kind: "ICF", handler: s.handler ?? "", pack: s.pack ?? ""})),
-    ...channels.map((c) => ({path: c.path, kind: "APC", handler: c.handler ?? "", pack: c.pack ?? ""})),
+    ...services.map((s) => ({path: s.path, kind: "ICF", handler: s.handler ?? "", text: s.text ?? "", pack: s.pack ?? ""})),
+    ...channels.map((c) => ({path: c.path, kind: "APC", handler: c.handler ?? "", text: c.text ?? "", pack: c.pack ?? ""})),
     ...odataServices,
   ].sort((a, b) => a.path.localeCompare(b.path));
   return {

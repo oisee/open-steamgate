@@ -164,6 +164,12 @@ export function startServer(quiet) {
   // be imported and served without this file learning its name. Mounted
   // before the OData front only so the reserved prefix below is meaningful.
   const reserved = ["/sap/opu/odata", "/sap/bc/adt"];
+  // SAP Easy Access reads the same five tables ZOSD_STATUS_SRV reads
+  // (src/webgui/, docs/webgui.md), so it pays for the same refresh. It is
+  // registered here, before the SICF mount below, because that mount answers
+  // the request instead of passing it on: a middleware added after it would
+  // never run.
+  app.all("/sap/bc/gui/sap/its/webgui*", withFreshStatus);
   let icf;
   if (MODE === "inline") {
     icf = mountServices(app, (args) => inline.cl_express_icf_shim.run({
@@ -237,14 +243,17 @@ export function startServer(quiet) {
     await postSnapshot(url, body);
   }
 
-  app.all("/sap/opu/odata/sap/ZOSD_STATUS_SRV*", async function (req, res, next) {
+  // A refresh that fails never fails the read: see above.
+  async function withFreshStatus(req, res, next) {
     try {
       await refreshStatus();
     } catch (e) {
       console.error(`status refresh: ${e?.message ?? e}`);
     }
     next();
-  });
+  }
+
+  app.all("/sap/opu/odata/sap/ZOSD_STATUS_SRV*", withFreshStatus);
 
   // The OData front, in one of two places.
   //

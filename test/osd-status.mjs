@@ -130,10 +130,32 @@ describe("tools/osd-status: the system as one JSON object", () => {
 
   it("lists the OData, ICF and APC services, each with the pack it came from", async () => {
     const found = servicesOf(root, {});
-    expect(found).to.deep.include({path: "/sap/opu/odata/sap/ZDEMO_SRV", kind: "ODATA", handler: "ZCL_ZDEMO_DPC_EXT", pack: ""});
-    expect(found).to.deep.include({path: "/sap/bc/zsrv", kind: "ICF", handler: "ZCL_SRV_HANDLER", pack: ""});
-    expect(found).to.deep.include({path: "/sap/bc/zvibes", kind: "ICF", handler: "ZCL_VIBES", pack: "vibes"});
-    expect(found).to.deep.include({path: "/sap/bc/apc/sap/zchan", kind: "APC", handler: "ZCL_CHAN", pack: ""});
+    expect(found).to.deep.include({path: "/sap/opu/odata/sap/ZDEMO_SRV", kind: "ODATA", handler: "ZCL_ZDEMO_DPC_EXT", text: "a demo", pack: ""});
+    expect(found).to.deep.include({path: "/sap/bc/zsrv", kind: "ICF", handler: "ZCL_SRV_HANDLER", text: "", pack: ""});
+    expect(found).to.deep.include({path: "/sap/bc/zvibes", kind: "ICF", handler: "ZCL_VIBES", text: "", pack: "vibes"});
+    expect(found).to.deep.include({path: "/sap/bc/apc/sap/zchan", kind: "APC", handler: "ZCL_CHAN", text: "", pack: ""});
+  });
+
+  // The UI5 apps of the tree come out of their own manifests, so the menu
+  // and the status app read one list: `sap.app.id` is the component that
+  // answers, `title` is what it is called, and the path is the launchpad
+  // with the app's own inbound intent, because that is where the launchpad
+  // opens it (webapp/booking has no page of its own at all).
+  it("lists a UI5 app by its manifest, at the intent the launchpad opens it with", async () => {
+    write("webapp/manifest.json", JSON.stringify({"sap.app": {
+      id: "stg.travel", title: "Travels",
+      crossNavigation: {inbounds: {"Travel-manage": {semanticObject: "Travel", action: "manage"}}},
+    }}));
+    write("webapp/booking/manifest.json", JSON.stringify({"sap.app": {
+      id: "stg.booking", title: "Bookings",
+      crossNavigation: {inbounds: {"Booking-display": {semanticObject: "Booking", action: "display"}}},
+    }}));
+    write("webapp/nothing/index.html", "<html></html>");
+    const found = servicesOf(root, {});
+    expect(found).to.deep.include({path: "/app/flp.html#Travel-manage", kind: "APP", handler: "stg.travel", text: "Travels", pack: ""});
+    expect(found).to.deep.include({path: "/app/flp.html#Booking-display", kind: "APP", handler: "stg.booking", text: "Bookings", pack: ""});
+    // a folder with no manifest in it is not an app
+    expect(found.filter((one) => one.kind === "APP")).to.have.length(2);
   });
 
   it("counts the objects a pack owns", async () => {

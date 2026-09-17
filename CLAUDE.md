@@ -349,6 +349,20 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   a field of a 200, not an HTTP error: the module ran and declined, and only
   a system failure is a broken call. No RFC wire, no SOAP envelope and no
   authentication yet; do not put it on a public address.
+- SAP Easy Access is served by ABAP at `/sap/bc/gui/sap/its/webgui/`
+  (`src/webgui/zcl_osd_webgui`, `docs/webgui.md`, backlog track G): the path
+  the real ITS webgui answers on, used on purpose. The tree is **read out of
+  the five status tables** (`ZOSD_SVC`, `ZOSD_PACK`, `ZOSD_SYS`) rather than
+  walked again, so there is one inventory and the menu cannot disagree with
+  the status app; `ZOSD_SVC` gained a `TEXT` column and `KIND = 'APP'` rows
+  (from each app's own `manifest.json`, at its own inbound intent). A node
+  has a kind — FOLDER / APP / SERVICE / TRANSACTION — and the command field
+  is resolved server-side against the same node list. `open-abap-gui` (the
+  SAP GUI control substitutes) is a **lib**, not a pack, from `oisee/` at
+  `ed96e89`, `/src` plus the three `scaffold` files `/src` names: +301
+  objects. Its `sapevent` rewrite works outbound; **nothing in it ever
+  raises the event**, so the next step is proving a click comes back against
+  abapGit's own HTML (G.2), and running abapGit is not started.
 - Media entities (`docs/media-entities.md`): `set_is_media` in the MPC,
   `m:HasStream` in `$metadata`, `<entity>/$value` served by the DPC's
   `GET_STREAM` / `UPDATE_STREAM` (`zcl_stg_dispatcher=>media`, the binary

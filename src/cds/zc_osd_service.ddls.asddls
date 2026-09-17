@@ -11,6 +11,8 @@ define view ZC_OSD_SERVICE
       kind    as Kind,
       @EndUserText.label: 'Handler'
       handler as Handler,
+      @EndUserText.label: 'Name'
+      text    as Text,
       @EndUserText.label: 'Pack'
       pack    as Pack
 }
