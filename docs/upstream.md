@@ -123,6 +123,8 @@ Ordered by what breaks without them, most first.
   the statement's calculation type, so it is the transpiler's, not the
   runtime's: put to Lars as issue #1866 with the six measured lines,
   2026-09-17. Not started.
+- **How these were found**: `docs/frame-comparison.md`, the demo as an
+  oracle, scene by scene.
 - **The order was test, issue, fix (Alice, 2026-09-17):** the reproducers
   went first, with the A4H measurement, so the issue could say what a
   system answers; the fixes followed the same day for the two runtime

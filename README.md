@@ -251,6 +251,12 @@ and the checks for an independent installation. The Bun host is self-contained
 for the tested runtime path; application content and writable data remain
 outside the executable.
 
+The demo is also how the runtime is measured: the same ABAP on a real
+system answers the same frames, and a diff between the two streams names
+the arithmetic that differs ([`docs/frame-comparison.md`](docs/frame-comparison.md);
+eight anomalies found that way, most of them fixed upstream or on their
+way).
+
 ## What the demo is made of
 
 Bottom up, every layer is real, nothing is mocked:

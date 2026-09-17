@@ -435,6 +435,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   raw transpiler writes the later folder's module last, and abaplint's
   registry files the first and calls the second "already defined" — a
   duplicate left to either is a guess.
+- **The demo is an oracle for the runtime** (`docs/frame-comparison.md`):
+  ZO4D answers a frame per tick as JSON, the same ABAP on A4H answers the
+  same, and `tools/o4d-record.mjs --scene <name> --ticks n` on both sides
+  plus `--compare` names the ABAP that computed a difference. Eight
+  anomalies in two days came out of it (2026-09-16/17); every one was
+  then measured on A4H with a throwaway ABAP Unit probe before anything
+  was changed. Recordings stay under `.local/`.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 - **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in
