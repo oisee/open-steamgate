@@ -83,6 +83,55 @@ Ordered by what breaks without them, most first.
    #1848 took the sy-tabix half; this half is still local. Rebase the branch
    on `origin/main` and it is one commit. Needs an issue.
 
+## What we carry, and what we wait for
+
+*Decided 2026-09-17, after the performance work made the question real.*
+
+Divergence from the published packages comes in two kinds, and they are held
+oppositely.
+
+**A defect fix is carried.** Without it this tree computes a different answer
+from a system, and the oracle says so every time the demo runs. So it lives on
+`local/osd-build`, pinned by commit in the preview workflow, with an entry in
+`ANORMALIES.md` and a DEBT entry saying the tree is built by something that is
+not published. `npm run parked` complains in both directions, and
+`npm run transpiler:published` drops the link when a release carries
+everything. That machinery exists and works; nothing changes here.
+
+**A performance change is not carried.** It is sent, and it arrives when a
+release carries it. Four reasons, in order of weight:
+
+1. **Nothing is broken while we wait.** The only cost of waiting is speed, and
+   speed that nobody else can reproduce is not worth a fork.
+2. **A patch that lives only here makes our numbers untrue for everyone else.**
+   The whole value of this work is that a maintainer can check it. "Fast here"
+   would say nothing about what someone who installs the package gets, and the
+   demo's frame rate would stop being evidence about anything but us.
+3. **Every pin is a standing tax**: rebase it, re-measure it and re-pin it on
+   each release, forever, and the public deployment becomes a build nobody can
+   reproduce. We already pay this for the defect fixes, which is enough.
+4. **It buys no correctness.** A performance change that alters one frame is
+   wrong by definition, so carrying it cannot protect the oracle — the thing
+   the defect pins exist to protect.
+
+**The exception, and it is the shape to aim for: a flag.** The code-generation
+work is built behind a feature flag defaulted off (`feature_flags.ts` in the
+transpiler, an empty mechanism waiting for its first user). Once that is
+released, turning it on here is a setting, not a fork: upstream owns the code,
+we own the choice, and it leaves our accounting entirely. Anything upstream is
+willing to offer as a flag should be taken as a flag rather than as a patch.
+
+**Why this was written down.** The critic pass on 2026-09-17 found that the
+build the performance numbers were measured on had been described as "2.13.87
+plus the three merged fixes" when it was in fact a local branch carrying a
+fourth, unmerged one, and the baseline was not `main` either. The files on the
+hot path turned out to be identical, so the measurements held, but the
+description did not — and that is the ordinary failure mode of a carried
+patch. The more we carry, the less any sentence about "the build" means.
+
+So each item in the queue below says which kind it is, and the performance ones
+say **wait for a release**.
+
 ## The performance track, in sending order
 
 *Opened 2026-09-17 after `docs/demo-profile.md` and `docs/abap-hot-code.md`.*
