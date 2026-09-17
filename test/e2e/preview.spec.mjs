@@ -261,11 +261,12 @@ test("the demo answers a frame over its channel and the socket stays open", asyn
   }
 });
 
-// The light-show pack: SAP GUI screens recorded by sap-tui and handed out
-// by line over a push channel (packs/lsd). The page speaks no DIAG; this
-// checks the channel says how long the show is and answers the first lines
-// with the recording's header.
-test("the LSD channel hands out the recorded show by line", async () => {
+// The light-show pack: SAP GUI screens recorded by sap-tui, stored as gzip
+// and handed out by the push channel in base64 (packs/lsd). The page speaks
+// no DIAG and neither side inflates the stream in ABAP: this asks the
+// channel for the whole object, inflates it the way the page does, with the
+// browser's own DecompressionStream, and checks the recording's header.
+test("the LSD channel hands out the recorded show as compressed bytes", async () => {
   const profile = await mkdtemp(join(tmpdir(), "stg-preview-lsd-"));
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
@@ -275,25 +276,41 @@ test("the LSD channel hands out the recorded show by line", async () => {
     await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
     const answer = await page.evaluate(() => new Promise((resolve) => {
       const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zapc_lsd");
-      let lines = 0;
-      const done = (why, head) => resolve({why, lines, head, state: socket.readyState});
+      let bytes = 0;
+      const done = (why, extra) => resolve(Object.assign({why, bytes, state: socket.readyState}, extra));
       socket.addEventListener("close", (e) => done(`closed ${e.code} ${e.reason}`));
       socket.addEventListener("error", () => done("error"));
-      socket.addEventListener("message", (e) => {
+      socket.addEventListener("message", async (e) => {
         const text = String(e.data);
-        if (text.startsWith("{\"type\":\"show\"")) {
-          lines = JSON.parse(text).lines;
-          socket.send(JSON.stringify({cmd: "lines", from: 0, to: 3}));
-        } else {
-          done("lines", text.split("\n").map((l) => l.slice(0, 40)));
+        if (text.indexOf("\"type\":\"show\"") >= 0) {
+          bytes = JSON.parse(text).bytes;
+          socket.send(JSON.stringify({cmd: "bytes", from: 0, to: bytes}));
+          return;
+        }
+        try {
+          const binary = atob(text);
+          const raw = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
+          const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("gzip"));
+          const show = await new Response(stream).text();
+          const lines = show.split(String.fromCharCode(10)).filter((l) => l.length);
+          done("bytes", {
+            arrived: raw.length,
+            head: lines.slice(0, 2).map((l) => l.slice(0, 40)),
+            frames: lines.filter((l) => l.indexOf("\"t\":") >= 0).length,
+          });
+        } catch (x) {
+          done("inflate failed: " + x);
         }
       });
-      setTimeout(() => done("timeout"), 60000);
+      setTimeout(() => done("timeout"), 120000);
     }));
-    expect(answer.why).toBe("lines");
-    expect(answer.lines).toBeGreaterThan(1000);
+    expect(answer.why).toBe("bytes");
+    expect(answer.bytes).toBeGreaterThan(100000);
+    expect(answer.arrived).toBe(answer.bytes);
     expect(answer.head[0]).toContain("\"v\":1");
     expect(answer.head[1]).toContain("\"s\":");
+    expect(answer.frames).toBeGreaterThan(2000);
     expect(answer.state).toBe(1);
   } finally {
     await context.close();

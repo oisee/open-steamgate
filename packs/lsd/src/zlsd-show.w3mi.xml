@@ -3,19 +3,19 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <NAME>ZLSD-SHOW</NAME>
-   <TEXT>sap-lsd show, screens as styled runs</TEXT>
+   <TEXT>sap-lsd show, screens as styled runs, gzip</TEXT>
    <PARAMS>
     <WWWPARAMS>
      <NAME>fileextension</NAME>
-     <VALUE>.ndjson</VALUE>
+     <VALUE>.gz</VALUE>
     </WWWPARAMS>
     <WWWPARAMS>
      <NAME>filename</NAME>
-     <VALUE>show.ndjson</VALUE>
+     <VALUE>show.ndjson.gz</VALUE>
     </WWWPARAMS>
     <WWWPARAMS>
      <NAME>mimetype</NAME>
-     <VALUE>application/x-ndjson</VALUE>
+     <VALUE>application/gzip</VALUE>
     </WWWPARAMS>
    </PARAMS>
   </asx:values>
