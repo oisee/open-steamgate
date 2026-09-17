@@ -88,7 +88,8 @@ E — content packs and layers: what the tree is made of
 
 G — the classic screens, and the GUI substitutes under them
 ├─ G.1  SAP Easy Access, served by ABAP                             DONE 09-18
-├─ G.2  prove a sapevent click comes back                           next
+├─ G.1b the drop, drawn, and a menu bar that works                  after G.2
+├─ G.2  prove a sapevent click comes back                           in progress
 ├─ G.3  a transaction node that actually runs                       open
 └─ G.4  abapGit through the substitutes                             blocked on G.2
 
@@ -991,6 +992,19 @@ G.1  SAP Easy Access, served by ABAP                     [S] DONE 2026-09-18
      ├─ the command field resolves server-side against the same node list
      └─ open-abap-gui in as a lib: +301 objects, /src plus three scaffold
         files /src names; escaping on the page is cl_gui_control=>escape_html
+
+G.1b The drop, drawn, and a menu bar that works                          [S]
+     Alice, 2026-09-18: "каноническую каплю саповскую нарисуем (но другую -
+     диагональную) и меню там тоже реализуй".
+     ├─ the image panel on the right becomes the SAP drop, drawn as SVG in
+        the page rather than a bitmap, and deliberately not the original:
+        the same idea set on a diagonal, so it reads as a nod and not a copy
+     ├─ the menu bar's entries do something: System > Status opens the
+        status app (the SM50 / sysinfo node the tree already has), System >
+        Log off returns to the launchpad, Help > About says the generation
+        and the build; the rest may stay inert but must not pretend
+     └─ SE80 - editing a class from this screen - is later (Alice), and it
+        is the ADT facade's editor behind a transaction node, not a new one
 
 G.2  Prove a sapevent click comes back                                   [S]
      ├─ the gap, measured: cl_gui_control rewrites <a href="sapevent:X">
