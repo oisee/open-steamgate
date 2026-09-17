@@ -70,6 +70,17 @@
                       }
                     },
                     {
+                      id: "status",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "System status",
+                        subtitle: "what runs, on which ports",
+                        info: "ZOSD_STATUS_SRV",
+                        icon: "sap-icon://monitor",
+                        targetURL: "#System-status"
+                      }
+                    },
+                    {
                       id: "vividvibes",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -171,6 +182,14 @@
           additionalInformation: "SAPUI5.Component=stg.segw",
           applicationType: "URL",
           url: "./segw/",
+          navigationMode: "embedded"
+        },
+        "System-status": {
+          title: "System status",
+          description: "what runs, on which ports, out of which packs",
+          additionalInformation: "SAPUI5.Component=stg.status",
+          applicationType: "URL",
+          url: "./status/",
           navigationMode: "embedded"
         },
         // Two that are not UI5 at all.
@@ -290,7 +309,7 @@
         return;
       }
       const boot = document.createElement("script");
-      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg\": \"./\", \"stg.travel\": \"./\", \"stg.booking\": \"./booking\", \"stg.analytics\": \"./analytics\", \"stg.segw\": \"./segw\"}","data-sap-ui-oninit":"module:stg/launchpad"};
+      const attributes = {"id":"sap-ui-bootstrap","src":"https://ui5.sap.com/1.120.50/resources/sap-ui-core.js","data-sap-ui-theme":"sap_horizon","data-sap-ui-libs":"sap.m,sap.ushell,sap.ui.generic.app,sap.suite.ui.generic.template","data-sap-ui-compatVersion":"edge","data-sap-ui-async":"true","data-sap-ui-frameOptions":"allow","data-sap-ui-xx-componentPreload":"off","data-sap-ui-flexibilityServices":"","data-sap-ui-resourceroots":"{\"stg\": \"./\", \"stg.travel\": \"./\", \"stg.booking\": \"./booking\", \"stg.analytics\": \"./analytics\", \"stg.segw\": \"./segw\", \"stg.status\": \"./status\"}","data-sap-ui-oninit":"module:stg/launchpad"};
       for (const name of Object.keys(attributes)) {
         boot.setAttribute(name, attributes[name]);
       }
