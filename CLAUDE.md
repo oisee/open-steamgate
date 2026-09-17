@@ -471,7 +471,13 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   cries wolf gets ignored). The identifier list is gitignored
   (`.local/leak-identifiers.json`): a list of what must not be published cannot
   itself be published, and the tool says so and exits 2 rather than passing
-  quietly when it is absent. `.leak-allow.json` **is** tracked and every entry
+  quietly when it is absent. **It takes its file list from git, so it cannot
+  see what is not tracked**, and the text most likely to be published is
+  exactly that: a draft of an issue under `.local/`, about to be pasted into a
+  public tracker. Asked to scan such a folder it used to answer "0 files, 0
+  matches", which reads like a pass; `--paths <path>…` reads them whatever git
+  knows, and a scan that read nothing now says so and exits 2 rather than
+  printing the clean line (2026-09-17). `.leak-allow.json` **is** tracked and every entry
   needs a reason, so an exception can be told from a way of making the build
   green. The rule "no live identifiers" had been in this file since the first
   week and did no work at all; both times it was attention that caught the

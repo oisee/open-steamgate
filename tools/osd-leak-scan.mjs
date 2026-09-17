@@ -27,9 +27,9 @@
 // gitignored, and the scan says so when it is missing rather than passing
 // quietly: a check that silently loses half its patterns is the failure this
 // tool exists to prevent.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 
 const PRIVATE_V4 =
   /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g;
@@ -262,8 +262,42 @@ function trackedFiles(root) {
   return out.split("\n").filter(Boolean);
 }
 
+// Files named on the command line, walked if they are directories, whether or
+// not git has ever heard of them. Everything else here asks git what to look
+// at, which is right for a commit and wrong for the thing most likely to be
+// pasted into a public tracker: a draft under .local/. Asked to scan such a
+// folder, the tracked-file modes answer "0 files, 0 matches", which reads
+// exactly like a pass (2026-09-17).
+function namedFiles(root, paths) {
+  const out = [];
+  const walk = (abs) => {
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      return;
+    }
+    if (st.isDirectory()) {
+      for (const entry of readdirSync(abs).sort()) {
+        if (entry === ".git" || entry === "node_modules") continue;
+        walk(join(abs, entry));
+      }
+      return;
+    }
+    const rel = relative(root, abs);
+    out.push(rel.startsWith("..") ? abs : rel);
+  };
+  for (const p of paths) walk(resolve(root, p));
+  return out;
+}
+
 const args = process.argv.slice(2);
-const rootArg = args.find((a) => !a.startsWith("--")) ?? ".";
+// the root positional is only what stands before --paths / --range, whose own
+// arguments are positionals too and are not the root
+const beforeLists = args.slice(0, Math.min(
+  ...[args.indexOf("--paths"), args.indexOf("--range")].filter((i) => i >= 0).concat([args.length]),
+));
+const rootArg = beforeLists.find((a) => !a.startsWith("--")) ?? ".";
 const root = resolve(rootArg);
 const all = args.includes("--all");
 const rangeAt = args.indexOf("--range");
@@ -271,9 +305,13 @@ const rangeAt = args.indexOf("--range");
 // wherever it landed: `--range <local> --not --remotes=origin` is three tokens,
 // and only the whole of it names the commits a push actually adds.
 const rangeArgs = rangeAt >= 0 ? args.slice(rangeAt + 1).filter((a) => a !== rootArg) : null;
+const pathsAt = args.indexOf("--paths");
+const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
 
 const names = identifiers(root);
-const files = rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
+const files = pathArgs
+  ? namedFiles(root, pathArgs)
+  : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
 const hits = scan(root, files, names);
 
 if (!names) {
@@ -283,6 +321,20 @@ if (!names) {
   );
 }
 console.error(`osd-leak-scan: ${files.length} файлов, ${hits.length} совпадений`);
+
+// Nothing looked at is not a pass. A scan that reads no file prints the same
+// reassuring line as a clean one, which is how a folder of drafts under
+// .local/ was called clean by a check that could not see it. Only the
+// explicit mode fails on it: staging nothing, or pushing nothing, is a
+// legitimate empty set and must not block a commit.
+if (files.length === 0) {
+  const explicit = pathArgs !== null;
+  console.error(
+    "osd-leak-scan: ни одного файла не прочитано — это не \"чисто\", это \"нечего было смотреть\"." +
+    (explicit ? "" : "\n               Для файлов вне git: node tools/osd-leak-scan.mjs --paths <путь> [<путь>…]"),
+  );
+  if (explicit) process.exit(2);
+}
 
 if (hits.length) {
   const byFile = new Map();
