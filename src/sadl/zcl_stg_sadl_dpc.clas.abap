@@ -187,6 +187,7 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA ls_pair      TYPE zcl_stg_cds_registry=>ty_pair.
     DATA ls_key       TYPE /iwbep/s_mgw_name_value_pair.
     DATA lv_source_set TYPE string.
+    DATA lv_binding    TYPE string.
 
     READ TABLE io_context->mt_navigation_path INTO ls_path INDEX 1.
     IF sy-subrc <> 0.
@@ -198,12 +199,25 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
       RETURN.
     ENDIF.
     READ TABLE ls_source-associations INTO ls_assoc WITH KEY name = ls_path-nav_prop.
-    IF sy-subrc <> 0.
-      RETURN.
+    IF sy-subrc = 0.
+      lv_binding = to_upper( ls_assoc-binding ).
+    ELSE.
+* A hand-written reference-data-source MPC writes the binding into the
+* definition (<sadl:association binding="_BOOKINGS">); a SEGW-generated one
+* does not - the tree has no place for it, and SEGW resolves it against the
+* CDS entity when it generates. Here the name is the resolution: a published
+* view calls the navigation of the alias _Bookings to_Bookings (measured on a
+* system, docs/cds-publish.md), so the alias is the property without its to_.
+      lv_binding = to_upper( ls_path-nav_prop ).
+      IF lv_binding CP 'TO_*'.
+        lv_binding = |_{ lv_binding+3 }|.
+      ELSE.
+        RETURN.
+      ENDIF.
     ENDIF.
     ls_entity = zcl_stg_cds_registry=>get( mo_def->binding_of( ls_source-data_source ) ).
     LOOP AT ls_entity-associations INTO ls_cds_assoc.
-      IF to_upper( ls_cds_assoc-name ) = to_upper( ls_assoc-binding ).
+      IF to_upper( ls_cds_assoc-name ) = lv_binding.
         EXIT.
       ENDIF.
       CLEAR ls_cds_assoc.

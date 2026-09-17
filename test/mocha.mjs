@@ -212,21 +212,47 @@ describe("wire", () => {
     const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_TRAVEL_CDS`;
     // the annotation on the view generated the model, the registration
     // objects and the classes; the registry serves them like any other service
+    // the exposed association pulled ZC_STG_BOOKING into the same service,
+    // and the entity set is the view's own name - measured on a system
+    // 2026-09-17, docs/cds-publish.md
     const doc = await (await fetch(S + "/")).json();
-    expect(doc.d.EntitySets).to.deep.equal(["Zc_Stg_TravelSet"]);
+    expect(doc.d.EntitySets).to.deep.equal(["ZC_STG_TRAVEL", "ZC_STG_BOOKING"]);
 
     const xml = await (await fetch(S + "/$metadata")).text();
-    expect(xml).to.contain('<EntityType Name="Zc_Stg_Travel"');
-    expect(xml).to.contain('<EntitySet Name="Zc_Stg_TravelSet"');
+    expect(xml).to.contain('<EntityType Name="ZC_STG_TRAVELType"');
+    expect(xml).to.contain('<EntityType Name="ZC_STG_BOOKINGType"');
+    expect(xml).to.contain('<EntitySet Name="ZC_STG_TRAVEL" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_TRAVELType"');
+    expect(xml).to.contain('<EntitySet Name="ZC_STG_BOOKING" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_BOOKINGType" sap:creatable="false" sap:updatable="false" sap:deletable="false"');
+    expect(xml).to.contain("<EntityContainer Name=\"ZC_STG_TRAVEL_CDS_Entities\"");
+    // the association is assoc_<32 hex>, the same string on its set, with
+    // FromRole_/ToRole_ roles; the hex is a hash here, not a GUID, so that a
+    // build is reproducible
+    const assoc = /<NavigationProperty Name="to_Bookings" Relationship="ZC_STG_TRAVEL_CDS\.(assoc_[0-9a-f]{32})" FromRole="FromRole_\1" ToRole="ToRole_\1"\/>/.exec(xml);
+    expect(assoc, "to_Bookings navigation property").to.not.equal(null);
+    expect(xml).to.contain(`<Association Name="${assoc[1]}"`);
+    expect(xml).to.contain(`<End Type="ZC_STG_TRAVEL_CDS.ZC_STG_BOOKINGType" Multiplicity="*" Role="ToRole_${assoc[1]}"/>`);
+    expect(xml).to.contain(`<AssociationSet Name="${assoc[1]}"`);
+    expect(xml).to.contain(`<End EntitySet="ZC_STG_BOOKING" Role="ToRole_${assoc[1]}"/>`);
+    // ZC_STG_BOOKING exposes _Travel back: the cycle is followed once
+    expect(xml).to.contain('<NavigationProperty Name="to_Travel"');
 
-    const rows = (await (await fetch(S + "/Zc_Stg_TravelSet?$format=json&$filter=STATUS eq 'A'")).json()).d.results;
+    const rows = (await (await fetch(S + "/ZC_STG_TRAVEL?$format=json&$filter=STATUS eq 'A'")).json()).d.results;
     expect(rows.map((r) => r.TRAVELID)).to.deep.equal(["T0001", "T0002", "T0009"]);
     // the virtual elements of the view are part of the published service too
     expect(rows[0].OCCUPANCY).to.equal("20% of 10");
 
+    // and the navigation carries data, not only metadata: the target rows are
+    // the ones the ON condition selects, both nested and through the URL
+    const expanded = (await (await fetch(S + "/ZC_STG_TRAVEL?$top=1&$expand=to_Bookings&$format=json")).json()).d.results[0];
+    expect(expanded.to_Bookings.results.map((r) => r.BOOKINGID)).to.deep.equal(["B001", "B002"]);
+    const below = (await (await fetch(S + "/ZC_STG_TRAVEL('T0002')/to_Bookings?$format=json")).json()).d.results;
+    expect(below.map((r) => `${r.TRAVELID}/${r.BOOKINGID}`)).to.deep.equal(["T0002/B001"]);
+    const up = (await (await fetch(S + "/ZC_STG_BOOKING(TRAVELID='T0002',BOOKINGID='B001')/to_Travel?$format=json")).json()).d;
+    expect(up.TRAVELID).to.equal("T0002");
+
     // the cube views are published as well
     const cube = await (await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS/`)).json();
-    expect(cube.d.EntitySets).to.deep.equal(["Zc_Stg_FlightcubeSet"]);
+    expect(cube.d.EntitySets).to.deep.equal(["ZC_STG_FLIGHTCUBE"]);
   });
 
   it("writes through a CDS projection: @ObjectModel.writeEnabled", async () => {
@@ -235,28 +261,28 @@ describe("wire", () => {
 
     // the view is a projection of one table field for field, so SADL writes
     // through it: the row lands in ZSTG_DEMO
-    let res = await fetch(S + "/Zc_Stg_TravelSet", {method: "POST", headers: write,
+    let res = await fetch(S + "/ZC_STG_TRAVEL", {method: "POST", headers: write,
       body: JSON.stringify({TRAVELID: "T0700", DESCRIPTION: "Through the projection", STATUS: "A", SEATS: 3})});
     expect(res.status).to.equal(201);
 
     const demo = await (await fetch(`${BASE}/TravelSet('T0700')?$format=json`)).json();
     expect(demo.d.Description).to.equal("Through the projection");
 
-    res = await fetch(S + "/Zc_Stg_TravelSet('T0700')", {method: "PUT", headers: write,
+    res = await fetch(S + "/ZC_STG_TRAVEL('T0700')", {method: "PUT", headers: write,
       body: JSON.stringify({DESCRIPTION: "Renamed", STATUS: "X", SEATS: 5})});
     expect(res.status).to.equal(204);
-    const after = (await (await fetch(S + "/Zc_Stg_TravelSet('T0700')?$format=json")).json()).d;
+    const after = (await (await fetch(S + "/ZC_STG_TRAVEL('T0700')?$format=json")).json()).d;
     expect([after.DESCRIPTION, after.STATUS, after.SEATS]).to.deep.equal(["Renamed", "X", 5]);
     // the virtual element is recalculated on the way out
     expect(after.OCCUPANCY).to.equal("50% of 10");
 
-    res = await fetch(S + "/Zc_Stg_TravelSet('T0700')", {method: "DELETE", headers: write});
+    res = await fetch(S + "/ZC_STG_TRAVEL('T0700')", {method: "DELETE", headers: write});
     expect(res.status).to.equal(204);
     expect((await fetch(`${BASE}/TravelSet('T0700')`)).status).to.equal(404);
 
     // a view that did not ask for writes, and an analytical one, are refused
     // by the model, before any DPC method is looked for
-    res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS/Zc_Stg_FlightcubeSet`,
+    res = await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS/ZC_STG_FLIGHTCUBE`,
       {method: "POST", headers: write, body: "{}"});
     expect(res.status).to.equal(405);
     expect((await res.json()).error.message.value).to.contain("is not creatable");

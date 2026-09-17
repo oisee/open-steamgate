@@ -12,26 +12,39 @@ define view ZC_STG_TRAVEL as select from zstg_demo { ... }
 ```
 
 ```
-GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/           -> {"EntitySets":["Zc_Stg_TravelSet"]}
+GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/     -> {"EntitySets":["ZC_STG_TRAVEL","ZC_STG_BOOKING"]}
 GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/$metadata
-GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet?$filter=STATUS eq 'A'
+GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL?$filter=STATUS eq 'A'
+GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL('T0001')/to_Bookings
+GET /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL?$expand=to_Bookings
 ```
+
+The second entity set is not a second annotation: `ZC_STG_TRAVEL` exposes an
+association to `ZC_STG_BOOKING`, and an exposed association pulls its target
+into the same service. That is what a system does; the measured shape is
+below.
 
 ## The chain
 
 `tools/cds2ddic.mjs` sees the annotation and writes
-`gen/cds/<view>_cds.stg.yaml`: the model of a service with one entity bound
-to the view (`source: {cds: …}`, SADL delegation), the view's fields as
-properties with their labels, its keys as keys, read-only with the
-operations SADL serves (`R`, `Q`). From there nothing is new:
+`gen/cds/<view>_cds.stg.yaml`: the model of a service with one entity per
+view reached, each bound to its view (`source: {cds: …}`, SADL delegation),
+the view's fields as properties with their labels, its keys as keys,
+read-only with the operations SADL serves (`R`, `Q`) unless the view's own
+`@ObjectModel` switches ask for more. From there nothing is new:
 `stg-compile --all` compiles that model like any hand-written one (the tree,
 the `IWSV`/`IWMO` pair and the four classes through segw-gen), and
 `tools/segw-registry.mjs` registers the service. Which means a published
 view is described, generated and served by exactly the code paths a SEGW
 project uses, and shows up in the SEGW editor like any other project.
 
-Two details worth knowing:
+Three details worth knowing:
 
+- **Which views.** `publishedYaml()` walks the exposed associations breadth
+  first from the annotated view and adds every view it reaches, with the
+  visited set as the cycle guard — `ZC_STG_BOOKING` exposes `_Travel`
+  straight back at `ZC_STG_TRAVEL`, and that is one association each way,
+  not a loop.
 - **Class names.** `ZCL_<project>_MPC_EXT` would be over 30 characters for
   most view names, so the generated classes are named after the SQL view
   (`ZCL_ZVSTGTRAVEL_MPC_EXT`), through the `classes:` override the YAML
@@ -48,9 +61,11 @@ declares types with on a system.
 
 ## Tested
 
-`test/mocha.mjs`, "@OData.publish": the service document, `$metadata`, a
-filtered read with the virtual element in it, and the cube view published
-the same way.
+`test/mocha.mjs`, "@OData.publish": the service document with both entity
+sets, `$metadata` (entity types, the container, the association, its set and
+the roles, the navigation property both ways), a filtered read with the
+virtual element in it, `$expand=to_Bookings`, the navigation URL in both
+directions, and the cube view published the same way.
 
 ## Measured on a system, 2026-09-17
 
@@ -125,20 +140,41 @@ joins the service.
 
 The probe objects were deleted from the sandbox afterwards.
 
+## What ours does with that, and where it differs on purpose
+
+`publishedYaml()` follows the measured shape: entity set = the view's name,
+entity type `<VIEW>Type`, container `<SERVICE>_Entities`, navigation
+`to_<alias without its leading underscore>`, association and association set
+both `assoc_<32 lower-case hex>` with `FromRole_`/`ToRole_` roles,
+multiplicity `1` to `*` for `[0..*]`, `sap:creatable/updatable/deletable`
+from the target view's own `@ObjectModel` switches. The CDS ON-condition
+becomes the `ReferentialConstraint` of the association (the `constraint:` the
+stg.yaml grammar already had), which the system's metadata carries too.
+
+**One deliberate difference: the 32 hex digits are a hash, not a GUID.** A
+system writes a fresh GUID there, so its `$metadata` changes on every
+regeneration. `gen/` is an input to the generation hash here, and a build has
+to be reproducible, so the hex is the first 32 characters of a sha256 over
+the service name, the view the association is written on and the alias. Same
+shape, same length, same place; stable across builds.
+
+The navigation has to carry data, not only metadata. A hand-written
+reference-data-source MPC writes the CDS alias into its definition
+(`<sadl:association binding="_BOOKINGS">`); a SEGW-generated one does not —
+the project tree has no field for it, and SEGW resolves it against the CDS
+entity when it generates. `zcl_stg_sadl_dpc->navigation_where` therefore
+falls back to the naming rule itself: with no `<sadl:association>` for the
+navigation property, `to_Bookings` is read as the alias `_Bookings`, looked
+up in `zcl_stg_cds_registry`, and its ON pairs become the WHERE. That is the
+measured convention inverted, not a guess, and it only runs when the
+definition is silent.
+
 ## Not yet
 
-Associations of a published view are not exposed as navigation properties:
-`publishedYaml()` in `tools/cds2ddic.mjs` emits one entity, its properties
-and its keys, and never an association, although the parser reads them and
-knows which the projection exposes. A service of several CDS views with
-navigation is possible here today only the way the hand-written `ZSTG_SADL_SRV`
-does it (a reference data source with an exposure XML in a hand-written
-MPC — four entity sets, two associations, real `NavigationProperty` entries)
-or through a `stg.yaml` that declares the navigation itself, which is what
-`ZOSD_STATUS_SRV` does. The missing piece has a name in ABAP: a **service
-definition** (SRVD) — "these views, this service" — and the transpiler
-refuses SRVD objects today (`ANOMALY-2026-09-15-srvd-not-allowed`).
-
-No write side (see the SADL write step); the service name is `<view>_CDS`,
-which is what SAP uses, but the generated class names are ours, not SAP's,
-because no corpus project carries a published view to copy from.
+The `IWVB` service variant the annotation also writes on a system has no
+equivalent here. The service name is `<view>_CDS`, which is what SAP uses,
+but the generated class names are ours, not SAP's, because no corpus project
+carries a published view to copy from. `sap:quickinfo` and
+`sap:display-format="UpperCase"` are in the measured metadata and not in
+ours: both come from the DDIC data element behind a field, which the
+generated YAML does not carry yet.

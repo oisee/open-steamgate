@@ -55,7 +55,7 @@ class reads another table).
 
 `@OData.publish: true` on the same view makes it a service of its own
 (`docs/cds-publish.md`), and the virtual elements are part of it: the model
-binds to the source class's row, so `ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet`
+binds to the source class's row, so `ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL`
 answers with `Occupancy` and `FreeSeats` like the hand-written SADL service.
 
 ## Not yet

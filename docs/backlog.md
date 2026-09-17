@@ -629,6 +629,29 @@ U.1  The user's path, measured                                      [S]  DONE 20
         missing period points at the next statement (abaplint's wording);
         the failed line sits among the generators' output.
 
+A.8  SRVD and a minimal SRVB: the service definition as an input        [S+A]
+     └─ Alice asked 2026-09-17 whether to take CAP-like syntax; the
+        answer is that ABAP already has it and it is native:
+        `define service N { expose E as A; }` in a SRVD, with a SRVB
+        saying V2 or V4. CAP is a Node/Java runtime with its own
+        persistence and handlers - reimplementing it would add an
+        application model no SAP system runs, against the rule that the
+        same ABAP runs in a system's ICF
+     └─ the work: parse the SRVD ourselves in a generator (the way
+        cds2ddic reads DDLS), emit the YAML model, let stg-compile make
+        the classes; read-only over OData V2, which is what our gateway
+        serves. Roughly a day, almost all reuse
+     └─ two rocks: the transpiler refuses object type SRVD
+        (ANOMALY-2026-09-15-srvd-not-allowed, needs an issue) - the
+        generator reads src/ itself, so the object only has to be kept
+        out of the transpile input; and V4 naming is unmeasured, V4 is a
+        track of its own
+     └─ not in scope: BDEF, behaviour implementations, drafts, actions,
+        EML - the write side of RAP is its own track
+     └─ @OData.publish is the older path (the sandbox warns that
+        DDIC-based CDS views are obsolete), so this is the one that
+        stays
+
 A.7  A service of several CDS views, without a hand-written class       [S+A]
      └─ today: @OData.publish gives one view one service and no
         navigation (publishedYaml() in tools/cds2ddic.mjs never emits an
@@ -646,6 +669,13 @@ A.7  A service of several CDS views, without a hand-written class       [S+A]
      └─ measured on the sandbox 2026-09-17 (docs/cds-publish.md): the
         annotation there generates IWSV + IWMO + IWVB and still needs the
         hub to publish; ours serves immediately
+     └─ DONE 2026-09-17: publishedYaml() walks the exposed associations
+        breadth first with a cycle guard and emits one entity per reached
+        view plus the associations; names follow the system
+        (<VIEW>Type, <VIEW>, to_<alias>, assoc_<32 hex>, the last one a
+        sha256 slice rather than a fresh GUID so a build stays
+        reproducible). ZC_STG_TRAVEL_CDS now serves ZC_STG_TRAVEL and
+        ZC_STG_BOOKING with to_Bookings and to_Travel both ways
      └─ **and the specification is now measured, not guessed**: one
         published view pulls every view its exposed associations reach
         into the same service. Entity set = the view's name as it is

@@ -13,9 +13,9 @@ define view ZC_STG_TRAVEL as select from zstg_demo { ... }
 ```
 
 ```
-POST   /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet            -> 201, the row is in ZSTG_DEMO
-PUT    /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet('T0700')   -> 204
-DELETE /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/Zc_Stg_TravelSet('T0700')   -> 204
+POST   /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL            -> 201, the row is in ZSTG_DEMO
+PUT    /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL('T0700')   -> 204
+DELETE /sap/opu/odata/sap/ZC_STG_TRAVEL_CDS/ZC_STG_TRAVEL('T0700')   -> 204
 ```
 
 ## When a view is writable
