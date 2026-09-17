@@ -244,13 +244,17 @@ B.9  A forced build mutates a generation under its name                 [S]
         compare, report) or publish under a name of its own, never both
         keep the name and change the bytes
 
-B.10 The base image is named by the schema alone                         [S]
+B.10 The base image is named by the schema alone                  [S]  DONE 2026-09-17
      ├─ Astra, 2026-09-16: .local/db/base/<schema-hash>.sqlite; a change to
      │  the seed rows (data/*.tabu.json) or to the seeding rules with the
      │  same DDIC keeps the name, so a new instance copies old rows
      └─ the identity is schema + seed data + the loader that applies them;
         a persistent user database is never reseeded by this, only the
         image a new database is copied from
+     └─ DONE 2026-09-17 with B.13: the image is named by the schema and
+        the rows that went into it, and the tables the generation writes
+        at start (tadir, wwwparams, t100) are rewritten from the
+        generation on every boot over an existing file
 
 B.12 One work process, and a channel that never waits                    [S]  pool DONE 2026-09-16
      ├─ tools/osd-pool.mjs: OSD_WORKERS children, a push channel pinned to
@@ -586,7 +590,7 @@ E.7  The oracle's leftovers (docs/frame-comparison.md, 2026-09-17)      [S]
         pulls frames over several sockets and interleaves them — the
         B.12 pool, in a browser. Idea only.
 
-D.9  docs/adt-facade.md, the version #7880 links to                       [S]
+D.9  docs/adt-facade.md, the version #7880 links to               [S]  DONE 2026-09-17
      └─ Astra's docs/adt-facade-proposed.md (uncommitted, 2026-09-17) is
         the top half of the next version: the role for the abapGit
         roadmap, the object-type matrix, activation as it is now (the
@@ -601,7 +605,7 @@ D.9  docs/adt-facade.md, the version #7880 links to                       [S]
         client contract kept below; 696 -> 542 lines, leak scan clean.
         The draft file stays untracked until Astra drops it.
 
-B.13 A new SMW0 object never reaches an existing database file           [S]
+B.13 A new SMW0 object never reaches an existing database file    [S]  DONE 2026-09-17
      └─ found 2026-09-17 with the lsd pack: with STG_DB=file the rows of
         wwwparams are seeded when the file is created, so an object added
         to a pack later (ZLSD-MUSIC) is in the generation and not in the
@@ -652,7 +656,7 @@ A.12 SRVD and a minimal SRVB: the service definition as an input       [S+A]
         DDIC-based CDS views are obsolete), so this is the one that
         stays
 
-A.11 A service of several CDS views, without a hand-written class      [S+A]
+A.11 A service of several CDS views, without a hand-written class [S+A] DONE 2026-09-17
      └─ today: @OData.publish gives one view one service and no
         navigation (publishedYaml() in tools/cds2ddic.mjs never emits an
         association, though the parser reads them); several CDS entities
@@ -725,7 +729,7 @@ E.9  A pack has a page of its own                                        [S]
         object store. Today a tile without a url points at /app/<name>/,
         which is 404 for a pack with ABAP only.
 
-E.8  A DIAG stream as a demo                                            [S+A]
+E.8  A DIAG stream as a demo                                      [S+A] milestone 1 DONE 2026-09-17
      └─ Alice, 2026-09-17: record the whole DIAG stream of a SAP GUI
         session (the LSD demo), push it over an APC channel the way ZO4D
         pushes frames, and paint it on the page with a SAP TUI written
