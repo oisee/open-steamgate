@@ -2,12 +2,13 @@
 
 **Run real SAP `_MPC_EXT` / `_DPC_EXT` OData classes offline — no system attached.**
 
-`open-steamgate` is a research project and integration harness for a **local
-IWBEP / OData runtime**: cross-compile the actual ABAP Gateway model- and
-data-provider classes, run their Open SQL against a local SQLite database seeded
-once through a blessed export, and serve the result as a real OData v2 service
-that a Fiori Elements / UI5 front end consumes — all without a live SAP system.
-Deploy back through abapGit when you want to.
+`open-steamgate` (OSD) is a research project and integration harness for a
+**local IWBEP / OData runtime**: cross-compile the actual ABAP Gateway model-
+and data-provider classes, run their Open SQL against a local SQLite database
+seeded once through a blessed export, and serve the result as a real OData v2
+service that a Fiori Elements / UI5 front end consumes — all without a live
+SAP system. Eclipse edits it over ADT, SAP GUI can knock on it, and it deploys
+back through abapGit when you want to.
 
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
@@ -18,7 +19,7 @@ the `/IWBEP/` framework this project reimplements the runtime of.
 
 ### **[oisee.github.io/open-steamgate/main/app/flp.html](https://oisee.github.io/open-steamgate/main/app/flp.html)**
 
-A Fiori launchpad with six tiles, and **no server behind any of them**. The
+A Fiori launchpad with nine tiles, and **no server behind any of them**. The
 whole gateway — the transpiled ABAP, the OData runtime, SQLite as
 [sql.js](https://github.com/sql-js/sql.js) — is in a service worker in your
 own browser. Every request the apps make is answered there.
@@ -30,14 +31,16 @@ own browser. Every request the apps make is answered there.
 | SEGW | the Service Builder itself, as an app, editing the project tree |
 | Vivid Vibes | WebGL and audio driven from ABAP over an APC push channel |
 | Zork | a Z-machine interpreter in ABAP, the story file loaded out of SMW0 |
+| SAP LSD | a demoscene light-show recorded as composed SAP GUI screens, replayed over an APC channel onto a canvas |
+| Source, and its QR code | this repository on GitHub (the second tile is the same link as a picture, for a phone pointed at a screen) |
 
-The last two are not UI5 at all: they are pages an ABAP class writes, served
-from the ICF path by the same runtime. That is the point of them. Neither is
-in this repository: [`packs/o4d`](packs/o4d) and [`packs/zork`](packs/zork)
-are two manifests that name
-[vivid-vibes](https://github.com/oisee/vivid-vibes) and
-[zork-abap](https://github.com/oisee/zork-abap) at a commit, and the
-deployment fetches them the way you would fetch any pack of your own.
+Vivid Vibes, Zork and SAP LSD are not UI5 at all: they are pages an ABAP
+class writes, served from the ICF path by the same runtime. That is the point
+of them. The first two are not in this repository: [`packs/o4d`](packs/o4d)
+and [`packs/zork`](packs/zork) name [vivid-vibes](https://github.com/oisee/vivid-vibes)
+and [zork-abap](https://github.com/oisee/zork-abap) at a commit, and the
+deployment fetches them the way you would fetch any pack of your own;
+[`packs/lsd`](packs/lsd) carries its recording ([`docs/lsd-pack.md`](docs/lsd-pack.md)).
 
 First visit installs the worker and takes a moment; after that it works
 offline. It needs a browser that allows service workers — a private window
@@ -53,12 +56,10 @@ tree and opens a source — and it does not know it is not a SAP system.**
 There are two kinds of ABAP project. A *Cloud Project* opens HTTPS and talks to
 the ICM, and this project has answered that since the façade was built
 ([`docs/adt-surface.md`](docs/adt-surface.md)). A **Custom Application Server**
-project does something else entirely: it never opens an HTTP port at all. It
-logs on over **RFC**, on the gateway port, and tunnels every ADT request inside
-a single RFC call. On a full captured session, 579 KB crossed the gateway and
-not one byte crossed the ICM.
-
-That path now works end to end:
+project never opens an HTTP port at all: it logs on over **RFC**, on the
+gateway port, and tunnels every ADT request inside a single RFC call. On a full
+captured session, 579 KB crossed the gateway and not one byte crossed the ICM.
+That path works end to end:
 
 ```
 Eclipse ──RFC/CPIC──▶ gateway port ──▶ bridge ──HTTP──▶ open-steamgate
@@ -91,10 +92,8 @@ short version is four things that each refuse in silence:
    there is no HTTP session on its side — so the bridge owns the session, its
    cookies and its token, or every read works and the first write is a 403.
 
-Point it at this project or at a real system with one flag, which is what makes
-it testable: against a real system it proves the transport, because the backend
-is known good; against this project it proves the façade, because the transport
-already is.
+One flag points it at this project or at a real system: against a real system
+it proves the transport, against this project it proves the façade.
 
 ---
 
@@ -109,38 +108,140 @@ is how code gets in and out. The substrate was there, mature and MIT — this
 project only builds the Gateway on top of it, which is the one part that did
 not exist.
 
-> **Status: a stock Eclipse ABAP project reaches it two ways — over HTTPS as a
-> Cloud Project, and over **RFC** as a Custom Application Server, logging on,
-> expanding the repository tree and opening a source through a gateway bridge
-> ([`docs/adt-over-rfc.md`](docs/adt-over-rfc.md)). CRUD, `$batch`, navigation, `$expand`, deep insert, function
-> imports, value helps (F4 by `Common.ValueList`, `search` → `iv_search_string`,
-> text arrangement), an object page (bookings via navigation, Edit/Save as
-> MERGE with Gateway semantics, Create below the parent as
-> `POST TravelSet('..')/to_Bookings`), media entities (a picture served as a
-> stream at `<entity>/$value`, shown by Fiori Elements), a launchpad sandbox
-> with six tiles and intent-based navigation between them, SEGW itself as one
-> of those apps, a service described by one YAML
-> file that consumes another service of the registry (SEGW's "external
-> service", `src/demo_odc/`), and read-only SADL over CDS projections (with analytics
-> annotations) work end to end, on SQLite or DuckDB (`STG_DB=duckdb`).** `npm test`
-> serves a SEGW-shaped demo DPC, transpiled and running Open SQL over SQLite,
-> as OData v2: `$metadata`, entity sets, keys, `$filter` delivered as
-> SELECT-OPTIONS, `$top/$skip/$orderby/$inlinecount/$count`, POST/PUT/DELETE
-> through the DPC's create/update/delete, `$batch` with changesets,
-> navigation properties and `$expand`. A Fiori
-> Elements list report in `webapp/` lists, filters and deletes through it
-> (`npm run e2e`). **Try it without installing anything:**
-> [oisee.github.io/open-steamgate/main/app/](https://oisee.github.io/open-steamgate/main/app/)
-> runs the whole gateway in your browser (a service worker over sql.js, see
-> [`docs/preview-deployments.md`](docs/preview-deployments.md)); every pull
-> request gets its own copy.
-> See `AGENDA.md`. This repo also holds the
-> research that scopes the work — a verified prior-art matrix, a gap-list of the
-> genuinely-novel pieces, and a phased build order. See
-> [`docs/prior-art.md`](docs/prior-art.md). The layers we have already
-> reverse-engineered in sibling projects (SAP compression, EXPORT data
-> clusters, the ADT transport) are indexed in
-> [`docs/layers-we-own.md`](docs/layers-we-own.md).
+---
+
+## Where it stands, 2026-09-17
+
+Measured in the tree as it is. The narrative is [`AGENDA.md`](AGENDA.md), the
+open list [`docs/backlog.md`](docs/backlog.md) (its track letters are in
+parentheses), the last two days [`docs/retro-2026-09-17.md`](docs/retro-2026-09-17.md).
+
+| topic | what works | numbers and dates |
+| --- | --- | --- |
+| **Gateway, OData v2** | `src/gateway/` + `src/http/`: URL parser, `$filter` → SELECT-OPTIONS, a request context with every `io_tech_request_context` facet, dispatcher, JSON both ways, `$batch` with changesets, navigation, `$expand`, deep insert, function imports, value helps (`Common.ValueList`, `search`), MERGE with Gateway semantics, Create below a parent (`POST …/to_Bookings`), media entities (`<entity>/$value`), a service consuming another service of the registry (`src/demo_odc/`). Services register from the abapGit IWSV/IWMO objects. All of it ABAP behind one `if_http_extension`, on SQLite or DuckDB. | first served 2026-09-11; ~4600 lines of ABAP; `/IWBEP/` interfaces from open-abap-odata, gaps sent back as PRs #40–#48, #56–#63 |
+| **SADL and CDS** | `src/sadl/`: CDS projections under `src/cds/`, `@OData.publish: true` makes a service, `@ObjectModel.writeEnabled` makes a one-table projection writable, `@Analytics.dataCategory: #CUBE` turns `$select` into `GROUP BY`, virtual elements filled by an ABAP exit. BOPF, RAP and drafts stay out. | read-only half 2026-09-12; `npm run bench:cube` times a million synthetic facts on SQLite and DuckDB |
+| **SEGW, the long pole** | The project tree read and written the way the transaction does: `tools/segw-gen.mjs` (IWPR → `_MPC`/`_DPC`, RFC/BOR and search-help mappings), `stg-compile` (one YAML → IWPR, IWSV/IWMO, four classes, annotations), `segw-tree` (53 `/IWBEP/I_SB*`-shaped tables derived from real projects, byte-identical export), the generator again in ABAP (`src/segw/`, byte-identical to the Node one by test), and the Service Builder as a Fiori app (`webapp/segw/`, [`docs/segw-editor.md`](docs/segw-editor.md)). | spec derived from 21 real SEGW projects; most commits between 09-12 and 09-15 |
+| **ADT façade (A)** | Eclipse ADT 3.60 and vsp treat OSD as a system: logon, package tree to any depth, open and edit every supported source kind, save, activate, ABAP Unit, F8 data preview on tables and CDS, create and delete — every change lands on the git tree as abapGit files. Over HTTPS as a Cloud Project and over **RFC** as a Custom Application Server through the sibling bridge; the metadata bootstrap proven with a plain RFC client. The contract for clients (abapGit #7880) is [`docs/adt-facade.md`](docs/adt-facade.md), the measured coverage [`docs/adt-surface.md`](docs/adt-surface.md). | milestone 2026-09-15; RFC path 2026-09-16 (sixteen 200s, one 304); every unanswered path is recorded, so the worklist writes itself |
+| **The runtime underneath (B)** | One database seam ([`docs/db-backends.md`](docs/db-backends.md): sql.js, a SQLite file in WAL, DuckDB); generations named by content hash with a live pointer and rollback ([`docs/generations.md`](docs/generations.md)); a pool of work processes with a push channel pinned to one for the life of its socket; a base image named by schema and rows; media out of SMW0 through a host hook; APC channels; RFC destinations as local / replay / live / record / fallback. | pool 2026-09-16: 474 → 1646 frames/s on the workstation, 111 → 369 on a second machine, no change to ABAP or page; a 4 MB SMW0 object in 0.3 s |
+| **The demo as an oracle** | The same ABAP on a real system answers the same frames, so a recording is an oracle and a diff is the test with sixty thousand assertions a scene ([`docs/frame-comparison.md`](docs/frame-comparison.md)). Every anomaly measured on the sandbox with a throwaway ABAP Unit probe before a line changed. | 2026-09-16/17: 8 anomalies in two days (5 runtime, 2 core, 1 transpiler design), 3 fixed and merged, 22 of 22 scenes attributed; what still differs everywhere is abaplint #4302 |
+| **DIAG, the side quest (C)** | The oracle read ([`docs/diag-notes.md`](docs/diag-notes.md)): a setup frame travels uncompressed, so a stub needs no LZH writer. The sibling's dispatcher stub answers SAP GUI with one still screen, and F8 in Eclipse hands SAP GUI to it. The LSD pack replays a recorded light-show as composed SAP GUI screens over an APC channel ([`docs/lsd-pack.md`](docs/lsd-pack.md)). | stub 2026-09-16; LSD milestone 1 2026-09-17: 1278 screens, 118 s, 141 KB gzipped, from idea to a tile on Pages in one afternoon |
+| **RFC gateway (D)** | The bridge terminates RFC for one function module today; exposing any transpiled module is a track with a plan (`/sap/bc/soap/rfc` first) and no code yet. | added 2026-09-16, not started |
+| **Packs and layers (E)** | `input_folder` is the layer order and the later folder wins, overrides logged with both files, duplicates refused; a pack is a directory with `osd-pack.json` (ABAP, tables, rows, a page, tiles), found in `packs/` or `OSD_PACKS`, its objects a package of their own; a pack may fetch a repository at a commit and overlay the few files it changes. | E.1, E.2 2026-09-16; fetch 2026-09-17; 677 objects of unlisted folders left the tree that no build ever had |
+| **Hosts and the binary (N, SP)** | The transpiler as a library call; `npm run binary` → `build/osd up\|serve\|build\|gen\|unit\|doctor`, one Bun binary that is the whole workbench; Node SEA and a plain bundle as control groups; `bun scripts/make-release.mjs` makes a directory that runs with neither Node 22 nor Bun installed ([`docs/bun-spike.md`](docs/bun-spike.md), [release assessment](docs/osd-release-assessment-astra.md)). webpack stays for the browser: Bun bundles 166× faster and the output cannot run in a classic worker. | N3, SP4 2026-09-16; Zork 33/33 on every host; the release measured on a second machine with a byte-identical frame stream |
+| **Preview on GitHub Pages** | The gateway in a service worker over sql.js, `main/` and `pr-<n>/`, packs fetched by the workflow, media beside the bundle so a page pays for audio only if it plays it ([`docs/preview-deployments.md`](docs/preview-deployments.md)). | broken 2026-09-13 → green 2026-09-17, six causes; browser tests on the preview 4 → 11; 29 media objects, 11.4 MB beside the bundle |
+| **The user's path (U)** | [`docs/using-osd.md`](docs/using-osd.md) is the guide: start it, a service from YAML, OData from CDS, a pack, a tile, another machine, what to do when it is wrong. | U.1 2026-09-17: a fresh agent with only the guide brought a pack (a YAML service and a published CDS view), served it, changed a line, broke it on purpose — 12 minutes, both services answered |
+| **Docs (D.9)** | [`docs/adt-facade.md`](docs/adt-facade.md) rewritten for abapGit #7880 with the client contract kept; [`docs/upstream.md`](docs/upstream.md) is the dossier of every local fix; `ANORMALIES.md` holds every SAP-vs-runtime discrepancy before any workaround. | 696 → 542 lines; 34 anomalies and 4 debts logged |
+| **Upstream** | One small PR per fix, from a branch inside the repository so Regression runs. transpiler #1829–#1832 (2.13.86), #1836 (2.13.87), #1862 / #1864 / #1867 merged the morning of 2026-09-17; #1863 open, #1866 a design question; abaplint #4302 open, #4293 fixed in core 2.120.52; open-abap-core #1218 from a fork. | 14 transpiler PRs merged since 2026-09-12, 17 open-abap-odata PRs merged; two open-abap-core patches still pins |
+| **Tests** | `npm test` = abaplint + transpile + ABAP Unit + mocha over the wire; Playwright for the apps and the preview. | counted in the tree 2026-09-17: 133 ABAP Unit test methods, 446 wire tests, 24 browser tests |
+
+---
+
+## Architecture
+
+The running system as the code has it, in two pictures: what answers a
+request, and what makes the thing it answers from. Ports are the defaults
+for `STG_PORT=3030`.
+
+**The request path.** The façade is JavaScript and loads no ABAP; every
+request that is not a static file or the ADT surface is proxied to a work
+process, which is transpiled ABAP end to end down to an eleven-method
+database seam. There are `OSD_WORKERS` of those children, and a socket —
+an OData session, a push channel — is pinned to one for its life.
+
+```mermaid
+flowchart TB
+  BROWSER(["browser · Fiori / UI5 · demo pages"])
+  ECLIPSE(["Eclipse ADT · vsp"])
+  GUI(["SAP GUI"])
+  BRIDGE["adt-rfc-bridge<br/><i>open-rfc-go</i>"]
+  DIAG["DIAG stub<br/><i>sap-lsd</i>"]
+
+  subgraph facade["façade process — test/start.mjs (express), no ABAP"]
+    direction TB
+    LISTEN["listener<br/>HTTP :3030 · HTTPS :44330<br/>(STG_TLS_PORT, else 44300 + port mod 100)"]
+    ADT["ADT façade · tools/adt-facade.mjs<br/>/sap/bc/adt"]
+    STORE[("object store · tools/osd-store.mjs<br/>abapGit files over the layers and packs")]
+    STATIC["static · webapp/ → /app"]
+    PROXY["proxy · tools/osd-proxy.mjs<br/>pool · tools/osd-pool.mjs<br/>supervisor · tools/osd-runtime.mjs"]
+    LISTEN --> ADT --> STORE
+    LISTEN --> STATIC
+    LISTEN -- "/sap/opu/odata · /sap/bc/* · ws upgrade" --> PROXY
+  end
+
+  subgraph runtime["a work process — tools/osd-serve.mjs"]
+    direction TB
+    ICF["ICF · cl_express_icf_shim<br/>APC · zcl_apc_host"]
+    GW["Gateway · src/gateway<br/>dispatcher · $filter · $batch"]
+    APP["SEGW · SADL · packs<br/>open-abap-core"]
+    SEAM["DatabaseClient seam<br/>test/setup.mjs"]
+    DB[("sql.js · SQLite file (WAL)<br/>DuckDB")]
+    ICF --> GW --> APP --> SEAM --> DB
+  end
+
+  BROWSER -- "HTTP / HTTPS" --> LISTEN
+  ECLIPSE -- "HTTPS, Cloud Project" --> LISTEN
+  ECLIPSE -- "RFC/CPIC :33NN" --> BRIDGE -- "HTTP /sap/bc/adt" --> LISTEN
+  GUI -- "DIAG :32NN" --> DIAG
+  PROXY -- "http://127.0.0.1:port · spawn / recycle / whenReady" --> ICF
+
+  classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
+  classDef abap fill:#fff7e6,stroke:#e8590c,color:#111
+  classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
+  classDef store fill:#fff0f0,stroke:#c92a2a,color:#111
+  class LISTEN,ADT,STATIC,PROXY js
+  class ICF,GW,APP,SEAM abap
+  class BRIDGE,DIAG go
+  class STORE,DB store
+```
+
+`tools/osd-tls-proxy.mjs` is the same door from outside: a TLS adapter on
+:44300 in front of a target that speaks plain HTTP, for a client that
+insists on HTTPS.
+
+**The build.** A *generation* is one transpiled system named by the hash of
+its inputs; `output/` is a symlink a work process follows, so moving the
+pointer is a recycle, and a rollback is moving it back. The same `output/`
+is what the browser build bundles.
+
+```mermaid
+flowchart TB
+  subgraph inputs["inputs"]
+    direction LR
+    LAYERS["layers · abap_transpile.json input_folder<br/>later folder wins, duplicates refused"]
+    PACKS["packs · tools/osd-packs.mjs<br/>osd-fetch.mjs: a repo at a commit + an overlay"]
+  end
+  GEN["generators → gen/<br/>cds · stg-compile · segw-registry · shlp"]
+  TRANSPILE["tools/osd-transpile.mjs<br/>abaplint + @abaplint/transpiler as a library"]
+  GENSTORE[("tools/osd-build.mjs<br/>build/by-input/&lt;hash&gt; · build/live<br/>output → build/live/output")]
+
+  subgraph hosts["hosts that run it"]
+    direction LR
+    NODE["Node 22/24 · npm start"]
+    BUN["Bun binary · build/osd"]
+    SEA["Node SEA · osd-sea"]
+  end
+  subgraph preview["preview — no server at all"]
+    direction LR
+    WEBPACK["scripts/build-preview.mjs (webpack)<br/>web/preview-worker.mjs · preview-backend.mjs"]
+    SW["service worker + sql.js<br/>:3031 locally · GitHub Pages main/, pr-n/"]
+    WEBPACK --> SW
+  end
+
+  LAYERS --> GEN
+  PACKS --> GEN
+  GEN --> TRANSPILE --> GENSTORE
+  GENSTORE -- "OSD_ROOT/output" --> hosts
+  GENSTORE -- "output/ + W3MI media" --> WEBPACK
+
+  classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
+  classDef store fill:#fff0f0,stroke:#c92a2a,color:#111
+  class LAYERS,PACKS,GEN,TRANSPILE,WEBPACK,SW,NODE,BUN,SEA js
+  class GENSTORE store
+```
+
+More in [`docs/generations.md`](docs/generations.md),
+[`docs/architecture-split.md`](docs/architecture-split.md) and
+[`docs/adt-facade.md`](docs/adt-facade.md).
 
 ---
 
@@ -150,26 +251,16 @@ Every pixel below is served by transpiled ABAP over SQLite. The apps are
 SAPUI5 1.120 from SAP's CDN, unchanged, and the pictures come out of a media
 entity through the DPC's `GET_STREAM`.
 
-**The launchpad** (`app/flp.html`): four Fiori apps over three services,
-`sap.ushell` resolving the intents between them.
-
-![The launchpad with four tiles](docs/images/launchpad.png)
-
-**The Travels list report**: `$filter` from the filter bar arrives in the DPC
-as SELECT-OPTIONS, the value help reads a search help, the Photo column is the
-media resource of each travel (`PhotoSet('T0001')/$value`).
-
-![List report with a column of pictures](docs/images/list-report.png)
-
-**The object page**: the header image comes from the same media entity, the
-bookings below through the navigation property, Edit and Save send a MERGE
-with the changed field only.
+**Fiori Elements over the Gateway** — the Travels object page: the header
+image is a media resource (`PhotoSet('T0001')/$value`), the bookings come
+through the navigation property, Edit and Save send a MERGE with the changed
+field only; the list report behind it delivers `$filter` as SELECT-OPTIONS.
 
 ![Object page with the travel's picture and its bookings](docs/images/object-page.png)
 
 **SEGW as an application** (`app/segw/`): the Service Builder's project tree
-over `ZSTG_SEGW_SRV`, every node a row of a `/IWBEP/I_SB*` table edited in
-place, Import and Export of the abapGit IWPR, Generate through the ABAP
+over `ZSTG_SEGW_SRV`, every node a row of a `/IWBEP/I_SB*`-shaped table edited
+in place, Import and Export of the abapGit IWPR, Generate through the ABAP
 generator ([`docs/segw-editor.md`](docs/segw-editor.md)).
 
 ![The SEGW project tree as a Fiori app](docs/images/segw-editor.png)
@@ -198,6 +289,7 @@ npm run e2e:install && npm run e2e         # Playwright against localhost:3030
 npm run web:preview && npm run web:serve   # the browser-only build on :3031
 npm run start:duckdb         # the same on DuckDB (STG_DB_PATH=x.duckdb persists)
 npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out gen/demo   # SEGW without the GUI
+npm run binary && build/osd up             # the same workbench as one Bun binary
 ```
 
 The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
@@ -211,33 +303,26 @@ pack, and putting any of it on the launchpad. The short version:
 
 **A service of your own** is one YAML file — SEGW without the GUI. It compiles
 into the project tree (IWPR), the registration objects (IWSV, IWMO) and the
-`_MPC` / `_DPC` classes SEGW would generate; the `_EXT` pair is yours to write
-in. An entity reads from a table, a CDS view, a function module, a search help
-or another service, or from a `GET_ENTITYSET` you write by hand. Or edit the
-tree in the browser: `/app/segw/` is the Service Builder as an application.
+`_MPC` / `_DPC` classes SEGW would generate; the `_EXT` pair is yours. An
+entity reads from a table, a CDS view, a function module, a search help,
+another service, or a `GET_ENTITYSET` you write by hand. Or edit the tree in
+the browser: `/app/segw/` is the Service Builder as an application.
 
-**OData from CDS** is one annotation. `@OData.publish: true` on a view under
-`src/cds/` makes the build write the DDIC views, the source class and a
-service around it. `@ObjectModel.writeEnabled` on a projection of one table
-makes it writable; `@Analytics.dataCategory: #CUBE` turns `$select` into
-`GROUP BY`, which is what the analytical app runs on.
+**OData from CDS** is one annotation: `@OData.publish: true` on a view under
+`src/cds/`. `@ObjectModel.writeEnabled` on a one-table projection makes it
+writable; `@Analytics.dataCategory: #CUBE` turns `$select` into `GROUP BY`.
 
 **Content arrives as a pack, which is a directory, not a rebuild.** A folder
 with an `osd-pack.json` in it, holding ABAP, its tables, its seed rows, its
-static files — dropped into `packs/` or named by `OSD_PACKS`. Its objects join
-the system in a package of their own and are editable from Eclipse, its rows
-are seeded, its ICF nodes and push channels are mounted, its CDS and services
-are generated like the tree's own. Layers are ordered and a collision is
-reported with both files rather than guessed. A pack may **fetch** instead
-of carrying: `sources` in its manifest names a repository, a commit and a
-path, `node tools/osd-fetch.mjs` copies that under the pack, and the pack's
-own folder layers over it — so a repository you do not own runs here with
-the few files it needs changed as an overlay, and a build refuses a pack
-that was not fetched rather than building a smaller system.
-
-**A tile** for a pack goes in the pack's own manifest: the launchpad asks the
-server which tiles the packs want and adds them, so nothing in this repository
-has to know a pack exists.
+static files and its tiles — dropped into `packs/` or named by `OSD_PACKS`.
+Its objects join the system in a package of their own and are editable from
+Eclipse, its rows are seeded, its ICF nodes and push channels are mounted,
+its CDS and services are generated like the tree's own, its tiles reach the
+launchpad. Layers are ordered and a collision is reported with both files
+rather than guessed. A pack may **fetch** instead of carrying: `sources` in
+its manifest names a repository, a commit and a path, `node
+tools/osd-fetch.mjs` copies that under the pack, the pack's own folder layers
+over it, and a build refuses a pack that was not fetched.
 
 **Take it to another machine** with `bun scripts/make-release.mjs`: a
 directory with a single-file binary, a Node single executable, a private Node,
@@ -245,223 +330,67 @@ the content, the packs and one prebuilt generation. Measured on a second
 machine with neither Node 22 nor Bun installed: it serves the same generation,
 and the demo's frame stream is byte-identical.
 
-The [release assessment](docs/osd-release-assessment-astra.md) explains what
-that deployment proves, why the Node forms carry a runtime package directory,
-and the checks for an independent installation. The Bun host is self-contained
-for the tested runtime path; application content and writable data remain
-outside the executable.
-
-The demo is also how the runtime is measured: the same ABAP on a real
-system answers the same frames, and a diff between the two streams names
-the arithmetic that differs ([`docs/frame-comparison.md`](docs/frame-comparison.md);
-eight anomalies found that way, most of them fixed upstream or on their
-way).
-
-## What the demo is made of
-
-Bottom up, every layer is real, nothing is mocked:
-
-1. **DDIC and data** — `src/ddic/*.tabl.xml` (abapGit format), seed rows in
-   `data/*.tabu.json` (`abapGit serialize` format for table contents),
-   pictures included: `ZSTG_PHOTO` holds a PNG per travel in a `RSTR` column.
-2. **SEGW registration objects** — `zstg_demo_srv ... 0001.iwsv.xml` (service
-   → DPC class) and `zstg_demo_mdl ... 0001.iwmo.xml` (model → MPC class), as
-   abapGit serializes them. `tools/segw-registry.mjs` reads them and generates
-   the registry, so a cloned SEGW repository registers its own services
-   (`npm run segw -- path/to/repo --list` shows what it would find).
-3. **SEGW-shaped classes** — `src/demo/zcl_zstg_demo_mpc` defines the model
-   through `/iwbep/if_mgw_odata_model` (entity types, sets, associations,
-   function imports, a value-help set); `zcl_zstg_demo_dpc_ext` is the data
-   provider: `it_filter_select_options` → Open SQL with ranges, paging, CRUD,
-   deep insert, `get_expanded_entityset`, `iv_search_string`. This is the code
-   that lives in a customer system.
-4. **The `/IWBEP/` interfaces** — from `open-abap/open-abap-odata`, where the
-   model, `$metadata`, annotations, RFC and search-help signatures, vocabulary
-   annotations and media entities we needed went back upstream as small PRs
-   (#40–#48, #56–#63).
-5. **The Gateway** (`src/gateway/`) — URL parser, `$filter` → SELECT-OPTIONS,
-   request context with every `io_tech_request_context` facet, dispatcher,
-   OData v2 JSON, `$batch`, `$expand`, entry provider. The part that existed
-   nowhere in open source.
-6. **Runtime** — the abaplint transpiler turns all of it into JavaScript;
-   Open SQL runs on SQLite (Node), sql.js (browser) or DuckDB.
-7. **Front** — two Fiori Elements V2 apps with no JavaScript of their own:
-   Travels (`webapp/manifest.json`; its annotations come from the model,
-   `src/demo/zstg_demo.stg.yaml`: list report, object page, the booking's
-   page below it) and Bookings (`webapp/booking/`). `UI.LineItem`, `UI.SelectionFields`,
-   `Common.ValueList`, `Common.Text`, `UI.DataFieldForIntentBasedNavigation`
-   and `UI.DataFieldWithIntentBasedNavigation` link them by intent;
-   `webapp/flp.html` is the launchpad sandbox (`sap.ushell` from the same
-   CDN) that resolves `Travel-manage` and `Booking-display`. The fourth tile
-   is SEGW itself: `webapp/segw/`, the Service Builder's project tree over
-   `ZSTG_SEGW_SRV`, every node edited in place, Import / Export of the
-   abapGit IWPR, Generate through segw-gen (`docs/segw-editor.md`); the
-   fourth is the Analytical List Page over the cube. `UI.IsImageURL` on a
-   property whose value is a media resource's URL is what puts the pictures
-   in the list and in the object page header
-   ([`docs/media-entities.md`](docs/media-entities.md)). SAPUI5 1.120 from
-   SAP's CDN: Fiori Elements, the smart controls and the launchpad are not
-   part of OpenUI5, and the point is that real Fiori apps run unchanged.
-   SAPUI5 is SAP's, not part of this project.
-8. **Preview** — layers 1–6 in a service worker, layer 7 as static files, on
-   GitHub Pages ([`docs/preview-deployments.md`](docs/preview-deployments.md)).
-
-The row **T0009 "Other client, must not leak"** is on purpose: it is seeded
-in client 001, a real system (client 123) would not show it. The transpiler
-has no implicit MANDT yet (`ANORMALIES.md`), so it leaks through; the demo
-keeps it visible as a live reminder, and a unit test pins the behaviour.
-
-## Why
-
-The classic way to test an ABAP OData service is to have SAP. That gates every
-edit on a system round-trip, a transport, an activation. But the *substrate*
-needed to run these classes off-platform already exists as mature MIT/Apache
-open source — an ABAP→JS transpiler with an Open-SQL-over-SQLite runtime, a
-DDIC→schema generator, a blessed table-data exporter, and a complete OData
-v2/v4 serializer. **What is missing is the one piece that connects them: the
-`/IWBEP/` Gateway runtime that turns an OData request into a call on a
-transpiled DPC method.** That gap — and only that gap — is what this project
-builds.
-
-It is a clean-room reimplementation of the `/IWBEP/` *interfaces*: no SAP source
-is bundled, no standard DDIC is shipped, and the agent building it touches no
-SAP API. abapGit is the blessed last mile for code and for the one-time seed
-data capture.
+**Measure it against a system.** The same ABAP on a real system answers the
+same frames, and a diff between the two streams names the arithmetic that
+differs ([`docs/frame-comparison.md`](docs/frame-comparison.md)).
 
 ---
 
-## The finding, in one line
+## How it was built
 
-> The **substrate** (transpile ABAP → run Open SQL over SQLite → serve UI5)
-> exists, is MIT/Apache, and is reusable. The **Gateway** — everything at and
-> above the `/IWBEP/` line — does not exist as working code anywhere, and is the
-> novelty this project builds. The two mature halves have **no code connecting
-> an OData request to a transpiled DPC method.**
+The full research is [`docs/prior-art.md`](docs/prior-art.md) (the verified
+reuse-vs-build matrix, licenses, the gap-list) and [`AGENDA.md`](AGENDA.md)
+(every decision, dated). The short version:
 
-That was the finding on 2026-09-11, before any code. It held: the connecting
-piece is now `src/gateway/` + `src/http/`, ~4600 lines of ABAP, and everything
-below it is reuse. What follows is the plan as written, with what each part
-turned into.
+**The finding, 2026-09-11, before any code.** The substrate (transpile ABAP →
+run Open SQL over SQLite → serve UI5) existed, mature and MIT/Apache. The
+Gateway — everything at and above the `/IWBEP/` line — existed nowhere as
+working code: nothing connected an OData request to a transpiled DPC method.
+So the rule became **build only the Gateway and the seam**, as a clean-room
+reimplementation of the `/IWBEP/` *interfaces*, no SAP source and no standard
+DDIC bundled. It held: `src/gateway/` + `src/http/` are the connecting piece,
+and everything below is reuse.
 
-## Prior-art matrix
+**What was reused and what was not.** The transpiler and its SQLite runtime,
+abapGit's formats, and `open-abap-odata` as the interface layer (its
+`LICENSE` still reads `todo`, so it is a spec and every fix goes back as a PR
+rather than a fork). `@sap-ux/fe-mockserver` was studied as the conformance
+reference and then not mounted: everything it would have provided had to
+exist in ABAP anyway for the same classes to run in a system's ICF, so the
+whole request path is ABAP behind `cl_express_icf_shim`. No `@ui5/cli`
+either: SAPUI5 comes from SAP's CDN and `webapp/` is plain files.
 
-Best single source per component. Full evidence, licenses and runner-ups in
-[`docs/prior-art.md`](docs/prior-art.md).
+**The four gaps, as stated on day one.** The `/IWBEP/` runtime
+(`zcl_stg_model_info`, `zcl_stg_dispatcher`, `zcl_stg_url`, `zcl_stg_json`,
+`zcl_stg_batch`, `zcl_stg_entry_provider`); the `$filter` → SELECT-OPTIONS
+bridge with every `io_tech_request_context` facet (`zcl_stg_filter`,
+`zcl_stg_request_context`: `startswith`/`substringof` become `CP`, `ge`+`le`
+collapse into `BT`, what cannot be a range is reported rather than dropped);
+the seam, which is the dispatcher calling the transpiled DPC directly; and the
+request-body deserializer for CREATE/UPDATE, deep insert and MERGE. All of it
+landed on 2026-09-11, the day the plan was written; the declared critical
+path was half a day.
 
-| Component | Best source | Coverage | Verdict |
-|---|---|---|---|
-| **Open SQL → SQLite** execution | abaplint transpiler + `@abaplint/database-sqlite` | full | **REUSE AS-IS** |
-| **DDIC → local schema** | transpiler `sqlite_database_schema.ts` | partial→full | **REUSE AS-IS** |
-| **Table-data export** (blessed) | abapGit `src/data/` (TABU) + open-abap `load-table-contents` | full | **REUSE AS-IS** |
-| **OData v2/v4 serializer** ($metadata, $batch) | `@sap-ux/fe-mockserver-core` | full | ~~REUSE / FORK~~ → **not used**, written in ABAP (`zcl_stg_json`, `zcl_stg_batch`) |
-| **UI5 / Fiori Elements local serving** | `@sap-ux/ui5-middleware-fe-mockserver` | full | ~~REUSE AS-IS~~ → **not needed**: express serves `webapp/`, SAPUI5 comes from SAP's CDN |
-| **MPC model-API** (`IF_MGW_ODATA_MODEL`) | `open-abap/open-abap-odata` | skeleton | **REUSED as the interface layer**, the gaps filled by PRs upstream (#40–#48, #56–#63) |
-| **DPC dispatch** (`IF_MGW_APPL_SRV_RUNTIME`) | `open-abap/open-abap-odata` (`ZCL_OAO_HTTP_HANDLER`) | skeleton | **BUILT here** (`src/gateway/zcl_stg_dispatcher`) |
-| **`$filter` → SELECT-OPTIONS** (`io_tech_request_context`) | fe-mockserver parser (parse only) | none for the bridge | **BUILT here** (`zcl_stg_filter`, day one) |
-| **CDS / SADL / RAP → OData** | *(none viable for ABAP)* | none | **BUILT read-only** (`src/sadl/`, CDS projections + an analytics cube); BOPF/RAP still out |
-| **Headless deploy-back** | abapGit deserialize | partial | **PIN + wrap** (stays SAP-side); the SEGW editor exports a ready abapGit repository |
-
-## The gaps we built
-
-The four gaps as stated on day one, and what each one is now. All of it is
-ABAP: the gateway runs transpiled next to the DPC it serves, so the same
-classes would run in a system's ICF.
-
-1. **The `/IWBEP/` Gateway runtime.** `open-abap-odata` was a *validated
-   skeleton, not a product*: the plug-in contract for one flat string-keyed
-   entity, then `ASSERT 1='todo'` for associations, actions, nav-props and most
-   EDM setters; `ZCL_OAO_HTTP_HANDLER` wired only `GET_ENTITYSET`, hardcoded to
-   one entity set. **Built:** `zcl_stg_model_info` (the EDM registry, read out
-   of a running MPC), `zcl_stg_dispatcher` (verb + path → GET_ENTITYSET /
-   GET_ENTITY / CREATE / UPDATE / DELETE / deep insert / action / `$expand` /
-   `$value`), `zcl_stg_url`, `zcl_stg_json`, `zcl_stg_batch`,
-   `zcl_stg_entry_provider`. The model API's own gaps went back upstream as
-   PRs instead of being forked around.
-2. **`io_tech_request_context`: the `$filter` → SELECT-OPTIONS bridge** — the
-   stated hard part and the single highest-risk piece. **Built on day one**
-   (`zcl_stg_filter` + `zcl_stg_request_context`): `$filter` becomes
-   `/iwbep/t_mgw_select_option` rows with SIGN/OPTION/LOW/HIGH, `startswith` /
-   `substringof` become `CP` patterns, `ge`+`le` on one property collapse into
-   `BT`, and what cannot be expressed as a range is reported instead of being
-   silently dropped. The context implements every facet a DPC reads
-   (`get_filter`, `get_filter_select_options`, paging, `$orderby`, keys,
-   navigation path, source entity set).
-3. **The seam.** Not a fe-mockserver plugin: the dispatcher *is* the seam and
-   it calls the transpiled DPC directly. In front of it sits one ABAP
-   `if_http_extension` (`src/http/zcl_stg_http_handler`) behind
-   `cl_express_icf_shim` on Node, or the same class behind a service worker in
-   the browser preview.
-4. **Request-body deserializer** for CREATE/UPDATE: `zcl_stg_json` both ways,
-   including deep insert, `__deferred` links, PATCH/MERGE semantics (only the
-   fields that came in) and the binary body of a media resource.
-
-## The sharpest risks, and how they turned out
-
-- **"Dependency-closure of a real `_DPC_EXT` may be the true long pole, not
-  `$filter`."** Measured first, before any architecture
-  ([`docs/2026-09-11-closure-probe.md`](docs/2026-09-11-closure-probe.md)):
-  eight public SEGW repositories through `npm run probe`. **The closure is
-  DDIC, not code** — data elements, domains, tables and table types, with only
-  a handful of standard classes on the DPC path (`CL_OO_OBJECT`,
-  `CL_O2_API_PAGES`). abapGit serializes exactly those, and the transpiler
-  consumes exactly that, so the answer is a capture script, not weeks of
-  shims. The BAPI fan-out the critic expected appeared in one repo, and even
-  there it was mostly types. **Still true:** a customer DPC with forty BAPI
-  calls is not in the public sample.
-- **"Many modern SEGW services are SADL-mapped."** Confirmed by the same probe
-  (three of eight). v1 stayed classic code-based SEGW, and then a read-only
-  SADL runtime was built anyway (`src/sadl/`: CDS projections, an analytics
-  cube, `$select` → `GROUP BY`), because two corpus services needed it. BOPF
-  and RAP remain out.
-- **"Fixed client 123 / SysID ABC / no implicit MANDT."** Still open, still
-  first-order, logged in [`ANORMALIES.md`](ANORMALIES.md). The demo keeps a row
-  seeded in client 001 (`T0009`, "Other client, must not leak") visible on
-  purpose, with a test pinning the behaviour, so the day the transpiler learns
-  implicit MANDT the test flips instead of the bug hiding.
-- **"`open-abap-odata` is effectively unlicensed."** Unchanged: `LICENSE` still
-  reads `todo`, the `license` field is still empty. So the runtime here is a
-  clean-room reimplementation under MIT and the upstream repository is used as
-  the *interface* layer only, with every fix contributed back as a small PR
-  (#40–#48, #56–#63) rather than forked. The question is with the maintainer.
-- **"The accessor surface is not one method."** Right: the corpus DPCs read
-  `it_filter_select_options` from the signature *and* call
-  `io_tech_request_context->get_filter( )`; both are served.
-
-## The build order, weeks-scale on paper
-
-- **Phase 0 — substrate stand-up** (mostly reuse): transpile a real
-  `MPC_EXT`/`DPC_EXT`, DDIC → SQLite schema, seed via abapGit TABU. **Done
-  2026-09-11**, the same day the plan was written.
-- **Phase 1 — Gateway model + dispatch.** **Done 2026-09-11**: model registry
-  and a generic dispatcher, then grown through writes, `$batch`, navigation,
-  `$expand`, deep insert, function imports and media entities.
-- **Phase 2 — the crux, request-context.** **Done 2026-09-11**, one commit
-  (`$filter -> SELECT-OPTIONS bridge (zcl_stg_filter)`). The "critical path"
-  was half a day. The differential-test oracle was not needed: the DPC's own
-  ranges, a corpus of real services and the Fiori client together pinned the
-  behaviour.
-- **Phase 3 — wire layer.** **Deviated on purpose.** fe-mockserver was never
-  mounted: it is built around mock data files, and everything it would have
-  provided (router, `$metadata`, `$batch`, deserialization) had to exist in
-  ABAP anyway for the code to run on a system. The project has no runtime
-  dependency on it; the whole request path is ABAP behind
-  `cl_express_icf_shim`.
-- **Phase 4 — Fiori serving.** **Done 2026-09-11** with the plain SAPUI5 CDN
-  bootstrap instead of the middleware: four Fiori apps, a launchpad sandbox,
-  and the same files deployable as a BSP (see AGENDA, "The Fiori apps").
-- **Deferred:** CDS/SADL/RAP — the read-only half arrived on 2026-09-12; BOPF,
-  RAP and drafts are still out. Push-back to SAP stays with the siblings.
+**The risks, and how they turned out.** The dependency closure of a real
+`_DPC_EXT` was measured first, over eight public SEGW repositories
+([`docs/2026-09-11-closure-probe.md`](docs/2026-09-11-closure-probe.md)): it
+is DDIC, not code, so the answer was a capture script, not weeks of shims.
+Three of the eight were SADL-mapped, so a read-only SADL runtime followed the
+next day. Fixed client 123, SysID ABC and **no implicit MANDT** are still
+first-order and logged in [`ANORMALIES.md`](ANORMALIES.md): the demo seeds a
+row in client 001 (`T0009`, "Other client, must not leak") and a test pins the
+leak, so the day the transpiler learns MANDT the test flips instead of the bug
+hiding.
 
 **What the long pole actually was:** not the Gateway and not `$filter`, but
 SEGW itself — reading and writing the project tree the way the transaction
-does (`tools/segw-gen.mjs`, `tools/stg-compile.mjs`, `tools/segw-tree.mjs`,
-byte-identical against 21 real projects), and then running it as an app
-(`webapp/segw/`). That work is most of the commits since, and it is what turns
-"the runtime works" into "a service can be built, generated and taken to a
-system without opening SAP GUI".
-
-**Where it stands:** 125 ABAP Unit tests, 80+ wire tests, 13 browser tests,
-`abaplint` clean, a browser-only deployment of the whole thing on GitHub Pages.
+does, generating from it, and running it as an app — and then, from
+2026-09-14, the ADT façade that lets Eclipse treat the result as a system.
+The demo itself is real bottom up: DDIC and seed rows in abapGit format,
+SEGW registration objects, SEGW-shaped classes (`src/demo/`, the code that
+lives in a customer system), the interfaces, the Gateway, the runtime, and
+two Fiori Elements V2 apps with no JavaScript of their own
+([`docs/media-entities.md`](docs/media-entities.md) for the pictures).
 
 ---
 
@@ -480,6 +409,9 @@ Public siblings:
   `cmd/adt-rfc-bridge`, the gateway that lets a Custom Application Server
   project in Eclipse reach this project over RFC
   ([`docs/adt-over-rfc.md`](docs/adt-over-rfc.md)).
+- **[sap-lsd](https://github.com/oisee/sap-lsd)**, **[sap-tui](https://github.com/oisee/sap-tui)**
+  — the rogue DIAG dispatcher that draws a light-show for a real SAP GUI, and
+  the terminal viewer whose recorder feeds the LSD tile.
 
 Two further siblings (a DIAG-protocol project carrying the SAP-LZH **writer**,
 and a shared SAP knowledge base) are private; the reusable protocol facts they
@@ -498,8 +430,8 @@ MIT unless noted. Full source list with evidence in
 - [abapGit](https://github.com/abapGit/abapGit) — Data Config (TABU) blessed
   data export; deserialize as the deploy-back path
 - [SAP/open-ux-odata](https://github.com/SAP/open-ux-odata) — fe-mockserver
-  OData v2/v4 serializer + FE serving (Apache-2.0). Studied as prior art and
-  as the conformance reference; not a dependency, see the build order above.
+  (Apache-2.0), studied as the conformance reference; not a dependency
+- [larshp/hithub](https://github.com/larshp/hithub) — the browser preview's recipe
 
 ## License
 
