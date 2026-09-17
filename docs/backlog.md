@@ -1005,6 +1005,17 @@ G.1b The drop, drawn, and a menu bar that works                          [S]
         and the build; the rest may stay inert but must not pretend
      ├─ a splitter between the tree and the image, draggable, the way the
         real screen's is (Alice)
+     ├─ **the status bar tells the truth** (Alice: "надо правду показывать").
+        Today it prints "OSG (1) 100 node": the "(1)" and the "100" are
+        hard-coded in zcl_osd_webgui line 487, and the system has four
+        identities that disagree - the runtime's sy-sysid ABC / sy-mandt 123
+        / sy-uname USERNAME (@abaplint/runtime constants, never overridden),
+        the status table's sid OSG (STG_ADT_SID or a default), and the ADT
+        facade's OS2 / client 001. Fix: one setting at boot sets sy-sysid,
+        sy-mandt and sy-uname (test/setup.mjs, the preview backend), and the
+        status table, the ADT facade and this screen all read sy. The bar
+        then shows sy-sysid, the work process pid in place of the session
+        number, sy-mandt and the host kind - nothing invented
      └─ SE80 - editing a class from this screen - is later (Alice), and it
         is the ADT facade's editor behind a transaction node, not a new one
 
