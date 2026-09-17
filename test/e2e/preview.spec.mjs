@@ -726,7 +726,7 @@ test("the status app says what the deployment in the browser is", async () => {
     const section = (id) => page.locator(`[id$="--${id}::Section"]`).first();
     // one work process, and it is the worker itself (the count is in the
     // section title, which a hidden header row in the table would not fake)
-    await expect(section("Processes")).toContainText("Work processes (1)");
+    await expect(section("Processes")).toContainText("Processes (1)");
     await expect(section("Processes")).toContainText("worker");
     // no port, said out loud rather than left blank
     await expect(section("Ports")).toContainText("absent");
