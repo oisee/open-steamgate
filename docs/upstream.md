@@ -1,5 +1,13 @@
 # What goes upstream, and how
 
+> **2026-09-17, 06:41–06:49:** Lars merged #1862 (compare), #1864 (rounding)
+> and #1867 (APPEND) within the morning; #1863 (MOD) is still open, #1866
+> (integer division) unanswered, abaplint/abaplint#4302 open. The npm
+> runtime is still 2.13.87; when the next release carries the three, the
+> pinned `local/osd-build` loses three of its commits and the preview pin
+> moves to a published version plus what remains (core pin, MOD).
+
+
 The transpiler and the runtime this tree builds with are a local build of
 `~/dev/transpiler` (branch `local/osd-build`), which is `@abaplint/transpiler`
 plus fixes that are not released yet. Every one of those fixes has an entry

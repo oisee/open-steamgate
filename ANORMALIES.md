@@ -58,7 +58,7 @@ f = 7 / 2 + 7 / 2.              " SAP: 7 — open-abap: 7 (the target makes the 
 
 ### ANOMALY-2026-09-17-append-number-rounded — `APPEND sin( x ) TO` a float table rounds the value to an integer
 
-- Status: `fixed locally, PR open`
+- Status: `fixed upstream, merged 2026-09-17 (#1867), release pending`
 - Discovery date: `2026-09-17`
 - Affected versions: `@abaplint/runtime 2.13.87` (`types/table.ts`, `cloneRow`, twice)
 - Affected ABAP statement, runtime API or adapter: `APPEND <numeric function>( … ) TO itab` where the row type is `f` (or `p`, or anything with a fraction) — `sin`, `cos`, `sqrt`, `abs`, `floor`, `ceil`, `trunc`, `sign`, `log`, `exp` return a raw JavaScript number from the runtime
@@ -153,7 +153,7 @@ r = CONV f( '2.75' ) MOD 1.   " SAP: 0.75 — open-abap: 1
 
 ### ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero — A float of −0.5 assigned to an integer becomes 0
 
-- Status: `fixed locally, PR open`
+- Status: `fixed upstream, merged 2026-09-17 (#1864), release pending`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`types/integer.ts`, `set()` with `Math.round`)
 - Affected ABAP statement, runtime API or adapter: any move of a negative float exactly on a half to an integer — `lv_i = lv_f` with `lv_f = -0.5`, `-1.5`, …
@@ -175,9 +175,9 @@ i = CONV f( '-0.5' ).   " SAP: -1 — open-abap: 0
 
 ### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
 
-- Status: `fixed locally, PR open`
+- Status: `fixed upstream, merged 2026-09-17 (#1862), release pending`
 - Discovery date: `2026-09-16`
-- Affected versions: `@abaplint/runtime 2.13.86` (and 2.13.87: `compare/gt.ts` is unchanged there)
+- Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`compare/gt.ts`)
 - Affected ABAP statement, runtime API or adapter: every comparison of a numeric operand with a character or string one — `IF f > '0.5'`, `f < '0.3'` — through `compare.gt` and, written in terms of it, `lt`, `ge`, `le`. `eq` is not affected: it already reads a point.
 - Minimal ABAP reproducer:
 
