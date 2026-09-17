@@ -579,6 +579,14 @@ E.7  The oracle's leftovers (docs/frame-comparison.md, 2026-09-17)      [S]
         pinned, to separate arithmetic and table order from state
         distribution (Astra)
 
+E.9  A pack has a page of its own                                        [S]
+     └─ Alice, 2026-09-17: a pack tile should open something even when
+        the pack brought no webapp — a generated Fiori page (or a
+        deep-linked one) with the pack's description, its objects, its
+        services, channels and tiles, read from osd-pack.json and the
+        object store. Today a tile without a url points at /app/<name>/,
+        which is 404 for a pack with ABAP only.
+
 E.8  A DIAG stream as a demo                                            [S+A]
      └─ Alice, 2026-09-17: record the whole DIAG stream of a SAP GUI
         session (the LSD demo), push it over an APC channel the way ZO4D

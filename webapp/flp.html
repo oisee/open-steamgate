@@ -96,14 +96,16 @@
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
                         title: "Source",
-                        subtitle: "the whole of this, on GitHub",
-                        info: "oisee/open-steamgate",
+                        subtitle: "oisee/open-steamgate",
+                        info: "GitHub",
                         icon: "sap-icon://source-code",
                         targetURL: "#Source-open"
                       }
                     },
                     {
-                      // the same link as a picture, for a phone pointed at a screen
+                      // the same link as a picture, for a phone pointed at a
+                      // screen: its own tile, because a static tile's icon
+                      // box is too small for a code to be read from
                       id: "source-qr",
                       tileType: "sap.ushell.ui.tile.ImageTile",
                       properties: {
