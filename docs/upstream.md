@@ -158,8 +158,8 @@ through the critic gate (CLAUDE.md).
 | # | what | where | gain, measured | state |
 | --- | --- | --- | --- | --- |
 | 0 | the anchor issue: the arithmetic protocol dominates compute-bound ABAP, with the profile and the ranked list | an issue only, `abaplint/transpiler` | — | to write |
-| 1 | a constant `Character` remembers the number it parses to | runtime, `types/character.ts` + `operators/_parse.ts` | -45 % on the operation, inside the noise on the demo | branch `perf/character-constant-numeric` 3046b03e, at the critic |
-| 2 | a `Float`/`Float` branch in `add`/`minus`/`multiply` | runtime, `operators/` | -4 to -13 % of a heavy frame's CPU | branch `perf/float-fast-path` b10dcf31, at the critic |
+| 1 | a constant `Character` remembers the number it parses to | runtime, `types/character.ts` + `operators/_parse.ts` | -45 % on the operation, inside the noise on the demo | ready, branch `perf/character-constant-numeric` a284eb2f, **held until #1868 is answered** |
+| 2 | a `Float`/`Float` branch in `add`/`minus`/`multiply` | runtime, `operators/` | -4 to -13 % of a heavy frame's CPU | **sent 2026-09-17: issue #1868, PR #1869**, branch `perf/float-fast-path` 111d6a93 |
 | 3 | plain JavaScript arithmetic when the operand types are proven | transpiler, `expressions/source.ts` + a new type walk, behind a feature flag | 110-200 ns to about 1 | in progress |
 | 4 | a synchronous `LOOP AT` when the body contains no `await` | runtime + codegen | 172–349 ns a row to 74 | design question, unwritten |
 | 5 | method inlining | transpiler | 123 ns to 67, and 206 to 67 for a structure return | unwritten, high risk |
@@ -218,6 +218,18 @@ written, tested and measured before either was sent, and both moved:
   scenes by the same rules took 28 to 38 % off a frame with every frame
   identical, which measures the ceiling a compiler could reach on its own.
   It is a measurement, not a patch to send (Alice, 2026-09-17).
+
+**What went out first, and why only that** (2026-09-17). Item 2 alone, as
+issue [#1868](https://github.com/abaplint/transpiler/issues/1868) and PR
+[#1869](https://github.com/abaplint/transpiler/pull/1869), from a branch
+inside the repository so **Regression** runs — confirmed in the checks, beside
+build and transpiler, which is the thing a fork's branch never gets. Five
+drafts were ready and four were held on purpose: a spare-time maintainer given
+five items in one evening answers none of them, and item 2's issue ends on a
+question (which placement of the branch he wants) whose answer changes what
+the rest should say. Also ready and waiting: an issue for the packed
+calculation type with the A4H measurement, and a comment giving #1866 the
+measurement it has never had.
 
 Every item's evidence is `docs/demo-profile.md` (where the time goes) and
 `docs/abap-hot-code.md` (what each idiom costs, and what the code generator
