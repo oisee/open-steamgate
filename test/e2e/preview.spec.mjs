@@ -622,8 +622,10 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     const targets = await page.evaluate(() =>
       globalThis["stg-launchpad-groups"][0].tiles.map((t) => t.properties.targetURL));
     expect(targets).toContain("#Zork-play");
+    // the repository, as a tile and as a QR code that opens the same link
+    expect(targets.filter((t) => t === "#Source-open")).toHaveLength(2);
     expect(targets).toContain("#VividVibes-play");
-    expect(targets).toHaveLength(6);
+    expect(targets).toHaveLength(8);
 
     const {readFile} = await import("node:fs/promises");
     const {fileURLToPath} = await import("node:url");
