@@ -9,6 +9,13 @@
 //   node tools/o4d-record.mjs http://127.0.0.1:3030 --demo main --ticks 120
 //   node tools/o4d-record.mjs http://i7:3030 --out .local/o4d-i7.jsonl
 //   diff .local/o4d-3030.jsonl .local/o4d-i7.jsonl
+//   node tools/o4d-record.mjs --scene plasma --ticks 256      # from that scene's first tick
+//   node tools/o4d-record.mjs --from 1536 --ticks 512         # from a tick by number
+//
+// A scene is found in the scenario the demo announces (name, start bar), and
+// a bar is fps * bar_sec ticks, both from the same message; nothing here
+// knows the bpm. Two recordings compare frame by frame, so both sides must
+// start at the same tick: --against checks that from the first frame's t.
 //
 // Never commit a recording: captures stay under .local/ (CLAUDE.md).
 import {writeFileSync} from "node:fs";
@@ -18,6 +25,7 @@ const CHANNEL = "/sap/bc/apc/sap/zo4d_demo";
 export async function record(base, options = {}) {
   const ticks = options.ticks ?? 120;
   const demo = options.demo ?? "main";
+  let from = options.from ?? 0;
   // the oracle is a real system: ICF takes the logon on the URL, and the
   // credentials come from the environment so that no command line and no
   // recording carries them (OSD_SAP_USER, OSD_SAP_PASSWORD, OSD_SAP_CLIENT)
@@ -41,6 +49,9 @@ export async function record(base, options = {}) {
     }
     if (message.type === "config" || message.type === "megademo" || message.type === "scenario") {
       meta[message.type] = message;
+      if (message.type === "scenario") {
+        scenarioKnown();
+      }
       return;
     }
     // anything else with a tick in it is a frame
@@ -56,18 +67,37 @@ export async function record(base, options = {}) {
     socket.addEventListener("error", () => no(new Error(`the demo channel did not open: ${base}${CHANNEL}`)));
     setTimeout(() => no(new Error("the demo channel did not open within 20 s")), 20000);
   });
+  let scenarioKnown;
+  const scenario = new Promise((r) => { scenarioKnown = r; });
   socket.send(JSON.stringify({cmd: "get_megademo"}));
   socket.send(JSON.stringify({cmd: "get_scenario"}));
   socket.send(JSON.stringify({cmd: "load_demo", demo}));
   socket.send("start");
+  if (options.scene !== undefined) {
+    // the scene's first tick, from the scenario: a bar is fps * bar_sec ticks
+    await Promise.race([scenario, new Promise((_, no) => setTimeout(() => no(new Error("no scenario announced within 20 s")), 20000))]);
+    from = sceneStart(meta.scenario, options.scene);
+  }
   // every tick asked for by number: the stream is the demo's function of the
   // tick, so nothing here depends on how fast either machine answers
-  for (let t = 0; t < ticks; t++) {
+  for (let t = from; t < from + ticks; t++) {
     socket.send(JSON.stringify({cmd: "frame", tick: t, sub: 0}));
   }
   await Promise.race([done, new Promise((r) => setTimeout(r, options.timeout ?? 60000))]);
   socket.close();
-  return {base, demo, ticks, frames, meta};
+  return {base, demo, ticks, from, frames, meta};
+}
+
+/** the first tick of a named scene, from the scenario the demo announced */
+export function sceneStart(scenario, name) {
+  const scenes = scenario?.scenes ?? [];
+  const wanted = String(name).toLowerCase();
+  const scene = scenes.find((s) => String(s.name).toLowerCase() === wanted || String(s.id).toLowerCase() === wanted);
+  if (scene === undefined) {
+    throw new Error(`no scene "${name}" in the scenario; there are: ${scenes.map((s) => s.name).join(", ")}`);
+  }
+  const ticksPerBar = Number(scenario.fps) * Number(scenario.bar_sec) / Number(scenario.fpt ?? 1);
+  return Math.round(Number(scene.start_bar) * ticksPerBar);
 }
 
 /** every place two values differ, named by its path through the frame.
@@ -161,10 +191,12 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
     return i === -1 ? fallback : args[i + 1];
   };
   const base = args[0]?.startsWith("http") ? args[0] : "http://127.0.0.1:3030";
-  const result = await record(base, {demo: at("--demo", "main"), ticks: Number(at("--ticks", 120))});
-  const out = at("--out", `.local/o4d-${new URL(base).port || "80"}.jsonl`);
+  const scene = at("--scene");
+  const result = await record(base, {demo: at("--demo", "main"), ticks: Number(at("--ticks", 120)), from: Number(at("--from", 0)), scene, timeout: Number(at("--timeout", 60000))});
+  const out = at("--out", `.local/o4d-${new URL(base).port || "80"}${scene === undefined ? "" : "-" + scene}.jsonl`);
   writeFileSync(out, result.frames.map((f) => JSON.stringify(f)).join("\n") + "\n");
-  console.log(`${result.frames.length} frames of "${result.meta.scenario?.name ?? result.demo}" from ${base} -> ${out}`);
+  const first = result.frames[0];
+  console.log(`${result.frames.length} frames of "${result.meta.scenario?.name ?? result.demo}" from tick ${result.from}${first ? ` (t=${first.t}, "${first.e}")` : ""} at ${base} -> ${out}`);
   const against = at("--against");
   if (against !== undefined) {
     const {readFileSync} = await import("node:fs");

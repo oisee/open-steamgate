@@ -30,6 +30,81 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-09-17-integer-division-not-rounded — In integer arithmetic, a division keeps its fraction until the end of the expression
+
+- Status: `open, needs an issue`
+- Discovery date: `2026-09-17`
+- Affected versions: `@abaplint/transpiler` 2.13.87 and `@abaplint/runtime` 2.13.87 together: the transpiler emits `abap.operators.divide( )` for every `/`, and the runtime's `divide` answers a `Float` for two integers; nothing rounds until the target is assigned
+- Affected ABAP statement, runtime API or adapter: any arithmetic expression whose calculation type is `i` (every operand and the target are integers) with a `/` in it that is not the last operation — `( a / 3 + b ) MOD 256`, `7 / 2 + 7 / 2`, `( 7 / 2 ) * 2`
+- Minimal ABAP reproducer:
+
+```abap
+DATA i TYPE i.
+i = 7 / 2 + 7 / 2.              " SAP: 8 — open-abap: 7
+i = ( 7 / 2 ) * 2.              " SAP: 8 — open-abap: 7
+i = ( -40 / 3 + 13 ) MOD 256.   " SAP: 0 — open-abap: 256
+DATA f TYPE f.
+f = 7 / 2 + 7 / 2.              " SAP: 7 — open-abap: 7 (the target makes the calculation type f)
+```
+
+- Exact command used to run it: `tools/o4d-record.mjs --scene plasma --ticks 256` against A4H after `ANOMALY-2026-09-17-append-number-rounded` was fixed: 7 frames of 256 still differed (10, 41, 161, 177, 192, 208, 223), each in exactly one row of 32 rectangles. The row's sine index is `( lv_y / 3 + CONV i( lv_t1 * 35 ) ) MOD 256`, and for those rows the sum before `MOD` is −0.333 or 255.667: a system rounds `lv_y / 3` to an integer first and gets 0, here the fraction survives, `MOD` gives 255.667, the integer target rounds it to 256, and `READ TABLE mt_sin INDEX 257` fails, leaving the previous pixel's value in `lv_v2`. **Measured on A4H, 2026-09-17**, ABAP Unit on a probe class: `( -40 / 3 + 13 ) MOD 256` = 0, `( 140 / 3 + 209 ) MOD 256` = 0, `7 / 2 + 7 / 2` = 8, `( 7 / 2 ) * 2` = 8, `10 / 4 + 10 / 4` = 6, and into an `f` target `7 / 2 + 7 / 2` = 7. The runtime asked directly gives 256, 256, 7, 7, 5 and 7. The probe class was deleted afterwards.
+- Expected SAP behaviour: with calculation type `i`, every intermediate result of `/` is rounded to an integer (ABAP keyword documentation, "Calculation Type"; the rounding is commercial, half away from zero)
+- Actual open-abap behaviour: the intermediate is a float, rounded once at the assignment
+- Impact on open-steamgate: 7 of 256 plasma frames, one wrong row each; any ABAP that does integer arithmetic with a division inside a longer expression — index computations, bucketing, `MOD` after a division — silently differs by one
+- Smallest safe workaround: none in ABAP that a system would want; the code is right as written
+- Upstream issue: none yet, **needs an issue** in `abaplint/transpiler`. The fix is not in the runtime alone: whether `7 / 2` is 4 or 3.5 depends on the calculation type of the whole statement, which the target decides too, so the transpiler has to emit a rounding division (a `divide` with an integer flag, or `abap.operators.div_i`) when the expression's calculation type is `i`, and core knows that type. A design question for Lars; the reproducer is the four lines above as a transpiler test.
+- Regression-test location: none yet; `packages/transpiler/test` over the reproducer
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-17-append-number-rounded — `APPEND sin( x ) TO` a float table appends 0
+
+- Status: `fixed locally, PR parked`
+- Discovery date: `2026-09-17`
+- Affected versions: `@abaplint/runtime 2.13.87` (`types/table.ts`, `cloneRow`, twice)
+- Affected ABAP statement, runtime API or adapter: `APPEND <numeric function>( … ) TO itab` where the row type is `f` (or `p`, or anything with a fraction) — `sin`, `cos`, `sqrt`, `abs`, `floor`, `ceil`, `trunc`, `sign`, `log`, `exp` return a raw JavaScript number from the runtime
+- Minimal ABAP reproducer:
+
+```abap
+DATA sines TYPE STANDARD TABLE OF f WITH EMPTY KEY.
+DO 256 TIMES.
+  APPEND sin( ( sy-index - 1 ) * '6.283185' / 256 ) TO sines.
+ENDDO.
+READ TABLE sines INDEX 65 INTO DATA(quarter).   " SAP: 1.0 — open-abap: 0
+```
+
+- Exact command used to run it: `tools/o4d-record.mjs --scene plasma --ticks 256` on the lab and on A4H, then `--compare`: 256 of 256 frames differ, every rectangle's `f` (its colour) — 7 distinct colours here across 641 rectangles and 169 there, frame 0 all `rgb(20,201,201)` here (hue 180, what the formula gives when every sine is 0). Then the runtime asked directly: `append({source: abap.builtin.sin({val: Float 0.5}), target: <float table>})` leaves a row of `0`; `append({source: Float 0.479})` keeps it.
+- Expected SAP behaviour: the sine value in the row
+- Actual open-abap behaviour: `cloneRow` wraps a raw number as `new Integer().set(item)` before setting the row, so the fraction is rounded away before the float row sees it
+- Impact on open-steamgate: the plasma scene of the demo is one colour per frame instead of a plasma; any ABAP that tabulates a numeric function
+- Smallest safe workaround: assign to an `f` variable first and append that
+- Upstream issue: none yet, **needs an issue**. Branch `fix/append-number-float` (worktree `.local/pr-append-number` of the transpiler clone, based on `origin/main`, be1bb514): a whole number stays an `Integer`, anything else goes through a `Float`; cherry-picked onto `local/osd-build`. Runtime tests and lint green.
+- Regression-test location: `packages/runtime/test/statements/append_number.ts` on the branch
+- **Verified, 2026-09-17.** With the fix on `local/osd-build` and the runtime rebuilt, the plasma scene against A4H goes from 256 differing frames of 256 to 18: 12 of them the pulse `p` (`ANOMALY-2026-09-16-numeric-builtins-typed-integer`), 7 one row each (`ANOMALY-2026-09-17-integer-division-not-rounded`).
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-17-character-literal-calc-type — An inline declaration from `lc_h * ( '0.4' + … )` is a character
+
+- Status: `fixed upstream, pin behind`
+- Discovery date: `2026-09-17`
+- Affected versions: `@abaplint/core` up to 2.120.51; fixed in 2.120.52 by [abaplint/abaplint#4293](https://github.com/abaplint/abaplint/pull/4293) (merged 2026-09-14). The transpiler build this tree and the preview were pinned to (`local/osd-build`) still resolved 2.120.50.
+- Affected ABAP statement, runtime API or adapter: `DATA(x) = <arithmetic expression with a character literal>` — the inline variable took the literal's type, `Character(4)` for `'0.12'`
+- Minimal ABAP reproducer:
+
+```abap
+CONSTANTS lc_h TYPE f VALUE 400.
+DATA(lv_base_y) = lc_h * ( '0.4' + 1 * '0.12' ).   " SAP: f, 208 — open-abap: c(4) '2,08', then 2 in arithmetic
+```
+
+- Exact command used to run it: `tools/o4d-record.mjs --scene mountains_oops --ticks 512` on the lab and on A4H: 511 of 512 frames differ, every mountain rectangle's `y` and `h` by exactly 159. The generated module declares `lv_base_y = new abap.types.Character(4, {})`; the runtime asked directly: `Character(4).set(400 * ('0.4' + 0 * '0.12'))` is `"1,60"`, and `"1,60" - lv_h` reads it as 1. 160 − 1 = 159.
+- Expected SAP behaviour: the calculation type of the expression, `f`; 160
+- Actual open-abap behaviour: a four-character field, and a float printed with the user's decimal comma into it, read back as its integer part
+- Impact on open-steamgate: the mountains scene sits 159 pixels too high; more generally any inline declaration from an expression with a character literal in it
+- Smallest safe workaround: none needed once core is at 2.120.52
+- Upstream issue: fixed by #4293. The action here is the pin: `local/osd-build` takes `@abaplint/core ^2.120.54` (c148d363), and the preview workflow's `OSD_TRANSPILER_REF` moves with it.
+- Regression-test location: upstream, with #4293; here the frame comparison of the mountains scene
+- **Verified, 2026-09-17.** With core 2.120.54 in the pinned build, the mountains scene against A4H goes from 511 differing frames of 512 to 268, and the constant 159 is gone. What remains is in bars 28 to 31 only, the sharp mountains: `DATA(lv_tri1) = abs( ( lv_nx MOD 2 ) - 1 ) * 2 - 1` is declared an integer because `abs` is (`ANOMALY-2026-09-16-numeric-builtins-typed-integer`, core), and the `MOD` fix alone changes nothing there; plus the pulse `p` and the beat `flash` it triggers, the same core anomaly.
+- Upstream version containing a fix: `@abaplint/core 2.120.52`
+
 ### ANOMALY-2026-09-16-numeric-builtins-typed-integer — `frac`, `abs`, `floor`, `ceil`, `trunc`, `sign` of a float are typed as integers
 
 - Status: `open, issue filed`

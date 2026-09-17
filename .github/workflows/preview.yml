@@ -35,7 +35,7 @@ jobs:
       # The commit of the transpiler this deployment is pinned to, or empty
       # to use whatever npm resolves. See the step below.
       OSD_CORE_REF: "52ba51a5662b93bd5093a9c1adef64bd438ce7f0"
-      OSD_TRANSPILER_REF: "88ab85390646c4ef730bfeaa50053edb9aa02936"
+      OSD_TRANSPILER_REF: "0263e42892063be5008eab42a5f836bc19385b82"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,8 +53,12 @@ jobs:
       # tests, and the first thing that notices is an ENOENT on a PNG.
       # The third is the runtime's: a float compared with a character
       # literal (abaplint/transpiler#1859), which is what made the demo
-      # label its bars on the second frame. The pinned commit carries all
-      # three on top of the published 2.13.87.
+      # label its bars on the second frame; APPEND of a raw number keeping
+      # its fraction (a sine table was zeros); MOD with a float operand;
+      # a negative half rounding away from zero; and core 2.120.54, whose
+      # #4293 stops an inline DATA from an expression with a character
+      # literal being a character. The pinned commit carries all of them
+      # on top of the published 2.13.87.
       #
       # So the deployment is pinned to a commit of an integration branch,
       # built here and linked the same way a developer links it. Pinned to a
