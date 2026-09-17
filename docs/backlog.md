@@ -54,7 +54,10 @@ B — the runtime underneath: what the answers are made of
 ├─ B.12 work processes, and a channel that never waits              DONE 09-16
 ├─ B.13 a new SMW0 object never reaches an existing database        DONE 09-17
 ├─ B.14 a cast in a CDS view drops the field                        open, small
-└─ B.15 does our pipeline read a view entity?                       open, one build
+├─ B.15 does our pipeline read a view entity?                       open, one build
+├─ B.16 the demo DPC ignores $orderby                               open, small
+└─ B.17 the arithmetic protocol: 30 ns an operation, and who        measured,
+        fixes it                                                    ranked
 
 C — the side quest: RFC in, DIAG out
 ├─ C.1-C.4  the oracle read, the stub that answers                  DONE
@@ -775,6 +778,66 @@ B.16 The demo DPC ignores $orderby                                       [S]
         the dispatcher sorts what a DPC hands back when the DPC says it
         did not - a system does the former. The conformance cases for
         $orderby ride on the SADL service meanwhile
+
+
+B.17 The arithmetic protocol: 30 ns an operation, and who fixes it   [S/T]
+     Measured 2026-09-17, docs/demo-profile.md and docs/abap-hot-code.md.
+     Every ABAP arithmetic operation costs about 30 ns here and about 1 ns
+     in plain JavaScript; one frame of sdf_blobs is 1.97 million of them.
+     The cost is the protocol around the operation - dispatch on the
+     operand types, parse each operand, allocate the result - and not the
+     arithmetic. Ranked by measured gain against risk, and the order is
+     not the intuitive one:
+     └─ a constant Character should remember the number it parses to
+        (runtime, operators/_parse.ts with the character factory). Five
+        lines, no compiler change, measured 22 % of an sdf_blobs frame,
+        because '0.5' is how ABAP spells a float constant. Safe only for
+        a literal with a decimal point: an integer-valued one takes the
+        Integer branch and folding it would change an inferred type
+     └─ a Float/Float branch in add/minus/multiply/divide (runtime). Two
+        lines each, measured 9-17 % a frame. Integer addition is 17 ns
+        and float addition 33 because the chain tests Integer first;
+        divide is cheaper than multiply because its chain is two tests
+        and multiply's is eight
+     └─ raw JavaScript arithmetic when the operand types are proven
+        (transpiler codegen, expressions/arith_operator.ts and source.ts).
+        110-200 ns to about 1. The largest item by a wide margin and a
+        project rather than a patch: the operator is chosen today by a
+        string switch with no type information, source.ts already carries
+        a context type it ignores, and abaplint core exports no
+        getTypeOfSource(node), so a bottom-up type for a Source subtree
+        has to be written. The admission rule is not "both operands f"
+        but "no operand is character-like, packed, decfloat34, int8, hex,
+        date or time, and at least one is f", which is what makes the
+        calculation type fall away; division keeps its zero guard
+     └─ a synchronous LOOP AT when the body contains no await (runtime
+        plus codegen). LOOP AT is an async generator and costs 172 to 349
+        ns a row before the body runs, against 74 for DO with READ TABLE
+        INDEX. 2.3x on every table loop in every program, but "no await"
+        means "no method call at all", so it reaches leaf arithmetic
+        loops and little else
+     └─ method inlining. 123 ns to 67, and 206 to 67 when the method
+        returns a structure. High gain, high risk (aliasing, sy-subrc,
+        exceptions, recursion, everything generated is async), and it is
+        the precondition for anything across a call boundary
+     └─ loop-invariant code motion: nearly nothing here on its own,
+        because the one enormous invariant in the demo (cos of a rotation
+        recomputed 128 000 times a frame) is behind a method call and
+        invisible without inlining. Not worth starting before it
+     └─ **not** a lookup table for a function over a proven range, and
+        this was measured rather than argued: sin( ) is 19 ns and a
+        READ TABLE INDEX lookup is 71, so the table is four times slower
+        than the thing it replaces, and no table equals Math.sin at the
+        sampled points, which breaks the frame comparison. The builtins
+        are cheaper than the operators here (sqrt 10 ns, less than one
+        multiply), so hand-expanding ** into multiplications is also a
+        pessimisation
+     └─ the demo's own ABAP is the ceiling measurement, not the fix:
+        rewriting three scenes by these rules took sdf_blobs -37 %,
+        torus_3d -38 %, quat_julia -28 % with every frame identical, so
+        at least that much is on the table for a compiler that did it by
+        itself. The patch is under .local/hotabap/ and belongs to
+        vivid-vibes, not here
 
 B.15 Does our CDS pipeline read a view entity?                           [S]
      └─ every view here is DDIC-based (`define view` + sqlViewName);
