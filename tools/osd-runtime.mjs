@@ -192,13 +192,20 @@ export class ServingRuntime {
       reapOnExit();
       CHILDREN.add(child);
 
+      // The tail of what the child said, and only the tail: every reader of
+      // it below asks for the last 2000 characters. Keeping the whole log
+      // instead cost about 2.5 KB a second for as long as a work process
+      // served the demo, which writes a line a frame — found by profiling
+      // (docs/demo-profile.md), never by a failure, because it costs no
+      // frame time and only memory.
+      const TAIL = 4000;
       let out = "";
-      child.stdout.on("data", (d) => {
+      const say = (d) => {
         out += d.toString();
-      });
-      child.stderr.on("data", (d) => {
-        out += d.toString();
-      });
+        if (out.length > TAIL * 2) out = out.slice(-TAIL);
+      };
+      child.stdout.on("data", say);
+      child.stderr.on("data", say);
 
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
