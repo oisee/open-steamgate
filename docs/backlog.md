@@ -558,6 +558,36 @@ E.3  What a pack may carry                                               [S]
         packs/o4d and packs/zork are the worked examples and the public
         preview builds from them
 
+E.7  The oracle's leftovers (docs/frame-comparison.md, 2026-09-17)      [S]
+     └─ Pages: the demo stops in the middle of plasma while the same
+        build on the i7 plays the whole demo; the worker is one thread
+        and plasma is 641 rectangles a frame — measure whether it is the
+        page's back-pressure (B.12) or a worker error the page swallows
+     └─ where the transpiled ABAP is slow: some effects run far below
+        the system's speed on one core; profile a frame of plasma,
+        julia_morph and the 4D cells in the runtime (node --cpu-prof on
+        the serving child) before reaching for fast-math; the suspects
+        are Float allocation per operator and the string templates that
+        build every colour
+     └─ sorted triangles: amiga_ball, amiga_ball_2, sierpinski sort by z
+        without a second key, so equal depths paint in an order the sort
+        chooses; the demo needs a tie-break key (a PR to vivid-vibes),
+        and the runtime's SORT should be checked for stability against
+        the kernel's on a table with many equal keys
+     └─ ignition's seed chain and one line of copperbars: not traced
+     └─ one worker against eight on a problem scene with the APC session
+        pinned, to separate arithmetic and table order from state
+        distribution (Astra)
+
+E.8  A DIAG stream as a demo                                            [S+A]
+     └─ Alice, 2026-09-17: record the whole DIAG stream of a SAP GUI
+        session (the LSD demo), push it over an APC channel the way ZO4D
+        pushes frames, and paint it on the page with a SAP TUI written
+        in JS, in the same console as the demos, with music. The DIAG
+        reader exists in the sibling project (docs/layers-we-own.md);
+        the missing piece is the screen-side renderer and the recording
+        format. Not started.
+
 E.6  A pack cut out of a system                                        [S+A]
      └─ Alice, 2026-09-17: for vsp, or anything that speaks ADT and the
         abapGit API — prepare a self-contained pack from a system, with

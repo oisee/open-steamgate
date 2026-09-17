@@ -91,18 +91,42 @@ brightness or flash drives, which is #4302 and nothing else.
 | plasma (256) | 19 of 256 | pulse (12), and 7 frames of one row each where the sine index is a division inside `MOD` (#1866) |
 | mountains_oops (512) | 268 of 512 | pulse and flash; the sharp mountains of bars 28 to 31: `DATA(lv_tri1) = abs( … )` declared `i` (#4302) |
 | voxel_landscape (256) | 13 of 256 | pulse |
-| ignition, ignite_emit | 128 of 128 | the particle seed chain `frac( sin( seed * 12345 ) * 43758 )` amplifies a last-digit difference into a different particle field; not a defect anyone can fix, and not measured further |
-| copperbars | 15 of 128 | pulse (frames 32–35, 96–99), and one line on six frames still to look at |
-| twistzoomer | 6 of 128 | pulse |
-| rotozoom, rotozoom_plasma | 6 of 128 | pulse |
-| tesseract | 127 of 128 | `CONV i( lv_bright / 255 * 60 + 20 )` with `lv_bright TYPE i`: a system rounds `200 / 255` to 1 and every line is 20% or 80% light; here 39% to 70% (#1866, measured: `l=80` on A4H) |
-| cell24 | 6 of 128 | pulse |
-| cell16, cell120, amiga_ball, amiga_ball_2, glitch, sierpinski, neon_city, joydivision, sierpinski_tet, quat_julia, sdf_blobs, torus_3d, julia_morph, constellation | recording | |
+| ignition, ignite_emit | 128 of 128 | the particle seed chain `frac( sin( seed * 12345 ) * 43758 )` amplifies a last-digit difference into a different particle field; measured: the first link of the chain is equal on both sides to 17 digits, the divergence is downstream and not traced further. **Open** |
+| copperbars | 15 of 128 | pulse (frames 32–35, 96–99); one line on six frames not traced. **Open, small** |
+| twistzoomer, rotozoom, rotozoom_plasma, neon_city | 6 of 128 | pulse |
+| cell24, cell16, cell120, sierpinski_tet, quat_julia, sdf_blobs, torus_3d | 6 of 128 | pulse and its flash |
+| joydivision | 6 of 128 | pulse frames only (line heights follow it) |
+| tesseract | 127 of 128 | `CONV i( lv_bright / 255 * 60 + 20 )` with `lv_bright TYPE i`: a system rounds `200 / 255` to 1 and every line is 20% or 80% light; here 39% to 70% (#1866, measured `l=80` on A4H) |
+| amiga_ball | 128 of 128 | `DATA(lv_bounce) = abs( sin( lv_t * 3 ) ) * 100` declared `i` (#4302), so the ball's height is rounded here; on top of it `SORT lt_tris BY z` orders equal `z` differently (below) |
+| amiga_ball_2 | 128 of 128 | 101 frames are the same triangles in a different order, `SORT lt_tris BY z ASCENDING` with equal keys; 27 frames differ in values too, not traced. **Open** |
+| glitch | 67 of 128 | 108 frames same triangles in a different order (no SORT in the scene: the order the table is filled differs, not traced); 20 differ in values. **Open** |
+| sierpinski | 128 of 128 | `SORT lt_proj BY z DESCENDING` with equal keys, and values not traced. **Open** |
+| julia_morph | 128 of 128 | the hue lands in the JSON as `335.5263157894733013` here and `336` there, the lightness as `26.25%` and `26%`: an expression of integers that a system evaluates in calculation type `i` keeps its fraction here (#1866 family, the same rule) |
+| constellation | 128 of 128 | `DATA(lv_i) = floor( lv_hh )` declared `i` (#4302) drives the line colours and heights |
 
-Two conclusions the table supports. The pulse anomaly (#4302) is in every
-scene, so a fix in core moves every row at once. And #1866 is not a
-corner: it decides whether the tesseract has depth shading at all, which
-is the kind of thing a person notices without a diff.
+**Triangle order.** Three scenes sort triangles by depth with `SORT … BY z`
+and no `STABLE`, and the front-to-back order of equal keys is whatever
+the sort implementation leaves, on each side. The same set in another
+order paints a different picture where triangles overlap, so the frames
+are not sorted before comparing to make them equal; the honest statement
+is that ABAP does not promise the order of equal keys, the kernel and the
+runtime pick differently, and a scene that wants a defined picture needs
+a second key (Astra, 2026-09-17). That is a change to the demo, not to
+the runtime, and is in the backlog.
+
+Three conclusions the table supports. The pulse anomaly (#4302) is in
+every scene, so a fix in core moves every row at once; it also owns
+amiga_ball, constellation and the sharp mountains outright. #1866 is not
+a corner: it decides whether the tesseract has depth shading at all and
+what colour every pixel of julia_morph is. And what is left open after
+those two is small and named: the ignition seed chain, one line of
+copperbars, the values behind three sorted-triangle scenes.
+
+**Milestone, 2026-09-17.** All 22 scenes of the main demo recorded on
+both sides (two bars each; plasma, mountains and voxel for four to eight
+bars), every difference attributed to a measured cause or marked open
+above. The sweep stops here; the next moves are upstream (#4302, #1866)
+and in the demo (a second sort key), not in the oracle.
 
 ## What it does not catch
 
