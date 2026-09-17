@@ -45,6 +45,7 @@ const GENERATORS = [
   ["stg-compile.mjs", "--all"],
   ["segw-registry.mjs"],
   ["segw-shlp.mjs"],
+  ["osd-fm-registry.mjs"],
 ];
 
 const TOOLS = fileURLToPath(new URL(".", import.meta.url));

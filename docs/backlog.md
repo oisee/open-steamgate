@@ -67,10 +67,10 @@ C — the side quest: RFC in, DIAG out
 └─ C.6  whether it goes further                                     a decision
 
 D — the RFC gateway: every RFC-enabled module, exposed
-│   not started; the bridge terminates one module today
-├─ D.1  a generic "call this module" endpoint                       the first stone
-├─ D.2  which modules are exposed, and finding them                 open
-├─ D.3  the signature -> metadata graph builder                     open
+│   the channel calls any module of the tree; no wire face yet
+├─ D.1  a generic "call this module" endpoint                       DONE 09-17
+├─ D.2  which modules are exposed, and finding them                 half done
+├─ D.3  the signature -> metadata graph builder                     open, next
 ├─ D.4  the bridge becomes a generic RFC server                     open
 ├─ D.5  the SOAP-RFC facade, likely the easiest win                 open
 └─ D.9  docs/adt-facade.md for abapGit #7880                        DONE 09-17
@@ -106,8 +106,8 @@ worker says what it knows about itself and leaves the rest visibly empty.
 
 **What I would take after those:** B.1 (SADL beyond one table — A.11 walked
 half of that road already), B.6 (MANDT, the oldest first-order risk on the
-list), D.1 (the first stone of the RFC gateway, the one track never
-started), then A.12 (SRVD, the native shape of a service definition).
+list), D.3 (the signature -> metadata graph, now that D.1 has put a channel
+under it), then A.12 (SRVD, the native shape of a service definition).
 
 > The numbered sections below ("The standing list", 0 to 8) are the older
 > plan and stay as history; the tree above is the current one.
@@ -504,22 +504,37 @@ from the module's real signature (its parameters and their DDIC types). That is
 the meat of the track; everything else is wiring what exists.
 
 ```
-D.1  A generic "call this module" endpoint in OSD                    [S/T]
-     ├─ POST /sap/bc/.../rfc/call/<FM> {imports, tables} -> {exports,
-     │  tables, exception}: run the transpiled module, return its answer
-     ├─ ABAP already runs; this is a generic CALL FUNCTION over the module
-     │  registry, the same shape as the service registry already here
-     └─ the foundation both modes below stand on
+D.1  A generic "call this module" endpoint in OSD             DONE 2026-09-17
+     ├─ ICF service ZOSD_RFC at /sap/bc/osd/rfc/: GET /functions,
+     │  GET /functions/<NAME>, POST /call/<NAME> {IMPORTING, CHANGING,
+     │  TABLES} -> {EXPORTING, CHANGING, TABLES} or {EXCEPTION}, all JSON
+     ├─ tools/osd-fm-registry.mjs reads the *.fugr.xml the way
+     │  segw-registry.mjs reads *.iwsv.xml, and writes gen/rfc/: the
+     │  registry (TFDIR/ENLFDIR of this tree, with the signature) and the
+     │  typed dispatcher — generated because the transpiler resolves a CALL
+     │  FUNCTION's parameter list at transpile time and has no
+     │  PARAMETER-TABLE
+     ├─ the gate: no REMOTE_CALL = 'R', no call, twice over — the channel
+     │  refuses with 403 and the dispatcher has no method for it
+     ├─ an exception is a field of a 200, not an HTTP error: the call
+     │  reached the module and the conversation is intact, which is what an
+     │  RFC client is told; only a system failure is a broken call
+     ├─ src/rfc/ (channel + if_http_extension + the SICF node),
+     │  test/osd-rfc.mjs, test/unit/zcl_osd_rfc_test, docs/rfc-channel.md
+     └─ NOT in it: the RFC wire, the SOAP envelope, authentication, and
+        calling out through the same channel
 
-D.2  Which modules are exposed, and finding them                     [S/T]
-     ├─ a registry of remote-enabled modules, the TFDIR/ENLFDIR of this
-     │  project — reuse the *.iwsv-style registration pattern, or a flag in
-     │  the fugr
-     ├─ RFC_FUNCTION_SEARCH answered from it (a name mask -> the matches),
-     │  so SE37's remote test, an SDK, or another system's CALL FUNCTION …
-     │  DESTINATION can discover them
-     └─ mode c) Alice named: a switch that drops the remote-enabled gate and
-        exposes ANY transpiled module, RFC-enabled or not — a dev convenience
+D.2  Which modules are exposed, and finding them             half done 09-17
+     ├─ DONE: the registry is derived from the *.fugr.xml of the content
+     │  folders, and GET /functions is the catalogue — every module with its
+     │  group, its remote flag, whether the tree implements it, whether it is
+     │  exposed, and the reason when it is not
+     ├─ open: RFC_FUNCTION_SEARCH answered from it (a name mask -> the
+     │  matches), so SE37's remote test, an SDK, or another system's CALL
+     │  FUNCTION … DESTINATION can discover them
+     └─ open: mode c) Alice named: a switch that drops the remote-enabled
+        gate and exposes ANY transpiled module — a regeneration with a flag,
+        since the dispatcher is generated from the same list
 
 D.3  The signature -> metadata graph builder                            [R]
      ├─ the one new thing: build the bridge's type graph from a module's real
@@ -545,14 +560,22 @@ D.5  mode b) the SOAP-RFC facade — likely the easiest first win        [S]
      └─ a good place to START the track: it exercises D.1 + D.3 without the
         RFC framing, so the marshalling is proven before the transport is
 
-Smallest first win: D.1 + D.5 over the one module that already exists
-(z_osd_test_status_text), reachable by curl. Then D.3/D.4 put it on RFC, where
-`rfc call` and SE37 reach it. The three modes Alice named map to: a) = D.4
-(full RFC gate), b) = D.5 (SOAP-RFC), c) = the switch in D.2.
+Smallest first win: taken, 2026-09-17. D.1 is done over z_osd_test_status_text
+and a second demo module written for it (z_osd_test_item_list: an optional
+import, a scalar export, a TABLES parameter and a classic exception), reachable
+by curl. D.3/D.4 put it on RFC, where `rfc call` and SE37 reach it. The three
+modes Alice named map to: a) = D.4 (full RFC gate), b) = D.5 (SOAP-RFC),
+c) = the switch in D.2.
 
-Recommendation: start at D.5. It proves the generic call and the marshalling
-over plain HTTP, where a failure is a curl and a diff, before any of it has to
-survive RFC framing.
+What D.1 measured, and what the two faces still need: both need DDIC *types*
+rather than type names — internal length, decimals, output length, the line
+type of a table type as a structure — which is what D.3 builds and neither the
+registry nor JSON needs. Both also need authentication (S_RFC per function
+group) and a third state between success and exception, namely SYSTEM_FAILURE.
+docs/rfc-channel.md has that list in full.
+
+Recommendation: D.3 next, then D.5 on top of it. D.5 needs no transport work
+at all and would then be a second envelope in front of a proven core.
 ```
 
 ---

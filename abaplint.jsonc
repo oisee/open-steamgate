@@ -1,6 +1,6 @@
 {
   "global": {
-    "files": "/{src,test,gen/cds,gen/segw}/**/*.*",
+    "files": "/{src,test,gen/cds,gen/segw,gen/rfc}/**/*.*",
     "errorOnDuplicateFilenames": true,
     "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
   },

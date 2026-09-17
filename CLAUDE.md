@@ -334,6 +334,21 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   (`zcl_stg_segw_fugr`). `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
+- The RFC channel (`docs/rfc-channel.md`, backlog D.1): one ICF service,
+  `ZOSD_RFC` at `/sap/bc/osd/rfc/`, calls any remote-enabled function module
+  of the tree over JSON. `GET /functions` is the catalogue, `GET
+  /functions/<NAME>` the signature, `POST /call/<NAME>` the call
+  (`{IMPORTING, CHANGING, TABLES}` in, `{EXPORTING, CHANGING, TABLES}` or
+  `{EXCEPTION}` out). `tools/osd-fm-registry.mjs` (part of `transpile`,
+  `npm run osd:fm -- --list`) reads the `*.fugr.xml` the way
+  `segw-registry.mjs` reads `*.iwsv.xml` and writes `gen/rfc/`: the registry
+  and a **generated** typed dispatcher, because the transpiler resolves a
+  `CALL FUNCTION`'s parameter list at transpile time and has no
+  `PARAMETER-TABLE`. No `<REMOTE_CALL>R</REMOTE_CALL>`, no call — the channel
+  answers 403 and the dispatcher has no method for it. A classic exception is
+  a field of a 200, not an HTTP error: the module ran and declined, and only
+  a system failure is a broken call. No RFC wire, no SOAP envelope and no
+  authentication yet; do not put it on a public address.
 - Media entities (`docs/media-entities.md`): `set_is_media` in the MPC,
   `m:HasStream` in `$metadata`, `<entity>/$value` served by the DPC's
   `GET_STREAM` / `UPDATE_STREAM` (`zcl_stg_dispatcher=>media`, the binary

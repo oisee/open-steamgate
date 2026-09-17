@@ -10,6 +10,7 @@
    <FUNCTIONS>
     <item>
      <FUNCNAME>Z_OSD_TEST_STATUS_TEXT</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
      <SHORT_TEXT>ZOSD_TEST: text of an item status</SHORT_TEXT>
      <IMPORT>
       <RSIMP>
@@ -33,6 +34,74 @@
        <PARAMETER>EV_TEXT</PARAMETER>
        <KIND>P</KIND>
        <STEXT>Status text</STEXT>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+    <item>
+     <FUNCNAME>Z_OSD_TEST_ITEM_LIST</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>ZOSD_TEST: the demo items, by status</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IV_STATUS</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>ZOSD_TEST_STATUS</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>EV_COUNT</PARAMETER>
+       <TYP>I</TYP>
+      </RSEXP>
+     </EXPORT>
+     <TABLES>
+      <RSTBL>
+       <PARAMETER>ET_ITEM</PARAMETER>
+       <DBSTRUCT>ZOSD_TEST_ITEM_S</DBSTRUCT>
+      </RSTBL>
+     </TABLES>
+     <EXCEPTION>
+      <RSEXC>
+       <EXCEPTION>UNKNOWN_STATUS</EXCEPTION>
+      </RSEXC>
+     </EXCEPTION>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IV_STATUS</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Item status, all of them when empty</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_COUNT</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Number of items returned</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>ET_ITEM</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>The items</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>UNKNOWN_STATUS</PARAMETER>
+       <KIND>X</KIND>
+       <STEXT>No such status</STEXT>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+    <item>
+     <FUNCNAME>Z_OSD_TEST_LOCAL_ONLY</FUNCNAME>
+     <SHORT_TEXT>ZOSD_TEST: not remote-enabled, on purpose</SHORT_TEXT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>EV_TEXT</PARAMETER>
+       <TYP>STRING</TYP>
+      </RSEXP>
+     </EXPORT>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>EV_TEXT</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Something only a local caller sees</STEXT>
       </RSFDO>
      </DOCUMENTATION>
     </item>
