@@ -578,6 +578,13 @@ E.7  The oracle's leftovers (docs/frame-comparison.md, 2026-09-17)      [S]
      └─ one worker against eight on a problem scene with the APC session
         pinned, to separate arithmetic and table order from state
         distribution (Astra)
+     └─ 2026-09-17, later: with the console fix the browser demo reaches
+        the frame before rotozoom (Alice); the stop moved, the cause is
+        still unmeasured
+     └─ work processes in the browser too (Alice): several workers
+        behind the service worker, one runtime each, and a page that
+        pulls frames over several sockets and interleaves them — the
+        B.12 pool, in a browser. Idea only.
 
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
