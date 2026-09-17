@@ -730,8 +730,15 @@ test("the status app says what the deployment in the browser is", async () => {
     await expect(section("Processes")).toContainText("worker");
     // no port, said out loud rather than left blank
     await expect(section("Ports")).toContainText("absent");
-    // the paths this bundle really answers, and the packs really in it
+    // the paths this bundle really answers, and the packs really in it. The
+    // table grows ten rows at a time and this bundle serves more than ten
+    // things -- the UI5 apps sort above the ICF paths -- so ask for the rest
+    // before looking for one of them.
+    await section("Services").locator(".sapMGrowingListTrigger").scrollIntoViewIfNeeded();
+    await section("Services").locator(".sapMGrowingListTrigger").click();
     await expect(section("Services")).toContainText("/sap/bc/zork");
+    // an app is a row of the inventory too, at the intent its manifest declares
+    await expect(section("Services")).toContainText("/app/flp.html#Travel-manage");
     // the last section is bound when it is looked at, so look at it: unscrolled
     // it says "No data available", which is the template waiting, not an answer
     await section("Packs").scrollIntoViewIfNeeded();
