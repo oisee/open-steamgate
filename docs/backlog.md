@@ -597,7 +597,9 @@ D.9  docs/adt-facade.md, the version #7880 links to                       [S]
         cadence softens; and the client contract of the original stays
         below it (403/405, encoded names, in-the-tree vs runnable,
         STG_DB_STRICT, unit-run alerts, the shim's pseudo-headers).
-        Alice: "потом перепишешь" — parked.
+        DONE 2026-09-17 evening: merged with the seven corrections, the
+        client contract kept below; 696 -> 542 lines, leak scan clean.
+        The draft file stays untracked until Astra drops it.
 
 B.13 A new SMW0 object never reaches an existing database file           [S]
      └─ found 2026-09-17 with the lsd pack: with STG_DB=file the rows of
