@@ -442,6 +442,16 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   anomalies in two days came out of it (2026-09-16/17); every one was
   then measured on A4H with a throwaway ABAP Unit probe before anything
   was changed. Recordings stay under `.local/`.
+- **Three traps of a long session, each paid for on 2026-09-17**
+  (`docs/retro-2026-09-17.md` has the rest): a pack asset never takes an
+  extension `.gitignore` names (`*.jsonl` swallowed the light-show
+  recording, green here and red on the runner; it is `.ndjson`); a page
+  written from ABAP in backtick literals gets no escapes (`\n` reaches
+  JavaScript as two characters; use `String.fromCharCode(10)`) and must
+  not name a variable after a window property (`status` is
+  `window.status`); and a server that must outlive a command is started
+  `setsid nohup … & disown`, since the harness reaps its own background
+  tasks and a plain `&` dies with the shell.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 - **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in
