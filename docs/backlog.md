@@ -56,8 +56,10 @@ B — the runtime underneath: what the answers are made of
 ├─ B.14 a cast in a CDS view drops the field                        open, small
 ├─ B.15 does our pipeline read a view entity?                       open, one build
 ├─ B.16 the demo DPC ignores $orderby                               open, small
-└─ B.17 the arithmetic protocol: 30 ns an operation, and who        measured,
-        fixes it                                                    ranked
+├─ B.17 the arithmetic protocol: 30 ns an operation, and who        measured,
+│       fixes it                                                    ranked
+└─ B.18 the release bundle runs 3.5x slower than the same build     measured,
+                                                                    undiagnosed
 
 C — the side quest: RFC in, DIAG out
 ├─ C.1-C.4  the oracle read, the stub that answers                  DONE
@@ -779,6 +781,30 @@ B.16 The demo DPC ignores $orderby                                       [S]
         did not - a system does the former. The conformance cases for
         $orderby ride on the SADL service meanwhile
 
+
+B.18 The release bundle runs 3.5x slower than the same build         [S]
+     `ANOMALY-2026-09-17-release-bundle-slower-than-source`, found while
+     re-measuring something else. One generation, one machine, one scene:
+     100 ms a frame from a checkout, 363 ms from the release bundle. Node
+     is not the cause. **This is what the i7 and every release run**, so
+     the deployed demo is several times slower than the same demo from a
+     checkout, and the work-process pool numbers (B.12) were taken on the
+     source host.
+     └─ it is not uniform, and that is the clue: with the transpiler's
+        typed-arithmetic flag off the bundle costs 3.6x, with it on 2.0x,
+        so the penalty falls on the `@abaplint/runtime` operator protocol
+        rather than on everything equally
+     └─ suspects, none confirmed: Terser's mangling of the runtime's hot
+        classes, the single-chunk module wrapper defeating inlining, or
+        the generated code reaching the runtime through the bundle
+        plugin's `build.module` copy instead of a normal import
+     └─ how to isolate it cheaply: build the bundle with Terser off, then
+        with the chunk split, then with the runtime external, and profile
+        the same generation each time. One scene and 60 frames answers it
+     └─ until it is understood, **no performance number may be taken
+        through a release**: a bundle that taxes the operator protocol
+        flatters any change that removes protocol work, which is how a
+        41 % improvement read as 63 % for a day
 
 B.17 The arithmetic protocol: 30 ns an operation, and who fixes it   [S/T]
      Measured 2026-09-17, docs/demo-profile.md and docs/abap-hot-code.md.
