@@ -612,6 +612,23 @@ B.13 A new SMW0 object never reaches an existing database file           [S]
         from the table. Until then: delete the file (or use another
         STG_DB_PATH) after adding media to a pack.
 
+U.1  The user's path, measured                                      [S]  DONE 2026-09-17
+     └─ a fresh agent with only docs/using-osd.md brought a pack (a YAML
+        service over its own table with seed rows, a CDS view with
+        @OData.publish), served it on another port, changed a line,
+        broke the syntax on purpose: 12 minutes, both services answered.
+        What tripped, and what changed for it: the guide now names
+        STG_PORT and STG_DB_PATH, says how a running server picks up a
+        build (it does not: npm run dev recycles, npm start restarts),
+        shows where the file shapes come from and the CDS service's
+        naming (<VIEW>_CDS, <View>Set, upper-case properties), and
+        reads a failed build's line; stg-compile --all now removes a
+        gen/stg project folder no YAML declares (the pack's service kept
+        being registered after the pack was gone). Report under
+        .local/try/user-path-report.md. Left: the error text for a
+        missing period points at the next statement (abaplint's wording);
+        the failed line sits among the generators' output.
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a

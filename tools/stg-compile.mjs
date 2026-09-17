@@ -986,6 +986,21 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
     }
     report.push({file, project: result.model.project, service: result.model.service, written, kept, warnings: result.warnings});
   }
+  // A project whose YAML is gone leaves its folder behind otherwise, and the
+  // registry keeps serving a service nobody declares any more; measured on
+  // the user's path 2026-09-17: unsetting OSD_PACKS after a trial left two
+  // folders under gen/stg and the build failed on a class of a pack that was
+  // no longer there. What this run did not write, it removes.
+  const produced = new Set(report.map((r) => r.project.toLowerCase().replaceAll("/", "#")));
+  if (existsSync(out)) {
+    for (const name of readdirSync(out).sort()) {
+      const dir = join(out, name);
+      if (statSync(dir).isDirectory() && produced.has(name) === false) {
+        rmSync(dir, {recursive: true, force: true});
+        report.push({file: undefined, project: name.toUpperCase(), service: undefined, written: [], kept: [], warnings: [], removed: true});
+      }
+    }
+  }
   return report;
 }
 
@@ -999,6 +1014,10 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
   const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
   if (args.includes("--all")) {
     for (const r of compileAll("src", "gen/stg", libs, ["gen/cds", ...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).filter((f) => f !== "src")])) {
+      if (r.removed === true) {
+        console.log(`stg-compile: gen/stg/${r.project.toLowerCase()}: removed, no YAML declares it any more`);
+        continue;
+      }
       console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} kept from src/)` : ""}`);
       for (const w of r.warnings) {
         console.log(`  warning: ${w}`);

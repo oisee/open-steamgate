@@ -1,6 +1,8 @@
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
-import {compile, readModel} from "../tools/stg-compile.mjs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {compile, compileAll, readModel} from "../tools/stg-compile.mjs";
 import {generate} from "../tools/segw-gen.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {buildModel, parseIwpr} from "../tools/segw-gen.mjs";
@@ -288,5 +290,25 @@ functions:
     expect(() => compile(yaml.replace("keys: [CustomerId]", "keys: [Address]"), {file: "x"})).to.throw("a complex property cannot be a key");
     expect(() => compile(yaml.replace("complexType: Money", "complexType: Price"), {file: "x"})).to.throw("complex type Price is not defined");
     expect(() => compile(yaml.replace("Balance: Money", "Balance: Price"), {file: "x"})).to.throw("unknown type Price");
+  });
+});
+
+// A project folder under gen/stg whose YAML is gone is removed by the next
+// --all run: the registry would otherwise keep serving a service nobody
+// declares, and the build failed on a class of a pack that was no longer
+// there (the user's path, 2026-09-17).
+describe("stg-compile --all sweeps a project no YAML declares", () => {
+  it("removes the stale folder and keeps the declared one", () => {
+    const out = mkdtempSync(join(tmpdir(), "stg-all-"));
+    try {
+      mkdirSync(join(out, "zzz_gone"));
+      writeFileSync(join(out, "zzz_gone", "zcl_zzz.clas.abap"), "");
+      const report = compileAll("src/demo_odc", out);
+      expect(existsSync(join(out, "zzz_gone")), "the stale folder").to.equal(false);
+      expect(existsSync(join(out, "zstg_odc")), "the declared one").to.equal(true);
+      expect(report.some((r) => r.removed === true && r.project === "ZZZ_GONE")).to.equal(true);
+    } finally {
+      rmSync(out, {recursive: true, force: true});
+    }
   });
 });

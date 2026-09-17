@@ -15,6 +15,7 @@ Everything below is measured against the system as it is, not planned.
 ```
 npm start                 # transpile, then serve on 3030
 npm run dev               # the same, and rebuild + recycle whenever ABAP changes
+STG_PORT=3050 npm start   # another port; STG_DB_PATH=.local/db/mine.sqlite keeps its rows apart
 ```
 
 Open `http://localhost:3030/` and the launchpad answers. Behind it:
@@ -71,7 +72,7 @@ entities:
 Compile it:
 
 ```
-npm run stg:compile -- src/my/zmy_srv.stg.yaml --out gen/stg
+npm run stg:compile -- src/my/zmy_srv.stg.yaml --out .local/try   # to look; the build itself writes gen/stg/<project>/
 ```
 
 That writes the SEGW project tree (the IWPR), the registration objects (IWSV
@@ -128,7 +129,12 @@ Then build. `npm run cds` (part of `npm run transpile`) turns every view into
 a DDIC view under its SQL view name **and** under the CDS name, a source
 class, and the registry; `@OData.publish: true` additionally writes
 `gen/cds/<view>_cds.stg.yaml`, which the same build compiles into a service.
-The service is then `Z<VIEW>_CDS` and is served like any other.
+The service is then `<VIEW>_CDS` (`ZC_MY_VIEW_CDS` for `ZC_MY_VIEW`), its
+one entity set `<View>Set` in the view's casing (`Zc_My_ViewSet`), and its
+properties are the view's field names as the database has them, upper
+case (`ITEMID`, not `ItemId`). The `.ddls.asddls` needs its abapGit
+companion beside it, a `.ddls.xml` naming the view; copy one from
+`src/cds/` and change the name.
 
 Three things worth knowing:
 
@@ -225,7 +231,24 @@ writable, the store finds them where the pack is. A check that fails leaves
 the live generation untouched, so a broken save never takes the system down.
 
 **Removing** a pack is deleting the directory (or unsetting `OSD_PACKS`) and
-building again.
+building again; a service the pack declared as YAML disappears from
+`gen/stg/` with it.
+
+**Picking up a build.** `npm run transpile` switches the tree's live
+generation; a server started with `npm start` keeps serving the one it
+started with (`/sap/bc/adt/core/http/build` shows `live` and `serving`
+side by side, and `synchronized: false` when they differ). `npm run dev`
+rebuilds and recycles by itself on every save; under `npm start`, stop
+the server and start it again, or activate from Eclipse, which recycles.
+
+**The files a pack needs, and where to copy a shape from.** A table is a
+`*.tabl.xml` (abapGit, `src/ddic/zstg_status.tabl.xml` is a small one);
+seed rows are `data/<table>.tabu.json`, a JSON array of rows with the
+field names upper case (`data/zstg_status.tabu.json`); a hand-written
+`_DPC_EXT` redefines `<set>_get_entityset` and needs no `.clas.xml`; the
+YAML makes the rest. A pack's `_EXT` pair is generated into `gen/stg/`
+and hidden by the pack's own when both exist, and the build says so
+(`overridden: CLAS ZCL_X_DPC_EXT: gen/stg/... hidden by packs/...`).
 
 **A pack that fetches instead of carrying.** A repository you do not own, or
 one you do not want copied into this tree, is named in the manifest and
@@ -343,7 +366,11 @@ curl localhost:<child port>/osd/dumps        # the last runtime errors, each nam
 ```
 
 A request that dies in ABAP answers with the statement that raised it and the
-ABAP frames under it, because the transpile carries source maps. `npm run dev`
+ABAP frames under it, because the transpile carries source maps. A build
+that fails prints `osd-build: FAILED: <check>, <message>, <file>:<line>`
+among the generators' own lines; the file is named without its folder, and
+a missing period is reported as the *next* statement not existing in
+"the configured ABAP version" — look one statement up. `npm run dev`
 prints what it rebuilt and why it refused when a check failed.
 
 See also: [`generations.md`](generations.md) for what a generation is and how
