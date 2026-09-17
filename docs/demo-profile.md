@@ -5,6 +5,15 @@ the transpiled tree of generation `2c602ef3`, SQLite file client. Nothing
 in `src/`, `packs/` or `webapp/` was changed to take these numbers; the
 recordings and profiles are captures and stay under `.local/`.*
 
+*Which runtime, exactly, because the ranked list below is an argument about
+it: `local/osd-build` at `0263e428`, which is `abaplint/transpiler` main at
+`71a75787` plus one unmerged local fix (#1860, `operators/mod.ts`), and
+without three commits merged after this build was taken (`create_data`,
+`create_object`, the two `contains_any_of` builtins). Every file on the
+arithmetic hot path — the four operators, `_parse`, `Float`, `Integer`,
+`Character`, `Structure`, `loop` — is byte-identical to main, checked with
+`git diff`, which is what makes the numbers a statement about main.*
+
 The demo is the only workload this tree has that is pure ABAP arithmetic in
 a loop: ZO4D draws itself, one frame per tick, and the page waits for each
 frame. So it answers two questions nobody had asked with numbers — which
@@ -235,12 +244,22 @@ frame time; it costs memory for as long as the process lives.
 
 ## Ranked, with where the change lives
 
-1. **A `Float`/`Float` fast path in the four arithmetic operators.**
-   Upstream, `@abaplint/runtime`, `src/operators/{add,minus,multiply,divide}.ts`.
+1. **A `Float`/`Float` branch in three of the four arithmetic operators.**
+   Upstream, `@abaplint/runtime`, `src/operators/{add,minus,multiply}.ts`.
    Measured 9–17 % off every heavy frame, and it touches every ABAP program
-   that computes with floats, not only this demo. Two lines each, no semantic
-   change. **This is the one to do first**, and it is an issue and a PR, not a
-   local patch.
+   that computes with floats, not only this demo. **This is the one to do
+   first**, and it is an issue and a PR, not a local patch.
+
+   Written and measured on 2026-09-17, and it came out smaller than this
+   entry asked for. Two lines at the *head* of all four operators is what
+   this said; the branch that exists is seven lines **after** the
+   Integer/Integer case in three of them, because at the head the two type
+   tests cost integer arithmetic 12–24 % and integer division 60 %
+   (10.4 → 16.4 ns, repeatably), which a change that speeds up floats has no
+   business doing. `divide` is left alone for the same reason. See branch
+   `perf/float-fast-path` and its draft in `.local/measure/drafts/pr-1.md`;
+   the issue puts both placements in front of Lars, whose weighting of
+   integer division is not ours to assume.
 2. **A constant `Character` should remember the number it parses to.**
    Upstream, `@abaplint/runtime`, `src/operators/_parse.ts` with
    `src/types/character.ts` (`setConstant`) or a `WeakMap` beside
