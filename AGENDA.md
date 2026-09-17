@@ -7,6 +7,70 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
 > was decided and why.
 
+## Milestone — the demo as an oracle, packs from repositories, Pages alive, 2026-09-17
+
+Status at the close of the 16/17 session (the narrative is
+[`docs/retro-2026-09-17.md`](docs/retro-2026-09-17.md), the method
+[`docs/frame-comparison.md`](docs/frame-comparison.md), the dossier
+[`docs/upstream.md`](docs/upstream.md)):
+
+- **Deployed, all three on commit `ae5235a`+:** the lab on 3030, the i7
+  (Bun binary, 8 work processes, `~/osd-i7`), and GitHub Pages
+  (`oisee.github.io/open-steamgate/main`): launchpad, ZO4D demo, Zork, the
+  SAP LSD light-show with music.
+- **Packs:** `packs/o4d`, `packs/zork` fetch vivid-vibes and zork-abap at
+  a commit (`node tools/osd-fetch.mjs`); `packs/lsd` is tracked (recording
+  as `.ndjson`, music as `.m4a`).
+- **The oracle:** 22 of 22 scenes attributed; what still differs anywhere
+  is abaplint #4302 (numeric functions typed `i`).
+
+**Upstream, checked 2026-09-17 evening.** Nobody has written on any of
+them yet; three PRs merged by Lars the same morning, no comments beyond the
+Regression bot.
+
+| where | what | state |
+| --- | --- | --- |
+| transpiler #1862 | float vs character literal (`parseInt`) | merged 06:41 |
+| transpiler #1864 | −0.5 to `i` rounds away from zero | merged 06:44 |
+| transpiler #1867 | APPEND of a raw number keeps its fraction | merged 06:49 |
+| transpiler #1863 | MOD with a float operand | open, Regression green, unreviewed |
+| transpiler #1860 | its issue | open |
+| transpiler #1866 | integer division rounded before the next operation, calc type `i` | open question, unanswered |
+| abaplint #4302 | `frac`/`abs`/`floor`/`ceil`/`trunc`/`sign` return `i` | open, test only, unanswered |
+| npm | runtime/transpiler 2.13.87, core 2.120.54 | no release carries the three merges yet |
+
+**Projection on the plan.** E.1, E.2 (incl. sources), E.8 milestone 1,
+B.12 (pool), B.13 (base image), SP4, N3 are done. Open, in the order to
+take them: the user's path with a small SEGW/CDS pack (Astra's next step,
+no number yet); E.7 (browser demo stops mid-show, profiling the slow
+effects, tie-break sort key in vivid-vibes); D.9 (`docs/adt-facade.md`
+for abapGit #7880); upstream tails (open-abap-core patches as PRs, the
+`?img=` line to vivid-vibes, the recorder to sap-lsd); E.9 (a pack's own
+page), E.8 milestone 2 (a DIAG decoder in JavaScript) if wanted.
+
+**Check first, next session:**
+
+1. `npm view @abaplint/runtime version` — a release above 2.13.87 carries
+   #1862/#1864/#1867: drop those three commits from `local/osd-build`, take
+   the published runtime, move `OSD_TRANSPILER_REF` in
+   `.github/workflows/preview.yml`, and see Pages stay green.
+2. `gh pr view 1863 -R abaplint/transpiler`, `gh issue view 1866`, `gh issue
+   view 4302 -R abaplint/abaplint` — any word from Lars decides whether
+   #1866 becomes a PR and who fixes #4302.
+3. Pages by content: `curl .../main/build.json` shows a build after the
+   last push; the Zork and LSD pages answer; the demo plays past rotozoom
+   or stops where it stopped (E.7, unmeasured).
+4. The i7 and the lab still serve (`/app/packs.json` on both); the lab
+   was restarted by `scripts/osd-restart.sh 3030` and runs without the
+   other session's `OSD_PACKS=.local/packs` (the vibes example pack is not
+   on it, by design).
+5. Uncommitted in the tree, not ours: README, `tools/osd-tls-proxy.mjs`,
+   `src/zosd_test/...`, four docs and `scripts/osd-restart.sh` (another
+   session's); `docs/adt-facade-proposed.md` (Astra's, D.9). In
+   `.local/lars/open-abap-core`: uncommitted patches plus the fork branch
+   `osd-build` that pins them. In `~/dev/sap-lsd`: commit 304f0c4 (the
+   recorder), unpushed.
+
 ## Milestone — the ADT surface (OSD as a real ABAP Cloud system), 2026-09-15
 
 Eclipse ADT 3.60 and vsp treat OSD as a system: log on, browse the package
