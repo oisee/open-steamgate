@@ -12,32 +12,104 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 
 ---
 
-# Where it is going next — five tracks
+# Where it stands, and what is next — 2026-09-17
 
-> Scheduled: [`plan-spikes-and-sprints.md`](plan-spikes-and-sprints.md) lays
-> the next six weeks out as sprints and spikes, with a gate at the end.
-> The **N-numbers** (N1 real-file SQLite, N2 the workbench-only entry point,
-> N3 transpile as a library call, N4 activation ordering, N5 the conformance
-> suite) are the "no-regret set" table in
-> [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md);
-> [`generations.md`](generations.md) is the mechanism that absorbed N4 and
-> delivered N2 and B4; N3 (the transpiler as a library call) is done
-> 2026-09-16 (`tools/osd-transpile.mjs`, the Bun binary's precondition).
-> Track B is done, two gaps Astra named are B.9 and B.10. **SP4 is
-> measured** (2026-09-16, `bun-spike.md` part three): decision 0.1 is
-> **yes** for Linux x64 with the checkout as workspace — `npm run binary`
-> builds `build/osd`, and `build/osd up` is the whole workbench, edits
-> included; a clean directory (gate 4) waits for E.2's content pack. The one-command
-> launcher is `osd-up` in open-diag-go (`architecture-split.md`, the sidecar).
+OSD is a system a client cannot tell from one: Eclipse works over HTTPS and
+over RFC, the demo runs on three machines and in a browser, content arrives
+as packs fetched from repositories, and the runtime is measured against a
+real system frame by frame. What is left is not "make it work" but "make it
+answer the way a system answers", and two or three tracks that were never
+started.
 
-Added 2026-09-16, after a stock Eclipse project logged on over RFC, expanded
-the tree and opened a source ([`adt-over-rfc.md`](adt-over-rfc.md)). The
-numbered tree below this is still the standing list; these three are the
-direction.
+```
+A — the ADT surface: what a client may ask
+│   the client works today; the rest is coverage
+├─ A.1  editor documents for FUGR, MSAG, DOMA, TTYP, VIEW, SHLP     open
+├─ A.2  function groups and modules as create targets               open
+├─ A.3  data preview beyond the freestyle door                      open
+├─ A.4  the metadata bootstrap                                      DONE
+├─ A.4b an RFC client that CALLs, not only describes                open
+├─ A.5  session affinity across parallel RFC connections            open
+├─ A.6  debugger endpoints                                          open
+├─ A.7  ATC, refactorings, quick fixes, where-used                  open
+├─ A.8  CTS                                                         open
+├─ A.9  creating an object: the second dialog nobody reads          open
+├─ A.10 what the client complains about while it works              open
+├─ A.11 a service of several CDS views, no hand-written class       DONE 09-17
+└─ A.12 SRVD + a minimal SRVB: the service definition as an input   next-ish
 
-The tracks are independent on purpose. **A** widens what a client may ask,
-**B** deepens what the answers are made of, **C** is a small strange thing
-worth doing because it is cheap and it proves a point.
+B — the runtime underneath: what the answers are made of
+│   the track is done; these are the named gaps
+├─ B.1  SADL beyond read-only, and beyond one table                 valuable
+├─ B.2  BOPF / RAP / drafts                                         a track of its own
+├─ B.3  OData V4                                                    a track of its own
+├─ B.4  the RFC runtime, both directions                            open
+├─ B.5  multi-record framing, measured against a long answer        open
+├─ B.6  the client and MANDT story                                  first-order risk
+├─ B.7  the database seam beyond three backends                     open
+├─ B.8  SICF and SM59 as applications, the way SEGW is one          open
+├─ B.9  a forced build mutates a generation under its name          open
+├─ B.10 the base image named by the schema alone                    DONE 09-17
+├─ B.11 the binary beyond the checkout (a system pack)              open
+├─ B.12 work processes, and a channel that never waits              DONE 09-16
+├─ B.13 a new SMW0 object never reaches an existing database        DONE 09-17
+├─ B.14 a cast in a CDS view drops the field                        open, small
+└─ B.15 does our pipeline read a view entity?                       open, one build
+
+C — the side quest: RFC in, DIAG out
+├─ C.1-C.4  the oracle read, the stub that answers                  DONE
+├─ C.5  one ticket, three doors: HTTP, RFC, DIAG                    open
+└─ C.6  whether it goes further                                     a decision
+
+D — the RFC gateway: every RFC-enabled module, exposed
+│   not started; the bridge terminates one module today
+├─ D.1  a generic "call this module" endpoint                       the first stone
+├─ D.2  which modules are exposed, and finding them                 open
+├─ D.3  the signature -> metadata graph builder                     open
+├─ D.4  the bridge becomes a generic RFC server                     open
+├─ D.5  the SOAP-RFC facade, likely the easiest win                 open
+└─ D.9  docs/adt-facade.md for abapGit #7880                        DONE 09-17
+
+E — content packs and layers: what the tree is made of
+├─ E.1  ordered source roots, duplicates refused                    DONE 09-16
+├─ E.2  a pack is a directory, not a rebuild                        DONE 09-16
+├─ E.3  what a pack may carry                                       open
+├─ E.4  the Zork console does not fit its box                       open, small
+├─ E.5  the launchpad asks for a config we do not serve             open, small
+├─ E.6  a pack cut out of a system, with stubs on the perimeter     open
+├─ E.7  the oracle's leftovers: Pages stops mid-show, profiling     open
+├─ E.8  a DIAG stream as a demo                                     milestone 1 DONE
+└─ E.9  a pack has a page of its own                                open
+
+U — the user, and the thing itself
+├─ U.1  the user's path, measured by a stranger                     DONE 09-17
+└─ U.2  the status app on the browser deployment                    taken 09-17
+
+N — the no-regret set (docs/shift-right-and-quick-wins.md)
+├─ N1  a real file-backed SQLite client                             DONE
+├─ N2  the workbench-only entry point                               DONE
+├─ N3  transpile as a library call                                  DONE 09-16
+├─ N4  activation ordering                                          DONE (generations)
+└─ N5  the black-box conformance suite                              taken 09-17
+```
+
+**What is being worked on now:** N5, the conformance suite — the same
+requests asked of a base URL rather than of an in-process app, so "our
+tests pass" becomes "we answer the way a system answers"; and U.2, the
+status app on the browser deployment, where there is no façade to take a
+snapshot and the worker has to say what it knows about itself.
+
+**What I would take after those:** B.1 (SADL beyond one table — A.11 walked
+half of that road already), B.6 (MANDT, the oldest first-order risk on the
+list), D.1 (the first stone of the RFC gateway, the one track never
+started), then A.12 (SRVD, the native shape of a service definition).
+
+> The numbered sections below ("The standing list", 0 to 8) are the older
+> plan and stay as history; the tree above is the current one.
+> [`plan-spikes-and-sprints.md`](plan-spikes-and-sprints.md) lays the
+> sprints out, [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md)
+> has the value-against-cost table, and
+> [`generations.md`](generations.md) is the mechanism that absorbed N4.
 
 ---
 
