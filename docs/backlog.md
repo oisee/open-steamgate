@@ -629,6 +629,24 @@ U.1  The user's path, measured                                      [S]  DONE 20
         missing period points at the next statement (abaplint's wording);
         the failed line sits among the generators' output.
 
+A.7  A service of several CDS views, without a hand-written class       [S+A]
+     └─ today: @OData.publish gives one view one service and no
+        navigation (publishedYaml() in tools/cds2ddic.mjs never emits an
+        association, though the parser reads them); several CDS entities
+        with navigation need either a hand-written MPC carrying the
+        exposure XML (src/demo_sadl, as ZSTG_SADL_SRV does) or a
+        stg.yaml that declares the navigation (as ZOSD_STATUS_SRV does)
+     └─ the shape ABAP gives this is a service definition (SRVD): "these
+        views, this service"; the transpiler refuses SRVD objects
+        (ANOMALY-2026-09-15-srvd-not-allowed), so the near-term move is
+        ours: carry the exposed associations from the parser into the
+        generated YAML, and let a marker (a second annotation, or an
+        SRVD-shaped file we read ourselves) say which views make one
+        service
+     └─ measured on the sandbox 2026-09-17 (docs/cds-publish.md): the
+        annotation there generates IWSV + IWMO + IWVB and still needs the
+        hub to publish; ours serves immediately
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a
