@@ -70,10 +70,64 @@ to break.
   comes out empty (`PortSet()`), which is worth knowing before someone
   reaches for a cast in a view.
 
+## On the browser deployment
+
+*2026-09-17, backlog U.2.* The preview on GitHub Pages is the same ABAP in a
+service worker, and there the façade does not exist: no pool, no listener, no
+operating-system process, no `/proc`. The five tables are filled anyway, by
+the worker, through the same door — `web/preview-backend.mjs` builds the JSON
+of the contract above and calls `ZCL_OSD_STATUS=>REFRESH` once when the
+runtime is up and the seed has run, and again whenever a request for
+`ZOSD_STATUS_SRV` arrives, which is what keeps `SnapAt` honest. Nothing about
+the shape is special; only the values are.
+
+What the browser says:
+
+| field | there | why |
+| --- | --- | --- |
+| `host_kind` | `browser` | it is a service worker, not node, bun or a SEA |
+| `workers` | 1 | the worker is the whole system |
+| `gen_live`, `gen_serving`, `synced` | the bundle's stamp, twice, in step | a bundle cannot serve a generation other than itself; the stamp is the digest `scripts/build-preview.mjs` writes into `sw.js` and `build.json` |
+| `root_hint` | the deployment's directory (`main`, `pr-7`) | the last segment of the worker's mount, and never a path from anyone's disk. Served from the root, as `npm run web:preview` is locally, it is `preview` |
+| `started_at`, `snap_at` | the real clock | `web/preview-runtime.mjs` pins `Date` so two builds of the same code answer with the same bytes; the snapshot is the one caller that steps outside it, through `realNow()`, because a frozen "snapshot taken" would be a lie told to quieten a screenshot diff. A worker is shut down when idle, so `started_at` is when it last woke, not when the page was opened |
+
+**Processes**: one row, role `worker`. `pid` and `port` are 0 and `rss_mb` is
+0 — a service worker has no pid, no port and no way to read its own resident
+size, and an empty column says that better than an invented number.
+`sockets` is real: it is the number of push channels open in the worker right
+now, so opening Zork and looking at the status app shows 1.
+
+**Ports**: one row, port 0, protocol HTTP, state `absent`, with the note *a
+service worker has no socket: requests are intercepted in the browser*. One
+row rather than none, for the reason the façade reports RFC and DIAG as
+absent rather than omitting them: an empty section and a snapshot that forgot
+to look are the same picture. It is one row and not three because `port` is
+the key of `ZOSD_PORT` and 0 is the only number here that is not a guess, so
+three protocols would be three rows with one key.
+
+**Services**: the real paths this bundle answers — the ICF services and push
+channels of the generated `web/generated/services.mjs`, plus the OData
+services of the SEGW registration objects. The pack a service came from is
+worked out at build time by `servicesOf` in `tools/osd-status.mjs`, the same
+function the façade uses, and written into the generated table.
+
+**Packs**: name, order, objects, folders and description, from `packsInfo` at
+build time (`web/generated/status.mjs`). The object counts are therefore
+real, but they are the build's count and not something the worker can check;
+nothing in a bundle can enumerate a folder.
+
+What is not there, and would be on a server: a second process, a listening
+port, a resident size, an RFC or DIAG row with a number, and a generation
+that differs from the one being served — a deployment cannot be rebuilt under
+its own feet.
+
 ## Tests
 
 `test/osd-status.mjs` (the snapshot over a fake runtime and fake listeners),
 `ZCL_OSD_STATUS`'s ABAP Unit tests (a snapshot written and read back, a
 second refresh replacing the first, malformed JSON changing nothing), and
 `test/e2e/status.spec.mjs` in a browser: the row, the header, a work
-process, the HTTP port `listening`, a service path, a pack.
+process, the HTTP port `listening`, a service path, a pack. The browser
+deployment has its own check in `test/e2e/preview.spec.mjs` ("the status app
+says what the deployment in the browser is"): host `browser`, one work
+process, a port that says `absent`, the ICF path of a pack, the three packs.

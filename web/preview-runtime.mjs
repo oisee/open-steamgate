@@ -24,3 +24,13 @@ class PreviewDate extends RealDate {
   }
 }
 globalThis.Date = PreviewDate;
+
+// The wall clock, for the one thing that must not be pinned.
+//
+// The status snapshot says when it was taken (web/preview-backend.mjs), and a
+// "snapshot taken" frozen at the instant above would be a lie told to keep a
+// screenshot diff quiet. Everything the transpiled ABAP asks for stays pinned;
+// only this steps outside.
+export function realNow() {
+  return new RealDate();
+}

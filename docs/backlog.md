@@ -83,7 +83,7 @@ E — content packs and layers: what the tree is made of
 
 U — the user, and the thing itself
 ├─ U.1  the user's path, measured by a stranger                     DONE 09-17
-└─ U.2  the status app on the browser deployment                    taken 09-17
+└─ U.2  the status app on the browser deployment                    DONE 09-17
 
 N — the no-regret set (docs/shift-right-and-quick-wins.md)
 ├─ N1  a real file-backed SQLite client                             DONE
@@ -95,9 +95,9 @@ N — the no-regret set (docs/shift-right-and-quick-wins.md)
 
 **What is being worked on now:** N5, the conformance suite — the same
 requests asked of a base URL rather than of an in-process app, so "our
-tests pass" becomes "we answer the way a system answers"; and U.2, the
-status app on the browser deployment, where there is no façade to take a
-snapshot and the worker has to say what it knows about itself.
+tests pass" becomes "we answer the way a system answers". U.2, the status
+app on the browser deployment, is done: there is no façade there, so the
+worker says what it knows about itself and leaves the rest visibly empty.
 
 **What I would take after those:** B.1 (SADL beyond one table — A.11 walked
 half of that road already), B.6 (MANDT, the oldest first-order risk on the
@@ -793,6 +793,14 @@ B.14 A cast in a CDS view drops the field                                [S]
         a casted element in tools/cds2ddic.mjs would pin it.
 
 U.2  The status app on the browser deployment                            [S]
+     ├─ DONE 2026-09-17: the worker takes the snapshot itself and posts it
+     │  to ZCL_OSD_STATUS=>REFRESH at boot and on every read of the
+     │  service (web/preview-backend.mjs); host "browser", one process
+     │  with no pid and no port, one port row saying there is none and
+     │  why, the services of generated/services.mjs plus the SEGW
+     │  registrations, the packs with their object counts from the build
+     │  (web/generated/status.mjs). docs/status-service.md "On the
+     │  browser deployment"; test/e2e/preview.spec.mjs
      └─ Alice, 2026-09-17: the launchpad on GitHub Pages has the tile and
         the app, but nothing fills the five tables there — no façade, no
         pool, no listeners. What the worker does know and could write at

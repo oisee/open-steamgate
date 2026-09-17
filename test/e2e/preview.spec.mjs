@@ -682,3 +682,46 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     await rm(profile, {recursive: true, force: true});
   }
 });
+
+// The system status of a deployment that is a bundle.
+//
+// On a server the facade takes the snapshot, because only it can see the
+// pool, the listeners and /proc. Here none of that exists, so the worker
+// says what is true of itself instead of faking a machine: host "browser",
+// one process with no pid and no port, one port row saying there is no port
+// and why, and the services and packs the build knows (web/preview-backend.mjs,
+// docs/status-service.md "On the browser deployment"). The tables are filled
+// through ZCL_OSD_STATUS=>REFRESH, the same door the facade uses.
+test("the status app says what the deployment in the browser is", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-status-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await controlled(page);
+
+    await page.goto("http://localhost:3031/app/status/index.html", {waitUntil: "domcontentloaded", timeout: 60000});
+    const row = page.locator(".sapMListTblRow", {hasText: "browser"}).first();
+    await expect(row).toBeVisible({timeout: 60000});
+    await row.click();
+
+    await expect(page.locator(".sapUxAPObjectPageHeaderTitle").first()).toContainText("OSG");
+    const section = (id) => page.locator(`[id$="--${id}::Section"]`).first();
+    // one work process, and it is the worker itself (the count is in the
+    // section title, which a hidden header row in the table would not fake)
+    await expect(section("Processes")).toContainText("Work processes (1)");
+    await expect(section("Processes")).toContainText("worker");
+    // no port, said out loud rather than left blank
+    await expect(section("Ports")).toContainText("absent");
+    // the paths this bundle really answers, and the packs really in it
+    await expect(section("Services")).toContainText("/sap/bc/zork");
+    // the last section is bound when it is looked at, so look at it: unscrolled
+    // it says "No data available", which is the template waiting, not an answer
+    await section("Packs").scrollIntoViewIfNeeded();
+    await expect(section("Packs")).toContainText("Packs (3)");
+    await expect(section("Packs")).toContainText("zork");
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});

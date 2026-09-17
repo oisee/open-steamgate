@@ -6,9 +6,10 @@
 // ZCL_STG_HTTP_HANDLER. This module does the same with the service worker in
 // the role of express and sql.js compiled to JavaScript in the role of the
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
-import "./preview-runtime.mjs";
+import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
 import {seed, buildId} from "./generated/seed.mjs";
+import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 
 // test/setup.mjs looks for this before it touches the file system: the seed
 // rows come from the bundle, the database from cache storage (or fresh).
@@ -17,7 +18,7 @@ globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
 const {cl_express_icf_shim} = await import("../output/cl_express_icf_shim.clas.mjs");
-const {services} = await import("./generated/services.mjs");
+const {services, channels} = await import("./generated/services.mjs");
 
 // SMW0 without a disk.
 //
@@ -104,6 +105,7 @@ function serviceFor(path) {
   }
   return found;
 }
+const {zcl_osd_status} = await import("../output/zcl_osd_status.clas.mjs");
 const {zcl_stg_segw_registry} = await import("../output/zcl_stg_segw_registry.clas.mjs");
 const {zcl_stg_shlp_registry} = await import("../output/zcl_stg_shlp_registry.clas.mjs");
 
@@ -151,6 +153,12 @@ async function invoke({method, path, search = "", headers = {}, body}) {
     },
   };
   const service = serviceFor(path);
+  // a read of the status service takes the snapshot that answers it, which is
+  // what keeps snap_at honest; it costs a few object reads and nothing else
+  // pays for it
+  if (STATUS_SERVICE.test(path)) {
+    await refreshStatus();
+  }
   await cl_express_icf_shim.run({
     req: {
       body: Buffer.from(body ?? new Uint8Array(0)),
@@ -225,10 +233,103 @@ export async function closeChannel(id) {
   }
 }
 
-export async function startBackend(stored) {
+// What this deployment is, said by the thing that is answering.
+//
+// On a server the facade takes the snapshot, because it is the only process
+// that can see the pool, the listeners and /proc (tools/osd-status.mjs).
+// Here there is no pool, no listener and no process: there is one service
+// worker, and the honest snapshot is small. So it is written rather than
+// faked -- host_kind "browser", one row in the process table with no pid and
+// no port, one port row that says there is no port and why -- and the parts
+// the worker cannot see are the build's, generated into ./generated/status.mjs
+// (the OData services, the packs, the system id). The JSON is the same
+// contract ZCL_OSD_STATUS=>REFRESH parses on a server; nothing about the
+// shape is special here, only the values.
+//
+// The generation is the worker's own stamp, the digest the build wrote into
+// the bundle, so gen_live and gen_serving are the same by construction: a
+// bundle cannot be serving anything but itself.
+const STATUS_SERVICE = /^\/sap\/opu\/odata\/sap\/ZOSD_STATUS_SRV(\/|$)/i;
+// the real clock, not the pinned one the rest of the bundle sees
+const bootedAt = realNow();
+// the worker fills these in when it starts the backend; the fallbacks are for
+// a host that does not (a test importing this module directly)
+let identity = {stamp: buildId, rootHint: "preview"};
+
+function statusSnapshot() {
+  const since = bootedAt.toISOString();
+  const rows = [
+    ...services.map((s) => ({path: s.path, kind: "ICF", handler: s.handler ?? "", pack: s.pack ?? ""})),
+    ...channels.map((c) => ({path: c.path, kind: "APC", handler: c.handler ?? "", pack: c.pack ?? ""})),
+    ...odataServices,
+  ].sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    system: {
+      sid: SID,
+      host_kind: "browser",
+      gen_live: identity.stamp,
+      gen_serving: identity.stamp,
+      synced: true,
+      workers: 1,
+      started_at: since,
+      snap_at: realNow().toISOString(),
+      root_hint: identity.rootHint,
+    },
+    // one row, and the two columns it cannot fill are left empty rather than
+    // invented: a service worker has no pid and no port, and nothing in a
+    // worker can read its own resident size. The sockets are the push
+    // channels open right now, which is a count this end does know.
+    processes: [{
+      pid: 0,
+      role: "worker",
+      port: 0,
+      generation: identity.stamp,
+      epoch: 0,
+      since,
+      sockets: hosts.size,
+      rss_mb: 0,
+      alive: true,
+    }],
+    // One row saying there is none, not an empty table. "No ports" and "the
+    // snapshot forgot to look" are the same picture when the section is
+    // empty, and this deployment has a real answer: the requests arrive
+    // through the fetch handler, so there is nothing listening anywhere.
+    // The port column is 0 because it is the key, and 0 is the only number
+    // here that is not a guess.
+    ports: [{
+      port: 0,
+      protocol: "HTTP",
+      purpose: "OData, apps and channels, intercepted",
+      state: "absent",
+      note: "a service worker has no socket: requests are intercepted in the browser",
+    }],
+    services: rows,
+    packs: packRows,
+  };
+}
+
+// Into the five tables, through the same door the facade uses. A refresh that
+// fails never fails the read it was taken for: the rows from the last one are
+// still there, and a status page a few seconds stale beats a 500.
+async function refreshStatus() {
+  try {
+    await zcl_osd_status.refresh({iv_json: JSON.stringify(statusSnapshot())});
+  } catch (error) {
+    console.error(`status refresh: ${error?.message?.get?.() ?? error?.message ?? error}`);
+  }
+}
+
+export async function startBackend(stored, options = {}) {
   preview.stored = stored;
+  identity = {
+    stamp: String(options.stamp ?? buildId),
+    // the deployment's own directory (main, pr-7), which is all of the
+    // location this may say; never a path from anybody's disk
+    rootHint: String(options.mount ?? "").split("/").filter((p) => p !== "").pop() ?? "preview",
+  };
   await initializeABAP();
   await registerServices();
+  await refreshStatus();
 }
 
 export function handleRequest(request) {
@@ -242,6 +343,9 @@ export function resetBackend() {
     preview.stored = undefined;
     const setup = await import("../test/setup.mjs");
     await setup.setup(globalThis.abap, preview.schemas, preview.insert);
+    // the status tables went with the database; fill them again rather than
+    // leaving the app empty until somebody opens it
+    await refreshStatus();
   });
 }
 

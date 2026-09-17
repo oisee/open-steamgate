@@ -201,7 +201,10 @@ function start() {
 async function load() {
   const backend = await import("./preview-backend.mjs");
   const stored = await readDatabase(backend.buildId);
-  await backend.startBackend(stored);
+  // the worker's own identity, for the status service: the stamp is the
+  // generation this bundle is (there is no other), the mount says which
+  // deployment it is (main, pr-7) and nothing more than that
+  await backend.startBackend(stored, {stamp: BUILD_STAMP, mount: MOUNT});
   if (stored === undefined) {
     await storeDatabase(backend);
   }
