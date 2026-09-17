@@ -152,7 +152,7 @@ annotations:
       - {id: Build, label: Build, fieldGroup: Build}
     facets:
       - {id: General, label: General, fieldGroup: General}
-      - {id: Processes, label: Work processes, lineItem: to_Processes}
+      - {id: Processes, label: Processes, lineItem: to_Processes}
       - {id: Ports, label: Ports, lineItem: to_Ports}
       - {id: Services, label: Services, lineItem: to_Services}
       - {id: Packs, label: Packs, lineItem: to_Packs}
@@ -171,7 +171,7 @@ annotations:
   System/RootHint: {label: Tree}
 
   Process:
-    header: {typeName: Work process, typeNamePlural: Work processes, title: Pid, description: Role}
+    header: {typeName: Process, typeNamePlural: Processes, title: Pid, description: Role}
     selectionFields: [Role, Generation, Alive]
     lineItem:
       - {value: Pid, label: Process}
