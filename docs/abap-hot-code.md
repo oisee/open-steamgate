@@ -551,14 +551,24 @@ What it needs, and whether it is there:
 What would be emitted: for a statement where no operand is character-like,
 packed, `decfloat34`, `int8`, hex, date or time, and at least one is `f`,
 `target.set(<plain JS expression over .getRaw() values>)`. The `.set()` stays,
-and it is correct for every numeric target: `Integer.set(number)` and
-`Integer.set(Float)` go through the **same** rounding function as each other,
+and it is correct for **three** target types and not for any: `Integer.set(number)`
+and `Integer.set(Float)` go through the same rounding function as each other,
 and `Packed.set(number)` and `Packed.set(Float)` both go through
-`numberToScaled` (`types/packed.ts`). So the target does not have to be `f`.
+`numberToScaled` (`types/packed.ts`), so `f`, `i` and `p` targets are safe.
 (Which rounding function that is depends on the version — `Math.round` in
 published 2.13.86, half-away-from-zero on this checkout — but it is the same
 one on both sides of the equivalence either way, which is what the argument
 needs.)
+
+**A character target is not safe, and an earlier draft of this document said
+it was** (corrected 2026-09-17, when the change was implemented and the claim
+checked rather than reasoned about). `Character.set(Float)` writes what
+`Float.get()` returns, which is exponential notation —
+`"5,0000000000000000E+00"` — while `Character.set(number)` writes `value + ""`,
+which is `"5"`. Handing a raw number to a character target would silently
+change what the program prints. The same risk class applies to `Numc`, `Date`,
+`Time` and `Hex`. So the target whitelist is `f`, `i`, `p`, and that is a rule
+about `set()` implementations rather than about arithmetic.
 
 What would break, and the answer to each:
 
