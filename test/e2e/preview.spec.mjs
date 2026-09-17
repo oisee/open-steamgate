@@ -666,10 +666,11 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     // rewrites an image tile's target, so only the count says it is there)
     expect(targets).toContain("#Source-open");
     expect(targets).toContain("#VividVibes-play");
-    // six apps and the Source tile; the QR image tile beside it is listed
+    // seven apps and the Source tile; the QR image tile beside it is listed
     // by the shell on one machine and not on another, so it is not counted
     expect(targets).toContain("#Lsd-play");
-    expect(targets.length).toBeGreaterThanOrEqual(8);
+    expect(targets).toContain("#System-status");
+    expect(targets.length).toBeGreaterThanOrEqual(9);
 
     const {readFile} = await import("node:fs/promises");
     const {fileURLToPath} = await import("node:url");

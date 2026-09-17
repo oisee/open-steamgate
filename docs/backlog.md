@@ -647,6 +647,14 @@ A.7  A service of several CDS views, without a hand-written class       [S+A]
         annotation there generates IWSV + IWMO + IWVB and still needs the
         hub to publish; ours serves immediately
 
+B.14 A cast in a CDS view drops the field                                [S]
+     └─ found 2026-09-17 building the status service:
+        `cast(pid as abap.char(10)) as Pid` in a view is parsed, but the
+        field is missing from the row the generated source class returns
+        and an entity keyed on it answers `PortSet()` with no key. Until
+        it is fixed, change the type in the stg.yaml instead. A test over
+        a casted element in tools/cds2ddic.mjs would pin it.
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a

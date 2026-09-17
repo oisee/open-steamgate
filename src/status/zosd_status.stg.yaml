@@ -1,0 +1,247 @@
+# The system OSD is, as a service it serves itself.
+#
+# Five DDIC tables are the storage (src/status/*.tabl.xml); the data model
+# is CDS over them (src/cds/zc_osd_*.ddls.asddls), and this file is the
+# service shell: five entity sets, all read-only, each `cds:`-sourced, so
+# the generic SADL delegation reads them and no hand-written DPC exists.
+# What fills the tables is the facade: it knows the live facts (ports, pool
+# children, generation, ICF services, packs), computes a snapshot
+# (tools/osd-status.mjs) and posts it to ZCL_OSD_STATUS=>REFRESH before a
+# read of this service is proxied.
+#
+# The four navigations mirror the four associations ZC_OSD_SYSTEM exposes
+# (_Processes, _Ports, _Services, _Packs) and carry no referential
+# constraint on purpose: there is one system row, and every process, port,
+# service and pack of this instance belongs to it, so the association is
+# unconditional and the SADL runtime reads the whole target set for the
+# expand (zcl_stg_sadl_dpc~navigation_where finds no constraint pair and
+# adds no WHERE).
+#
+# Compiled by `stg-compile --all` during `npm run transpile` into
+# gen/stg/zosd_status/.
+project: ZOSD_STATUS
+service: ZOSD_STATUS_SRV
+model: ZOSD_STATUS_MDL
+description: "OSD system status: processes, ports, services, packs"
+
+entities:
+  System:
+    set: SystemSet
+    description: "the system this runtime is"
+    source: {cds: ZC_OSD_SYSTEM, struct: "ZCL_STG_CDS_ZVOSDSYS=>TY_ROW"}
+    keys: [Sid]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Sid: {type: String(8), field: SID, readonly: true, label: System}
+      HostKind: {type: String(8), field: HOSTKIND, readonly: true, label: Host}
+      GenLive: {type: String(40), field: GENLIVE, readonly: true, label: Generation built}
+      GenServing: {type: String(40), field: GENSERVING, readonly: true, label: Generation serving}
+      Synced: {type: String(1), field: SYNCED, readonly: true, label: In step}
+      Workers: {type: Int32, field: WORKERS, readonly: true, label: Work processes}
+      StartedAt: {type: String(30), field: STARTEDAT, readonly: true, label: Started}
+      SnapAt: {type: String(30), field: SNAPAT, readonly: true, label: Snapshot taken}
+      RootHint: {type: String(60), field: ROOTHINT, readonly: true, label: Tree}
+
+  Process:
+    set: ProcessSet
+    description: "the work processes of the pool"
+    source: {cds: ZC_OSD_PROCESS, struct: "ZCL_STG_CDS_ZVOSDPROC=>TY_ROW"}
+    keys: [Pid]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Pid: {type: String(10), field: PID, readonly: true, label: Process}
+      Role: {type: String(10), field: ROLE, readonly: true, label: Role}
+      Port: {type: String(6), field: PORT, readonly: true, label: Port}
+      Generation: {type: String(40), field: GENERATION, readonly: true, label: Generation}
+      Epoch: {type: String(6), field: EPOCH, readonly: true, label: Epoch}
+      Since: {type: String(30), field: SINCE, readonly: true, label: Since}
+      Sockets: {type: Int32, field: SOCKETS, readonly: true, label: Sockets}
+      RssMb: {type: Int32, field: RSSMB, readonly: true, label: RSS (MB)}
+      Alive: {type: String(1), field: ALIVE, readonly: true, label: Alive}
+
+  Port:
+    set: PortSet
+    description: "the ports of this instance"
+    source: {cds: ZC_OSD_PORT, struct: "ZCL_STG_CDS_ZVOSDPORT=>TY_ROW"}
+    keys: [Port]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Port: {type: String(6), field: PORT, readonly: true, label: Port}
+      Protocol: {type: String(8), field: PROTOCOL, readonly: true, label: Protocol}
+      Purpose: {type: String(60), field: PURPOSE, readonly: true, label: Purpose}
+      State: {type: String(12), field: STATE, readonly: true, label: State}
+      Note: {type: String(120), field: NOTE, readonly: true, label: Note}
+
+  Service:
+    set: ServiceSet
+    description: "the OData, ICF and push services this system serves"
+    source: {cds: ZC_OSD_SERVICE, struct: "ZCL_STG_CDS_ZVOSDSVC=>TY_ROW"}
+    keys: [Path]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Path: {type: String(120), field: PATH, readonly: true, label: Path}
+      Kind: {type: String(8), field: KIND, readonly: true, label: Kind}
+      Handler: {type: String(60), field: HANDLER, readonly: true, label: Handler}
+      Pack: {type: String(30), field: PACK, readonly: true, label: Pack}
+
+  Pack:
+    set: PackSet
+    description: "the content packs layered into this system"
+    source: {cds: ZC_OSD_PACK, struct: "ZCL_STG_CDS_ZVOSDPACK=>TY_ROW"}
+    keys: [Name]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Name: {type: String(30), field: NAME, readonly: true, label: Pack}
+      PackOrder: {type: Int32, field: PACKORDER, readonly: true, label: Order}
+      Objects: {type: Int32, field: OBJECTS, readonly: true, label: Objects}
+      Folders: {type: String(120), field: FOLDERS, readonly: true, label: Folders}
+      Description: {type: String(120), field: DESCRIPTION, readonly: true, label: Description}
+
+associations:
+  SystemToProcesses:
+    from: System
+    to: Process
+    cardinality: 1:N
+    navigation: {System: to_Processes}
+  SystemToPorts:
+    from: System
+    to: Port
+    cardinality: 1:N
+    navigation: {System: to_Ports}
+  SystemToServices:
+    from: System
+    to: Service
+    cardinality: 1:N
+    navigation: {System: to_Services}
+  SystemToPacks:
+    from: System
+    to: Pack
+    cardinality: 1:N
+    navigation: {System: to_Packs}
+
+annotations:
+  System:
+    header: {typeName: System, typeNamePlural: Systems, title: Sid, description: GenLive}
+    selectionFields: [Sid, HostKind]
+    lineItem:
+      - {value: Sid, label: System}
+      - {value: HostKind, label: Host}
+      - {value: GenLive, label: Generation built}
+      - {value: GenServing, label: Generation serving}
+      - {value: Workers, label: Work processes}
+      - {value: SnapAt, label: Snapshot taken}
+    # the header of the object page, not its body: without this the header
+    # carries only the title and the description of `header:` above
+    headerFacets:
+      - {id: Runtime, label: Runtime, fieldGroup: Runtime}
+      - {id: Build, label: Build, fieldGroup: Build}
+    facets:
+      - {id: General, label: General, fieldGroup: General}
+      - {id: Processes, label: Work processes, lineItem: to_Processes}
+      - {id: Ports, label: Ports, lineItem: to_Ports}
+      - {id: Services, label: Services, lineItem: to_Services}
+      - {id: Packs, label: Packs, lineItem: to_Packs}
+    fieldGroups:
+      General: [Sid, HostKind, GenLive, GenServing, Synced, Workers, StartedAt, SnapAt, RootHint]
+      Runtime: [HostKind, Workers, StartedAt]
+      Build: [GenLive, GenServing, Synced, SnapAt]
+  System/Sid: {label: System}
+  System/HostKind: {label: Host}
+  System/GenLive: {label: Generation built}
+  System/GenServing: {label: Generation serving}
+  System/Synced: {label: In step}
+  System/Workers: {label: Work processes}
+  System/StartedAt: {label: Started}
+  System/SnapAt: {label: Snapshot taken}
+  System/RootHint: {label: Tree}
+
+  Process:
+    header: {typeName: Work process, typeNamePlural: Work processes, title: Pid, description: Role}
+    selectionFields: [Role, Generation, Alive]
+    lineItem:
+      - {value: Pid, label: Process}
+      - {value: Role, label: Role}
+      - {value: Port, label: Port}
+      - {value: Generation, label: Generation}
+      - {value: Sockets, label: Sockets}
+      - {value: RssMb, label: RSS (MB)}
+    facets:
+      - {id: ProcessGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [Pid, Role, Port, Generation, Epoch, Since, Sockets, RssMb, Alive]
+  Process/Pid: {label: Process}
+  Process/Role: {label: Role}
+  Process/Port: {label: Port}
+  Process/Generation: {label: Generation}
+  Process/Epoch: {label: Epoch}
+  Process/Since: {label: Since}
+  Process/Sockets: {label: Sockets}
+  Process/RssMb: {label: RSS (MB)}
+  Process/Alive: {label: Alive}
+
+  Port:
+    header: {typeName: Port, typeNamePlural: Ports, title: Port, description: Purpose}
+    selectionFields: [Protocol, State]
+    lineItem:
+      - {value: Port, label: Port}
+      - {value: Protocol, label: Protocol}
+      - {value: Purpose, label: Purpose}
+      - {value: State, label: State}
+    facets:
+      - {id: PortGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [Port, Protocol, Purpose, State, Note]
+  Port/Port: {label: Port}
+  Port/Protocol: {label: Protocol}
+  Port/Purpose: {label: Purpose}
+  Port/State: {label: State}
+  Port/Note: {label: Note}
+
+  Service:
+    header: {typeName: Service, typeNamePlural: Services, title: Path, description: Kind}
+    selectionFields: [Kind, Pack]
+    lineItem:
+      - {value: Path, label: Path}
+      - {value: Kind, label: Kind}
+      - {value: Handler, label: Handler}
+      - {value: Pack, label: Pack}
+    facets:
+      - {id: ServiceGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [Path, Kind, Handler, Pack]
+  Service/Path: {label: Path}
+  Service/Kind: {label: Kind}
+  Service/Handler: {label: Handler}
+  Service/Pack: {label: Pack}
+
+  Pack:
+    header: {typeName: Pack, typeNamePlural: Packs, title: Name, description: Description}
+    selectionFields: [Name]
+    lineItem:
+      - {value: Name, label: Pack}
+      - {value: Objects, label: Objects}
+      - {value: Description, label: Description}
+    facets:
+      - {id: PackGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [Name, PackOrder, Objects, Folders, Description]
+  Pack/Name: {label: Pack}
+  Pack/PackOrder: {label: Order}
+  Pack/Objects: {label: Objects}
+  Pack/Folders: {label: Folders}
+  Pack/Description: {label: Description}

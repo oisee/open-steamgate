@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V>
+    <TABNAME>ZOSD_SVC</TABNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <TABCLASS>TRANSP</TABCLASS>
+    <DDTEXT>OSD system status: the services</DDTEXT>
+    <MAINFLAG>X</MAINFLAG>
+    <CONTFLAG>A</CONTFLAG>
+    <EXCLASS>1</EXCLASS>
+   </DD02V>
+   <DD09L>
+    <TABNAME>ZOSD_SVC</TABNAME>
+    <AS4LOCAL>A</AS4LOCAL>
+    <TABKAT>0</TABKAT>
+    <TABART>APPL2</TABART>
+    <BUFALLOW>N</BUFALLOW>
+   </DD09L>
+   <DD03P_TABLE>
+    <DD03P>
+     <FIELDNAME>PATH</FIELDNAME>
+     <KEYFLAG>X</KEYFLAG>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000240</INTLEN>
+     <NOTNULL>X</NOTNULL>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000120</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>KIND</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000016</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000008</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>HANDLER</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000120</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000060</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>PACK</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000060</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000030</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>

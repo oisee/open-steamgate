@@ -70,6 +70,17 @@
                       }
                     },
                     {
+                      id: "status",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "System status",
+                        subtitle: "what runs, on which ports",
+                        info: "ZOSD_STATUS_SRV",
+                        icon: "sap-icon://monitor",
+                        targetURL: "#System-status"
+                      }
+                    },
+                    {
                       id: "vividvibes",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -173,6 +184,14 @@
           url: "./segw/",
           navigationMode: "embedded"
         },
+        "System-status": {
+          title: "System status",
+          description: "what runs, on which ports, out of which packs",
+          additionalInformation: "SAPUI5.Component=stg.status",
+          applicationType: "URL",
+          url: "./status/",
+          navigationMode: "embedded"
+        },
         // Two that are not UI5 at all.
         //
         // The four above are components the launchpad loads. These two are
@@ -238,7 +257,7 @@
     data-sap-ui-frameOptions="allow"
     data-sap-ui-xx-componentPreload="off"
     data-sap-ui-flexibilityServices=""
-    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking", "stg.analytics": "./analytics", "stg.segw": "./segw"}'
+    data-sap-ui-resourceroots='{"stg": "./", "stg.travel": "./", "stg.booking": "./booking", "stg.analytics": "./analytics", "stg.segw": "./segw", "stg.status": "./status"}'
     data-sap-ui-oninit="module:stg/launchpad"></script>
 </head>
 <body class="sapUiBody" id="content">

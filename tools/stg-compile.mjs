@@ -319,7 +319,8 @@ export function readModel(text, file = "stg.yaml") {
 // `annotations:` -> ZCL_<project>_MPC_ANN, a class that writes the vocabulary
 // annotations through vocab_anno_model the way a SEGW-generated _MPC_EXT
 // does; the _MPC_EXT calls it from DEFINE. Terms: UI.HeaderInfo,
-// UI.SelectionFields, UI.LineItem, UI.Facets, UI.FieldGroup on an entity;
+// UI.SelectionFields, UI.LineItem, UI.Facets, UI.HeaderFacets,
+// UI.FieldGroup on an entity;
 // Common.Label, Common.Text (+UI.TextArrangement), Common.ValueList on a
 // property.
 //
@@ -429,9 +430,17 @@ class AnnotationWriter {
         this.dataField("lo_collection", item);
       }
     }
-    if (s.facets) {
-      this.line(`lo_collection = lo_target->create_annotation( ${lit(UI + "Facets")} )->create_collection( ).`);
-      for (const f of s.facets) {
+    // UI.HeaderFacets is UI.Facets in the object page's header rather than in
+    // its body: the same ReferenceFacet, a different term. Without it a Fiori
+    // Elements header shows only the title and the description of HeaderInfo,
+    // and everything else falls into the first section (measured on the
+    // status app, 2026-09-17).
+    for (const [term, list] of [[UI + "HeaderFacets", s.headerFacets], [UI + "Facets", s.facets]]) {
+      if (list === undefined) {
+        continue;
+      }
+      this.line(`lo_collection = lo_target->create_annotation( ${lit(term)} )->create_collection( ).`);
+      for (const f of list) {
         this.line(`lo_item = lo_collection->create_record( ${lit(UI + "ReferenceFacet")} ).`);
         this.value("lo_item", "ID", "set_string", f.id);
         if (f.label) {

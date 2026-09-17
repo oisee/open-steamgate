@@ -14,6 +14,8 @@ import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
+import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
+import {request as httpRequest} from "node:http";
 
 // Two shapes of one listener, and the difference is whether this process
 // contains an ABAP system.
@@ -40,6 +42,9 @@ async function loadInline() {
   const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
   const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
   const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
+  // the system-status writer; inline there is no child to post a snapshot to,
+  // so the facade writes the tables itself (src/status/)
+  const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
   await initializeABAP();
   // the SEGW registration objects (IWSV/IWMO in src/) say which service is
   // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
@@ -47,7 +52,7 @@ async function loadInline() {
   // the search help objects (*.shlp.xml in src/) become value help providers;
   // tools/segw-shlp.mjs generated this
   await zcl_stg_shlp_registry.register();
-  return {cl_express_icf_shim, zcl_apc_host};
+  return {cl_express_icf_shim, zcl_apc_host, zcl_osd_status};
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
 
@@ -181,6 +186,66 @@ export function startServer(quiet) {
     }
   }
 
+  // The system status, refreshed by the read that asks for it.
+  //
+  // ZOSD_STATUS_SRV is five tables, and ABAP cannot fill them: the pool's
+  // children, the listeners this process opened and the generation it built
+  // are facts of the facade. So a request for that service — and only that
+  // service, because nothing else should pay for it — computes the snapshot
+  // (tools/osd-status.mjs) and posts it to the work process the proxy is
+  // about to forward to, which is the one whose connection will answer.
+  //
+  // A refresh that fails never fails the read. The rows are still there from
+  // the last one, and a status page a few seconds stale is worth more than a
+  // 500 that says nothing about the system it was asked about.
+  const listeners = [];
+
+  function postSnapshot(url, body) {
+    return new Promise((resolve, reject) => {
+      const asked = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(new URL(url).port),
+        path: "/osd/status",
+        method: "POST",
+        headers: {"content-type": "application/json", "content-length": Buffer.byteLength(body)},
+      }, (answer) => {
+        let text = "";
+        answer.on("data", (d) => {
+          text = text + d.toString();
+        });
+        answer.on("end", () => (answer.statusCode === 200 ? resolve(text) : reject(new Error(`/osd/status answered ${answer.statusCode}: ${text.slice(0, 200)}`))));
+      });
+      asked.on("error", reject);
+      asked.end(body);
+    });
+  }
+
+  async function refreshStatus() {
+    const body = JSON.stringify(await statusSnapshot(process.cwd(), {runtime, listeners}));
+    if (runtime === undefined) {
+      // inline: this process holds the tables
+      await inline.zcl_osd_status.refresh({iv_json: body});
+      return;
+    }
+    await runtime.ensure();
+    // the address odataProxy forwards to: a pool answers for its primary,
+    // so the snapshot lands in the process that is about to be asked
+    const url = runtime.url;
+    if (url === undefined) {
+      throw new Error("no serving runtime to refresh the status in");
+    }
+    await postSnapshot(url, body);
+  }
+
+  app.all("/sap/opu/odata/sap/ZOSD_STATUS_SRV*", async function (req, res, next) {
+    try {
+      await refreshStatus();
+    } catch (e) {
+      console.error(`status refresh: ${e?.message ?? e}`);
+    }
+    next();
+  });
+
   // The OData front, in one of two places.
   //
   // Inline is this process: the modules imported at the top of this file
@@ -223,6 +288,8 @@ export function startServer(quiet) {
         if (started.length > 1) {
           console.log(`${started.length} work processes; a push channel is pinned to one for the life of its socket`);
         }
+        // the status tables have something in them before anybody asks
+        refreshStatus().catch((error) => console.error(`status refresh: ${error?.message ?? error}`));
       },
       (e) => console.error(`runtime: ${e.message}`),
     );
@@ -288,6 +355,12 @@ export function startServer(quiet) {
   let secure;
   if (tls !== undefined) {
     secure = createHttpsServer(tls, app).listen(TLS_PORT);
+  }
+
+  // what the snapshot reports as this instance's ports: what was opened here
+  listeners.push({port: PORT, protocol: "HTTP", purpose: "OData, apps, ADT"});
+  if (secure !== undefined) {
+    listeners.push({port: TLS_PORT, protocol: "HTTPS", purpose: "the same, for a client that refuses plain HTTP"});
   }
 
   if (quiet !== true) {

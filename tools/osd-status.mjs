@@ -1,0 +1,296 @@
+// What this system is, right now, as one JSON object.
+//
+// The façade is the only process that can answer the question. It knows
+// which listeners it opened, which children the pool started and on what
+// ports, which generation it built and which one is actually serving, what
+// the content layers into the tree. The ABAP side owns the tables and the
+// service (src/status/, ZOSD_STATUS_SRV) and cannot see any of that, so
+// this computes the snapshot and ZCL_OSD_STATUS=>REFRESH writes it.
+//
+// The shape below is the contract, and the Fiori app is built against it:
+//
+//   {"system":{"sid","host_kind","gen_live","gen_serving","synced",
+//              "workers","started_at","snap_at","root_hint"},
+//    "processes":[{"pid","role","port","generation","epoch","since",
+//                  "sockets","rss_mb","alive"}],
+//    "ports":[{"port","protocol","purpose","state","note"}],
+//    "services":[{"path","kind","handler","pack"}],
+//    "packs":[{"name","order","objects","folders","description"}]}
+//
+// Counts only. No host names, no user names, no addresses, no absolute
+// paths, no identity of whoever is connected: a status page that leaks the
+// machine it runs on is a status page nobody can publish, and this one is
+// served to anyone who can reach the port. `root_hint` is the tree's
+// basename and nothing above it.
+import {createConnection} from "node:net";
+import {basename, join, resolve} from "node:path";
+import {readFileSync} from "node:fs";
+import {createRequire} from "node:module";
+import {liveHash} from "./osd-build.mjs";
+import {instances} from "./osd-runtime.mjs";
+import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
+import {segwRegistrations} from "./segw-registry.mjs";
+import {contentFoldersOf, folderOf, packsOf} from "./osd-packs.mjs";
+import {layers} from "./osd-inputs.mjs";
+
+const PAGE = 4096;
+
+/** node, a compiled Bun binary, or a Node single executable */
+export function hostKind() {
+  if (typeof globalThis.Bun !== "undefined") {
+    return "bun";
+  }
+  try {
+    return createRequire(import.meta.url)("node:sea").isSea() ? "sea" : "node";
+  } catch {
+    return "node";
+  }
+}
+
+// The local ports of /proc/net/tcp, by state. Cheaper than spawning `ss`
+// and it says the same thing; a system without /proc (or one that will not
+// let this process read it) falls back to a connect, which is why the
+// callers are async.
+function procTcp() {
+  const rows = [];
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n").slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 4) {
+        continue;
+      }
+      const port = Number.parseInt(parts[1].split(":")[1], 16);
+      if (Number.isNaN(port)) {
+        continue;
+      }
+      rows.push({port, state: parts[3]});
+    }
+  }
+  return rows;
+}
+
+/** how many connections are established on this port; a count, never a peer */
+export function socketsOn(port, rows = procTcp()) {
+  return rows.filter((r) => r.port === port && r.state === "01").length;
+}
+
+/** is something listening there? /proc first, a connect when it cannot say */
+export async function isListening(port, rows = procTcp()) {
+  if (rows.length > 0) {
+    return rows.some((r) => r.port === port && r.state === "0A");
+  }
+  return new Promise((done) => {
+    const socket = createConnection({host: "127.0.0.1", port});
+    const answer = (yes) => {
+      socket.destroy();
+      done(yes);
+    };
+    socket.setTimeout(200);
+    socket.once("connect", () => answer(true));
+    socket.once("timeout", () => answer(false));
+    socket.once("error", () => answer(false));
+  });
+}
+
+/** the resident size of another process, from /proc; undefined when it cannot be read */
+export function rssMb(pid) {
+  try {
+    const pages = Number(readFileSync(`/proc/${pid}/statm`, "utf8").trim().split(/\s+/)[1]);
+    return Number.isFinite(pages) ? Math.round((pages * PAGE) / 1048576) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** the runtimes a supervisor holds: a pool has several, a plain one has itself */
+function runtimesOf(runtime) {
+  if (runtime === undefined) {
+    return [];
+  }
+  return Array.isArray(runtime.runtimes) ? runtime.runtimes : [runtime];
+}
+
+/** the OData services the SEGW registration objects declare, with their pack */
+export function servicesOf(root, env = process.env) {
+  const out = [];
+  const packs = packsOf(root, env);
+  const packOf = (file) => {
+    const at = resolve(root, file);
+    return packs.find((p) => p.abap.some((f) => at.startsWith(resolve(f) + "/")))?.name ?? "";
+  };
+  const folders = [...contentFoldersOf(root, env), "gen"].map((f) => join(root, f));
+  for (const one of segwRegistrations(folders)) {
+    out.push({
+      path: `/sap/opu/odata/sap/${one.external}`,
+      kind: "ODATA",
+      handler: one.dpc ?? "",
+      pack: packOf(one.file),
+    });
+  }
+  for (const one of icfServices(root)) {
+    if (one.handler === undefined) {
+      continue;
+    }
+    out.push({path: one.path, kind: "ICF", handler: one.handler, pack: packOf(one.source)});
+  }
+  for (const one of pushChannels(root)) {
+    out.push({path: one.path, kind: "APC", handler: one.handler, pack: packOf(one.source)});
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** the packs layered into this tree, with how many objects each of them owns */
+export function packsInfo(root, env = process.env) {
+  let owner;
+  try {
+    owner = layers(root).owner;
+  } catch {
+    owner = new Map();
+  }
+  return packsOf(root, env).map((pack) => {
+    const folders = pack.abap.map((f) => folderOf(root, f));
+    let objects = 0;
+    for (const folder of owner.values()) {
+      if (folders.includes(folder)) {
+        objects = objects + 1;
+      }
+    }
+    return {
+      name: pack.name,
+      order: pack.order,
+      objects,
+      folders: folders.join(", "),
+      description: pack.description ?? "",
+    };
+  });
+}
+
+// The ports this instance has, and the two it has not.
+//
+// RFC and DIAG are the sibling projects' territory (open-rfc-go carries the
+// NI/RFC/CPIC transport; a DIAG sibling carries DIAG). OSD speaks neither,
+// so the row is reported as absent with a note saying who would serve it
+// rather than left out — "no RFC port" is a fact about this system, and a
+// missing row is indistinguishable from a snapshot that forgot to look.
+export async function portsOf(listeners = [], options = {}) {
+  const rows = procTcp();
+  const out = [];
+  const seen = new Set();
+  for (const one of listeners) {
+    const port = Number(one.port);
+    if (!Number.isFinite(port) || seen.has(port)) {
+      continue;
+    }
+    seen.add(port);
+    out.push({
+      port,
+      protocol: String(one.protocol ?? "HTTP"),
+      purpose: String(one.purpose ?? ""),
+      state: (await isListening(port, rows)) ? "listening" : "absent",
+      note: String(one.note ?? ""),
+    });
+  }
+  // the SAP-shaped neighbours of this instance's number, the way the TLS
+  // port is 44300 + the instance (test/start.mjs)
+  const instance = Number(options.instance ?? 0) % 100;
+  const siblings = [
+    {port: 3300 + instance, protocol: "RFC", purpose: "RFC gateway", note: "open-rfc-go speaks NI/RFC/CPIC; OSD does not serve it"},
+    {port: 3200 + instance, protocol: "DIAG", purpose: "DIAG dispatcher", note: "a DIAG sibling project speaks this; OSD does not serve it"},
+  ];
+  for (const one of siblings) {
+    if (seen.has(one.port)) {
+      continue;
+    }
+    seen.add(one.port);
+    const up = await isListening(one.port, rows);
+    out.push({
+      port: one.port,
+      protocol: one.protocol,
+      purpose: one.purpose,
+      state: up ? "listening" : "absent",
+      note: up ? "" : one.note,
+    });
+  }
+  return out.sort((a, b) => a.port - b.port);
+}
+
+/** the whole snapshot, in the shape ZCL_OSD_STATUS=>REFRESH parses */
+export async function snapshot(root = process.cwd(), options = {}) {
+  const env = options.env ?? process.env;
+  const runtime = options.runtime;
+  const now = options.now ?? new Date();
+  const started = options.startedAt ?? new Date(Date.now() - (options.uptime ?? process.uptime()) * 1000);
+  const live = options.genLive ?? liveHash(root) ?? "";
+  const serving = runtime?.generation ?? "";
+  const children = runtimesOf(runtime);
+  const registered = new Map((options.instances ?? instancesOf(root)).map((e) => [e.pid, e]));
+  const rows = procTcp();
+
+  const facadePort = Number(options.listeners?.[0]?.port ?? 0);
+  const processes = [{
+    pid: process.pid,
+    role: "facade",
+    port: facadePort,
+    generation: live,
+    epoch: 0,
+    since: started.toISOString(),
+    sockets: socketsOn(facadePort, rows),
+    rss_mb: Math.round((options.rss ?? process.memoryUsage().rss) / 1048576),
+    alive: true,
+  }];
+  for (const one of children) {
+    const pid = one.child?.pid;
+    if (pid === undefined) {
+      continue;
+    }
+    const entry = registered.get(pid);
+    processes.push({
+      pid,
+      role: "work",
+      port: Number(one.port ?? 0),
+      generation: String(one.generation ?? ""),
+      epoch: Number(one.epoch ?? 0),
+      since: String(entry?.since ?? started.toISOString()),
+      sockets: socketsOn(Number(one.port ?? 0), rows),
+      rss_mb: rssMb(pid) ?? 0,
+      alive: one.running === true,
+    });
+  }
+
+  return {
+    system: {
+      sid: String(env.STG_ADT_SID ?? "OSG"),
+      host_kind: options.hostKind ?? hostKind(),
+      gen_live: live,
+      gen_serving: serving,
+      synced: live !== "" && live === serving,
+      workers: children.length,
+      started_at: started.toISOString(),
+      snap_at: now.toISOString(),
+      root_hint: basename(resolve(root)),
+    },
+    processes,
+    ports: await portsOf(options.listeners ?? [], {instance: facadePort}),
+    services: options.services ?? servicesOf(root, env),
+    packs: options.packs ?? packsInfo(root, env),
+  };
+}
+
+function instancesOf(root) {
+  try {
+    return instances(root);
+  } catch {
+    return [];
+  }
+}
+
+if (process.argv[1] && /osd-status\.mjs$/.test(process.argv[1])) {
+  const root = resolve(process.argv[2] ?? process.cwd());
+  console.log(JSON.stringify(await snapshot(root, {listeners: [{port: Number(process.env.STG_PORT ?? 3030), protocol: "HTTP", purpose: "OData, apps, ADT"}]}), null, 2));
+}

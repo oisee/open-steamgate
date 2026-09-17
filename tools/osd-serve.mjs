@@ -35,6 +35,10 @@ const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
 const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
 const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
 const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
+// the system-status writer (src/status/): the facade posts a snapshot here
+// because only it can see the pool, the listeners and the generation, and
+// only this process can write the tables the service reads
+const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
 await initializeABAP();
 await zcl_stg_segw_registry.register();
@@ -134,6 +138,23 @@ const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.ru
   ...args,
   base: new globalThis.abap.types.String().set(args.base),
 })), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+
+// The system status, written from outside.
+//
+// ZOSD_STATUS_SRV reads five tables; the facade computes what goes in them
+// (tools/osd-status.mjs) and posts it here just before it proxies a read of
+// that service. Not an OData surface and not an ADT one: a door of this
+// process, like /osd/sql beside it.
+app.post("/osd/status", async function (req, res) {
+  const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
+  try {
+    const rows = await dialogStep(() => zcl_osd_status.refresh({iv_json: body}));
+    res.json({rows: rows.get()});
+  } catch (e) {
+    dump(e, "POST /osd/status");
+    res.status(500).json({error: {code: "STATUS_REFRESH", message: String(e?.message?.get?.() ?? e?.message ?? e)}});
+  }
+});
 
 app.all("/sap/opu/odata/sap/*", async function (req, res) {
   try {
