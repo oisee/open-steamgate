@@ -90,7 +90,7 @@ N — the no-regret set (docs/shift-right-and-quick-wins.md)
 ├─ N2  the workbench-only entry point                               DONE
 ├─ N3  transpile as a library call                                  DONE 09-16
 ├─ N4  activation ordering                                          DONE (generations)
-└─ N5  the black-box conformance suite                              taken 09-17
+└─ N5  the black-box conformance suite                              DONE 09-17
 ```
 
 **What is being worked on now:** N5, the conformance suite — the same
@@ -765,6 +765,16 @@ A.11 A service of several CDS views, without a hand-written class [S+A] DONE 202
         same service. Note it changes existing services (ZC_STG_TRAVEL_CDS
         would gain the booking entity and to_Bookings), so it is a
         decision, not only a patch
+
+B.16 The demo DPC ignores $orderby                                       [S]
+     └─ found 2026-09-17 writing the conformance suite: a hand-written
+        `_DPC_EXT` gets the ordering in `io_tech_request_context` and
+        `zcl_zstg_demo_dpc_ext` never applies it, so
+        `TravelSet?$orderby=TravelId desc` comes back ascending. The
+        SADL and CDS paths do order. Either the demo DPC applies it or
+        the dispatcher sorts what a DPC hands back when the DPC says it
+        did not - a system does the former. The conformance cases for
+        $orderby ride on the SADL service meanwhile
 
 B.15 Does our CDS pipeline read a view entity?                           [S]
      └─ every view here is DDIC-based (`define view` + sqlViewName);
