@@ -90,6 +90,26 @@
                         icon: "sap-icon://keyboard-and-mouse",
                         targetURL: "#Zork-play"
                       }
+                    },
+                    {
+                      id: "source",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Source",
+                        subtitle: "the whole of this, on GitHub",
+                        info: "oisee/open-steamgate",
+                        icon: "sap-icon://source-code",
+                        targetURL: "#Source-open"
+                      }
+                    },
+                    {
+                      // the same link as a picture, for a phone pointed at a screen
+                      id: "source-qr",
+                      tileType: "sap.ushell.ui.tile.ImageTile",
+                      properties: {
+                        imageSource: "./qr-github.png",
+                        targetURL: "#Source-open"
+                      }
                     }
                   ]
                 }
@@ -162,6 +182,13 @@
           applicationType: "URL",
           url: "../sap/bc/zork",
           navigationMode: "embedded"
+        },
+        "Source-open": {
+          title: "Source",
+          description: "the repository this launchpad is built from",
+          applicationType: "URL",
+          url: "https://github.com/oisee/open-steamgate",
+          navigationMode: "newWindow"
         }
       },
       services: {
