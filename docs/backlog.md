@@ -646,6 +646,19 @@ A.7  A service of several CDS views, without a hand-written class       [S+A]
      └─ measured on the sandbox 2026-09-17 (docs/cds-publish.md): the
         annotation there generates IWSV + IWMO + IWVB and still needs the
         hub to publish; ours serves immediately
+     └─ **and the specification is now measured, not guessed**: one
+        published view pulls every view its exposed associations reach
+        into the same service. Entity set = the view's name as it is
+        (no Set suffix), entity type <VIEW>Type, container
+        <SERVICE>_Entities, navigation `_Items` -> `to_Items`,
+        association `assoc_<32 hex>` with FromRole_/ToRole_, read-only
+        flags on the set, labels from the data elements. $expand and the
+        navigation URL both work. So no SRVD is needed for this case:
+        the work is to carry the parser's exposed associations into
+        publishedYaml() and add the reached views as entities of the
+        same service. Note it changes existing services (ZC_STG_TRAVEL_CDS
+        would gain the booking entity and to_Bookings), so it is a
+        decision, not only a patch
 
 B.14 A cast in a CDS view drops the field                                [S]
      └─ found 2026-09-17 building the status service:

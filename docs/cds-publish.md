@@ -77,12 +77,53 @@ headless session. Here the service is served the moment it is generated,
 which is a difference in our favour and worth keeping in mind when comparing
 behaviour.
 
-Whether SAP's generated model turns the exposed association into a
-navigation property was **not** measured: without the hub registration there
-is no `$metadata` to read, and `CL_SADL_GW_CDS_ANALYZER` (through
-`CL_SADL_GW_MODEL_CDS`) answers an empty `get_exposure( )` for such a view —
-it is the design-time reporting analyzer, not the model builder. The probe
-objects were deleted afterwards; `TADIR` shows nothing left.
+Then Alice registered the service by hand in `/IWFND/MAINT_SERVICE` (Add
+Service, system alias `LOCAL`, technical name `ZC_OSD_PROBE_HEAD_CDS`,
+Local Object), and the rest could be read. **The external name has no
+suffix**: the service answers at `/sap/opu/odata/sap/ZC_OSD_PROBE_HEAD_CDS`.
+
+### What one published view with one exposed association produces
+
+The annotation was on the head view only. The service that came out has
+**two** entity sets: the association pulled its target into the same
+service.
+
+```xml
+<EntityContainer Name="ZC_OSD_PROBE_HEAD_CDS_Entities" m:IsDefaultEntityContainer="true"
+                 sap:message-scope-supported="true" sap:supported-formats="atom json xlsx">
+  <EntitySet Name="ZC_OSD_PROBE_HEAD" EntityType="…ZC_OSD_PROBE_HEADType"
+             sap:creatable="false" sap:updatable="false" sap:deletable="false"/>
+  <EntitySet Name="ZC_OSD_PROBE_ITEM" EntityType="…ZC_OSD_PROBE_ITEMType" … />
+  <AssociationSet Name="assoc_F71C19A5AE9C4F1DBF9256A6790FF2F4" …>
+    <End EntitySet="ZC_OSD_PROBE_HEAD" Role="FromRole_assoc_F71C…"/>
+    <End EntitySet="ZC_OSD_PROBE_ITEM" Role="ToRole_assoc_F71C…"/>
+  </AssociationSet>
+</EntityContainer>
+```
+
+The conventions, measured rather than assumed:
+
+| thing | how SAP names it |
+| --- | --- |
+| entity set | the view's name, **as it is** — `ZC_OSD_PROBE_HEAD`, no `Set` suffix |
+| entity type | `<VIEW>Type` |
+| entity container | `<SERVICE>_Entities` |
+| navigation property | the association alias with the underscore turned into a prefix: `_Items` → **`to_Items`** |
+| association and its set | `assoc_<32 hex>` — a GUID, the same string in both, with roles `FromRole_<that>` / `ToRole_<that>` |
+| multiplicity | `1` to `*` for `[0..*]` |
+| read-only | `sap:creatable/updatable/deletable="false"` on the entity set |
+| property | `sap:label` and `sap:quickinfo` from the DDIC data element, `sap:display-format="UpperCase"` for a CHAR key |
+
+`$expand=to_Items` works and nests the target's `results`; so does the
+navigation URL `ZC_OSD_PROBE_HEAD('<key>')/to_Items`. Keys are escaped in
+the usual way (`/1BS/…` appears as `%2F1BS%2F…`).
+
+That is the whole specification we were missing, and it says the gap is
+narrower than it looked: **no service definition is needed for this case**.
+One view, one annotation, and every view its exposed associations reach
+joins the service.
+
+The probe objects were deleted from the sandbox afterwards.
 
 ## Not yet
 
@@ -90,7 +131,7 @@ Associations of a published view are not exposed as navigation properties:
 `publishedYaml()` in `tools/cds2ddic.mjs` emits one entity, its properties
 and its keys, and never an association, although the parser reads them and
 knows which the projection exposes. A service of several CDS views with
-navigation is possible today only the way the hand-written `ZSTG_SADL_SRV`
+navigation is possible here today only the way the hand-written `ZSTG_SADL_SRV`
 does it (a reference data source with an exposure XML in a hand-written
 MPC — four entity sets, two associations, real `NavigationProperty` entries)
 or through a `stg.yaml` that declares the navigation itself, which is what
