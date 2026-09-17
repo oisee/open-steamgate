@@ -26,15 +26,10 @@ sap.ui.define([], function () {
       }
       var group = {id: "packs", title: "Content packs", isPreset: true, isVisible: true, isGroupLocked: false, tiles: []};
       tiles.forEach(function (tile) {
-        var intent = "Pack" + tile.id.replace(/[^A-Za-z0-9]/g, "") + "-open";
-        config.applications = config.applications || {};
-        config.applications[intent] = {
-          title: tile.title,
-          description: tile.subtitle || tile.description || "",
-          applicationType: "URL",
-          url: tile.url.charAt(0) === "/" ? ".." + tile.url : tile.url,
-          navigationMode: "embedded"
-        };
+        // the tile goes straight to the pack's page: the sandbox resolves
+        // an intent from the applications it was booted with, and one
+        // added here, after the boot, answered "could not be opened"
+        // (2026-09-17). A targetURL that is not a hash is followed as is.
         group.tiles.push({
           id: tile.id,
           tileType: "sap.ushell.ui.tile.StaticTile",
@@ -43,7 +38,7 @@ sap.ui.define([], function () {
             subtitle: tile.subtitle || "",
             info: tile.info || tile.pack,
             icon: tile.icon,
-            targetURL: "#" + intent
+            targetURL: tile.url.charAt(0) === "/" ? ".." + tile.url : tile.url
           }
         });
       });
