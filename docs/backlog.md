@@ -1003,6 +1003,8 @@ G.1b The drop, drawn, and a menu bar that works                          [S]
         status app (the SM50 / sysinfo node the tree already has), System >
         Log off returns to the launchpad, Help > About says the generation
         and the build; the rest may stay inert but must not pretend
+     ├─ a splitter between the tree and the image, draggable, the way the
+        real screen's is (Alice)
      └─ SE80 - editing a class from this screen - is later (Alice), and it
         is the ADT facade's editor behind a transaction node, not a new one
 
