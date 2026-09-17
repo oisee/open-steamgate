@@ -33,6 +33,36 @@ const {services} = await import("./generated/services.mjs");
 const HEX = Array.from({length: 256}, (_, byte) => byte.toString(16).padStart(2, "0").toUpperCase());
 const loaded = new Map();
 
+// WRITE has nowhere to go in a service worker. The runtime's default console
+// writes to process.stdout, which the browser polyfill of process does not
+// have, so the first WRITE threw "Cannot read properties of undefined
+// (reading 'write')" inside the APC handler and the channel closed with
+// 1011: the demo's send_frame writes a debug line per frame, and the demo
+// said "Disconnected" the moment it started while Zork, which never
+// writes, played on (Alice, 2026-09-17). A console that keeps the tail of
+// what was written, so a WRITE costs nothing and SKIP, which reads the
+// console back, still works.
+class TailConsole {
+  #data = "";
+  add(data) {
+    this.#data = (this.#data + data).slice(-8192);
+  }
+  get() {
+    return this.#data;
+  }
+  isEmpty() {
+    return this.#data === "";
+  }
+  clear() {
+    this.#data = "";
+  }
+  getTrimmed() {
+    return this.#data.split("\n").map((a) => a.trimEnd()).join("\n");
+  }
+}
+globalThis.abap.console = new TailConsole();
+globalThis.abap.context.console = globalThis.abap.console;
+
 globalThis.abap.W3MI_LOADER = async (objid, filename) => {
   const already = loaded.get(filename);
   if (already !== undefined) {

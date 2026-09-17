@@ -211,6 +211,56 @@ test("the demo pack is served: its page by the handler, a picture out of SMW0", 
   }
 });
 
+// The demo over its channel, not only its page: a page that opens the
+// socket, loads the demo and asks for a frame must get the frame and keep
+// the socket. It did not: the handler WRITEs a debug line per frame, the
+// runtime's console wrote to a process.stdout the worker does not have, and
+// the channel closed with 1011 on the first frame while the page said
+// "Disconnected" (measured 2026-09-17 on Pages, reproduced here).
+test("the demo answers a frame over its channel and the socket stays open", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-o4d-frame-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await controlled(page);
+    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+    const answer = await page.evaluate(() => new Promise((resolve) => {
+      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zo4d_demo");
+      const seen = [];
+      const done = (why) => resolve({why, state: socket.readyState, seen});
+      socket.addEventListener("close", (e) => done(`closed ${e.code} ${e.reason}`));
+      socket.addEventListener("error", () => done("error"));
+      socket.addEventListener("message", (e) => {
+        const text = String(e.data);
+        seen.push(text.slice(0, 40));
+        let message;
+        try {
+          message = JSON.parse(text);
+        } catch {
+          return;
+        }
+        if (message.type === "scenario") {
+          socket.send(JSON.stringify({cmd: "frame", tick: 0, sub: 0}));
+        } else if (message.t !== undefined) {
+          setTimeout(() => done(`frame ${message.e}`), 500);
+        }
+      });
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({cmd: "load_demo", demo: "main"}));
+        socket.send("start");
+        socket.send(JSON.stringify({cmd: "get_scenario"}));
+      });
+      setTimeout(() => done("timeout"), 30000);
+    }));
+    expect(answer.why).toBe("frame Sales Dance");
+    expect(answer.state).toBe(1);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // A push channel with no socket and no second runtime.
 //
 // The page opens ws://…/sap/bc/apc/sap/… in its own script, before anything
