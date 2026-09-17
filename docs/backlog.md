@@ -586,6 +586,19 @@ E.7  The oracle's leftovers (docs/frame-comparison.md, 2026-09-17)      [S]
         pulls frames over several sockets and interleaves them — the
         B.12 pool, in a browser. Idea only.
 
+D.9  docs/adt-facade.md, the version #7880 links to                       [S]
+     └─ Astra's docs/adt-facade-proposed.md (uncommitted, 2026-09-17) is
+        the top half of the next version: the role for the abapGit
+        roadmap, the object-type matrix, activation as it is now (the
+        original still says fire-and-forget). Before it goes in: DOMA/TTYP
+        rows say "no ADT route", persistence names STG_DB=file, the
+        RFC bridge points at docs/adt-over-rfc.md, the DIAG sentence
+        shrinks to the stub, the review scaffolding goes, the "Do not"
+        cadence softens; and the client contract of the original stays
+        below it (403/405, encoded names, in-the-tree vs runnable,
+        STG_DB_STRICT, unit-run alerts, the shim's pseudo-headers).
+        Alice: "потом перепишешь" — parked.
+
 E.9  A pack has a page of its own                                        [S]
      └─ Alice, 2026-09-17: a pack tile should open something even when
         the pack brought no webapp — a generated Fiori page (or a
@@ -601,7 +614,17 @@ E.8  A DIAG stream as a demo                                            [S+A]
         in JS, in the same console as the demos, with music. The DIAG
         reader exists in the sibling project (docs/layers-we-own.md);
         the missing piece is the screen-side renderer and the recording
-        format. Not started.
+        format.
+     └─ milestone 1 DONE 2026-09-17 (docs/lsd-pack.md): sap-tui --record
+        writes the composed screens as styled runs (141 KB gzipped for
+        the whole show), packs/lsd carries the recording as an SMW0
+        object, ZCL_LSD_APC_HANDLER hands it out by line, the page paints
+        it on a canvas with the xterm palette; tile on the launchpad,
+        preview test on the channel. Left: the music file (S: is not
+        mounted here), icon glyphs, a compressed object once the browser
+        side inflates it
+     └─ milestone 2, if wanted: a DIAG decoder in JavaScript, so the page
+        follows a live dispatcher
 
 E.6  A pack cut out of a system                                        [S+A]
      └─ Alice, 2026-09-17: for vsp, or anything that speaks ADT and the

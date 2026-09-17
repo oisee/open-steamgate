@@ -261,6 +261,46 @@ test("the demo answers a frame over its channel and the socket stays open", asyn
   }
 });
 
+// The light-show pack: SAP GUI screens recorded by sap-tui and handed out
+// by line over a push channel (packs/lsd). The page speaks no DIAG; this
+// checks the channel says how long the show is and answers the first lines
+// with the recording's header.
+test("the LSD channel hands out the recorded show by line", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-lsd-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await controlled(page);
+    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+    const answer = await page.evaluate(() => new Promise((resolve) => {
+      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zapc_lsd");
+      let lines = 0;
+      const done = (why, head) => resolve({why, lines, head, state: socket.readyState});
+      socket.addEventListener("close", (e) => done(`closed ${e.code} ${e.reason}`));
+      socket.addEventListener("error", () => done("error"));
+      socket.addEventListener("message", (e) => {
+        const text = String(e.data);
+        if (text.startsWith("{\"type\":\"show\"")) {
+          lines = JSON.parse(text).lines;
+          socket.send(JSON.stringify({cmd: "lines", from: 0, to: 3}));
+        } else {
+          done("lines", text.split("\n").map((l) => l.slice(0, 40)));
+        }
+      });
+      setTimeout(() => done("timeout"), 60000);
+    }));
+    expect(answer.why).toBe("lines");
+    expect(answer.lines).toBeGreaterThan(1000);
+    expect(answer.head[0]).toContain("\"v\":1");
+    expect(answer.head[1]).toContain("\"s\":");
+    expect(answer.state).toBe(1);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // A push channel with no socket and no second runtime.
 //
 // The page opens ws://…/sap/bc/apc/sap/… in its own script, before anything
