@@ -129,6 +129,31 @@ DATA(dist)  = abs( CONV f( '-2.5' ) ).  " SAP: f, 2.5 — open-abap: i, 3
 - Regression-test location: `packages/core/test/abap/syntax/basic_variables.ts` on the branch — "inline DATA from frac( f ) is a float", "… abs( f ) …" (both failing on 2.120.54: `expected IntegerType to be an instance of FloatType`) and "frac( i ) stays an integer" (passing)
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-17-character-operand-calculation-type — A character literal in arithmetic gives a different type on each side, and neither is the kernel's
+
+- Status: `measured, not fixed`
+- Discovery date: `2026-09-17`
+- Affected versions: `@abaplint/runtime 2.13.87` (`operators/multiply.ts`, `minus.ts`, `add.ts`, `divide.ts`) and the transpiler's inferred type for an inline declaration
+- Affected ABAP statement, runtime API or adapter: any arithmetic with a character literal operand, which is how ABAP spells a non-integer constant
+- Minimal ABAP reproducer:
+
+```abap
+DATA lv_i TYPE i VALUE 3.
+DATA(lv_a) = lv_i * '2'.      " SAP: P(8,0) 6    open-abap: Float 6
+DATA(lv_b) = '2' * lv_i.      " SAP: P(8,0) 6    open-abap: Integer 6
+DATA(lv_c) = lv_i * '2.5'.    " SAP: P(8,0) 8    open-abap: Float 7.5
+```
+
+- Exact command used to run it: **measured on A4H, 2026-09-17**, a throwaway class with an ABAP Unit test that fails on purpose so the assertion message carries `cl_abap_typedescr=>describe_by_data( )->type_kind` and the value of each expression; created, read and deleted. The runtime side was read from the operators directly.
+- Expected SAP behaviour: a character-like operand makes the calculation type packed, **symmetrically** — the side the literal is on does not matter. The system answers `P(8,0)` for `*`, `-`, `+` and `/` alike, and the compiler warns nine times that `P(8,0)` is used implicitly because the length and the decimals cannot be derived.
+- Actual open-abap behaviour: the operators test a character operand only on one side, and differently per operator. `multiply` and `minus` check `Number.isInteger(Number(left.get()))` for the left operand only; the right-hand test reads the object rather than its value, so it can never fire; `divide` has no character branch at all. The result is `Integer` with the literal on the left and `Float` with it on the right, and neither is packed.
+- **The second half of the measurement, and the more useful half**: the rounding is not in the computation, it is in the target. On A4H `lv_f = lv_i * '2.5'` is 7.5 and `lv_p` with four decimals is 7.5000, while the inline `DATA(x)` is 8, because the inferred type is `P(8,0)`. And with no character literal at all, `lv_f = lv_i / 2` is 1.5 while `DATA(x) = lv_i / 2` is `I` and 2. **So the kernel chooses the calculation type from the target of the assignment as well as from the operands**, which is exactly the question [abaplint/transpiler#1866](https://github.com/abaplint/transpiler/issues/1866) asks and has no answer to yet. This is the measurement that issue was missing.
+- Impact on open-steamgate: this is the family behind the inline-declaration differences the frame comparison found (`docs/frame-comparison.md`, the mountains and tesseract rows). A scene that writes `DATA(lv_x) = lc_h * ( '0.4' + … )` is packed with no decimals on a system and a float here.
+- Smallest safe workaround: declare the variable rather than inferring it, and give it the type the computation needs.
+- Upstream issue: none of its own yet. It belongs with #1866 as the measurement that answers it, and the asymmetry is a candidate in the draft of the character-literal issue (`docs/upstream.md`, the performance track).
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
 
 - Status: `fixed locally, PR open`
