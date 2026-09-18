@@ -110,11 +110,11 @@ not exist.
 
 ---
 
-## Where it stands, 2026-09-17
+## Where it stands, 2026-09-18
 
 Measured in the tree as it is. The narrative is [`AGENDA.md`](AGENDA.md), the
 open list [`docs/backlog.md`](docs/backlog.md) (its track letters are in
-parentheses), the last two days [`docs/retro-2026-09-17.md`](docs/retro-2026-09-17.md).
+parentheses), the last two days [`docs/retro-2026-09-18.md`](docs/retro-2026-09-18.md).
 
 | topic | what works | numbers and dates |
 | --- | --- | --- |
@@ -123,6 +123,7 @@ parentheses), the last two days [`docs/retro-2026-09-17.md`](docs/retro-2026-09-
 | **SEGW, the long pole** | The project tree read and written the way the transaction does: `tools/segw-gen.mjs` (IWPR → `_MPC`/`_DPC`, RFC/BOR and search-help mappings), `stg-compile` (one YAML → IWPR, IWSV/IWMO, four classes, annotations), `segw-tree` (53 `/IWBEP/I_SB*`-shaped tables derived from real projects, byte-identical export), the generator again in ABAP (`src/segw/`, byte-identical to the Node one by test), and the Service Builder as a Fiori app (`webapp/segw/`, [`docs/segw-editor.md`](docs/segw-editor.md)). | spec derived from 21 real SEGW projects; most commits between 09-12 and 09-15 |
 | **ADT façade (A)** | Eclipse ADT 3.60 and vsp treat OSD as a system: logon, package tree to any depth, open and edit every supported source kind, save, activate, ABAP Unit, F8 data preview on tables and CDS, create and delete — every change lands on the git tree as abapGit files. Over HTTPS as a Cloud Project and over **RFC** as a Custom Application Server through the sibling bridge; the metadata bootstrap proven with a plain RFC client. The contract for clients (abapGit #7880) is [`docs/adt-facade.md`](docs/adt-facade.md), the measured coverage [`docs/adt-surface.md`](docs/adt-surface.md). | milestone 2026-09-15; RFC path 2026-09-16 (sixteen 200s, one 304); every unanswered path is recorded, so the worklist writes itself |
 | **The runtime underneath (B)** | One database seam ([`docs/db-backends.md`](docs/db-backends.md): sql.js, a SQLite file in WAL, DuckDB); generations named by content hash with a live pointer and rollback ([`docs/generations.md`](docs/generations.md)); a pool of work processes with a push channel pinned to one for the life of its socket; a base image named by schema and rows; media out of SMW0 through a host hook; APC channels; RFC destinations as local / replay / live / record / fallback. | pool 2026-09-16: 474 → 1646 frames/s on the workstation, 111 → 369 on a second machine, no change to ABAP or page; a 4 MB SMW0 object in 0.3 s |
+| **HANA, and AMDP (B.19)** | `STG_DB=hana` is a fourth backend and a first-class one: the 148 ABAP unit tests and the 22 wire tests pass against a real HANA exactly as against SQLite. On top of it, **an AMDP method runs where it belongs** — the SQLScript body is cut out of the class, deployed and called, and ordinary ABAP calls the method without knowing. CDS table functions too, checked field for field against the method that implements them ([`docs/amdp-in-hana.md`](docs/amdp-in-hana.md)). | 2026-09-18; HANA Express in docker on the i7; nine obstacles to the backend and **eight were not about SQL** — one real dialect rewrite; per statement it costs 52x a single-row SELECT and 3.8x a 200-row one, so it is a mode and never a default |
 | **The demo as an oracle** | The same ABAP on a real system answers the same frames, so a recording is an oracle and a diff is the test with sixty thousand assertions a scene ([`docs/frame-comparison.md`](docs/frame-comparison.md)). Every anomaly measured on the sandbox with a throwaway ABAP Unit probe before a line changed. | 2026-09-16/17: 8 anomalies in two days (5 runtime, 2 core, 1 transpiler design), 3 fixed and merged, 22 of 22 scenes attributed; what still differs everywhere is abaplint #4302 |
 | **DIAG, the side quest (C)** | The oracle read ([`docs/diag-notes.md`](docs/diag-notes.md)): a setup frame travels uncompressed, so a stub needs no LZH writer. The sibling's dispatcher stub answers SAP GUI with one still screen, and F8 in Eclipse hands SAP GUI to it. The LSD pack replays a recorded light-show as composed SAP GUI screens over an APC channel ([`docs/lsd-pack.md`](docs/lsd-pack.md)). | stub 2026-09-16; LSD milestone 1 2026-09-17: 1278 screens, 118 s, 141 KB gzipped, from idea to a tile on Pages in one afternoon |
 | **RFC gateway (D)** | The bridge terminates RFC for one function module today; exposing any transpiled module is a track with a plan (`/sap/bc/soap/rfc` first) and no code yet. | added 2026-09-16, not started |
@@ -289,12 +290,88 @@ npm test                     # abaplint + ABAP Unit + mocha over the wire
 npm run e2e:install && npm run e2e         # Playwright against localhost:3030
 npm run web:preview && npm run web:serve   # the browser-only build on :3031
 npm run start:duckdb         # the same on DuckDB (STG_DB_PATH=x.duckdb persists)
+npm run unit:hana            # the same on a real HANA (see "ABAP in one database" below)
 npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out gen/demo   # SEGW without the GUI
 npm run binary && build/osd up             # the same workbench as one Bun binary
 ```
 
 The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
 `open-abap-odata` from GitHub unless `.local/` already holds them.
+
+## ABAP and SQLScript in one database
+
+An **AMDP** method is ABAP on the outside and SQLScript inside: the body is
+written in the database's own language and runs there. That is why every
+transpiler stops at one — there is nothing to transpile, it is a different
+language.
+
+So we do not transpile it. We take the body out and let a real HANA run it:
+
+```abap
+CLASS zcl_osd_amdp_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS squares
+      IMPORTING VALUE(iv_count)  TYPE i
+      EXPORTING VALUE(et_square) TYPE tt_square.
+ENDCLASS.
+
+CLASS zcl_osd_amdp_demo IMPLEMENTATION.
+  METHOD squares BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    DECLARE lv_i INTEGER;
+    ...
+  ENDMETHOD.
+ENDCLASS.
+```
+
+and calling it is calling a method:
+
+```abap
+zcl_osd_amdp_demo=>squares( EXPORTING iv_count = 4 IMPORTING et_square = lt ).
+```
+
+The caller does not know. `tools/amdp-gen.mjs` replaces the body with a routed
+call before the transpiler sees the class and keeps the SQLScript aside;
+`tools/amdp-destination.mjs` deploys it into HANA on first use and calls it.
+**The source in `src/` is untouched** and still compiles on a real system as
+the AMDP it is — only the copy handed to the transpiler is rewritten, the way
+everything else in `gen/` is generated over `src/`.
+
+A **CDS table function** works too, and its result is queryable like a view:
+
+```
+define table function ZTF_OSD_SQUARES
+  with parameters p_count : abap.int4
+  returns { id : abap.int4; label : abap.char(40); square : abap.int4; }
+  implemented by method zcl_osd_amdp_demo=>squares_tf;
+```
+
+The `returns` list is the authority and the build **fails** if the implementing
+method disagrees with it by a name, an order or a width — a table function
+fills its columns by position, so a mismatch makes rows that look plausible
+and are wrong.
+
+### Running it
+
+HANA Express in docker, on a machine with room for it:
+
+```sh
+docker pull saplabs/hanaexpress:latest
+bash ~/hxe/run.sh                 # bind-mounted data, ports 39013 / 39017
+STG_DB=hana npm run unit:hana     # the ABAP unit suite against it
+```
+
+`STG_DB=hana` is a **mode, not a default**, and the reason is measured: the
+cost is per statement, not per row — a 200-row `SELECT` is 3.8x the in-process
+SQLite cost, a single-row one 52x, an `INSERT` 146x. ABAP written set-wise
+ports nearly free; ABAP written row-at-a-time does not. What it buys is
+fidelity nothing else gives: `sy-dbsys` says `HDB`, and an AMDP body reads the
+same tables the rest of the ABAP does, so nothing has to be mirrored.
+
+The whole thing, including the nine obstacles that were in the way and the
+eight of them that had nothing to do with SQL, is
+[`docs/amdp-in-hana.md`](docs/amdp-in-hana.md) and
+[`docs/db-backends.md`](docs/db-backends.md).
 
 ## Build on it
 

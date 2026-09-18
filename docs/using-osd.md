@@ -4,7 +4,8 @@ OSD is an ABAP application server you run on your own machine. It transpiles
 the ABAP in front of it, serves the result as OData v2 and as ICF paths, and
 answers ADT so Eclipse can edit it. This is the working guide: how to start
 it, how to add a Gateway service by hand or from CDS, how to bring content in
-as a pack, and how to put any of it on the launchpad.
+as a pack, how to put any of it on the launchpad, and how to write a method
+whose body runs inside the database.
 
 Everything below is measured against the system as it is, not planned.
 
@@ -354,7 +355,90 @@ stream is byte-identical to the one recorded here.
 
 ---
 
-## 7. When something is wrong
+## 7. A method whose body runs in the database
+
+Most of what you write here is ABAP that the transpiler turns into
+JavaScript. An **AMDP** method is the exception: its body is SQLScript, the
+database's own language, so there is nothing to transpile. It runs in HANA
+instead, and the caller cannot tell.
+
+You need a HANA for it. HANA Express in docker is enough:
+
+```
+docker pull saplabs/hanaexpress:latest
+bash ~/hxe/run.sh                 # a few minutes to come up; ports 39013 / 39017
+```
+
+Then write the method as you would on a system — `src/amdp/zcl_osd_amdp_demo`
+is the worked example:
+
+```abap
+    CLASS-METHODS squares
+      IMPORTING VALUE(iv_count)  TYPE i
+      EXPORTING VALUE(et_square) TYPE tt_square.
+...
+  METHOD squares BY DATABASE PROCEDURE FOR HDB
+                 LANGUAGE SQLSCRIPT
+                 OPTIONS READ-ONLY.
+    DECLARE lv_i INTEGER;
+    et_square = SELECT 0 AS id, '' AS label, 0 AS square FROM DUMMY WHERE 1 = 0;
+    ...
+  ENDMETHOD.
+```
+
+and call it like any other method:
+
+```abap
+zcl_osd_amdp_demo=>squares( EXPORTING iv_count = 4 IMPORTING et_square = lt ).
+```
+
+Run it with the database set to HANA:
+
+```
+STG_DB=hana npm run unit:hana         # the ABAP unit suite
+STG_DB=hana STG_AMDP_TRACE=1 node output/index.mjs    # and watch the deploy and the call
+```
+
+Three things worth knowing before you write one.
+
+**Without HANA the call fails, and that is on purpose.** There is nowhere else
+to run an AMDP body, and a test that wants to work on SQLite too should ask
+`IF sy-dbsys <> 'HDB'. RETURN. ENDIF.` rather than expect a silent empty
+result.
+
+**A body that reads a table needs that table in HANA.** The worked example
+computes from `DUMMY` and reads nothing, which is why it runs against an empty
+schema. If yours selects from a table, run the whole tree on HANA
+(`STG_DB=hana`) so the table is already there — that is what the mode is for.
+
+**`STG_DB=hana` is a mode, not a default.** Measured: a 200-row `SELECT` costs
+3.8x what it costs in-process, a single-row one 52x, an `INSERT` 146x. Set-wise
+ABAP barely notices; row-at-a-time ABAP does. Develop on SQLite, switch when
+the work is AMDP.
+
+### A CDS table function
+
+The other shape, and its result is queryable like a view:
+
+```
+define table function ZTF_OSD_SQUARES
+  with parameters p_count : abap.int4
+  returns { id : abap.int4; label : abap.char(40); square : abap.int4; }
+  implemented by method zcl_osd_amdp_demo=>squares_tf;
+```
+
+with `METHOD squares_tf BY DATABASE FUNCTION FOR HDB ... RETURNING VALUE(rt)`.
+The `returns` list is the authority: if the method's row type disagrees by a
+name, an order or a width, **the build fails and names the field**. It has to,
+because a table function fills its columns by position and a silent mismatch
+gives rows that look right.
+
+The rest, including what is not solved yet, is
+[`docs/amdp-in-hana.md`](amdp-in-hana.md).
+
+---
+
+## 8. When something is wrong
 
 ```
 npm run ps                                   # what is running
