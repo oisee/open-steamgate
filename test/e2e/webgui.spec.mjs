@@ -12,7 +12,7 @@ test("easy access: the menu renders, and a node goes where it says", async ({pag
   await page.goto(WEBGUI);
 
   // the title bar and the image panel down the right-hand side
-  await expect(page.locator(".title")).toContainText("SAP Easy Access");
+  await expect(page.locator(".title")).toContainText("Easy Access");
   const art = page.locator(".art");
   await expect(art).toBeVisible();
   const box = await art.boundingBox();

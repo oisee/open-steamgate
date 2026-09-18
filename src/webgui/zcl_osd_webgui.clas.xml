@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_OSD_WEBGUI</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>SAP Easy Access, served by ABAP</DESCRIPT>
+    <DESCRIPT>Easy Access, served by ABAP</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

@@ -38,7 +38,19 @@ describe("webgui: SAP Easy Access", () => {
     expect(res.status).to.equal(200);
     expect(res.headers.get("content-type")).to.contain("text/html");
     const html = await res.text();
-    expect(html, "the title bar").to.contain("SAP Easy Access");
+    // G.1c: what we call ourselves does not carry somebody else's trademark,
+    // so the title bar is "Easy Access" with the system beside it, where the
+    // real screen puts the system. The comments in the class still say "SAP
+    // Easy Access" where they describe the real one, which is a statement of
+    // fact and stays true.
+    expect(html, "the title bar").to.contain("Easy Access");
+    expect(html, "and it is ours, not theirs").to.not.contain("SAP Easy Access");
+    expect(html, "the slogan").to.contain("the next level of vaporware");
+    // the picture is rain on a surface, not one drop, and it costs no script,
+    // no bitmap and no second request
+    expect(html, "the scene").to.contain('class="artscene"');
+    expect(html, "rings spreading where the drops land").to.contain('attributeName="rx"');
+    expect(html, "no bitmap").to.not.contain("<img");
     expect(html, "the command field").to.contain('name="okcode"');
     expect(html, "the menu bar").to.contain("Favorites");
     // the image panel on the right, and the bulge in its left edge

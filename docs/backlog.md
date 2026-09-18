@@ -93,8 +93,9 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.2  prove a sapevent click comes back                           DONE 09-18
 ├─ G.3  a transaction node that actually runs                       DONE 09-18
 ├─ G.5  SICF as a Fiori Elements application, and live                open
-├─ G.6  a class with an interface becomes a screen                    open
-├─ G.1c the name is ours and the picture is the joke                  next
+├─ G.6  a class with an interface becomes a screen (the Neptune       open
+│       concept, named by Alice 2026-09-18)
+├─ G.1c the name is ours and the picture is the joke                DONE 09-18
 ├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
@@ -212,7 +213,7 @@ G.7  The screen is usable from the keyboard                              [S]
      └─ it belongs with G.1b's work rather than after abapGit: the screen
         is the thing people touch first
 
-G.1c The name is ours and the picture is the joke                        [S]
+G.1c The name is ours and the picture is the joke        [S]  DONE 2026-09-18
      Alice, 2026-09-18, with the original screen's background in front of
      her: drop "SAP" from our own names, and the image panel is not one
      drop - it is rain on a surface.
@@ -250,8 +251,93 @@ G.1c The name is ours and the picture is the joke                        [S]
         Fumarole, Solfatara, Plume
      +- G.7 (the keyboard) and this share the same file, so whichever runs
         second rebases rather than both editing `zcl_osd_webgui` at once
+     +- **DONE 2026-09-18.** The title bar is "Easy Access" with the system
+        beside it; the ICF documentation, the class description and the
+        launchpad tile follow. The three remaining "SAP Easy Access" in the
+        class are comments describing the real screen, which is a statement
+        of fact and stays. The picture is a second SVG, `.artscene`, behind
+        the wordmark: sun, rain as one `<pattern>` with a single
+        `animateTransform` on it, mist drifting, a gate of steam standing in
+        the water, and four rings spreading from where the drops land, each
+        two `<animate>` elements. It is separate from `.artbg` because that
+        one stretches with the splitter and would turn every ring into an
+        egg. 4.7 KB, no script, no bitmap, no second request - the browser
+        test still asserts a script count of zero and it still passes.
+        `.artname` is now `Open<b>SteamGate</b>` and `.artnote` the slogan,
+        "the next level of vaporware"; the status line's "a gateway that is
+        not there" moved aside for it. Tests: test/webgui.mjs asserts the
+        name, the absence of the old one, the slogan, the scene and the
+        absence of any <img>; 17 passing, and the six browser tests pass
 
-G.4  abapGit through the substitutes                             open, closure measured in G.2
+G.4  abapGit through the substitutes — **PARKED 2026-09-18 by Alice** after a, b decided
+     Split 2026-09-18 on the critic's reading: under one number the three
+     block each other for no reason. The first two are decisions this
+     circle can take today; only the third is work.
+     ├─ G.4a the page stack — **decided 2026-09-18: serialisable, no pinned
+     │  process.** abapGit keeps the stack as live objects
+     │  (`mt_stack TYPE ty_page_stack`, `page TYPE REF TO
+     │  zif_abapgit_gui_renderable` plus a bookmark flag) and our session
+     │  carries a string (ZOSD_TSES, G.3), so the question was whether a
+     │  page can be rebuilt from data. Measured in the clone rather than
+     │  assumed: **36 renderable pages; 11 take no creation parameters at
+     │  all**, and of the 54 parameters the rest declare, 17 are
+     │  `REF TO zif_abapgit_repo(_online)` — which the router itself
+     │  already rebuilds from a key (`..._repo_view=>create(
+     │  lv_last_repo_key )`) — and the remainder are flat: structures from
+     │  `zif_abapgit_definitions` / `_persistence` / `_git_definitions`,
+     │  `abap_bool`, `string`, `tadir`, `devclass`, `trkorr`, `sci_chkv`.
+     │  ├─ the six that looked like genuinely live objects are **all
+     │  │  serialisable too**, which is what settled it: `zcl_abapgit_stage`
+     │  │  holds exactly two fields (a stage table and a SHA1),
+     │  │  `zcl_abapgit_merge` holds a repo reference plus four flat
+     │  │  tables and a string, and both object filters hold a TADIR table
+     │  ├─ so a stack entry becomes {page class, parameters}, a repo
+     │  │  becomes its key, and `/ui2/cl_json` — already used in the status
+     │  │  service and the RFC channel — carries the rest
+     │  └─ what is NOT the design: replaying the router's actions. The
+     │     router mixes page construction with service calls in the same
+     │     branches (`zcl_abapgit_services_git=>create_branch` sits beside
+     │     `..._merge_sel=>create`), so replaying a path would redo side
+     │     effects. The stack is stored as what it is, not as how it was
+     │     reached
+     ├─ G.4b the build mode — **measured 2026-09-18, and it is not a
+     │  setting we can simply flip per pack.** abapGit's own CI uses
+     │  `unknownTypes: runtimeError` (its `test/abap_transpile.json:93`),
+     │  we use `compileError` (`abap_transpile.json:98`). Read in the
+     │  transpiler source, the option is **per transpile run**, not per
+     │  input folder: it is one field of `ITranspilerOptions`, defaulted
+     │  once in `index.ts:35`, and consulted in `validation.ts`,
+     │  `statements/create_object.ts` and `expressions/new_object.ts`.
+     │  ├─ so the three ways are: flip our whole build to `runtimeError`
+     │  │  and lose the net over our own code; keep `compileError` and
+     │  │  supply the missing DDIC, which is G.4c; or build abapGit as a
+     │  │  separate generation with its own options and serve it beside
+     │  │  ours
+     │  └─ the third is the only one that keeps both properties, and it
+     │     costs an upstream change or a second build — which is why this
+     │     is a decision and not a line of config
+     ├─ G.4c the closure: 371 of 592 objects. This is the work, and it is
+     │  third, not first
+     ├─ **and abapGit does not get vendored into the tree** — 592 objects
+     │  arrive the way the demo and Zork do, as a pack with `sources` and
+     │  `osd-fetch` (E.2). So the first artefact of G.4c is a manifest,
+     │  which ties this entry to track E more tightly than the tree shows
+     └─ **parked 2026-09-18.** Alice: "там мне кажется больше мороки чем
+        пользы пока" — this is the whole of abapGit, and the trouble
+        outweighs the benefit at this point in the queue. The two cheap
+        questions were answered first and are recorded above, so whoever
+        unparks it starts from two decisions rather than from nothing;
+        what remains under the number is G.4c, the closure of 371 of 592
+        objects, and it is work rather than a decision
+
+O — the oracles: proving we answer the way a system answers
+│   Proposed by the workstation session 2026-09-18 and owned by it. These
+│   were spread across A and B; the instrument has outgrown one track.
+│   `o4d-record --compare` (a frame as the oracle, eight anomalies in two
+│   days) is O.0 and already exists — whoever writes O.1 reads its code
+│   rather than starting over.
+├─ O.1  an SQL trace taken on both sides, compared             high, do first
+└─ O.2  a step trace through the debugger endpoints            after O.1, with A.6
 
 U — the user, and the thing itself
 ├─ U.1  the user's path, measured by a stranger                     DONE 09-17
@@ -348,8 +434,15 @@ A.5  Stateful session affinity across parallel connections               [R]
 A.6  Debugger endpoints                                                  [S]
      ├─ debugger/listeners is a long poll and the second most frequent call
      │  in a real session; breakpoints is a POST
-     └─ answering them emptily is most of the value: it stops the client
-        retrying, and debugging can stay unimplemented for a long time
+     ├─ answering them emptily is most of the value: it stops the client
+     │  retrying, and debugging can stay unimplemented for a long time
+     └─ **the message schemas are shared with O.2** and the two must be
+        written together. A.6 is us *answering* `debugger/listeners` and
+        `breakpoints`; O.2 is us *calling* the same endpoints on A4H to
+        record a step trace. Done apart, the schemas get written twice and
+        drift. Note also that the entry carries two different sizes under
+        one number: answering emptily is small, being the oracle's client
+        is not
 
 A.7  ATC, refactorings, quick fixes, where-used                          [S]
      └─ not started, not blocking; listed so a 404 reads as a plan
@@ -530,11 +623,27 @@ B.5  Multi-record framing, properly measured                             [R]
      └─ but the operation-info length on a *continued* record is inferred
         from single-record captures; capture a real long answer and check
 
-B.6  The client/MANDT story                                             [S+T]
-     └─ unchanged and still first-order: fixed client 123, no implicit
-        MANDT (ANORMALIES.md). The demo keeps T0009 visible on purpose
+B.6  The client/MANDT story — dormant, with a detector to build      [S+T]
+     Re-read 2026-09-18 by the workstation session, acting as critic, and
+     the label was wrong rather than the place in the queue.
+     ├─ the facts are unchanged: fixed client 123, no implicit MANDT
+     │  (ANORMALIES.md). The demo keeps T0009 visible on purpose
+     ├─ **but upstream considers the question closed by design**: in
+     │  abaplint/transpiler#606 Lars answers "or just ignore it, the runtime
+     │  does not need a client, run several instances" — and running one
+     │  instance per client is exactly what we do. So this is not a
+     │  first-order risk today; it is a **dormant property**
+     ├─ it wakes on exactly two events, and neither is in the queue: one
+     │  runtime serving more than one client, or running a customer's real
+     │  DPC that branches on `sy-mandt`. That is why it sits below G.5/G.6
+     │  and that is correct — what was wrong was calling it an alarm
+     └─ **turn it into a detector rather than a standing worry**, the way
+        `npm run leak` was made: fail the build when transpiled code reads
+        `sy-mandt`, or when a SELECT hits a CLIDEP table with no explicit
+        client condition. An alarm nobody touches for a year does not work;
+        a check does
 
-B.8  SICF and SM59 as applications, the way SEGW is one                  [S]
+B.8  SICF and SM59 as applications — **merged into G.5**, see there      [S]
      ├─ Alice, 2026-09-16: a SICF editor over the *.sicf.xml / *.sapc.xml the
      │  tree carries (tools/osd-icf.mjs already lists and mounts them), the
      │  way src/segw is SEGW as an application over its own tables
@@ -543,10 +652,16 @@ B.8  SICF and SM59 as applications, the way SEGW is one                  [S]
      │  implementation: the door (POST /osd/sql) is already a node answered
      │  by JS, so the shape exists; missing is declaring it in a *.sicf.xml
      │  and an editor over the set
-     └─ SM59 in the same manner later: destinations as objects with an
-        editor, over the .local/rfc-destinations.json the RFC runtime reads
-        (local / replay / live / record / fallback); track D's gateway makes
-        the outbound half real
+     ├─ SM59 in the same manner later: destinations as objects with an
+     │  editor, over the .local/rfc-destinations.json the RFC runtime reads
+     │  (local / replay / live / record / fallback); track D's gateway makes
+     │  the outbound half real
+     └─ **merged 2026-09-18.** This entry and G.5 describe the same work in
+        two tracks, which is how a thing gets built twice by two owners.
+        G.5 carries the fuller specification (Alice, 2026-09-18) and is the
+        surviving number; the two ideas that live only here — a node that
+        may point at a JS rather than an ABAP handler, and SM59 later —
+        move with it. Nothing new starts under B.8
 
 B.9  A forced build mutates a generation under its name                 [S]
      ├─ Astra, 2026-09-16: `--force` replaces the directory build/by-input/<hash>
@@ -1374,6 +1489,50 @@ G.4  abapGit through the substitutes                                   [S+A]
         container/viewer/frontend-services path) but the SAP APIs abapGit
         wants underneath. That is a closure audit, not a screen.
 ```
+
+---
+
+## Track O — the oracles: proving we answer the way a system answers
+
+*Proposed 2026-09-18 by the workstation session, which owns the formulation.
+These two lived nowhere: they were proposed in conversation, nobody answered,
+and so they were not written down. The instrument has outgrown a single
+track — today it compares frames, tomorrow SQL, the day after steps.*
+
+O.0  A frame as the oracle — **exists already**                          [S]
+     `tools/o4d-record.mjs --scene <name> --ticks n` on both sides plus
+     `--compare` names the ABAP that computed a difference. Eight anomalies
+     in two days, 2026-09-16/17, each then measured on A4H with a throwaway
+     ABAP Unit probe before anything was changed. It is listed here so the
+     next two are written as its siblings and not from scratch.
+
+O.1  An SQL trace taken on both sides, compared              [S]  high, first
+     ├─ take an SQL trace of one service call on A4H (ST05, or the trace
+     │  from ADT — both reachable through vsp), take ours, bring both to a
+     │  canonical form (statement text with the literals masked, order
+     │  preserved) and compare
+     ├─ **our side is nearly free, and that is the argument for doing it
+     │  first**: all transpiled ABAP talks to exactly one object,
+     │  `abap.context.databaseConnections["DEFAULT"]` with its eleven
+     │  methods (docs/db-backends.md), so there is one interception point
+     │  and no new protocol on either side
+     ├─ what it catches that the OData surface cannot show at all: a
+     │  missing MANDT, a different ORDER BY, an N+1 where the system issues
+     │  one statement, a different FOR ALL ENTRIES chunking
+     └─ the deeper reason for the priority: the database seam is the one
+        place where being wrong is **invisible from outside**, because the
+        answer can come out right by accident
+
+O.2  A step trace through the debugger endpoints             [S]  after O.1
+     ├─ drive a DPC step by step through the debugger endpoints on A4H,
+     │  recording (statement, variable snapshot) pairs; run the same here
+     │  through a runtime hook; compare and name the first step that
+     │  diverges
+     ├─ an order of magnitude more expensive than O.1, because it needs the
+     │  live debugger protocol
+     └─ **its message schemas are the same as A.6's** and the two are
+        written together — A.6 answers those endpoints, O.2 calls them. See
+        the note on A.6
 
 ---
 

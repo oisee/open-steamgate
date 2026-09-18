@@ -158,13 +158,67 @@ through the critic gate (CLAUDE.md).
 | # | what | where | gain, measured | state |
 | --- | --- | --- | --- | --- |
 | 0 | the anchor issue: the arithmetic protocol dominates compute-bound ABAP, with the profile and the ranked list | an issue only, `abaplint/transpiler` | — | to write |
-| 1 | a constant `Character` remembers the number it parses to | runtime, `types/character.ts` + `operators/_parse.ts` | -45 % on the operation, inside the noise on the demo | ready, branch `perf/character-constant-numeric` a284eb2f, **held until #1868 is answered** |
+| 1 | a constant `Character` remembers the number it parses to | runtime, `types/character.ts` + `operators/_parse.ts` | -35 to -77 % on the operation, below the measurement threshold on the demo | **sent 2026-09-18: issue #1872, PR #1873**, branch `perf/character-constant-numeric` 40cab17c — see below |
 | 2 | a `Float`/`Float` branch in `add`/`minus`/`multiply` | runtime, `operators/` | -4 to -13 % of a heavy frame's CPU | **sent 2026-09-17: issue #1868, PR #1869**, branch `perf/float-fast-path` 111d6a93 |
 | 3 | plain JavaScript arithmetic when the operand types are proven | transpiler, `expressions/source.ts` + a new type walk, behind a feature flag | 110-200 ns to about 1 | in progress |
 | 4 | a synchronous `LOOP AT` when the body contains no `await` | runtime + codegen | 172–349 ns a row to 74 | design question, unwritten |
 | 5 | method inlining | transpiler | 123 ns to 67, and 206 to 67 for a structure return | unwritten, high risk |
 
 Notes that belong with them, so they are not rediscovered:
+
+**Item 1, re-measured against 2.13.89 and sent, 2026-09-18** (issue #1872,
+PR #1873; the calculation-type issue that came out of the same work is #1871,
+and the A4H measurement behind it is a comment on #1866).** The
+branch was held because its numbers were taken against a base that has since
+moved; it was rebased (`a284eb2f` -> `40cab17c`, onto `2f011157` = 2.13.89,
+which already carries the Float/Float fast path of #1869) and measured again.
+Host: i7-10700K, node 26, `intel_pstate` on `powersave` — which boosts itself,
+4.9 GHz measured under load, so no governor change was needed. Protocol: the
+12 cases of `.local/measure/drafts/bench-operators.mjs`, 2 runtimes, 5 sweeps
+interleaved with the column order reversed on alternate sweeps. Both builds
+were verified **by content**, not by the build exiting 0: `getNumeric` absent
+from the base's built `character.js` and present in the branch's, and the
+float fast path present in the base's `add.js`. The first build of the branch
+was a false green — `tsc` returned 0 and left yesterday's `build/` in place.
+
+| operation | base 2.13.89 | + cache | delta | five sweeps |
+| --- | ---: | ---: | ---: | --- |
+| `divide(const '0.5', Float)` | 97.32 ns | 22.37 ns | **-77.0 %** | -77.0 -76.3 -76.8 -77.6 -76.6 |
+| `multiply(const '0.5', Float)` | 148.48 ns | 75.71 ns | **-49.0 %** | -49.3 -50.0 -48.0 -49.0 -49.1 |
+| `add(const '0.5', Float)` | 170.49 ns | 99.60 ns | **-41.6 %** | -41.9 -42.0 -41.6 -40.8 -41.9 |
+| `multiply(Float, const '0.5')` | 224.05 ns | 144.90 ns | **-35.3 %** | -35.0 -36.3 -34.8 -35.7 -34.7 |
+| `multiply(Character '0.5', Float)`, not a constant | 149.17 ns | 128.84 ns | -13.6 % | -13.4 -14.2 -13.0 -14.0 -15.0 |
+| `Float`/`Float` and `Integer`/`Integer` | 9-21 ns | unchanged | -4.0 to +2.9 % | noise |
+
+The absolute nanoseconds are about twice those in
+`.local/measure/drafts/measurement.txt` because that table was taken on the
+workstation; ratios within one machine are what compare.
+
+**The verdict, and the wording matters.** Per operation the win is large and
+reproducible — a spread of fractions of a percent across five sweeps, against
+a harness whose own noise is about 10 %. At whole-program level the
+contribution is **below our measurement threshold**, which is not the same
+claim as "a few percent": the `both/fast` column of `measurement.txt` cannot
+carry that claim, because it measured the *head* placement that was rejected
+(its own first line says the shape "is NOT on the branch") and because its
+per-round CPU wanders 5890-9890 ms on one scene while the signs disagree
+between scenes. `docs/abap-hot-code.md` already states the rule: no absolute
+number here may be quoted finer than half a significant figure.
+
+It was parked under Alice's rule of that morning — pure performance without a
+roughly twofold win waits, only defect fixes go up — and then **unparked by
+her the same day**: "гони в апстрим то что готово и что улучшит
+производительность и радость". So it goes, through the critic gate. The
+argument that supports sending it, which was recorded while it was still the
+counter-argument:
+**ABAP 7.02 has no float literal**, so `lv_x = lv_y * '0.5'` is how real code
+writes any percentage or rounding, while the author of our demo scenes hoisted
+those constants into `DATA` by hand — exactly what the cache makes
+unnecessary. Our corpus therefore *understates* the share of constant-literal
+arithmetic. It stays weak as an argument because real business ABAP is bound
+by the database, not by arithmetic; the niche is compute-bound code.
+
+
 
 **What measuring changed about items 1 and 2, 2026-09-17.** Both were
 written, tested and measured before either was sent, and both moved:

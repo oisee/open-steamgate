@@ -506,6 +506,57 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<path d="M118,0 C22,230 22,670 118,900 L300,900 L300,0 Z" fill="url(#ah)"/>` &&
       `<path d="M118,0 C22,230 22,670 118,900" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2"/>` &&
       `</svg>` &&
+* Backlog G.1c, Alice with the original screen in front of her: the picture
+* is not one drop, it is rain on a surface. Sun, rain falling, mist drifting
+* over the water, a gate of steam standing in it, and rings spreading from
+* where the drops land. It is a second SVG rather than more of the panel
+* because the panel stretches with the splitter (preserveAspectRatio=none)
+* and would turn every ring into an egg; this one keeps its aspect and is
+* cropped instead. No script, no bitmap, no second request -- the browser
+* test asserts all three, and the rain is a <pattern> with one animate on it
+* rather than a hundred lines, because this HTML is concatenated into every
+* response.
+      `<svg class="artscene" viewBox="0 0 320 480" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><defs><radialGradient id="sg" cx="0.5" cy="0.5" r="0.5">` &&
+      `<stop offset="0" stop-color="#fff6d8"/><stop offset="0.55" stop-color="#ffd98a" stop-opacity="0.9"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/>` &&
+      `</radialGradient><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b6ba8"/><stop offset="1" stop-color="#071b33"/></linearGradient>` &&
+      `<linearGradient id="gg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.4" stop-color="#eaf6ff" stop-opacity="0.62"/>` &&
+      `<stop offset="1" stop-color="#eaf6ff" stop-opacity="0.16"/></linearGradient>` &&
+      `<pattern id="rp" width="26" height="44" patternUnits="userSpaceOnUse" patternTransform="rotate(14)">` &&
+      `<line x1="4" y1="0" x2="4" y2="15" stroke="#cfe6ff" stroke-opacity="0.45" stroke-width="1.4"/>` &&
+      `<line x1="17" y1="22" x2="17" y2="35" stroke="#cfe6ff" stroke-opacity="0.3" stroke-width="1.2"/>` &&
+      `<animateTransform attributeName="patternTransform" type="translate" from="0 0" to="0 44" dur="1.1s" repeatCount="indefinite" additive="sum"/></pattern><g id="rg">` &&
+      `<ellipse rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.6" stroke-opacity="0.75"/></g></defs><circle cx="243" cy="66" r="52" fill="url(#sg)"/>` &&
+      `<circle cx="243" cy="66" r="21" fill="#fff3cf" fill-opacity="0.92"/><rect x="0" y="0" width="320" height="330" fill="url(#rp)"/>` &&
+      `<path d="M84,334 C76,268 92,208 104,160 L132,160 C118,210 108,270 112,334 Z" fill="url(#gg)">` &&
+      `<animate attributeName="opacity" values="0.75;1;0.75" dur="11s" repeatCount="indefinite"/></path>` &&
+      `<path d="M236,334 C244,268 228,208 216,160 L188,160 C202,210 212,270 208,334 Z" fill="url(#gg)">` &&
+      `<animate attributeName="opacity" values="1;0.72;1" dur="13s" repeatCount="indefinite"/></path>` &&
+      `<path d="M104,160 C126,126 194,126 216,160 L188,160 C172,142 148,142 132,160 Z" fill="url(#gg)"/>` &&
+      `<ellipse cx="98" cy="334" rx="26" ry="7" fill="#eaf6ff" fill-opacity="0.22"/><ellipse cx="222" cy="334" rx="26" ry="7" fill="#eaf6ff" fill-opacity="0.22"/>` &&
+      `<ellipse cx="110" cy="250" rx="120" ry="17" fill="#dff0ff" fill-opacity="0.09"><animate attributeName="cx" values="110;190;110" dur="19s" repeatCount="indefinite"/>` &&
+      `</ellipse><ellipse cx="220" cy="292" rx="140" ry="13" fill="#dff0ff" fill-opacity="0.07">` &&
+      `<animate attributeName="cx" values="220;120;220" dur="26s" repeatCount="indefinite"/></ellipse><rect x="0" y="330" width="320" height="150" fill="url(#wg)"/>` &&
+      `<line x1="0" y1="330" x2="320" y2="330" stroke="#bfe0ff" stroke-opacity="0.5" stroke-width="1.5"/>` &&
+      `<ellipse cx="96" cy="356" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="2"><animate attributeName="rx" values="3;70" dur="3.4s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="ry" values="1;19" dur="3.4s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="stroke-opacity" values="0.95;0" dur="3.4s" repeatCount="indefinite"/></ellipse>` &&
+      `<ellipse cx="216" cy="392" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.8">` &&
+      `<animate attributeName="rx" values="3;82" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="ry" values="1;23" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="stroke-opacity" values="0.9;0" dur="4.2s" begin="1.1s" repeatCount="indefinite"/></ellipse>` &&
+      `<ellipse cx="150" cy="430" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.7">` &&
+      `<animate attributeName="rx" values="3;94" dur="5s" begin="2.3s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="ry" values="1;26" dur="5s" begin="2.3s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="stroke-opacity" values="0.85;0" dur="5s" begin="2.3s" repeatCount="indefinite"/></ellipse>` &&
+      `<ellipse cx="272" cy="344" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.8">` &&
+      `<animate attributeName="rx" values="3;56" dur="2.8s" begin="0.6s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="ry" values="1;14" dur="2.8s" begin="0.6s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="stroke-opacity" values="0.9;0" dur="2.8s" begin="0.6s" repeatCount="indefinite"/></ellipse>` &&
+      `<ellipse cx="96" cy="120" rx="2.6" ry="6" fill="#dff0ff" fill-opacity="0.8"><animate attributeName="cy" values="120;330" dur="3.4s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="fill-opacity" values="0.85;0.85;0" keyTimes="0;0.92;1" dur="3.4s" repeatCount="indefinite"/></ellipse>` &&
+      `<ellipse cx="216" cy="96" rx="2.4" ry="5.6" fill="#dff0ff" fill-opacity="0.7">` &&
+      `<animate attributeName="cy" values="96;392" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
+      `<animate attributeName="fill-opacity" values="0.8;0.8;0" keyTimes="0;0.93;1" dur="4.2s" begin="1.1s" repeatCount="indefinite"/></ellipse></svg>` &&
       `<div class="artmark">` &&
       `<svg class="artdrop" viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">` &&
       `<defs>` &&
@@ -525,9 +576,9 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<ellipse cx="49" cy="68" rx="15" ry="19" fill="url(#dh)" transform="rotate(-22 49 68)"/>` &&
       `<ellipse cx="50" cy="60" rx="4.5" ry="7" fill="#ffffff" fill-opacity="0.85" transform="rotate(-28 50 60)"/>` &&
       `</g></svg>` &&
-      `<div class="artname">open<b>steamgate</b></div>` &&
+      `<div class="artname">Open<b>SteamGate</b></div>` &&
       |<div class="artsid">{ esc( iv_sid ) }</div>| &&
-      `<div class="artnote">a gateway that is not there</div>` &&
+      `<div class="artnote">the next level of vaporware</div>` &&
       `</div></div>`.
   ENDMETHOD.
 
@@ -688,7 +739,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<p class="dim">The identity is one setting at boot (tools/osd-identity.mjs): it sets sy-sysid, ` &&
       `sy-mandt and sy-uname, names the system in the status tables, and is what the ADT facade ` &&
       `presents to Eclipse. docs/webgui.md says why the facade's own id is allowed to differ.</p>` &&
-      |<p><a class="back" href="{ gc_path }/">Back to SAP Easy Access</a></p>| &&
+      |<p><a class="back" href="{ gc_path }/">Back to Easy Access</a></p>| &&
       `</div></div></body></html>`.
   ENDMETHOD.
 
@@ -773,6 +824,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.tree.run .gg-controls iframe{width:100%;height:100%;min-height:320px;border:0;background:#fff}` &&
       `.art{flex:1 1 auto;min-width:140px;position:relative;overflow:hidden;background:#0b2544}` &&
       `.artbg{position:absolute;inset:0;width:100%;height:100%}` &&
+      `.artscene{position:absolute;inset:0;width:100%;height:100%;opacity:.92}` &&
       `.artmark{position:absolute;right:20px;top:0;bottom:0;width:190px;color:#fff;` &&
       `display:flex;flex-direction:column;justify-content:center;align-items:flex-end;text-align:right;gap:10px}` &&
       `.artdrop{filter:drop-shadow(0 8px 14px rgba(3,17,33,.55))}` &&
@@ -826,9 +878,9 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     rv_html =
       `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` &&
       `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
-      `<title>SAP Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
+      `<title>Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
       `<div class="win">` &&
-      |<div class="title"><span>SAP Easy Access</span><small>{ esc( ls_ident-info ) }</small></div>| &&
+      |<div class="title"><span>Easy Access</span><small>{ esc( ls_ident-info ) }</small></div>| &&
       |<div class="menu">{ menubar( lt_nodes ) }</div>| &&
       `<div class="tools">` &&
       |<form class="cmdbox" method="get" action="{ gc_path }/" target="_top">| &&
