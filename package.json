@@ -33,8 +33,10 @@
     "cds": "node tools/cds2ddic.mjs",
     "unit:file": "npm run transpile && rm -f .local/db/unit.sqlite* && echo RUNNING on a SQLite file && STG_DB=file STG_DB_PATH=.local/db/unit.sqlite node --expose-gc output/index.mjs && echo OK",
     "unit:duckdb": "npm run transpile && echo RUNNING on DuckDB && STG_DB=duckdb node --expose-gc output/index.mjs && echo OK",
+    "unit:hana": "npm run transpile && echo RUNNING on HANA && STG_DB=hana node --expose-gc output/index.mjs && echo OK",
     "integration:duckdb": "STG_DB=duckdb mocha test/mocha.mjs",
     "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",
+    "start:hana": "npm run transpile && STG_DB=hana node test/run.mjs",
     "web:preview": "npm run transpile && node scripts/build-preview.mjs",
     "web:serve": "node scripts/serve-build.mjs",
     "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs",
@@ -101,5 +103,8 @@
   },
   "dependencies": {
     "open-rfc": "^0.2.3"
+  },
+  "optionalDependencies": {
+    "hdb": "^2.29.6"
   }
 }

@@ -533,6 +533,56 @@ B.1  SADL beyond read-only                                               [S]
 
 B.19 HANA, AMDP and where each machine stands                            [S]
      Decided 2026-09-18 by arithmetic rather than preference.
+     ├─ **HXE is up on the i7, 2026-09-18**, and the first AMDP body ran
+        in it end to end: `ZCL_VSP_00_AMDP_TEST=>CALCULATE_SQUARES` cut out
+        of the class, deployed as a procedure and called, returning the
+        five squares. Startup 169 s, instance HXE/HDB90, SYSTEMDB 39013,
+        tenant 39017.
+        ├─ **the load-bearing assumption is confirmed and is generous**:
+        │  `CREATE PROCEDURE` refuses a missing table and names it *with a
+        │  position* - `Could not find table/view NO_SUCH_TABLE_HERE in
+        │  schema OSD: line 3 col 44`. So HANA is the oracle for which
+        │  tables a body needs, and no SQLScript parser is required.
+        │  `SYS.OBJECT_DEPENDENCIES` then lists it, which is the
+        │  after-the-fact completeness check
+        └─ **snapshots need no work**: HXE persists under `/hana/mounts`,
+           the one directory the recipe says to bind, so the database is
+           already outside the container - 3.7 GB there against 73.6 kB in
+           the writable layer. That is the property `~/dev/a4h/a4h-lite.sh`
+           had to be written to get for A4H, whose image keeps 38.3 GB in
+           the writable layer. A save/restore script in its spirit is worth
+           having when we start wanting clean states between experiments;
+           until then it is not needed. (Alice, 2026-09-18: "это если прям
+           надо - можно и попозже")
+     ├─ **decided 2026-09-18: `STG_DB=hana` is the AMDP mode.** Alice:
+        "работать целиком на хане имеет смысл если мы веселимся с AMDP и
+        там всё мило и красиво бежит". So HANA is not a general backend
+        and not a default - it is the mode you switch into when the work
+        *is* AMDP, and in that mode everything falls out:
+        ├─ the procedure and the tables are in **one database**, so the
+        │  mirroring question disappears entirely, along with the
+        │  iterative "create, read the error, mirror, retry" plan. That
+        │  plan stays written down because it is what you need when the
+        │  data layer is *not* HANA, which is every other mode
+        ├─ `sy-dbsys = HDB`, which is what a real system reports, so the
+        │  oracle work gets a fidelity it cannot get any other way
+        └─ and the cost is bounded and known, because it was measured
+           before deciding (docs/db-backends.md): per **statement**, not
+           per row - a 200-row SELECT is 3.8x the in-process cost, a
+           single-row SELECT 52x, an INSERT 146x. Set-wise ABAP ports
+           nearly free, row-at-a-time ABAP does not
+     ├─ **the two pieces of work, in order**:
+        ├─ **the DDL generator, and it does not exist anywhere**: the
+        │  transpiler has real schema generators for SQLite, PostgreSQL
+        │  and Snowflake and `hdb: ["todo"]` for HANA - a literal string.
+        │  This is first because without a schema there is nothing to
+        │  point a client at
+        └─ **the client**: eleven methods on the npm driver `hdb`, the
+           same shape as `tools/duckdb-client.mjs`. Three differences to
+           measure rather than assume, the ones DuckDB taught us: the DDL
+           flavour, trailing blanks in CHAR comparison, and savepoints -
+           HANA has real ones, so that third one should be easier here
+           than it was there
      ├─ **what HANA Express is actually for, Alice 2026-09-18**: it is
         **not** a database backend for OSD. It is the engine for one
         narrow case - **cut the AMDP body out of the ABAP class and run it

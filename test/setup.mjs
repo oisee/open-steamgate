@@ -36,6 +36,27 @@ export async function setup(abap, schemas, insert) {
   // it 'NONE' and '' run here and any other name replays STG_RFC_CAPTURE
   const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
   await installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
+  // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
+  // procedure and the tables are then in one database and nothing has to be
+  // mirrored (docs/amdp-in-hana.md, backlog B.19). Never a default: the cost
+  // is per statement and it is 52x on a single-row SELECT, measured in
+  // docs/db-backends.md. HANA_SCHEMA picks the schema, default OSD, and it is
+  // kept between runs unless STG_DB_FRESH=1.
+  if (process.env.STG_DB === "hana") {
+    const {HanaDatabaseClient, hanaSchema, hanaInserts} = await import("../tools/hana-client.mjs");
+    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1"});
+    abap.context.databaseConnections["DEFAULT"] = db;
+    await db.connect();
+    if (process.env.STG_DB_FRESH !== "1" && await db.hasSchema()) {
+      return;
+    }
+    await db.execute(hanaSchema(schemas));
+    await db.execute(hanaInserts(insert));
+    await db.execute(seedStatements());
+    await loadScaledData(db, "hana");
+    await db.commit();
+    return;
+  }
   if (process.env.STG_DB === "duckdb") {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
     // STG_DB_PATH=some.duckdb keeps the data between runs
