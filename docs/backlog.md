@@ -91,7 +91,37 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.1b the drop, drawn, and a menu bar that works                  after G.2
 ├─ G.2  prove a sapevent click comes back                           DONE 09-18
 ├─ G.3  a transaction node that actually runs                       open
-└─ G.4  abapGit through the substitutes                             open, closure measured in G.2
+├─ G.5  SICF as a Fiori Elements application, and live                open
+└─ G.5  SICF as a Fiori Elements application, and live                      [S]
+     Alice, 2026-09-18: a real application, the analogue of transaction
+     SICF, as a proper Fiori Elements app where handlers and the rest are
+     configured.
+     ├─ half the model is already here and in SAP's own shape: a
+        *.sicf.xml carries URL, ICFSERVICE (name, orig_name), ICFDOCU
+        (description per language) and an ordered ICFHANDLER_TABLE of
+        classes. Eight nodes in the tree today
+     ├─ missing against the real one: logon data (client, user, language,
+        the order of the authentication procedures), service parameters as
+        name/value pairs, error pages, the session timeout and the
+        stateful flag, the active/inactive flag (inactive answers 403),
+        and aliases pointing at another node
+     ├─ the shape to build: DDIC tables + CDS views with associations + a
+        stg.yaml service + a Fiori Elements list report and object page,
+        exactly as src/status/ is built; the object page's sections are
+        handlers, parameters, descriptions, logon
+     ├─ the write-back follows the SEGW editor: the tables are the truth
+        at runtime and the ICF registry reads them, and an export writes
+        *.sicf.xml back so abapGit can carry it away. @ObjectModel.
+        writeEnabled already makes a one-table projection writable and the
+        dispatcher already answers 405 for a write the model forbids
+     └─ what makes it worth doing rather than pretty: **the settings
+        become live**. Change a node's handler class and the next request
+        goes elsewhere; deactivate a node and it answers 403; add a second
+        handler and it runs after the first. Today our nodes are static -
+        they arrive from XML at build time - so this is a behaviour of a
+        real system that we do not have at all
+
+G.4  abapGit through the substitutes                             open, closure measured in G.2
 
 U — the user, and the thing itself
 ├─ U.1  the user's path, measured by a stranger                     DONE 09-17
