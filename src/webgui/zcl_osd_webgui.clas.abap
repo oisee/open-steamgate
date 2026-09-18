@@ -506,57 +506,71 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<path d="M118,0 C22,230 22,670 118,900 L300,900 L300,0 Z" fill="url(#ah)"/>` &&
       `<path d="M118,0 C22,230 22,670 118,900" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2"/>` &&
       `</svg>` &&
-* Backlog G.1c, Alice with the original screen in front of her: the picture
-* is not one drop, it is rain on a surface. Sun, rain falling, mist drifting
-* over the water, a gate of steam standing in it, and rings spreading from
-* where the drops land. It is a second SVG rather than more of the panel
-* because the panel stretches with the splitter (preserveAspectRatio=none)
-* and would turn every ring into an egg; this one keeps its aspect and is
-* cropped instead. No script, no bitmap, no second request -- the browser
-* test asserts all three, and the rain is a <pattern> with one animate on it
-* rather than a hundred lines, because this HTML is concatenated into every
-* response.
-      `<svg class="artscene" viewBox="0 0 320 480" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><defs><radialGradient id="sg" cx="0.5" cy="0.5" r="0.5">` &&
-      `<stop offset="0" stop-color="#fff6d8"/><stop offset="0.55" stop-color="#ffd98a" stop-opacity="0.9"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/>` &&
-      `</radialGradient><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b6ba8"/><stop offset="1" stop-color="#071b33"/></linearGradient>` &&
-      `<linearGradient id="gg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.4" stop-color="#eaf6ff" stop-opacity="0.62"/>` &&
-      `<stop offset="1" stop-color="#eaf6ff" stop-opacity="0.16"/></linearGradient>` &&
-      `<pattern id="rp" width="26" height="44" patternUnits="userSpaceOnUse" patternTransform="rotate(14)">` &&
-      `<line x1="4" y1="0" x2="4" y2="15" stroke="#cfe6ff" stroke-opacity="0.45" stroke-width="1.4"/>` &&
-      `<line x1="17" y1="22" x2="17" y2="35" stroke="#cfe6ff" stroke-opacity="0.3" stroke-width="1.2"/>` &&
-      `<animateTransform attributeName="patternTransform" type="translate" from="0 0" to="0 44" dur="1.1s" repeatCount="indefinite" additive="sum"/></pattern><g id="rg">` &&
-      `<ellipse rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.6" stroke-opacity="0.75"/></g></defs><circle cx="243" cy="66" r="52" fill="url(#sg)"/>` &&
-      `<circle cx="243" cy="66" r="21" fill="#fff3cf" fill-opacity="0.92"/><rect x="0" y="0" width="320" height="330" fill="url(#rp)"/>` &&
-      `<path d="M84,334 C76,268 92,208 104,160 L132,160 C118,210 108,270 112,334 Z" fill="url(#gg)">` &&
-      `<animate attributeName="opacity" values="0.75;1;0.75" dur="11s" repeatCount="indefinite"/></path>` &&
-      `<path d="M236,334 C244,268 228,208 216,160 L188,160 C202,210 212,270 208,334 Z" fill="url(#gg)">` &&
-      `<animate attributeName="opacity" values="1;0.72;1" dur="13s" repeatCount="indefinite"/></path>` &&
-      `<path d="M104,160 C126,126 194,126 216,160 L188,160 C172,142 148,142 132,160 Z" fill="url(#gg)"/>` &&
-      `<ellipse cx="98" cy="334" rx="26" ry="7" fill="#eaf6ff" fill-opacity="0.22"/><ellipse cx="222" cy="334" rx="26" ry="7" fill="#eaf6ff" fill-opacity="0.22"/>` &&
-      `<ellipse cx="110" cy="250" rx="120" ry="17" fill="#dff0ff" fill-opacity="0.09"><animate attributeName="cx" values="110;190;110" dur="19s" repeatCount="indefinite"/>` &&
-      `</ellipse><ellipse cx="220" cy="292" rx="140" ry="13" fill="#dff0ff" fill-opacity="0.07">` &&
-      `<animate attributeName="cx" values="220;120;220" dur="26s" repeatCount="indefinite"/></ellipse><rect x="0" y="330" width="320" height="150" fill="url(#wg)"/>` &&
-      `<line x1="0" y1="330" x2="320" y2="330" stroke="#bfe0ff" stroke-opacity="0.5" stroke-width="1.5"/>` &&
-      `<ellipse cx="96" cy="356" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="2"><animate attributeName="rx" values="3;70" dur="3.4s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="ry" values="1;19" dur="3.4s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="stroke-opacity" values="0.95;0" dur="3.4s" repeatCount="indefinite"/></ellipse>` &&
-      `<ellipse cx="216" cy="392" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.8">` &&
-      `<animate attributeName="rx" values="3;82" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="ry" values="1;23" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="stroke-opacity" values="0.9;0" dur="4.2s" begin="1.1s" repeatCount="indefinite"/></ellipse>` &&
-      `<ellipse cx="150" cy="430" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.7">` &&
-      `<animate attributeName="rx" values="3;94" dur="5s" begin="2.3s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="ry" values="1;26" dur="5s" begin="2.3s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="stroke-opacity" values="0.85;0" dur="5s" begin="2.3s" repeatCount="indefinite"/></ellipse>` &&
-      `<ellipse cx="272" cy="344" rx="4" ry="1.3" fill="none" stroke="#dff0ff" stroke-width="1.8">` &&
-      `<animate attributeName="rx" values="3;56" dur="2.8s" begin="0.6s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="ry" values="1;14" dur="2.8s" begin="0.6s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="stroke-opacity" values="0.9;0" dur="2.8s" begin="0.6s" repeatCount="indefinite"/></ellipse>` &&
-      `<ellipse cx="96" cy="120" rx="2.6" ry="6" fill="#dff0ff" fill-opacity="0.8"><animate attributeName="cy" values="120;330" dur="3.4s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="fill-opacity" values="0.85;0.85;0" keyTimes="0;0.92;1" dur="3.4s" repeatCount="indefinite"/></ellipse>` &&
-      `<ellipse cx="216" cy="96" rx="2.4" ry="5.6" fill="#dff0ff" fill-opacity="0.7">` &&
-      `<animate attributeName="cy" values="96;392" dur="4.2s" begin="1.1s" repeatCount="indefinite"/>` &&
-      `<animate attributeName="fill-opacity" values="0.8;0.8;0" keyTimes="0;0.93;1" dur="4.2s" begin="1.1s" repeatCount="indefinite"/></ellipse></svg>` &&
+* Backlog G.1c. The original is a pool seen from above with concentric
+* ripples and words half-submerged in it, so this is that: a rainbow in pastel
+* over a still surface, and rings spreading where drops fell -- the drops
+* themselves left out, because the rings are what says a drop was there.
+*
+* **Still on purpose** (Alice, 2026-09-18). There is no animation in it at
+* all: no <animate>, no <animateTransform>. A screen somebody works on all day
+* should not move.
+*
+* It is a second SVG rather than more of the panel because the panel stretches
+* with the splitter (preserveAspectRatio=none) and would turn every ring into
+* an egg; this one keeps its aspect and is cropped instead. No script, no
+* bitmap, no second request -- the browser test asserts all three.
+      `<svg class="artscene" viewBox="0 0 320 480" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">` &&
+      `<stop offset="0" stop-color="#4a86c8" stop-opacity="0.55"/><stop offset="1" stop-color="#071b33" stop-opacity="0.9"/></linearGradient>` &&
+      `<radialGradient id="gl" cx="0.5" cy="1" r="0.75"><stop offset="0" stop-color="#eaf4ff" stop-opacity="0.22"/><stop offset="1" stop-color="#eaf4ff" stop-opacity="0"/>` &&
+      `</radialGradient><clipPath id="sky"><rect x="0" y="0" width="320" height="252"/></clipPath></defs><ellipse cx="160" cy="252" rx="200" ry="150" fill="url(#gl)"/>` &&
+      `<g clip-path="url(#sky)"><path d="M8,252 A152,152 0 0 1 312,252" fill="none" stroke="#f7b9ae" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M17,252 A143,143 0 0 1 303,252" fill="none" stroke="#f8d0a8" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M26,252 A134,134 0 0 1 294,252" fill="none" stroke="#f7ecb2" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M35,252 A125,125 0 0 1 285,252" fill="none" stroke="#c2e6bd" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M44,252 A116,116 0 0 1 276,252" fill="none" stroke="#b4dcef" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M53,252 A107,107 0 0 1 267,252" fill="none" stroke="#b9c2ee" stroke-opacity="0.72" stroke-width="9"/>` &&
+      `<path d="M62,252 A98,98 0 0 1 258,252" fill="none" stroke="#d6bee8" stroke-opacity="0.72" stroke-width="9"/></g>` &&
+      `<rect x="0" y="252" width="320" height="228" fill="url(#wg)"/><line x1="0" y1="252" x2="320" y2="252" stroke="#eaf4ff" stroke-opacity="0.45" stroke-width="1.5"/>` &&
+      `<ellipse cx="74" cy="372" rx="15" ry="4.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="74" cy="372" rx="30" ry="9.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="74" cy="372" rx="45" ry="13.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="60" ry="18.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="75" ry="22.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="90" ry="27.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.15" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="105" ry="31.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.105" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="120" ry="36.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.06" stroke-width="1.1"/>` &&
+      `<ellipse cx="74" cy="372" rx="135" ry="40.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.06" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="17" ry="5.1" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="196" cy="404" rx="34" ry="10.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="196" cy="404" rx="51" ry="15.3" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="68" ry="20.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="85" ry="25.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="102" ry="30.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.15" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="119" ry="35.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.105" stroke-width="1.1"/>` &&
+      `<ellipse cx="196" cy="404" rx="136" ry="40.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.06" stroke-width="1.1"/>` &&
+      `<ellipse cx="132" cy="452" rx="21" ry="6.3" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="132" cy="452" rx="42" ry="12.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="132" cy="452" rx="63" ry="18.9" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="132" cy="452" rx="84" ry="25.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="132" cy="452" rx="105" ry="31.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="132" cy="452" rx="126" ry="37.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.15" stroke-width="1.1"/>` &&
+      `<ellipse cx="132" cy="452" rx="147" ry="44.1" fill="none" stroke="#eaf4ff" stroke-opacity="0.105" stroke-width="1.1"/>` &&
+      `<ellipse cx="262" cy="350" rx="13" ry="3.9" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="262" cy="350" rx="26" ry="7.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="262" cy="350" rx="39" ry="11.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="262" cy="350" rx="52" ry="15.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="262" cy="350" rx="65" ry="19.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="262" cy="350" rx="78" ry="23.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.15" stroke-width="1.1"/>` &&
+      `<ellipse cx="40" cy="436" rx="19" ry="5.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="40" cy="436" rx="38" ry="11.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="40" cy="436" rx="57" ry="17.1" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="40" cy="436" rx="76" ry="22.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="40" cy="436" rx="95" ry="28.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="228" cy="468" rx="23" ry="6.9" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="228" cy="468" rx="46" ry="13.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="228" cy="468" rx="69" ry="20.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="228" cy="468" rx="92" ry="27.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="228" cy="468" rx="115" ry="34.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/></svg>` &&
       `<div class="artmark">` &&
       `<svg class="artdrop" viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">` &&
       `<defs>` &&

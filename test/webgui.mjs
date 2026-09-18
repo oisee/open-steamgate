@@ -49,7 +49,9 @@ describe("webgui: SAP Easy Access", () => {
     // the picture is rain on a surface, not one drop, and it costs no script,
     // no bitmap and no second request
     expect(html, "the scene").to.contain('class="artscene"');
-    expect(html, "rings spreading where the drops land").to.contain('attributeName="rx"');
+    expect(html, "rings where drops fell").to.contain('<ellipse');
+    // still on purpose: a screen somebody works on all day should not move
+    expect(html, "no animation at all").to.not.contain("<animate");
     expect(html, "no bitmap").to.not.contain("<img");
     expect(html, "the command field").to.contain('name="okcode"');
     expect(html, "the menu bar").to.contain("Favorites");
