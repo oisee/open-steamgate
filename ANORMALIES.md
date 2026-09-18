@@ -76,7 +76,7 @@ f = 7 / 2 + 7 / 2.              " SAP: 7 — open-abap: 7 (the target makes the 
 
 ### ANOMALY-2026-09-17-append-number-rounded — `APPEND sin( x ) TO` a float table rounds the value to an integer
 
-- Status: `fixed upstream, merged 2026-09-17 (#1867), release pending`
+- Status: `fixed upstream: abaplint/transpiler#1867, released in 2.13.88`
 - Discovery date: `2026-09-17`
 - Affected versions: `@abaplint/runtime 2.13.87` (`types/table.ts`, `cloneRow`, twice)
 - Affected ABAP statement, runtime API or adapter: `APPEND <numeric function>( … ) TO itab` where the row type is `f` (or `p`, or anything with a fraction) — `sin`, `cos`, `sqrt`, `abs`, `floor`, `ceil`, `trunc`, `sign`, `log`, `exp` return a raw JavaScript number from the runtime
@@ -97,9 +97,9 @@ READ TABLE sines INDEX 7 INTO DATA(seventh).  " SAP: 0.14673046733376413 — ope
 - Impact on open-steamgate: the plasma scene of the demo has 7 colours across a frame instead of 169; any ABAP that tabulates a numeric function
 - Smallest safe workaround: assign to an `f` variable first and append that
 - Upstream issue: [abaplint/transpiler#1865](https://github.com/abaplint/transpiler/issues/1865), filed 2026-09-17 after a critic pass; PR [#1867](https://github.com/abaplint/transpiler/pull/1867) the same day. Branch `fix/append-number-float` (worktree `.local/pr-append-number` of the transpiler clone, based on `origin/main`, 283a48d8): a whole number stays an `Integer`, anything else goes through a `Float`; cherry-picked onto `local/osd-build`. Runtime tests and lint green.
-- Regression-test location: `packages/runtime/test/statements/append_number.ts` on the branch
+- Regression-test location: `packages/runtime/test/statements/append_number.ts`, upstream since #1867
 - **Verified, 2026-09-17.** With the fix on `local/osd-build` and the runtime rebuilt, the plasma scene against A4H goes from 256 differing frames of 256 to 18: 12 of them the pulse `p` (`ANOMALY-2026-09-16-numeric-builtins-typed-integer`), 7 one row each (`ANOMALY-2026-09-17-integer-division-not-rounded`).
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-17-character-literal-calc-type — An inline declaration from `lc_h * ( '0.4' + … )` is a character
 
@@ -240,7 +240,7 @@ r = CONV f( '2.75' ) MOD 1.   " SAP: 0.75 — open-abap: 1
 
 ### ANOMALY-2026-09-16-integer-rounds-negative-half-to-zero — A float of −0.5 assigned to an integer becomes 0
 
-- Status: `fixed upstream, merged 2026-09-17 (#1864), release pending`
+- Status: `fixed upstream: abaplint/transpiler#1864, released in 2.13.88`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`types/integer.ts`, `set()` with `Math.round`)
 - Affected ABAP statement, runtime API or adapter: any move of a negative float exactly on a half to an integer — `lv_i = lv_f` with `lv_f = -0.5`, `-1.5`, …
@@ -257,12 +257,12 @@ i = CONV f( '-0.5' ).   " SAP: -1 — open-abap: 0
 - Impact on open-steamgate: none seen; it is a half of a unit, exactly, on the negative side, which is rare and silent
 - Smallest safe workaround: none needed
 - Upstream issue: [abaplint/transpiler#1861](https://github.com/abaplint/transpiler/issues/1861), filed 2026-09-17; PR [#1864](https://github.com/abaplint/transpiler/pull/1864), 2026-09-17. Branch `fix/integer-round-half-away` (worktree `.local/pr-integer-round-half-away`, based on `origin/main`), one commit with the fix and the test (2026-09-17): `roundHalfAwayFromZero` on `Integer` (`-Math.round(-v)` for a negative, `-0` made `0`), used by `Integer.set` for numbers and floats, by `toInteger` for strings and by `Integer8.set` for floats; `Float.getRaw` already rounded this way. The runtime's tests and lint green.
-- Regression-test location: `packages/runtime/test/arithmetics.ts` on the branch, "a negative half moved to an integer rounds away from zero" (failed on 2.13.87 with `expected -0 to equal -1`, passes with the fix)
-- Upstream version containing a fix: `unknown`
+- Regression-test location: `packages/runtime/test/arithmetics.ts`, "a negative half moved to an integer rounds away from zero" (failed on 2.13.87 with `expected -0 to equal -1`, passes with the fix), upstream since #1864
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-16-float-vs-character-compare — A float compared with a character literal is compared with an integer
 
-- Status: `fixed upstream, merged 2026-09-17 (#1862), release pending`
+- Status: `fixed upstream: abaplint/transpiler#1862, released in 2.13.88`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`compare/gt.ts`)
 - Affected ABAP statement, runtime API or adapter: every comparison of a numeric operand with a character or string one — `IF f > '0.5'`, `f < '0.3'` — through `compare.gt` and, written in terms of it, `lt`, `ge`, `le`. `eq` is not affected: it already reads a point.
@@ -282,9 +282,9 @@ ENDIF.
 - Impact on open-steamgate: the demo's `Sales Dance` scene labels its bars on the second frame instead of halfway through the intro, and the frame stream is not the system's from frame 1 (`ANOMALY-2026-09-16-*` is the first anomaly found by the frame comparison rather than by a crash). Any ABAP that compares a float with a literal carrying a fraction is affected; business code, which compares with integer literals, happens not to be.
 - Smallest safe workaround: write the literal as a float, `CONV f( '0.5' )`, which compares float with float. Not applied to the demo: the ABAP is right as written.
 - Upstream issue: [abaplint/transpiler#1859](https://github.com/abaplint/transpiler/issues/1859), filed 2026-09-17 with the frame count before and after; PR [#1862](https://github.com/abaplint/transpiler/pull/1862) from the branch inside the repository, 2026-09-17. Branch `fix/compare-character-literal` in `abaplint/transpiler` (worktree `.local/pr-compare-char`, based on `origin/main` 7daf28f2): `parse()` in place of `parseInt` in both branches of `gt`'s tail, one commit, the runtime's tests and lint green.
-- Regression-test location: `packages/runtime/test/compare.ts`, "float against a character literal with a fraction", on the branch
+- Regression-test location: `packages/runtime/test/compare.ts`, "float against a character literal with a fraction", upstream since #1862
 - **Verified, 2026-09-16.** With the fix cherry-picked onto `local/osd-build` and the runtime rebuilt, the same sixty frames against A4H differ in 3 instead of 59, and none of them by a label; what remains is the field `p` on frames 33 to 35, which is a different question and is being looked at.
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-15-srvd-not-allowed — The transpiler refuses SRVD objects
 
@@ -419,8 +419,9 @@ ENDIF.
 - Impact on open-steamgate: none of ours; 786 uses of `CONV f(` across 69 files of vivid-vibes, 136 of them with two in one expression, so the demo payload did not transpile at all
 - Smallest safe workaround: split the expression into two statements
 - Upstream issue: **PR [abaplint/transpiler#1842](https://github.com/abaplint/transpiler/pull/1842)**, opened 2026-09-14 from branch `fix/conv-builtin-type-name` inside the repo, so Regression runs. A built-in type name that names exactly one type (`i`, `f`, `string`, `xstring`, `d`, `t`, `int8`, `utclong`, `decfloat16/34`) is enough on its own when no reference was recorded
-- Regression-test location: the transpiler's `test/single_statements.ts`, local branch
-- Upstream version containing a fix: `unreleased, on main after 2.13.87`
+- Regression-test location: the transpiler's `test/single_statements.ts`, upstream since #1842 (`foo = CONV f( 1 ) + CONV f( 2 ).`, not skipped)
+- Upstream version containing a fix: `2.13.88`
+- **What actually landed, checked 2026-09-18.** #1842 was merged as three lines of test and no fix: the defect was closed by `@abaplint/core` recording an inferred type for every constructor expression rather than the first (abaplint#4290). So the `BUILT_IN` table this side carried in `expressions/type_name_or_infer.ts` is *not* upstream, and on 2.13.88 it is not needed either — the reproducer transpiles without it. The table was dropped with the link
 
 ### ANOMALY-2026-09-13-paren-before-conv — A parenthesised group before `* CONV ... /` generates unbalanced JavaScript
 
@@ -440,7 +441,7 @@ ENDIF.
 
 ### ANOMALY-2026-09-13-builtin-as-method — A built-in function in such an expression is emitted as a method of the class
 
-- Status: `fixed locally, PR parked`
+- Status: `gone upstream on 2.13.88, not by our fix`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: any built-in function call (`cos`, `sin`, `nmax`, `lines`, `frac`) inside an expression carrying more than one constructor expression
@@ -451,8 +452,9 @@ ENDIF.
 - Impact on open-steamgate: none of ours; it is why several vivid-vibes effects failed at runtime rather than at build time, which is the worse of the two
 - Smallest safe workaround: split the expression
 - Upstream issue: none yet, PR deferred. Fixed in the same local branch: an unrecorded name is taken as a built-in only when it is the first call in its chain, `abaplint.BuiltIn.searchBuiltin` knows it, and the enclosing class has no method of that name. The chain condition matters, `mi_merge->get_result( )-stage->count( )` is a method called COUNT
-- Regression-test location: the transpiler's `test/files.ts`, local branch, both directions
-- Upstream version containing a fix: `unknown`
+- Regression-test location: the transpiler's `test/files.ts` on `fix/builtin-not-a-method`, both directions, still local
+- Upstream version containing a fix: `2.13.88`, indirectly
+- **Checked 2026-09-18, on published 2.13.88 with the link dropped.** The defect does not reproduce any more, and the reason is the same one as for `ANOMALY-2026-09-13-conv-second-in-expression`: the syntax check now records a reference for every call in the expression, so nothing falls through to the `this.` case. Measured over the whole build, 1499 objects: no `await this.(cos|sin|nmax|sqrt|frac|abs|lines)(` anywhere in `output/`. The branch `fix/builtin-not-a-method` is kept, because it also guards the case where a class *does* define a method of a built-in's name, which has no upstream test
 
 ### ANOMALY-2026-09-14-class-constructor-eager — A class constructor runs before the program, not at first use
 
@@ -494,7 +496,7 @@ WRITE / 'after'.
 
 ### ANOMALY-2026-09-14-builtin-positional-argument — An unrecorded built-in is called positionally
 
-- Status: `fixed locally, PR parked`
+- Status: `gone upstream on 2.13.88, not by our fix`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/transpiler 2.13.86`, including the local build that already carried the earlier half of this fix
 - Affected ABAP statement, runtime API or adapter: any built-in function taking a single argument — `sin`, `cos`, `sqrt`, `exp` — called from inside an expression that carries more than one constructor expression
@@ -515,8 +517,9 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 - Impact on open-steamgate: the whole timeline. Twistzoomer was simply the first of the eight her sequence reached; the other seven were queued behind it. Deterministic, not a race — they chased concurrency first and it was a blind alley
 - Smallest safe workaround: `sin( val = x )` written out, or lift the argument into its own variable first
 - Upstream issue: none yet, branch `fix/builtin-not-a-method`, which carries both halves — the name and the argument shape — since they are the same defect one layer apart. It sits on `fix/conv-builtin-type-name` (PR #1842) because a built-in only goes unrecorded in an expression that also loses a constructor expression's type, so the test cannot be written without it; four other shapes were tried. **This is the tail of a defect this session fixed earlier and did not fix far enough.** `isBuiltinMethod` was taught to recognise built-ins the syntax check had not recorded, so the *name* came out right; `findMethodReference` still returns nothing for them, and the parameter transpiler falls back to a positional argument when it has no definition. Right function, wrong shape. A built-in now brings its own definition via `BuiltIn.searchBuiltin`
-- Regression-test location: `test/builtin/cos.ts` — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
-- Upstream version containing a fix: `unknown`
+- Regression-test location: `test/builtin/cos.ts` on the branch — runs the expression, and separately asserts that no `builtin.sin(` or `builtin.cos(` is followed by anything but a brace, so a regression fails on the shape rather than on a value that happens to be zero
+- **Checked 2026-09-18, on published 2.13.88.** `zcl_o4d_twistzoomer` line 59, the class this was found in, is the reproducer verbatim (`CONV f( '0.5' ) + sin( lv_t * mv_zoom_speed ) * CONV f( '0.3' )`) and now emits `abap.builtin.sin({val: …})`. Over the whole build there is no `abap.builtin.<fn>(` followed by anything but `{`
+- Upstream version containing a fix: `2.13.88`, indirectly
 
 ### DEBT-2026-09-14-no-push-to-abaplint — We can push a branch to the transpiler and not to abaplint
 
@@ -635,7 +638,7 @@ ENDLOOP.
 - Smallest safe workaround: do not read `sy-tabix` in a loop over a hashed table, which is also the rule on a system
 - Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, alongside the restore fix, since the two are siblings and one test file covers both
 - Regression-test location: `test/statements/loop.ts`, two cases: hashed gives `000`, sorted still gives `12`
-- Upstream version containing a fix: `unreleased, on main after 2.13.87`
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-13-sy-tabix-not-restored — An inner loop keeps the outer loop's `sy-tabix`
 
@@ -660,11 +663,11 @@ ENDLOOP.
 - Smallest safe workaround: read `sy-tabix` into a variable as the first statement of the loop body, before anything that might loop
 - Upstream issue: none yet, branch `fix/sy-tabix-restore` in `abaplint/transpiler`, commit `be5d4db9`. Save on entry, restore in the `finally` that already runs, so every exit path is covered by construction. Full suite 2224/133 before, 2227/130 after, and the three that moved are the new tests
 - Regression-test location: `test/statements/loop.ts`, three cases: nested, inner loop left with `EXIT`, and a method that loops called from a loop
-- Upstream version containing a fix: `unreleased, on main after 2.13.87`
+- Upstream version containing a fix: `2.13.88`
 
 ### DEBT-2026-09-13-runtime-not-linked — The transpiler is linked from our clone, the runtime is not
 
-- Status: `open`
+- Status: `not live, 2026-09-18` — both are published 2.13.89 and neither is a symlink, so the two cannot disagree today. The entry stays because the shape comes back with the next carried fix, and `transpiler:which` is the thing that would catch it
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler-cli` linked, `@abaplint/runtime 2.13.86` published
 - Affected ABAP statement, runtime API or adapter: none; a build-topology note
@@ -698,7 +701,7 @@ ENDLOOP.
 
 ### DEBT-2026-09-13-linked-transpiler — This tree may be built by a transpiler that is not published
 
-- Status: `accepted, with a banner`
+- Status: `paid, 2026-09-18` — the tree builds with published `@abaplint/transpiler` / `@abaplint/runtime` 2.13.89 and nothing is linked. The banner and the two switches stay, because the next unreleased fix will want them
 - Discovery date: `2026-09-13`
 - What it is: four transpiler defects found on oisee/vivid-vibes are fixed in a local branch of `abaplint/transpiler` (`fix/conv-builtin-type`) and not released. `npm link @abaplint/transpiler-cli` puts that build in a tree, which is what makes SMW0 content, the vivid-vibes effects and anything else those four fixes touch work at all
 - The cost, said plainly: a linked tree differs from a clean clone, so `npm test` can be green here and red in CI, and nothing about the repository says why. That is the same failure the W3MIMETABTYPE hunt cost a morning on, and it is worth having a rule about rather than a memory
@@ -706,11 +709,12 @@ ENDLOOP.
 - How to switch: `npm run transpiler:local` links the local build, `npm run transpiler:published` puts the released one back. `npm ci` and `npm install` silently drop the link, which the banner then says
 - Who is on it: the transpiler session's tree is linked; open-steamgate's is its own choice
 - How it ends: four pull requests upstream, one per fix, at which point the link comes out and this entry moves to the resolved section. The four are recorded above with their reproducers
+- **How it actually ended, 2026-09-18.** Three of the four (`#1843` the rearranger, `#1844` the percent, `#1846` the W3MI name) went upstream and are released. The fourth, `fix/builtin-not-a-method`, was never sent and does not need to be: `@abaplint/core` closed the underlying defect from the other end, and the reproducer has stopped reproducing (see the two entries above). `node tools/osd-transpiler.mjs` now prints `published` on both lines
 - Upstream issue: none yet, deferred by Alice 2026-09-13
 
 ### DEBT-2026-09-14-ci-pinned-transpiler — The public deployment is built by an unmerged branch
 
-- Status: `accepted, with a way out written into the step`
+- Status: `half paid, 2026-09-18` — `OSD_TRANSPILER_REF` is empty and the build step is gone; `OSD_CORE_REF` and `OSD_GUI_REF` remain, and so does this entry until open-abap-core has `SCMS_BINARY_TO_XSTRING` and the `WWWDATA_IMPORT` walk, and open-abap-gui the inbound `sapevent`
 - Discovery date: `2026-09-14`
 - What it is: the preview deployment builds a transpiler from a pinned commit of `oisee/transpiler` (`osd-build`, `c5a2290f`) and links it, instead of taking what npm resolves. Decided by Alice: "можно сделать один раз (или добавить режим для этого) — и записать в техдолг"
 - Why it had to happen: on a published transpiler a runner writes **no** `*.w3mi.data.*` files at all, so the bundle CI builds is not the bundle this repository tests. #1845 (a binary file survives the copy to output) and #1846 (a W3MI object keyed on its name, not its file name) are both still open. Measured on the runner: `ENOENT: output/zo4d_05_copper%2epng.w3mi.data.png`. Before this, the public site had been serving a build from before the media, the Zork channel and the two new tiles — 17.7 MB of `sw.js` against the 22.8 MB built here — and nobody had noticed, because a failed deployment leaves the previous one standing
@@ -718,11 +722,12 @@ ENDLOOP.
 - What keeps it honest: `OSD_TRANSPILER_REF` is a plain environment variable at the top of the workflow. Empty means "take what npm gives" and the whole step is skipped, so the day the fixes are released the debt is paid by deleting one line. `tools/osd-transpiler.mjs` runs at the end of the step and prints which transpiler produced the build, into the run log
 - Related: `DEBT-2026-09-13-linked-transpiler`, which is the same divergence on a developer's machine. This one is that divergence made public
 - How it ends: #1845 and #1846 merged and released, then `OSD_TRANSPILER_REF: ""` and the step goes
-- Upstream issue: the two pull requests above
+- **Half of it ended 2026-09-18**: 2.13.88 carries #1844, #1845, #1846, #1863 and #1869, and 2.13.87 carried #1843 and #1847, so the transpiler pin and the whole clone-and-compile step came out. What is left pinned is the two ABAP libraries, which are a different debt wearing this one's name: `OSD_CORE_REF` (open-abap-core, `SCMS_BINARY_TO_XSTRING` and the `WWWDATA_IMPORT` remainder) and `OSD_GUI_REF` (open-abap-gui, the `sapevent` branch). Neither has been offered upstream yet
+- Upstream issue: the two pull requests above, both merged and released
 
 ### ANOMALY-2026-09-13-binary-file-to-output — A binary file is corrupted on the way to output
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1845, released in 2.13.88`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler-cli 2.13.86`
 - Affected ABAP statement, runtime API or adapter: the CLI's copy of non-ABAP files, `FileOperations.readAllFiles` and `writeFiles`
@@ -732,13 +737,13 @@ ENDLOOP.
 - Actual open-abap behaviour: the file was read and written as UTF-8, so every byte above 0x7F became the replacement character: an 11770-byte PNG arrived as 20175 bytes and no image. Nothing reported an error, because a corrupted PNG is a perfectly valid file
 - Impact on open-steamgate: every image and every sound in her demo. It is the reason the media chain could not be tested end to end until it was fixed
 - Smallest safe workaround: none; exclude the binary objects from the transpile and copy them by hand
-- Upstream issue: none yet, branch `fix/binary-file-copy`. Files matching `\.(w3mi|smim)\.data\.` are read and written as `latin1`. `binary` was measured against `latin1` on Node and Bun and is the same alias, so the plainer name is used
+- Upstream issue: PR [abaplint/transpiler#1845](https://github.com/abaplint/transpiler/pull/1845), merged 2026-09-18 as `39af3f1c`, unchanged from the branch (`packages/cli/src/file_operations.ts` is byte-identical to `fix/binary-file-copy`). Files matching `\.(w3mi|smim)\.data\.` are read and written as `latin1`. `binary` was measured against `latin1` on Node and Bun and is the same alias, so the plainer name is used
 - Regression-test location: `packages/cli` — the fix is in `file_operations.ts`; the end-to-end proof is open-steamgate serving the 11770-byte PNG byte-identical through the whole ABAP chain
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-13-percent-in-filename — A percent in a file name is not escaped in the import specifier
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1844, released in 2.13.88`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: not ABAP — any object whose abapGit file name carries a percent, which is every W3MI (Web Repository) object, because abapGit encodes the dot of `ZO4D_06_PLASMA.PNG` as `zo4d_06_plasma%2epng`
@@ -748,13 +753,13 @@ ENDLOOP.
 - Actual open-abap behaviour: `init.mjs` throws `ERR_MODULE_NOT_FOUND` at boot with the module sitting beside it, so adding an image to a build takes the whole runtime down: the ADT façade and the OData front never start, not only the images
 - Impact on open-steamgate: found by open-steamgate on oisee/vivid-vibes, whose media are W3MI objects. Nothing of ours carries a percent today
 - Smallest safe workaround: exclude `\.w3mi\.` from the transpile, which is what the vivid-vibes staging did until this was fixed
-- Upstream issue: none yet, branch `fix/percent-in-filename`. The percent is escaped before the slash in `escapeNamespaceFilename`, and the order matters because escaping it afterwards would corrupt the `%23` the same function writes for a namespace. Both specifier writers and the CLI's `sourceMappingURL` use it
-- Regression-test location: the transpiler's `test/files.ts`, local branch
-- Upstream version containing a fix: `unknown`
+- Upstream issue: PR [abaplint/transpiler#1844](https://github.com/abaplint/transpiler/pull/1844), merged 2026-09-18 as `f6689840`. The percent is escaped before the slash in `escapeNamespaceFilename`, and the order matters because escaping it afterwards would corrupt the `%23` the same function writes for a namespace. Both specifier writers and the CLI's `sourceMappingURL` use it
+- Regression-test location: the transpiler's `test/files.ts`, upstream since #1844
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-13-w3mi-objid-encoded — The W3MI registry is keyed on the encoded file name, not the object name
 
-- Status: `fixed locally, PR parked`
+- Status: `fixed upstream: abaplint/transpiler#1846, released in 2.13.88`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/transpiler 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FROM wwwparams WHERE objid = ...` and the W3MI registry the transpiler generates
@@ -764,10 +769,10 @@ ENDLOOP.
 - Actual open-abap behaviour: the registry and the `wwwparams` rows are keyed on the encoded name, `ZOISEE-EAR-02%2EMP3`, while the object's own XML carries `ZOISEE-EAR-02.MP3`, so a handler that asks the way SAP's API is asked finds nothing and returns empty rather than failing. The percent-escape is an abapGit filename spelling that should never have become a key
 - Impact on open-steamgate: this is what stops the audio in the running demo. The images work only because they were asked for by the encoded name while testing, which is the failure mode in miniature: the wrong key looks like a working one until someone uses the right one
 - Smallest safe workaround: ask with the encoded name
-- **Addendum, 2026-09-16.** Seen again, from the other side: `npm i --no-save postject` (for a Node single-executable experiment) rewrote `node_modules` and replaced the link to the local build with the published `@abaplint/transpiler` 2.13.87, which does not carry this fix. The next build named the object `ZO4D_00_SALES%2EPNG` and `init.mjs` imported `./zo4d_00_sales%2epng.w3mi.mjs`, which Node decodes to a dot and cannot find while Bun resolves literally and can — so the compiled binary served the generation and every Node host failed at boot. `npm run transpiler:local` puts the link back; `node tools/osd-transpiler.mjs` says which build is in use. Both halves of the W3MI naming, this entry and `ANOMALY-2026-09-13-percent-in-filename`, are still local only, and this is the cost of that.
-- Upstream issue: none yet, branch `fix/w3mi-objid` in `abaplint/transpiler`. The registry, `wwwparams` and `tadir` are all keyed on `<NAME>` now. Corrected 2026-09-14: this was the transpiler's code all along, not open-steamgate's, and saying otherwise nearly left it unowned
-- Regression-test location: none
-- Upstream version containing a fix: `unknown`
+- **Addendum, 2026-09-16.** Seen again, from the other side: `npm i --no-save postject` (for a Node single-executable experiment) rewrote `node_modules` and replaced the link to the local build with the published `@abaplint/transpiler` 2.13.87, which does not carry this fix. The next build named the object `ZO4D_00_SALES%2EPNG` and `init.mjs` imported `./zo4d_00_sales%2epng.w3mi.mjs`, which Node decodes to a dot and cannot find while Bun resolves literally and can — so the compiled binary served the generation and every Node host failed at boot. `npm run transpiler:local` puts the link back; `node tools/osd-transpiler.mjs` says which build is in use. Both halves of the W3MI naming, this entry and `ANOMALY-2026-09-13-percent-in-filename`, were still local only, and this is the cost of that. Both are released in 2.13.88 (2026-09-18), so the link is gone and `npm install` can no longer undo them.
+- Upstream issue: PR [abaplint/transpiler#1846](https://github.com/abaplint/transpiler/pull/1846), merged 2026-09-18 as `8a0df788`. The registry, `wwwparams` and `tadir` are all keyed on `<NAME>` now. **That merge commit also carried a change to `operators/mod.ts` that nobody on this side wrote — see `ANOMALY-2026-09-16-mod-result-integer`.** Corrected 2026-09-14: this was the transpiler's code all along, not open-steamgate's, and saying otherwise nearly left it unowned
+- Regression-test location: `packages/transpiler/test/files.ts` upstream, four cases (the registry, `wwwparams`/`tadir`, a `<NAME>` inside the parameters, and the fall back to the file name)
+- Upstream version containing a fix: `2.13.88`
 
 ### ANOMALY-2026-09-13-default-ignore — `DEFAULT IGNORE` is parsed and not honoured, and the project cannot switch the rule off
 
