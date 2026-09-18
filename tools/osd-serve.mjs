@@ -12,6 +12,7 @@
 // process channel: it says "ready" with the port it got, and it exits when
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
+import {dialogStep} from "./osd-dialog-step.mjs";
 import express from "express";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -93,23 +94,10 @@ app.get("/osd/dumps", function (req, res) {
   res.json(dumps.slice().reverse());
 });
 
-// The end of a dialog step. An AS ABAP commits the database implicitly
-// when a request's work is done and rolls it back when the request ends in
-// an uncaught exception; a DPC that inserts without a COMMIT WORK of its
-// own relies on that. The in-memory client hid the rule — its export at
-// exit committed whatever was open — and the file client does not, so an
-// OData write once vanished at the recycle. This is the rule, said once.
+// The end of a dialog step lives in tools/osd-dialog-step.mjs, because it is
+// the kernel's rule and every host that runs the ABAP needs it -- this one,
+// test/start.mjs's inline front and the browser preview alike.
 const connection = () => globalThis.abap.context.databaseConnections.DEFAULT;
-async function dialogStep(work) {
-  try {
-    const result = await work();
-    await connection().commit?.();
-    return result;
-  } catch (e) {
-    await connection().rollback?.();
-    throw e;
-  }
-}
 
 // The door for the rows: the façade's data preview asks here instead of
 // booting a second runtime of its own, so what a client sees in a preview

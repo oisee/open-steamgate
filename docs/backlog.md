@@ -46,7 +46,7 @@ B — the runtime underneath: what the answers are made of
 ├─ B.3  OData V4                                                    a track of its own
 ├─ B.4  the RFC runtime, both directions                            open
 ├─ B.5  multi-record framing, measured against a long answer        open
-├─ B.6  the client and MANDT story                                  first-order risk
+├─ B.6  the client and MANDT story                             dormant + a detector
 ├─ B.7  the database seam beyond three backends                     open
 ├─ B.8  SICF and SM59 as applications, the way SEGW is one          open
 ├─ B.9  a forced build mutates a generation under its name          open
@@ -99,6 +99,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.9  SE16-shaped data browser: a page over reads we already have  open, cheap
 ├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument        open, two for one
 ├─ G.1c the name is ours and the picture is the joke                DONE 09-18
+├─ G.1d the naming rule as a check, not as a list                   open, small
 ├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
@@ -272,6 +273,36 @@ G.1c The name is ours and the picture is the joke        [S]  DONE 2026-09-18
         name, the absence of the old one, the slogan, the scene and the
         absence of any <img>; 17 passing, and the six browser tests pass
 
+G.1d The naming rule as a check, not as a list                           [S]
+     Raised 2026-09-18 by fable-osd, who caught her own README headline
+     breaking the rule Alice set in G.1c, and agreed with this session.
+     ├─ the rule: a name **we give ourselves** carries no third-party brand
+     │  word; a **statement of fact about their software** keeps it, because
+     │  without it the sentence would be false. "in a real SAP system code
+     │  is branched by transports and data is not branched at all" stays as
+     │  it is; a page title does not
+     ├─ the headline settles as **`An ABAP application server you can
+     │  clone`**, with the boundary in the next sentence: not an ERP, no
+     │  business applications, a subset of the language and of the
+     │  dictionary. The noun is a claim of compatibility and people read it
+     │  literally, so the line that says what is *not* here is what keeps
+     │  the headline true -- it is a definition of scope, not an apology
+     ├─ why a check and not a document: "no live identifiers" sat in
+     │  CLAUDE.md from the first week and did no work at all -- both leaks
+     │  were caught by attention, and attention runs out. A list of what we
+     │  call what goes stale silently
+     ├─ so scan the **naming positions**, the way `npm run leak` scans byte
+     │  views: `<title>`, the launchpad title and tile texts, `shellLogo`
+     │  and icons, pack names and `osd-pack.json`, ICF node texts and
+     │  `ZOSD_SVC`, class descriptions, the page titles ABAP writes in
+     │  backtick literals. A third-party brand word in one of those fails
+     └─ `.naming-allow.json`, tracked, every entry with a reason, exactly
+        like `.leak-allow.json` -- so an exception can be told from a way of
+        making the build green. Stated limit: a text scan cannot tell "what
+        we call ourselves" from "what we say about them"; the **position**
+        carries that, which is why positions are what is checked, and prose
+        stays a person's job
+
 G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      Alice, 2026-09-18: "кастомная SE80-like транзакция - в которой можно
      будет редактировать код, CDS (ахаха SAP!) и AMDP (охохо SAP!!!) - и
@@ -438,11 +469,82 @@ W — what this actually is, and the two things to bet on
 │    If a system can be cloned it can be branched, and a git branch of an
 │    entire system *including its data* does not exist in the ABAP world at
 │    all: there, code is branched by transports and data is not branched by
-│    anything. We have built what it needs almost by accident -- layered
-│    input folders with an override order, seeding from captures, immutable
-│    generations. The shape is not "a code editor": it is **two systems side
-│    by side and a switch between them** -- the same system on two branches,
+│    anything. The shape is not "a code editor": it is **two systems side by
+│    side and a switch between them** -- the same system on two branches,
 │    running twice, and a comparison of what each answers.
+│    ├─ **why it is possible here and not there, and it is not about code.**
+│    │  ABAP branches code after a fashion, through transports. It is the
+│    │  data: in a system the database is one and shared, so "the same
+│    │  system with other data" is another system somebody has to install.
+│    │  Here the database is a **file**, the seed is a **repository
+│    │  artefact** (TABU JSON under `data/`), and a generation is immutable
+│    │  and addressed by the hash of its inputs. So a branch carries state
+│    │  as well as sources, and two branches cannot physically disturb each
+│    │  other. **This fell out of decisions taken for entirely other
+│    │  reasons**, which is what makes it the most valuable accident here.
+│    ├─ **the minimum is nearly assembled**: take a git ref, unfold it into
+│    │  a worktree, build it (the build is cached by input hash, so the
+│    │  second branch is often free), serve it on its own port with its own
+│    │  database file. Exactly **one** new artefact is missing: a **request
+│    │  log and its replay** -- a list of HTTP calls run against both.
+│    │  The log and the replay are an hour. **The normaliser is the work**,
+│    │  and the estimate belongs to it, not to the plumbing.
+│    ├─ **the order, and it is not the obvious one.** The minimum is the
+│    │  *first* sieve only -- responses -- and it does not touch the SQL
+│    │  seam at all. So W.1 and G.10 do not compete for it: the order is
+│    │  W.1 minimum, then capture SQL as the second sieve, then G.10 as a
+│    │  screen over a log that by then already exists. Backwards, G.10 is a
+│    │  handsome page with no consumer and no normaliser behind it -- and
+│    │  the normaliser is the whole job (fable-osd, 2026-09-18).
+│    ├─ **three sieves, and the interesting cases live between them**:
+│    │  ├─ *responses*, normalised for order, time and identifiers
+│    │  ├─ *SQL*, taken at the one seam every statement goes through (O.1)
+│    │  └─ *steps*, a statement with its variables (O.2)
+│    │  Each is strictly finer than the last, and the **most valuable case
+│    │  is when the responses agree and the SQL differs**: the right answer
+│    │  arrived by accident, and that is what later breaks on a change of
+│    │  data volume or row order. No ordinary test sees it.
+│    ├─ **what this does to the oracle track, and it is the turn that
+│    │  matters.** Until now "oracle" meant *us against a real system*:
+│    │  expensive, by hand, only when A4H is up. Branch comparison is *us
+│    │  against us* -- free, and in ordinary CI. And most of the questions
+│    │  we actually ask an oracle are "did my change break anything?",
+│    │  which needs no real system at all. A4H stays necessary for exactly
+│    │  one class: "and how is it really?" That is much cheaper than we had
+│    │  been assuming.
+│    ├─ **three uses, in ascending order of cheek**: our own runtime's
+│    │  regression (one system on two transpiler versions -- it would have
+│    │  caught the release-bundle slowdown and the sort defect before either
+│    │  was argued about); **A/B of somebody else's code** -- "prove your
+│    │  refactoring changed nothing", which does not exist in the ABAP world
+│    │  and is probably the first honest statement of use for an outsider;
+│    │  and a **behavioural bisect**, because generations are immutable and
+│    │  input-addressed, so the comparison is a predicate for `git bisect`
+│    │  and "which commit changed this answer" stops being an investigation.
+│    ├─ **where tools like this die: noise.** If the difference is never
+│    │  empty, nobody looks at it after a week. So the discipline is the
+│    │  opposite of the intuition -- **begin where there must be no
+│    │  difference** (one branch on two runtimes, one system twice) and get
+│    │  the instrument to stay silent. Calibrating the normaliser on the
+│    │  knowingly identical comes before pointing it at a real change. And a
+│    │  way to say "this difference is expected and approved" is needed from
+│    │  the start, or every deliberate change paints everything red.
+│    ├─ **on HANA, isolation is not by file.** Two branches that point at
+│    │  one HANA server must live in **different schemas**, or the property
+│    │  the whole bet rests on -- a branch cannot disturb another branch --
+│    │  stops holding exactly where the interesting work is. A question of
+│    │  deployment and naming, and it has to be answered before the second
+│    │  branch is ever pointed at a server somebody else is using.
+│    ├─ **one question to settle out loud**, because it changes what a
+│    │  comparison means: does the second branch start from the first's data
+│    │  or from its own seed? Both are useful and they are different --
+│    │  a shared seed is a clean A/B of code; its own data checks that a
+│    │  migration or another seed does not change behaviour. Unnamed, people
+│    │  get different results and call the instrument unreliable.
+│    └─ and it has an obvious showcase: two systems on one screen, the same
+│       request into both, the difference highlighted -- a demonstration and
+│       a working instrument at once. In a world where branching a whole
+│       system is impossible in principle, the picture alone is the joke.
 ├─ W.2  **the differential debugger**                           the other bet
 │    Three things that arrived separately: the frame oracle (the same ABAP
 │    computes a picture here and on a real system, and we diff), a step
@@ -513,9 +615,53 @@ tests pass" becomes "we answer the way a system answers". U.2, the status
 app on the browser deployment, is done: there is no façade there, so the
 worker says what it knows about itself and leaves the rest visibly empty.
 
+## The order of work, settled 2026-09-18
+
+Alice asked for the queue to be sorted into three, and it was agreed between
+the two sessions rather than decided by one. A bucket is not a priority
+ranking: it says **what kind of thing an item is**, and the three kinds are
+paid for differently.
+
+**Loud per hour.** Every one of these is something a stranger can be shown.
+1. **G.8, the AMDP sandbox** — SQLScript that can be edited and run from the
+   screen, which cannot be done in the original at all. One honest
+   limitation to carry with it: it lives where there is a HANA, so it will
+   **not be on the public preview** until SQLScript runs on DuckDB (W.3).
+   Without that line the item promises a link that never appears.
+2. **G.9, the SE16-shaped data browser** — the cheapest visible thing on the
+   whole list, over reads that already exist, and the one a person actually
+   uses more than the rest put together.
+3. **W.1 minimum** — the request log, its replay and the first sieve. See
+   W.1 for why this comes before G.10 and not after it.
+4. **G.10, the ST05-shaped SQL trace** — a screen over a log that W.1 will
+   by then be filling, which is what makes it nearly free.
+
+**Small and safe.** Low risk, and each one removes a future evening.
+- the exception that walked past the transactional bracket — **done
+  2026-09-18**, and it was ours, not SAP's: see `docs/luw-buffer.md`
+- B.14 (a cast in a CDS view drops the field), B.15 (does the pipeline read
+  a view entity) — one build each
+- E.5, the launchpad asking for a config we do not serve, **first among
+  these if it shows in the console of the public preview**: a breakage a
+  stranger sees costs more than it costs to fix
+- E.4, the Zork console not fitting its box
+- B.9, a forced build mutating a generation under its own name
+- `node tools/osd-inputs.mjs` after `src/luw` and `src/amdp` — one command,
+  and it catches the silent name override that has cost an evening before
+  (run 2026-09-18: two overrides, both intended and both named)
+
+**Waiting its turn, and waiting is the right answer.** Structural work whose
+cost is real and whose harm is already contained.
+- B.18, the release bundle 3.5x slower than the same build. Not deferral:
+  the rule "no performance number is taken through a release bundle" closes
+  the harm, so the bundle is worth fixing and is not worth hurrying.
+- B.6, the client and MANDT story — dormant, and W.1 makes it *more*
+  dormant, not less: see B.6.
+- B.1 (SADL beyond read-only), B.3 (OData V4), A.12 (SRVD + SRVB)
+- D.3 / D.4, the RFC server whole; G.6, a screen out of a class interface
+
 **What I would take after those:** B.1 (SADL beyond one table — A.11 walked
-half of that road already), B.6 (MANDT, the oldest first-order risk on the
-list), D.3 (the signature -> metadata graph, now that D.1 has put a channel
+half of that road already), D.3 (the signature -> metadata graph, now that D.1 has put a channel
 under it), then A.12 (SRVD, the native shape of a service definition).
 
 > The numbered sections below ("The standing list", 0 to 8) are the older
@@ -991,11 +1137,20 @@ B.6  The client/MANDT story — dormant, with a detector to build      [S+T]
      │  runtime serving more than one client, or running a customer's real
      │  DPC that branches on `sy-mandt`. That is why it sits below G.5/G.6
      │  and that is correct — what was wrong was calling it an alarm
-     └─ **turn it into a detector rather than a standing worry**, the way
-        `npm run leak` was made: fail the build when transpiled code reads
-        `sy-mandt`, or when a SELECT hits a CLIDEP table with no explicit
-        client condition. An alarm nobody touches for a year does not work;
-        a check does
+     ├─ **turn it into a detector rather than a standing worry**, the way
+     │  `npm run leak` was made: fail the build when transpiled code reads
+     │  `sy-mandt`, or when a SELECT hits a CLIDEP table with no explicit
+     │  client condition. An alarm nobody touches for a year does not work;
+     │  a check does
+     └─ and W.1 lowers it further rather than raising it (fable-osd,
+        2026-09-18): a client is SAP's own multi-tenancy -- one instance,
+        several isolated sets of data -- and a **branch** answers exactly
+        that need here, with its own database, its own seed and its own
+        port. We get the isolation from a file rather than from a column,
+        and the better W.1 works the less MANDT is wanted. HANA does not
+        change this either, with one caveat that is not about MANDT at all:
+        two branches on one HANA server must sit in different schemas, or
+        the isolation-by-file property stops holding there (W.1)
 
 B.8  SICF and SM59 as applications — **merged into G.5**, see there      [S]
      ├─ Alice, 2026-09-16: a SICF editor over the *.sicf.xml / *.sapc.xml the

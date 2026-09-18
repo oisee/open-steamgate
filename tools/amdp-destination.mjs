@@ -58,6 +58,14 @@ export class AmdpDestination {
 
   async #connect() {
     if (this.client !== undefined) return this.client;
+    // A host that was built without a HANA driver -- the browser preview,
+    // where the bundle leaves hdb and tools/amdp-run.mjs out -- still has this
+    // destination, because a developer needs "there is no HANA here" rather
+    // than "unknown destination AMDP". Say that, rather than fail on an
+    // undefined import.
+    if (typeof connection !== "function") {
+      throw new Error("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a database that speaks SQLScript");
+    }
     const hdb = (await import("hdb")).default;
     this.client = hdb.createClient(connection());
     await new Promise((resolve, reject) => this.client.connect((e) => (e ? reject(e) : resolve())));

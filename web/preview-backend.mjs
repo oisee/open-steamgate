@@ -6,6 +6,7 @@
 // ZCL_STG_HTTP_HANDLER. This module does the same with the service worker in
 // the role of express and sql.js compiled to JavaScript in the role of the
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
+import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
 import {seed, buildId} from "./generated/seed.mjs";
@@ -164,7 +165,12 @@ async function invoke({method, path, search = "", headers = {}, body}) {
   if (STATUS_SERVICE.test(path)) {
     await refreshStatus();
   }
-  await cl_express_icf_shim.run({
+  // the kernel's end of a dialog step, the same one the served hosts use:
+  // commit when the work is done, roll back when it ends in an exception
+  // nobody declared. There is no process to recycle here, so a request that
+  // dumped used to leave its rows pending for the next write to adopt
+  // (tools/osd-dialog-step.mjs)
+  await dialogStep(() => cl_express_icf_shim.run({
     req: {
       body: Buffer.from(body ?? new Uint8Array(0)),
       headers,
@@ -175,7 +181,7 @@ async function invoke({method, path, search = "", headers = {}, body}) {
     res,
     class: service.handler,
     base: new abap.types.String().set(service.path),
-  });
+  }));
   return {status, headers: responseHeaders, body: data};
 }
 

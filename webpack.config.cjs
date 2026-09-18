@@ -95,6 +95,14 @@ module.exports = {
     // the same for the SQLite file client: STG_DB=file is a process with a
     // disk, and node:sqlite is not a thing a service worker can resolve
     new webpack.IgnorePlugin({resourceRegExp: /sqlite-file-client\.mjs$/}),
+    // and for HANA, which is a TCP driver and a node:url the browser polyfill
+    // does not have (fileURLToPath). test/setup.mjs installs the AMDP
+    // destination whatever the database is, so the graph reaches these two
+    // even in a preview that will never have a server to talk to; the
+    // destination itself says so when it is called (tools/amdp-destination.mjs).
+    new webpack.IgnorePlugin({resourceRegExp: /^hdb$/}),
+    new webpack.IgnorePlugin({resourceRegExp: /hana-client\.mjs$/}),
+    new webpack.IgnorePlugin({resourceRegExp: /amdp-run\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

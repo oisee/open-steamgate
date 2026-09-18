@@ -1,3 +1,4 @@
+import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
 import {tilesOf, webappsOf} from "../tools/osd-packs.mjs";
@@ -305,12 +306,17 @@ export function startServer(quiet) {
   } else {
     app.all("/sap/opu/odata/sap/*", async function (req, res) {
       try {
-        await inline.cl_express_icf_shim.run({
+        // the kernel's end of a dialog step: commit when the work is done,
+        // roll back when it ends in an exception nobody declared. Without it
+        // a request that dumps leaves its rows pending on the connection and
+        // the next modifying request's fencing COMMIT WORK adopts them
+        // (tools/osd-dialog-step.mjs)
+        await dialogStep(() => inline.cl_express_icf_shim.run({
           req,
           res,
           class: "ZCL_STG_HTTP_HANDLER",
           base: new abap.types.String().set("/sap/opu/odata/sap"),
-        });
+        }));
       } catch (e) {
         // a runtime (kernel) error is not an ABAP exception the dispatcher can
         // catch; answer instead of leaving the client hanging

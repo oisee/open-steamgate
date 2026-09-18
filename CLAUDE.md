@@ -445,6 +445,22 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   delivers a message while the page's socket is still CONNECTING: `onmessage`
   runs before `onopen` and the page's reply is refused as "the socket is not
   open". The page is right; the ordering was wrong (`web/preview-backend.mjs`).
+- **A rule written once, next to its one caller, does not survive the second
+  caller.** The end of a dialog step -- commit when the work is done, roll
+  back when it ends in an exception nobody declared -- was written correctly
+  in `tools/osd-serve.mjs`, with a comment ending "This is the rule, said
+  once." It was said once, in one host out of three. `test/start.mjs`'s
+  inline front and `web/preview-backend.mjs` were written afterwards and
+  neither copied it, so there a request that dumped left its rows pending on
+  the connection and the **next** modifying request's fencing `COMMIT WORK`
+  adopted them: a half-write that becomes permanent one request later and
+  looks like nothing in between. It is the kernel's job and not the
+  application's -- on a system such an exception is a short dump and a dump
+  ends the LUW -- so it now lives in `tools/osd-dialog-step.mjs` and all
+  three hosts call it (`docs/luw-buffer.md`, test in `test/mocha.mjs`,
+  checked failing without it). The general form: when a rule is about **what
+  every host must do**, a comment saying so is not where it goes; a module
+  they all import is.
 - **Verify a built artefact by its code, never by a comment, and never by
   the build command exiting 0.** Three false greens in one day, 2026-09-14,
   all the same shape: a test that called `install()` itself and passed while

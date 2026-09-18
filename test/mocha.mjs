@@ -397,6 +397,44 @@ describe("wire", () => {
     expect((await fetch(`${BASE}/TravelSet('T0001')`)).status, "the seeded rows survived").to.equal(200);
   });
 
+  it("a request that dumps leaves nothing behind, not even for the next write", async () => {
+    const crlf = "\r\n";
+    // An exception nobody declared: Seats is a number and "abc" is not one, so
+    // the entry provider raises CX_SY_CONVERSION_NO_NUMBER, which is none of
+    // the four gateway families the dispatcher catches. It therefore unwinds
+    // past the ROLLBACK WORK of the changeset -- and the row the first request
+    // of the changeset had already written stays pending on the connection.
+    //
+    // That is the half-write. Nothing reads it back, because it is committed
+    // by nobody; it becomes permanent one request later, when the *next*
+    // modifying request opens with its fencing COMMIT WORK and adopts it.
+    // Ending the LUW on a dump is the kernel's job rather than the ABAP's, so
+    // it lives in tools/osd-dialog-step.mjs and every host uses it.
+    const part = (body) => [
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "POST TravelSet HTTP/1.1", "Content-Type: application/json", "", JSON.stringify(body),
+    ].join(crlf);
+    const body = [
+      "--b", "Content-Type: multipart/mixed; boundary=cs", "",
+      part({TravelId: "T0920", Description: "written before the dump", Seats: 1}),
+      part({TravelId: "T0921", Description: "dumps on Seats", Seats: "abc"}),
+      "--cs--", "", "--b--", "",
+    ].join(crlf);
+    const headers = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
+    const res = await fetch(BASE + "/$batch", {method: "POST", headers: {"content-type": "multipart/mixed; boundary=b", "x-csrf-token": "open-steamgate"}, body});
+    expect(res.status, "the dump is the host's to answer, not the dispatcher's").to.equal(500);
+
+    // the next modifying request: its fence is what used to make the
+    // half-write permanent
+    const next = await fetch(BASE + "/TravelSet", {method: "POST", headers, body: JSON.stringify({TravelId: "T0930", Description: "the request after the dump", Seats: 1})});
+    expect(next.status, "and the system still works afterwards").to.equal(201);
+
+    expect((await fetch(`${BASE}/TravelSet('T0920')`)).status, "the row written before the dump is gone").to.equal(404);
+    expect((await fetch(`${BASE}/TravelSet('T0921')`)).status, "and the one that dumped never existed").to.equal(404);
+
+    await fetch(`${BASE}/TravelSet('T0930')`, {method: "DELETE", headers});
+  });
+
   it("CSRF token fetch is answered", async () => {
     const res = await fetch(BASE + "/", {headers: {"x-csrf-token": "Fetch"}});
     expect(res.status).to.equal(200);

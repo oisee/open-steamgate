@@ -762,7 +762,14 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("the local package opens straight to the roots, and holds nothing itself", async () => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24TMP", {method: "POST"})).text();
       const rows = [...xml.matchAll(/<OBJECT_TYPE>([^<]*)<\/OBJECT_TYPE><OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/g)].map((m) => `${m[1]} ${m[2]}`);
-      expect(rows, "every root, with no package in between").to.include.members(["DEVC/K $STG", "DEVC/K $OSD", "DEVC/K $ZOSD_TEST"]);
+      // $STG and $ZOSD_TEST are in every tree. $OSD is not: it is the parent
+      // of imported repositories (tools/osd-store.mjs), and since o4d, zork
+      // and lsd became packs rather than clones under local/ there is nothing
+      // imported here to hang under it. An absent $OSD is therefore the
+      // correct answer and not a missing root; test/osd-import.mjs is where
+      // the import case is checked.
+      expect(rows, "every root, with no package in between").to.include.members(["DEVC/K $STG", "DEVC/K $ZOSD_TEST"]);
+      expect(rows.some((row) => row.includes("$STG/")), "a root, not a path to one").to.equal(false);
       const doc = await (await call("/packages/$TMP")).text();
       expect(doc).to.contain('adtcore:name="$TMP"');
     });

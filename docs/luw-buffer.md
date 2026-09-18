@@ -61,6 +61,53 @@ written. It is one row that is there, with new content.
 A create stays a create however often it is updated afterwards. Everything
 else takes the later operation.
 
+## The bracket, and what ends it when nothing catches
+
+One modifying request is one LUW. `ZCL_STG_HTTP_HANDLER` opens with a fencing
+`COMMIT WORK` -- nothing in this system commits on its own, so without it a
+later `ROLLBACK WORK` would reach back to whatever the process last wrote,
+including the tables the generation writes at boot -- and closes with a
+`COMMIT WORK` or, when the answer is 400 or worse, a `ROLLBACK WORK`.
+`ZCL_STG_BATCH` does the same around a changeset, which is why `$batch` is
+excluded from the handler's bracket: the changesets own their own.
+
+That covers every failure the dispatcher *catches*. It does not cover the
+failure it does not: an exception nobody declared -- a conversion, a missing
+table line, a zero divide -- is none of the four gateway families
+`zcl_stg_dispatcher=>dispatch` catches, so it unwinds straight past the
+`ROLLBACK WORK` below it. The rows the request had already written stay
+pending on the connection, uncommitted and invisible; the **next** modifying
+request opens with its fencing `COMMIT WORK` and adopts them. A half-write
+becomes permanent one request later, and nothing in between looks wrong.
+
+Ending the LUW on a dump is the **kernel's** job, not the application's: on a
+system such an exception is a short dump, and a dump rolls the LUW back. So
+the rule lives in `tools/osd-dialog-step.mjs`, in one file, and every host
+that runs the ABAP calls it -- `tools/osd-serve.mjs` (the binary and the work
+processes), `test/start.mjs`'s inline front, and `web/preview-backend.mjs`.
+Until 2026-09-18 only the first of the three had it, which is the part worth
+remembering: the rule had been written down once, correctly, next to one
+caller. Two other hosts were written afterwards and neither copied it, and
+nothing said so, because the half-write is silent by construction.
+
+`test/mocha.mjs`, "a request that dumps leaves nothing behind, not even for
+the next write", is the reproduction: a changeset whose first request writes a
+row and whose second sets `Seats` to `"abc"`, then an ordinary write, then a
+read of the first row. It fails without the bracket and passes with it.
+
+### What the bracket still does not reach
+
+- **A function import declared as a GET.** The handler brackets by method, so
+  an action mapped to `GET` -- which SEGW allows and some services use --
+  writes outside the bracket entirely. Neither the fence nor the rollback
+  applies to it. Declaring such an operation `POST` is the fix at the model
+  level; bracketing by *what the operation does* rather than by its verb is
+  the fix at the runtime level, and it is not built.
+- **Two modifying requests in one work process.** They share a connection, so
+  their brackets are not isolated from each other. Nothing in the suite
+  interleaves them today, so this is not known to be broken -- it is known to
+  be unmeasured, which is a different thing.
+
 ## What is not built yet
 
 - **The save sequence.** `delta( )` gives the changes in order; nothing yet

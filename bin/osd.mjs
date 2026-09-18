@@ -74,6 +74,8 @@ const GENERATORS = {
   "stg-compile.mjs": () => import("../tools/stg-compile.mjs"),
   "segw-registry.mjs": () => import("../tools/segw-registry.mjs"),
   "segw-shlp.mjs": () => import("../tools/segw-shlp.mjs"),
+  "amdp-gen.mjs": () => import("../tools/amdp-gen.mjs"),
+  "amdp-tablefunc.mjs": () => import("../tools/amdp-tablefunc.mjs"),
   "osd-fm-registry.mjs": () => import("../tools/osd-fm-registry.mjs"),
   "osd-tran-registry.mjs": () => import("../tools/osd-tran-registry.mjs"),
 };
