@@ -92,6 +92,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.2  prove a sapevent click comes back                           DONE 09-18
 ├─ G.3  a transaction node that actually runs                       open
 ├─ G.5  SICF as a Fiori Elements application, and live                open
+├─ G.6  a class with an interface becomes a screen                    open
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
      SICF, as a proper Fiori Elements app where handlers and the rest are
@@ -129,6 +130,35 @@ G — the classic screens, and the GUI substitutes under them
         handler and it runs after the first. Today our nodes are static -
         they arrive from XML at build time - so this is a behaviour of a
         real system that we do not have at all
+
+G.6  A class with an interface becomes a screen                          [S]
+     Alice, 2026-09-18, naming the Neptune concept: implement one
+     interface in a class and its public attributes and tables are the
+     model a Fiori screen binds to. No DDIC, no annotations, no OData -
+     serialize the object, post it back, run a method, serialize again.
+     ├─ measured, not assumed: **every part of the loop already exists
+        here.** `cl_abap_objectdescr` enumerates attributes with their
+        visibility and lists the implemented interfaces, so "does this
+        class implement ours" is a runtime question with no registry;
+        `ASSIGN data->(ls_attribute-name) TO <any>` is the dynamic access
+        by name, and it is not hypothetical - `/ui2/cl_json` uses exactly
+        that line to serialize an object today; the JSON serializer
+        already walks an object reference into its public attributes, and
+        we already use it in the status service and the RFC channel; and
+        the endpoint is the ICF handler pattern every page here uses
+     ├─ what is left to write: the interface itself (init and an event
+        handler), writing values back into the attributes, and a UI5 host
+        page that holds the model and posts it. Days, not weeks
+     ├─ why it is worth having beside B.2 rather than inside it: RAP and
+        BOPF are for a *modelled* business object - buffer, composition,
+        draft, locks - and are expensive because that is expensive. This
+        is "I have a class, give me a screen", which is a different and
+        much larger pile of tasks. The RFC channel (D.1) is the same idea
+        for function modules, so this is its sibling, not B.2's
+     └─ **compatibility is deliberately not the goal**: reimplement the
+        concept under our own names. Copying a closed product's interface
+        names and page format would tie us to it for no gain, and this way
+        is cleaner in every sense
 
 G.4  abapGit through the substitutes                             open, closure measured in G.2
 
