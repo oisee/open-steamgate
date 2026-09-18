@@ -29,6 +29,64 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
+
+**A POSTed form field is not there.** On a system, ICF fills the form fields of
+a request from an `application/x-www-form-urlencoded` **body** as well as from
+the query string, so `if_http_request~get_form_field( 'x' )` answers for both.
+`cl_express_icf_shim` fills them only from the query string
+(`cl_express_icf_shim=>request` splits `~request_uri` at `?` and hands that to
+`cl_http_utility=>string_to_fields`); the body is set as data and never parsed.
+
+**Why it is worth an entry rather than a shrug:** the failure is silent and
+well-disguised. `get_form_field` answers an empty string, which is exactly what
+a person submitting an empty box would produce, so the screen shows "nothing to
+run" and the developer looks at the form, the browser and the encoding before
+looking at the shim.
+
+Found building the AMDP sandbox (backlog G.8): the body typed on the page never
+arrived. **Workaround**, in `zcl_osd_amdp_sbx=>posted_body`: read
+`get_cdata( )` and parse the pairs by hand. Two lines of it are their own trap
+and are commented where they are -- a form sends a space as `+`, and
+`REPLACE ... WITH ' '` in ABAP replaces it with *nothing*, because a text
+literal loses its trailing blanks; it has to be written `` WITH ` ` ``.
+
+**Upstream:** open-abap/express-icf-shim. Not yet drafted.
+
+### ANOMALY-2026-09-18-call-function-parameter-case — A destination call is made in lower case and the declaration is upper, so it answers into nothing
+
+**A destination call runs and answers into nothing.** The transpiler writes the
+parameter names of a `CALL FUNCTION` in the case they were typed in the ABAP
+source, which for ordinary ABAP is **lower**:
+
+```js
+abap.statements.callFunction({name: 'ZOSD_AMDP_SANDBOX', destination: 'AMDP',
+  exporting: {iv_body: lv_body}, importing: {ev_result: lv_result, ...}});
+```
+
+The function group declares the same parameters **upper** case (`IV_BODY`,
+`EV_RESULT`), which is how a `*.fugr.xml` names them and how a real system
+holds them. A destination implementation that looks its parameters up by the
+declared name therefore finds nothing: the call is made, the work is done, and
+the answer is written into a bag nobody reads.
+
+**Why it is worth an entry.** On a system this cannot happen -- the kernel
+resolves the parameter interface, and case is not a property the caller
+carries. Here the two spellings meet, and the failure leaves **no trace at
+all**: no exception, no error, no empty result to be suspicious of. The page
+that prompted it showed neither a result nor an error, which is the least
+informative outcome a program can produce.
+
+Found building the AMDP sandbox (backlog G.8). **Workaround** in
+`tools/amdp-destination.mjs`: look parameters up case-insensitively. Every
+destination implementation needs the same, so it belongs in the contract rather
+than in each one -- see `docs/rfc-destinations.example.json` and the note in
+`tools/rfc-replay.mjs`.
+
+**Upstream:** abaplint/transpiler, if the intent is that a destination sees the
+declared names. Not yet drafted -- the question to ask first is which spelling
+is meant to be authoritative.
+
 
 ### ANOMALY-2026-09-18-system-uuid-window — cl_system_uuid asks a service worker for `window`, and drops the ABAP wrapper when it does
 
@@ -889,27 +947,3 @@ ENDLOOP.
 - Upstream issue: none. Arguably the runtime could give exception instances a `message`; T is separately fixing `get_source_position( )`, which throws on anything the runtime raised itself
 - Regression-test location: `test/osd-apc.mjs`
 - Upstream version containing a fix: `unknown`
-
-## ANOMALY-2026-09-18-icf-shim-form-fields-from-body
-
-**A POSTed form field is not there.** On a system, ICF fills the form fields of
-a request from an `application/x-www-form-urlencoded` **body** as well as from
-the query string, so `if_http_request~get_form_field( 'x' )` answers for both.
-`cl_express_icf_shim` fills them only from the query string
-(`cl_express_icf_shim=>request` splits `~request_uri` at `?` and hands that to
-`cl_http_utility=>string_to_fields`); the body is set as data and never parsed.
-
-**Why it is worth an entry rather than a shrug:** the failure is silent and
-well-disguised. `get_form_field` answers an empty string, which is exactly what
-a person submitting an empty box would produce, so the screen shows "nothing to
-run" and the developer looks at the form, the browser and the encoding before
-looking at the shim.
-
-Found building the AMDP sandbox (backlog G.8): the body typed on the page never
-arrived. **Workaround**, in `zcl_osd_amdp_sbx=>posted_body`: read
-`get_cdata( )` and parse the pairs by hand. Two lines of it are their own trap
-and are commented where they are -- a form sends a space as `+`, and
-`REPLACE ... WITH ' '` in ABAP replaces it with *nothing*, because a text
-literal loses its trailing blanks; it has to be written `` WITH ` ` ``.
-
-**Upstream:** open-abap/express-icf-shim. Not yet drafted.

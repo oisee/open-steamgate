@@ -82,12 +82,25 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
            END OF ty_pack.
     TYPES tt_pack TYPE STANDARD TABLE OF ty_pack WITH DEFAULT KEY.
 
+*   What the database is, as facts rather than as a shape. The rows are
+*   name/value on purpose: a SQLite file, a DuckDB file and a HANA server have
+*   almost nothing in common to put in fixed columns, and the one thing a
+*   person wants -- "what am I actually talking to" -- is a list.
+    TYPES: BEGIN OF ty_dbfact,
+             section TYPE string,
+             name    TYPE string,
+             value   TYPE string,
+             note    TYPE string,
+           END OF ty_dbfact.
+    TYPES tt_dbfact TYPE STANDARD TABLE OF ty_dbfact WITH DEFAULT KEY.
+
     TYPES: BEGIN OF ty_snapshot,
              system    TYPE ty_system,
              processes TYPE tt_process,
              ports     TYPE tt_port,
              services  TYPE tt_service,
              packs     TYPE tt_pack,
+             database  TYPE tt_dbfact,
            END OF ty_snapshot.
 
 * the snapshot as JSON, into the tables; the number of rows written, or
@@ -146,6 +159,10 @@ CLASS zcl_osd_status IMPLEMENTATION.
     DATA ls_port    TYPE zosd_port.
     DATA ls_svc     TYPE zosd_svc.
     DATA ls_pack    TYPE zosd_pack.
+    DATA ls_db_in   TYPE ty_dbfact.
+    DATA ls_db      TYPE zosd_db.
+    DATA lt_db      TYPE STANDARD TABLE OF zosd_db WITH DEFAULT KEY.
+    DATA lv_seq     TYPE i.
     DATA lt_proc    TYPE STANDARD TABLE OF zosd_proc WITH DEFAULT KEY.
     DATA lt_port    TYPE STANDARD TABLE OF zosd_port WITH DEFAULT KEY.
     DATA lt_svc     TYPE STANDARD TABLE OF zosd_svc WITH DEFAULT KEY.
@@ -224,6 +241,21 @@ CLASS zcl_osd_status IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    lv_seq = 0.
+    LOOP AT ls_snap-database INTO ls_db_in.
+      CLEAR ls_db.
+      lv_seq       = lv_seq + 1.
+      ls_db-seq    = lv_seq.
+      ls_db-section = ls_db_in-section.
+      ls_db-name   = ls_db_in-name.
+      ls_db-value  = ls_db_in-value.
+      ls_db-note   = ls_db_in-note.
+      READ TABLE lt_db WITH KEY section = ls_db-section name = ls_db-name TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND ls_db TO lt_db.
+      ENDIF.
+    ENDLOOP.
+
 * replace, rather than merge: a process that is gone must not linger, and
 * the snapshot is the whole truth about this instance
     DELETE FROM zosd_sys WHERE sid <> ''.
@@ -231,6 +263,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
     DELETE FROM zosd_port WHERE port >= 0.
     DELETE FROM zosd_svc WHERE path <> ''.
     DELETE FROM zosd_pack WHERE name <> ''.
+    DELETE FROM zosd_db WHERE name <> ''.
 
     INSERT zosd_sys FROM ls_sys.
     rv_rows = 1.
@@ -249,6 +282,10 @@ CLASS zcl_osd_status IMPLEMENTATION.
     IF lt_pack IS NOT INITIAL.
       INSERT zosd_pack FROM TABLE lt_pack.
       rv_rows = rv_rows + lines( lt_pack ).
+    ENDIF.
+    IF lt_db IS NOT INITIAL.
+      INSERT zosd_db FROM TABLE lt_db.
+      rv_rows = rv_rows + lines( lt_db ).
     ENDIF.
   ENDMETHOD.
 

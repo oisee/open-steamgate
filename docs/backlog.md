@@ -609,6 +609,35 @@ N — the no-regret set (docs/shift-right-and-quick-wins.md)
 └─ N5  the black-box conformance suite                              DONE 09-17
 ```
 
+### Track WD -- Web Dynpro, with the handlers in the page
+
+Proposed 2026-09-18 by fable-osd; the case is in
+[`docs/webdynpro-in-the-browser.md`](webdynpro-in-the-browser.md).
+
+Run a component **and its own ABAP handlers** in the browser, reaching the
+application server only when the ABAP goes outside it -- database, RFC, locks.
+
+It reads as madness and is not, for three reasons that are already true here:
+the transpiler runs ABAP in a page; the boundary to data is **one object with
+eleven methods**, so "go to the server only for data" is a second
+implementation of an existing seam rather than a new architecture; and that
+seam is **already asynchronous**, so the point where execution would have to
+pause is exactly where a remote call would go. The real work is three things:
+the context (nodes, lead selection, cardinalities, supply functions -- the
+largest piece), the phase model, and drawing with **our own** HTML rather
+than imitating Unified Rendering.
+
+Seven waves. The first is a **corpus measurement designed to close the track
+in a day** if what is out there is mostly Floorplan Manager -- the cheapest
+possible way to be wrong about this.
+
+**The security rule is written before the speed, on purpose:** a handler run
+in the browser is a **prediction, not a decision**. An `AUTHORITY-CHECK` in a
+page is not a check, and a write "approved" by the client is a security
+boundary handed to whoever opened the developer tools. Everything that writes
+is replayed or re-checked on the server.
+
+
 **What is being worked on now:** N5, the conformance suite — the same
 requests asked of a base URL rather than of an in-process app, so "our
 tests pass" becomes "we answer the way a system answers". U.2, the status

@@ -12,18 +12,41 @@
 // laboratory is kept and which is not tracked.
 import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
+import {join} from "node:path";
 import {extract, procedure, parameterType} from "./amdp-extract.mjs";
 
 const SCHEMA = process.env.HXE_SCHEMA ?? "OSD";
 
+/** Where the password may be, in order, and why there is more than one place.
+ *
+ *  A checkout finds it beside the tree, under `.local/`. A **deployment** does
+ *  not: the release directory is rebuilt by `rsync --delete` on every deploy,
+ *  so anything put there by hand is gone at the next one, and inside a
+ *  compiled binary every module shares one `import.meta.url`, so the path
+ *  relative to this file is not a path to anything. `~/.osd/hxe-password` is
+ *  the one that survives both -- it is outside the deployment and it does not
+ *  depend on where the code thinks it lives. */
+export function passwordFiles() {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const files = [];
+  if (process.env.OSD_HANA_PASSWORD_FILE) files.push(process.env.OSD_HANA_PASSWORD_FILE);
+  if (home !== "") files.push(join(home, ".osd", "hxe-password"));
+  try {
+    files.push(fileURLToPath(new URL("../.local/hxe-password", import.meta.url)));
+  } catch {
+    // a bundled module has no useful url of its own; the two above are the answer
+  }
+  return files;
+}
+
 export function connection() {
-  const passwordFile = fileURLToPath(new URL("../.local/hxe-password", import.meta.url));
+  const found = passwordFiles().find((f) => existsSync(f));
   return {
-    host: process.env.HXE_HOST ?? "localhost",
-    port: Number(process.env.HXE_PORT ?? 39017),
-    user: process.env.HXE_USER ?? "SYSTEM",
-    password: process.env.HXE_PASSWORD
-      ?? (existsSync(passwordFile) ? readFileSync(passwordFile, "utf8").trim() : undefined),
+    host: process.env.HXE_HOST ?? process.env.HANA_HOST ?? "localhost",
+    port: Number(process.env.HXE_PORT ?? process.env.HANA_PORT ?? 39017),
+    user: process.env.HXE_USER ?? process.env.HANA_USER ?? "SYSTEM",
+    password: process.env.HXE_PASSWORD ?? process.env.HANA_PASSWORD
+      ?? (found === undefined ? undefined : readFileSync(found, "utf8").trim()),
   };
 }
 
@@ -52,36 +75,100 @@ function readable(value) {
   return value;
 }
 
-/** call it, with the IN parameters given as plain values or arrays of rows.
+/** A table IN parameter cannot be handed over as an array: the driver answers
+ *  `invalid argument: input parameter must be a table`. HANA takes a **table**
+ *  there, named in the CALL -- measured:
  *
- * node-hdb hands a procedure's results back as (err, scalars, ...tables):
- * the first argument is the object of scalar OUT parameters and each table
- * OUT parameter is a further argument, in the order the signature declares
- * them. Reading only the first is how this returned an empty object at first
- * -- the rows were in the arguments after it. */
-export async function call(client, name, method, inputs) {
-  const ins = method.parameters.filter((p) => p.direction === "IN");
-  const outs = method.parameters.filter((p) => p.direction !== "IN");
-  const placeholders = method.parameters.map(() => "?").join(", ");
-  const values = ins.map((p) => inputs[p.name.toLowerCase()] ?? inputs[p.name] ?? null);
+ *    CALL "OSD"."P"("OSD"."ROWS", ?)   ->  works
+ *    CALL "OSD"."P"(SELECT ..., ?)     ->  syntax error
+ *
+ *  which is the shape an AMDP call has on a system anyway, where the rows are
+ *  already in tables. So rows given as an array are materialised into a
+ *  throw-away table first and that table is named; a string is taken to be a
+ *  table name already and passed straight through, which is the cheap path
+ *  once the data layer is HANA and nothing has to be copied at all. */
+async function materialise(client, exec, name, columns, rows) {
+  await exec(`DROP TABLE ${name}`).catch(() => undefined);
+  await exec(`CREATE LOCAL TEMPORARY COLUMN TABLE ${name} (${columns.join(", ")})`);
+  if (rows.length === 0) return name;
+  // One small prepared INSERT, the rows bound as parameters and sent as one
+  // batch. Measured against writing the values into the statement text:
+  //
+  //     rows     literals            bound batch
+  //      100     52 ms  0.52 ms/row  18 ms  0.181 ms/row
+  //     1000    465 ms  0.465        26 ms  0.026
+  //    10000  21745 ms  2.175        59 ms  0.006
+  //
+  // The literal form gets *worse* per row as it grows and the bound one gets
+  // better, and the reason is not the round trips -- it is parsing. The same
+  // 2000-branch statement run twice in a row costs 2478 ms and then 4 ms, so
+  // 99.8 % of it is parse, and a statement whose text carries the values is
+  // new text every time and can never hit the plan cache. A bound statement
+  // is parsed once and reused for the life of the connection.
+  //
+  // It also removes a whole class of defect rather than a case of it: values
+  // travel as parameters instead of being escaped into SQL text, so nothing
+  // can mangle a value that happens to contain a quote, a JSON document or
+  // the word `true`.
   const statement = await new Promise((resolve, reject) =>
-    client.prepare(`CALL ${name} (${placeholders})`, (err, st) => (err ? reject(err) : resolve(st))));
-  const parts = await new Promise((resolve, reject) =>
-    statement.exec(values, (err, ...rest) => (err ? reject(err) : resolve(rest))));
-  const [scalars, ...tables] = parts;
-  const result = {};
-  for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);
-  let i = 0;
-  for (const p of outs) {
-    const table = tables[i];
-    if (table === undefined) continue;
-    if (Array.isArray(table)) {
-      result[p.name.toLowerCase()] = table.map((row) =>
-        Object.fromEntries(Object.entries(row).map(([k, v]) => [k, readable(v)])));
-      i += 1;
+    client.prepare(`INSERT INTO ${name} VALUES (${columns.map(() => "?").join(", ")})`,
+      (err, st) => (err ? reject(err) : resolve(st))));
+  const batch = rows.map((row) => Object.values(row));
+  await new Promise((resolve, reject) => statement.exec(batch, (err) => (err ? reject(err) : resolve())));
+  return name;
+}
+
+/** the columns of a TABLE(...) type, as CREATE TABLE wants them */
+function columnsOf(hanaTableType) {
+  const inner = /^TABLE\s*\((.*)\)$/is.exec(String(hanaTableType).trim())?.[1];
+  return inner === undefined ? undefined : inner.split(/,\s*(?![^(]*\))/).map((c) => c.trim());
+}
+
+/** call it. An IN table parameter takes a table name or an array of rows; a
+ *  scalar takes a value. node-hdb hands the results back as
+ *  (err, scalars, ...tables), one argument per table OUT parameter in
+ *  signature order -- reading only the first is how this returned an empty
+ *  object at first, with the rows sitting in the arguments after it. */
+export async function call(client, name, method, inputs, types) {
+  const exec = (sql) => new Promise((resolve, reject) =>
+    client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+  const outs = method.parameters.filter((p) => p.direction !== "IN");
+  const temporary = [];
+
+  const args = [];
+  for (const p of method.parameters) {
+    if (p.direction !== "IN") { args.push("?"); continue; }
+    const given = inputs[p.name.toLowerCase()] ?? inputs[p.name];
+    const columns = columnsOf(parameterType(p.abapType, types));
+    if (columns === undefined) {                       // a scalar
+      args.push(typeof given === "number" ? String(given) : `'${String(given ?? "").replace(/'/g, "''")}'`);
+    } else if (typeof given === "string") {            // a table, named
+      args.push(given);
+    } else {                                           // rows, materialised
+      const table = `#AMDP_IN_${p.name.toUpperCase()}`;
+      temporary.push(table);
+      args.push(await materialise(client, exec, table, columns, given ?? []));
     }
   }
-  return result;
+
+  try {
+    const parts = await exec(`CALL ${name} (${args.join(", ")})`);
+    const [scalars, ...tables] = parts;
+    const result = {};
+    for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);
+    let i = 0;
+    for (const p of outs) {
+      const table = tables[i];
+      if (Array.isArray(table)) {
+        result[p.name.toLowerCase()] = table.map((row) =>
+          Object.fromEntries(Object.entries(row).map(([k, v]) => [k, readable(v)])));
+        i += 1;
+      }
+    }
+    return result;
+  } finally {
+    for (const t of temporary) await exec(`DROP TABLE ${t}`).catch(() => undefined);
+  }
 }
 
 if (process.argv[1]?.endsWith("amdp-run.mjs")) {
@@ -118,7 +205,7 @@ if (process.argv[1]?.endsWith("amdp-run.mjs")) {
   try {
     const name = await deploy(client, parsed.className, method, parsed.types);
     console.log(`deployed ${name}`);
-    const result = await call(client, name, method, inputs);
+    const result = await call(client, name, method, inputs, parsed.types);
     console.log(JSON.stringify(result, undefined, 2));
   } finally {
     client.end();

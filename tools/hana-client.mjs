@@ -30,6 +30,7 @@
 import {createRequire} from "node:module";
 import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
+import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
 
@@ -106,13 +107,23 @@ function plain(value) {
 }
 
 export function hanaConnection(input = {}) {
-  const passwordFile = fileURLToPath(new URL("../.local/hxe-password", import.meta.url));
+  // the same search as tools/amdp-run.mjs, and for the same reason: a
+  // deployment is rebuilt by rsync --delete and a bundled module has no url
+  // of its own, so the password lives outside both
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const candidates = [];
+  if (process.env.OSD_HANA_PASSWORD_FILE) candidates.push(process.env.OSD_HANA_PASSWORD_FILE);
+  if (home !== "") candidates.push(join(home, ".osd", "hxe-password"));
+  try {
+    candidates.push(fileURLToPath(new URL("../.local/hxe-password", import.meta.url)));
+  } catch { /* bundled: the two above are the answer */ }
+  const passwordFile = candidates.find((f) => existsSync(f)) ?? "";
   return {
     host: input.host ?? process.env.HANA_HOST ?? process.env.HXE_HOST ?? "localhost",
     port: Number(input.port ?? process.env.HANA_PORT ?? process.env.HXE_PORT ?? 39017),
     user: input.user ?? process.env.HANA_USER ?? process.env.HXE_USER ?? "SYSTEM",
     password: input.password ?? process.env.HANA_PASSWORD ?? process.env.HXE_PASSWORD
-      ?? (existsSync(passwordFile) ? readFileSync(passwordFile, "utf8").trim() : undefined),
+      ?? (passwordFile === "" ? undefined : readFileSync(passwordFile, "utf8").trim()),
     // node-hdb defaults to a 128 KB packet and refuses a statement that does
     // not fit with "Packet size limit exceeded". The transpiler's seed puts
     // whole ABAP sources into reposrc and SMW0 media into wwwdata as hex, so
