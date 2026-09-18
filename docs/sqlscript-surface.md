@@ -149,3 +149,51 @@ start, end, expert and field routines written as AMDP. If the corpus on the
 sandbox turns out to be mostly these, it is mostly **generated** code, and a
 frequency count over it measures a generator's habits rather than how people
 write SQLScript. Check what the classes are before trusting the histogram.
+
+---
+
+## What the frequency column is for, and the number it is not
+
+A frequency per construct says how often a thing appears. It does **not** say
+how much of the corpus we can translate, and the difference is not small: a
+body needs **all** of its constructs, so implementing the three most frequent
+ones can still leave every body blocked by its own fourth. The number that
+answers "what do we build first" is cumulative and per body:
+
+- **bodies fully covered** by the top *n* constructs — the only progress
+  curve that means anything, and it starts lower and rises later than the
+  per-construct percentages suggest;
+- **bodies blocked by exactly one missing construct** — the cheapest work
+  available at any moment, and the list changes every time something lands;
+- **bodies that can never be covered**, because what they use has no portable
+  form at all. `XMLTABLE` and `HIERARCHY` are in this class. That is a
+  ceiling, not a backlog item, and stating it early keeps it from being
+  rediscovered as a disappointment.
+
+## Measured zeros, kept as rows
+
+A construct nobody uses is a row with a zero in it, never a missing row —
+see the rule above. Measured on the ABAP sandbox, 15 packages of 67, 246
+work bodies and 82 teaching bodies (a first pass; the final count supersedes
+these):
+
+| construct | work corpus | teaching corpus |
+| --- | ---: | ---: |
+| calculation engine operators (`CE_*`) | 0 | 0 |
+| `MAP_MERGE`, `MAP_REDUCE` | 0 | 0 |
+| cursors | 0 | 0 |
+| arrays | 0 | 0 |
+| `BREAK` / `CONTINUE` | 0 | 0 |
+
+So the plan for section C above — refuse the calculation engine operators —
+is now measured rather than preferred, and the imperative half of section B
+is thinner than it looks: branching and assignment first, loops and cursors
+whenever.
+
+**And one measured surprise, worth keeping because it corrects a plausible
+guess.** The teaching classes were expected to be *richer* than the work
+corpus, on the argument that they are written to show the corners of the
+language. They are poorer: no `UNION` at all against 51% of work bodies, no
+`IF` against 30%. The corners are in the *set* of classes, not in each body —
+every demo shows one feature in the simplest body that can show it. A
+property of a collection was read onto its elements.
