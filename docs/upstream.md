@@ -164,6 +164,59 @@ through the critic gate (CLAUDE.md).
 | 4 | a synchronous `LOOP AT` when the body contains no `await` | runtime + codegen | 172–349 ns a row to 74 | design question, unwritten |
 | 5 | method inlining | transpiler | 123 ns to 67, and 206 to 67 for a structure return | unwritten, high risk |
 
+## A candidate for abaplint, not yet drafted: the AMDP body comes out four times
+
+Found 2026-09-18 while building the AMDP scissors (`docs/amdp-in-hana.md`),
+researched against abaplint's own source rather than guessed at.
+
+**The observation.** A class with one AMDP method whose body is twenty lines
+yields **four** `NativeSQL` statements, three of them starting on the same
+row and nesting inside one another:
+
+```
+1  rows 31-46   DECLARE lv_i INTEGER; ...
+2  rows 47-47   SELECT lv_i AS id,
+3  rows 31-47   DECLARE lv_i INTEGER; ...
+4  rows 31-50   DECLARE lv_i INTEGER; ...
+```
+
+Concatenating their tokens does not reproduce the source, and neither does
+taking the longest: the concatenation drops the original line breaks, and
+SQLScript has `--` line comments, so a lost newline changes what is
+commented out.
+
+**Why, from the source.** `3_structures/structures/method.ts` says a method
+body is `opt(alt(sub(Body), star(sta(NativeSQL))))`. `NativeSQL` is a marker
+whose matcher deliberately throws — it is assigned out of band, by
+`statement_parser.ts`'s `nativeSQL()` pass, which runs **after**
+`lazyUnknown()`. That second pass is an editor-typing recovery heuristic: for
+a statement that failed to categorise, it tries every row boundary as a split
+point and keeps the first suffix that categorises as something. Neither pass
+promises the statements it emits are non-overlapping or exhaustive. So the
+AMDP path is not a dedicated extraction mechanism; it is two general-purpose
+salvage heuristics meeting.
+
+**The proposal, if it is sent**: make an AMDP body become exactly **one**
+`NativeSQL` statement covering the whole span, carved out before
+`lazyUnknown` can touch it — which is what `star(sta(NativeSQL))` already
+implies in practice, and which makes the built-in path give what every
+consumer is otherwise forced to compute from source positions by hand. Ask
+in the same breath whether `EXEC SQL ... ENDEXEC` has the same shape, since
+`nativeSQL()` handles both.
+
+**It is not a rediscovery.** The three related issues — #743, #1777 and the
+still-open #3486 — are all about making the *linter* stop complaining about
+AMDP bodies. None is about a consumer needing the verbatim body or a
+non-overlapping statement list.
+
+**What is not proven.** The mechanism-level explanation is solid; the exact
+step-by-step reconstruction of those four ranges is not, because it was read
+rather than traced with an instrumented run. An issue should state the
+observation and let the maintainer pick the fix, rather than assert the
+internal cause.
+
+Unsent, undrafted, and it goes through the critic like everything else.
+
 Notes that belong with them, so they are not rediscovered:
 
 **Item 1, re-measured against 2.13.89 and sent, 2026-09-18** (issue #1872,

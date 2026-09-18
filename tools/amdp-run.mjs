@@ -43,16 +43,45 @@ export async function deploy(client, cls, method, types) {
   return name;
 }
 
-/** call it, with the IN parameters given as plain values or arrays of rows */
+/** NCLOB and friends arrive as Buffers; a row is nicer read as text */
+function readable(value) {
+  if (Buffer.isBuffer(value)) return value.toString("utf8");
+  if (value !== null && typeof value === "object" && value.type === "Buffer" && Array.isArray(value.data)) {
+    return Buffer.from(value.data).toString("utf8");
+  }
+  return value;
+}
+
+/** call it, with the IN parameters given as plain values or arrays of rows.
+ *
+ * node-hdb hands a procedure's results back as (err, scalars, ...tables):
+ * the first argument is the object of scalar OUT parameters and each table
+ * OUT parameter is a further argument, in the order the signature declares
+ * them. Reading only the first is how this returned an empty object at first
+ * -- the rows were in the arguments after it. */
 export async function call(client, name, method, inputs) {
   const ins = method.parameters.filter((p) => p.direction === "IN");
+  const outs = method.parameters.filter((p) => p.direction !== "IN");
   const placeholders = method.parameters.map(() => "?").join(", ");
-  const values = method.parameters.map((p) =>
-    (p.direction === "IN" ? inputs[p.name.toLowerCase()] ?? inputs[p.name] ?? null : null));
+  const values = ins.map((p) => inputs[p.name.toLowerCase()] ?? inputs[p.name] ?? null);
   const statement = await new Promise((resolve, reject) =>
     client.prepare(`CALL ${name} (${placeholders})`, (err, st) => (err ? reject(err) : resolve(st))));
-  return new Promise((resolve, reject) =>
-    statement.exec(values.slice(0, ins.length), (err, result) => (err ? reject(err) : resolve(result))));
+  const parts = await new Promise((resolve, reject) =>
+    statement.exec(values, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+  const [scalars, ...tables] = parts;
+  const result = {};
+  for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);
+  let i = 0;
+  for (const p of outs) {
+    const table = tables[i];
+    if (table === undefined) continue;
+    if (Array.isArray(table)) {
+      result[p.name.toLowerCase()] = table.map((row) =>
+        Object.fromEntries(Object.entries(row).map(([k, v]) => [k, readable(v)])));
+      i += 1;
+    }
+  }
+  return result;
 }
 
 if (process.argv[1]?.endsWith("amdp-run.mjs")) {
