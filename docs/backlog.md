@@ -42,6 +42,7 @@ B — the runtime underneath: what the answers are made of
 │   the track is done; these are the named gaps
 ├─ B.1  SADL beyond read-only, and beyond one table                 valuable
 ├─ B.2  BOPF / RAP / drafts: one runtime, two front ends           decided 09-18
+├─ B.19 HANA and AMDP: the i7 runs it, A4H is the oracle            decided 09-18
 ├─ B.3  OData V4                                                    a track of its own
 ├─ B.4  the RFC runtime, both directions                            open
 ├─ B.5  multi-record framing, measured against a long answer        open
@@ -90,7 +91,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.1  SAP Easy Access, served by ABAP                             DONE 09-18
 ├─ G.1b the drop, drawn, and a menu bar that works                  DONE 09-18
 ├─ G.2  prove a sapevent click comes back                           DONE 09-18
-├─ G.3  a transaction node that actually runs                       open
+├─ G.3  a transaction node that actually runs                       DONE 09-18
 ├─ G.5  SICF as a Fiori Elements application, and live                open
 ├─ G.6  a class with an interface becomes a screen                    open
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
@@ -368,6 +369,49 @@ B.1  SADL beyond read-only                                               [S]
      │  and writes only on a projection of exactly one table
      └─ next: associations in a projection, and a write path that is not
         the single-table special case
+
+B.19 HANA, AMDP and where each machine stands                            [S]
+     Decided 2026-09-18 by arithmetic rather than preference.
+     ├─ **HANA Express runs in docker on the i7, and only there.** The
+        workstation is WSL2 on a 31 GB Windows host, so the Linux side
+        sees 15 GB by the default "half the host" rule; HXE wants 16-24 GB
+        and would take all of it, leaving nothing for agents, transpiles
+        and webpack - and a Windows reboot would take the database with
+        the session, which has already happened once. The i7 has 125 GB,
+        16 cores, 581 GB free and docker without sudo, and the image is
+        1.8 GB compressed. Raising WSL's memory in `.wslconfig` to 24 GB
+        is still worth doing, for the agents, not for HANA
+     ├─ **the oracle already exists and it is A4H**: `sy-dbsys = HDB`,
+        release 758, and **194 AMDP classes, 191 of them SAP standard**,
+        readable through ADT (measured 2026-09-18). A separate HXE is a
+        clean laboratory, not the source of truth
+     ├─ what a real one looks like, read off A4H: `method … by database
+        procedure for hdb language sqlscript using CdsFrwk_Open_So_Items_
+        By_TaxR.` with a one-line body selecting from a **CDS view with a
+        parameter**. A large part of the standard's AMDP is a thin wrapper
+        over CDS rather than a table-variable engine, and CDS we already
+        generate and read - so the portable share may be much larger than
+        it looks. **Measure it before designing anything**: read all 194,
+        cut the bodies out with our parser and count how many are one
+        portable SELECT, how many use table variables, how many call
+        calculation-engine functions, how many are imperative
+     ├─ the parser is ready for that cut and it cost nothing: abaplint
+        already swallows an AMDP body whole as one `NativeSQL` statement
+        (verified by parsing a real class), so the body comes out by
+        source position. `FOR HDB` is a string literal in one line of
+        `method_implementation.js`, so `FOR DUCKDB` is a one-line grammar
+        change - but see the next point before reaching for it
+     ├─ **a dialect does not need a grammar fork**: a marker interface of
+        our own beside `IF_AMDP_MARKER_HDB` picks the target, and the
+        source stays legal ABAP that compiles unchanged on a real system.
+        Forking abaplint's grammar for a non-standard `FOR <db>` is a
+        divergence in the language itself, which is worse than the carried
+        patches we just spent a day getting rid of
+     └─ **not inside HANA**: XS Classic is SpiderMonkey at about ES5 and
+        deprecated, and our runtime needs classes, async/await, BigInt and
+        8893 top-level awaits; XSA is a separate application server that
+        costs 3 GB+ to get a Node we already have. Co-location on one
+        machine buys the missing network hop and nothing is lost
 
 B.2  BOPF / RAP / drafts: one runtime, two front ends                    [S]
      ├─ still out, as stated on day one
@@ -1206,15 +1250,55 @@ G.2  Prove a sapevent click comes back                     [S] DONE 2026-09-18
      └─ state between GET and POST is class data of the harness, one
         document per process: enough for a proof, and exactly G.3's step 3
 
-G.3  A transaction node that actually runs                               [S]
-     ├─ the kind exists and answers "not yet" (ZABAPGIT is the one entry)
-     ├─ find the object by name (*.tran.xml joining the layers the way
-     │  *.sicf.xml did, or a convention), decide it is executable, run it,
-     │  render what it drew through cl_gui_control=>render_html
-     └─ the part with no precedent is state between two HTTP requests: a
-        transaction has a screen sequence, a function call does not
+G.3  A transaction node that actually runs                 [S] DONE 2026-09-18
+     ├─ the registry is derived, like every other one here:
+     │  tools/osd-tran-registry.mjs reads *.tran.xml out of the input
+     │  layers the way osd-icf.mjs reads *.sicf.xml, and writes
+     │  gen/tran/zcl_osd_tran_registry -- the list, and a generated CASE
+     │  doing a static CREATE OBJECT per runnable code, for the reason
+     │  zcl_osd_fm_call is generated
+     ├─ **the rule for runnable**: TSTCP-PARAM names \CLASS=..\METHOD=..,
+     │  which is SE93's own "transaction with class method" form and what
+     │  zcl_abapgit_object_tran serialises, the class is in the tree, and
+     │  it implements ZIF_OSD_TRANSACTION. A report is refused with
+     │  "SUBMIT is not implemented by the transpiler" -- measured, not
+     │  assumed: statements/submit.ts is one throw and call_transaction.ts
+     │  is a no-op -- and a dynpro with "there is no dynpro processor
+     │  here". ZABAPGIT stays typed out and now says what it is missing
+     │  (no zabapgit.tran.xml in this tree), which is G.4's lift
+     ├─ page( iv_body ): the left pane was hard-wired to branch( ), so a
+     │  transaction had nowhere to draw. The tree is the default body and
+     │  the screen keeps its title bar, menu, command field and status bar
+     │  around whatever is running
+     ├─ **the state between two requests is a row, not a pinned process**
+     │  (ZOSD_TSES, keyed by a uuid, holding what ROLL_OUT wrote). Weighed
+     │  against the pin on four things that happen here: the browser
+     │  preview has no pool to pin to, a recycle mid-conversation takes
+     │  class data with it, two browsers are two rows and cannot collide,
+     │  and a process cannot expire anything while a TOUCHED column can
+     │  (30 minutes idle, swept on every start). ZOSD_SYS-PID goes into the
+     │  row so a session that moved between processes is readable, and
+     │  nothing routes by it. Given up: no live object graph across a step
+     │  -- the state must survive /ui2/cl_json -- and no affinity
+     ├─ one step is the dynpro cycle: roll in, PBO, dispatch_sapevent into
+     │  the viewer PBO just rebuilt, PBO again, render_html, roll out. The
+     │  session id rides in cl_gui_control=>ty_sapevent-fields, so the
+     │  rewrite writes it as a hidden field and dispatch strips it back out
+     ├─ the demonstration is ZOSD_NOTE, the session notepad (a field, Add,
+     │  the list) -- the smallest thing that proves the loop, not abapGit
+     └─ tests: test/transaction.mjs (11, browser by hand),
+        test/e2e/transaction.spec.mjs (4, Chromium, two contexts for two
+        sessions), ltcl_session in
+        src/webgui/zcl_osd_tran_session.clas.testclasses.abap (6) -- expiry
+        is there because only ABAP inside the system can age a row without
+        waiting half an hour
 
 G.4  abapGit through the substitutes                                   [S+A]
+     └─ G.3 built the seat: a *.tran.xml naming a class that implements
+        ZIF_OSD_TRANSACTION is entered and drawn, so what abapGit needs
+        from this side is that tran object, a class whose PBO builds
+        zcl_abapgit_gui's viewer, and ROLL_IN/ROLL_OUT over its page
+        stack. What it needs from the other side is the closure.
      └─ blocked on G.2 by choice. It should arrive as a transaction rather
         than as a page with a URL of its own, because that is how a system
         works; and what stops it is not the GUI layer (31 todo stubs in
