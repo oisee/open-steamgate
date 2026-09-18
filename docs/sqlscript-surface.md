@@ -170,30 +170,46 @@ answers "what do we build first" is cumulative and per body:
   ceiling, not a backlog item, and stating it early keeps it from being
   rediscovered as a disappointment.
 
-## Measured zeros, kept as rows
+## Where the numbers live
 
-A construct nobody uses is a row with a zero in it, never a missing row —
-see the rule above. Measured on the ABAP sandbox, 15 packages of 67, 246
-work bodies and 82 teaching bodies (a first pass; the final count supersedes
-these):
+**Not here.** Every measured figure belongs to `docs/sqlscript-corpus.md`,
+which is produced by `tools/amdp-corpus.mjs` on the machine that has the
+sandbox. This file owns the enumeration and the method; that one owns the
+counts. Two files carrying the same numbers is how two files come to disagree,
+and the first draft of this section made exactly that mistake — it copied a
+first-pass table that the full export then superseded within the hour.
 
-| construct | work corpus | teaching corpus |
-| --- | ---: | ---: |
-| calculation engine operators (`CE_*`) | 0 | 0 |
-| `MAP_MERGE`, `MAP_REDUCE` | 0 | 0 |
-| cursors | 0 | 0 |
-| arrays | 0 | 0 |
-| `BREAK` / `CONTINUE` | 0 | 0 |
+What the counts have settled so far, in one line each, with the detail and the
+sample size over there: the calculation engine operators, `MAP_MERGE`,
+`MAP_REDUCE` and cursors are **measured zeros** across the whole corpus, so
+section C is refused on evidence rather than on preference; the imperative half
+of section B is thinner than it looks, branching and assignment first; and the
+teaching corpus turned out **poorer** than the work corpus rather than richer,
+because the corners of the language are spread across the set of demo classes
+rather than packed into each body.
 
-So the plan for section C above — refuse the calculation engine operators —
-is now measured rather than preferred, and the imperative half of section B
-is thinner than it looks: branching and assignment first, loops and cursors
-whenever.
+That last fact has a use neither of us expected. A corpus that is small,
+real, and **completely covered by the first dozen constructs** is not a
+surface list — it is an **acceptance suite**. Build the interpreter, run it
+over those bodies, and the target is not a percentage to argue about but
+100%, on code somebody else wrote.
 
-**And one measured surprise, worth keeping because it corrects a plausible
-guess.** The teaching classes were expected to be *richer* than the work
-corpus, on the argument that they are written to show the corners of the
-language. They are poorer: no `UNION` at all against 51% of work bodies, no
-`IF` against 30%. The corners are in the *set* of classes, not in each body —
-every demo shows one feature in the simplest body that can show it. A
-property of a collection was read onto its elements.
+## Reading the coverage curve without being misled by it
+
+Two cautions about the shape, both of which change what gets built:
+
+- **The curve has no cliff.** Each construct adds a few points and the line
+  keeps climbing, so the corpus will never tell us where to stop. That
+  decision has to come from outside it — from what a demo needs, or a time
+  box, or a named target — and pretending the data chose it is how a project
+  ends up implementing a language for its own sake.
+- **Order by cost, not by count.** The greedy curve treats every construct as
+  costing the same, and they do not: `GROUP BY` and the joins are pass-through
+  to the engine, while dynamic SQL and `CALL` are real machinery. Re-read the
+  same table with an effort estimate beside each row and the order changes.
+  Worth noticing while reading it: most of the top of that curve is **plain
+  SQL**, which the engine already does. The genuinely SQLScript-specific work
+  in the first dozen is a short list — table variables, scalar `DECLARE`,
+  `IF`/`ELSE`, `CALL`, session variables, dynamic SQL — and of those only
+  `CALL` is structural, because it needs a procedure registry and a call
+  stack. The coverage is bought far more cheaply than the row count suggests.
