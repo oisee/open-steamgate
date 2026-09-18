@@ -155,10 +155,32 @@ G.6  A class with an interface becomes a screen                          [S]
         is "I have a class, give me a screen", which is a different and
         much larger pile of tasks. The RFC channel (D.1) is the same idea
         for function modules, so this is its sibling, not B.2's
-     └─ **compatibility is deliberately not the goal**: reimplement the
-        concept under our own names. Copying a closed product's interface
-        names and page format would tie us to it for no gain, and this way
-        is cleaner in every sense
+     ├─ **compatibility is not a property of our code, it is an importer**
+        (Alice, 2026-09-18). Our interface lives under our own name in our
+        own namespace and we publish nothing carrying theirs. A tree
+        imported from such a product gets a **generated shim** - an
+        interface under the vendor's name that delegates to ours - written
+        **into the imported folder**, never into this repository. The
+        mechanism already exists: the `input_folder` layer order where the
+        later folder wins, and the pack overlay that brought the demo and
+        Zork in over fetched upstream sources. So the customer's classes
+        run unchanged and we ship nothing named after anybody
+     ├─ the namespace is the technical reason, not only the legal one: a
+        registered namespace needs its owner's key on a real system, so an
+        object we invented there would exist here and be impossible to
+        create where it has to run. Interface *signatures* are a different
+        matter and are what this project already reimplements clean-room
+        for `/IWBEP/`, which is the precedent to follow
+     ├─ **the compatibility report falls out of the same pass, free**: the
+        importer must walk the classes, find the implementations and match
+        the methods anyway, so it can say how many classes were matched,
+        which methods it could not find and which capabilities are not
+        supported. That is the number worth having - not "does it work"
+        but how much of it does
+     └─ **export is a consequence, not a feature**: carrying a class
+        written against our interface back out to theirs works exactly as
+        far as we implemented their contract faithfully. Worth naming as a
+        goal, not worth promising
 
 G.4  abapGit through the substitutes                             open, closure measured in G.2
 
