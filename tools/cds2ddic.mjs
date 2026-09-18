@@ -99,6 +99,7 @@ function parseDDLS(obj, reg) {
 
   const fields = [];
   const exposedAssociations = [];
+  const associationAnnotations = new Map();
   for (const el of find(select, "CDSElement")) {
     const annos = children(el).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
     const isKey = children(el).some((c) => nodeName(c) === "Identifier" && tokensOf(c).toLowerCase() === "key");
@@ -127,7 +128,7 @@ function parseDDLS(obj, reg) {
       continue;
     }
     if (!srcName) continue;
-    if (srcName.startsWith("_")) { exposedAssociations.push(srcName); continue; }
+    if (srcName.startsWith("_")) { exposedAssociations.push(srcName); associationAnnotations.set(srcName, annos); continue; }
     if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
     const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
     const baseField = srcName.split(".").pop().toUpperCase();
@@ -149,7 +150,14 @@ function parseDDLS(obj, reg) {
       const pm = /\$projection\s*\.\s*(\w+)\s*=\s*\w+\s*\.\s*(\w+)|(\w+)\s*\.\s*(\w+)\s*=\s*\$projection\s*\.\s*(\w+)/i.exec(part);
       if (pm) pairs.push(pm[1] ? {source: pm[1].toUpperCase(), target: pm[2].toUpperCase()} : {source: pm[5].toUpperCase(), target: pm[4].toUpperCase()});
     }
-    associations.push({alias, target, min: m?.[1] ?? "0", max: m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias)});
+    // RAP's vocabulary, entered through the CDS annotation (backlog B.2):
+    // @ObjectModel.association.type: [#TO_COMPOSITION_CHILD] makes the
+    // target a part of this entity rather than a thing it points at, which
+    // is what lets a delete take the children with it.
+    const assocAnnos = associationAnnotations.get(alias) ?? [];
+    const kind = assocAnnos.map((a) => /@ObjectModel\.association\.type:\s*\[?\s*#TO_COMPOSITION_(CHILD|PARENT|ROOT)/i.exec(a)?.[1]).find(Boolean);
+    associations.push({alias, target, min: m?.[1] ?? "0", max: m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias),
+      composition: kind === undefined ? undefined : kind.toUpperCase()});
   }
   const label = viewAnnotations.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? name;
 
@@ -220,7 +228,7 @@ ${dd27}
 `;
 }
 
-function sourceClass(e) {
+function sourceClass(e, byName) {
   const cls = "zcl_stg_cds_" + e.sqlView.toLowerCase();
   const view = e.sqlView.toLowerCase();
   const virtual = e.fields.filter((f) => f.virtual);
@@ -277,7 +285,7 @@ CLASS ${cls} IMPLEMENTATION.
     CREATE DATA rr_line TYPE ty_row.
   ENDMETHOD.
 
-${writeMethods(e)}
+${writeMethods(e, byName)}
 ENDCLASS.
 `;
 }
@@ -285,7 +293,31 @@ ENDCLASS.
 // The write side of a CDS entity. A projection the view marked writable and
 // that maps back to one table field for field is written through to that
 // table; anything else keeps SADL's answer, which is that it cannot.
-function writeMethods(e) {
+
+// A composition child is a part of its parent, so deleting the parent takes
+// the children with it (backlog B.2: RAP's vocabulary, declared in the CDS
+// annotation). One DELETE per child view, over the child's own base table,
+// joined on the pairs the association's ON condition gave us. The parent's
+// own DELETE follows, so sy-subrc still answers for the parent.
+function cascadeDeletes(e, byName) {
+  const children = (e.associations ?? []).filter((a) => a.composition === "CHILD");
+  if (children.length === 0 || byName === undefined) return "";
+  const out = [];
+  for (const a of children) {
+    const child = byName.get(String(a.target ?? "").toUpperCase());
+    if (child === undefined || child.source === undefined) continue;
+    const baseOf = (view, name) => (view.fields.find((f) => f.name === String(name).toUpperCase())?.base ?? name).toLowerCase();
+    const pairs = (a.pairs ?? []).filter((p) => p.source && p.target);
+    if (pairs.length === 0) continue;
+    out.push(`*   composition: ${child.name} is a part of ${e.name}, so it goes too
+    DELETE FROM ${child.source.toLowerCase()}
+      WHERE ${pairs.map((p) => `${baseOf(child, p.target)} = ls_row-${baseOf(e, p.source)}`).join("\n        AND ")}.
+`);
+  }
+  return out.join("");
+}
+
+function writeMethods(e, byName) {
   const w = e.write ?? {writable: false, why: "the view does not ask for it"};
   const notImpl = (verb) => `  METHOD zif_stg_cds_source~${verb.toLowerCase()}.
     RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
@@ -322,7 +354,7 @@ ${w.mandt ? "    rs_row-mandt = sy-mandt.\n" : ""}${assign}
 
 ${body("INSERT", `    INSERT ${tab} FROM ls_row.`)}
 ${body("UPDATE", `    UPDATE ${tab} FROM ls_row.`)}
-${body("DELETE", `    DELETE FROM ${tab}
+${body("DELETE", `${cascadeDeletes(e, byName)}    DELETE FROM ${tab}
       WHERE ${w.keyColumns.map((k) => `${k.toLowerCase()} = ls_row-${k.toLowerCase()}`).join("\n        AND ")}.`)}`;
 }
 
@@ -728,7 +760,7 @@ function main() {
     if (e.name.toUpperCase() !== e.sqlView.toUpperCase()) {
       write(e.name.toLowerCase() + ".view.xml", viewXml({...e, sqlView: e.name.toUpperCase()}));
     }
-    write("zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap", sourceClass(e));
+    write("zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap", sourceClass(e, byName));
     let published = "";
     if (e.viewAnnotations.some((a) => /@OData\.publish:\s*true/i.test(a))) {
       // the whole set of views is needed: an exposed association pulls its

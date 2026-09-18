@@ -222,7 +222,9 @@ describe("wire", () => {
     expect(xml).to.contain('<EntityType Name="ZC_STG_TRAVELType"');
     expect(xml).to.contain('<EntityType Name="ZC_STG_BOOKINGType"');
     expect(xml).to.contain('<EntitySet Name="ZC_STG_TRAVEL" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_TRAVELType"');
-    expect(xml).to.contain('<EntitySet Name="ZC_STG_BOOKING" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_BOOKINGType" sap:creatable="false" sap:updatable="false" sap:deletable="false"');
+    expect(xml).to.contain('<EntitySet Name="ZC_STG_BOOKING" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_BOOKINGType"');
+    // the child of the composition asks for writes too, so it is not flagged read-only
+    expect(xml).to.not.contain('Name="ZC_STG_BOOKING" EntityType="ZC_STG_TRAVEL_CDS.ZC_STG_BOOKINGType" sap:creatable="false"');
     expect(xml).to.contain("<EntityContainer Name=\"ZC_STG_TRAVEL_CDS_Entities\"");
     // the association is assoc_<32 hex>, the same string on its set, with
     // FromRole_/ToRole_ roles; the hex is a hash here, not a GUID, so that a
@@ -291,6 +293,41 @@ describe("wire", () => {
       {method: "DELETE", headers: write});
     expect(res.status).to.equal(405);
     expect((await fetch(`${BASE}/TravelSet('T0001')`)).status).to.equal(200);
+  });
+
+  it("a composition child goes with its parent: @ObjectModel.association.type [#TO_COMPOSITION_CHILD]", async () => {
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_TRAVEL_CDS`;
+    const write = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};
+
+    // a travel with two bookings under it. The child view asks for writes of
+    // its own, which is what makes this reachable over the wire at all.
+    let res = await fetch(S + "/ZC_STG_TRAVEL", {method: "POST", headers: write,
+      body: JSON.stringify({TRAVELID: "T0800", DESCRIPTION: "Composition", STATUS: "A", SEATS: 2})});
+    expect(res.status).to.equal(201);
+    for (const id of ["B1", "B2"]) {
+      res = await fetch(S + "/ZC_STG_BOOKING", {method: "POST", headers: write,
+        body: JSON.stringify({TRAVELID: "T0800", BOOKINGID: id, CUSTOMER: "C" + id, FLIGHTDATE: "20260918"})});
+      expect(res.status).to.equal(201);
+    }
+    let below = (await (await fetch(S + "/ZC_STG_TRAVEL('T0800')/to_Bookings?$format=json")).json()).d.results;
+    expect(below.map((r) => r.BOOKINGID).sort()).to.deep.equal(["B1", "B2"]);
+
+    // deleting the parent takes the parts with it, in one statement each and
+    // one LUW - a booking is not a thing a travel points at, it is part of it
+    res = await fetch(S + "/ZC_STG_TRAVEL('T0800')", {method: "DELETE", headers: write});
+    expect(res.status).to.equal(204);
+    expect((await fetch(S + "/ZC_STG_TRAVEL('T0800')")).status).to.equal(404);
+    below = (await (await fetch(S + "/ZC_STG_BOOKING?$format=json&$filter=TRAVELID eq 'T0800'")).json()).d.results;
+    expect(below).to.deep.equal([]);
+
+    // and the other direction does not cascade: deleting a booking leaves its
+    // travel alone, because _Travel is the parent end of the composition
+    res = await fetch(S + "/ZC_STG_BOOKING", {method: "POST", headers: write,
+      body: JSON.stringify({TRAVELID: "T0002", BOOKINGID: "B9", CUSTOMER: "C9", FLIGHTDATE: "20260918"})});
+    expect(res.status).to.equal(201);
+    res = await fetch(S + "/ZC_STG_BOOKING(TRAVELID='T0002',BOOKINGID='B9')", {method: "DELETE", headers: write});
+    expect(res.status).to.equal(204);
+    expect((await fetch(S + "/ZC_STG_TRAVEL('T0002')")).status).to.equal(200);
   });
 
   it("$count", async () => {

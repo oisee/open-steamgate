@@ -71,3 +71,52 @@ Writes through a view with associations (a deep insert into a composition),
 ETags on a projection, and the `@ObjectModel.readOnly` element-level
 annotation. A projection over another view stays read-only even when the
 chain would be resolvable.
+
+## A composition: the child goes with the parent
+
+RAP's vocabulary, entered through the CDS annotation — which is the order
+decided in backlog B.2, because abaplint parses `@ObjectModel` in full and a
+behaviour definition with a single regular expression.
+
+```
+define view ZC_STG_TRAVEL as select from zstg_demo
+  association [0..*] to ZC_STG_BOOKING as _Bookings on $projection.TravelId = _Bookings.TravelId
+{
+  ...
+  @ObjectModel.association.type: [#TO_COMPOSITION_CHILD]
+  _Bookings
+}
+```
+
+A booking is then **part of** a travel rather than something the travel points
+at, and one thing follows from that today: deleting the parent deletes its
+children. `tools/cds2ddic.mjs` emits the child's `DELETE` into the parent's
+`delete` method, over the child's own base table, joined on the pairs the
+association's `ON` condition gives:
+
+```abap
+METHOD zif_stg_cds_source~delete.
+  DATA ls_row TYPE zstg_demo.
+  ls_row = to_base( is_line ).
+* composition: ZC_STG_BOOKING is a part of ZC_STG_TRAVEL, so it goes too
+  DELETE FROM zstg_demo_bk WHERE travel_id = ls_row-travel_id.
+  DELETE FROM zstg_demo    WHERE travel_id = ls_row-travel_id.
+  rv_subrc = sy-subrc.
+ENDMETHOD.
+```
+
+Both statements are in the one LUW the request already runs in, and
+`sy-subrc` still answers for the parent, so a delete that finds no parent
+still reports what it found.
+
+`#TO_COMPOSITION_PARENT` on the other end is the child's way of naming its
+parent, and it deliberately does **not** cascade: deleting a booking leaves
+its travel alone. Only `#TO_COMPOSITION_CHILD` carries the cascade, which is
+the same asymmetry a RAP behaviour definition has between `composition of`
+and `association to parent`.
+
+The child needs its own `@ObjectModel.writeEnabled` to be written directly;
+the cascade works regardless, because it is the parent's statement.
+
+What this is not yet: a transactional buffer, a draft, or a deep insert that
+creates header and items in one request. Those are the rest of B.2.

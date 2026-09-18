@@ -27,5 +27,8 @@ define view ZC_STG_TRAVEL
       @ObjectModel.virtualElement: true
       @ObjectModel.virtualElementCalculatedBy: 'ABAP:ZCL_STG_TRAVEL_CALC'
       cast( 0 as abap.int4 ) as FreeSeats,
+      // a booking is a part of its travel, not a thing the travel points
+      // at: RAP's word for it, entered through the CDS annotation (B.2)
+      @ObjectModel.association.type: [#TO_COMPOSITION_CHILD]
       _Bookings
 }
