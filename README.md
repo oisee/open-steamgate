@@ -1,6 +1,18 @@
 # open-steamgate
 
-**A SAP system you can clone.**
+**An ABAP application server you can clone.**
+
+The layer under an ERP, not the ERP. What is here is that layer's list, and
+it can be read off line by line: the language runtime, the dictionary, Open
+SQL, the ICF service tree, the OData gateway, CDS, AMDP, the transactional
+bracket, screens, abapGit as the transport, ADT from outside. What is not
+here belongs in the same breath, because the line above is read as a claim
+of compatibility and should be: no business application of any kind — no
+finance, no logistics, not one application table beyond the demo flights —
+and what runs is a subset in every direction, a subset of the language, a
+subset of the dictionary, the `_DPC_EXT` classes of classic code-based SEGW
+rather than everything that ships. That is not an apology for what is
+missing. It is where the edges are.
 
 `open-steamgate` (OSD) cross-compiles real ABAP — the actual `_MPC_EXT` /
 `_DPC_EXT` Gateway classes, CDS views, AMDP methods — and runs it against a
