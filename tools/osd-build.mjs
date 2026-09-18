@@ -50,6 +50,11 @@ const GENERATORS = [
   // function-module registry, because the modules it writes are what that
   // registry has to see.
   ["amdp-gen.mjs"],
+  // and then the CDS table functions are checked against the methods that
+  // implement them: the `returns` list is the authority and a mismatch fails
+  // the build, because filling columns by position quietly is worse than not
+  // building at all
+  ["amdp-tablefunc.mjs"],
   ["osd-fm-registry.mjs"],
   ["osd-tran-registry.mjs"],
 ];

@@ -26,12 +26,21 @@ export function loadProcedures(folder = "gen/amdp") {
 }
 
 function statement(p) {
+  const name = `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`;
+  if (p.kind === "function") {
+    // A table function is a view with arguments: its rows are its return
+    // value, not an OUT parameter, so the RETURNING parameter of the ABAP
+    // method becomes RETURNS TABLE(...) here.
+    const returning = p.parameters.find((x) => x.direction === "RETURNING");
+    const args = p.parameters.filter((x) => x.direction === "IN")
+      .map((x) => `${x.name} ${x.hanaType}`).join(", ");
+    return [`CREATE FUNCTION ${name} (${args})`,
+      `  RETURNS ${returning?.hanaType ?? "TABLE()"}`,
+      `  LANGUAGE ${p.language}`, `  READS SQL DATA`, "AS BEGIN", p.body, "END;"].join("\n");
+  }
   const args = p.parameters.map((x) =>
     `${x.direction === "INOUT" ? "INOUT" : x.direction} ${x.name} ${x.hanaType}`).join(", ");
-  const head = p.kind === "function"
-    ? `CREATE FUNCTION "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}" (${args})`
-    : `CREATE PROCEDURE "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}" (${args})`;
-  return [head, `  LANGUAGE ${p.language}`, `  SQL SECURITY INVOKER`,
+  return [`CREATE PROCEDURE ${name} (${args})`, `  LANGUAGE ${p.language}`, `  SQL SECURITY INVOKER`,
     p.readOnly ? "  READS SQL DATA" : "", "AS BEGIN", p.body, "END;"]
     .filter((x) => x !== "").join("\n");
 }
@@ -89,8 +98,20 @@ export class AmdpDestination {
       // the runtime's typed value -> plain JSON the runner can bind
       inputs[x.name] = typeof given.array === "function" ? given.array().map((row) => plainRow(row)) : given.get();
     }
-    const method = {name: p.method, parameters: p.parameters.map((x) => ({...x, abapType: x.hanaType}))};
-    const result = await call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
+    let result;
+    if (p.kind === "function") {
+      // a table function is queried, not called
+      const args = p.parameters.filter((x) => x.direction === "IN")
+        .map((x) => `${x.name} => ${literal(inputs[x.name])}`).join(", ");
+      const rows = await this.#exec(
+        `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`);
+      const returning = p.parameters.find((x) => x.direction === "RETURNING");
+      result = {[returning?.name ?? "rt"]: (rows.find(Array.isArray) ?? []).map((row) =>
+        Object.fromEntries(Object.entries(row).map(([k, v]) => [k.toLowerCase(), Buffer.isBuffer(v) ? v.toString("utf8") : v])))};
+    } else {
+      const method = {name: p.method, parameters: p.parameters.map((x) => ({...x, abapType: x.hanaType}))};
+      result = await call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
+    }
 
     for (const x of p.parameters) {
       if (x.direction === "IN") continue;
@@ -100,6 +121,12 @@ export class AmdpDestination {
     }
     if (this.trace) console.log(`AMDP: ${p.class}=>${p.method} returned ${Object.keys(result).join(", ")}`);
   }
+}
+
+/** a value as SQL text; only scalars reach here, a table parameter of a table
+ *  function is not a thing HANA has */
+function literal(v) {
+  return typeof v === "number" ? String(v) : `'${String(v ?? "").replace(/'/g, "''")}'`;
 }
 
 /** a runtime structure as plain JSON, lower-cased field names */

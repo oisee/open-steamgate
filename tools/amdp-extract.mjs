@@ -99,7 +99,7 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   // type text is on that line of the definition, and reading it there is
   // exact rather than a guess.
   const defs = new Map();
-  const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "OUT"};
+  const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
   for (const m of obj.getClassDefinition?.()?.methods ?? []) {
     const params = [];
     for (const p of m.parameters ?? []) {
@@ -121,6 +121,9 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
       if (!/BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i.test(text)) { open = undefined; continue; }
       open = {
         name: /METHOD\s+(\S+)/i.exec(text)?.[1] ?? "",
+        // PROCEDURE or FUNCTION: a table function becomes CREATE FUNCTION ...
+        // RETURNS TABLE(...) in HANA, not a procedure with an OUT parameter
+        dbKind: (/BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i.exec(text)?.[1] ?? "PROCEDURE").toUpperCase(),
         forDb: /FOR\s+(\w+)/i.exec(text)?.[1] ?? "",
         language: /LANGUAGE\s+(\w+)/i.exec(text)?.[1] ?? "",
         readOnly: /OPTIONS\s+READ-ONLY/i.test(text),

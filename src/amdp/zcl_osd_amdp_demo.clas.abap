@@ -25,6 +25,21 @@ CLASS zcl_osd_amdp_demo DEFINITION
       IMPORTING VALUE(iv_count)  TYPE i
       EXPORTING VALUE(et_square) TYPE tt_square.
 
+*   The same computation as a CDS table function: its result is queryable
+*   like a view rather than returned to one caller. The row type has to agree
+*   with the `returns` list of ZTF_OSD_SQUARES field for field -- the CDS
+*   declaration is the authority and amdp-gen refuses a mismatch.
+    TYPES: BEGIN OF ty_square_tf,
+             id     TYPE i,
+             label  TYPE c LENGTH 40,
+             square TYPE i,
+           END OF ty_square_tf,
+           tt_square_tf TYPE STANDARD TABLE OF ty_square_tf WITH EMPTY KEY.
+
+    CLASS-METHODS squares_tf
+      IMPORTING VALUE(p_count)  TYPE i
+      RETURNING VALUE(rt_square) TYPE tt_square_tf.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -45,6 +60,16 @@ CLASS zcl_osd_amdp_demo IMPLEMENTATION.
                   SELECT :lv_i AS id, 'square of ' || :lv_i AS label, :lv_i * :lv_i AS square FROM DUMMY;
       lv_i = :lv_i + 1;
     END WHILE;
+  ENDMETHOD.
+
+  METHOD squares_tf BY DATABASE FUNCTION FOR HDB
+                    LANGUAGE SQLSCRIPT
+                    OPTIONS READ-ONLY.
+    RETURN SELECT n AS id,
+                  'square of ' || n AS label,
+                  n * n AS square
+           FROM ( SELECT ROW_NUMBER() OVER () AS n
+                  FROM SERIES_GENERATE_INTEGER(1, 1, :p_count + 1) );
   ENDMETHOD.
 
 ENDCLASS.

@@ -61,6 +61,34 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(parameterType("tt_cpu_state", types)).to.contain("cycles BIGINT");
   });
 
+  it("a CDS table function is checked against the method that implements it", async () => {
+    const {parseTableFunction, cdsType, check} = await import("../tools/amdp-tablefunc.mjs");
+    const abaplint = (await import("@abaplint/core"));
+    const tf = parseTableFunction(`
+      define table function ZTF_PROBE
+        with parameters p_count : abap.int4
+        returns { id : abap.int4; label : abap.char(40); square : abap.int4; }
+        implemented by method zcl_x=>f;`, abaplint);
+    expect([tf.name, tf.class, tf.method]).to.deep.equal(["ZTF_PROBE", "ZCL_X", "f"]);
+    expect(tf.returns.map((r) => `${r.name} ${r.hanaType}`)).to.deep.equal(
+      ["id INTEGER", "label NVARCHAR(40)", "square INTEGER"]);
+
+    const method = {kind: "function", parameters: [
+      {name: "p_count", direction: "IN", hanaType: "INTEGER"},
+      {name: "rt", direction: "RETURNING", hanaType: "TABLE(id INTEGER, label NVARCHAR(40), square INTEGER)"}]};
+    expect(check(tf, method), "the declarations agree").to.deep.equal([]);
+
+    // the CDS is the authority, and a mismatch is named rather than tolerated:
+    // the body fills columns by position, so a wrong width produces rows that
+    // look plausible and are wrong
+    const narrower = {...method, parameters: [method.parameters[0],
+      {...method.parameters[1], hanaType: "TABLE(id INTEGER, label NVARCHAR(30), square INTEGER)"}]};
+    expect(check(tf, narrower)[0]).to.contain("the CDS says abap.char(40)");
+    const renamed = {...method, parameters: [method.parameters[0],
+      {...method.parameters[1], hanaType: "TABLE(id INTEGER, caption NVARCHAR(40), square INTEGER)"}]};
+    expect(check(tf, renamed)[0]).to.contain("'label' in the CDS and 'caption' in the method");
+  });
+
   it("maps the ABAP types an AMDP signature can use, and says so when it cannot", () => {
     expect(hanaType("i")).to.equal("INTEGER");
     expect(hanaType("int8")).to.equal("BIGINT");
