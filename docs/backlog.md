@@ -94,6 +94,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.3  a transaction node that actually runs                       DONE 09-18
 ├─ G.5  SICF as a Fiori Elements application, and live                open
 ├─ G.6  a class with an interface becomes a screen                    open
+├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
      SICF, as a proper Fiori Elements app where handlers and the rest are
@@ -182,6 +183,33 @@ G.6  A class with an interface becomes a screen                          [S]
         written against our interface back out to theirs works exactly as
         far as we implemented their contract faithfully. Worth naming as a
         goal, not worth promising
+
+G.7  The screen is usable from the keyboard                              [S]
+     Alice, 2026-09-18: the menu and the tree must work with the arrow
+     keys and Enter as well as the mouse, and Page Up / Page Down too.
+     ├─ this is what a real SAP GUI user expects and it is also plain
+        accessibility: a tree nobody can walk without a mouse is half a
+        screen
+     ├─ the constraint that makes it interesting: `ZCL_OSD_WEBGUI`
+        currently ships **no JavaScript at all** - the folders are
+        `<details>`, the menu folds out on `:hover` and `:focus-within`,
+        a node is an anchor, and a browser test asserts a script count of
+        zero. Tab and Enter therefore already reach every node and every
+        menu entry. What is missing is arrow-key movement, which the
+        browser does not give a list of links for free
+     ├─ so decide honestly rather than by reflex: how much of it is
+        reachable with `tabindex`, `<details>` and the roving-focus
+        pattern in HTML alone, and where a small script genuinely earns
+        its place (arrow keys across a tree, Page Up / Page Down by a
+        screenful, Home / End). If a script goes in, it is small, it is
+        the only one, and the test that asserted zero scripts becomes a
+        test that asserts exactly one and says why
+     ├─ the real screen's habits worth copying: arrows move, Enter opens,
+        Right/Left expand and collapse a folder, Page Up / Page Down move
+        by a page, and the command field keeps focus on load so a name
+        can be typed immediately
+     └─ it belongs with G.1b's work rather than after abapGit: the screen
+        is the thing people touch first
 
 G.4  abapGit through the substitutes                             open, closure measured in G.2
 
