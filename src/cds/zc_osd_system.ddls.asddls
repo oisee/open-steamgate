@@ -31,6 +31,8 @@ define view ZC_OSD_SYSTEM
       snap_at     as SnapAt,
       @EndUserText.label: 'Tree'
       root_hint   as RootHint,
+      @EndUserText.label: 'Work process'
+      pid         as Pid,
       _Processes,
       _Ports,
       _Services,

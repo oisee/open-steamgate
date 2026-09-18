@@ -1,4 +1,5 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
+import {bootIdentity} from "../tools/osd-identity.mjs";
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
 // options.setup). Same shape as every open-abap repo: one in-memory DB,
@@ -9,6 +10,12 @@ export async function setup(abap, schemas, insert) {
   // the browser preview (web/preview-backend.mjs): seed rows come from the
   // bundle, the database from cache storage when there is one
   const preview = globalThis.__stgPreview;
+  // Who this system is, before a line of ABAP runs: sy-sysid, sy-mandt and
+  // sy-uname come from tools/osd-identity.mjs, which the status snapshot and
+  // the ADT façade read too, so the three cannot drift apart (backlog G.1b).
+  // In the browser there is no environment; the build wrote the id into the
+  // bundle and the backend hands it over here.
+  bootIdentity(abap, preview?.env ?? globalThis.process?.env ?? {});
   if (preview !== undefined) {
     preview.schemas = schemas;
     preview.insert = insert;

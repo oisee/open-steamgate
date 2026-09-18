@@ -26,13 +26,52 @@ The screen is the classic one, and is meant to be recognised as such: the blue
 title bar with the system on the right, the menu bar, the command field with
 its green tick and the standard buttons beside it, the folder tree with the
 disclosure triangles, the tall image panel down the right-hand side with the
-bulge in its left edge, and the status bar at the bottom carrying the message.
+bulge in its left edge and the drop on it, the splitter between the two, and
+the status bar at the bottom carrying the message.
 
-Nothing on the page is scripted. The folders are `<details>`/`<summary>`, so
-they fold without JavaScript; the command field is a GET form; a node is an
-anchor. The one trap this tree has paid for twice — a page written from ABAP in
-backtick literals gets no escapes — does not apply, because there is nothing to
-escape.
+Nothing on the page is scripted, and that survived G.1b. The folders are
+`<details>`/`<summary>`, so they fold without JavaScript; the command field is
+a GET form; a node is an anchor; the menu bar folds out on `:hover` and
+`:focus-within`; the splitter is `resize: horizontal` on the tree pane. The one
+trap this tree has paid for twice — a page written from ABAP in backtick
+literals gets no escapes — does not apply, because there is nothing to escape.
+
+## The drop, and the splitter, and the menu bar (G.1b)
+
+**The drop** is drawn in the page as SVG and is deliberately *not* the SAP one:
+the same idea — a glossy bead of water, tip and bulb, lit from the near side —
+set on a diagonal (`rotate(38 60 60)`) instead of standing upright, so it reads
+as a nod rather than as a copy of somebody's trademark. It sits on the deep
+blue gradient field the panel already had. It is drawn in an SVG of its own
+inside the wordmark block rather than in the stretched background, because the
+background is `preserveAspectRatio="none"` and would squash a circle into an
+egg the moment the splitter moved; the browser test asserts the drawing is
+square and that the page fetched no image.
+
+The shape's class is `bead`, and that is not cosmetic: it was `drop` for one
+build, `.drop` is the menu bar's fold-out, `display:none`, and the filled path
+was invisible while the outline beside it was not. It looked like a gradient
+that had not applied. Verify a drawing by looking at it.
+
+**The menu bar** works, as anchors, with no script: `System > Status` opens the
+status app, `System > Log off` goes to the launchpad, `Favorites` lists what
+the Favorites folder of the tree holds, and `Help > About` is a page of the
+same class at `/sap/bc/gui/sap/its/webgui/about`. The two System targets are
+**read off the node list** (`ZCL_OSD_WEBGUI=>TARGET`, by the node's name —
+`SM50`, `FLP`), never written a second time, so the bar and the tree cannot
+send you to two different places, and a test asserts the menu's `href` equals
+the tree's own. Everything else is greyed and says so (`aria-disabled`, a
+`title` saying it is not wired to anything), top-level entries included: a menu
+that swallows a click silently is worse than one that admits what it cannot do.
+
+**The splitter** is CSS. `resize: horizontal` on the tree pane, which does not
+grow or shrink on its own (`flex: 0 0 auto`), so the width the drag writes is
+the width that is used, and the image panel takes what is left
+(`flex: 1 1 auto`). The handle is the browser's own grip in the pane's
+bottom-right corner; there is no drawn splitter bar, because a bar that looked
+draggable and was not would be exactly the pretending the menu was cured of.
+The browser test drags the grip and asserts the tree lost what the panel
+gained.
 
 ## What is on it, and where it comes from
 
@@ -46,7 +85,7 @@ read, in ABAP, out of the five status tables of `src/status/`:
 | Services / ICF Services | `ZOSD_SVC` where `KIND = 'ICF'` | the `*.sicf.xml` nodes |
 | Services / Push Channels | `ZOSD_SVC` where `KIND = 'APC'` | the `*.sapc.xml` applications |
 | Content Packs | `ZOSD_PACK` | `osd-pack.json` in every pack |
-| the title and status bars | `ZOSD_SYS` | the façade |
+| the title and status bars | `ZOSD_SYS` + `sy` | the façade, and the boot |
 
 Those tables are the system-status inventory, and the façade fills them from
 one snapshot (`tools/osd-status.mjs`, `ZCL_OSD_STATUS=>REFRESH`). Reading them
@@ -77,6 +116,69 @@ is registered for this path as well (`test/start.mjs`, and `STATUS_SERVICE` in
 `web/preview-backend.mjs` for the browser deployment). It has to be registered
 *before* the SICF mount, because that mount answers the request instead of
 passing it on.
+
+## The status bar tells the truth, and the system has one identity
+
+The bar used to print `OSG (1) 100 node`. The `(1)` and the `100` were literals
+of the class, and underneath them this system had **four identities that
+disagreed** (backlog G.1b):
+
+| who | said | filled from |
+| --- | --- | --- |
+| the ABAP runtime | `sy-sysid ABC`, `sy-mandt 123`, `sy-uname USERNAME` | `@abaplint/runtime`, `builtin/sy.ts`, never set by us |
+| the status table | `ZOSD_SYS-SID` = `OSG` | `STG_ADT_SID` or a default (`tools/osd-status.mjs`) |
+| the ADT façade | `systemID OS2`, `client 001`, user `DEVELOPER` | `tools/adt-facade.mjs` |
+| this screen | a session and a client | two literals |
+
+There is one source now: **`tools/osd-identity.mjs`**. The boot sets `sy-sysid`,
+`sy-mandt` and `sy-uname` from it — `test/setup.mjs`, which is the setup hook
+every host of this tree boots the ABAP through (node, the binary, and the
+service worker; in the browser there is no environment, so the build writes the
+id into the bundle and `web/preview-backend.mjs` hands it over). The status
+snapshot takes `ZOSD_SYS-SID` from the same function, and so does the ADT
+façade. The screen then reads `sy` and prints what it finds:
+
+```
+OSG (436726) 123 DEVELOPER · node · open-steamgate
+ |    |       |   |          |      root_hint
+ |    |       |   |          host kind
+ |    |       |   sy-uname
+ |    |       sy-mandt
+ |    the work process (ZOSD_SYS-PID)
+ sy-sysid
+```
+
+**Two names, and why they differ.** `OSD_SID` is the runtime-facing id: what
+the ABAP sees as `sy-sysid` and what the status service reports. `STG_ADT_SID`
+is the ADT-facing one, what Eclipse sees, and it defaults to `OS2` rather than
+to the runtime's `OSG`. That is not an oversight: an ABAP project stores the id
+it was created against and refuses a logon to a system reporting another one
+("Logon was not performed to the service instance of the project OS2, but to
+service instance: OSD"), so renaming it locks the owner of a working project
+out — which happened twice, and is why `tools/adt-facade.mjs` made the id a
+constant in the first place. The same holds for the façade's client `001`,
+which is also part of what a project was created against and of the session
+cookie's name (`SAP_SESSIONID_OS2_001`), while the runtime's client is `123`
+because that is the client the seed rows in `data/` are in. `STG_ADT_SID` still
+renames both, exactly as it did before. `OSD_CLIENT` and `OSD_USER` are the
+other two knobs, and `OSD_CLIENT` moves `sy-mandt` away from the seeded rows,
+so it is for experiments rather than for a working tree.
+
+**The session number is a work process.** This system has no sessions; it has
+work processes, so the work process is what goes where SAP GUI prints the
+session. `ZOSD_SYS-PID` is new, and it is the process the status tables were
+*written in* — the façade itself when it holds the ABAP inline, and otherwise
+the child the snapshot is posted to, which is the one the proxy forwards the
+request to. A deployment with no process number (the browser one: a service
+worker is not a process anybody can number) prints the system without the
+parentheses rather than printing a zero that looks like a session.
+
+The tests assert the bar against the *other* source rather than against a
+string: `test/webgui.mjs` and `test/e2e/webgui.spec.mjs` read `SystemSet`
+through `ZOSD_STATUS_SRV` and require the bar to carry that `Sid` and that
+`Pid`, and the ABAP unit test asserts `identity( )` equals `sy` and that `sy`
+is no longer the runtime's `ABC` / `USERNAME` — a bar compared with a literal
+would only prove that two literals match.
 
 ## A node has a kind
 
@@ -308,8 +410,8 @@ exactly step 3 above.
 ## Tests
 
 ```
-npx mocha test/webgui.mjs                       # the path, the tree, the command field
-npx playwright test test/e2e/webgui.spec.mjs    # it renders, a node navigates, the field works
+npx mocha test/webgui.mjs                       # the path, the tree, the command field, the bar, the menu
+npx playwright test test/e2e/webgui.spec.mjs    # it renders, a node navigates, the field works, the splitter moves
 npm run unit                                    # ZCL_OSD_WEBGUI: the ok-codes, and the sapevent rewrite
 npx mocha test/sapevent.mjs                     # the round trip against abapGit's markup, browser played by hand
 npx playwright test test/e2e/sapevent.spec.mjs  # the same, Chromium clicking inside the frame
@@ -320,4 +422,6 @@ two halves run with `npm run unit` in `.local/lars/open-abap-gui`.
 
 `test/webgui.mjs` is in `npm run integration`. The browser test does not assert
 a status code: it opens folders, reads a node, clicks it and follows where it
-goes, then types names into the command field.
+goes, types names into the command field, folds the menu bar out with the mouse
+and with the keyboard and follows `Help > About` and `System > Status`, drags
+the splitter, and reads the status bar back against the status service.

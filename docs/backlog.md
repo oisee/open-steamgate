@@ -88,7 +88,7 @@ E — content packs and layers: what the tree is made of
 
 G — the classic screens, and the GUI substitutes under them
 ├─ G.1  SAP Easy Access, served by ABAP                             DONE 09-18
-├─ G.1b the drop, drawn, and a menu bar that works                  after G.2
+├─ G.1b the drop, drawn, and a menu bar that works                  DONE 09-18
 ├─ G.2  prove a sapevent click comes back                           DONE 09-18
 ├─ G.3  a transaction node that actually runs                       open
 ├─ G.5  SICF as a Fiori Elements application, and live                open
@@ -1032,29 +1032,52 @@ G.1  SAP Easy Access, served by ABAP                     [S] DONE 2026-09-18
      └─ open-abap-gui in as a lib: +301 objects, /src plus three scaffold
         files /src names; escaping on the page is cl_gui_control=>escape_html
 
-G.1b The drop, drawn, and a menu bar that works                          [S]
+G.1b The drop, drawn, and a menu bar that works           [S] DONE 2026-09-18
      Alice, 2026-09-18: "каноническую каплю саповскую нарисуем (но другую -
      диагональную) и меню там тоже реализуй".
-     ├─ the image panel on the right becomes the SAP drop, drawn as SVG in
-        the page rather than a bitmap, and deliberately not the original:
-        the same idea set on a diagonal, so it reads as a nod and not a copy
-     ├─ the menu bar's entries do something: System > Status opens the
-        status app (the SM50 / sysinfo node the tree already has), System >
-        Log off returns to the launchpad, Help > About says the generation
-        and the build; the rest may stay inert but must not pretend
-     ├─ a splitter between the tree and the image, draggable, the way the
-        real screen's is (Alice)
-     ├─ **the status bar tells the truth** (Alice: "надо правду показывать").
-        Today it prints "OSG (1) 100 node": the "(1)" and the "100" are
-        hard-coded in zcl_osd_webgui line 487, and the system has four
-        identities that disagree - the runtime's sy-sysid ABC / sy-mandt 123
-        / sy-uname USERNAME (@abaplint/runtime constants, never overridden),
-        the status table's sid OSG (STG_ADT_SID or a default), and the ADT
-        facade's OS2 / client 001. Fix: one setting at boot sets sy-sysid,
-        sy-mandt and sy-uname (test/setup.mjs, the preview backend), and the
-        status table, the ADT facade and this screen all read sy. The bar
-        then shows sy-sysid, the work process pid in place of the session
-        number, sy-mandt and the host kind - nothing invented
+     ├─ the drop is drawn in the page as SVG, on a diagonal
+        (rotate(38 60 60)) on the panel's own deep blue field: a glossy bead,
+        tip and bulb, a nod rather than a copy. Not a bitmap, no second
+        request, and in an SVG of its own rather than in the stretched
+        background, which would squash it when the splitter moves. Its class
+        is `bead` because `.drop` is the menu's fold-out, display:none, and
+        the filled path was invisible for one build while the outline beside
+        it was not - it read as a gradient that had not applied
+     ├─ the menu bar works, as anchors, still no JavaScript on the page:
+        System > Status and System > Log off are the URLs of the tree's own
+        SM50 and FLP nodes, read through ZCL_OSD_WEBGUI=>TARGET rather than
+        typed a second time (the test asserts menu href == tree href),
+        Favorites lists the Favorites folder, Help > About is a page of the
+        same class at .../webgui/about with the identity, the generation and
+        the build. Everything else is greyed, aria-disabled and titled "not
+        wired to anything", top-level entries included
+     ├─ the splitter is CSS: resize:horizontal on the tree pane (flex:0 0
+        auto so the dragged width wins), the image takes what is left. The
+        handle is the browser's own corner grip; no drawn bar, because a bar
+        that looked draggable and was not is the same lie the menu just
+        stopped telling. The browser test drags it
+     └─ **the status bar tells the truth** (Alice: "надо правду показывать").
+        One source, tools/osd-identity.mjs: the boot sets sy-sysid, sy-mandt
+        and sy-uname from it (test/setup.mjs, which every host boots through;
+        the browser has no environment, so the build writes the id into the
+        bundle and web/preview-backend.mjs hands it over), the status
+        snapshot takes ZOSD_SYS-SID from it, and the ADT facade takes its
+        identity from it. The bar reads sy and prints
+        "OSG (436726) 123 DEVELOPER · node · open-steamgate" - and the tests
+        assert it against SystemSet through the status service rather than
+        against a string.
+        ├─ two names on purpose: OSD_SID is runtime-facing (sy-sysid, the
+           status table, default OSG) and STG_ADT_SID is ADT-facing (default
+           OS2), because a project stores the id it was created against and
+           refuses a logon to a system reporting another one - the trap
+           tools/adt-facade.mjs already documents. The facade's client 001
+           is pinned for the same reason while the runtime's is 123, which
+           is the client data/ is seeded in. STG_ADT_SID still renames both
+        └─ the session number is a work process: ZOSD_SYS gained PID, the
+           process the tables were written in (inline the facade, otherwise
+           the child the snapshot is posted to, by the port it posts to).
+           The browser deployment has none and prints no parentheses rather
+           than a zero that looks like a session
      └─ SE80 - editing a class from this screen - is later (Alice), and it
         is the ADT facade's editor behind a transaction node, not a new one
 

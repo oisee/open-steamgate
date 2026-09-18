@@ -12,9 +12,21 @@ them carry the labels and the associations; one `stg.yaml` makes the
 service; a Fiori Elements V2 app renders it; the façade fills the tables
 when somebody reads the service.
 
+The SID is not chosen here: it comes from `tools/osd-identity.mjs`, the one
+place this tree says which system it is, and the same function sets `sy-sysid`,
+`sy-mandt` and `sy-uname` at boot and gives the ADT façade its identity. What
+each name means, and why the façade's id and client are allowed to differ from
+`sy`, is in `docs/webgui.md` ("The status bar tells the truth").
+
+`ZOSD_SYS-PID` is the process these tables were *written in*, which is the
+process that answers the read: the façade when it holds the ABAP inline, and
+otherwise the child the snapshot was posted to (found by the port of the
+address it posts to). SAP Easy Access prints it where SAP GUI prints the
+session number.
+
 | table | CDS view | what a row is |
 | --- | --- | --- |
-| `ZOSD_SYS` | `ZC_OSD_SYSTEM` | the system: SID, host kind, generation built and serving, whether they are in step, work processes, when it started, when the snapshot was taken |
+| `ZOSD_SYS` | `ZC_OSD_SYSTEM` | the system: SID, host kind, generation built and serving, whether they are in step, work processes, when it started, when the snapshot was taken, and the process the tables were written in (`PID`) |
 | `ZOSD_PROC` | `ZC_OSD_PROCESS` | a process: pid, role (`facade` or `work`), port, generation, epoch, sockets pinned to it, RSS |
 | `ZOSD_PORT` | `ZC_OSD_PORT` | a port: number, protocol (HTTP, HTTPS, RFC, DIAG), what it is for, whether anything is listening |
 | `ZOSD_SVC` | `ZC_OSD_SERVICE` | a service: path, kind (`ODATA`, `ICF`, `APC`), handler class, the pack it came from |
@@ -89,6 +101,7 @@ What the browser says:
 | `workers` | 1 | the worker is the whole system |
 | `gen_live`, `gen_serving`, `synced` | the bundle's stamp, twice, in step | a bundle cannot serve a generation other than itself; the stamp is the digest `scripts/build-preview.mjs` writes into `sw.js` and `build.json` |
 | `root_hint` | the deployment's directory (`main`, `pr-7`) | the last segment of the worker's mount, and never a path from anyone's disk. Served from the root, as `npm run web:preview` is locally, it is `preview` |
+| `pid` | 0 | a service worker is not a process anybody can number; SAP Easy Access prints the system without a session rather than printing the zero (`docs/webgui.md`) |
 | `started_at`, `snap_at` | the real clock | `web/preview-runtime.mjs` pins `Date` so two builds of the same code answer with the same bytes; the snapshot is the one caller that steps outside it, through `realNow()`, because a frozen "snapshot taken" would be a lie told to quieten a screenshot diff. A worker is shut down when idle, so `started_at` is when it last woke, not when the page was opened |
 
 **Processes**: one row, role `worker`. `pid` and `port` are 0 and `rss_mb` is

@@ -10,7 +10,7 @@
 // The shape below is the contract, and the Fiori app is built against it:
 //
 //   {"system":{"sid","host_kind","gen_live","gen_serving","synced",
-//              "workers","started_at","snap_at","root_hint"},
+//              "workers","started_at","snap_at","root_hint","pid"},
 //    "processes":[{"pid","role","port","generation","epoch","since",
 //                  "sockets","rss_mb","alive"}],
 //    "ports":[{"port","protocol","purpose","state","note"}],
@@ -32,6 +32,7 @@ import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
 import {contentFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
+import {identity} from "./osd-identity.mjs";
 
 const PAGE = 4096;
 
@@ -317,7 +318,9 @@ export async function snapshot(root = process.cwd(), options = {}) {
 
   return {
     system: {
-      sid: String(env.STG_ADT_SID ?? "OSG"),
+      // one source for what this system is called, shared with the boot that
+      // sets sy-sysid and with the ADT façade (tools/osd-identity.mjs)
+      sid: identity(env).sid,
       host_kind: options.hostKind ?? hostKind(),
       gen_live: live,
       gen_serving: serving,
@@ -326,12 +329,37 @@ export async function snapshot(root = process.cwd(), options = {}) {
       started_at: started.toISOString(),
       snap_at: now.toISOString(),
       root_hint: basename(resolve(root)),
+      // which process these tables are written in, and therefore the process
+      // that will answer the read: the façade when it holds the ABAP itself,
+      // and otherwise the work process the snapshot is posted to. It is the
+      // work process number SAP Easy Access prints where SAP GUI prints the
+      // session (src/webgui/), and it is not invented anywhere.
+      pid: servingPid(runtime, processes),
     },
     processes,
     ports: await portsOf(options.listeners ?? [], {instance: facadePort}),
     services: options.services ?? servicesOf(root, env),
     packs: options.packs ?? packsInfo(root, env),
   };
+}
+
+// The process the tables live in. Inline (no child) that is this process;
+// with a pool it is the child the façade posts the snapshot to, which is the
+// one the proxy forwards the request to — matched by the port of runtime.url,
+// because that is the address both of them use.
+function servingPid(runtime, processes) {
+  if (runtime === undefined) {
+    return process.pid;
+  }
+  let port = 0;
+  try {
+    port = Number(new URL(String(runtime.url)).port);
+  } catch {
+    port = 0;
+  }
+  const work = processes.filter((one) => one.role === "work");
+  const found = work.find((one) => one.port === port && port !== 0);
+  return Number(found?.pid ?? work[0]?.pid ?? 0);
 }
 
 function instancesOf(root) {

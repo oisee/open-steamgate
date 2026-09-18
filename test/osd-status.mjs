@@ -79,10 +79,26 @@ describe("tools/osd-status: the system as one JSON object", () => {
       started_at: "2026-09-17T09:00:00.000Z",
       snap_at: "2026-09-17T09:00:30.000Z",
       root_hint: s.system.root_hint,
+      // the process these tables are written in: the child the snapshot is
+      // posted to, which is the one that will answer the read
+      pid: 90001,
     });
     // the basename of the tree, never a path anyone could walk back
     expect(s.system.root_hint).to.match(/^osd-status-/);
     expect(JSON.stringify(s)).to.not.include(root);
+  });
+
+  // SAP Easy Access prints this where SAP GUI prints the session number
+  // (src/webgui/), so it has to be the process that answers rather than any
+  // process: the one the façade posts the snapshot to, found by the port of
+  // the address it posts to
+  it("names the work process the snapshot is posted to, and this process when there is no child", async () => {
+    const two = pool(2);
+    const s = await take({runtime: {...two, url: "http://127.0.0.1:38811/"}});
+    expect(s.system.pid).to.equal(90002);
+    // inline (a test, the binary, the preview): the façade holds the ABAP
+    const inline = await take({runtime: undefined});
+    expect(inline.system.pid).to.equal(process.pid);
   });
 
   it("says so when the generation built is not the generation serving", async () => {

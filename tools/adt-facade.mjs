@@ -29,6 +29,7 @@ import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {identity as osdIdentity} from "./osd-identity.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -620,12 +621,18 @@ export function adtRouter(options = {}) {
   // The id was set by STG_ADT_SID alone, so a restart without it renamed
   // the system under a working project and locked its owner out, twice.
   // OSD is the product; OS2 is what it answers to on the wire.
+  //
+  // The defaults come from tools/osd-identity.mjs now, which is the one
+  // source the ABAP boot and the status snapshot read as well — and which is
+  // also where it is written down why the id and the client this façade
+  // presents are allowed to differ from sy-sysid and sy-mandt (backlog G.1b).
+  const whoami = osdIdentity().adt;
   const identity = {
-    systemID: options.systemID ?? "OS2",
-    userName: options.userName ?? "DEVELOPER",
-    userFullName: options.userFullName ?? "Off-Stack Doppelganger",
-    client: options.client ?? "001",
-    language: options.language ?? "EN",
+    systemID: options.systemID ?? whoami.systemID,
+    userName: options.userName ?? whoami.userName,
+    userFullName: options.userFullName ?? whoami.userFullName,
+    client: options.client ?? whoami.client,
+    language: options.language ?? whoami.language,
     ...options.identity,
   };
 

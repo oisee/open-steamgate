@@ -1,5 +1,6 @@
 import {expect} from "chai";
 import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
+import {identity} from "../tools/osd-identity.mjs";
 import {startServer} from "./start.mjs";
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
 const PORT = process.env.STG_PORT ?? 3030;
@@ -11,6 +12,13 @@ const PORT = process.env.STG_PORT ?? 3030;
 // the facade takes its snapshot with (tools/osd-status.mjs), so a service
 // added anywhere in the tree has to appear in the menu or this fails.
 const BASE = `http://localhost:${PORT}/sap/bc/gui/sap/its/webgui/`;
+
+// the one row of ZOSD_SYS, through the service that serves it: the other
+// source the status bar has to agree with
+async function systemRow() {
+  const answer = await (await fetch(`http://localhost:${PORT}/sap/opu/odata/sap/ZOSD_STATUS_SRV/SystemSet?$format=json`)).json();
+  return answer.d.results[0];
+}
 
 describe("webgui: SAP Easy Access", () => {
   let server;
@@ -36,6 +44,20 @@ describe("webgui: SAP Easy Access", () => {
     // the image panel on the right, and the bulge in its left edge
     expect(html, "the image panel").to.contain('class="art"');
     expect(html, "the bulge").to.match(/<path d="M118,0 C22,230 22,670 118,900/);
+  });
+
+  // the drop is drawn in the page, and it is on a diagonal on purpose: the
+  // same idea as the SAP one, set at an angle, so it is a nod and not a copy
+  it("draws the drop, diagonally, as SVG rather than a bitmap", () => {
+    expect(page, "the drop").to.contain('class="artdrop"');
+    // the shape is named "bead" and not "drop": ".drop" is the menu bar's
+    // fold-out, display:none, and a path wearing that class was invisible
+    expect(page, "one path, tip and bulb").to.match(/<path class="bead" d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74/);
+    expect(page, "set on a diagonal").to.contain('<g transform="rotate(38 60 60)">');
+    // nothing is loaded: no <img>, no SMW0 object, no second request
+    expect(page, "not a bitmap").to.not.match(/<img[^>]+class="art/);
+    // and the geometric stand-in it replaced is gone
+    expect(page).to.not.contain('class="artgate"');
   });
 
   it("without the path's trailing slash too, the way express serves the node", async () => {
@@ -80,6 +102,90 @@ describe("webgui: SAP Easy Access", () => {
     for (const one of packsInfo(process.cwd())) {
       expect(page, one.name).to.contain(`data-node="${one.name.toUpperCase()}"`);
     }
+  });
+
+  // The menu bar does something, and what it does is read off the tree.
+  //
+  // Asserting the hrefs against a string typed here would only prove that two
+  // literals match; they are asserted against the node the tree itself draws,
+  // which is what "reuse its target" means.
+  it("puts System > Status where the tree's own status node points", () => {
+    const node = /<a class="leaf"[^>]*href="([^"]+)"[^>]*data-node="SM50"/.exec(page);
+    expect(node, "the tree has a status node").to.not.equal(null);
+    const item = /<a class="mx"[^>]*href="([^"]+)">Status</.exec(page);
+    expect(item, "the menu has a Status entry").to.not.equal(null);
+    expect(item[1]).to.equal(node[1]);
+  });
+
+  it("logs off to the launchpad, which is the favourite the tree carries", () => {
+    const node = /<a class="leaf"[^>]*href="([^"]+)"[^>]*data-node="FLP"/.exec(page);
+    const item = /<a class="mx"[^>]*href="([^"]+)">Log off</.exec(page);
+    expect(item[1]).to.equal(node[1]);
+  });
+
+  it("greys what is not wired to anything instead of swallowing the click", () => {
+    // every item of the bar is either an anchor or visibly disabled
+    const items = page.match(/<(a|span) class="mx[^"]*"[^>]*>/g) ?? [];
+    expect(items.length).to.be.greaterThan(10);
+    for (const one of items) {
+      if (one.startsWith("<span")) {
+        expect(one, one).to.contain('aria-disabled="true"');
+        expect(one, one).to.contain("mx off");
+      } else {
+        expect(one, one).to.contain("href=");
+      }
+    }
+    // a top-level entry with nothing live under it says so too
+    expect(page).to.match(/<span class="mt off" tabindex="0">Edit<\/span>/);
+    expect(page).to.match(/<span class="mt" tabindex="0">System<\/span>/);
+  });
+
+  // the splitter is CSS: the tree pane resizes, and the page still has no
+  // script on it at all
+  it("has a draggable splitter and no JavaScript", () => {
+    expect(page, "resize on the tree pane").to.match(/\.tree\{[^}]*resize:horizontal/);
+    expect(page, "and the image takes what is left").to.match(/\.art\{flex:1 1 auto/);
+    expect(page, "no script").to.not.match(/<script/i);
+    expect(page, "no inline handler").to.not.match(/\son[a-z]+=/i);
+  });
+
+  // Help > About: a page of the same class one path below the screen
+  it("answers Help > About with the generation, the build and what the system is", async () => {
+    expect(page, "the About entry").to.contain('href="/sap/bc/gui/sap/its/webgui/about"');
+    const res = await fetch(`${BASE}about`);
+    expect(res.status).to.equal(200);
+    const html = await res.text();
+    const system = await systemRow();
+    expect(html, "the generation the facade built").to.contain(system.GenLive);
+    expect(html, "what this system is").to.contain("open-steamgate");
+    expect(html, "sy, named as sy").to.contain("sy-sysid");
+    expect(html, "the work process").to.contain(String(system.Pid).trim());
+    expect(html, "back to the screen").to.contain('href="/sap/bc/gui/sap/its/webgui/"');
+  });
+
+  // The status bar used to print "OSG (1) 100": an invented session and an
+  // invented client. Now it prints what the system says it is, and the test
+  // asks the other two sources rather than a string typed here.
+  it("prints the system, the work process, the client and the user the rest of the system reports", async () => {
+    const system = await systemRow();
+    const who = identity();
+    const bar = /<span class="dim" id="sysinfo">([^<]*)/.exec(page);
+    expect(bar, "the status bar").to.not.equal(null);
+    const text = bar[1];
+    // the system id: what the status service reports, and what the boot set
+    // sy-sysid to, are the same thing
+    expect(system.Sid).to.equal(who.sid);
+    expect(text, "the system").to.contain(who.sid);
+    // the session number SAP prints is a work process here, and it is the
+    // process the status tables were written in
+    expect(Number(String(system.Pid).trim())).to.be.greaterThan(0);
+    expect(text, "the work process").to.contain(`(${String(system.Pid).trim()})`);
+    // the client and the user are sy-mandt and sy-uname, set at boot from
+    // the one identity; nothing here is 100 or 1
+    expect(text, "the client").to.contain(who.client);
+    expect(text, "the user").to.contain(who.user);
+    expect(text, "no invented session").to.not.contain("(1)");
+    expect(text, "no invented client").to.not.contain(" 100 ");
   });
 
   // the command field is the second way in, and it is resolved on the server

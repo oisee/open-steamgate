@@ -9,7 +9,7 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
 *
 *   {"system":{"sid":..,"host_kind":..,"gen_live":..,"gen_serving":..,
 *              "synced":true,"workers":4,"started_at":..,"snap_at":..,
-*              "root_hint":..},
+*              "root_hint":..,"pid":..},
 *    "processes":[{"pid":..,"role":..,"port":..,"generation":..,"epoch":..,
 *                  "since":..,"sockets":..,"rss_mb":..,"alive":true}],
 *    "ports":[{"port":..,"protocol":..,"purpose":..,"state":..,"note":..}],
@@ -36,6 +36,10 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
              started_at  TYPE string,
              snap_at     TYPE string,
              root_hint   TYPE string,
+* the process these tables were written in, which is the process that
+* answers the read: SAP Easy Access prints it where SAP GUI prints the
+* session number (src/webgui/, backlog G.1b)
+             pid         TYPE i,
            END OF ty_system.
 
     TYPES: BEGIN OF ty_process,
@@ -162,6 +166,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
     ls_sys-started_at  = ls_snap-system-started_at.
     ls_sys-snap_at     = ls_snap-system-snap_at.
     ls_sys-root_hint   = ls_snap-system-root_hint.
+    ls_sys-pid         = ls_snap-system-pid.
 
     LOOP AT ls_snap-processes INTO ls_proc_in.
       CLEAR ls_proc.
@@ -270,6 +275,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
       ls_snap-system-started_at  = ls_sys-started_at.
       ls_snap-system-snap_at     = ls_sys-snap_at.
       ls_snap-system-root_hint   = ls_sys-root_hint.
+      ls_snap-system-pid         = ls_sys-pid.
     ENDIF.
 
     SELECT * FROM zosd_proc INTO ls_proc ORDER BY pid.

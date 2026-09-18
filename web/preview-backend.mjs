@@ -13,7 +13,12 @@ import {odata as odataServices, packs as packRows, sid as SID} from "./generated
 
 // test/setup.mjs looks for this before it touches the file system: the seed
 // rows come from the bundle, the database from cache storage (or fresh).
-const preview = {seed, buildId, stored: undefined, db: undefined};
+// `env` is the only environment the browser has: the build wrote the system
+// id into the bundle (scripts/build-preview.mjs), and test/setup.mjs sets
+// sy-sysid / sy-mandt / sy-uname from it through tools/osd-identity.mjs, so
+// the ABAP in a service worker knows which system it is exactly as the ABAP
+// in a work process does (backlog G.1b).
+const preview = {seed, buildId, stored: undefined, db: undefined, env: {OSD_SID: SID}};
 globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
@@ -277,6 +282,10 @@ function statusSnapshot() {
       started_at: since,
       snap_at: realNow().toISOString(),
       root_hint: identity.rootHint,
+      // no pid: a service worker is not a process anybody can number, so the
+      // screen prints the system without one rather than printing a zero
+      // that looks like a session (src/webgui/)
+      pid: 0,
     },
     // one row, and the two columns it cannot fill are left empty rather than
     // invented: a service worker has no pid and no port, and nothing in a

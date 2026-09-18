@@ -44,6 +44,9 @@ entities:
       StartedAt: {type: String(30), field: STARTEDAT, readonly: true, label: Started}
       SnapAt: {type: String(30), field: SNAPAT, readonly: true, label: Snapshot taken}
       RootHint: {type: String(60), field: ROOTHINT, readonly: true, label: Tree}
+      # the process the tables were written in, and the number SAP Easy
+      # Access prints where SAP GUI prints the session (src/webgui/)
+      Pid: {type: String(10), field: PID, readonly: true, label: Work process}
 
   Process:
     set: ProcessSet
@@ -158,8 +161,8 @@ annotations:
       - {id: Services, label: Services, lineItem: to_Services}
       - {id: Packs, label: Packs, lineItem: to_Packs}
     fieldGroups:
-      General: [Sid, HostKind, GenLive, GenServing, Synced, Workers, StartedAt, SnapAt, RootHint]
-      Runtime: [HostKind, Workers, StartedAt]
+      General: [Sid, HostKind, GenLive, GenServing, Synced, Workers, StartedAt, SnapAt, RootHint, Pid]
+      Runtime: [HostKind, Workers, StartedAt, Pid]
       Build: [GenLive, GenServing, Synced, SnapAt]
   System/Sid: {label: System}
   System/HostKind: {label: Host}
@@ -170,6 +173,7 @@ annotations:
   System/StartedAt: {label: Started}
   System/SnapAt: {label: Snapshot taken}
   System/RootHint: {label: Tree}
+  System/Pid: {label: Work process}
 
   Process:
     header: {typeName: Process, typeNamePlural: Processes, title: Pid, description: Role}

@@ -35,6 +35,19 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * it: making a transaction real is filling in RUN, not reshaping the screen.
 * What a real one has to do is written down in docs/webgui.md.
 *
+* The menu bar is not decoration either: what it offers, it does. System >
+* Status opens the status app at the target the tree's own node carries,
+* System > Log off goes to the launchpad, Help > About is a page of this
+* class at /about, and everything that is not wired to anything is greyed
+* and says so. The bar folds out on hover and on focus, in CSS: this screen
+* still has no JavaScript on it.
+*
+* The status bar tells the truth. It used to print an invented session
+* number and an invented client; it now prints sy-sysid, sy-mandt and
+* sy-uname -- which the boot sets from tools/osd-identity.mjs, the one place
+* this system says who it is -- and the work process the tables were written
+* in, where SAP GUI prints the session number (ZOSD_SYS-PID).
+*
 * The command field is the second way in, beside the tree, because that is
 * how a system works: you type a name and it takes you there. It is resolved
 * on the server, against the same node list the tree is built from, so the
@@ -65,6 +78,29 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
              badge  TYPE string,
            END OF ty_node.
     TYPES tt_node TYPE STANDARD TABLE OF ty_node WITH DEFAULT KEY.
+
+* who this system is, as the screen prints it. Nothing here is a literal of
+* this class: the first three are sy, set at boot from the one identity
+* (tools/osd-identity.mjs), and the last two are the status tables.
+    TYPES: BEGIN OF ty_ident,
+             sid       TYPE string,
+             client    TYPE string,
+             user      TYPE string,
+             pid       TYPE string,
+             host_kind TYPE string,
+             info      TYPE string,
+           END OF ty_ident.
+
+    CLASS-METHODS identity
+      RETURNING VALUE(rs_ident) TYPE ty_ident.
+
+* what a node of this menu points at, by the name it is known by. The menu
+* bar reads its targets from here rather than repeating them, so the bar and
+* the tree cannot send you to two different places.
+    CLASS-METHODS target
+      IMPORTING it_nodes      TYPE tt_node
+                iv_name       TYPE string
+      RETURNING VALUE(rv_url) TYPE string.
 
 * the menu of this system, as rows; the tree and the command field read this
     CLASS-METHODS menu
@@ -118,6 +154,35 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
     CLASS-METHODS artwork
       IMPORTING iv_sid         TYPE string
+      RETURNING VALUE(rv_html) TYPE string.
+
+* the menu bar, built out of the same node list the tree is
+    CLASS-METHODS menubar
+      IMPORTING it_nodes       TYPE tt_node
+      RETURNING VALUE(rv_html) TYPE string.
+
+* one entry of the bar, with the items it folds out
+    CLASS-METHODS menu_entry
+      IMPORTING iv_text        TYPE string
+                iv_items       TYPE string
+                iv_live        TYPE abap_bool DEFAULT abap_false
+      RETURNING VALUE(rv_html) TYPE string.
+
+* an item of a fold-out: an anchor when it goes somewhere, and visibly
+* disabled when it does not. A menu that swallows a click silently is worse
+* than one that admits it is not wired to anything.
+    CLASS-METHODS menu_item
+      IMPORTING iv_text        TYPE string
+                iv_url         TYPE string OPTIONAL
+      RETURNING VALUE(rv_html) TYPE string.
+
+* Help > About: what this system is, out of sy and the status tables
+    CLASS-METHODS about
+      RETURNING VALUE(rv_html) TYPE string.
+
+    CLASS-METHODS about_row
+      IMPORTING iv_label       TYPE string
+                iv_value       TYPE string
       RETURNING VALUE(rv_html) TYPE string.
 
 * cl_gui_control=>escape_html, under a shorter name. The escaping of this
@@ -374,7 +439,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD artwork.
-* The tall panel down the right-hand side, and the bulge in it.
+* The tall panel down the right-hand side, the bulge in it, and the drop.
 *
 * On a real SAP Easy Access screen this is a picture control showing whatever
 * SMW0 object the system was configured with, and its left edge curves into
@@ -382,6 +447,14 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * object and no second request: one path, curved out to the left in the
 * middle, filled with the gradient, and the wordmark laid over it in HTML so
 * that stretching the panel does not stretch the letters.
+*
+* The drop is the SAP drop, and deliberately not the SAP drop: the same idea
+* -- a glossy blue bead of water, tip and bulb, lit from the near side --
+* set on a diagonal instead of standing upright, so it reads as a nod rather
+* than as a copy of somebody's trademark. It is drawn in an SVG of its own
+* inside the wordmark block rather than in the stretched background, because
+* the background has preserveAspectRatio=none and would squash a circle into
+* an egg as soon as the splitter moved.
     rv_html =
       `<div class="art">` &&
       `<svg class="artbg" viewBox="0 0 300 900" preserveAspectRatio="none" aria-hidden="true">` &&
@@ -398,11 +471,189 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<path d="M118,0 C22,230 22,670 118,900" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2"/>` &&
       `</svg>` &&
       `<div class="artmark">` &&
-      `<div class="artgate"><span></span><span></span><span></span></div>` &&
+      `<svg class="artdrop" viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">` &&
+      `<defs>` &&
+      `<linearGradient id="dg" x1="0.15" y1="0" x2="0.85" y2="1">` &&
+      `<stop offset="0" stop-color="#ffffff"/><stop offset="0.25" stop-color="#cbe7fd"/>` &&
+      `<stop offset="0.62" stop-color="#63b2f0"/><stop offset="1" stop-color="#1c74c4"/>` &&
+      `</linearGradient>` &&
+      `<radialGradient id="dh" cx="0.35" cy="0.32" r="0.45">` &&
+      `<stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>` &&
+      `<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>` &&
+      `</radialGradient>` &&
+      `</defs>` &&
+* one shape, set on the diagonal: tip up to the right, bulb down to the left
+      `<g transform="rotate(38 60 60)">` &&
+      `<path class="bead" d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74 C24,50 60,34 60,8 Z" fill="url(#dg)"/>` &&
+      `<path d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74 C24,50 60,34 60,8 Z" fill="none" stroke="#ffffff" stroke-opacity="0.7" stroke-width="2"/>` &&
+      `<ellipse cx="49" cy="68" rx="15" ry="19" fill="url(#dh)" transform="rotate(-22 49 68)"/>` &&
+      `<ellipse cx="50" cy="60" rx="4.5" ry="7" fill="#ffffff" fill-opacity="0.85" transform="rotate(-28 50 60)"/>` &&
+      `</g></svg>` &&
       `<div class="artname">open<b>steamgate</b></div>` &&
       |<div class="artsid">{ esc( iv_sid ) }</div>| &&
       `<div class="artnote">a gateway that is not there</div>` &&
       `</div></div>`.
+  ENDMETHOD.
+
+  METHOD identity.
+* The four identities of backlog G.1b are one now. sy is what the ABAP in
+* this process actually sees -- the boot sets sy-sysid, sy-mandt and
+* sy-uname from tools/osd-identity.mjs, which is also where the status
+* snapshot takes ZOSD_SYS-SID and the ADT facade takes what it tells
+* Eclipse -- and PID is the process those tables were written in. Nothing
+* below is a literal, and there is no session number, because this system
+* has no sessions: it has work processes, so the work process is what goes
+* where SAP GUI prints the session.
+    DATA ls_sys TYPE zosd_sys.
+
+    rs_ident-sid    = sy-sysid.
+    rs_ident-client = sy-mandt.
+    rs_ident-user   = sy-uname.
+    CONDENSE rs_ident-sid.
+    CONDENSE rs_ident-client.
+    CONDENSE rs_ident-user.
+
+    SELECT SINGLE * FROM zosd_sys INTO ls_sys.
+    rs_ident-host_kind = ls_sys-host_kind.
+    CONDENSE rs_ident-host_kind.
+    IF ls_sys-pid > 0.
+      rs_ident-pid = |{ ls_sys-pid }|.
+    ENDIF.
+
+    IF rs_ident-pid IS INITIAL.
+* a deployment with no process number -- the browser one -- says nothing
+* rather than printing a zero that looks like a session
+      rs_ident-info = |{ rs_ident-sid } { rs_ident-client } { rs_ident-user }|.
+    ELSE.
+      rs_ident-info = |{ rs_ident-sid } ({ rs_ident-pid }) { rs_ident-client } { rs_ident-user }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD target.
+    DATA ls_node TYPE ty_node.
+    LOOP AT it_nodes INTO ls_node.
+      IF ls_node-name = iv_name.
+        rv_url = ls_node-url.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD menu_item.
+    IF iv_url IS INITIAL.
+      rv_html = |<span class="mx off" aria-disabled="true" title="not wired to anything">{ esc( iv_text ) }</span>|.
+    ELSE.
+      rv_html = |<a class="mx" target="_top" href="{ esc( iv_url ) }">{ esc( iv_text ) }</a>|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD menu_entry.
+    DATA lv_class TYPE string.
+    lv_class = COND string( WHEN iv_live = abap_true THEN 'mt' ELSE 'mt off' ).
+    rv_html = |<div class="mi"><span class="{ lv_class }" tabindex="0">{ esc( iv_text ) }</span>| &&
+              |<div class="drop">{ iv_items }</div></div>|.
+  ENDMETHOD.
+
+  METHOD menubar.
+* The bar of the classic screen, and every live entry in it is a plain
+* anchor: no JavaScript, the fold-out is :hover and :focus-within in CSS.
+*
+* Where the live ones point is read out of the node list rather than typed
+* here a second time -- System > Status is the target of the node the tree
+* shows as "System status", System > Log off is the launchpad node -- so a
+* target that moves moves in both places at once. Everything else is greyed:
+* the screen has one function, and a menu that quietly swallowed a click
+* would be worse than one that admits what it cannot do.
+    DATA lv_favs TYPE string.
+    DATA ls_node TYPE ty_node.
+    DATA lv_url  TYPE string.
+
+    LOOP AT it_nodes INTO ls_node.
+      IF ls_node-parent <> 'FAVORITES'.
+        CONTINUE.
+      ENDIF.
+* a favourite with no page of its own is still reachable: the command field
+* answers for it, and says what it is
+      lv_url = COND string( WHEN ls_node-url IS INITIAL
+                            THEN |{ gc_path }/?okcode={ ls_node-name }|
+                            ELSE ls_node-url ).
+      lv_favs = lv_favs && menu_item( iv_text = ls_node-text iv_url = lv_url ).
+    ENDLOOP.
+
+    rv_html =
+      menu_entry( iv_text  = 'Menu'
+                  iv_items = menu_item( 'Create role' ) && menu_item( 'Assign users' ) && menu_item( 'Documentation' ) ) &&
+      menu_entry( iv_text  = 'Edit'
+                  iv_items = menu_item( 'Expand' ) && menu_item( 'Collapse' ) && menu_item( 'Create favourite' ) ) &&
+      menu_entry( iv_text  = 'Favorites'
+                  iv_live  = abap_true
+                  iv_items = lv_favs ) &&
+      menu_entry( iv_text  = 'Extras'
+                  iv_items = menu_item( 'Settings' ) && menu_item( 'Technical information' ) ) &&
+      menu_entry( iv_text  = 'System'
+                  iv_live  = abap_true
+                  iv_items = menu_item( iv_text = 'Status' iv_url = target( it_nodes = it_nodes iv_name = 'SM50' ) ) &&
+                             menu_item( 'Create session' ) &&
+                             menu_item( 'User profile' ) &&
+                             menu_item( iv_text = 'Log off' iv_url = target( it_nodes = it_nodes iv_name = 'FLP' ) ) ) &&
+      menu_entry( iv_text  = 'Help'
+                  iv_live  = abap_true
+                  iv_items = menu_item( iv_text = 'About' iv_url = |{ gc_path }/about| ) &&
+                             menu_item( 'SAP Library' ) &&
+                             menu_item( 'Release notes' ) ).
+  ENDMETHOD.
+
+  METHOD about_row.
+    rv_html = |<tr><th>{ esc( iv_label ) }</th><td>{ esc( iv_value ) }</td></tr>|.
+  ENDMETHOD.
+
+  METHOD about.
+* Help > About, at /sap/bc/gui/sap/its/webgui/about.
+*
+* The generation, the build and what this system is -- and every line of it
+* is read rather than written down: sy for the identity, ZOSD_SYS for the
+* generation and the process, the menu for the size of the tree.
+    DATA ls_sys   TYPE zosd_sys.
+    DATA ls_ident TYPE ty_ident.
+    DATA lv_rel   TYPE string.
+
+    ls_ident = identity( ).
+    SELECT SINGLE * FROM zosd_sys INTO ls_sys.
+    lv_rel = sy-saprl.
+    CONDENSE lv_rel.
+
+    rv_html =
+      `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` &&
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
+      `<title>About - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
+      `<div class="win">` &&
+      |<div class="title"><span>System: Status</span><small>{ esc( ls_ident-info ) }</small></div>| &&
+      `<div class="about">` &&
+      `<h1>open-steamgate</h1>` &&
+      `<p>A local IWBEP / OData runtime: the ABAP of this tree, transpiled to JavaScript, ` &&
+      `Open SQL over SQLite, ICF services behind CL_EXPRESS_ICF_SHIM, and Fiori on top. ` &&
+      `This screen is ZCL_OSD_WEBGUI, mounted where the real ITS webgui answers on a system.</p>` &&
+      `<table class="kv">` &&
+      about_row( iv_label = 'System (sy-sysid)'   iv_value = ls_ident-sid ) &&
+      about_row( iv_label = 'Client (sy-mandt)'   iv_value = ls_ident-client ) &&
+      about_row( iv_label = 'User (sy-uname)'     iv_value = ls_ident-user ) &&
+      about_row( iv_label = 'Release (sy-saprl)'  iv_value = lv_rel ) &&
+      about_row( iv_label = 'Work process'        iv_value = COND string( WHEN ls_ident-pid IS INITIAL THEN 'none: this deployment has no process number' ELSE ls_ident-pid ) ) &&
+      about_row( iv_label = 'Host'                iv_value = ls_ident-host_kind ) &&
+      about_row( iv_label = 'Work processes'      iv_value = |{ ls_sys-workers }| ) &&
+      about_row( iv_label = 'Generation built'    iv_value = CONV string( ls_sys-gen_live ) ) &&
+      about_row( iv_label = 'Generation serving'  iv_value = CONV string( ls_sys-gen_serving ) ) &&
+      about_row( iv_label = 'In step'             iv_value = COND string( WHEN ls_sys-synced = 'X' THEN 'yes' ELSE 'no' ) ) &&
+      about_row( iv_label = 'Started'             iv_value = CONV string( ls_sys-started_at ) ) &&
+      about_row( iv_label = 'Snapshot taken'      iv_value = CONV string( ls_sys-snap_at ) ) &&
+      about_row( iv_label = 'Tree'                iv_value = CONV string( ls_sys-root_hint ) ) &&
+      about_row( iv_label = 'Menu'                iv_value = |{ lines( menu( ) ) } nodes, from the system status tables| ) &&
+      `</table>` &&
+      `<p class="dim">The identity is one setting at boot (tools/osd-identity.mjs): it sets sy-sysid, ` &&
+      `sy-mandt and sy-uname, names the system in the status tables, and is what the ADT facade ` &&
+      `presents to Eclipse. docs/webgui.md says why the facade's own id is allowed to differ.</p>` &&
+      |<p><a class="back" href="{ gc_path }/">Back to SAP Easy Access</a></p>| &&
+      `</div></div></body></html>`.
   ENDMETHOD.
 
   METHOD style.
@@ -414,8 +665,20 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.title{background:linear-gradient(#5d8ac0,#2f5f94);color:#fff;font-weight:bold;padding:6px 12px;letter-spacing:.3px;` &&
       `display:flex;justify-content:space-between;align-items:center}` &&
       `.title small{font-weight:normal;opacity:.9}` &&
-      `.menu{background:#eef2f7;border-bottom:1px solid #c5d0dd;padding:3px 10px;color:#2b3b4d}` &&
-      `.menu b{margin-right:18px;font-weight:normal}` &&
+      `.menu{background:#eef2f7;border-bottom:1px solid #c5d0dd;padding:2px 6px;color:#2b3b4d;` &&
+      `display:flex;gap:2px;position:relative;z-index:20}` &&
+* the fold-out is CSS, not script: open on hover, open on keyboard focus,
+* and an item is an anchor or is visibly disabled
+      `.mi{position:relative}` &&
+      `.mt{display:inline-block;padding:3px 10px;border-radius:2px;cursor:default;outline-offset:-2px}` &&
+      `.mi:hover>.mt,.mi:focus-within>.mt{background:#cfdcea}` &&
+      `.mt.off{color:#8496a8}` &&
+      `.drop{display:none;position:absolute;left:0;top:100%;min-width:190px;background:#fff;` &&
+      `border:1px solid #8ea3bc;box-shadow:0 5px 12px rgba(12,34,58,.28);padding:3px 0;z-index:30}` &&
+      `.mi:hover>.drop,.mi:focus-within>.drop{display:block}` &&
+      `.mx{display:block;padding:4px 16px;white-space:nowrap;text-decoration:none;color:#1c2f43}` &&
+      `a.mx:hover,a.mx:focus{background:#2668a3;color:#fff}` &&
+      `.mx.off{color:#9aa9ba;cursor:default}` &&
       `.tools{background:linear-gradient(#f9fbfd,#e2e9f1);border-bottom:1px solid #b9c6d6;padding:5px 10px;` &&
       `display:flex;align-items:center;gap:8px}` &&
       `.cmdbox{display:flex;align-items:center;gap:4px}` &&
@@ -431,7 +694,13 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.sep{width:1px;height:18px;background:#b9c6d6;margin:0 4px}` &&
       `.dim{color:#5d7186}` &&
       `.body{flex:1;display:flex;min-height:0}` &&
-      `.tree{flex:1;overflow:auto;padding:10px 6px 24px 14px;background:#f7fafd}` &&
+* The splitter, and it is a CSS one: `resize: horizontal` on the tree pane,
+* so the grip in its bottom-right corner drags the boundary between the tree
+* and the image and the screen still ships no JavaScript. The pane does not
+* grow or shrink on its own (flex:0 0 auto), so the width the drag writes is
+* the width that is used; the image panel takes whatever is left.
+      `.tree{flex:0 0 auto;width:68%;min-width:220px;max-width:calc(100% - 140px);` &&
+      `overflow:auto;resize:horizontal;border-right:1px solid #b9c6d6;padding:10px 6px 26px 14px;background:#f7fafd}` &&
       `.fld{margin:0}` &&
       `.fld>summary{list-style:none;cursor:pointer;padding:2px 4px;display:flex;align-items:center;gap:6px;border-radius:2px}` &&
       `.fld>summary::-webkit-details-marker{display:none}` &&
@@ -456,13 +725,11 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.ico-app{background:#e07b39;border:1px solid #b45c22}` &&
       `.ico-pack{background:#7c8ea3;border:1px solid #5d7186}` &&
       `.ico-tcode{background:#c94f4f;border:1px solid #9c3535}` &&
-      `.art{width:300px;flex:none;position:relative;overflow:hidden;background:#0b2544}` &&
+      `.art{flex:1 1 auto;min-width:140px;position:relative;overflow:hidden;background:#0b2544}` &&
       `.artbg{position:absolute;inset:0;width:100%;height:100%}` &&
       `.artmark{position:absolute;right:20px;top:0;bottom:0;width:190px;color:#fff;` &&
-      `display:flex;flex-direction:column;justify-content:center;align-items:flex-end;text-align:right;gap:6px}` &&
-      `.artgate{display:flex;gap:4px;align-items:flex-end;height:44px;opacity:.9}` &&
-      `.artgate span{width:10px;background:#ffffff;border-radius:2px 2px 0 0;opacity:.85}` &&
-      `.artgate span:nth-child(1){height:22px}.artgate span:nth-child(2){height:44px}.artgate span:nth-child(3){height:30px}` &&
+      `display:flex;flex-direction:column;justify-content:center;align-items:flex-end;text-align:right;gap:10px}` &&
+      `.artdrop{filter:drop-shadow(0 8px 14px rgba(3,17,33,.55))}` &&
       `.artname{font-size:19px;letter-spacing:.5px;opacity:.95}` &&
       `.artname b{font-weight:bold}` &&
       `.artsid{font-size:36px;font-weight:bold;letter-spacing:3px;opacity:.9}` &&
@@ -470,21 +737,28 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.bar{background:#eef2f7;border-top:1px solid #b9c6d6;padding:4px 10px;display:flex;justify-content:space-between;` &&
       `align-items:center;color:#2b3b4d;font-size:12px}` &&
       `.msg{color:#a3480d;font-weight:bold}` &&
-      `@media (max-width:760px){.art{width:120px}.artmark{display:none}.det{display:none}}`.
+      `.about{flex:1;overflow:auto;padding:18px 24px;background:#f7fafd}` &&
+      `.about h1{font-size:20px;margin:0 0 6px}` &&
+      `.about p{max-width:70ch;line-height:1.5}` &&
+      `.kv{border-collapse:collapse;margin:12px 0}` &&
+      `.kv th{text-align:left;font-weight:normal;color:#5d7186;padding:3px 18px 3px 0;vertical-align:top;white-space:nowrap}` &&
+      `.kv td{padding:3px 0;font-family:"DejaVu Sans Mono","Consolas",monospace}` &&
+      `.back{color:#2668a3}` &&
+      `@media (max-width:760px){.tree{width:62%;min-width:160px}.artmark{display:none}.det{display:none}}`.
   ENDMETHOD.
 
   METHOD page.
     DATA lt_nodes TYPE tt_node.
     DATA ls_sys   TYPE zosd_sys.
-    DATA lv_sid   TYPE string.
-    DATA lv_info  TYPE string.
+    DATA ls_ident TYPE ty_ident.
     DATA lv_msg   TYPE string.
 
     lt_nodes = menu( ).
 
     SELECT SINGLE * FROM zosd_sys INTO ls_sys.
-    lv_sid = COND string( WHEN ls_sys-sid IS INITIAL THEN 'OSG' ELSE ls_sys-sid ).
-    lv_info = |{ lv_sid } (1) 100 { COND string( WHEN ls_sys-host_kind IS INITIAL THEN 'node' ELSE ls_sys-host_kind ) }|.
+* who this system is: sy, and the process the status tables were written in.
+* It used to be an invented session number and an invented client.
+    ls_ident = identity( ).
 
     lv_msg = iv_message.
     IF lv_msg IS INITIAL.
@@ -496,8 +770,8 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
       `<title>SAP Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
       `<div class="win">` &&
-      |<div class="title"><span>SAP Easy Access</span><small>{ esc( lv_info ) }</small></div>| &&
-      `<div class="menu"><b>Menu</b><b>Edit</b><b>Favorites</b><b>Extras</b><b>System</b><b>Help</b></div>` &&
+      |<div class="title"><span>SAP Easy Access</span><small>{ esc( ls_ident-info ) }</small></div>| &&
+      |<div class="menu">{ menubar( lt_nodes ) }</div>| &&
       `<div class="tools">` &&
       |<form class="cmdbox" method="get" action="{ gc_path }/" target="_top">| &&
       |<input class="cmd" type="text" name="okcode" value="{ esc( iv_okcode ) }" autocomplete="off" spellcheck="false" aria-label="Command field">| &&
@@ -513,11 +787,13 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<span class="dim">type a name and press Enter, or pick one from the menu</span>` &&
       `</div>` &&
       `<div class="body">` &&
-      `<div class="tree">` && branch( it_nodes = lt_nodes iv_parent = '' ) && `</div>` &&
-      artwork( lv_sid ) &&
+      `<div class="tree" title="drag the grip in the corner to move the splitter">` &&
+      branch( it_nodes = lt_nodes iv_parent = '' ) && `</div>` &&
+      artwork( ls_ident-sid ) &&
       `</div>` &&
       |<div class="bar"><span class="msg" id="msg">{ esc( lv_msg ) }</span>| &&
-      |<span class="dim">{ esc( lv_info ) } &middot; { esc( CONV string( ls_sys-root_hint ) ) }</span></div>| &&
+      |<span class="dim" id="sysinfo">{ esc( ls_ident-info ) } &middot; { esc( ls_ident-host_kind ) }| &&
+      | &middot; { esc( CONV string( ls_sys-root_hint ) ) }</span></div>| &&
       `</div></body></html>`.
   ENDMETHOD.
 
@@ -525,6 +801,20 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     DATA lv_okcode TYPE string.
     DATA ls_node   TYPE ty_node.
     DATA lv_msg    TYPE string.
+    DATA lv_path   TYPE string.
+
+* Help > About is a page of this class one path below the screen, the way a
+* service of a system has more than one node under it. The shim takes the
+* mount off the front, so what is left here is the sub-path and nothing else.
+    lv_path = server->request->get_header_field( '~path_info' ).
+    REPLACE ALL OCCURRENCES OF '/' IN lv_path WITH ''.
+    CONDENSE lv_path.
+    TRANSLATE lv_path TO UPPER CASE.
+    IF lv_path = 'ABOUT'.
+      server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
+      server->response->set_cdata( about( ) ).
+      RETURN.
+    ENDIF.
 
 * The shim hands the query string on as it arrived, so the field is decoded
 * here: a browser submitting a GET form sends a space as "+" and everything
