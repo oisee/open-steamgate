@@ -1,18 +1,26 @@
 # open-steamgate
 
-**Run real SAP `_MPC_EXT` / `_DPC_EXT` OData classes offline — no system attached.**
+**A SAP system you can clone.**
 
-`open-steamgate` (OSD) is a research project and integration harness for a
-**local IWBEP / OData runtime**: cross-compile the actual ABAP Gateway model-
-and data-provider classes, run their Open SQL against a local SQLite database
-seeded once through a blessed export, and serve the result as a real OData v2
-service that a Fiori Elements / UI5 front end consumes — all without a live
-SAP system. Eclipse edits it over ADT, SAP GUI can knock on it, and it deploys
-back through abapGit when you want to.
+`open-steamgate` (OSD) cross-compiles real ABAP — the actual `_MPC_EXT` /
+`_DPC_EXT` Gateway classes, CDS views, AMDP methods — and runs it against a
+local database, serving OData that a Fiori Elements front end consumes, that
+Eclipse edits over ADT, and that SAP GUI knocks on. No system attached. That
+much is a runtime, and *an offline IWBEP / OData runtime* is how this
+repository described itself for its first weeks.
+
+The sentence at the top turned out to be the more useful one, and the
+difference is not a slogan. A runtime is a thing you point at your code. A
+system you can clone is a thing you can copy, version, branch and throw away —
+source, dictionary, seed data and all. Everything here is already a file: the
+ABAP is a repository, the tables are abapGit TABU JSON, a build is an
+immutable generation addressed by the hash of its inputs, and the database
+sits behind a seam of eleven methods with three implementations. Not one of
+those decisions was taken in order to make a system cloneable. Together they
+do, and the rest of this README is mostly consequences.
 
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
-
 ---
 
 ## ▶ Try it without installing anything
@@ -45,6 +53,74 @@ deployment fetches them the way you would fetch any pack of your own;
 First visit installs the worker and takes a moment; after that it works
 offline. It needs a browser that allows service workers — a private window
 usually does not.
+
+---
+
+## ▶ A branch of a whole system
+
+In a real SAP system, code branches through transports and **data does not
+branch at all**. The database is one and it is shared, so "the same system
+with different data" means a second system, installed by somebody, with
+somebody's budget. That one fact is why *run the old version and the new one
+side by side and compare what they answer* is not a thing an ABAP shop does,
+however obviously useful it sounds.
+
+Here the database is a file, the seed is an artifact in the repository, and a
+generation is immutable and addressed by the hash of what went into it. So a
+branch carries the state as well as the source, and two branches run at the
+same time without knowing about each other: check one out, build it (usually
+free — the hash is already in the cache), serve it on another port.
+
+**Comparing them is three sieves, each strictly finer than the last.**
+Responses first, normalised for order, timestamps and generated ids. Then the
+SQL, which is cheap to capture because every statement in the system goes
+through one object. Then the steps: each statement with the values it saw. The
+most valuable outcome is the middle one — **the responses agree and the SQL
+does not**. That is a right answer arrived at by a different route, which is
+the kind that survives the test suite and breaks later on data volume or row
+order. No ordinary test sees it.
+
+**It also turns the oracle inside out.** Until now, checking ourselves meant
+checking against a real system: expensive, by hand, and only when a sandbox is
+up. Comparing two branches is checking against ourselves — free, and it runs
+in ordinary CI. Most of the questions actually asked in a day are *did my
+change break something*, and those do not need a real system at all. A real
+system stays necessary for exactly one class of question: **how does it really
+behave?** That is a much smaller bill than we had assumed.
+
+Three uses, in increasing order of cheek:
+
+1. **Regression of our own runtime** — one system, two transpiler versions.
+   The release-bundle slowdown and an `$orderby` defect both cost a day each
+   before this existed.
+2. **A/B of somebody else's refactor** — *prove your refactor changed
+   nothing.* There is no way to do this in the ABAP world today.
+3. **A behavioural bisect** — generations are immutable and keyed by their
+   inputs, so the comparison can be the predicate of a `git bisect`, and
+   "which commit changed this response?" stops being an investigation.
+
+**The discipline this needs, stated before it is skipped.** Tools like this
+die of noise: if the difference is rarely empty, people stop reading it. So
+the first target is a pair where there must be **no** difference at all — one
+branch on two runtimes — and the instrument has to be made silent before it is
+pointed at anything interesting. And a way to say *this difference is expected
+and approved* is needed on day one, not after the first intentional change
+paints everything red.
+
+**One question that has to be answered out loud**, because it changes what a
+comparison means: does the second branch start from the first branch's data,
+or from its own seed? Both are useful and they are not the same test. A shared
+seed is a clean A/B of code. Separate seeds check that a migration, or a
+different seed, does not change behaviour.
+
+A **differential debugger** is the second breath of the same idea: run both,
+step both, stop at the first divergence. The frame recorder is its crude
+ancestor and it found eight anomalies in two days.
+
+And it makes its own demo. In a world where a branch of a whole system is not
+a thing that exists, two systems side by side on one screen, answering the
+same request, with the difference marked, is both the argument and the
+instrument.
 
 ---
 
