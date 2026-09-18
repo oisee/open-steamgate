@@ -366,6 +366,37 @@ describe("wire", () => {
     expect((text.match(/--batchresponse_stg_\d+--/g) || []).length).to.equal(1);
   });
 
+  it("a changeset that fails is undone, including the requests that had succeeded", async () => {
+    const crlf = "\r\n";
+    // two creates and then a POST at an entity rather than at the set, which
+    // the dispatcher refuses with 405. The changeset fails as a whole, and the
+    // two rows the first two requests had already written have to be gone with
+    // it: a changeset is one LUW, not three requests that happen to travel
+    // together (backlog B.2).
+    const body = [
+      "--b", "Content-Type: multipart/mixed; boundary=cs", "",
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "POST TravelSet HTTP/1.1", "Content-Type: application/json", "", JSON.stringify({TravelId: "T0410", Description: "first of the changeset", Seats: 1}),
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "POST TravelSet HTTP/1.1", "Content-Type: application/json", "", JSON.stringify({TravelId: "T0411", Description: "second of the changeset", Seats: 1}),
+      "--cs", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      "POST TravelSet('T0001') HTTP/1.1", "Content-Type: application/json", "", "{}",
+      "--cs--", "", "--b--", "",
+    ].join(crlf);
+    const res = await fetch(BASE + "/$batch", {method: "POST", headers: {"content-type": "multipart/mixed; boundary=b", "x-csrf-token": "open-steamgate"}, body});
+    expect(res.status).to.equal(202);
+    const text = await res.text();
+    expect(text, "the changeset answers with the one error").to.contain("HTTP/1.1 405");
+    expect(text, "and not with the parts that had worked").to.not.contain("HTTP/1.1 201 Created");
+
+    for (const id of ["T0410", "T0411"]) {
+      expect((await fetch(`${BASE}/TravelSet('${id}')`)).status, id + " was rolled back").to.equal(404);
+    }
+
+    // and the fence holds: what was there before the changeset is still there
+    expect((await fetch(`${BASE}/TravelSet('T0001')`)).status, "the seeded rows survived").to.equal(200);
+  });
+
   it("CSRF token fetch is answered", async () => {
     const res = await fetch(BASE + "/", {headers: {"x-csrf-token": "Fetch"}});
     expect(res.status).to.equal(200);

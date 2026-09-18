@@ -575,6 +575,57 @@ B.19 HANA, AMDP and where each machine stands                            [S]
         machine buys the missing network hop and nothing is lost
 
 B.2  BOPF / RAP / drafts: one runtime, two front ends                    [S]
+     ├─ **started 2026-09-18**, and the first two pieces are in:
+     │  ├─ **a composition**: `@ObjectModel.association.type:
+     │  │  [#TO_COMPOSITION_CHILD]` makes the target a part rather than a
+     │  │  thing pointed at, and deleting the parent takes the children
+     │  │  with it, in the one LUW the request is already in. The
+     │  │  `#TO_COMPOSITION_PARENT` end deliberately does not cascade, the
+     │  │  same asymmetry a BDEF has between `composition of` and
+     │  │  `association to parent`. ZC_STG_TRAVEL / ZC_STG_BOOKING is the
+     │  │  worked pair; docs/cds-writes.md
+     │  └─ **a transactional bracket, which turned out to be missing
+     │     entirely**: nothing in this system ever committed. All three
+     │     database clients implement begin/commit/rollback, so the whole
+     │     server ran inside one transaction that ended at disconnect.
+     │     A `$batch` changeset is now one LUW - a `COMMIT WORK` fences
+     │     off everything earlier (the rows the boot writes, an earlier
+     │     part of the same batch), then the changeset either commits or
+     │     rolls back as a whole. Without the fence a failing changeset
+     │     would have undone the process's entire uncommitted history.
+     │     The test was checked by removing the rollback and watching it
+     │     fail, which is the rule this repository learned the hard way
+     ├─ **the parts are readable at runtime**: `ZIF_STG_CDS_COMPOSITION`,
+     │  implemented by the generated source class of a view that declares a
+     │  child and by no other, so the runtime asks with a cast and carries
+     │  on when the cast fails. `children( )` answers the navigation a
+     │  client sees, the child view, and how a parent key becomes a child
+     │  key. Unit-tested by its content and by the child *not* implementing
+     │  it, not by the fact that it compiles - an interface implemented
+     │  with an empty method looks the same in a build as a working one
+     ├─ **what blocks the deep insert, named so it is not rediscovered**:
+     │  `zcl_stg_sadl_dpc` has no `create_deep_entity`, and a generic one
+     │  cannot be written the way the demo's hand-written one is. The entry
+     │  provider fills a **typed deep structure** - the demo declares
+     │  `ts_travel_deep` in its MPC and the provider walks `is_set-navs`
+     │  into it - and a generic DPC has no such type. So the next piece is
+     │  either a deep structure built at runtime through RTTI (and whether
+     │  the transpiler carries `cl_abap_structdescr=>create` with a table
+     │  component is the thing to measure first), or a second path in the
+     │  provider that hands the nested rows over untyped
+     ├─ next in this track: the buffer proper (changes held in memory for
+     │  the length of an interaction rather than written through), then
+     │  draft. The order is the peer session's, and the argument is sharper
+     │  than "cheaper first": a draft is **not a persistent buffer**, it
+     │  stands on one. Activating a draft re-runs the behaviour - the
+     │  validations and determinations - and that run happens in the
+     │  buffer, so a buffer folded into the draft leaves the save sequence
+     │  nowhere to happen. What does carry over is the **delta** (entity,
+     │  key, operation, state after), which is designed serialisable from
+     │  the first day: in a LUW it lives in memory, for a draft the same
+     │  delta is written to a table keyed by the draft. Persistence is then
+     │  a change of storage, not of model - and the browser preview, which
+     │  has no process at all, is why persistence will come
      ├─ still out, as stated on day one
      ├─ oracles planned but not built: docs/oracle-rap.md, oracle-draft.md
      ├─ gated on 0.4 / 0.5 (Alice: build sample objects on the sandbox?)

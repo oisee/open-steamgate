@@ -45,6 +45,16 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
                                           value = 'open-steamgate' ).
     ENDIF.
 
+* One modifying request is one LUW (backlog B.2). The COMMIT before is the
+* fence: nothing in this system commits on its own, so without it the
+* ROLLBACK after a failure would reach back to whatever the process last
+* wrote, including the tables the generation writes at boot. $batch is left
+* alone here, because its changesets own their own brackets and a commit
+* around the whole batch would defeat them.
+    IF lv_method <> 'GET' AND lv_method <> 'HEAD' AND lv_path NP '*/$batch*'.
+      COMMIT WORK.
+    ENDIF.
+
     ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = lv_method
                                                 iv_path    = lv_path
                                                 it_options = lt_options
@@ -52,6 +62,17 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
                                                 iv_body    = lv_body
                                                 iv_body_x  = lv_body_x
                                                 iv_content_type = server->request->get_header_field( 'content-type' ) ).
+
+    IF lv_method <> 'GET' AND lv_method <> 'HEAD' AND lv_path NP '*/$batch*'.
+      IF ls_response-status >= 400.
+* a request that failed half way through -- a deep insert whose second row
+* was refused, a composition delete whose child went and whose parent did
+* not -- leaves nothing behind
+        ROLLBACK WORK.
+      ELSE.
+        COMMIT WORK.
+      ENDIF.
+    ENDIF.
 
     LOOP AT ls_response-headers INTO ls_header.
       server->response->set_header_field( name  = ls_header-name

@@ -135,3 +135,50 @@ shipping a Node sidecar. Their result, for the record:
 
 Speed of a Go-hosted engine against ours. `npm run bench:cube -- 1000000` compares SQLite and DuckDB through this
 same seam; nothing comparable exists for a Go engine yet.
+
+## The LUW, and the fact that there was not one
+
+Measured 2026-09-18, while making a `$batch` changeset atomic (backlog B.2):
+**nothing in this system ever committed.** All three clients implement the
+bracket — `beginTransaction` is called by every write, and `commit` /
+`rollback` end it — so the server ran from boot to disconnect inside a single
+open transaction, and the rows survived only because `export()` and
+`disconnect()` commit on the way out.
+
+That is not harmless once anything rolls back. A `ROLLBACK WORK` issued to
+undo one failed request would have undone everything written since the
+process started, including the tables the generation writes at boot (`tadir`,
+`wwwparams`, `t100`).
+
+So the rule is: **a rollback is always preceded by a commit that fences it.**
+`zcl_stg_batch` issues `COMMIT WORK` before it dispatches a changeset, which
+ends whatever LUW was open, and only then can its `ROLLBACK WORK` reach no
+further back than the changeset itself. The same shape is what any other
+transactional boundary here has to use until something owns the LUW properly.
+
+`COMMIT WORK` reaches every open connection (`abap.statements.commit` loops
+over `context.databaseConnections`), so this holds for SQLite, the file-backed
+client and DuckDB alike — DuckDB emulates savepoints by replay, which is why
+it too needs the fence rather than a nested transaction.
+
+### What the fence fixed in the DuckDB client as a side effect
+
+`tools/duckdb-client.mjs` has no savepoints. It keeps every successful
+modifying statement of the open LUW in `this.luw` and, when a failing
+statement aborts the DuckDB transaction, rolls back and **replays the array**
+into a fresh one. `beginTransaction`, `commit` and `rollback` each reset it.
+
+While nothing committed, `commit` was never called, so that array grew from
+boot until disconnect — and every failed statement replayed the entire
+history of the process, the generation's boot writes included. The behaviour
+was correct and quietly quadratic.
+
+With the fence the array lives exactly one LUW, which gives a cheap check
+that the bracket is really there: **the length of `luw` must stay within one
+LUW's worth of statements.** Noticed by the workstation session, 2026-09-18,
+reading the client rather than the symptom.
+
+Verified after the change, on all three clients rather than assumed, because
+they only behaved alike while the bracket was unused: `npm run unit:duckdb`
+passes, and the wire suite against a DuckDB-backed server is 22 of 22,
+including the changeset rollback and the composition cascade.

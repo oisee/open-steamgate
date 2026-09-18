@@ -2,8 +2,11 @@ CLASS zcl_stg_batch DEFINITION PUBLIC CREATE PUBLIC.
 * OData v2 $batch: multipart/mixed in, multipart/mixed out. Retrieve parts
 * are dispatched one by one; a changeset is dispatched in order and answered
 * as a whole: the first failing request becomes the changeset's single error
-* response, like a real Gateway does. No rollback of the requests before it
-* (see AGENDA: local SQLite has no transaction bracket yet).
+* response, like a real Gateway does, and the requests that already succeeded
+* inside that changeset are rolled back with it (backlog B.2)
+* (the bracket is real: all three database clients implement begin, commit
+* and rollback, and nothing else in this system commits, which is why the
+* fence below matters).
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_request,
              method  TYPE string,
@@ -352,19 +355,29 @@ CLASS zcl_stg_batch IMPLEMENTATION.
         lv_cs = |changesetresponse_stg_{ gv_counter }|.
         CLEAR lv_cs_out.
         lv_failed = abap_false.
+* A changeset is one LUW, so it has to be all or nothing (backlog B.2). The
+* COMMIT here is the fence, not the point: it ends whatever LUW was open
+* before this changeset -- the rows the boot writes, an earlier part of this
+* same batch -- so that the ROLLBACK below can only reach what this changeset
+* did. Without it a failing changeset would undo the whole process's
+* uncommitted history, because nothing else in this system ever commits.
+        COMMIT WORK.
         LOOP AT ls_part-requests INTO ls_request.
           ls_response = run_request( is_request      = ls_request
                                      iv_service_path = iv_service_path
                                      iv_host         = iv_host ).
           IF ls_response-status >= 400.
-* the changeset fails as a whole: one error part instead of the multipart
+* the changeset fails as a whole: one error part instead of the multipart,
+* and the requests that already succeeded inside it are undone
             lv_failed = abap_true.
+            ROLLBACK WORK.
             lv_out = lv_out && |--{ lv_boundary }{ lv_crlf }| && format_part( ls_response ).
             EXIT.
           ENDIF.
           lv_cs_out = lv_cs_out && |--{ lv_cs }{ lv_crlf }| && format_part( ls_response ).
         ENDLOOP.
         IF lv_failed = abap_false.
+          COMMIT WORK.
           lv_out = lv_out && |--{ lv_boundary }{ lv_crlf }Content-Type: multipart/mixed; boundary={ lv_cs }{ lv_crlf }{ lv_crlf }| &&
                    lv_cs_out && |--{ lv_cs }--{ lv_crlf }|.
         ENDIF.

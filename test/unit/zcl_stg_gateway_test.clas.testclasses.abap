@@ -1738,3 +1738,65 @@ CLASS ltcl_odc IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_composition DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* What a CDS view says it is made of (backlog B.2). The generated source
+* class of a view with @ObjectModel.association.type: [#TO_COMPOSITION_CHILD]
+* implements ZIF_STG_CDS_COMPOSITION; a view without one does not, which is
+* what lets the runtime ask with a cast and carry on when the cast fails.
+  PRIVATE SECTION.
+    METHODS parent_names_its_parts FOR TESTING RAISING cx_static_check.
+    METHODS child_is_not_a_parent FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_composition IMPLEMENTATION.
+
+  METHOD parent_names_its_parts.
+    DATA li_parts    TYPE REF TO zif_stg_cds_composition.
+    DATA lt_children TYPE zif_stg_cds_composition=>tt_child.
+    DATA ls_child    TYPE zif_stg_cds_composition=>ty_child.
+    DATA ls_key      TYPE zif_stg_cds_composition=>ty_key_pair.
+
+    CREATE OBJECT li_parts TYPE zcl_stg_cds_zvstgtravel.
+    lt_children = li_parts->children( ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_children )
+                                        exp = 1
+                                        msg = 'a travel is made of its bookings, and of nothing else' ).
+    READ TABLE lt_children INDEX 1 INTO ls_child.
+    cl_abap_unit_assert=>assert_equals( act = ls_child-navigation
+                                        exp = 'to_Bookings'
+                                        msg = 'the navigation a client sees' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_child-view
+                                        exp = 'ZC_STG_BOOKING'
+                                        msg = 'the view the parts live in' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_child-keys )
+                                        exp = 1
+                                        msg = 'one pair, from the ON condition' ).
+    READ TABLE ls_child-keys INDEX 1 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = |{ ls_key-parent }->{ ls_key-child }|
+                                        exp = 'TRAVELID->TRAVELID'
+                                        msg = 'how a parent key becomes a child key' ).
+  ENDMETHOD.
+
+  METHOD child_is_not_a_parent.
+* the booking names its travel with #TO_COMPOSITION_PARENT, which is the
+* other direction and carries no parts: the class does not implement the
+* interface at all, and the cast is how the runtime finds that out
+    DATA lo_booking TYPE REF TO object.
+    DATA li_parts   TYPE REF TO zif_stg_cds_composition.
+    DATA lv_cast    TYPE abap_bool.
+
+    CREATE OBJECT lo_booking TYPE zcl_stg_cds_zvstgbooking.
+    lv_cast = abap_true.
+    TRY.
+        li_parts ?= lo_booking.
+      CATCH cx_sy_move_cast_error.
+        lv_cast = abap_false.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( act = lv_cast
+                                        exp = abap_false
+                                        msg = 'a booking is a part, not a whole' ).
+  ENDMETHOD.
+
+ENDCLASS.
