@@ -533,6 +533,103 @@ B.1  SADL beyond read-only                                               [S]
 
 B.19 HANA, AMDP and where each machine stands                            [S]
      Decided 2026-09-18 by arithmetic rather than preference.
+     ├─ **what HANA Express is actually for, Alice 2026-09-18**: it is
+        **not** a database backend for OSD. It is the engine for one
+        narrow case - **cut the AMDP body out of the ABAP class and run it
+        in HANA Express**. The body is already valid SQLScript, so HANA
+        executes it natively and we never write an interpreter for a
+        second language. That is what makes the track cheap, and it is a
+        different design from "a fourth DatabaseClient".
+        ├─ it also settles the earlier question: transpiling AMDP is not
+        │  on the table. Our own `ZCL_Z80_00_CPU_AMDP` - eighteen
+        │  DECLAREs, thirty-six SELECTs and three loops in one procedure -
+        │  is why
+        ├─ **and it must not be the A4H HANA** (Alice, same day): that one
+        │  is the sandbox everybody's oracle work depends on, and our
+        │  schema has no business in it. HXE is the clean laboratory the
+        │  entry always said it should be
+        └─ the questions that design raises, none of them answered yet:
+           ├─ **where the data is.** An AMDP body selects from tables.
+           │  Those tables have to exist in HXE with our rows, so either
+           │  the tables it touches are mirrored before the call, or HXE
+           │  holds a copy of the schema. Which one is the first real
+           │  measurement
+           ├─ **how the procedure gets there.** On a real system the AMDP
+           │  framework generates a HANA procedure from the method body.
+           │  We would do the same: body plus signature in, `CREATE
+           │  PROCEDURE` out, cached by a hash of the source
+           └─ **how the call travels.** Transpiled ABAP calls the method;
+              something has to bind the table parameters, call the
+              procedure and read the result back. The npm driver `hdb` is
+              the transport
+     ├─ **an earlier reading of this entry, kept because the facts in it
+        are still true**: a real HANA is reachable from the i7 today -
+        premise of this item was that a HANA has to be stood up locally.
+        There already is one, and it is reachable from the i7 two ways:
+        ├─ `~/dev/a4h` is the landscape and carries the recipe: instance
+        │  **02**, SYSTEMDB on **30213**, tenant **HDB** on **30215**, and
+        │  the tenant holds the ABAP schema **SAPA4H**. Running
+        │  `SELECT DATABASE_NAME, ACTIVE_STATUS FROM M_DATABASES` through
+        │  the documented `ssh <host> "docker exec <container> su - hdbadm
+        │  -c 'hdbsql ...'"` route answers `SYSTEMDB YES` / `HDB YES`
+        ├─ and **both ports already answer on the i7 itself**, forwarded
+        │  by the long-running `tools/osd-tcp-forward.mjs`: a TCP connect
+        │  to `127.0.0.1:30213` and `:30215` succeeds. That process is
+        │  therefore **load bearing, not the idle leftover it looks like**
+        │  - its capture file has not grown since 2026-09-14, but the
+        │  forwarding is what makes HANA reachable from here at all
+        └─ so what is left is a **database client**, not a database: the
+           seam in docs/db-backends.md takes an eleven-method
+           `DatabaseClient` and a fourth implementation needs no change
+           anywhere else. Upstream's `packages/database-hdb` is a
+           `todo.txt` naming the npm driver `hdb` and nothing more, so the
+           work is ours, and it is the same shape as
+           `tools/duckdb-client.mjs`
+     ├─ **and the old correction stands: the HXE image was never pulled.** `docker images` holds exactly two,
+        `sapse/abap-cloud-developer-trial:2023` (62.4 GB) and portainer;
+        `docker ps -a` holds `a4h-107`, **exited four weeks ago**, and
+        portainer. So the sentence below was the plan, not the state - the
+        image has never been pulled. Anyone starting B.19 pulls it first,
+        and should know it is a 1.8 GB download before anything can be
+        measured locally. Note also that A4H exists here as a **local
+        container** as well as at the address `.mcp.json` names; the
+        container is stopped.
+     ├─ **the corpus, measured on A4H 2026-09-18 through the vsp CLI**
+        (`vsp query SEOMETAREL --where "REFCLSNAME = 'IF_AMDP_MARKER_HDB'"
+        --top 5000`), which is the cheap question the peer session asked
+        for instead of reading every class:
+        ├─ **195 classes implement the marker** - which corroborates the
+        │  194 recorded earlier from a different route. 167 SAP standard,
+        │  22 `CL_ABAP_AMDP_MC_*` compiler fixtures, 3 partner namespace,
+        │  and **3 customer classes**
+        ├─ **the three customer ones are the interesting part, and they
+        │  are all ours**: `ZADT_CL_AMDP_TEST`, `ZCL_VSP_00_AMDP_TEST` and
+        │  `ZCL_Z80_00_CPU_AMDP`. The last one is a **Z80 CPU written as
+        │  four SQLScript procedures** - `run_steps` alone is 148 lines
+        │  with 18 DECLAREs, 36 SELECTs and three loops - and it is the
+        │  hardest shape of AMDP there is: imperative, stateful, nothing
+        │  like a wrapper over a view. So the corpus says both things at
+        │  once: what SAP writes is largely portable, and what *we* wrote
+        │  is not portable at all
+        ├─ **the sampling caveat stands**: A4H is a delivered sandbox, so
+        │  it cannot say whether third-party customers write AMDP. It says
+        │  how SAP writes it, and it says what we ourselves wrote
+        └─ **how SAP writes it, sampled**: 10 standard classes, 27 AMDP
+           method bodies, cut out with a regex - **15 are one portable
+           SELECT**, 10 use table variables or are imperative, 1 has no
+           SELECT, 1 has several. That supports the thin-wrapper
+           hypothesis below, with the caveats stated rather than buried:
+           the sample is 10 of 167 and was not random, and the classifier
+           treats `:=` as a table variable, so the imperative count is an
+           upper bound
+     ├─ **a measurement trap that cost the first answer**: `vsp query`
+        documents `--top` as "0=all", and `--top 0` **silently returns
+        exactly 100 rows**. The first run of the query above answered
+        "100 classes, none of them customer", which is wrong in both
+        halves, and the round number was the only clue. Alice spotted it.
+        Pass an explicit large `--top`, and treat any result that is
+        exactly 100 as suspect until a second page is checked with
+        `--skip`
      ├─ **HANA Express runs in docker on the i7, and only there.** The
         workstation is WSL2 on a 31 GB Windows host, so the Linux side
         sees 15 GB by the default "half the host" rule; HXE wants 16-24 GB
@@ -793,8 +890,32 @@ B.11 The binary beyond the checkout                                      [S]
         change that renames another one shows up there first
 
 B.7  Database seam                                                       [S]
-     └─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
-        (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+     ├─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
+     │  (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+     └─ **DuckDB is parked entirely, 2026-09-18 (Alice)**: "можно
+        полностью забыть пока - мы его исследуем когда прям необходимость
+        появится острая. То есть далеко в будущем."
+        ├─ what that means in practice: `tools/duckdb-client.mjs`,
+        │  `STG_DB=duckdb`, `npm run unit:duckdb`, `npm run start:duckdb`
+        │  and `npm run bench:cube` stay where they are and keep working;
+        │  nothing is deleted. What stops is **investing** in it - no new
+        │  features are measured against it, no defect in it is chased,
+        │  and it is not a reason to shape anything else
+        ├─ **it does not get in the way, checked rather than assumed**:
+        │  `npm test` is lint + unit + integration and none of them touch
+        │  it. `test/setup.mjs` imports `tools/duckdb-client.mjs` only
+        │  behind `STG_DB === "duckdb"`, a dynamic import inside the
+        │  branch, so the default build never loads it and
+        │  `@duckdb/node-api` is not on the default path at all. Alice,
+        │  2026-09-18: "если лежит и есть пить не просит и не мешает - то
+        │  ок", and if it ever does get in the way of a build or a test,
+        │  it goes to a branch or is ignored rather than fixed
+        ├─ the upstream branch `feat/database-duckdb` (PR #1835 in
+        │  abaplint/transpiler) is Lars's to merge and needs nothing from
+        │  us; `npm run parked` keeps naming it, which is correct
+        └─ do not confuse this with B.19: HANA and AMDP are a different
+           track and are not parked. DuckDB was the analytics engine
+           experiment, HANA is the dialect a real system speaks
 ```
 
 ---
