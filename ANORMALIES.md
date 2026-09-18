@@ -889,3 +889,27 @@ ENDLOOP.
 - Upstream issue: none. Arguably the runtime could give exception instances a `message`; T is separately fixing `get_source_position( )`, which throws on anything the runtime raised itself
 - Regression-test location: `test/osd-apc.mjs`
 - Upstream version containing a fix: `unknown`
+
+## ANOMALY-2026-09-18-icf-shim-form-fields-from-body
+
+**A POSTed form field is not there.** On a system, ICF fills the form fields of
+a request from an `application/x-www-form-urlencoded` **body** as well as from
+the query string, so `if_http_request~get_form_field( 'x' )` answers for both.
+`cl_express_icf_shim` fills them only from the query string
+(`cl_express_icf_shim=>request` splits `~request_uri` at `?` and hands that to
+`cl_http_utility=>string_to_fields`); the body is set as data and never parsed.
+
+**Why it is worth an entry rather than a shrug:** the failure is silent and
+well-disguised. `get_form_field` answers an empty string, which is exactly what
+a person submitting an empty box would produce, so the screen shows "nothing to
+run" and the developer looks at the form, the browser and the encoding before
+looking at the shim.
+
+Found building the AMDP sandbox (backlog G.8): the body typed on the page never
+arrived. **Workaround**, in `zcl_osd_amdp_sbx=>posted_body`: read
+`get_cdata( )` and parse the pairs by hand. Two lines of it are their own trap
+and are commented where they are -- a form sends a space as `+`, and
+`REPLACE ... WITH ' '` in ABAP replaces it with *nothing*, because a text
+literal loses its trailing blanks; it has to be written `` WITH ` ` ``.
+
+**Upstream:** open-abap/express-icf-shim. Not yet drafted.

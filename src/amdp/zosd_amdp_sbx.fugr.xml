@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <AREAT>AMDP sandbox: run a body typed on a screen</AREAT>
+   <INCLUDES>
+    <SOBJ_NAME>LZOSD_AMDP_SBXTOP</SOBJ_NAME>
+    <SOBJ_NAME>SAPLZOSD_AMDP_SBX</SOBJ_NAME>
+   </INCLUDES>
+   <FUNCTIONS>
+    <item>
+     <FUNCNAME>ZOSD_AMDP_SANDBOX</FUNCNAME>
+     <SHORT_TEXT>Run a SQLScript body and answer with rows or the engine's words</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP><PARAMETER>IV_BODY</PARAMETER><TYP>STRING</TYP></RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP><PARAMETER>EV_RESULT</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_ERROR</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_RAW</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_ROWS</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_MS</PARAMETER><TYP>STRING</TYP></RSEXP>
+     </EXPORT>
+    </item>
+   </FUNCTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>

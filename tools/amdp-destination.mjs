@@ -45,6 +45,9 @@ function statement(p) {
     .filter((x) => x !== "").join("\n");
 }
 
+/** lines the sandbox wrapper puts in front of a typed body (see #sandbox) */
+const SANDBOX_OFFSET = 1;
+
 export class AmdpDestination {
   constructor(options = {}) {
     this.folder = options.folder ?? "gen/amdp";
@@ -87,8 +90,93 @@ export class AmdpDestination {
     if (this.trace) console.log(`AMDP: deployed ${name}`);
   }
 
+  /** Let go of the connection. An open socket keeps Node's event loop alive,
+   *  so a suite that touched HANA passes and then does not exit. */
+  async close() {
+    if (this.client === undefined) return;
+    try { this.client.end(); } catch { /* already gone */ }
+    this.client = undefined;
+  }
+
+  /** The sandbox (backlog G.8): a body typed on a screen, run now.
+   *
+   *  Everything else here routes a *generated* module whose signature the
+   *  transpiler resolved at transpile time. The sandbox has no signature to
+   *  resolve: it takes text and gives back text, which is what lets one
+   *  function module stand for any body a person types.
+   *
+   *  The body is deployed under a throwaway name and dropped again, so
+   *  nothing a visitor types survives the call. The name carries the process
+   *  and a counter rather than a random word, so two sandboxes open at once
+   *  cannot collide and a leftover object says who left it.
+   *
+   *  The interesting half is the failure: HANA answers a bad body with a
+   *  message that names the line and the column. That is the oracle we have
+   *  and no parser of ours would be, so it is passed through **verbatim** --
+   *  a sandbox that paraphrases the engine is worth nothing.
+   */
+  async #sandbox(signature) {
+    // The transpiler writes the parameter names of a CALL FUNCTION in the
+    // case they were typed in, which for ABAP source is lower; the function
+    // group declares them upper. Look either up without caring, or the call
+    // arrives, runs and answers into nothing -- which on the screen is a page
+    // with no result and no error, the least informative outcome possible.
+    const pick = (bag, name) => {
+      if (bag === undefined) return undefined;
+      const key = Object.keys(bag).find((k) => k.toUpperCase() === name);
+      return key === undefined ? undefined : bag[key];
+    };
+    const given = pick(signature.exporting, "IV_BODY");
+    const body = String(given?.get?.() ?? given ?? "");
+    const say = (field, text) => {
+      const target = pick(signature.importing, field);
+      if (target?.set !== undefined) target.set(String(text));
+    };
+    if (body.trim() === "") {
+      say("EV_ERROR", "nothing to run");
+      return;
+    }
+    await this.#connect();
+    this.sandboxCount = (this.sandboxCount ?? 0) + 1;
+    const name = `"${SCHEMA}"."OSD_SANDBOX_${process.pid}_${this.sandboxCount}"`;
+    const started = Date.now();
+    await this.#exec(`CREATE SCHEMA "${SCHEMA}"`).catch(() => undefined);
+    await this.#exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
+    // The wrapper is **one fixed line**, and that is not a matter of taste:
+    // the engine reports "line N col M" against the statement it was given,
+    // so every line the wrapper adds is a line the person's own numbering is
+    // wrong by. One line in front, one behind, and the correction is a
+    // subtraction that cannot drift (SANDBOX_OFFSET). A second CREATE shape
+    // tried on failure would make the offset depend on which attempt spoke.
+    const preamble = `CREATE PROCEDURE ${name} () LANGUAGE SQLSCRIPT SQL SECURITY INVOKER AS BEGIN`;
+    try {
+      await this.#exec(`${preamble}\n${body}\nEND`);
+      const out = await this.#exec(`CALL ${name}`);
+      const rows = out.find(Array.isArray) ?? [];
+      const plain = rows.slice(0, 200).map((row) => Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, Buffer.isBuffer(v) ? v.toString("utf8") : v])));
+      say("EV_RESULT", JSON.stringify(plain));
+      say("EV_ROWS", String(rows.length));
+      say("EV_MS", String(Date.now() - started));
+    } catch (e) {
+      // The engine's own words, twice. EV_ERROR carries the position moved
+      // back into the person's own line numbering, because a sandbox that
+      // points at line 2 of something the person cannot see is worse than
+      // one that says nothing. EV_RAW carries the message untouched, because
+      // the moment we start paraphrasing the oracle we stop having one.
+      const raw = String(e?.message ?? e);
+      say("EV_RAW", raw);
+      say("EV_ERROR", raw.replace(/line (\d+)/g, (m, n) => `line ${Number(n) - SANDBOX_OFFSET}`));
+    } finally {
+      await this.#exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
+    }
+  }
+
   /** the destination contract: (function module name, typed signature) */
   async call(name, signature) {
+    if (String(name).trimEnd().toUpperCase() === "ZOSD_AMDP_SANDBOX") {
+      return this.#sandbox(signature);
+    }
     const p = this.procedures.get(String(name).trimEnd().toUpperCase());
     if (p === undefined) {
       throw new Error(`AMDP: no procedure known for ${name}. Run 'node tools/amdp-gen.mjs' `
