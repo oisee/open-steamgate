@@ -36,6 +36,13 @@ export async function setup(abap, schemas, insert) {
   // it 'NONE' and '' run here and any other name replays STG_RFC_CAPTURE
   const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
   await installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
+  // AMDP: a method whose body is SQLScript has been rewritten by
+  // tools/amdp-gen.mjs into CALL FUNCTION ... DESTINATION 'AMDP', and this is
+  // where that destination is answered (docs/amdp-in-hana.md). It is
+  // installed whatever the database is, because the failure a developer needs
+  // is "no HANA to run this in", not "unknown destination".
+  const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
+  abap.context.RFCDestinations["AMDP"] = new AmdpDestination({trace: process.env.STG_AMDP_TRACE === "1"});
   // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
   // procedure and the tables are then in one database and nothing has to be
   // mirrored (docs/amdp-in-hana.md, backlog B.19). Never a default: the cost

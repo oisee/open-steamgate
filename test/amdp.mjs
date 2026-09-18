@@ -10,7 +10,11 @@ import {readFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {extract, procedure, hanaType, parameterType, localTypes} from "../tools/amdp-extract.mjs";
 
-const fixture = (name) => readFileSync(fileURLToPath(new URL(`fixtures/amdp/${name}`, import.meta.url)), "utf8");
+// The fixtures are kept as .abap.txt, not .abap: test/ is an input folder of
+// the build, and a file that looks like a class gets transpiled -- an AMDP
+// body is exactly what the transpiler refuses. The logical name is passed to
+// extract() instead, which is all abaplint needs.
+const fixture = (name) => readFileSync(fileURLToPath(new URL(`fixtures/amdp/${name}.txt`, import.meta.url)), "utf8");
 
 describe("AMDP: cutting a body out of a class", () => {
 

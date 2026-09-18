@@ -45,6 +45,11 @@ const GENERATORS = [
   ["stg-compile.mjs", "--all"],
   ["segw-registry.mjs"],
   ["segw-shlp.mjs"],
+  // AMDP: the bodies the transpiler cannot compile become routed calls, and
+  // the SQLScript is put aside for HANA (docs/amdp-in-hana.md). Before the
+  // function-module registry, because the modules it writes are what that
+  // registry has to see.
+  ["amdp-gen.mjs"],
   ["osd-fm-registry.mjs"],
   ["osd-tran-registry.mjs"],
 ];

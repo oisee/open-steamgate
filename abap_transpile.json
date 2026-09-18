@@ -110,6 +110,7 @@
   },
   "exclude_filter": [
     "/test/e2e/",
+    "/test/fixtures/",
     "\\.mjs$",
     "\\.cjs$",
     "\\.sapc\\.xml$",
