@@ -107,7 +107,8 @@ export class AmdpDestination {
         `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`);
       const returning = p.parameters.find((x) => x.direction === "RETURNING");
       result = {[returning?.name ?? "rt"]: (rows.find(Array.isArray) ?? []).map((row) =>
-        Object.fromEntries(Object.entries(row).map(([k, v]) => [k.toLowerCase(), Buffer.isBuffer(v) ? v.toString("utf8") : v])))};
+        Object.fromEntries(Object.entries(row).map(([k, v]) =>
+          [k.toLowerCase(), abapDateTime(Buffer.isBuffer(v) ? v.toString("utf8") : v)])))};
     } else {
       const method = {name: p.method, parameters: p.parameters.map((x) => ({...x, abapType: x.hanaType}))};
       result = await call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
@@ -117,16 +118,49 @@ export class AmdpDestination {
       if (x.direction === "IN") continue;
       const target = signature.importing?.[x.name] ?? signature.changing?.[x.name] ?? signature.tables?.[x.name];
       if (target === undefined) continue;
-      fromJson(target, result[x.name] ?? result[x.name.toUpperCase()]);
+      fromJson(target, withAbapDates(result[x.name] ?? result[x.name.toUpperCase()]));
     }
     if (this.trace) console.log(`AMDP: ${p.class}=>${p.method} returned ${Object.keys(result).join(", ")}`);
   }
+}
+
+/** HANA's own date and time types, in ABAP's spelling.
+ *
+ *  Measured 2026-09-18 rather than assumed: node-hdb hands DATE, TIME,
+ *  TIMESTAMP and SECONDDATE back as **strings**, not Date objects --
+ *  "2026-09-18", "14:30:05", "2026-09-18T14:30:05.123". ABAP holds a date as
+ *  CHAR(8) "20260918" and a time as CHAR(6) "143005", so the separators come
+ *  out. Without this `set()` would store "2026-09-" into a CHAR(8) date and
+ *  be quietly wrong, which is the failure mode this whole file keeps meeting.
+ *
+ *  Our own tables never hit this path: the transpiler writes ABAP D and T as
+ *  NCHAR(8) and NCHAR(6), so they come back as "20260918" already. It matters
+ *  when an AMDP body returns a real HANA date, `SELECT CURRENT_DATE` being
+ *  the obvious one. */
+export function abapDateTime(value) {
+  if (typeof value !== "string") return value;
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (m) return m[1] + m[2] + m[3];
+  m = /^(\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  if (m) return m[1] + m[2] + m[3];
+  m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/.exec(value);
+  if (m) return m.slice(1).join("");            // ABAP timestamp: YYYYMMDDHHMMSS
+  return value;
 }
 
 /** a value as SQL text; only scalars reach here, a table parameter of a table
  *  function is not a thing HANA has */
 function literal(v) {
   return typeof v === "number" ? String(v) : `'${String(v ?? "").replace(/'/g, "''")}'`;
+}
+
+/** the same, through a table of rows or a single value */
+function withAbapDates(value) {
+  if (Array.isArray(value)) return value.map(withAbapDates);
+  if (value !== null && typeof value === "object" && !Buffer.isBuffer(value)) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withAbapDates(v)]));
+  }
+  return abapDateTime(value);
 }
 
 /** a runtime structure as plain JSON, lower-cased field names */

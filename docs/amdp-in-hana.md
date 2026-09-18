@@ -312,3 +312,28 @@ What `fromJson` does not cover and the AMDP client has to do first:
 - **NULL.** ABAP has no null, and `fromJson` returns early on one, leaving the
   target at its initial value. That is the right answer and it is worth
   knowing it is deliberate rather than an oversight.
+
+**Measured, 2026-09-18**: node-hdb hands HANA's `DATE`, `TIME`, `TIMESTAMP`
+and `SECONDDATE` over as **strings**, not `Date` objects —
+
+```
+D   DATE         "2026-09-18"
+T   TIME         "14:30:05"
+TS  TIMESTAMP    "2026-09-18T14:30:05.123"
+SD  SECONDDATE   "2026-09-18T14:30:05"
+```
+
+so `abapDateTime()` in `tools/amdp-destination.mjs` takes the separators out:
+`20260918`, `143005`, `20260918143005`. Without it `set()` on an ABAP `D`
+would store `2026-09-` into eight characters and be quietly wrong, which is
+the failure this whole file keeps meeting.
+
+**Our own tables never reach that path.** The transpiler writes ABAP `D` and
+`T` into the schema as `NCHAR(8)` and `NCHAR(6)`, so they come back as
+`"20260918"` and `"143005"` already — verified in the same probe. The
+conversion is for an AMDP body that returns a real HANA date, `SELECT
+CURRENT_DATE` being the obvious one.
+
+The test checks what is left alone as carefully as what is converted: a
+converter that also touches `"square of 3"` or an eight-digit string that was
+already a date is how a value ends up wrong.

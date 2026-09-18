@@ -89,6 +89,24 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(check(tf, renamed)[0]).to.contain("'label' in the CDS and 'caption' in the method");
   });
 
+  it("gives HANA's dates and times back in ABAP's spelling", async () => {
+    const {abapDateTime} = await import("../tools/amdp-destination.mjs");
+    // Measured against HANA Express on 2026-09-18: the driver hands DATE,
+    // TIME, TIMESTAMP and SECONDDATE over as strings, not Date objects. ABAP
+    // holds a date as CHAR(8) and a time as CHAR(6), so the separators go.
+    expect(abapDateTime("2026-09-18")).to.equal("20260918");
+    expect(abapDateTime("14:30:05")).to.equal("143005");
+    expect(abapDateTime("2026-09-18T14:30:05.123")).to.equal("20260918143005");
+    expect(abapDateTime("2026-09-18 14:30:05")).to.equal("20260918143005");
+    // and everything else is left exactly alone, which is the part worth
+    // testing: a converter that also touches what it should not is how a
+    // value ends up quietly wrong
+    expect(abapDateTime("20260918")).to.equal("20260918");
+    expect(abapDateTime("square of 3")).to.equal("square of 3");
+    expect(abapDateTime(42)).to.equal(42);
+    expect(abapDateTime(null)).to.equal(null);
+  });
+
   it("maps the ABAP types an AMDP signature can use, and says so when it cannot", () => {
     expect(hanaType("i")).to.equal("INTEGER");
     expect(hanaType("int8")).to.equal("BIGINT");
