@@ -1,6 +1,16 @@
 CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
-* SAP Easy Access, served by ABAP.
+* Easy Success, served by ABAP: the screen SAP calls Easy Access, at the path
+* the real ITS webgui answers on, under a name of our own.
+*
+* The name is the last step of the rule Alice set in G.1c - what we invent
+* carries no trademark, what states a fact about SAP software keeps the word.
+* "Easy Access" was still somebody else's screen name worn by ours. "Easy
+* Success" keeps the cadence and turns the promise over, the way the slogan
+* under the wordmark does, and it is a joke this project is entitled to make
+* because it is about itself. Every comment below that describes the real
+* screen still says Easy Access: there it is a statement of fact, and
+* changing it would make the sentence false.
 *
 * Mounted at /sap/bc/gui/sap/its/webgui/, which is the path the real ITS
 * webgui lives at on a system. That is a deliberate nod and not an accident:
@@ -825,7 +835,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<p class="dim">The identity is one setting at boot (tools/osd-identity.mjs): it sets sy-sysid, ` &&
       `sy-mandt and sy-uname, names the system in the status tables, and is what the ADT facade ` &&
       `presents to Eclipse. docs/webgui.md says why the facade's own id is allowed to differ.</p>` &&
-      |<p><a class="back" href="{ gc_path }/">Back to Easy Access</a></p>| &&
+      |<p><a class="back" href="{ gc_path }/">Back to Easy Success</a></p>| &&
       `</div></div></body></html>`.
   ENDMETHOD.
 
@@ -1080,9 +1090,9 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     rv_html =
       `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` &&
       `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
-      `<link rel="icon" type="image/svg+xml" href="/app/osg.svg"><title>Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
+      `<link rel="icon" type="image/svg+xml" href="/app/osg.svg"><title>Easy Success - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
       `<div class="win">` &&
-      |<div class="title"><span>Easy Access</span><small>{ esc( ls_ident-info ) }</small></div>| &&
+      |<div class="title"><span>Easy Success</span><small>{ esc( ls_ident-info ) }</small></div>| &&
       |<div class="menu">{ menubar( lt_nodes ) }</div>| &&
       `<div class="tools">` &&
       |<form class="cmdbox" method="get" action="{ gc_path }/" target="_top">| &&

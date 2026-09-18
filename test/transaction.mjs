@@ -139,9 +139,9 @@ describe("webgui: a transaction node that runs, and keeps its session", () => {
   it("enters the notepad and puts what it drew where the tree is, keeping the screen", async () => {
     const {page, doc} = await enter("ZOSD_NOTE");
     // the screen is still the screen
-    // G.1c: the screen is "Easy Access" now, and what we call ourselves
-    // carries nobody else's trademark
-    expect(page, "the title bar").to.contain("Easy Access");
+    // G.1c: the screen is "Easy Success" now - a name of our own, which is
+    // the whole of the rule
+    expect(page, "the title bar").to.contain("Easy Success");
     expect(page, "the command field").to.contain('name="okcode"');
     expect(page, "the menu bar").to.contain("Favorites");
     expect(page, "the image panel").to.contain('class="art"');

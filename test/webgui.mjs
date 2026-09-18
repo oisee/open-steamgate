@@ -20,7 +20,7 @@ async function systemRow() {
   return answer.d.results[0];
 }
 
-describe("webgui: SAP Easy Access", () => {
+describe("webgui: Easy Success, the screen SAP calls Easy Access", () => {
   let server;
   let page;
 
@@ -33,18 +33,20 @@ describe("webgui: SAP Easy Access", () => {
     server.close();
   });
 
-  it("answers on the ITS webgui path, as the Easy Access screen", async () => {
+  it("answers on the ITS webgui path, as the Easy Success screen", async () => {
     const res = await fetch(BASE);
     expect(res.status).to.equal(200);
     expect(res.headers.get("content-type")).to.contain("text/html");
     const html = await res.text();
-    // G.1c: what we call ourselves does not carry somebody else's trademark,
-    // so the title bar is "Easy Access" with the system beside it, where the
-    // real screen puts the system. The comments in the class still say "SAP
-    // Easy Access" where they describe the real one, which is a statement of
-    // fact and stays true.
-    expect(html, "the title bar").to.contain("Easy Access");
-    expect(html, "and it is ours, not theirs").to.not.contain("SAP Easy Access");
+    // G.1c, last step: what we call ourselves carries nobody else's name at
+    // all. The screen SAP calls Easy Access is ours as "Easy Success", which
+    // keeps the cadence and turns the promise over - the same joke as the
+    // slogan under the wordmark, and one this project is entitled to make
+    // because it is about itself. The comments in the class still say "SAP
+    // Easy Access" where they describe the real screen: there it is a
+    // statement of fact and stays true.
+    expect(html, "the title bar").to.contain("Easy Success");
+    expect(html, "and not the borrowed one").to.not.contain("Easy Access");
     expect(html, "the slogan").to.contain("the next level of vaporware");
     // the picture is rain on a surface, not one drop, and it costs no script,
     // no bitmap and no second request
