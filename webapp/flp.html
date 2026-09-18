@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" type="image/svg+xml" href="osg.svg">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>open-steamgate demo: launchpad</title>
@@ -157,7 +158,13 @@
             config: {
               enableSearch: false,
               enablePersonalization: false,
-              rootIntent: "Shell-home"
+              rootIntent: "Shell-home",
+              // our own mark in the shell header, drawn here rather than
+              // fetched: a drop over a pastel arc, the same two things the
+              // Easy Access panel is made of
+              appState: "lean",
+              shellLogo: "osg.svg",
+              rootIntentDisplayName: "open-steamgate"
             }
           }
         }

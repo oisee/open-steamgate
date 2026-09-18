@@ -95,6 +95,9 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.5  SICF as a Fiori Elements application, and live                open
 ├─ G.6  a class with an interface becomes a screen (the Neptune       open
 │       concept, named by Alice 2026-09-18)
+├─ G.8  an AMDP sandbox first, an SE80-shaped workbench after        open, weighed
+├─ G.9  SE16-shaped data browser: a page over reads we already have  open, cheap
+├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument        open, two for one
 ├─ G.1c the name is ours and the picture is the joke                DONE 09-18
 ├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
@@ -269,6 +272,92 @@ G.1c The name is ours and the picture is the joke        [S]  DONE 2026-09-18
         name, the absence of the old one, the slogan, the scene and the
         absence of any <img>; 17 passing, and the six browser tests pass
 
+G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
+     Alice, 2026-09-18: "кастомная SE80-like транзакция - в которой можно
+     будет редактировать код, CDS (ахаха SAP!) и AMDP (охохо SAP!!!) - и
+     ставить брейкпоинты". Weighed rather than estimated, because the parts
+     are very unequal.
+     ├─ **what this is not**: editing already works from Eclipse, through the
+     │  ADT facade, and has since 2026-09-15. The value here is editing
+     │  **without Eclipse** -- in a browser, on our own screen, out of our own
+     │  tree -- and the three jokes that fall out of it
+     ├─ **the jokes are the point, and two of them are real capability**:
+     │  ├─ **CDS in SE80.** On a real system CDS cannot be edited in SE80 at
+     │  │  all, only in Eclipse. Here CDS is already parsed, generated and
+     │  │  published, so an editor for it is a screen and not an engine
+     │  ├─ **AMDP in SE80**, which on a real system is not even a question --
+     │  │  there is no SQLScript editor in SE80. Here, since 2026-09-18,
+     │  │  there is everything needed not only to show it but to **run it and
+     │  │  show the result**: the scissors, the deploy, the call, and the
+     │  │  table-function type check
+     │  └─ and ABAP itself, which is the ordinary part
+     ├─ **the text control is already there and it is the real contract.**
+     │  `open-abap-gui` carries `CL_GUI_TEXTEDIT`, 349 lines, with
+     │  `set_text_as_r3table`, `get_text_as_r3table`, `get_textstream`,
+     │  `set_readonly_mode`, `get_selection_pos`, `protect_lines`,
+     │  `go_to_line`. Alice said a custom control would be acceptable and
+     │  matching ABAP's contract merely nice -- it turns out we get the real
+     │  contract for nothing, because Lars already wrote it. What is missing
+     │  is only the **rendering**: nothing turns it into an editable area,
+     │  and nothing brings the text back
+     ├─ **the screen, not a Fiori app**, and for a measured reason rather
+     │  than taste: the webgui screen already has a session in ZOSD_TSES, a
+     │  `sapevent` click that comes back into ABAP, keyboard handling, and
+     │  ships **zero JavaScript** with a test asserting it. An editor is
+     │  "state between requests plus a click", which is exactly what is
+     │  already built. A Fiori app would have to learn all of it again
+     ├─ **the cost, split so it is honest**:
+     │  ├─ *cheap*: a `<textarea>` in a form, posted back through the same
+     │  │  handler -- pure HTML, no script, and the zero-script test survives
+     │  ├─ *medium*: making it feel like an editor without JavaScript. Line
+     │  │  numbers and syntax colouring have to be **server-rendered**, which
+     │  │  is possible (abaplint tokenises, we already own the parse) but is
+     │  │  a real piece of work, and the caret cannot be styled at all
+     │  └─ *a track of its own*: **breakpoints.** There is no debugger here.
+     │     A.6 is unbuilt, and its message schemas are shared with O.2, the
+     │     step-trace oracle. This must be priced separately or the item
+     │     becomes bottomless
+     ├─ **the order is wrong as first written, corrected by the critic
+     │  2026-09-18**: starting with SE80 means starting with its most
+     │  expensive part -- an object tree, navigation, many types -- for its
+     │  cheapest reward. The one thing that cannot be copied in the original
+     │  is AMDP, and it is nearly ready. So the first artefact is **one
+     │  sandbox page**: an AMDP method on the left, a run button, the result
+     │  table on the right. A day's work and a finished act. Then the same
+     │  editor generalises to other object types, and only then does a tree
+     │  in SE80's shape go under it. Demonstration first, generalisation
+     │  after -- the order that got us here.
+     ├─ **decide before the first line of the editor**: highlighting either
+     │  breaks the zero-JavaScript property the screen's test asserts, or is
+     │  **rendered by the server**. The second is real here, because the
+     │  parser is already in the process -- the facade parses the whole
+     │  system at start -- so the server can hand back coloured HTML while
+     │  editing happens in a plain textarea. That gives back exactly the
+     │  display/change pair the original SE80 had, and it is a joke on the
+     │  original rather than a compromise: a screen that colours text on the
+     │  server, because in nineteen-ninety-something that is how it was done
+     ├─ **and the question that was missing from the estimate entirely, and
+     │  matters more than the two above: where does an edit land?** A
+     │  browser editor means the system starts writing its own sources. Into
+     │  the tracked `src/`, into the object store `gen/`, or into a pack?
+     │  Everything hangs on it: whether the edit takes part in the
+     │  generation hash, whether it survives a rebuild, whether abapGit sees
+     │  it, and what happens when a layer wins the name of an object that
+     │  was edited. Until that is answered the editor is a toy; once it is,
+     │  this is a development environment. **It is the first item of the
+     │  estimate, not a consequence of it.**
+     ├─ **a cheap middle for breakpoints**, which gives most of the feeling
+     │  for a fraction of the price: not an interactive debugger but a
+     │  **step recording** -- run it and show every statement with the
+     │  variables' values. It is a log rather than a protocol, we need it
+     │  anyway for O.2, and it costs incomparably less than A.6.
+     └─ **the name is not SE80.** The rule we set for ourselves -- call
+        what is ours by our own name, keep "SAP" in a statement of fact --
+        does not stretch to transaction codes. A transaction of ours called
+        SE80 is not our name, it is somebody's product. `ZOSD_*` with a line
+        saying "corresponds to SE80" is cleaner and describes more exactly
+        what we did.
+
 G.4  abapGit through the substitutes — **PARKED 2026-09-18 by Alice** after a, b decided
      Split 2026-09-18 on the critic's reading: under one number the three
      block each other for no reason. The first two are decisions this
@@ -329,6 +418,73 @@ G.4  abapGit through the substitutes — **PARKED 2026-09-18 by Alice** after a,
         unparks it starts from two decisions rather than from nothing;
         what remains under the number is G.4c, the closure of 371 of 592
         objects, and it is work rather than a decision
+
+W — what this actually is, and the two things to bet on
+│   The workstation session, thinking aloud 2026-09-18, and Alice on the
+│   second of them: "OMG!!! это гениально". Recorded here rather than left in
+│   a conversation, because they reframe tracks that already exist.
+│
+│   The framing: we keep describing this through a negative -- "a gateway
+│   that is not there". There is a stronger statement available for what is
+│   already built: **a SAP system you can clone.** Not a service, not a
+│   runtime: a whole system as a repository that unfolds into a folder or a
+│   browser tab. Seen that way several tracks stop being separate -- a
+│   content-hashed generation is a version of the system, a pack is a
+│   package, abapGit is the transport, and the browser preview is the proof
+│   that a system fits in a file. The product's main surface is then not
+│   `/sap/opu/odata/` but `osd clone && osd up`.
+│
+├─ W.1  **a branch of a whole system, data and all**            the bet
+│    If a system can be cloned it can be branched, and a git branch of an
+│    entire system *including its data* does not exist in the ABAP world at
+│    all: there, code is branched by transports and data is not branched by
+│    anything. We have built what it needs almost by accident -- layered
+│    input folders with an override order, seeding from captures, immutable
+│    generations. The shape is not "a code editor": it is **two systems side
+│    by side and a switch between them** -- the same system on two branches,
+│    running twice, and a comparison of what each answers.
+├─ W.2  **the differential debugger**                           the other bet
+│    Three things that arrived separately: the frame oracle (the same ABAP
+│    computes a picture here and on a real system, and we diff), a step
+│    trace (a log of statements with their values, O.2), and a facade that
+│    can talk to a real client. Together they are a debugger that runs one
+│    piece of code in both places and stops at the first divergence. For a
+│    project that transpiles somebody else's language that is not a
+│    convenience, it is **the measuring instrument** -- and a product of its
+│    own. Eight anomalies in two days came out of the crude version of this
+│    on pictures; the version on statements would find them in handfuls.
+├─ W.3  AMDP in the browser, by way of DuckDB
+│    Now that AMDP really runs, the funniest thing and the most useful
+│    coincide: teach SQLScript to execute in DuckDB as well as HANA and AMDP
+│    reaches the browser preview -- a Z80 written in SQLScript, playing
+│    something, on a public link with no HANA anywhere. That is the
+│    `FOR DUCKDB` polyglot from B.19, and it turns the demo from "come and
+│    I'll show you" into a URL.
+├─ W.4  the closure, as a service and as the honest answer
+│    CLAUDE.md said on day one that the long pole is the dependency closure
+│    of real classes, and that it must be measured before architectural
+│    commitments. We then built half a system and never made that number a
+│    live metric. Make it a service: point it at a repository, get back what
+│    would run, what would not, and why. It is a marketing instrument, a
+│    backlog generator and the honest answer to "is this a toy" at once --
+│    and it is the same machine the Neptune importer (G.6) needs.
+├─ W.5  ABAP tests in ordinary CI, in tens of seconds
+│    Not "emulate SAP": put a repository of Z code in, get green or red. It
+│    needs no new track, only W.4 measured and published.
+├─ W.6  the backlog as something the system says about itself
+│    The facade already records every path a client asked for and did not
+│    get. Generalise it: every layer logs what it was asked for and could
+│    not do, and the backlog stops being a file somebody maintains. This is
+│    the line `npm run parked` and the leak scan are already on -- not
+│    "remember the rule" but "let the check ask".
+└─ W.7  **the risk, which is not technical**
+     There are many live tracks now and each can be deepened forever. The
+     failure mode is not collapse, it is spreading thin: seven half-done
+     things instead of two finished ones. The defence exists already -- the
+     rule about measuring before deciding -- and it should be extended from
+     choosing implementations to choosing tracks. The other half of the same
+     risk: this runs on Alice's attention, which is the one resource we can
+     neither measure nor replenish.
 
 O — the oracles: proving we answer the way a system answers
 │   Proposed by the workstation session 2026-09-18 and owned by it. These

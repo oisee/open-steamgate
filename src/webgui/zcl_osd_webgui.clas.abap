@@ -726,7 +726,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     rv_html =
       `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` &&
       `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
-      `<title>About - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
+      `<link rel="icon" type="image/svg+xml" href="/app/osg.svg"><title>About - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
       `<div class="win">` &&
       |<div class="title"><span>System: Status</span><small>{ esc( ls_ident-info ) }</small></div>| &&
       `<div class="about">` &&
@@ -892,7 +892,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     rv_html =
       `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` &&
       `<meta name="viewport" content="width=device-width,initial-scale=1">` &&
-      `<title>Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
+      `<link rel="icon" type="image/svg+xml" href="/app/osg.svg"><title>Easy Access - open-steamgate</title><style>` && style( ) && `</style></head><body>` &&
       `<div class="win">` &&
       |<div class="title"><span>Easy Access</span><small>{ esc( ls_ident-info ) }</small></div>| &&
       |<div class="menu">{ menubar( lt_nodes ) }</div>| &&

@@ -19,7 +19,7 @@ test("a transaction is entered from the command field and draws where the tree w
   await page.waitForURL(/okcode=ZOSD_NOTE/);
 
   // the screen kept its own chrome around the transaction
-  await expect(page.locator(".title")).toContainText("SAP Easy Access");
+  await expect(page.locator(".title")).toContainText("Easy Access");
   await expect(page.locator(".menu")).toContainText("Favorites");
   await expect(page.locator(".runhead")).toContainText("ZOSD_NOTE - Session notepad");
   await expect(page.locator("#msg")).toContainText("Session notepad started");
