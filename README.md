@@ -33,6 +33,7 @@ do, and the rest of this README is mostly consequences.
 
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** = the SAP Gateway,
 the `/IWBEP/` framework this project reimplements the runtime of.
+
 ---
 
 ## ▶ Try it without installing anything
