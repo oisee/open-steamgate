@@ -361,6 +361,14 @@ bash ~/hxe/run.sh                 # bind-mounted data, ports 39013 / 39017
 STG_DB=hana npm run unit:hana     # the ABAP unit suite against it
 ```
 
+`run.sh` passes `--agree-to-sap-license`, which the image's own help describes
+as agreeing to the **SAP Developer Center Software Developer License
+Agreement** — so running it is accepting that. The terms are SAP's to state
+and are published with the image; read them before using it for more than a
+laboratory. Ours is exactly that: one machine, no customer data, not reachable
+from outside the host, and deliberately **not** the A4H sandbox, which is the
+oracle other work compares against.
+
 `STG_DB=hana` is a **mode, not a default**, and the reason is measured: the
 cost is per statement, not per row — a 200-row `SELECT` is 3.8x the in-process
 SQLite cost, a single-row one 52x, an `INSERT` 146x. ABAP written set-wise

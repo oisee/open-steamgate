@@ -59,6 +59,67 @@ replaces the procedure and calls it. The connection comes from `HXE_HOST` /
 `HXE_PORT` / `HXE_USER` / `HXE_PASSWORD`, or from `.local/hxe-password`, which
 is where the laboratory's password lives and which is not tracked.
 
+## Bringing HANA Express up, and under what terms
+
+**The terms first, because the container makes you assert them.** The image's
+own `--help` says what the flag means, in its words:
+
+```
+--agree-to-sap-license    Indicates you agree to the SAP Developer Center
+                          Software Developer License Agreement.
+```
+
+`~/hxe/run.sh` passes that flag, so **running the script is accepting that
+agreement**. Anyone who runs it should know that, which is why it is written
+here rather than left in a command line.
+
+What this file does *not* do is summarise SAP's terms. They are SAP's to
+state, the agreement is named above, and it is published at SAP's own site
+along with the image on Docker Hub (`saplabs/hanaexpress`). The one practical
+point worth checking there before using it for anything beyond a laboratory
+is the memory limit the free edition carries — read it rather than take a
+number from here.
+
+For what we use it for the shape is clear enough: **a laboratory on one
+machine, for running AMDP bodies and for measuring**. It holds no customer
+data, it is not reachable from outside the host, and it is not the A4H
+sandbox — which is deliberate, because that one is the oracle everybody's
+comparison work depends on.
+
+### Bringing it up
+
+```sh
+docker pull saplabs/hanaexpress:latest        # 4.49 GB
+mkdir -p ~/hxe/mounts && chmod 777 ~/hxe/mounts
+printf '{"master_password":"<a strong one>"}\n' > ~/hxe/mounts/password.json
+chmod 666 ~/hxe/mounts/password.json
+bash ~/hxe/run.sh
+docker logs -f hxe                            # "Startup finished!" — 169 s here
+```
+
+The password file is read and the container keeps it; ours is in `.local/`,
+which is not tracked, and the client reads it from there when no
+`HANA_PASSWORD` is set.
+
+Three things the published recipe gets wrong on a machine like this one, all
+measured on 2026-09-18 and all already handled in `run.sh`:
+
+- **`kernel.shmmni` cannot be set per container.** It is not namespaced, and
+  docker refuses the flag outright with `invalid argument`. The host's 4096 is
+  what you get, and HANA's own pre-flight check passes with it:
+  `Check succeeded: /proc/sys prerequisites and limits`.
+- **`kernel.shmmax` and `kernel.shmall` should not be set either.** The recipe
+  passes 1 GB and 8 M; this host already has 18446744073692774399 for both, so
+  the flags would *lower* them. Inheriting is better.
+- **The failed syscall check can be ignored here.** HANA reports
+  `Check failed: syscalls` for `move_pages` and `mbind` and tells you to get a
+  seccomp profile with `docker run --rm <image> --print seccomp.json` — a
+  command this image does not have (`--print` takes only `README` and
+  `hdb_version`). It does not matter on a single-socket machine: those two
+  calls place memory pages across NUMA nodes and there is one node. On a
+  multi-socket host the profile would have to be built by hand from docker's
+  default plus those two entries.
+
 ## The laboratory
 
 `~/hxe/run.sh` starts it. The data is in a bind mount rather than the
