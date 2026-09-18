@@ -150,7 +150,11 @@ like `open-abap-core` and the pack/delta half of abapGit: it is the substrate a
 program compiles against, not content this system serves.
 
 - URL: our fork, `https://github.com/oisee/open-abap-gui`; folder
-  `.local/lars/open-abap-gui`, both remotes at **`ed96e89`** ("update", #162).
+  `.local/lars/open-abap-gui`. Upstream `main` is at **`ed96e89`** ("update",
+  #162); the folder is on the fork branch **`html-viewer-sapevent`** at
+  **`0324e1c`** (two commits on top of `ed96e89`: the `sapevent` raise, and
+  `show_url` showing what `load_data` loaded), which is what the preview
+  workflow pins (`OSD_GUI_REF`) and what "How close" below describes.
 - Declared in `abap_transpile.json` (libs) and `abaplint.jsonc` (dependencies).
 - **Only `/src` comes in.** The repository also carries `/scaffold` — 162
   example programs and a dynpro host of its own — and `/test`, and neither
@@ -176,38 +180,70 @@ nothing calls is a library nobody notices has stopped building.
 
 ## How close the substitutes are to carrying abapGit
 
-Honestly: **the outbound half is there and the inbound half is not.**
+**Both halves are there now** (2026-09-18, backlog G.2). What follows is what
+each half is, and where the seam between them runs.
 
 `cl_gui_html_viewer` is a real substitute, not a stub. It has `load_data`,
 `show_data`, `show_url`, `close_document`, a document history behind
 `go_back`/`go_forward`/`do_refresh`, and it declares `sapevent` with the full
 five-parameter signature abapGit's handler is written against (`action`,
-`frame`, `getdata`, `postdata`, `query_table`). `cl_gui_control` renders a
-registered viewer into a sandboxed `<iframe srcdoc=...>` and rewrites every
-`<a href="sapevent:ACTION">` in the document into a form that posts the
-caller's hidden fields plus `ACTION` under a field the caller names. That
-rewrite is careful in the ways that matter — it does not parse attributes it
-does not need, it leaves ordinary links alone, it knows `<abbr>` starts with
-`<a` too — and `src/webgui/zcl_osd_webgui.clas.testclasses.abap` drives it end
-to end in ABAP Unit, on a synthetic anchor, as part of `npm run unit`.
+`frame`, `getdata`, `postdata`, `query_table`), the last two on the `CNHT`
+types SAP declares them with. `cl_gui_control` renders a registered viewer
+into a sandboxed `<iframe srcdoc=...>` and rewrites what the document would
+send to SAP GUI into forms that post to a transport the caller names
+(`ty_sapevent`: a url, the name of the field that carries the action, hidden
+fields of the caller's own):
 
-What is missing is the return leg. **Nothing in the library ever raises
-`sapevent`.** `grep -rn "RAISE EVENT" src/ scaffold/` finds the event raised for
-toolbars, timers, ALV grids, trees and DD elements, and never for the HTML
-viewer. The one example that registers a handler,
-`scaffold/examples/zcl_gg_ex_151`, therefore has a handler that can never fire.
-The scaffold host does not use the event either: it points the rewrite at its
-own `/dispatch` with `action_field = 'ucomm'` and folds the click into the same
-`gg_action` command dispatch every other control posts to. That is a reasonable
-design for the scaffold's own dynpro host; it is not the SAP contract, and
-abapGit is written against the SAP contract.
+- `<a href="sapevent:ACTION">` becomes a form whose submit button carries
+  `ACTION` under the action field, as before;
+- `<form action="sapevent:ACTION">` and a submit button's
+  `formaction="sapevent:ACTION"` — which is how abapGit's forms are written
+  (`zcl_abapgit_html_form=>render`) — are pointed at the transport with the
+  action in the url's query string, so the body stays exactly the document's
+  own fields;
+- every rewritten form carries a hidden `gg_control` naming the viewer it
+  belongs to, and forms posting somewhere else are left alone.
 
-So for abapGit's UI the gap is narrow and specific: something has to take the
-POST the rewritten form produces and raise `sapevent` on the viewer object with
-`action` and `postdata` filled the way SAP fills them (`postdata` as the body's
-lines, `query_table` as the parsed fields), so that `SET HANDLER ... FOR EVENT
-sapevent OF cl_gui_html_viewer` runs. That is one class and one test, not a
-track.
+The return leg is `cl_gui_html_viewer=>dispatch_sapevent`: whoever answers the
+transport's url hands it the query string, the body and the same transport; it
+finds the viewer by `gg_control`, strips the transport's fields, and raises
+`sapevent` on that viewer, so `SET HANDLER ... FOR EVENT sapevent OF
+cl_gui_html_viewer` runs. The parameters are filled the way the frontend
+fills them, **measured against the consumer rather than the frontend**,
+because the frontend was not available and the consumer is strict
+(`zcl_abapgit_gui_event`, which is the only reader abapGit has):
+
+- `action` is the url before `?`, as written (abapGit lower-cases it);
+- `getdata` is the text after `?`, untouched — abapGit undoes the escapes it
+  expects there itself (`%3A %3F %3D %2F %23 %25 %26`);
+- `postdata` is the form's `name=value` pairs joined with `&`, in lines of
+  256 characters filled to the end, the last line carrying the rest, the
+  text as typed with only `%`, `&` and `=` escaped. abapGit redeclares the
+  table with 256-character lines and converts line by line
+  (`zcl_abapgit_html_viewer_gui=>on_event`), joins the lines `RESPECTING
+  BLANKS` except the last, and undoes exactly those escapes; a wider fill
+  would lose the tail of every long form in abapGit, and it does not lose it
+  on real systems. The line width SAP GUI itself fills is the one number
+  nobody has measured; it is one constant (`c_post_data_chunk`);
+- `query_table` is the same parsed, unless the viewer was constructed with
+  `query_table_disabled`, which abapGit does.
+
+The library's own tests drive both halves on a synthetic page
+(`cl_gui_html_viewer.clas.testclasses.abap`, `ltcl_sapevent`, five tests:
+an anchor with a query, abapGit's form shape with a side action, the line
+fill, an unknown viewer, a foreign form), and its browser spec of the HTML
+viewer example (`zcl_gg_ex_151`) still passes through the scaffold host,
+which keeps folding the click into its own `gg_action` dispatch and ignores
+the extra hidden field. `src/webgui/zcl_osd_webgui.clas.testclasses.abap`
+keeps the original synthetic-anchor probe as part of `npm run unit`.
+
+One more thing the real flow found: abapGit shows a page by `load_data`
+without a url, which assigns one, then `show_url` of the assigned url
+(`zcl_abapgit_gui=>cache_asset`, `render`). The substitute overwrote the
+document with the url's text at that second step, so the frame read
+`abapgit.html`. It now keeps what `load_data` loaded under the url it got
+and resolves `show_url` and `show_data` from that
+(`ANOMALY-2026-09-18-html-viewer-show-url`).
 
 The rest of what abapGit touches looks better than I expected. There are 31
 `todo, implement method` stubs in `/src` and no `ASSERT 1 = 'todo'` at all, and
@@ -221,20 +257,53 @@ larger question than whether its screen draws — it wants DDIC serializers, a
 transport layer and a hundred SAP APIs this tree does not have — but the GUI
 layer is not the thing that will stop it.
 
-## Out of scope, deliberately
+## The click comes back: proven, and against what
 
-**Running abapGit itself through the GUI substitutes is not part of this**, and
-was not started. It is the obvious next step and it needs one thing proven
-first, which is the next step's first task:
+The round trip was proven 2026-09-18 at
+`/sap/bc/gui/sap/its/webgui/sapevent/` (`src/webgui/zcl_osd_sapevent`, a
+proof harness that says so in its header, and the seed of what a transaction
+node needs: controls drawn into a page, the click coming back as an event).
+`test/sapevent.mjs` plays the browser by hand and `test/e2e/sapevent.spec.mjs`
+lets Chromium click inside the sandboxed frame; both end in the JSON the
+harness answers a POST with, which is what abapGit's event class made of the
+click.
 
-> **Prove that a click comes back.** Take abapGit's own HTML — not a synthetic
-> anchor — put it through `cl_gui_html_viewer=>load_data` with `sapevent`
-> registered, render it, post one of the resulting forms back, and show that
-> `sapevent` reaches a handler with the action and the post data intact.
+What is real on that path, and what is not, because the distinction is the
+proof:
 
-Not "wire up abapGit". One round trip, against real abapGit markup, with the
-missing raise written and tested. Everything after that is a question of which
-SAP APIs are missing, and that is a closure audit, not a screen.
+| piece | status |
+| --- | --- |
+| `zcl_abapgit_html_viewer_gui`, abapGit's wrapper of `cl_gui_html_viewer`, constructed as abapGit constructs it, re-raising `zif_abapgit_html_viewer~sapevent` | real, from abapGit |
+| `zcl_abapgit_html`, which writes every sapevent anchor abapGit has (`href="sapevent:select?key=…"` plus its `data-sapevent` marker) | real, from abapGit |
+| `zcl_abapgit_gui_event`, the object `zcl_abapgit_gui=>handle_action` builds first, and its `query( )` / `form_data( )` | real, from abapGit |
+| `cl_gui_html_viewer=>dispatch_sapevent` and the raise | real, the fork branch |
+| `zcl_abapgit_gui=>on_event` | absent: three lines calling `handle_action`, whose first act is the `CREATE OBJECT` the harness repeats; the rest is the router and the pages |
+| the "New Online Repository" form | **copied**: `zcl_abapgit_html_form` reaches `zcl_abapgit_ui_factory` and with it all of abapGit, so the harness writes the markup that class writes (the `<form>` with the main command as its action and a hidden submit, side actions as submits with a `formaction`) with the field ids and events of `zcl_abapgit_gui_page_addonline`, and says so |
+
+Measured on the way: `zcl_abapgit_gui` reaches **371 of abapGit's 592
+objects by name** (`node tools/osd-closure.mjs .local/lars/abapgit/src
+zcl_abapgit_gui`), through `zcl_abapgit_exit` and the UI factory, and so does
+any page class; the three real pieces above reach 17, 6 and 7. abapGit's own
+CI transpiles the whole tree against open-abap-core, **open-abap-gui**,
+open-abap-seo, express-icf-shim and `abapGit-web-classic` with
+`unknownTypes: runtimeError` (`test/abap_transpile.json` there), and serves
+it through `zcl_abapgit_web_sicf` (`test/express.mjs`), which passes the raw
+POST body into `postdata` with a `todo, parse and pass data` beside it. So
+"abapGit renders" is not blocked by the GUI layer or by the closure as such;
+it is blocked by this tree building with `compileError` and layering only
+the pack/delta half of abapGit. That is G.4's lift, and now a measured one.
+
+What the proof asserts, concretely: a repository's anchor comes back as
+`action = select`, `getdata = key=000000000002`, `query( ) = {KEY: …}`; the
+form comes back as `action = add-repo-online` with `postdata` holding the
+document's fields only (`url=…&package=$OSD&…&display_name=open steamgate
+%26 friends, 100%25 offline&folder_logic=PREFIX`, none of the transport's),
+and `form_data( )` holding the typed values under abapGit's upper-cased keys;
+a side action's `formaction` is its own event; a 700-character value fills
+256-character lines and abapGit joins them back; a POST naming no viewer is
+not dispatched. State between the GET and the POST is class data of the
+harness — one document per process, which is enough for a proof and is
+exactly step 3 above.
 
 ## Tests
 
@@ -242,7 +311,12 @@ SAP APIs are missing, and that is a closure audit, not a screen.
 npx mocha test/webgui.mjs                       # the path, the tree, the command field
 npx playwright test test/e2e/webgui.spec.mjs    # it renders, a node navigates, the field works
 npm run unit                                    # ZCL_OSD_WEBGUI: the ok-codes, and the sapevent rewrite
+npx mocha test/sapevent.mjs                     # the round trip against abapGit's markup, browser played by hand
+npx playwright test test/e2e/sapevent.spec.mjs  # the same, Chromium clicking inside the frame
 ```
+
+`test/sapevent.mjs` is in `npm run integration`. The fork's own tests of the
+two halves run with `npm run unit` in `.local/lars/open-abap-gui`.
 
 `test/webgui.mjs` is in `npm run integration`. The browser test does not assert
 a status code: it opens folders, reads a node, clicks it and follows where it

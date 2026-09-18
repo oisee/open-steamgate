@@ -89,9 +89,9 @@ E — content packs and layers: what the tree is made of
 G — the classic screens, and the GUI substitutes under them
 ├─ G.1  SAP Easy Access, served by ABAP                             DONE 09-18
 ├─ G.1b the drop, drawn, and a menu bar that works                  after G.2
-├─ G.2  prove a sapevent click comes back                           in progress
+├─ G.2  prove a sapevent click comes back                           DONE 09-18
 ├─ G.3  a transaction node that actually runs                       open
-└─ G.4  abapGit through the substitutes                             blocked on G.2
+└─ G.4  abapGit through the substitutes                             open, closure measured in G.2
 
 U — the user, and the thing itself
 ├─ U.1  the user's path, measured by a stranger                     DONE 09-17
@@ -1019,21 +1019,49 @@ G.1b The drop, drawn, and a menu bar that works                          [S]
      └─ SE80 - editing a class from this screen - is later (Alice), and it
         is the ADT facade's editor behind a transaction node, not a new one
 
-G.2  Prove a sapevent click comes back                                   [S]
-     ├─ the gap, measured: cl_gui_control rewrites <a href="sapevent:X">
-     │  into a form that posts, and NOTHING in open-abap-gui ever raises
-     │  the sapevent event -- grep "RAISE EVENT" finds toolbars, timers,
-     │  grids, trees, never the HTML viewer. scaffold/examples/zcl_gg_ex_151
-     │  registers a handler that therefore cannot fire; the scaffold host
-     │  folds the POST into its own gg_action/ucomm dispatch instead
-     ├─ so: take the POST, raise sapevent on the viewer with action and
-     │  postdata filled the way SAP fills them, and show a registered
-     │  handler run. One class and one test, not a track
-     ├─ do it against abapGit's OWN HTML, not a synthetic anchor: the
-     │  synthetic one is already covered by
-     │  src/webgui/zcl_osd_webgui.clas.testclasses.abap (ltcl_substrate)
-     └─ upstream candidate once it works: the raise belongs in
-        open-abap-gui, not here
+G.2  Prove a sapevent click comes back                     [S] DONE 2026-09-18
+     ├─ the gap was as measured: nothing in open-abap-gui raised sapevent
+     │  on the HTML viewer. The raise is in our fork now, branch
+     │  html-viewer-sapevent at 0324e1c (two commits, 496 tests and the
+     │  zcl_gg_ex_151 browser spec green there): cl_gui_html_viewer=>
+     │  dispatch_sapevent takes the POST, finds the viewer by the hidden
+     │  gg_control field every rewritten form carries, strips the
+     │  transport's fields, raises with action / getdata / postdata /
+     │  query_table on the CNHT types; the rewrite now also covers a
+     │  document's own <form action="sapevent:X"> and formaction, which is
+     │  how abapGit's forms are written. No PR upstream yet: docs/upstream.md,
+     │  "Beside the transpiler", says what it would say
+     ├─ the contract was measured against the consumer, not the frontend:
+     │  zcl_abapgit_gui_event (256-char lines joined RESPECTING BLANKS,
+     │  only %3A %3F %3D %2F %23 %25 %26 undone), so lines fill to 256 and
+     │  text stays as typed with % & = escaped. The width SAP GUI fills is
+     │  the one unmeasured number; one constant, c_post_data_chunk
+     ├─ PROVEN against abapGit's own markup: zcl_abapgit_html (real) writes
+     │  the anchors, zcl_abapgit_html_viewer_gui (real) wraps the viewer as
+     │  abapGit does, zcl_abapgit_gui_event (real) reads the event, and the
+     │  handler repeats the CREATE OBJECT zcl_abapgit_gui=>handle_action
+     │  starts with. src/webgui/zcl_osd_sapevent at
+     │  /sap/bc/gui/sap/its/webgui/sapevent/; test/sapevent.mjs (browser by
+     │  hand, 6) and test/e2e/sapevent.spec.mjs (Chromium clicking inside
+     │  the sandboxed frame, 3): anchor -> action select, getdata key=...,
+     │  query {KEY}; the New Online Repository form -> action
+     │  add-repo-online, postdata = the document's fields only, form_data( )
+     │  = the typed values; a side action's formaction is its own event; a
+     │  700-char value fills 256-char lines and abapGit joins them back
+     ├─ NOT proven, and said so in the class header and docs/webgui.md: the
+     │  form itself is a copy of what zcl_abapgit_html_form writes, because
+     │  that class reaches zcl_abapgit_ui_factory and with it 371 of
+     │  abapGit's 592 objects by name, as does zcl_abapgit_gui and every
+     │  page class; zcl_abapgit_gui=>on_event itself is absent for the same
+     │  reason. abapGit's own CI transpiles the whole tree with
+     │  open-abap-gui + open-abap-seo + abapGit-web-classic under
+     │  unknownTypes: runtimeError, so the closure is a build decision
+     │  (compileError, the pack/delta half only), not a GUI gap: G.4's lift
+     ├─ found on the way and fixed in the fork: show_url of what load_data
+     │  assigned showed the url's text, so abapGit's own page flow drew
+     │  "abapgit.html" (ANOMALY-2026-09-18-html-viewer-show-url)
+     └─ state between GET and POST is class data of the harness, one
+        document per process: enough for a proof, and exactly G.3's step 3
 
 G.3  A transaction node that actually runs                               [S]
      ├─ the kind exists and answers "not yet" (ZABAPGIT is the one entry)

@@ -35,6 +35,11 @@ jobs:
       # The commit of the transpiler this deployment is pinned to, or empty
       # to use whatever npm resolves. See the step below.
       OSD_CORE_REF: "52ba51a5662b93bd5093a9c1adef64bd438ce7f0"
+      # The GUI substitutes, at the fork branch that raises sapevent on the
+      # HTML viewer (docs/webgui.md, backlog G.2). Without a folder the build
+      # clones the fork's default branch, which tracks upstream and does not
+      # have it, so the branch commit is pinned the same way as the core.
+      OSD_GUI_REF: "0324e1c1538f7ac63826ebbddab3fbee31c4501c"
       OSD_TRANSPILER_REF: "0263e42892063be5008eab42a5f836bc19385b82"
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +115,8 @@ jobs:
         run: |
           git clone --filter=blob:none https://github.com/oisee/open-abap-core.git .local/lars/open-abap-core
           git -C .local/lars/open-abap-core checkout -q "$OSD_CORE_REF"
+          git clone --filter=blob:none https://github.com/oisee/open-abap-gui.git .local/lars/open-abap-gui
+          git -C .local/lars/open-abap-gui checkout -q "$OSD_GUI_REF"
       # The packs: the demo and Zork are not in this repository, they are
       # fetched from theirs at the commit each pack's manifest pins
       # (tools/osd-fetch.mjs), and the pack's own folder layers over that.

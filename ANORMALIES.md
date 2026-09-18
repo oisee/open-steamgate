@@ -767,6 +767,22 @@ ENDLOOP.
 - Regression-test location: none
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-18-html-viewer-show-url — `cl_gui_html_viewer=>show_url` of an assigned url shows the url's text, not the document
+
+- Status: `fixed in fork` — open-abap-gui branch `html-viewer-sapevent`, commit `0324e1c`, not yet offered upstream
+- Discovery date: `2026-09-18`
+- Affected versions: `open-abap-gui` at `ed96e89` (upstream `main`)
+- Affected ABAP statement, runtime API or adapter: `cl_gui_html_viewer->load_data( )` followed by `show_url( assigned_url )`, which is how abapGit shows every page (`zcl_abapgit_gui=>cache_asset` then `render`)
+- Minimal ABAP reproducer: `load_data( IMPORTING assigned_url = lv_url CHANGING data_table = lt_html )` then `show_url( lv_url )`, then `cl_gui_control=>render_html( )`
+- Exact command used to run it: `STG_PORT=3080 npx mocha test/sapevent.mjs` before the fork fix: the frame's `srcdoc` read `abapgit.html`
+- Expected SAP behaviour: `load_data` puts the document into the control's data cache under the url it assigns (or the one given), and `show_url` of that url shows the document; any other url is a link the control navigates to
+- Actual open-abap behaviour: the substitute set the payload to the url's text at `show_url`, so the document loaded a line earlier was replaced by its own name. `load_data` without a url also assigned nothing, so abapGit's `show_url( '' )` had nothing to name
+- Impact on open-steamgate: abapGit's own page flow drew an empty frame with a file name in it; the sapevent round trip (backlog G.2) could not be run against real markup until this was fixed
+- Smallest safe workaround: none here; fixed in the fork, which the build takes from `.local/lars/open-abap-gui` and the preview workflow pins by commit (`OSD_GUI_REF`)
+- Upstream issue: none yet. The branch carries two commits, the raise of `sapevent` and this; both go to open-abap/open-abap-gui as one PR after a critic pass (`docs/upstream.md`, "Beside the transpiler")
+- Regression-test location: `cl_gui_html_viewer.clas.testclasses.abap` in the fork (`show_url_shows_what_was_loaded`), `test/sapevent.mjs` here
+- Upstream version containing a fix: `unknown`
+
 ## Resolved anomalies
 
 (none yet)

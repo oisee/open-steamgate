@@ -247,6 +247,25 @@ all of them: a performance change that alters one frame is wrong.
 
 ## Beside the transpiler
 
+- **`open-abap-gui`, one PR owed (2026-09-18)**: fork branch
+  `html-viewer-sapevent` on `oisee/open-abap-gui`, two commits, lint and
+  the 496 unit tests of that repository green, the browser spec of the
+  HTML viewer example (`zcl_gg_ex_151`) green. The first commit is the
+  inbound half of `sapevent` — `cl_gui_html_viewer=>dispatch_sapevent`,
+  the raise, the `CNHT` type pool, the rewrite of a document's own
+  `<form action="sapevent:X">` and `formaction`, the classic exceptions on
+  `load_data` / `show_url` / `set_registered_events` / `set_focus` — with
+  five unit tests on the round trip; the second is
+  `ANOMALY-2026-09-18-html-viewer-show-url`, `show_url` of what
+  `load_data` loaded. The PR would say: nothing raised `sapevent` on the
+  viewer, so a handler registered on it could never fire; the scaffold
+  host folds the click into its own dispatch, which is not the SAP
+  contract abapGit is written against; the shape of `postdata` was
+  measured against that consumer (`zcl_abapgit_gui_event`, 256-character
+  lines joined respecting blanks, only the pair delimiters escaped). The
+  one number nobody has measured on a frontend is the line width SAP GUI
+  itself fills; it is one constant. Critic pass before sending, as for
+  the rest. Self-merging there is not agreed; it is Lars's to merge.
 - **`@abaplint/core`**: one owed, and it is not a table edit.
   `ANOMALY-2026-09-16-numeric-builtins-typed-integer` — `frac`, `abs`,
   `floor`, `ceil`, `trunc` and `sign` are declared with a fixed integer
