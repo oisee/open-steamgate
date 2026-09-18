@@ -10,8 +10,9 @@
 // runtime's typed values and ends at target.set(), so the ABAP type does its
 // own converting -- CHAR gets its padding back, which matters because HANA's
 // NVARCHAR has none.
-import {readFileSync, existsSync} from "node:fs";
-import {join} from "node:path";
+import {readFileSync, existsSync, writeFileSync, mkdirSync} from "node:fs";
+import {randomBytes} from "node:crypto";
+import {join, dirname} from "node:path";
 import {fromJson} from "./rfc-replay.mjs";
 import {connection} from "./amdp-run.mjs";
 
@@ -47,6 +48,25 @@ function statement(p) {
 
 /** lines the sandbox wrapper puts in front of a typed body (see #sandbox) */
 const SANDBOX_OFFSET = 1;
+
+/** The restricted sandbox user's password: made once and kept beside the
+ *  other one, outside the deployment directory, because a release is rebuilt
+ *  by `rsync --delete` on every deploy. It is not a secret anybody types --
+ *  nothing but this process ever uses it -- but it has to be the same across
+ *  restarts or the user would have to be dropped and recreated. */
+function sandboxPassword() {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const file = process.env.OSD_AMDP_SANDBOX_PASSWORD_FILE
+    ?? (home === "" ? undefined : join(home, ".osd", "amdp-sandbox-password"));
+  if (process.env.OSD_AMDP_SANDBOX_PASSWORD) return process.env.OSD_AMDP_SANDBOX_PASSWORD;
+  if (file === undefined) return "Sbx" + randomBytes(12).toString("hex") + "A1";
+  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  // HANA's default policy wants length, a digit and mixed case
+  const made = "Sbx" + randomBytes(12).toString("hex") + "A1";
+  mkdirSync(dirname(file), {recursive: true});
+  writeFileSync(file, made + "\n", {mode: 0o600});
+  return made;
+}
 
 export class AmdpDestination {
   constructor(options = {}) {
@@ -93,9 +113,18 @@ export class AmdpDestination {
   /** Let go of the connection. An open socket keeps Node's event loop alive,
    *  so a suite that touched HANA passes and then does not exit. */
   async close() {
-    if (this.client === undefined) return;
-    try { this.client.end(); } catch { /* already gone */ }
+    // both of them: the privileged connection and the restricted one the
+    // sandbox runs on. Closing only the first left a socket open, which keeps
+    // Node's event loop alive, so a suite passed and then hung -- the same
+    // failure this method was added to fix, reintroduced by giving the
+    // sandbox a connection of its own.
+    for (const key of ["client", "sbx"]) {
+      const held = key === "sbx" ? this.sbx?.client : this.client;
+      if (held === undefined) continue;
+      try { held.end(); } catch { /* already gone */ }
+    }
     this.client = undefined;
+    this.sbx = undefined;
   }
 
   /** The sandbox (backlog G.8): a body typed on a screen, run now.
@@ -115,6 +144,51 @@ export class AmdpDestination {
    *  and no parser of ours would be, so it is passed through **verbatim** --
    *  a sandbox that paraphrases the engine is worth nothing.
    */
+  /** The connection a typed body runs on, which is **not** the one the bridge
+   *  deploys generated procedures with.
+   *
+   *  A sandbox reachable from a page must not execute as the database's
+   *  superuser: `SQL SECURITY INVOKER` means the body runs with the rights of
+   *  whoever called it, and as SYSTEM that is everything -- reading any
+   *  schema, creating users, dropping the system's own tables. The default is
+   *  therefore a user of its own, `OSD_SBX`, owning one schema and holding no
+   *  grant outside it: a body can create, fill and read its own tables and
+   *  can see nothing else. A fresh HANA user starts with no privileges, so
+   *  the restriction is the absence of grants rather than a list of denials,
+   *  which is the kind that cannot be got wrong by forgetting one.
+   *
+   *  `OSD_AMDP_SUPERUSER=1` runs as the privileged user instead. It is an
+   *  environment variable and not a switch on the page on purpose: a flag in
+   *  a URL would let anyone who can reach the sandbox grant themselves the
+   *  rights it is there to withhold.
+   */
+  async #sandboxClient() {
+    if (process.env.OSD_AMDP_SUPERUSER === "1") {
+      await this.#connect();
+      return {client: this.client, user: connection().user, schema: SCHEMA, restricted: false};
+    }
+    if (this.sbx !== undefined) return this.sbx;
+
+    const user = process.env.OSD_AMDP_SANDBOX_USER ?? "OSD_SBX";
+    const password = sandboxPassword();
+    // provisioning needs the privileged connection, and only the first time
+    await this.#connect();
+    const exists = await this.#exec(
+      `SELECT COUNT(*) AS N FROM SYS.USERS WHERE USER_NAME = '${user}'`).catch(() => undefined);
+    const n = Number((exists?.find(Array.isArray) ?? [])[0]?.N ?? 0);
+    if (n === 0) {
+      await this.#exec(`CREATE USER ${user} PASSWORD "${password}" NO FORCE_FIRST_PASSWORD_CHANGE`);
+      // a schema of its own, owned by it; nothing else is granted
+      await this.#exec(`CREATE SCHEMA ${user} OWNED BY ${user}`).catch(() => undefined);
+      if (this.trace) console.log(`AMDP: created the restricted sandbox user ${user}`);
+    }
+    const hdb = (await import("hdb")).default;
+    const client = hdb.createClient({...connection(), user, password});
+    await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
+    this.sbx = {client, user, schema: user, restricted: true};
+    return this.sbx;
+  }
+
   async #sandbox(signature) {
     // The transpiler writes the parameter names of a CALL FUNCTION in the
     // case they were typed in, which for ABAP source is lower; the function
@@ -136,12 +210,16 @@ export class AmdpDestination {
       say("EV_ERROR", "nothing to run");
       return;
     }
-    await this.#connect();
+    const run = await this.#sandboxClient();
+    const exec = (sql) => new Promise((resolve, reject) =>
+      run.client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+    say("EV_USER", run.user);
+    say("EV_SCHEMA", run.schema);
+    say("EV_RESTRICTED", run.restricted === true ? "X" : "");
     this.sandboxCount = (this.sandboxCount ?? 0) + 1;
-    const name = `"${SCHEMA}"."OSD_SANDBOX_${process.pid}_${this.sandboxCount}"`;
+    const name = `"${run.schema}"."OSD_SANDBOX_${process.pid}_${this.sandboxCount}"`;
     const started = Date.now();
-    await this.#exec(`CREATE SCHEMA "${SCHEMA}"`).catch(() => undefined);
-    await this.#exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
+    await exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
     // The wrapper is **one fixed line**, and that is not a matter of taste:
     // the engine reports "line N col M" against the statement it was given,
     // so every line the wrapper adds is a line the person's own numbering is
@@ -150,8 +228,8 @@ export class AmdpDestination {
     // tried on failure would make the offset depend on which attempt spoke.
     const preamble = `CREATE PROCEDURE ${name} () LANGUAGE SQLSCRIPT SQL SECURITY INVOKER AS BEGIN`;
     try {
-      await this.#exec(`${preamble}\n${body}\nEND`);
-      const out = await this.#exec(`CALL ${name}`);
+      await exec(`${preamble}\n${body}\nEND`);
+      const out = await exec(`CALL ${name}`);
       const rows = out.find(Array.isArray) ?? [];
       const plain = rows.slice(0, 200).map((row) => Object.fromEntries(
         Object.entries(row).map(([k, v]) => [k, Buffer.isBuffer(v) ? v.toString("utf8") : v])));
@@ -168,7 +246,7 @@ export class AmdpDestination {
       say("EV_RAW", raw);
       say("EV_ERROR", raw.replace(/line (\d+)/g, (m, n) => `line ${Number(n) - SANDBOX_OFFSET}`));
     } finally {
-      await this.#exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
+      await exec(`DROP PROCEDURE ${name}`).catch(() => undefined);
     }
   }
 

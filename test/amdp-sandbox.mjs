@@ -65,6 +65,29 @@ describe("the AMDP sandbox", function () {
     expect(back, "spaces and all -- a text literal loses its trailing blanks").to.contain(" AS one ");
   });
 
+  it("says whether anything here can run SQLScript, by running the smallest body", async () => {
+    // a name in a configuration says what somebody intended; this says what
+    // happens, which is what the launchpad needs to decide whether its tile
+    // is alive or grey
+    const answer = await (await fetch(BASE + "engine")).json();
+    expect(answer.destination, "which destination the body goes through").to.equal("AMDP");
+    expect(answer.engine, "HDB or none, nothing else").to.be.oneOf(["HDB", "none"]);
+    expect(answer.system_db, "and the system database, which is a different thing").to.be.a("string");
+  });
+
+  it("says where the body ran, because the two databases are not the same one", async () => {
+    // Alice, looking at the deployment: the sandbox computes on HANA Express
+    // through DESTINATION 'AMDP', while the system database of that same
+    // deployment is SQLite. Correct, and indistinguishable from the screen --
+    // so the screen says it, on the page where a person is already looking.
+    const {page} = await run("SELECT 1 AS one FROM dummy;");
+    expect(page, "the destination it went through").to.contain("DESTINATION 'AMDP'");
+    expect(page, "and that it is not the system database").to.contain("does not touch it");
+    // and who it ran as, which is the other half of the same question: a
+    // sandbox on a page must not execute as the database's superuser
+    expect(page, "the user").to.match(/as <b>[A-Z_0-9]+<\/b>, a user with no grant outside its own schema/);
+  });
+
   (hasHana ? it : it.skip)("runs a body and shows the rows", async () => {
     const {page} = await run("lt = SELECT 6*7 AS answer FROM dummy;\nSELECT * FROM :lt;");
     expect(page, "the count and the time").to.match(/class="ok">\d+ row\(s\), \d+ ms/);

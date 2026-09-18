@@ -24,8 +24,16 @@ CLASS zcl_osd_amdp_sbx DEFINITION PUBLIC CREATE PUBLIC.
 * answers honestly on a deployment that has none rather than pretending.
   PUBLIC SECTION.
     INTERFACES if_http_extension.
+*   'HDB' when a body typed here would actually run, 'none' when there is no
+*   engine behind the destination. Read by the launchpad, so a tile that
+*   cannot do anything is grey rather than disappointing.
+    CLASS-METHODS engine
+      RETURNING
+        VALUE(rv_engine) TYPE string.
   PROTECTED SECTION.
   PRIVATE SECTION.
+    CLASS-DATA gv_engine TYPE string.
+    CLASS-DATA gv_reason TYPE string.
     CONSTANTS c_example TYPE string VALUE
       'lt = SELECT 6*7 AS answer, CURRENT_DATE AS today FROM dummy;&&SELECT * FROM :lt;'.
 
@@ -37,6 +45,9 @@ CLASS zcl_osd_amdp_sbx DEFINITION PUBLIC CREATE PUBLIC.
         iv_raw         TYPE string
         iv_rows        TYPE string
         iv_ms          TYPE string
+        iv_user        TYPE string
+        iv_schema      TYPE string
+        iv_restricted  TYPE string
       RETURNING
         VALUE(rv_html) TYPE string.
 
@@ -94,6 +105,45 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD engine.
+*   Can anything here run SQLScript at all? Asked by running the smallest
+*   possible body, because that is the only honest answer: a name in a
+*   configuration says what somebody intended, and this says what happens.
+*   The answer is cached for the life of the process -- a launchpad asking on
+*   every load would otherwise open a database connection per page view.
+    DATA lv_error  TYPE string.
+    DATA lv_result TYPE string.
+    DATA lv_rows   TYPE string.
+    DATA lv_ms     TYPE string.
+    DATA lv_raw    TYPE string.
+    DATA lx_root   TYPE REF TO cx_root.
+
+    IF gv_engine IS NOT INITIAL.
+      rv_engine = gv_engine.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        CALL FUNCTION 'ZOSD_AMDP_SANDBOX' DESTINATION 'AMDP'
+          EXPORTING iv_body   = `SELECT CURRENT_SCHEMA AS s FROM dummy;`
+          IMPORTING ev_result = lv_result
+                    ev_error  = lv_error
+                    ev_raw    = lv_raw
+                    ev_rows   = lv_rows
+                    ev_ms     = lv_ms.
+      CATCH cx_root INTO lx_root.
+        lv_error = lx_root->get_text( ).
+    ENDTRY.
+
+    IF lv_error IS INITIAL AND lv_rows IS NOT INITIAL.
+      gv_engine = 'HDB'.
+    ELSE.
+      gv_engine = 'none'.
+      gv_reason = lv_error.
+    ENDIF.
+    rv_engine = gv_engine.
+  ENDMETHOD.
+
   METHOD if_http_extension~handle_request.
     DATA lv_body   TYPE string.
     DATA lv_result TYPE string.
@@ -101,7 +151,23 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
     DATA lv_raw    TYPE string.
     DATA lv_rows   TYPE string.
     DATA lv_ms     TYPE string.
+    DATA lv_user   TYPE string.
+    DATA lv_schema TYPE string.
+    DATA lv_restr  TYPE string.
+    DATA lv_path   TYPE string.
     DATA lx_root   TYPE REF TO cx_root.
+
+*   /engine: the one question a caller outside this page asks -- can anything
+*   here run SQLScript? The launchpad greys its tile on the answer.
+    lv_path = server->request->get_header_field( '~path_info' ).
+    REPLACE ALL OCCURRENCES OF '/' IN lv_path WITH ''.
+    CONDENSE lv_path.
+    TRANSLATE lv_path TO LOWER CASE.
+    IF lv_path = 'engine'.
+      server->response->set_header_field( name = 'content-type' value = 'application/json' ).
+      server->response->set_cdata( |\{"engine":"{ engine( ) }","destination":"AMDP","system_db":"{ sy-dbsys }"\}| ).
+      RETURN.
+    ENDIF.
 
     IF server->request->get_header_field( '~request_method' ) = 'POST'.
       lv_body = posted_body( server->request->get_cdata( ) ).
@@ -118,7 +184,10 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
                       ev_error  = lv_error
                       ev_raw    = lv_raw
                       ev_rows   = lv_rows
-                      ev_ms     = lv_ms.
+                      ev_ms     = lv_ms
+                      ev_user   = lv_user
+                      ev_schema = lv_schema
+                      ev_restricted = lv_restr.
         CATCH cx_root INTO lx_root.
 *         no HANA behind this deployment, or the connection is down. Say which
 *         rather than showing an empty result table, which reads as "it ran and
@@ -133,7 +202,10 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
                                        iv_error  = lv_error
                                        iv_raw    = lv_raw
                                        iv_rows   = lv_rows
-                                       iv_ms     = lv_ms ) ).
+                                       iv_ms     = lv_ms
+                                       iv_user   = lv_user
+                                       iv_schema = lv_schema
+                                       iv_restricted = lv_restr ) ).
   ENDMETHOD.
 
   METHOD rows_table.
@@ -193,6 +265,26 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
 
   METHOD page.
     DATA lv_answer TYPE string.
+    DATA lv_where  TYPE string.
+    DATA lv_who    TYPE string.
+
+*   Where this went, said on the page rather than in a document: the sandbox
+*   computes through a destination with a connection of its own, and the
+*   system database of the same deployment is usually a different engine
+*   entirely. Correct, and invisible -- which is how a person ends up asking
+*   whether it really ran where they think.
+    IF iv_user IS NOT INITIAL.
+      IF iv_restricted IS INITIAL.
+        lv_who = |<b>{ esc( iv_user ) }</b>, the privileged user| &&
+                 ` (OSD_AMDP_SUPERUSER=1)`.
+      ELSE.
+        lv_who = |<b>{ esc( iv_user ) }</b>, a user with no grant outside its own schema|.
+      ENDIF.
+      lv_where = |<div class="where">Run through <b>DESTINATION 'AMDP'</b> as { lv_who }, | &&
+                 |in schema <b>{ esc( iv_schema ) }</b>. | &&
+                 |The system database of this deployment is <b>{ esc( CONV string( sy-dbsys ) ) }</b> -- | &&
+                 `a body typed here does not touch it.</div>`.
+    ENDIF.
 
     IF iv_error IS NOT INITIAL.
 *     the engine's position, moved into the person's own numbering, and its
@@ -230,6 +322,7 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
       `table.rows th,table.rows td{border:1px solid #b9c6d6;padding:3px 8px;text-align:left}` &&
       `table.rows th{background:#dbe7f4}` &&
       `.note{color:#5d7186;margin-top:18px;line-height:1.5}` &&
+      `.where{margin-top:16px;padding:8px 10px;background:#f2f7fc;border-left:3px solid #b9c6d6;line-height:1.5}` &&
       `</style></head><body>` &&
       `<div class="hd"><b>AMDP sandbox</b>` &&
       `<span>SQLScript, run where the ABAP runs</span></div>` &&
@@ -237,6 +330,7 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
       |<textarea name="body" spellcheck="false">{ esc( iv_body ) }</textarea>| &&
       `<div><button class="btn" type="submit">Run</button></div></form>` &&
       lv_answer &&
+      lv_where &&
       `<div class="note">The body is deployed under a throwaway name, called, and dropped again: ` &&
       `nothing typed here survives the call, and nothing here is saved anywhere. ` &&
       `A body the engine refuses is answered with the engine's own message, ` &&
