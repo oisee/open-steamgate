@@ -1,3 +1,10 @@
+> ## ▶ [Run a whole ABAP application server in a browser tab](https://oisee.github.io/open-steamgate/main/app/flp.html)
+>
+> **oisee.github.io/open-steamgate/main/app/flp.html** — nothing to install,
+> no server to reach, no system to log on to. The transpiled ABAP, the OData
+> runtime and the database are all in a service worker on your own machine,
+> and every app on the launchpad is answered there.
+
 # open-steamgate
 
 **An ABAP application server you can clone.**
