@@ -166,6 +166,10 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_sid         TYPE string
       RETURNING VALUE(rv_html) TYPE string.
 
+* The one script on this screen, and what it buys (Alice, 2026-09-18).
+    CLASS-METHODS drag_script
+      RETURNING VALUE(rv_html) TYPE string.
+
 * the menu bar, built out of the same node list the tree is
     CLASS-METHODS menubar
       IMPORTING it_nodes       TYPE tt_node
@@ -513,11 +517,15 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * all: no <animate>, no <animateTransform>. A screen somebody works on all day
 * should not move.
 *
-* It is a second SVG rather than more of the panel because the panel stretches
-* with the splitter (preserveAspectRatio=none) and would turn every ring into
-* an egg; this one keeps its aspect and is cropped instead. No script, no
-* bitmap, no second request -- the browser test asserts all three.
-      `<svg class="artscene" viewBox="0 0 320 480" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">` &&
+* It is a second SVG rather than more of the panel because the two want
+* different things from the panel's shape. It STRETCHES with the panel
+* (preserveAspectRatio=none), the way the picture on the real screen does:
+* pull the splitter and the water is pulled with it, rings and all, instead
+* of the scene being scaled and cropped so that most of it leaves the frame
+* (Alice, 2026-09-18 -- "stretch like SAP, do not scale"). Rings becoming
+* ellipses is what stretching water looks like, and the bead that could not
+* survive it is gone anyway.
+      `<svg class="artscene" viewBox="0 0 320 480" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">` &&
       `<stop offset="0" stop-color="#4a86c8" stop-opacity="0.55"/><stop offset="1" stop-color="#071b33" stop-opacity="0.9"/></linearGradient>` &&
       `<radialGradient id="gl" cx="0.5" cy="1" r="0.75"><stop offset="0" stop-color="#eaf4ff" stop-opacity="0.22"/><stop offset="1" stop-color="#eaf4ff" stop-opacity="0"/>` &&
       `</radialGradient><clipPath id="sky"><rect x="0" y="0" width="320" height="252"/></clipPath></defs><ellipse cx="160" cy="252" rx="200" ry="150" fill="url(#gl)"/>` &&
@@ -529,6 +537,56 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<path d="M53,252 A107,107 0 0 1 267,252" fill="none" stroke="#b9c2ee" stroke-opacity="0.72" stroke-width="9"/>` &&
       `<path d="M62,252 A98,98 0 0 1 258,252" fill="none" stroke="#d6bee8" stroke-opacity="0.72" stroke-width="9"/></g>` &&
       `<rect x="0" y="252" width="320" height="228" fill="url(#wg)"/><line x1="0" y1="252" x2="320" y2="252" stroke="#eaf4ff" stroke-opacity="0.45" stroke-width="1.5"/>` &&
+      `<clipPath id="sea"><rect x="0" y="252" width="320" height="228"/></clipPath>` &&
+      `<linearGradient id="rf" x1="0" y1="252" x2="0" y2="356" gradientUnits="userSpaceOnUse">` &&
+      `<stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>` &&
+      `<mask id="rm"><rect x="0" y="252" width="320" height="120" fill="url(#rf)"/>` &&
+      `<rect x="0" y="254.0" width="320" height="1.6" fill="#000000" fill-opacity="0.85"/>` &&
+      `<rect x="0" y="258.4" width="320" height="2.1" fill="#000000" fill-opacity="0.83"/>` &&
+      `<rect x="0" y="263.5" width="320" height="2.6" fill="#000000" fill-opacity="0.81"/>` &&
+      `<rect x="0" y="269.3" width="320" height="1.6" fill="#000000" fill-opacity="0.79"/>` &&
+      `<rect x="0" y="275.8" width="320" height="2.1" fill="#000000" fill-opacity="0.77"/>` &&
+      `<rect x="0" y="280.2" width="320" height="2.6" fill="#000000" fill-opacity="0.75"/>` &&
+      `<rect x="0" y="285.3" width="320" height="1.6" fill="#000000" fill-opacity="0.73"/>` &&
+      `<rect x="0" y="291.1" width="320" height="2.1" fill="#000000" fill-opacity="0.71"/>` &&
+      `<rect x="0" y="297.6" width="320" height="2.6" fill="#000000" fill-opacity="0.69"/>` &&
+      `<rect x="0" y="302.0" width="320" height="1.6" fill="#000000" fill-opacity="0.67"/>` &&
+      `<rect x="0" y="307.1" width="320" height="2.1" fill="#000000" fill-opacity="0.65"/>` &&
+      `<rect x="0" y="312.9" width="320" height="2.6" fill="#000000" fill-opacity="0.63"/>` &&
+      `<rect x="0" y="319.4" width="320" height="1.6" fill="#000000" fill-opacity="0.61"/>` &&
+      `<rect x="0" y="323.8" width="320" height="2.1" fill="#000000" fill-opacity="0.59"/>` &&
+      `<rect x="0" y="328.9" width="320" height="2.6" fill="#000000" fill-opacity="0.57"/>` &&
+      `<rect x="0" y="334.7" width="320" height="1.6" fill="#000000" fill-opacity="0.55"/>` &&
+      `<rect x="0" y="341.2" width="320" height="2.1" fill="#000000" fill-opacity="0.53"/>` &&
+      `<rect x="0" y="345.6" width="320" height="2.6" fill="#000000" fill-opacity="0.51"/>` &&
+      `<rect x="0" y="350.7" width="320" height="1.6" fill="#000000" fill-opacity="0.5"/>` &&
+      `</mask>` &&
+* The rainbow, again, upside down in the water and squashed the way a
+* reflection is, broken into dashes because still water would mirror and
+* rippled water only suggests -- and the dashes are horizontal bands cut out
+* of the mask rather than a dash pattern along each arc, because a dash
+* following a curve reads as brickwork and a horizontal band reads as the
+* surface. Clipped to the sea so it cannot climb back
+* into the sky, and faded out downwards through a mask, which is what stops
+* it looking like brickwork: a reflection is strongest where the thing
+* touches the water and gone a little further out. Ghostly was the word
+* (Alice, 2026-09-18), so it is meant to be noticed second.
+* The clip and the flip cannot ride on the same element: an element's own
+* transform applies to its clip path too, so clipping to the sea and then
+* mirroring turned the clip upside down as well and the reflection was cut
+* to the sky, where it is not. It rendered, it measured 448 by 165 in the
+* right place, and it was invisible - found by looking at the pixels, not
+* by reading the markup. So the clip is on the outer group and the mirror
+* on the inner one.
+      `<g clip-path="url(#sea)" mask="url(#rm)"><g transform="translate(0,408.2) scale(1,-0.62)">` &&
+      `<path d="M8,252 A152,152 0 0 1 312,252" fill="none" stroke="#f7b9ae" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M17,252 A143,143 0 0 1 303,252" fill="none" stroke="#f8d0a8" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M26,252 A134,134 0 0 1 294,252" fill="none" stroke="#f7ecb2" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M35,252 A125,125 0 0 1 285,252" fill="none" stroke="#c2e6bd" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M44,252 A116,116 0 0 1 276,252" fill="none" stroke="#b4dcef" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M53,252 A107,107 0 0 1 267,252" fill="none" stroke="#b9c2ee" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `<path d="M62,252 A98,98 0 0 1 258,252" fill="none" stroke="#d6bee8" stroke-opacity="0.55" stroke-width="9"/>` &&
+      `</g></g>` &&
       `<ellipse cx="74" cy="372" rx="15" ry="4.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
       `<ellipse cx="74" cy="372" rx="30" ry="9.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
       `<ellipse cx="74" cy="372" rx="45" ry="13.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
@@ -568,7 +626,41 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<ellipse cx="228" cy="468" rx="46" ry="13.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
       `<ellipse cx="228" cy="468" rx="69" ry="20.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
       `<ellipse cx="228" cy="468" rx="92" ry="27.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
-      `<ellipse cx="228" cy="468" rx="115" ry="34.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/></svg>` &&
+      `<ellipse cx="228" cy="468" rx="115" ry="34.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="300" cy="330" rx="11" ry="3.3" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="300" cy="330" rx="22" ry="6.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="300" cy="330" rx="33" ry="9.9" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="300" cy="330" rx="44" ry="13.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="300" cy="330" rx="55" ry="16.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="108" cy="412" rx="9" ry="2.7" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="108" cy="412" rx="18" ry="5.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="108" cy="412" rx="27" ry="8.1" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="108" cy="412" rx="36" ry="10.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="176" cy="300" rx="7" ry="2.1" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="176" cy="300" rx="14" ry="4.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="176" cy="300" rx="21" ry="6.3" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="52" cy="330" rx="8" ry="2.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="52" cy="330" rx="16" ry="4.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="52" cy="330" rx="24" ry="7.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="52" cy="330" rx="32" ry="9.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="246" cy="430" rx="15" ry="4.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="246" cy="430" rx="30" ry="9.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="246" cy="430" rx="45" ry="13.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="246" cy="430" rx="60" ry="18.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="246" cy="430" rx="75" ry="22.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="150" cy="348" rx="12" ry="3.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="150" cy="348" rx="24" ry="7.2" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="150" cy="348" rx="36" ry="10.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="150" cy="348" rx="48" ry="14.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="150" cy="348" rx="60" ry="18.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/>` &&
+      `<ellipse cx="296" cy="470" rx="10" ry="3.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="296" cy="470" rx="20" ry="6.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="296" cy="470" rx="30" ry="9.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `<ellipse cx="296" cy="470" rx="40" ry="12.0" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
+      `<ellipse cx="16" cy="380" rx="6" ry="1.8" fill="none" stroke="#eaf4ff" stroke-opacity="0.375" stroke-width="1.4"/>` &&
+      `<ellipse cx="16" cy="380" rx="12" ry="3.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.33" stroke-width="1.4"/>` &&
+      `<ellipse cx="16" cy="380" rx="18" ry="5.4" fill="none" stroke="#eaf4ff" stroke-opacity="0.285" stroke-width="1.1"/>` &&
+      `</svg>` &&
       `<div class="artmark">` &&
       `<div class="artname">Open<b>SteamGate</b></div>` &&
       |<div class="artsid">{ esc( iv_sid ) }</div>| &&
@@ -735,6 +827,72 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `presents to Eclipse. docs/webgui.md says why the facade's own id is allowed to differ.</p>` &&
       |<p><a class="back" href="{ gc_path }/">Back to Easy Access</a></p>| &&
       `</div></div></body></html>`.
+  ENDMETHOD.
+
+  METHOD drag_script.
+* Dragging the boundary, and the reason this screen now carries a script
+* after refusing to for a week.
+*
+* A browser draws the only handle it has in one corner of the resizable
+* element, sixteen pixels of it, and there is no way to stretch that handle
+* down the whole boundary. The CSS steps below it are real - four widths as
+* radio buttons, a click on the ridge moves to the next - but the gesture
+* everybody makes over a col-resize cursor is a PULL, and Alice made it
+* three times before saying so. A cursor that promises dragging over
+* something that cannot be dragged is the same lie as a button that looks
+* enabled and does nothing, which this screen refuses to tell anywhere else.
+*
+* So: the page still works with the script removed. Without it the ridge
+* steps on a click and the picture still hides, because all of that is CSS
+* and an anchor; the script only adds the pull. That is why the browser
+* test no longer asserts a script count of zero, and asserts instead that
+* every function of the screen survives scripting being switched off.
+*
+* An inline width beats the stepped widths, since a rule keyed on a checked
+* radio cannot outrank a style attribute - so once it is pulled, it stays
+* where it was put.
+    rv_html =
+      `<script>(function(){` &&
+      `var s=document.querySelector('.split'),t=document.querySelector('.tree');` &&
+      `if(!s||!t){return;}` &&
+      `var on=false,moved=false,x0=0,w0=0;` &&
+* Three obvious things here are wrong, and all three were found by measuring
+* rather than by reading - the whole method is four statements long and it
+* took three rounds.
+*
+* preventDefault() on pointerdown eats the click that follows, and with it
+* the stepping the ridge does for somebody who clicks instead of pulling.
+* setPointerCapture on pointerdown does the same damage by another route: a
+* captured pointer delivers its click to the capturing element, so the label
+* lying over the ridge never receives it and the width never changes. Both
+* times the script was quietly taking away a function the page already had
+* without it.
+*
+* And the fix for the second one broke the first: with no capture at all,
+* the pointer leaves the eight-pixel ridge on the first millimetre of a pull
+* and every later move goes to whatever is under the cursor. So the move and
+* the release are listened for on the window, where they arrive wherever the
+* pointer has wandered to, and only the press is the ridge's own. Nothing is
+* prevented, nothing is captured, and a click is still a click.
+*
+* Selection is held off with user-select during a drag and put back on
+* release.
+      `s.addEventListener('pointerdown',function(e){` &&
+      `on=true;moved=false;x0=e.clientX;w0=t.getBoundingClientRect().width;` &&
+      `document.body.style.userSelect='none';});` &&
+      `window.addEventListener('pointermove',function(e){` &&
+      `if(!on){return;}var d=e.clientX-x0;if(d>3||d<-3){moved=true;}` &&
+      `var w=w0+d,lo=220,hi=window.innerWidth-140;` &&
+      `if(w<lo){w=lo;}if(w>hi){w=hi;}` &&
+      `t.style.width=w+'px';t.style.maxWidth='none';});` &&
+      `window.addEventListener('pointerup',function(){on=false;` &&
+      `document.body.style.userSelect='';});` &&
+* a pull that ends over the ridge would otherwise also count as a click on
+* the label lying over it, and the boundary would jump to the next step
+* just as it was let go
+      `s.addEventListener('click',function(e){` &&
+      `if(moved){e.preventDefault();e.stopPropagation();}},true);` &&
+      `})();</script>`.
   ENDMETHOD.
 
   METHOD style.
@@ -959,7 +1117,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       |<div class="bar"><span class="msg" id="msg">{ esc( lv_msg ) }</span>| &&
       |<span class="dim" id="sysinfo">{ esc( ls_ident-info ) } &middot; { esc( ls_ident-host_kind ) }| &&
       | &middot; { esc( CONV string( ls_sys-root_hint ) ) }</span></div>| &&
-      `</div></body></html>`.
+      `</div>` && drag_script( ) && `</body></html>`.
   ENDMETHOD.
 
   METHOD if_http_extension~handle_request.

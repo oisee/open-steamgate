@@ -72,36 +72,57 @@ test("easy access: the picture is drawn in the page and fetches nothing", async 
   // the rain scene is there and the lone bead is not (Alice, 2026-09-18)
   await expect(page.locator("svg.artscene")).toBeVisible();
   await expect(page.locator("svg.artdrop")).toHaveCount(0);
+  // it stretches with the panel rather than being scaled and cropped, the way
+  // the picture on the real screen does (Alice: "stretch like SAP")
+  await expect(page.locator("svg.artscene")).toHaveAttribute("preserveAspectRatio", "none");
   // and the screen still makes no second request for any of it
   expect(requests.filter((u) => /\.(png|jpe?g|gif|svg)$/.test(u) && !u.endsWith("/osg.svg"))).toHaveLength(0);
 });
 
-test(u))).toHaveLength(0);
-  // the diagonal is in the drawing, not in a CSS transform of the element
-  await expect(drop.locator("g")).toHaveAttribute("transform", "rotate(38 60 60)");
-});
-
-test("easy access: the splitter moves, and nothing on the page is scripted", async ({page}) => {
+test("easy access: the boundary is pulled, and stepped when it is clicked", async ({page}) => {
   await page.goto(WEBGUI);
 
   const tree = page.locator(".tree");
   const art = page.locator(".art");
+  const ridge = await page.locator(".split").boundingBox();
   const before = await tree.boundingBox();
   const artBefore = await art.boundingBox();
 
-  // the handle is the CSS resizer in the pane's bottom-right corner: no drag
-  // handler, no script, the browser does it
-  await page.mouse.move(before.x + before.width - 3, before.y + before.height - 3);
+  // a pull, anywhere along the boundary. This is the gesture everybody makes
+  // over a col-resize cursor and the only reason this screen carries a
+  // script: a browser draws its own resize handle in one corner and there is
+  // no way to stretch that handle down the whole edge.
+  await page.mouse.move(ridge.x + 4, ridge.y + ridge.height / 2);
   await page.mouse.down();
-  await page.mouse.move(before.x + before.width - 200, before.y + before.height - 3, {steps: 8});
+  await page.mouse.move(ridge.x + 4 - 250, ridge.y + ridge.height / 2, {steps: 10});
   await page.mouse.up();
 
   const after = await tree.boundingBox();
   const artAfter = await art.boundingBox();
-  expect(after.width).toBeLessThan(before.width - 100);
+  expect(after.width).toBeLessThan(before.width - 200);
   // and what the tree gave up the image panel took
-  expect(artAfter.width).toBeGreaterThan(artBefore.width + 100);
-  expect(await page.locator("script").count()).toBe(0);
+  expect(artAfter.width).toBeGreaterThan(artBefore.width + 200);
+});
+
+// The screen carried no script at all for a week, on purpose, so the one it
+// carries now has to earn its place: everything the page does must still work
+// without it. That is what this asserts - not a count of script tags, which
+// never said anything about whether the page depended on them.
+test.describe("with scripting switched off", () => {
+  test.use({javaScriptEnabled: false});
+
+  test("easy access: the boundary still steps and the picture still hides", async ({page}) => {
+    await page.goto(WEBGUI);
+    const tree = page.locator(".tree");
+    const ridge = await page.locator(".split").boundingBox();
+    const before = (await tree.boundingBox()).width;
+
+    await page.mouse.click(ridge.x + 4, ridge.y + ridge.height * 0.8);
+    expect((await tree.boundingBox()).width).not.toBe(before);
+
+    await page.locator("a.splithide").click();
+    await expect(page.locator(".art")).toBeHidden();
+  });
 });
 
 test("easy access: the menu bar goes where it says, and says what it cannot do", async ({page}) => {

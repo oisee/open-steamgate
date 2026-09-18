@@ -154,12 +154,11 @@ describe("webgui: SAP Easy Access", () => {
     expect(page).to.match(/<span class="mt" tabindex="0">System<\/span>/);
   });
 
-  // the splitter is CSS: the tree pane resizes, and the page still has no
-  // script on it at all
-  it("has a draggable splitter and no JavaScript", () => {
+  // the panes: the tree resizes, the image takes what is left, and no
+  // behaviour is smuggled into an attribute
+  it("has a resizable tree pane and no inline handlers", () => {
     expect(page, "resize on the tree pane").to.match(/\.tree\{[^}]*resize:horizontal/);
     expect(page, "and the image takes what is left").to.match(/\.art\{flex:1 1 auto/);
-    expect(page, "no script").to.not.match(/<script/i);
     expect(page, "no inline handler").to.not.match(/\son[a-z]+=/i);
   });
 
@@ -190,7 +189,15 @@ describe("webgui: SAP Easy Access", () => {
     expect(page, "a step changes the width").to.match(/#w2:checked~\.body \.tree\{width:\d+%\}/);
     expect(page, "and it hides the picture and widens the tree").to.contain("#nopic:target~.body .art{display:none}");
     expect(page, "the old one-pixel border is gone").to.not.match(/\.tree\{[^}]*border-right:1px/);
-    expect(page, "still no script").to.not.match(/<script/i);
+    // The screen carried no script for a week on purpose, and now it carries
+    // exactly one, for exactly one thing: pulling the boundary, which a
+    // browser cannot be made to do any other way. What is asserted is no
+    // longer its absence but its smallness and its subject - and the browser
+    // test proves the page still works with scripting switched off, which is
+    // the property a script count never checked.
+    expect((page.match(/<script/gi) ?? []).length, "exactly one script").to.equal(1);
+    expect(page, "and it is about the boundary").to.contain("pointerdown");
+    expect(page, "nothing is loaded from anywhere").to.not.match(/<script[^>]+src=/i);
   });
 
   // Help > About: a page of the same class one path below the screen
