@@ -174,6 +174,55 @@ test("an ICF service is served by the worker too, page and all", async () => {
   }
 });
 
+// A transaction, and its session, inside the service worker (backlog G.3).
+//
+// This is the test the session design was decided on rather than a nice
+// extra: the browser deployment is one thread with no work-process pool at
+// all, so a session pinned to a process would be a design that only exists
+// on Node. A row in ZOSD_TSES is the same row here, in the same sql.js
+// database as every other table, and the same ABAP reads it.
+test("a transaction keeps its session in the service worker, where there is no pool", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-tran-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto("http://localhost:3031/index.html?stay=1");
+    await controlled(page);
+
+    const step = async (query, body) => page.evaluate(async ({query, body}) => {
+      const url = "/sap/bc/gui/sap/its/webgui/" + query;
+      const res = body === undefined
+        ? await fetch(url)
+        : await fetch(url, {method: "POST", headers: {"content-type": "application/x-www-form-urlencoded"}, body});
+      return {status: res.status, html: await res.text()};
+    }, {query, body});
+
+    const first = await step("?okcode=ZOSD_NOTE");
+    expect(first.status).toBe(200);
+    expect(first.html).toContain("Session notepad started");
+    const doc = /srcdoc="([^"]*)"/.exec(first.html)[1].replaceAll("&amp;", "&").replaceAll("&quot;", '"');
+    const sid = /name="osdsid" value="([^"]*)"/.exec(doc)[1];
+    const gg = /name="gg_control" value="([^"]*)"/.exec(doc)[1];
+    expect(sid).toHaveLength(32);
+
+    // the click, as the browser would post it: the same conversation, one
+    // request later, in a worker that has no process to be pinned to
+    const second = await step("tx/?okcode=add",
+      new URLSearchParams({note: "written in a service worker", osdsid: sid, gg_control: gg}).toString());
+    expect(second.status).toBe(200);
+    expect(second.html).toContain("1 in this session");
+    expect(second.html).toContain("written in a service worker");
+
+    // and an id it does not have is refused here the way it is on Node
+    const lost = await step("tx/?okcode=add",
+      new URLSearchParams({note: "x", osdsid: "0".repeat(32), gg_control: gg}).toString());
+    expect(lost.html).toContain("is not open here");
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // The demo is a pack, fetched from its own repository at a pinned commit
 // (packs/o4d/osd-pack.json, tools/osd-fetch.mjs), and it reaches the
 // deployment the way Zork does: its ICF node is in the services table, its

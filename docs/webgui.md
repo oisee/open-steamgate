@@ -221,28 +221,158 @@ The form is a GET, so the shim hands the query string on as it arrived and the
 field is decoded in the handler: a browser sends a space as `+` and the rest
 percent-encoded, and "System status" has a space in it.
 
-## What a transaction node has to do when it is real
+## A transaction node runs (G.3)
 
-Today `RESOLVE` returns a node of kind `TRANSACTION` and `HANDLE_REQUEST`
-answers with a message. A real one has four steps, and each of them is a thing
-this tree can already nearly do:
+`ZOSD_NOTE` on the screen, or typed into the command field, starts a
+transaction: the tree pane is replaced by what the transaction drew through
+the GUI substitutes, a click in it comes back as `sapevent`, and what was
+typed in the first request is still there in the second. Three pieces do it,
+and only the third had no precedent in this tree.
 
-1. **Find the object by name.** The object store knows every object of every
-   layer (`tools/osd-store.mjs`, `zcl_osd_store`); a transaction code is not an
-   object type we carry yet, so either a `*.tran.xml` joins the layers the way
-   `*.sicf.xml` did, or the code maps to a report or a class by convention.
-2. **Decide it is executable.** A `PROG` with a `START-OF-SELECTION`, or a class
-   with `IF_OO_ADT_CLASSRUN` / a `MAIN`. `zcl_osd_store` already has the type
-   and the source.
-3. **Run it**, in a request of its own, with the screen's session around it.
-   That is the part with no precedent here: a transaction is not a function
-   call, it has a screen sequence, and the state has to live somewhere between
-   two HTTP requests.
-4. **Render what it draws through the GUI substitutes.** A program that runs
-   builds controls; `cl_gui_control=>render_html` turns the controls that exist
-   at the end of the step into markup, and the screen puts that where the tree
-   is. The inbound leg — a click in that markup coming back as an ABAP event —
-   is the piece that does not exist; see below.
+### 1. The registry: a transaction is a `*.tran.xml`, and it names a class
+
+A transaction code is an object of the tree like every other route here, and
+abapGit already serialises it, so nothing is invented:
+`tools/osd-tran-registry.mjs` reads `*.tran.xml` out of the input layers the
+way `tools/osd-icf.mjs` reads `*.sicf.xml` and `tools/segw-registry.mjs`
+reads `*.iwsv.xml`, and writes `gen/tran/zcl_osd_tran_registry`. The layer
+order applies (backlog E.1): the later folder wins a transaction code, and a
+pack that brings a transaction brings it with no change here.
+
+**What "runnable" means, and why.** SE93 has one form that names something
+this system can actually enter, and it is the one SAP calls a *transaction
+with class method*: `TSTCP-PARAM` = `\PROGRAM=…\CLASS=…\METHOD=…`, which
+`zcl_abapgit_object_tran` writes and reads (`split_parameters`,
+`c_oo_class` / `c_oo_method`). So the rule is:
+
+> A transaction is runnable here when its `TSTCP-PARAM` names a class, the
+> class is in the tree, and the class implements `ZIF_OSD_TRANSACTION`. The
+> `METHOD` of the entry is the interface's, so the tran object names the
+> class and the contract names the method.
+
+Everything else is listed with the reason it cannot run, and the reasons are
+measured rather than assumed:
+
+| form | what it names | verdict |
+| --- | --- | --- |
+| `\CLASS=ZCL_X\METHOD=…` + the class implements the interface | a class of this tree | **runs** |
+| `\CLASS=ZCL_X\METHOD=…`, class absent or not implementing it | a class this tree does not have | refused, named |
+| `TSTC-PGMNA` = a report, no `TSTCP` | a report | refused: *the transpiler's `SUBMIT` throws* |
+| a dynpro number in `TSTC-DYPNO` | a screen | refused: there is no dynpro processor here |
+
+The `SUBMIT` line is not an opinion: `packages/transpiler/src/statements/
+submit.ts` is one `throw new Error("Submit, transpiler todo")`, and
+`call_transaction.ts` is a no-op. A report transaction that "ran" would
+either die or silently do nothing, so it is refused with that sentence in
+the status bar, which is more than "not runnable yet" ever said.
+
+`ZABAPGIT` stays the one typed-out transaction node of `menu( )` — the seat
+G.4 will sit in — and it is now honest about what it is: this tree carries
+no `zabapgit.tran.xml`, and both the node and the status bar say so. That
+last part is a bug the browser test caught and the wire test did not: typing
+`ZABAPGIT` answered *"Transaction ZABAPGIT does not exist"* about a node
+visibly in the menu, because the registry is what `start( )` asks and the
+registry has nothing for it. `ty_step-known` tells "no tran object" from "no
+such code", and the screen prints the node's own detail for the first. The
+wire test had asserted the string against the **page**, where the node's
+detail sits in the tree either way, so it passed over a status bar saying
+the opposite — the false-green shape this tree has a rule about. Both tests
+read the bar now. Every other transaction on the screen comes from the
+registry.
+
+**The dispatcher is generated**, one `WHEN` per runnable transaction doing a
+static `CREATE OBJECT`, for the same reason `zcl_osd_fm_call` is generated
+(`docs/rfc-channel.md`): nothing dynamic reaches a report here anyway, and a
+generated `CREATE OBJECT` is a name abaplint checks. A transaction whose
+class the generator cannot see gets no `WHEN` at all — the door is not
+locked, it is not built.
+
+### 2. Running it: `page( iv_body )`, and the screen around it
+
+`page( )` used to hard-wire the left pane to `branch( )`. It now takes
+`iv_body`, and the tree is what it renders when nobody passed one, so a
+running transaction has somewhere to put its markup and the screen keeps its
+title bar, its menu, its command field and its status bar around it.
+
+One dialog step, in `zcl_osd_tran`, is the dynpro cycle and is written as
+one:
+
+```
+roll in    the state string of the session row (empty on the first step)
+PBO        zif_osd_transaction~pbo( ) builds the controls: a container, a
+           cl_gui_html_viewer, the document, SET HANDLER for sapevent
+PAI        cl_gui_html_viewer=>dispatch_sapevent( query, body, transport )
+           raises the event on that viewer; the transaction's own handler
+           changes its own state.  (Not on the first step: nothing was
+           clicked yet)
+PBO        cl_gui_control=>clear( ) and pbo( ) again, so what is rendered is
+           the state after the click rather than before it
+render     cl_gui_control=>render_html( iv_document = abap_false
+                                        is_sapevent = transport( sid ) )
+roll out   zif_osd_transaction~roll_out( ) back into the session row
+```
+
+The transport is `cl_gui_control=>ty_sapevent` with one field of its own:
+`osdsid`, the session id. `render_html` writes it as a hidden input into
+every rewritten form and `dispatch_sapevent` strips it back out before the
+event is raised, which is exactly what `ty_sapevent-fields` is for — so the
+session travels in the document and the transaction never sees it.
+
+### 3. The state between two requests: a row, not a process
+
+**The decision: a row in `ZOSD_TSES`, keyed by a session id, holding the
+string the transaction rolled out.** Not a pinned work process.
+
+Both designs were weighed against four things that actually happen here:
+
+| | a pinned process | a row keyed by a session id |
+| --- | --- | --- |
+| the browser preview | there is no pool: one service worker, one thread. A pin is a no-op, so the design would exist only on Node and the preview would need a second one | the table is in the same sql.js database as every other table, and the code is the same code |
+| a recycle mid-conversation | the supervisor replaces a runtime after a build, and class data goes with it. The next click lands in a process that never saw the first, and nothing says so — it just starts over | the row is in the database file the processes share (WAL: readers do not block). A new process resumes the session |
+| two browsers at once | needs the pin to be *correct*, i.e. a cookie or a sticky route through the proxy, and `RuntimePool.next( )` is round-robin: HTTP goes to the primary today, so the pin does not exist yet and would have to be built | two ids, two rows. They cannot see each other because the id is the key |
+| nobody comes back | a process cannot expire anything; it forgets when it dies and holds the memory until then | `TOUCHED` is a column, so expiry is `cl_abap_tstmp=>subtract( )` against a TTL, and a sweep on every start clears what nobody came back to |
+
+`ZOSD_SYS-PID` is what makes "which process answered you last time"
+answerable, and the session row records it (`ZOSD_TSES-PID`) — not to route
+by it, but so that a session that moved between work processes is a visible
+fact rather than a mystery. That is the use the pin argument had left once
+the row won.
+
+**What this gives up, and it is not nothing:**
+
+- **No live object graph between steps.** The state has to survive
+  `/ui2/cl_json=>serialize`, so a transaction cannot hold a reference to
+  anything across a dialog step — no open cursor, no handle, no lock. A real
+  system's roll area keeps the objects; this keeps a string. A transaction
+  that needs more than a string will need a different answer, and that is a
+  real limit rather than a rough edge.
+- **A serialize and a deserialize per dialog step**, plus one SELECT and one
+  UPDATE. Nothing measurable at this size, and it is work a pin would not do.
+- **No affinity.** Nothing may rely on a process-local cache surviving the
+  step, which is true of everything else on the HTTP path here anyway.
+- **The controls are rebuilt every step**, because `cl_gui_control`'s
+  snapshots are class data that `clear( )` wipes. That is closer to a real
+  PBO than keeping them would be, but it means a control's own internal
+  state (a scroll position, a selection) lives only as long as the request
+  unless the transaction rolls it out itself.
+
+The session id is `cl_system_uuid=>if_system_uuid_static~create_uuid_c32( )`,
+the TTL is 30 minutes of idle (`zcl_osd_tran_session=>gc_ttl_seconds`), and
+an expired or unknown id does not half-work: the step is refused, the screen
+comes back with the tree in it, and the status bar says the session is gone.
+`start( )` sweeps whatever is older than the TTL, so a system nobody visits
+does not accumulate rows.
+
+### The demonstration transaction
+
+`ZOSD_NOTE`, "Session notepad" (`src/webgui/zcl_osd_note`,
+`src/webgui/zosd_note.tran.xml`): a field, an Add button and the list of
+what was added, drawn as HTML into a `cl_gui_html_viewer` and clicked back
+through `sapevent`. It is deliberately the smallest thing that proves the
+loop rather than a useful tool: the value typed in request one is in the
+list in request two, the dialog-step counter it prints is the session's, and
+a second browser gets its own id and its own empty list. It is not abapGit
+— that is G.4, and it is a build decision rather than a screen.
 
 ## Where the GUI substitutes come from
 
@@ -410,12 +540,23 @@ exactly step 3 above.
 ## Tests
 
 ```
-npx mocha test/webgui.mjs                       # the path, the tree, the command field, the bar, the menu
-npx playwright test test/e2e/webgui.spec.mjs    # it renders, a node navigates, the field works, the splitter moves
-npm run unit                                    # ZCL_OSD_WEBGUI: the ok-codes, and the sapevent rewrite
-npx mocha test/sapevent.mjs                     # the round trip against abapGit's markup, browser played by hand
-npx playwright test test/e2e/sapevent.spec.mjs  # the same, Chromium clicking inside the frame
+npx mocha test/webgui.mjs                          # the path, the tree, the command field, the bar, the menu
+npx playwright test test/e2e/webgui.spec.mjs       # it renders, a node navigates, the field works, the splitter moves
+npm run unit                                       # ZCL_OSD_WEBGUI: the ok-codes and the sapevent rewrite;
+                                                   # ZCL_OSD_TRAN_SESSION: the session store and its expiry
+npx mocha test/sapevent.mjs                        # the round trip against abapGit's markup, browser played by hand
+npx playwright test test/e2e/sapevent.spec.mjs     # the same, Chromium clicking inside the frame
+npx mocha test/transaction.mjs                     # the transaction runs and keeps its session, browser by hand
+npx playwright test test/e2e/transaction.spec.mjs  # the same in Chromium, and two browsers at once
+node tools/osd-tran-registry.mjs --list            # what the *.tran.xml objects of the layers declare
 ```
+
+`ltcl_session` is where expiry is tested and that is not an accident: only
+ABAP inside the system can write a row that was last touched thirty-one
+minutes ago, and waiting for the real timeout is not a test. The wire test
+covers the half a browser can reach — an id this system does not have — and
+the two are the same message, because a swept row and a made-up id look the
+same from outside.
 
 `test/sapevent.mjs` is in `npm run integration`. The fork's own tests of the
 two halves run with `npm run unit` in `.local/lars/open-abap-gui`.

@@ -207,13 +207,21 @@ describe("webgui: SAP Easy Access", () => {
     expect(html).to.contain("Transaction ZNOPE does not exist");
   });
 
-  // the third kind of node: something the system runs rather than links to.
-  // One entry, and it is honest about not being one yet (docs/webgui.md).
-  it("knows a transaction from a link, and says the transaction is not runnable yet", async () => {
+  // The third kind of node: something the system runs rather than links to.
+  // It runs since backlog G.3 and test/transaction.mjs is where that is
+  // tested; what belongs here is that the screen still tells a transaction
+  // from a link, and that the one node this class types out -- abapGit, the
+  // seat G.4 will sit in -- is honest about what it is.
+  it("knows a transaction from a link, and says what abapGit is still missing", async () => {
     const res = await fetch(`${BASE}?okcode=ZABAPGIT`, {redirect: "manual"});
-    expect(res.status).to.equal(200);
+    expect(res.status, "a transaction is entered, not redirected to").to.equal(200);
     const html = await res.text();
-    expect(html).to.contain("ZABAPGIT is not runnable yet");
+    // the status bar, not just the page: the node's own detail is in the tree
+    // either way, and asserting the page would pass on a message that said
+    // the opposite
+    const bar = /<span class="msg" id="msg">([^<]*)/.exec(html)[1];
+    expect(bar).to.contain("no zabapgit.tran.xml in this tree");
+    expect(bar, "not a lie about something visibly in the menu").to.not.contain("does not exist");
     expect(html).to.contain('data-kind="TRANSACTION"');
   });
 });

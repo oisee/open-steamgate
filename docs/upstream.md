@@ -266,6 +266,21 @@ all of them: a performance change that alters one frame is wrong.
   one number nobody has measured on a frontend is the line width SAP GUI
   itself fills; it is one constant. Critic pass before sending, as for
   the rest. Self-merging there is not agreed; it is Lars's to merge.
+- **`open-abap-core`, a two-line fix owed and no branch yet (2026-09-18)**:
+  `ANOMALY-2026-09-18-system-uuid-window`. `cl_system_uuid`'s private
+  `RANDOM` falls back to `rv_str = window.crypto.randomUUID();` when the
+  imported `crypto` has no `randomUUID`, which is what webpack's
+  `crypto-browserify` polyfill is, and a service worker has no `window` —
+  so every `create_uuid_*` throws in the browser deployment. Read off
+  `build/preview/sw.js` rather than reasoned about. The same line also
+  assigns the JavaScript variable instead of calling `set( )` on it, so a
+  plain page, where `window` exists, hands a raw string back where the
+  caller's type is a `String`. The fix is `globalThis.crypto` and
+  `rv_str.set(…)`. Not written yet because `oisee` has no write access to
+  `open-abap-core` and it takes a fork (the exception the tree already
+  documents); the workaround is local
+  (`zcl_osd_tran_session=>new_id( )`), so nothing is blocked. Critic pass
+  before sending, as for the rest.
 - **`@abaplint/core`**: one owed, and it is not a table edit.
   `ANOMALY-2026-09-16-numeric-builtins-typed-integer` — `frac`, `abs`,
   `floor`, `ceil`, `trunc` and `sign` are declared with a fixed integer

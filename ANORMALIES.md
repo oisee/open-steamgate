@@ -30,6 +30,24 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-09-18-system-uuid-window — cl_system_uuid asks a service worker for `window`, and drops the ABAP wrapper when it does
+
+- Status: `workaround`
+- Discovery date: `2026-09-18`
+- Affected versions: `open-abap-core` at `.local/lars/open-abap-core` (`src/uuid/cl_system_uuid.clas.abap`), any host that is not Node
+- Affected ABAP statement, runtime API or adapter: `cl_system_uuid=>if_system_uuid_static~create_uuid_c32` / `_c22` / `_c36` / `_x16`, all four through the private `RANDOM`
+- Minimal ABAP reproducer: `DATA(lv) = cl_system_uuid=>if_system_uuid_static~create_uuid_c32( ).` anywhere that runs in the browser deployment
+- Exact command used to run it: `npm run web:preview` then `grep -o ".\{40\}window\.crypto.\{0,40\}" build/preview/sw.js`
+- Expected SAP behaviour: a 32-character uuid, on every host
+- Actual open-abap behaviour: `RANDOM` does `await import("crypto")` and, when that module has no `randomUUID`, falls back to `rv_str = window.crypto.randomUUID();`. Two things are wrong with that line in this tree, and the second one only shows on a host where the first does not bite:
+  - webpack polyfills `crypto` with `crypto-browserify`, which has **no** `randomUUID` (`prng, pseudoRandomBytes, rng, randomBytes, Hash, …`), so the fallback is the branch that runs; and the browser deployment is a **service worker**, where there is no `window` at all. `ReferenceError`.
+  - the fallback assigns the JavaScript variable rather than calling `set( )` on it — `rv_str = …` where every other line of the method is `rv_str.set(…)` — so a plain page, where `window` does exist, gets a raw JavaScript string back where the caller's ABAP type is a `String`.
+- Impact on open-steamgate: the dialog-session id of a transaction (backlog G.3) is the first thing in this tree that wanted a uuid, and the browser preview is one of the three deployments it has to work in
+- Smallest safe workaround: `zcl_osd_tran_session=>new_id( )` — `GET TIME STAMP` plus `cl_abap_random`, which is `Math.random( )` on every host and needs no import. Local, and one line from becoming the upstream call again
+- Upstream issue: not filed yet. It belongs in `open-abap/open-abap-core` and is two lines: `globalThis.crypto` rather than `window.crypto`, and `rv_str.set(…)` rather than `rv_str = …`. See `docs/upstream.md`
+- Regression-test location: `src/webgui/zcl_osd_tran_session.clas.testclasses.abap` (`ltcl_session`, which would fail on any host where the id could not be made) and `test/transaction.mjs`
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-17-integer-division-not-rounded — In integer arithmetic, a division keeps its fraction until the end of the expression
 
 - Status: `open, issue filed`

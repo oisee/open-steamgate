@@ -26,6 +26,20 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
 
   afterEach(() => rmSync(root, {recursive: true, force: true}));
 
+  // The builder starts a generator through tools/osd-host.mjs, which inside a
+  // compiled binary becomes "osd gen <name>" and is answered from a map in
+  // bin/osd.mjs. A generator the build runs and the map does not know exits
+  // 2 there and nowhere else, so the two lists are compared rather than
+  // remembered: osd-fm-registry.mjs had been missing from the map since it
+  // was added, and no test would have said so.
+  it("hands the binary every generator the build runs", () => {
+    const named = (file, re) => [...readFileSync(file, "utf8").matchAll(re)].map((m) => m[1]);
+    const runs = named("tools/osd-build.mjs", /^\s*\["([a-z0-9-]+\.mjs)"/gm);
+    const known = named("bin/osd.mjs", /"([a-z0-9-]+\.mjs)": \(\) => import/g);
+    expect(runs.length, "the build runs generators").to.be.greaterThan(5);
+    expect(runs.filter((one) => known.includes(one) === false)).to.deep.equal([]);
+  });
+
   it("refuses a name twice inside one input, naming both files, and builds nothing", async () => {
     write("src/a/zcl_two.clas.abap", "");
     write("src/b/zcl_two.clas.abap", "");

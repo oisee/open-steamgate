@@ -53,11 +53,14 @@ test("easy access: the command field is the second way in", async ({page}) => {
   await page.locator("input.cmd").press("Enter");
   await expect(page.locator("#msg")).toContainText("Transaction ZNOSUCHTHING does not exist");
 
-  // and the one transaction node says what it is: a thing to be run, once
-  // running one is real (docs/webgui.md)
+  // The one transaction node this class types out. Running a transaction is
+  // real since G.3, and this one is the seat abapGit will sit in: the screen
+  // has the node and no *.tran.xml backs it, so it says what is missing
+  // rather than "does not exist" about something visibly in the menu.
   await page.locator("input.cmd").fill("ZABAPGIT");
   await page.locator("input.cmd").press("Enter");
-  await expect(page.locator("#msg")).toContainText("not runnable yet");
+  await expect(page.locator("#msg")).toContainText("no zabapgit.tran.xml in this tree");
+  await expect(page.locator("#msg")).not.toContainText("does not exist");
   await expect(page.locator('[data-node="ZABAPGIT"]').first()).toBeVisible();
 });
 

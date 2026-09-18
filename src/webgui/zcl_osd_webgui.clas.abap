@@ -30,10 +30,14 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
 *   SERVICE      an OData service, an ICF node, a push channel, a pack
 *   TRANSACTION  something the system runs rather than something it links to
 *
-* TRANSACTION has exactly one entry today (ZABAPGIT) and that entry answers
-* "not yet". It is here so that the third kind exists before anything needs
-* it: making a transaction real is filling in RUN, not reshaping the screen.
-* What a real one has to do is written down in docs/webgui.md.
+* TRANSACTION nodes are real since backlog G.3: they come from the *.tran.xml
+* objects of the layers through the generated ZCL_OSD_TRAN_REGISTRY, and a
+* runnable one is entered by ZCL_OSD_TRAN, whose markup goes where the tree
+* goes (page( iv_body )). One that cannot be entered here says which of the
+* reasons it is -- a report, a dynpro, a class that is not in this tree --
+* rather than "not yet". ZABAPGIT is the exception and is typed out below:
+* this tree carries no zabapgit.tran.xml, and the node says so. It is the
+* seat G.4 will sit in. docs/webgui.md has the rule and the session design.
 *
 * The menu bar is not decoration either: what it offers, it does. System >
 * Status opens the status app at the target the tree's own node carries,
@@ -111,10 +115,16 @@ CLASS zcl_osd_webgui DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_code        TYPE string
       RETURNING VALUE(rs_node) TYPE ty_node.
 
-* the screen
+* The screen. IV_BODY is what goes where the tree goes, which is how a
+* running transaction gets on to this screen at all (backlog G.3): the pane
+* used to be hard-wired to branch( ), so a transaction had nowhere to draw.
+* The tree is what it renders when nobody passed a body, so the default is
+* the screen as it always was.
     CLASS-METHODS page
       IMPORTING iv_message     TYPE string OPTIONAL
                 iv_okcode      TYPE string OPTIONAL
+                iv_body        TYPE string OPTIONAL
+                iv_heading     TYPE string OPTIONAL
       RETURNING VALUE(rv_html) TYPE string.
 
   PRIVATE SECTION.
@@ -230,6 +240,8 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
   METHOD menu.
     DATA ls_svc  TYPE zosd_svc.
     DATA ls_pack TYPE zosd_pack.
+    DATA lt_tran TYPE zcl_osd_tran_registry=>tt_tran.
+    DATA ls_tran TYPE zcl_osd_tran_registry=>ty_tran.
     DATA lv_name TYPE string.
     DATA lv_url  TYPE string.
 
@@ -246,7 +258,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
          CHANGING  ct_nodes = rt_nodes ).
     add( EXPORTING iv_parent = 'FAVORITES' iv_id = 'ZABAPGIT' iv_kind = gc_kind-transaction
                    iv_text = 'abapGit' iv_name = 'ZABAPGIT'
-                   iv_detail = 'not yet: see docs/webgui.md'
+                   iv_detail = 'no zabapgit.tran.xml in this tree: backlog G.4'
                    iv_badge = 'TCODE'
          CHANGING  ct_nodes = rt_nodes ).
 
@@ -324,11 +336,35 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
            CHANGING  ct_nodes = rt_nodes ).
     ENDSELECT.
 
-* The one transaction, and the reason the kind exists. It is listed twice on
-* purpose, the way a favourite is a second entry for the same object.
+* The transactions of this system, out of the *.tran.xml objects of the
+* layers through the generated registry (tools/osd-tran-registry.mjs). The
+* detail is what SE93 would show and, for one that cannot be entered here,
+* the reason -- a report, a dynpro, a class that is not in the tree.
+    lt_tran = zcl_osd_tran_registry=>list( ).
+    LOOP AT lt_tran INTO ls_tran.
+      IF ls_tran-tcode = 'ZABAPGIT'.
+* the seat below is the one this system types out; two would be two
+        CONTINUE.
+      ENDIF.
+      add( EXPORTING iv_parent = 'TOOLS' iv_id = |TCODE-{ ls_tran-tcode }| iv_kind = gc_kind-transaction
+                     iv_text = COND string( WHEN ls_tran-text IS INITIAL THEN ls_tran-tcode ELSE ls_tran-text )
+                     iv_name = ls_tran-tcode
+                     iv_url = COND string( WHEN ls_tran-runnable = abap_true
+                                           THEN |{ gc_path }/?okcode={ ls_tran-tcode }| ELSE '' )
+                     iv_detail = COND string( WHEN ls_tran-runnable = abap_true
+                                              THEN |{ ls_tran-classname }| ELSE ls_tran-reason )
+                     iv_badge = 'TCODE'
+           CHANGING  ct_nodes = rt_nodes ).
+    ENDLOOP.
+
+* abapGit, the one transaction node this class types out, and the reason the
+* kind existed before anything filled it. This tree carries no
+* zabapgit.tran.xml -- the closure is a build decision rather than a screen
+* (backlog G.4) -- so there is nothing for the registry to read, and the node
+* says exactly that instead of pretending.
     add( EXPORTING iv_parent = 'TOOLS' iv_id = 'TOOLS-ZABAPGIT' iv_kind = gc_kind-transaction
                    iv_text = 'abapGit' iv_name = 'ZABAPGIT'
-                   iv_detail = 'not yet: see docs/webgui.md'
+                   iv_detail = 'no zabapgit.tran.xml in this tree: backlog G.4'
                    iv_badge = 'TCODE'
          CHANGING  ct_nodes = rt_nodes ).
     add( EXPORTING iv_parent = 'TOOLS' iv_id = 'TOOLS-SEGW' iv_kind = gc_kind-app
@@ -725,6 +761,16 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.ico-app{background:#e07b39;border:1px solid #b45c22}` &&
       `.ico-pack{background:#7c8ea3;border:1px solid #5d7186}` &&
       `.ico-tcode{background:#c94f4f;border:1px solid #9c3535}` &&
+* the pane when a transaction is running in it: the same box the tree lives
+* in, so the splitter, the image panel and the bars do not move when you
+* enter one, with a head that names what is running and a way back out
+      `.tree.run{padding:0;background:#fff;display:flex;flex-direction:column}` &&
+      `.runhead{display:flex;align-items:center;gap:6px;padding:4px 8px;background:#dbe7f4;` &&
+      `border-bottom:1px solid #b9c6d6;font-size:12px;color:#1c2f43}` &&
+      `.runexit{margin-left:auto;text-decoration:none;color:#1f4e79;padding:0 4px}` &&
+      `.runexit:hover{background:#c3d7ea}` &&
+      `.tree.run .gg-controls{flex:1;min-height:0}` &&
+      `.tree.run .gg-controls iframe{width:100%;height:100%;min-height:320px;border:0;background:#fff}` &&
       `.art{flex:1 1 auto;min-width:140px;position:relative;overflow:hidden;background:#0b2544}` &&
       `.artbg{position:absolute;inset:0;width:100%;height:100%}` &&
       `.artmark{position:absolute;right:20px;top:0;bottom:0;width:190px;color:#fff;` &&
@@ -752,8 +798,20 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     DATA ls_sys   TYPE zosd_sys.
     DATA ls_ident TYPE ty_ident.
     DATA lv_msg   TYPE string.
+    DATA lv_pane  TYPE string.
 
     lt_nodes = menu( ).
+
+* the left pane: what a transaction drew, or the menu when nothing is running
+    IF iv_body IS INITIAL.
+      lv_pane = `<div class="tree" title="drag the grip in the corner to move the splitter">` &&
+                branch( it_nodes = lt_nodes iv_parent = '' ) && `</div>`.
+    ELSE.
+      lv_pane = |<div class="tree run" data-transaction="{ esc( iv_heading ) }">| &&
+                |<div class="runhead"><span class="ico ico-tcode"></span>{ esc( iv_heading ) }| &&
+                |<a class="runexit" href="{ gc_path }/" target="_top" title="Back to the menu">&#9650;</a></div>| &&
+                iv_body && `</div>`.
+    ENDIF.
 
     SELECT SINGLE * FROM zosd_sys INTO ls_sys.
 * who this system is: sy, and the process the status tables were written in.
@@ -787,8 +845,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<span class="dim">type a name and press Enter, or pick one from the menu</span>` &&
       `</div>` &&
       `<div class="body">` &&
-      `<div class="tree" title="drag the grip in the corner to move the splitter">` &&
-      branch( it_nodes = lt_nodes iv_parent = '' ) && `</div>` &&
+      lv_pane &&
       artwork( ls_ident-sid ) &&
       `</div>` &&
       |<div class="bar"><span class="msg" id="msg">{ esc( lv_msg ) }</span>| &&
@@ -802,10 +859,12 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     DATA ls_node   TYPE ty_node.
     DATA lv_msg    TYPE string.
     DATA lv_path   TYPE string.
+    DATA ls_step   TYPE zcl_osd_tran=>ty_step.
 
 * Help > About is a page of this class one path below the screen, the way a
-* service of a system has more than one node under it. The shim takes the
-* mount off the front, so what is left here is the sub-path and nothing else.
+* service of a system has more than one node under it, and so is the dialog
+* step of a running transaction (tx/). The shim takes the mount off the
+* front, so what is left here is the sub-path and nothing else.
     lv_path = server->request->get_header_field( '~path_info' ).
     REPLACE ALL OCCURRENCES OF '/' IN lv_path WITH ''.
     CONDENSE lv_path.
@@ -813,6 +872,22 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
     IF lv_path = 'ABOUT'.
       server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
       server->response->set_cdata( about( ) ).
+      RETURN.
+    ENDIF.
+
+* A dialog step: the click in the document the transaction drew, coming back
+* as the sapevent it is. The whole screen is answered, not a fragment, so
+* the title bar, the menu, the command field and the status bar stay around
+* the transaction the way they do on a system.
+    IF lv_path = 'TX'.
+      ls_step = zcl_osd_tran=>resume(
+        iv_query = server->request->get_header_field( '~query_string' )
+        iv_body  = server->request->get_cdata( ) ).
+      server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
+      server->response->set_cdata( page( iv_message = ls_step-message
+                                         iv_okcode  = ls_step-tcode
+                                         iv_body    = ls_step-body
+                                         iv_heading = |{ ls_step-tcode } - { ls_step-title }| ) ).
       RETURN.
     ENDIF.
 
@@ -828,10 +903,28 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       IF ls_node-kind IS INITIAL.
         lv_msg = |Transaction { to_upper( lv_okcode ) } does not exist|.
       ELSEIF ls_node-kind = gc_kind-transaction.
-* The seam. A transaction node is the kind of node that is run rather than
-* linked to, and running one is the next step rather than this one: what it
-* has to do is in docs/webgui.md.
-        lv_msg = |{ ls_node-name } is not runnable yet: the GUI substitutes are wired in, the round trip is not proven|.
+* A transaction node is the kind that is run rather than linked to, and this
+* is the running (backlog G.3). START makes a session, enters the class the
+* *.tran.xml names and gives back what it drew; one that cannot be entered
+* here comes back with the reason instead of a screen.
+        ls_step = zcl_osd_tran=>start( ls_node-name ).
+        IF ls_step-ok = abap_true.
+          server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
+          server->response->set_cdata( page( iv_message = ls_step-message
+                                             iv_okcode  = ls_step-tcode
+                                             iv_body    = ls_step-body
+                                             iv_heading = |{ ls_step-tcode } - { ls_step-title }| ) ).
+          RETURN.
+        ENDIF.
+        IF ls_step-known = abap_false.
+* the screen has the node and no *.tran.xml backs it, which is true of
+* exactly one: abapGit. Its own detail says what is missing, and repeating
+* "does not exist" about something visibly in the menu would be a lie the
+* tree could catch nobody at
+          lv_msg = |{ ls_node-name } cannot be started here: { ls_node-detail }|.
+        ELSE.
+          lv_msg = ls_step-message.
+        ENDIF.
       ELSEIF ls_node-url IS INITIAL.
         lv_msg = |{ ls_node-name } is { ls_node-detail }, and has no page of its own|.
       ELSE.
