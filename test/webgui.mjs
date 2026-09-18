@@ -60,14 +60,14 @@ describe("webgui: SAP Easy Access", () => {
     expect(html, "the bulge").to.match(/<path d="M118,0 C22,230 22,670 118,900/);
   });
 
-  // the drop is drawn in the page, and it is on a diagonal on purpose: the
-  // same idea as the SAP one, set at an angle, so it is a nod and not a copy
-  it("draws the drop, diagonally, as SVG rather than a bitmap", () => {
-    expect(page, "the drop").to.contain('class="artdrop"');
-    // the shape is named "bead" and not "drop": ".drop" is the menu bar's
-    // fold-out, display:none, and a path wearing that class was invisible
-    expect(page, "one path, tip and bulb").to.match(/<path class="bead" d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74/);
-    expect(page, "set on a diagonal").to.contain('<g transform="rotate(38 60 60)">');
+  // The single bead is gone (Alice, 2026-09-18): once the panel became rain
+  // on a surface, the one oversized drop beside the wordmark was the only
+  // object in the picture that was not part of the scene. What has to stay
+  // true is the reason it was drawn rather than loaded.
+  it("the panel is drawn, not loaded, and the lone bead is gone", () => {
+    expect(page, "the rain scene").to.contain('class="artscene"');
+    expect(page, "the bead").to.not.contain('class="artdrop"');
+    expect(page, "and its path").to.not.contain('class="bead"');
     // nothing is loaded: no <img>, no SMW0 object, no second request
     expect(page, "not a bitmap").to.not.match(/<img[^>]+class="art/);
     // and the geometric stand-in it replaced is gone
@@ -175,8 +175,19 @@ describe("webgui: SAP Easy Access", () => {
     expect(page, "the widened grip Blink draws off the scrollbar metrics").to.contain("::-webkit-resizer");
     expect(page, "the button that hides the picture").to.contain('class="splitbtn splithide" href="#nopic"');
     expect(page, "and the one that brings it back").to.contain('class="splitbtn splitshow"');
-    // :target does the hiding, so the anchor has to stand before the panes
-    expect(page, "the anchor before the panes").to.contain('<span id="nopic"></span><div class="body">');
+    // :target does the hiding through a sibling selector, so what matters is
+    // that the anchor stands BEFORE the panes - not that it touches them.
+    // Asserting the two next to each other broke the moment the width radios
+    // were added between them, although the selector still worked: the test
+    // was pinning the spelling instead of the property.
+    expect(page, "the anchor before the panes").to.match(/<span id="nopic"><\/span>[^]*?<div class="body">/);
+    // and the ridge itself moves the boundary when it is clicked, because a
+    // col-resize cursor over something that does not resize is the same lie
+    // as an enabled-looking button that does nothing
+    expect(page, "four widths as radios").to.contain('type="radio" name="w" id="w1" checked');
+    expect(page, "each step points at the next").to.contain('class="wstep to2" for="w2"');
+    expect(page, "and the last wraps round").to.contain('class="wstep to1" for="w1"');
+    expect(page, "a step changes the width").to.match(/#w2:checked~\.body \.tree\{width:\d+%\}/);
     expect(page, "and it hides the picture and widens the tree").to.contain("#nopic:target~.body .art{display:none}");
     expect(page, "the old one-pixel border is gone").to.not.match(/\.tree\{[^}]*border-right:1px/);
     expect(page, "still no script").to.not.match(/<script/i);

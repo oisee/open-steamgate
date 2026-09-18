@@ -484,13 +484,11 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * middle, filled with the gradient, and the wordmark laid over it in HTML so
 * that stretching the panel does not stretch the letters.
 *
-* The drop is the SAP drop, and deliberately not the SAP drop: the same idea
-* -- a glossy blue bead of water, tip and bulb, lit from the near side --
-* set on a diagonal instead of standing upright, so it reads as a nod rather
-* than as a copy of somebody's trademark. It is drawn in an SVG of its own
-* inside the wordmark block rather than in the stretched background, because
-* the background has preserveAspectRatio=none and would squash a circle into
-* an egg as soon as the splitter moved.
+* There was a single glossy bead here, set on a diagonal - a nod to the drop
+* of the original rather than a copy of it. It is gone (Alice, 2026-09-18):
+* once the panel became rain on a surface, with drops striking it and rings
+* spreading, one oversized bead beside the wordmark was the one object in the
+* picture that was not part of the scene. The rings are the drops now.
     rv_html =
       `<div class="art">` &&
       `<svg class="artbg" viewBox="0 0 300 900" preserveAspectRatio="none" aria-hidden="true">` &&
@@ -572,24 +570,6 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<ellipse cx="228" cy="468" rx="92" ry="27.6" fill="none" stroke="#eaf4ff" stroke-opacity="0.24" stroke-width="1.1"/>` &&
       `<ellipse cx="228" cy="468" rx="115" ry="34.5" fill="none" stroke="#eaf4ff" stroke-opacity="0.195" stroke-width="1.1"/></svg>` &&
       `<div class="artmark">` &&
-      `<svg class="artdrop" viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">` &&
-      `<defs>` &&
-      `<linearGradient id="dg" x1="0.15" y1="0" x2="0.85" y2="1">` &&
-      `<stop offset="0" stop-color="#ffffff"/><stop offset="0.25" stop-color="#cbe7fd"/>` &&
-      `<stop offset="0.62" stop-color="#63b2f0"/><stop offset="1" stop-color="#1c74c4"/>` &&
-      `</linearGradient>` &&
-      `<radialGradient id="dh" cx="0.35" cy="0.32" r="0.45">` &&
-      `<stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>` &&
-      `<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>` &&
-      `</radialGradient>` &&
-      `</defs>` &&
-* one shape, set on the diagonal: tip up to the right, bulb down to the left
-      `<g transform="rotate(38 60 60)">` &&
-      `<path class="bead" d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74 C24,50 60,34 60,8 Z" fill="url(#dg)"/>` &&
-      `<path d="M60,8 C60,34 96,50 96,74 A36,36 0 0 1 24,74 C24,50 60,34 60,8 Z" fill="none" stroke="#ffffff" stroke-opacity="0.7" stroke-width="2"/>` &&
-      `<ellipse cx="49" cy="68" rx="15" ry="19" fill="url(#dh)" transform="rotate(-22 49 68)"/>` &&
-      `<ellipse cx="50" cy="60" rx="4.5" ry="7" fill="#ffffff" fill-opacity="0.85" transform="rotate(-28 50 60)"/>` &&
-      `</g></svg>` &&
       `<div class="artname">Open<b>SteamGate</b></div>` &&
       |<div class="artsid">{ esc( iv_sid ) }</div>| &&
       `<div class="artnote">the next level of vaporware</div>` &&
@@ -821,6 +801,25 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * pulling is for. No script: the button is a link to an anchor that sits
 * before the panes, and `:target` does the rest, so the state survives a
 * reload and can be sent to somebody as a URL.
+*
+* The ridge also MOVES when it is clicked, and that is not decoration. A
+* browser's own `resize` puts its grip in one corner, sixteen pixels of it,
+* and nobody finds it; a ridge that shows a col-resize cursor and does
+* nothing is the same lie as a button that looks enabled and is not, which
+* this screen refuses to tell anywhere else. So there are four widths as
+* radio buttons before the panes, and the label lying over the ridge points
+* at the next one: a click steps the boundary and wraps around at the end.
+* Dragging the corner grip still works and still wins, because the width it
+* writes is an inline style.
+      `.wsel{display:none}` &&
+      `#w2:checked~.body .tree{width:50%}` &&
+      `#w3:checked~.body .tree{width:34%}` &&
+      `#w4:checked~.body .tree{width:84%}` &&
+      `.wstep{display:none;position:absolute;inset:0;cursor:col-resize}` &&
+      `#w1:checked~.body .to2{display:block}` &&
+      `#w2:checked~.body .to3{display:block}` &&
+      `#w3:checked~.body .to4{display:block}` &&
+      `#w4:checked~.body .to1{display:block}` &&
       `.split{flex:0 0 8px;position:relative;cursor:col-resize;` &&
       `background:linear-gradient(90deg,#d7e2ee,#eef3f9 45%,#eef3f9 55%,#c3d0de)}` &&
       `.split::after{content:"";position:absolute;left:2px;top:50%;width:4px;height:46px;` &&
@@ -873,7 +872,6 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.artscene{position:absolute;inset:0;width:100%;height:100%;opacity:.92}` &&
       `.artmark{position:absolute;right:20px;top:0;bottom:0;width:190px;color:#fff;` &&
       `display:flex;flex-direction:column;justify-content:center;align-items:flex-end;text-align:right;gap:10px}` &&
-      `.artdrop{filter:drop-shadow(0 8px 14px rgba(3,17,33,.55))}` &&
       `.artname{font-size:19px;letter-spacing:.5px;opacity:.95}` &&
       `.artname b{font-weight:bold}` &&
       `.artsid{font-size:36px;font-weight:bold;letter-spacing:3px;opacity:.9}` &&
@@ -943,9 +941,16 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<span class="dim">type a name and press Enter, or pick one from the menu</span>` &&
       `</div>` &&
       `<span id="nopic"></span>` &&
+* the four widths the ridge steps through; the first is the default
+      `<input class="wsel" type="radio" name="w" id="w1" checked>` &&
+      `<input class="wsel" type="radio" name="w" id="w2">` &&
+      `<input class="wsel" type="radio" name="w" id="w3">` &&
+      `<input class="wsel" type="radio" name="w" id="w4">` &&
       `<div class="body">` &&
       lv_pane &&
-      `<div class="split" title="drag the grip at the bottom of the boundary to resize; the arrow hides the picture">` &&
+      `<div class="split" title="click the boundary to step it, drag the grip at its foot for any width; the arrow hides the picture">` &&
+      `<label class="wstep to2" for="w2"></label><label class="wstep to3" for="w3"></label>` &&
+      `<label class="wstep to4" for="w4"></label><label class="wstep to1" for="w1"></label>` &&
       `<a class="splitbtn splithide" href="#nopic" title="hide the picture">&#171;</a>` &&
       `<a class="splitbtn splitshow" href="#showpic" title="show the picture">&#187;</a>` &&
       `</div>` &&

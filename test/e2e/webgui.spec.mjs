@@ -64,20 +64,19 @@ test("easy access: the command field is the second way in", async ({page}) => {
   await expect(page.locator('[data-node="ZABAPGIT"]').first()).toBeVisible();
 });
 
-test("easy access: the drop is drawn, on a diagonal, and does not stretch with the panel", async ({page}) => {
-  await page.goto(WEBGUI);
-
-  const drop = page.locator("svg.artdrop");
-  await expect(drop).toBeVisible();
-  // an SVG drawn in the page, not a picture fetched from anywhere: the
-  // screen makes no second request for it
+test("easy access: the picture is drawn in the page and fetches nothing", async ({page}) => {
   const requests = [];
   page.on("request", (one) => requests.push(one.url()));
-  const box = await drop.boundingBox();
-  // square, because it is drawn in its own viewBox rather than in the
-  // stretched background, and it stays square when the splitter moves
-  expect(Math.abs(box.width - box.height)).toBeLessThan(2);
-  expect(requests.filter((u) => /\.(png|jpe?g|gif|svg)$/.test(u))).toHaveLength(0);
+  await page.goto(WEBGUI);
+
+  // the rain scene is there and the lone bead is not (Alice, 2026-09-18)
+  await expect(page.locator("svg.artscene")).toBeVisible();
+  await expect(page.locator("svg.artdrop")).toHaveCount(0);
+  // and the screen still makes no second request for any of it
+  expect(requests.filter((u) => /\.(png|jpe?g|gif|svg)$/.test(u) && !u.endsWith("/osg.svg"))).toHaveLength(0);
+});
+
+test(u))).toHaveLength(0);
   // the diagonal is in the drawing, not in a CSS transform of the element
   await expect(drop.locator("g")).toHaveAttribute("transform", "rotate(38 60 60)");
 });
