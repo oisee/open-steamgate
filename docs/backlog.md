@@ -41,7 +41,7 @@ A — the ADT surface: what a client may ask
 B — the runtime underneath: what the answers are made of
 │   the track is done; these are the named gaps
 ├─ B.1  SADL beyond read-only, and beyond one table                 valuable
-├─ B.2  BOPF / RAP / drafts                                         a track of its own
+├─ B.2  BOPF / RAP / drafts: one runtime, two front ends           decided 09-18
 ├─ B.3  OData V4                                                    a track of its own
 ├─ B.4  the RFC runtime, both directions                            open
 ├─ B.5  multi-record framing, measured against a long answer        open
@@ -317,10 +317,39 @@ B.1  SADL beyond read-only                                               [S]
      └─ next: associations in a projection, and a write path that is not
         the single-table special case
 
-B.2  BOPF / RAP / drafts                                                 [S]
+B.2  BOPF / RAP / drafts: one runtime, two front ends                    [S]
      ├─ still out, as stated on day one
      ├─ oracles planned but not built: docs/oracle-rap.md, oracle-draft.md
-     └─ gated on 0.4 / 0.5 (Alice: build sample objects on the sandbox?)
+     ├─ gated on 0.4 / 0.5 (Alice: build sample objects on the sandbox?)
+     │
+     ├─ **the order, decided 2026-09-18**: build the runtime once, shaped
+     │  in RAP's vocabulary, and enter it first through CDS annotations,
+     │  with a behaviour-definition grammar as the second front end.
+     ├─ what decided it, measured rather than assumed: abaplint parses a
+     │  BDEF with **one regular expression** that extracts the entity name
+     │  and its alias (`objects/behavior_definition.js`) - no create/update/
+     │  delete, no actions, validations, determinations, draft, locks or
+     │  field control. The `@ObjectModel` annotations, by contrast, we
+     │  already parse in full: virtual elements, writeEnabled and the
+     │  analytics annotations all run on them today. So RAP's front end is
+     │  a grammar to write and CDS-BOPF's is free
+     ├─ the runtime is the same either way and is most of the work: a
+     │  transactional buffer, the composition tree, draft, delegated CUD,
+     │  locks, ETags. The choice is only which language describes it first
+     ├─ the vocabulary inside is RAP's from day one, because a managed RAP
+     │  implementation with `persistent table` + `lock master` says almost
+     │  exactly what the CDS-BOPF annotations say (`transactionalProcessing
+     │  Enabled`, `writeActivePersistence`, `writeDraftPersistence`,
+     │  `association.type: [#TO_COMPOSITION_CHILD]`, `transactional
+     │  ProcessingDelegated` on the consumption view). Cheap front end,
+     │  modern model
+     ├─ writing the BDEF grammar against a runtime that exists is far
+     │  easier than designing both at once - and it is a real contribution
+     │  to abaplint when it comes, which is a reason to do it second and
+     │  not first
+     └─ first milestone, and it is visible: a **draft-enabled Fiori app**
+        over one composition - header and items, create, change, activate -
+        declared in annotations, the machinery ours, checked in a browser
 
 B.3  OData v4                                                            [S]
      └─ the serializer is v2; v4 is a second shape over the same model, and
