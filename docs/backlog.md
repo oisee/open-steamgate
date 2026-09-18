@@ -114,6 +114,15 @@ G — the classic screens, and the GUI substitutes under them
         *.sicf.xml back so abapGit can carry it away. @ObjectModel.
         writeEnabled already makes a one-table projection writable and the
         dispatcher already answers 405 for a write the model forbids
+     ├─ reached from the status app, not only from the launchpad (Alice):
+        the Services section's path becomes a link into this editor by
+        intent. The annotation compiler already emits both shapes -
+        `lineItem: [{value: Path, semanticObject: IcfNode, action: manage}]`
+        makes the value itself navigate, and `{intent: {semanticObject,
+        action, label}}` makes a button - so the work is one line of YAML
+        in src/status/zosd_status.stg.yaml plus an inbound in this app's
+        manifest, the way SegwProject-manage and EasyAccess-show already
+        work. Nothing to add to tools/stg-compile.mjs
      └─ what makes it worth doing rather than pretty: **the settings
         become live**. Change a node's handler class and the next request
         goes elsewhere; deactivate a node and it answers 403; add a second
