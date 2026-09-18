@@ -94,6 +94,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.3  a transaction node that actually runs                       DONE 09-18
 ├─ G.5  SICF as a Fiori Elements application, and live                open
 ├─ G.6  a class with an interface becomes a screen                    open
+├─ G.1c the name is ours and the picture is the joke                  next
 ├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
@@ -210,6 +211,45 @@ G.7  The screen is usable from the keyboard                              [S]
         can be typed immediately
      └─ it belongs with G.1b's work rather than after abapGit: the screen
         is the thing people touch first
+
+G.1c The name is ours and the picture is the joke                        [S]
+     Alice, 2026-09-18, with the original screen's background in front of
+     her: drop "SAP" from our own names, and the image panel is not one
+     drop - it is rain on a surface.
+     +- **the naming rule, and it has a line in it**: a name *we* invent
+        does not carry somebody else's trademark, so "SAP Easy Access"
+        becomes **"Easy Access"** in the title bar with `open-steamgate`
+        beside it, exactly where the real one puts the system. Same for
+        the class descriptions, the ICF documentation, the launchpad tile
+        and the pack names. But a *statement of fact about SAP software*
+        keeps the word, because removing it would make the sentence false:
+        the light show really does play to a real SAP GUI over DIAG, and
+        `docs/` describes a real SAP system throughout. Rename what we
+        call ourselves; do not rewrite what is true
+     +- **the picture**: the original is a pool seen from above with
+        concentric ripples and business words half-submerged in it. So:
+        many drops striking a surface, their rings spreading and crossing,
+        rain, mist over the water, a gate of steam standing in it, and a
+        sun above. SVG in the page as the drop already is - no bitmap, no
+        fetch, and the browser test that asserts zero images stays
+     +- **the slogan, hers**: `Open SteamGate` and under it *the next
+        level of vaporware*. It earns its place: the screen's status line
+        already says "a gateway that is not there", and a project that
+        reimplements a gateway nobody can buy should say so first
+     +- **codenames, steam-related, for release names.** The bathing
+        traditions are the better seam - geographically spread, each with
+        a story, and none of them anybody's trademark: **Loyly** (Finnish,
+        and the best of them: it names *the steam itself*, the burst off
+        the stones - which is the vaporware joke made literal), Sauna,
+        Banya, Hammam, Sento, Onsen, Jjimjilbang, Temazcal, Rasul,
+        Sudatorium, Laconicum, Tepidarium, Caldarium, Thermae, Aufguss
+        (the German ritual of pouring), Kiuas (the stove), Parilka.
+        If a machine-shaped set is wanted instead: Boiler, Piston,
+        Flywheel, Governor, Condenser, Throttle, Injector, Whistle,
+        Firebox, Safety-valve; and from the world itself: Geyser,
+        Fumarole, Solfatara, Plume
+     +- G.7 (the keyboard) and this share the same file, so whichever runs
+        second rebases rather than both editing `zcl_osd_webgui` at once
 
 G.4  abapGit through the substitutes                             open, closure measured in G.2
 
