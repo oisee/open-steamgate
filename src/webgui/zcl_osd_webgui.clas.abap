@@ -800,8 +800,40 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * and the image and the screen still ships no JavaScript. The pane does not
 * grow or shrink on its own (flex:0 0 auto), so the width the drag writes is
 * the width that is used; the image panel takes whatever is left.
+*
+* It worked and nobody could find it, which is the same as not working. A
+* browser draws that grip 16x16 in the pane's bottom-right corner only -- down
+* by the node count -- and no standard property stretches it up the edge. So
+* the boundary is drawn instead: a ridge with a notch, cursor col-resize, and
+* the title that says where to pull. In Blink the system grip itself is sized
+* off the scrollbar metrics, so widening the pane's scrollbar widens the grip
+* and `::-webkit-resizer` colours it; elsewhere the small native one stays,
+* next to a ridge that at least shows where it is.
       `.tree{flex:0 0 auto;width:68%;min-width:220px;max-width:calc(100% - 140px);` &&
-      `overflow:auto;resize:horizontal;border-right:1px solid #b9c6d6;padding:10px 6px 26px 14px;background:#f7fafd}` &&
+      `overflow:auto;resize:horizontal;padding:10px 6px 26px 14px;background:#f7fafd}` &&
+      `.tree::-webkit-scrollbar{width:14px;height:14px}` &&
+      `.tree::-webkit-scrollbar-track{background:#eef3f9}` &&
+      `.tree::-webkit-scrollbar-thumb{background:#c3d0de;border:3px solid #eef3f9;border-radius:7px}` &&
+      `.tree::-webkit-resizer{background:#b9c6d6}` &&
+* The ridge, and the one thing a person actually wants when they pull it.
+* Eight pixels of drawn boundary with a notch in the middle, and a button at
+* the top that hides the picture outright -- which is what most of that
+* pulling is for. No script: the button is a link to an anchor that sits
+* before the panes, and `:target` does the rest, so the state survives a
+* reload and can be sent to somebody as a URL.
+      `.split{flex:0 0 8px;position:relative;cursor:col-resize;` &&
+      `background:linear-gradient(90deg,#d7e2ee,#eef3f9 45%,#eef3f9 55%,#c3d0de)}` &&
+      `.split::after{content:"";position:absolute;left:2px;top:50%;width:4px;height:46px;` &&
+      `margin-top:-23px;border-left:1px solid #90a4b8;border-right:1px solid #90a4b8;opacity:.7}` &&
+      `.splitbtn{position:absolute;left:-6px;top:8px;width:20px;height:18px;line-height:17px;` &&
+      `text-align:center;text-decoration:none;color:#3c5670;border:1px solid #b9c6d6;border-radius:2px;` &&
+      `background:linear-gradient(#ffffff,#dfe8f2);font-size:11px;cursor:pointer}` &&
+      `.splitbtn:hover{background:linear-gradient(#ffffff,#cbd8e6)}` &&
+      `.splitshow{display:none}` &&
+      `#nopic:target~.body .art{display:none}` &&
+      `#nopic:target~.body .tree{width:100%;max-width:none;resize:none}` &&
+      `#nopic:target~.body .splithide{display:none}` &&
+      `#nopic:target~.body .splitshow{display:block}` &&
       `.fld{margin:0}` &&
       `.fld>summary{list-style:none;cursor:pointer;padding:2px 4px;display:flex;align-items:center;gap:6px;border-radius:2px}` &&
       `.fld>summary::-webkit-details-marker{display:none}` &&
@@ -910,8 +942,13 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `<span class="sep"></span>` &&
       `<span class="dim">type a name and press Enter, or pick one from the menu</span>` &&
       `</div>` &&
+      `<span id="nopic"></span>` &&
       `<div class="body">` &&
       lv_pane &&
+      `<div class="split" title="drag the grip at the bottom of the boundary to resize; the arrow hides the picture">` &&
+      `<a class="splitbtn splithide" href="#nopic" title="hide the picture">&#171;</a>` &&
+      `<a class="splitbtn splitshow" href="#showpic" title="show the picture">&#187;</a>` &&
+      `</div>` &&
       artwork( ls_ident-sid ) &&
       `</div>` &&
       |<div class="bar"><span class="msg" id="msg">{ esc( lv_msg ) }</span>| &&

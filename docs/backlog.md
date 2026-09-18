@@ -624,10 +624,17 @@ paid for differently.
 
 **Loud per hour.** Every one of these is something a stranger can be shown.
 1. **G.8, the AMDP sandbox** — SQLScript that can be edited and run from the
-   screen, which cannot be done in the original at all. One honest
-   limitation to carry with it: it lives where there is a HANA, so it will
-   **not be on the public preview** until SQLScript runs on DuckDB (W.3).
-   Without that line the item promises a link that never appears.
+   screen, which cannot be done in the original at all. It runs **fully on
+   any deployment that has a server**: the i7 at 3030 with HANA Express
+   beside it is the whole feature, nothing withheld. What it cannot reach is
+   the **GitHub Pages preview**, and the reason is not the database and not
+   a licence -- that preview is a service worker in a browser with no
+   server, no process and no socket, so *no* backend of any kind is
+   reachable from it, HANA, ClickHouse or otherwise. For SQLScript to run
+   there it would have to run **in the page**, which is W.3 (DuckDB-WASM,
+   or translating SQLScript to plain SQL). So the line to carry is "the
+   public preview links to the deployment, not to a sandbox of its own",
+   not "the feature is limited".
 2. **G.9, the SE16-shaped data browser** — the cheapest visible thing on the
    whole list, over reads that already exist, and the one a person actually
    uses more than the rest put together.

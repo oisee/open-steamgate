@@ -163,6 +163,25 @@ describe("webgui: SAP Easy Access", () => {
     expect(page, "no inline handler").to.not.match(/\son[a-z]+=/i);
   });
 
+  // It resized from the first day and nobody could find it: a browser draws
+  // the grip 16x16 in the pane's bottom-right corner, down by the node count,
+  // and no property stretches it up the edge. So the boundary is drawn. What
+  // is asserted here is what a person can see and reach -- a ridge that says
+  // col-resize, a notch, the button that hides the picture and the one that
+  // brings it back -- and that none of it cost a line of script.
+  it("draws the boundary it resizes on, and can hide the picture without a script", () => {
+    expect(page, "a ridge that says it can be pulled").to.match(/\.split\{[^}]*cursor:col-resize/);
+    expect(page, "with a notch in the middle").to.contain(".split::after");
+    expect(page, "the widened grip Blink draws off the scrollbar metrics").to.contain("::-webkit-resizer");
+    expect(page, "the button that hides the picture").to.contain('class="splitbtn splithide" href="#nopic"');
+    expect(page, "and the one that brings it back").to.contain('class="splitbtn splitshow"');
+    // :target does the hiding, so the anchor has to stand before the panes
+    expect(page, "the anchor before the panes").to.contain('<span id="nopic"></span><div class="body">');
+    expect(page, "and it hides the picture and widens the tree").to.contain("#nopic:target~.body .art{display:none}");
+    expect(page, "the old one-pixel border is gone").to.not.match(/\.tree\{[^}]*border-right:1px/);
+    expect(page, "still no script").to.not.match(/<script/i);
+  });
+
   // Help > About: a page of the same class one path below the screen
   it("answers Help > About with the generation, the build and what the system is", async () => {
     expect(page, "the About entry").to.contain('href="/sap/bc/gui/sap/its/webgui/about"');
