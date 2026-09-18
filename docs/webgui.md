@@ -190,14 +190,15 @@ TRANSACTION  something the system runs rather than something it links to
 ```
 
 The kind is part of the model (`ZCL_OSD_WEBGUI=>GC_KIND`, carried into the HTML
-as `data-kind`), not something the renderer guesses. `TRANSACTION` has exactly
-one entry today, `ZABAPGIT`, and that entry answers *"not runnable yet"*. It is
-there so the third kind exists before anything needs it: making a transaction
-real is filling in one branch of `HANDLE_REQUEST`, not reshaping the screen.
+as `data-kind`), not something the renderer guesses. `TRANSACTION` nodes come
+from the `*.tran.xml` objects of the layers since G.3 (below), and a runnable
+one is entered rather than linked to: the Tools folder has one per transaction
+the tree declares, and `ZABAPGIT` is the single node this class still types out.
 
-This matters because of where this is going. abapGit should eventually arrive
-as a transaction — you type its name and the system runs it — rather than as a
-bespoke page with a URL of its own, because that is how a system works.
+That is where this is going. abapGit should arrive as a transaction — you type
+its name and the system runs it — rather than as a bespoke page with a URL of
+its own, because that is how a system works; G.3 built the seat and G.4 is the
+closure.
 
 ## The command field
 
@@ -215,7 +216,9 @@ different places.
   push channel has no page) comes back with the reason in the status bar.
 - An unknown code comes back as `Transaction ZNOPE does not exist`, which is
   the message SAP puts in the status bar.
-- A `TRANSACTION` node comes back saying it is not runnable yet.
+- A `TRANSACTION` node is **entered**: the screen comes back with what the
+  transaction drew where the tree was, and one that cannot be entered here
+  comes back with the reason (below).
 
 The form is a GET, so the shim hands the query string on as it arrived and the
 field is decoded in the handler: a browser sends a space as `+` and the rest
