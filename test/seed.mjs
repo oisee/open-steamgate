@@ -24,6 +24,16 @@ function fieldLengths(tablXml) {
       lengths.set(name, {pad: 3});
     } else if ((datatype === "CHAR" || datatype === "NUMC") && leng !== undefined) {
       lengths.set(name, {pad: Number(leng)});
+    } else if (datatype === "DATS") {
+      // **The file holds an ISO date and the runtime holds the internal one.**
+      // These seed files are abapGit's own TABU JSON -- its data serialiser
+      // names the folder, the file and the format -- and abapGit's ajson
+      // insists on YYYY-MM-DD for a DATS field: `to_date` matches
+      // `^(\d{4})-(\d{2})-(\d{2})(T|$)` and raises "Unexpected date format"
+      // otherwise. We used to write 20260915, which is the internal form, so
+      // the file looked like abapGit's and was not (A4H refused the import,
+      // 2026-09-19). The conversion belongs on this side, in the reader.
+      lengths.set(name, {pad: 0, date: true});
     } else {
       lengths.set(name, {pad: 0});
     }
@@ -31,11 +41,17 @@ function fieldLengths(tablXml) {
   return lengths;
 }
 
-function quote(value, pad) {
+function quote(value, pad, isDate = false) {
   if (typeof value === "number") {
     return String(value);
   }
   let s = String(value ?? "");
+  if (isDate) {
+    // ISO in the file, internal in the database; anything else is left as it
+    // is, so a value that is already internal still works
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (iso !== null) s = iso[1] + iso[2] + iso[3];
+  }
   if (pad > 0) {
     s = s.padEnd(pad, " ");
   }
@@ -99,7 +115,7 @@ function seedFrom(dataDir, ddicDirs) {
         flush();
         shape = cols;
       }
-      batch.push(cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0)));
+      batch.push(cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0, lengths.get(c)?.date === true)));
       // a bound on the statement rather than on the row count: engines differ
       // on how long a statement may be, and none of them differ on this being
       // far inside it

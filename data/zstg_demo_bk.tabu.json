@@ -1,5 +1,23 @@
 [
-  {"mandt": "123", "travel_id": "T0001", "booking_id": "B001", "customer": "Ada Lovelace", "flight_date": "20260915"},
-  {"mandt": "123", "travel_id": "T0001", "booking_id": "B002", "customer": "Grace Hopper", "flight_date": "20260916"},
-  {"mandt": "123", "travel_id": "T0002", "booking_id": "B001", "customer": "Edsger Dijkstra", "flight_date": "20261001"}
+ {
+  "mandt": "123",
+  "travel_id": "T0001",
+  "booking_id": "B001",
+  "customer": "Ada Lovelace",
+  "flight_date": "2026-09-15"
+ },
+ {
+  "mandt": "123",
+  "travel_id": "T0001",
+  "booking_id": "B002",
+  "customer": "Grace Hopper",
+  "flight_date": "2026-09-16"
+ },
+ {
+  "mandt": "123",
+  "travel_id": "T0002",
+  "booking_id": "B001",
+  "customer": "Edsger Dijkstra",
+  "flight_date": "2026-10-01"
+ }
 ]
