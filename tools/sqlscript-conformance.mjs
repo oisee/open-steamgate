@@ -32,9 +32,11 @@
 // The HANA column is measured on the machine that has HANA Express and
 // merged in; this file prints the columns it can reach.
 import {readFileSync} from "node:fs";
+import {basename} from "node:path";
+import {isInvalid} from "./sqlscript-eager.mjs";
 
 /** one row of the table: what to ask, and what each answer means */
-const CASES = [
+export const CASES = [
   {id: "int_div", sql: "SELECT a / b AS v FROM t WHERE k = 'r1'",
    why: "division: HANA yields a DECIMAL (0.500000) - it does NOT truncate, which this list assumed until the oracle answered"},
   {id: "int_div_neg", sql: "SELECT c / b AS v FROM t WHERE k = 'r1'",
@@ -119,21 +121,49 @@ const CASES = [
   {id: "fn_round_scale", sql: "SELECT ROUND(2.345, 2) AS v FROM t WHERE k = 'r1'",
    why: "ROUND to a scale, which is a different function from ROUND to an integer on some engines"},
   {id: "fn_avg", sql: "SELECT AVG(a) AS v FROM t", why: "AVG over integers: an integer average, or a decimal one - the likeliest of these to differ"},
+  // Not a function we lower, and here on purpose: it is the standing proof
+  // that the two SQLite columns are two ENGINES and not one spelled twice.
+  // LOG(10) is 1 on the server's build and 2.302585092994046 in the
+  // browser's - base ten against natural - and every other row of this table
+  // happens to agree, which is exactly how "one sqlite dialect is fine" would
+  // have become a belief rather than a measurement. HANA takes LOG(base, x)
+  // and refuses the one-argument form, which is its own answer and a true one.
+  {id: "fn_log", sql: "SELECT LOG(10) AS v FROM t WHERE k = 'r1'",
+   why: "LOG: base ten or natural - the row that keeps the two SQLite builds honest"},
 ];
 
 /** the fixture, in our own DDIC shapes: a padded CHAR, a packed decimal, integers */
-const DDL = {
-  duckdb: `CREATE TABLE t (
-      k VARCHAR, ch CHAR(10), txt VARCHAR, num VARCHAR,
-      upper_txt VARCHAR, long_txt VARCHAR,
-      a INTEGER, b INTEGER, c INTEGER, zero INTEGER,
-      d1 DECIMAL(15,2), d2 DECIMAL(15,2), nullable INTEGER)`,
-  sqlite: `CREATE TABLE t (
-      k TEXT, ch NCHAR(10), txt TEXT, num TEXT,
-      upper_txt TEXT, long_txt TEXT,
-      a INTEGER, b INTEGER, c INTEGER, zero INTEGER,
-      d1 NUMERIC, d2 NUMERIC, nullable INTEGER)`,
-};
+/** The fixture's columns, once, with each engine's spelling beside the name.
+ *
+ *  Three DDLs used to be written out separately and HANA's was the one
+ *  nobody edited: `upper_txt` and `long_txt` were added for the LIKE and the
+ *  narrow-cast rows, the two local engines got them, and HANA's table kept
+ *  eleven columns. The next `--hana` run did not measure those two rows - it
+ *  failed on the INSERT and lost the ENTIRE column, which is how three
+ *  sessions came and went with fifteen rows unmeasured against the oracle.
+ *  One list, three renderings: a column added anywhere is added everywhere.
+ */
+export const COLUMNS = [
+  {name: "k",        duckdb: "VARCHAR",        sqlite: "TEXT",      hana: "NVARCHAR(10)"},
+  {name: "ch",       duckdb: "CHAR(10)",       sqlite: "NCHAR(10)", hana: "NCHAR(10)"},
+  {name: "txt",      duckdb: "VARCHAR",        sqlite: "TEXT",      hana: "NVARCHAR(20)"},
+  {name: "num",      duckdb: "VARCHAR",        sqlite: "TEXT",      hana: "NVARCHAR(20)"},
+  {name: "upper_txt", duckdb: "VARCHAR",       sqlite: "TEXT",      hana: "NVARCHAR(20)"},
+  {name: "long_txt", duckdb: "VARCHAR",        sqlite: "TEXT",      hana: "NVARCHAR(20)"},
+  {name: "a",        duckdb: "INTEGER",        sqlite: "INTEGER",   hana: "INTEGER"},
+  {name: "b",        duckdb: "INTEGER",        sqlite: "INTEGER",   hana: "INTEGER"},
+  {name: "c",        duckdb: "INTEGER",        sqlite: "INTEGER",   hana: "INTEGER"},
+  {name: "zero",     duckdb: "INTEGER",        sqlite: "INTEGER",   hana: "INTEGER"},
+  {name: "d1",       duckdb: "DECIMAL(15,2)",  sqlite: "NUMERIC",   hana: "DECIMAL(15,2)"},
+  {name: "d2",       duckdb: "DECIMAL(15,2)",  sqlite: "NUMERIC",   hana: "DECIMAL(15,2)"},
+  {name: "nullable", duckdb: "INTEGER",        sqlite: "INTEGER",   hana: "INTEGER"},
+];
+
+export const ddlFor = (dialect) => `CREATE TABLE ${dialect === "hana" ? '"T"' : "t"} (` +
+  COLUMNS.map((c) => `${dialect === "hana" ? `"${c.name.toUpperCase()}"` : c.name} ${c[dialect]}`).join(", ") + ")";
+
+const DDL = {duckdb: ddlFor("duckdb"), sqlite: ddlFor("sqlite"), hana: ddlFor("hana")};
+
 // Two fixtures, and the difference between them is the whole padding
 // question. The padded one is what our runtime writes today; the unpadded one
 // is what a real system holds, measured on A4H: a CHAR(30) column whose value
@@ -156,12 +186,43 @@ const UNPADDED = [
 // differently now: a new row that changed an old answer would invalidate the
 // oracle column silently, which is a worse fault than the one it was added
 // to catch.
+/** Every fixture row must name exactly as many values as there are columns.
+ *
+ *  The check the lost HANA column asked for: the drift was visible in the
+ *  text the whole time and no engine could see it until it ran. Counting is
+ *  free and it fails where the mistake is made, not five minutes into a
+ *  measurement on another machine. */
+export function rowsMatchColumns(rows = [...PADDED, ...UNPADDED]) {
+  const wrong = [];
+  for (const row of rows) {
+    const values = row.slice(row.indexOf("VALUES (") + 8, row.lastIndexOf(")"));
+    // split on commas that are not inside a quoted literal
+    const count = values.split(/,(?=(?:[^']*'[^']*')*[^']*$)/).length;
+    if (count !== COLUMNS.length) wrong.push({row: row.slice(0, 40), count, expected: COLUMNS.length});
+  }
+  return wrong;
+}
+
 const ROWS = process.argv.includes("--unpadded") ? UNPADDED : PADDED;
+
+/** Which build answered each column.
+ *
+ *  Added after the question "the browser runs sql.js, but the server runs
+ *  SQLite too - should it not be measured?" (Alice, 2026-09-19), which was
+ *  right and showed this table had been calling two different engines by one
+ *  name. A column headed `sqlite` was a claim that one SQLite stands for
+ *  another, and the first probe written to check it found LOG(10) answering
+ *  1 on the server's build and 2.302585092994046 in the browser's. So the
+ *  build travels with the column: a version nobody printed is a version
+ *  nobody compared.
+ */
+export const BUILDS = {};
 
 async function runDuckDB() {
   const {DuckDBInstance} = await import("@duckdb/node-api");
   const instance = await DuckDBInstance.create(":memory:");
   const connection = await instance.connect();
+  BUILDS.duckdb = "duckdb " + (await connection.runAndReadAll("SELECT version() AS v")).getRowObjects()[0].v;
   await connection.run(DDL.duckdb);
   for (const row of ROWS) await connection.run(row);
   const out = {};
@@ -195,12 +256,12 @@ async function runDuckDB() {
  */
 async function runHana() {
   const {HanaDatabaseClient} = await import("./hana-client.mjs");
-  const c = new HanaDatabaseClient({schema: "OSD_CONFORMANCE"});
+  // A schema per session, because two of us run this at once and one fixture
+  // table called T in one schema is two sessions overwriting each other's
+  // measurement - which would not fail, it would answer.
+  const c = new HanaDatabaseClient({schema: process.env.HANA_SCHEMA ?? "OSD_CONFORMANCE"});
   await c.connect();
-  const ddl = `CREATE TABLE "T" (
-      "K" NVARCHAR(10), "CH" NCHAR(10), "TXT" NVARCHAR(20), "NUM" NVARCHAR(20),
-      "A" INTEGER, "B" INTEGER, "C" INTEGER, "ZERO" INTEGER,
-      "D1" DECIMAL(15,2), "D2" DECIMAL(15,2), "NULLABLE" INTEGER)`;
+  const ddl = DDL.hana;
   await c.native({sql: `DROP TABLE "T"`, expect: "none"}).catch(() => undefined);
   await c.native({sql: ddl, expect: "none"});
   for (const row of ROWS) {
@@ -232,6 +293,7 @@ async function runSqlJs() {
     locateFile: () => new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname,
   });
   const db = new SQL.Database();
+  BUILDS.sqljs = "sqlite " + db.exec("SELECT sqlite_version()")[0].values[0][0] + " (wasm)";
   db.run(DDL.sqlite);
   for (const row of ROWS) db.run(row);
   const out = {};
@@ -244,6 +306,45 @@ async function runSqlJs() {
       out[one.id] = {error: String(error.message ?? error).split("\n")[0].slice(0, 90)};
     }
   }
+  return out;
+}
+
+/** SQLite as the SERVER runs it: node:sqlite, the build inside Node itself.
+ *
+ *  This is not the browser's engine and it is not a spare. `test/run.mjs`
+ *  sets `STG_DB=file`, which is tools/sqlite-file-client.mjs over
+ *  `node:sqlite`, so it is the engine answering on the deployed showcase --
+ *  the one column of this table that describes what is serving users right
+ *  now. It was the one missing, and the reason it was missing was an
+ *  argument that only ever covered the browser: "the column must describe
+ *  the engine that really runs the code". It must, and there is more than
+ *  one such engine.
+ *
+ *  Under the compiled binary the same import is answered by Bun's SQLite
+ *  rather than Node's - measured 2026-09-19 as 3.53.2 against Node's 3.53.4,
+ *  a third build again. That one is not a column here because this tool runs
+ *  under Node; `npm run conformance:bun` runs the same file under Bun, and
+ *  the header line says which build actually answered.
+ */
+async function runSqliteNode() {
+  const {DatabaseSync} = await import("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  const one = (sql) => Object.values(db.prepare(sql).get() ?? {})[0];
+  BUILDS.sqlite_node = "sqlite " + one("SELECT sqlite_version() AS v") +
+    (globalThis.Bun === undefined ? " (node)" : " (bun)");
+  db.exec(DDL.sqlite);
+  for (const row of ROWS) db.exec(row);
+  const out = {};
+  for (const c of CASES) {
+    try {
+      const row = db.prepare(c.sql).get();
+      const value = row === undefined ? null : Object.values(row)[0];
+      out[c.id] = {value: value === null || value === undefined ? null : String(value)};
+    } catch (error) {
+      out[c.id] = {error: String(error.message ?? error).split("\n")[0].slice(0, 90)};
+    }
+  }
+  db.close();
   return out;
 }
 
@@ -262,9 +363,13 @@ export function normalise(cell) {
     // binder error is a defect in what we sent, not a difference between
     // engines, and letting it pass as agreement is an instrument reporting
     // its own brokenness as a clean result.
-    return /syntax|parse|not exist|unknown|no such|Binder Error|Catalog Error/i.test(cell.error)
-      ? {kind: "refused", value: cell.error}
-      : {kind: "raised"};
+    // The SAME predicate as the fused/forced comparison, imported rather than
+    // written again. There were two copies of this regex and only one of them
+    // was taught HANA's wording, so `LOG(10)` -- which HANA refuses with
+    // "wrong number of arguments" -- was classified here as a RAISE, i.e. as
+    // the engine rejecting the data. Two copies of a predicate is one
+    // predicate and one stale opinion.
+    return isInvalid(cell.error) ? {kind: "refused", value: cell.error} : {kind: "raised"};
   }
   if (cell.value === null) return {kind: "null"};
   const asNumber = Number(cell.value);
@@ -288,79 +393,104 @@ const show = (cell) => {
   return cell.value === null ? "NULL" : `"${cell.value}"`;
 };
 
-const engines = {};
-try {
-  engines.duckdb = await runDuckDB();
-} catch (error) {
-  console.error(`duckdb unavailable: ${error.message}`);
-}
-try {
-  engines.sqljs = await runSqlJs();
-} catch (error) {
-  console.error(`sql.js unavailable: ${error.message}`);
-}
-
-// a column measured elsewhere (HANA Express lives on another machine) merges in
-if (process.argv.includes("--hana")) {
+/** The engines this host can reach, each with the build that answered.
+ *
+ *  Exported so a test can run them: until this was a function the file ran
+ *  its whole command line on import, which is the defect that once made the
+ *  journal tool exit the entire suite. An instrument nobody can call from a
+ *  test is an instrument with no guard on it.
+ */
+export async function measureEngines() {
+  const engines = {};
   try {
-    engines.hana = await runHana();
+    engines.duckdb = await runDuckDB();
   } catch (error) {
-    console.error("hana: " + (error.message ?? error));
+    console.error(`duckdb unavailable: ${error.message}`);
   }
+  try {
+    engines.sqljs = await runSqlJs();
+  } catch (error) {
+    console.error(`sql.js unavailable: ${error.message}`);
+  }
+  try {
+    engines.sqlite_node = await runSqliteNode();
+  } catch (error) {
+    console.error(`node:sqlite unavailable: ${error.message}`);
+  }
+  return {engines, builds: {...BUILDS}};
 }
-const merged = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
-if (merged !== undefined) engines.hana = JSON.parse(readFileSync(merged, "utf8")).hana;
 
-if (process.argv.includes("--json")) {
-  console.log(JSON.stringify({cases: CASES, ...engines}, null, 1));
-} else {
-  const names = Object.keys(engines);
-  console.log(`case              ${names.map((n) => n.padEnd(34)).join("")}`);
-  for (const one of CASES) {
-    console.log(`${one.id.padEnd(17)} ${names.map((n) => show(engines[n][one.id]).padEnd(34)).join("")}`);
-  }
-  console.log("");
-  // Against the oracle when there is one, and between the local engines when
-  // there is not. "Differs from HANA" is the only question that matters; two
-  // local engines agreeing says nothing, as the padding rows proved.
-  const oracle = engines.hana !== undefined ? "hana" : names[0];
-  const others = names.filter((n) => n !== oracle);
-  const nominal = [];
-  const real = [];
-  const unmeasured = [];
-  for (const one of CASES) {
-    // A row the oracle has not answered is NOT a difference - it is a row
-    // nobody has measured, and counting it as a difference is the instrument
-    // reporting its own incompleteness as a finding. Three cases added after
-    // the oracle column was captured did exactly that until this line existed.
-    if (normalise(engines[oracle][one.id]).kind === "missing") {
-      unmeasured.push(one);
-      continue;
+async function main() {
+  const {engines} = await measureEngines();
+
+  // a column measured elsewhere (HANA Express lives on another machine) merges in
+  if (process.argv.includes("--hana")) {
+    try {
+      engines.hana = await runHana();
+    } catch (error) {
+      console.error("hana: " + (error.message ?? error));
     }
-    const differs = others.filter((n) => show(engines[n][one.id]) !== show(engines[oracle][one.id]));
-    const actually = others.filter((n) => !agree(engines[n][one.id], engines[oracle][one.id]));
-    if (differs.length > 0) nominal.push({one, who: differs});
-    if (actually.length > 0) real.push({one, who: actually});
   }
-  const compared = CASES.length - unmeasured.length;
-  console.log(`against ${oracle}: ${nominal.length} of ${compared} rows compared differ nominally, **${real.length} after normalisation**`);
-  if (unmeasured.length > 0) {
-    console.log(`  NOT measured against ${oracle} (re-run the oracle column): ${unmeasured.map((one) => one.id).join(", ")}`);
+  const merged = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
+  if (merged !== undefined) engines.hana = JSON.parse(readFileSync(merged, "utf8")).hana;
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({cases: CASES, ...engines}, null, 1));
+  } else {
+    const names = Object.keys(engines);
+    // the header says which BUILD answered, not only which name: two of these
+    // columns are SQLite and they are not the same SQLite
+    console.log(names.map((n) => `${n}: ${BUILDS[n] ?? "build not recorded"}`).join("\n"));
+    console.log(`case              ${names.map((n) => n.padEnd(34)).join("")}`);
+    for (const one of CASES) {
+      console.log(`${one.id.padEnd(17)} ${names.map((n) => show(engines[n][one.id]).padEnd(34)).join("")}`);
+    }
+    console.log("");
+    // Against the oracle when there is one, and between the local engines when
+    // there is not. "Differs from HANA" is the only question that matters; two
+    // local engines agreeing says nothing, as the padding rows proved.
+    const oracle = engines.hana !== undefined ? "hana" : names[0];
+    const others = names.filter((n) => n !== oracle);
+    const nominal = [];
+    const real = [];
+    const unmeasured = [];
+    for (const one of CASES) {
+      // A row the oracle has not answered is NOT a difference - it is a row
+      // nobody has measured, and counting it as a difference is the instrument
+      // reporting its own incompleteness as a finding. Three cases added after
+      // the oracle column was captured did exactly that until this line existed.
+      if (normalise(engines[oracle][one.id]).kind === "missing") {
+        unmeasured.push(one);
+        continue;
+      }
+      const differs = others.filter((n) => show(engines[n][one.id]) !== show(engines[oracle][one.id]));
+      const actually = others.filter((n) => !agree(engines[n][one.id], engines[oracle][one.id]));
+      if (differs.length > 0) nominal.push({one, who: differs});
+      if (actually.length > 0) real.push({one, who: actually});
+    }
+    const compared = CASES.length - unmeasured.length;
+    console.log(`against ${oracle}: ${nominal.length} of ${compared} rows compared differ nominally, **${real.length} after normalisation**`);
+    if (unmeasured.length > 0) {
+      console.log(`  NOT measured against ${oracle} (re-run the oracle column): ${unmeasured.map((one) => one.id).join(", ")}`);
+    }
+    // per engine, because "nine rows differ" is not a number anybody can act
+    // on: one engine may account for all of them
+    const comparable = CASES.filter((one) => normalise(engines[oracle][one.id]).kind !== "missing");
+    for (const name of others) {
+      const nom = comparable.filter((one) => show(engines[name][one.id]) !== show(engines[oracle][one.id])).length;
+      const act = comparable.filter((one) => !agree(engines[name][one.id], engines[oracle][one.id])).length;
+      console.log(`  ${name.padEnd(8)} ${nom} nominal, ${act} real`);
+    }
+    const formattingOnly = nominal.filter((n) => !real.some((r) => r.one.id === n.one.id));
+    if (formattingOnly.length > 0) {
+      console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
+    }
+    for (const {one, who} of real) console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${one.why}`);
+    console.log("\nA count is not the verdict. Each differing row needs a class -");
+    console.log("native / rewrite / typed / compat / host / refuse - and the HANA");
+    console.log("column has to be merged in before any of them can be assigned.");
   }
-  // per engine, because "nine rows differ" is not a number anybody can act
-  // on: one engine may account for all of them
-  const comparable = CASES.filter((one) => normalise(engines[oracle][one.id]).kind !== "missing");
-  for (const name of others) {
-    const nom = comparable.filter((one) => show(engines[name][one.id]) !== show(engines[oracle][one.id])).length;
-    const act = comparable.filter((one) => !agree(engines[name][one.id], engines[oracle][one.id])).length;
-    console.log(`  ${name.padEnd(8)} ${nom} nominal, ${act} real`);
-  }
-  const formattingOnly = nominal.filter((n) => !real.some((r) => r.one.id === n.one.id));
-  if (formattingOnly.length > 0) {
-    console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
-  }
-  for (const {one, who} of real) console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${one.why}`);
-  console.log("\nA count is not the verdict. Each differing row needs a class -");
-  console.log("native / rewrite / typed / compat / host / refuse - and the HANA");
-  console.log("column has to be merged in before any of them can be assigned.");
+
 }
+
+if (basename(process.argv[1] ?? "") === "sqlscript-conformance.mjs") await main();

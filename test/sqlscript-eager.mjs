@@ -102,7 +102,12 @@ describe("a refused statement is never agreement", () => {
 
   it("but a syntax or binder error is our defect and must not pass as agreement", () => {
     for (const message of ["Parser Error: syntax error at or near", "Binder Error: column K does not exist",
-                           "no such function: TO_INTEGER", "Catalog Error: Table with name SRC does not exist"]) {
+                           "no such function: TO_INTEGER", "Catalog Error: Table with name SRC does not exist",
+                           // HANA's own wording, which none of the above matched: a refusal
+                           // that read as a raise, and two of them as agreement
+                           "invalid table name: Could not find table/view T in schema OSD: line 1 col 15",
+                           "invalid identifier: NOPE: line 1 col 8 (at pos 7)",
+                           "invalid column name: V"]) {
       expect(isInvalid(message), message).to.equal(true);
       const verdict = compare({raised: message}, {raised: message});
       expect(verdict.agree, message).to.equal(false);

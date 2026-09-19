@@ -234,3 +234,49 @@ would have had to be right in every future statement; a connection that means
 the same thing by `LIKE` as HANA does has to be right once. It also makes the
 emulation more faithful everywhere else, because Open SQL's `LIKE` on a real
 system is case-sensitive too.
+
+## The oracle answered every row, and seven of fifteen were one decision
+
+*2026-09-19. The HANA column had owed fifteen rows for three sessions. It was
+not laziness: `runHana()` carried its own copy of the fixture DDL, two
+columns were added to the other two engines for the LIKE and narrow-cast
+rows, and HANA's table kept the old thirteen. The next `--hana` run did not
+skip those rows -- it failed on the INSERT and **lost the entire column**,
+which reads exactly like "nobody has run it yet". One column list now writes
+all three DDLs, and a count of values per row fails where the mistake is
+made rather than five minutes into a run on another machine.*
+
+With all 33 rows measured on HANA 2.00.088, against the fixture as our
+runtime writes it today:
+
+| engine | differs from HANA, padded | differs from HANA, unpadded |
+| --- | --- | --- |
+| DuckDB | 11 | 4 |
+| sql.js (browser) | 15 | 8 |
+| node:sqlite (server) | 15 | 8 |
+
+**Seven divergences per engine are one decision.** `concat_padded`,
+`substr_padded`, `length_padded`, `char_equals`, `fn_upper`, `fn_ltrim` and
+`fn_min` all agree with HANA the moment the fixture stops padding. HANA holds
+`'abc'` in an `NCHAR(10)` and answers `LENGTH` **3**: it does not store the
+blanks, so every question asked about them differed for one reason and not
+seven. The measurement is now on both sides of that boundary
+(`--unpadded`), which is what turns "we should stop padding" from a plan
+into a number.
+
+It also clears three names that were under suspicion. `UPPER`, `LTRIM` and
+`MIN` are in the lowering's `PORTABLE` list, they differed from HANA on the
+padded fixture, and they differ for the padding and not for themselves. The
+list survives the oracle -- **measured**, which is the only way it was ever
+going to be worth having.
+
+Two rows are ours and remain open: `div_zero` (HANA raises; sql.js cannot,
+by decision) and `cast_round` on DuckDB (answered in the dialect). `fn_log`
+is not a divergence to fix -- it is the row that keeps the two SQLite
+columns honest, and HANA's answer to it is a **refusal**: `LOG(10)` is
+"wrong number of arguments", because HANA's `LOG` takes a base. That refusal
+is also what found the last defect of the day: the table classified it as the
+engine rejecting the **data**, because `normalise()` carried a second copy of
+the "was the statement refused" predicate and only the copy in
+`sqlscript-eager.mjs` had ever been taught HANA's wording. Two copies of a
+predicate is one predicate and one stale opinion.

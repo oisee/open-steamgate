@@ -150,7 +150,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 }
 
 /** the SQL type to declare a column as, per dialect, from our own type shape */
-function declaredAs(type, dialect) {
+export function declaredAs(type, dialect) {
   const abap = (type?.abap ?? "C").toUpperCase();
   // STRING before the letter test, and this is not pedantry: the letters are
   // single characters, "STRING" is a word, and `charAt(0)` turned it into
@@ -158,11 +158,17 @@ function declaredAs(type, dialect) {
   // the hazard row could not be inserted at all. A test on the first letter
   // is wider than the letters it means, which is the same shape as a suffix
   // test being wider than the filename it means, one day earlier.
-  if (abap === "STRING") return "VARCHAR";
+  // HANA has no bare VARCHAR: written without a length it is a length of
+  // ONE, and the invented fixture failed on its first live run with
+  // "inserted value too large for column" over the two-character value 'aa'.
+  // A type that is legal everywhere and means something else in one place is
+  // worse than one that is refused, because it runs.
+  const text = dialect === "hana" ? "NVARCHAR(100)" : "VARCHAR";
+  if (abap === "STRING") return text;
   const letter = abap.charAt(0);
   if (["I", "B", "S"].includes(letter)) return "INTEGER";
   if (["P", "F"].includes(letter)) return dialect === "sqlite" ? "NUMERIC" : "DECIMAL(15,2)";
-  return "VARCHAR";
+  return type?.len !== undefined && dialect === "hana" ? `NVARCHAR(${Math.max(Number(type.len), 1)})` : text;
 }
 
 /**
@@ -182,7 +188,7 @@ function declaredAs(type, dialect) {
  * body returns what it returns on a real system, because the data is not the
  * real data - and no amount of care here can make it so.
  */
-export async function runOnInventedTables(client, rel, dialect, {rows = 3} = {}) {
+export async function withInventedTables(client, rel, dialect, {rows = 3} = {}, measure) {
   const shapes = tableShapesFor(rel);
   if (shapes.tables.length === 0) {
     return {skipped: "the plan reads no table, so there is nothing to invent"};
@@ -242,19 +248,37 @@ export async function runOnInventedTables(client, rel, dialect, {rows = 3} = {})
     // measurement's own.
     stage = "commit the fixture";
     await client.commit?.();
-    stage = "plant the hazard";
+    stage = "the measurement";
+    const verdict = await measure({table, schema, shapes, quote, stageIs: (s) => { stage = s; }});
+    return {...verdict, invented: {table, columns: schema, guessed: shapes.guessed}};
+  }
+}
+
+/**
+ * The original use of the scaffolding above: plant a hazard row the body
+ * removes, then run the plan fused and forced and compare.
+ *
+ * It is a caller now rather than the whole function because a second
+ * instrument wants the same invented fixture and a different measurement on
+ * it - tools/sqlscript-vs-hana.mjs, which runs the body's own SQLScript
+ * against our lowering of it on one engine. Two measurements over one
+ * scaffold, instead of a second copy of the scaffold that drifts.
+ */
+export async function runOnInventedTables(client, rel, dialect, options = {}) {
+  return withInventedTables(client, rel, dialect, options, async ({table, schema, stageIs}) => {
+    stageIs("plant the hazard");
     // The hazard row has to be one the body REMOVES, or both halves evaluate
     // the dangerous expression and both raise - which agrees, and says
     // nothing. The plan already knows which value is removed: a predicate
     // `col <> literal` names it exactly. Derived rather than asked for,
     // because the caller would be guessing at the same thing from outside.
     const {planted, unplanted} = await plantHazards(client, rel, {table, schema, fill: fillThatIsFilteredOut(rel)});
-    stage = "commit the hazard";
+    stageIs("commit the hazard");
     await client.commit?.();
-    stage = "run both ways";
+    stageIs("run both ways");
     const verdict = await runBothWays(client, rel, dialect);
-    return {...verdict, invented: {table, columns: schema, guessed: shapes.guessed}, planted, unplanted};
-  }
+    return {...verdict, planted, unplanted};
+  });
 }
 
 /** ordinary values, varied a little so a filter has something to remove */

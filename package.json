@@ -69,7 +69,9 @@
     "naming": "node tools/osd-naming-scan.mjs",
     "replay": "node tools/osd-replay.mjs",
     "leak:all": "node tools/osd-leak-scan.mjs . --all",
-    "osd:restart": "sh scripts/osd-restart.sh"
+    "osd:restart": "sh scripts/osd-restart.sh",
+    "conformance:sqlscript": "node tools/sqlscript-conformance.mjs",
+    "conformance:sqlscript:bun": "bun tools/sqlscript-conformance.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",

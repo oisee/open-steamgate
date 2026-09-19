@@ -116,7 +116,19 @@ export async function runEager(client, rel, dialect) {
  * the diagnostics instead of the thing.
  */
 export function isInvalid(message = "") {
-  return /syntax|parse|not exist|unknown|no such|Binder Error|Catalog Error/i.test(message);
+  // Two families, because this list was written from the engines that were
+  // in front of it. DuckDB says "Binder Error" and "does not exist", SQLite
+  // says "no such column" -- and HANA says none of those. It says "invalid
+  // table name", "invalid identifier", "sql syntax error". So on HANA a
+  // refused statement read as a raise, and two refusals read as AGREEMENT,
+  // which is the instrument reporting its own brokenness as a clean result
+  // for the third time on this project. Found by the test for the
+  // HANA-against-HANA comparison before that comparison had ever run
+  // (2026-09-19): the engine a predicate has never seen is the engine it is
+  // wrong about.
+  const portable = /syntax|parse|not exist|unknown|no such|Binder Error|Catalog Error/i;
+  const hana = /invalid (identifier|table name|column name|name of|schema name)|feature not supported|cannot use duplicate|wrong number of arguments/i;
+  return portable.test(message) || hana.test(message);
 }
 
 /** the same rows, or the same raise? and if not, which way round */

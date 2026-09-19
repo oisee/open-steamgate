@@ -415,6 +415,25 @@ export function toIr(tree, options = {}) {
       rel = join(rel, right, on === undefined ? undefined : condition(on),
         hasWord(j, "CROSS") ? "cross" : (hasWord(j, "LEFT") ? "left" : "inner"));
     }
+    // **A clause the parser can read and the binder cannot is worse than one
+    // neither of them has** -- written one function below, about ORDER BY,
+    // and three more clauses were in exactly that state until a HANA ran the
+    // body's own SQLScript beside our lowering of it and the two answers
+    // parted (2026-09-19):
+    //
+    //   SELECT DISTINCT k  ->  SELECT "DISTINCT" AS "K"   (a COLUMN called DISTINCT)
+    //   ... GROUP BY n     ->  the grouping silently gone
+    //   ... HAVING c > 1   ->  the condition moved into the WHERE
+    //
+    // Each of the three parsed, each lowered, and each was therefore counted
+    // as a body that works while computing a different program. Refusing by
+    // name costs one measurement and buys back the meaning of the number.
+    for (const [word, what] of [["DISTINCT", "DISTINCT"], ["GROUP", "GROUP BY"], ["HAVING", "HAVING"]]) {
+      if (hasWord(node, word)) {
+        throw new BindError(`${what} is parsed but not carried into the IR, so this body would lower to a ` +
+          "different program; it is refused until the IR has an aggregate", node);
+      }
+    }
     const where = kid(node, "Condition");
     if (where !== undefined) rel = filter(rel, condition(where));
     const items = kids(node, "SelectItem").map((item) => {
@@ -444,6 +463,18 @@ export function toIr(tree, options = {}) {
     // the columns at the moment of compiling, so adding a column to the
     // table later changes what the body means. That is a quiet dependency on
     // the state of the dictionary dressed up as a convenience.
+    // `SELECT DISTINCT k` parses TWO ways under this grammar -- DISTINCT as
+    // the optional keyword, or DISTINCT as a column with `k` for an alias --
+    // and the second one wins. So the keyword never reaches `hasWord` and the
+    // statement lowers to `SELECT "DISTINCT" AS "K"`, which is a different
+    // program that an engine will happily refuse for the wrong reason. The
+    // ambiguity belongs in the grammar; until it is resolved there, the shape
+    // it produces is refused HERE, by name, rather than lowered.
+    if (items.some((i) => i.expr?.node === "col" && String(i.expr.name).toUpperCase() === "DISTINCT")) {
+      throw new BindError("DISTINCT was read as a column name: the grammar admits two parses of " +
+        "`SELECT DISTINCT x` and takes the wrong one. Refused rather than lowered, because the " +
+        "lowering would select a column called DISTINCT", node);
+    }
     const stars = items.filter((i) => i.expr?.node === "star");
     if (stars.length > 0 && items.length > stars.length) {
       throw new BindError("`*` together with named columns is not lowered: expanding it would fix the set and the order of the columns at compile time, and a column added to the table later would change what this body means", node);
