@@ -11,7 +11,8 @@
 // own converting -- CHAR gets its padding back, which matters because HANA's
 // NVARCHAR has none.
 import {readFileSync, existsSync, writeFileSync, mkdirSync} from "node:fs";
-import {randomBytes} from "node:crypto";
+import {randomBytes, createHash} from "node:crypto";
+import {hostname} from "node:os";
 import {join, dirname} from "node:path";
 import {fromJson} from "./rfc-replay.mjs";
 // **Not a static import.** The preview bundle ignores `amdp-run.mjs` on
@@ -134,6 +135,29 @@ function sandboxPassword() {
   mkdirSync(dirname(file), {recursive: true});
   writeFileSync(file, made + "\n", {mode: 0o600});
   return made;
+}
+
+/** The sandbox user's name, which has to differ per machine.
+ *
+ *  The password is generated once and kept in `~/.osd/amdp-sandbox-password`
+ *  so a restart does not have to drop and recreate the user. That is right
+ *  for one machine and wrong the moment two share one HANA: whoever creates
+ *  `OSD_SBX` first owns it, the second machine finds it already there, does
+ *  not create it, and connects with a password that was never set on it.
+ *  What it gets back is `authentication failed` -- measured 2026-09-19, five
+ *  of them in one run, and nothing in the message says the user belongs to
+ *  somebody else.
+ *
+ *  The shape is the day's: **a decision about a shared thing, taken in code
+ *  that can only see one participant.** A per-machine secret needs a
+ *  per-machine name, so the host is in the name and the two do not collide.
+ *  Hashed rather than spelled out: a host name is an identifier and this one
+ *  is written into a database other people can read.
+ *
+ *  `OSD_AMDP_SANDBOX_USER` still overrides, which is how two sessions on one
+ *  machine get a sandbox each. */
+function defaultSandboxUser() {
+  return "OSD_SBX_" + createHash("sha1").update(hostname()).digest("hex").slice(0, 6).toUpperCase();
 }
 
 export class AmdpDestination {
@@ -261,7 +285,7 @@ export class AmdpDestination {
     }
     if (this.sbx !== undefined) return this.sbx;
 
-    const user = process.env.OSD_AMDP_SANDBOX_USER ?? "OSD_SBX";
+    const user = process.env.OSD_AMDP_SANDBOX_USER ?? defaultSandboxUser();
     const password = sandboxPassword();
     // provisioning needs the privileged connection, and only the first time
     await this.#connect();
@@ -276,7 +300,22 @@ export class AmdpDestination {
     }
     const hdb = (await import("hdb")).default;
     const client = hdb.createClient({...this.settings, user, password});
-    await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
+    await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())))
+      .catch((e) => {
+        // "authentication failed" against a user that is plainly there is the
+        // least informative thing this can say, and it is exactly what one
+        // host gets when another host made the user. Say which of the two it
+        // is, because the fix differs: a wrong password is a password, and a
+        // foreign user is a name.
+        if (n !== 0) {
+          throw new Error(
+            `AMDP: the sandbox user ${user} exists on this HANA but the password held here does ` +
+            `not open it. It was most likely created by another host, since the password is ` +
+            `generated per machine (~/.osd/amdp-sandbox-password). Set OSD_AMDP_SANDBOX_USER to a ` +
+            `name of your own, or OSD_AMDP_SANDBOX_PASSWORD to the one that made it. (${e.message})`);
+        }
+        throw e;
+      });
     this.sbx = {client, user, schema: user, restricted: true};
     return this.sbx;
   }
