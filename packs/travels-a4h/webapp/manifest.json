@@ -19,9 +19,9 @@
     },
     "crossNavigation": {
       "inbounds": {
-        "Travel-manage": {
+        "Travel-manageRemote": {
           "semanticObject": "Travel",
-          "action": "manage",
+          "action": "manageRemote",
           "signature": {
             "parameters": {},
             "additionalParameters": "allowed"

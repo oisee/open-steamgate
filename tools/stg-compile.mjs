@@ -1150,6 +1150,37 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   return report;
 }
 
+/** Everything a compiled project puts in a folder. Lifted out of the CLI
+ *  because a second caller appeared: `osd-abapgit-zip` used to compile a
+ *  YAML by spawning this file with `process.execPath`, which is the one
+ *  thing `test/osd-binary.mjs` forbids -- in a compiled binary
+ *  `process.execPath` is the binary and there is no script beside it, so
+ *  the zip builder worked from a checkout and not from a release. A
+ *  library call has no such seam. */
+export function writeCompiled(result, out) {
+  mkdirSync(out, {recursive: true});
+  for (const [name, content] of Object.entries({...result.files, ...result.classes})) {
+    writeFileSync(join(out, name), content);
+  }
+  // the _EXT pair is the developer's: written once, never overwritten
+  for (const [name, content] of Object.entries(result.ext)) {
+    if (!existsSync(join(out, name))) {
+      writeFileSync(join(out, name), content);
+    }
+  }
+  return {objects: Object.keys(result.files).length, classes: Object.keys(result.classes).length};
+}
+
+/** Compile one `.stg.yaml` into a folder, the way the command does. */
+export function compileFile(file, out, libs = []) {
+  const result = compile(readFileSync(file, "utf8"),
+    {file: basename(file), functionModules: loadFunctionGroups([dirname(file), ...libs])});
+  if (out !== undefined) {
+    writeCompiled(result, out);
+  }
+  return result;
+}
+
 // ------------------------------------------------------------------ CLI
 
 if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
@@ -1182,17 +1213,8 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
     console.log(`  warning: ${w}`);
   }
   if (out) {
-    mkdirSync(out, {recursive: true});
-    for (const [name, content] of Object.entries({...result.files, ...result.classes})) {
-      writeFileSync(join(out, name), content);
-    }
-    // the _EXT pair is the developer's: written once, never overwritten
-    for (const [name, content] of Object.entries(result.ext)) {
-      if (!existsSync(join(out, name))) {
-        writeFileSync(join(out, name), content);
-      }
-    }
-    console.log(`  written to ${out}: ${Object.keys(result.files).length} objects, ${Object.keys(result.classes).length} class files, _EXT pair if it was missing`);
+    const wrote = writeCompiled(result, out);
+    console.log(`  written to ${out}: ${wrote.objects} objects, ${wrote.classes} class files, _EXT pair if it was missing`);
   } else {
     process.stdout.write(result.iwpr);
   }

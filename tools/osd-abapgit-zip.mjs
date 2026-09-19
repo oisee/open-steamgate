@@ -16,8 +16,9 @@
 // `.abapgit.xml` with STARTING_FOLDER /src/ and FOLDER_LOGIC PREFIX, a
 // `src/package.devc.xml`, and every object beside it.
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
-import {execFileSync} from "node:child_process";
 import {basename, join, resolve} from "node:path";
+import {execFileSync} from "node:child_process";
+import {compileFile} from "./stg-compile.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const BOM = "﻿";
@@ -179,10 +180,11 @@ if (runsAs("osd-abapgit-zip.mjs")) {
 
   let objects = input;
   if (input.endsWith(".stg.yaml")) {
+    // a library call and not a spawn: test/osd-binary.mjs forbids starting
+    // another tool by process.execPath and a script path, because in a
+    // compiled binary there is no script beside the executable
     objects = `${out}.objects`;
-    const code = execFileSync(process.execPath,
-      ["tools/stg-compile.mjs", input, "--out", objects], {stdio: "inherit"});
-    void code;
+    compileFile(input, objects);
   } else if (!existsSync(input)) {
     console.error(`no such folder: ${input}`);
     process.exit(2);
