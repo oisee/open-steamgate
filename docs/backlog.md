@@ -1983,6 +1983,72 @@ C.6  Then, and only then, decide whether it goes further                 [A]
 
 ---
 
+## Track R — HTTP carried over RFC, and the ticket that gets us in
+
+*Proposed by Alice 2026-09-19. Ideas, not a plan: what is measured is marked
+as measured and what is a guess says so.*
+
+Track D goes one way -- an RFC client calls **our** function modules. This is
+the other: a server here that speaks ordinary HTTP to a browser and reaches a
+real system **by RFC**, routing the request through function modules instead
+of through that system's ICF port.
+
+**Why it would be worth having.** A service that was never exposed on the
+system's web port is unreachable for us today, and a great deal of what we
+want to test against is exactly that: something switched on inside and not
+published outside. RFC is often open where HTTP is not, and one credential
+then reaches everything the RFC user may call. For testing this collapses
+"ask somebody to publish the service" into "call it".
+
+R.1  **The ticket, from the browser into RFC.**
+     A web logon yields an SSO ticket; the question is whether it can be the
+     RFC logon rather than a password.
+     ├─ **Measured today**: our client is `open-rfc@0.2.3`, and the only
+     │  authentication it names is **SNC** -- a search of the package for
+     │  `mysapsso2`, `ssoticket` or `x509` finds nothing. So forwarding a
+     │  ticket is **not** something we can do with what is installed; it is a
+     │  change in the client or a different client
+     ├─ what has to be measured next, in this order: does the RFC protocol
+     │  carry a ticket at all as a logon parameter, and does `open-rfc`'s
+     │  handshake have a place to put it. The first is a protocol fact and
+     │  the sibling `open-rfc-go` is where to look; the second is our code
+     └─ until both are answered, everything below runs as a named RFC user,
+        which is enough for testing and not enough for anything else
+
+R.2  **The dispatcher: an HTTP request executed through a function module.**
+     ├─ **This is the unknown that decides the track.** It needs a
+     │  remote-enabled function module on the system that will take a method,
+     │  a path, headers and a body, run the ICF handler for that path, and
+     │  give back status, headers and body. Whether such a module exists in a
+     │  stock system is **not known here** and is the first thing to find
+     │  out -- naming a candidate from memory is exactly the mistake this
+     │  backlog keeps recording
+     ├─ if none exists, the fallback is ours to install: one function module
+     │  of our own, deployed the way level 2 already deploys objects, calling
+     │  `cl_http_server`-side dispatch in the system. That turns the track
+     │  from "find the door" into "carry our own", which is slower but
+     │  entirely within what we can already do
+     └─ either way the seam is the same shape as `cl_express_icf_shim`, only
+        with RFC where express is: a request object filled from the wire, a
+        handler, a response read back
+
+R.3  **The local front.** Ordinary `http`/`https` here, so a browser, a test
+     and `abap-adt-api` all speak to it without knowing what is behind. This
+     part is small: we already have the shim, the ICF mount and TLS.
+
+**What it would change, if R.2 has an answer.** Every test that today needs a
+published service could run against a system that publishes nothing. And it
+would make the A4H round trip cheaper than it is now: no `Activate and
+Maintain Services`, no publishing, no waiting for a human at a GUI.
+
+**What to be careful about, said now rather than after.** This is a
+credential that reaches everything the RFC user may call, over a channel that
+is usually open. Destinations stay in `.local/`, the ticket never lands in a
+tracked file, and the front listens on localhost until somebody has thought
+about it properly. The A4H rule is unchanged: only when Alice asks.
+
+---
+
 ## Track D — the RFC gateway: expose every RFC-enabled function module
 
 *The ADT bridge terminates RFC for one function module. Make it a real gateway
