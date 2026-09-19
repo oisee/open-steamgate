@@ -1006,10 +1006,29 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.fld>summary::-webkit-details-marker{display:none}` &&
       `.fld>summary::before{content:"\25B6";color:#5d7186;font-size:9px;width:10px;display:inline-block}` &&
       `.fld[open]>summary::before{content:"\25BC"}` &&
-      `.fld>summary:hover{background:#dbe7f4}` &&
-      `.kids{margin-left:16px;border-left:1px dotted #b9c6d6;padding-left:6px}` &&
+      `.fld>summary:hover{background:#e1f0d2}` &&
+*     Nesting the way SAP Easy Access draws it, measured off three
+*     screenshots of the real screen rather than guessed (2026-09-19).
+*     Two rules, and both are about the subtree, not the row:
+*       - each level's background is one step **lighter**, so the
+*         shallower a level, the greener it is. Written as nested
+*         selectors, so a tree of any depth shades itself and nobody
+*         has to pass a level number into the markup.
+*       - the border is horizontal and sits on the subtree block, which
+*         is why the original shows a line where a level begins and ends
+*         and none between siblings.
+*     Measured: indent 18px = the row height; backgrounds #ECF8E2,
+*     #F3FBED, #F9FEF6 at depths 1-3; rule #B3C69E; the selected row
+*     #E1F0D2. The fourth step is extrapolated by the same delta -- the
+*     screenshots have no fourth level, and it is said here rather than
+*     left to look measured.
+      `.kids{margin-left:18px;padding:0;background:#ecf8e2;`  &&
+      `border-top:1px solid #b3c69e;border-bottom:1px solid #b3c69e}` &&
+      `.kids .kids{background:#f3fbed}` &&
+      `.kids .kids .kids{background:#f9fef6}` &&
+      `.kids .kids .kids .kids{background:#fcfffc}` &&
       `.leaf{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 14px;text-decoration:none;color:#1c2f43;border-radius:2px}` &&
-      `a.leaf:hover{background:#dbe7f4}` &&
+      `a.leaf:hover{background:#e1f0d2}` &&
       `a.leaf:hover .lbl{text-decoration:underline}` &&
       `.leaf.dead{color:#5d7186}` &&
       `.lbl{white-space:nowrap}` &&
