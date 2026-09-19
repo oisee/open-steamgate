@@ -69,12 +69,58 @@ for (const {folder, files} of libraryFiles(root)) {
 }
 say(`${libFiles} library files, so a check in the release sees the system the build compiled`);
 
-// the hosts
-for (const artefact of ["osd", "osd-sea"]) {
-  if (existsSync(join(root, "build", artefact))) {
-    cpSync(join(root, "build", artefact), join(out, artefact));
-    say(`host: ${artefact}`);
+// **The hosts are copied, not built -- so a stale one is refused.**
+//
+// This cost an evening on 2026-09-19. `make-release` writes a `release.json`
+// with the current commit and the time it ran, and copies `build/osd` beside
+// it. The metadata was honest and the binary was four hours old, so a
+// container built from that release ran code from before every fix made that
+// afternoon -- and every conclusion drawn from it was wrong: an explainer
+// that "never fired" was not in the binary, a seed defect "still present
+// after the fix" had never had the fix, and four candidate causes were
+// excluded by reading the CURRENT tree while an OLD one executed.
+//
+// The checksum told the truth in one line (`.local/release/osd` was byte for
+// byte `build/osd`) and nothing else did. So the freshness is checked here,
+// by mtime against the sources the binary is built from, and a stale host is
+// a refusal rather than a warning: a release that quietly ships yesterday's
+// binary is worse than one that will not build.
+const newestSource = () => {
+  let newest = 0;
+  let name = "";
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (/\.(mjs|js|json|cjs)$/.test(entry.name) === false) continue;
+      const at = statSync(full).mtimeMs;
+      if (at > newest) { newest = at; name = relative(root, full); }
+    }
+  };
+  for (const dir of ["bin", "tools", "scripts"]) {
+    const full = join(root, dir);
+    if (existsSync(full)) walk(full);
   }
+  return {at: newest, name};
+};
+
+const source = newestSource();
+for (const artefact of ["osd", "osd-sea"]) {
+  const from = join(root, "build", artefact);
+  if (existsSync(from) === false) continue;
+  const built = statSync(from).mtimeMs;
+  if (built < source.at) {
+    throw new Error(
+      `build/${artefact} is older than the code it is built from: it was made ` +
+      `${new Date(built).toISOString()} and ${source.name} changed ` +
+      `${new Date(source.at).toISOString()}. Copying it would put a release ` +
+      `together whose release.json names this commit and whose binary does not ` +
+      `contain it -- which is how an evening was spent testing code that was ` +
+      `not running. Build it first: npm run binary`);
+  }
+  cpSync(from, join(out, artefact));
+  say(`host: ${artefact}, built ${new Date(built).toISOString()}`);
 }
 if (existsSync(join(root, "build", "osd-node", "osd.mjs"))) {
   cpSync(join(root, "build", "osd-node", "osd.mjs"), join(out, "osd.mjs"));
