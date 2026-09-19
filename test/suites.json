@@ -52,6 +52,7 @@
     "test/segw-shlp.mjs",
     "test/segw-tree.mjs",
     "test/segw.mjs",
+    "test/segw-corpus.mjs",
     "test/sql-trace-buffer.mjs",
     "test/sql-trace.mjs",
     "test/sqlscript-canary.mjs",

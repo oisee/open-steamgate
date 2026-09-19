@@ -42,7 +42,10 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
 
   it("is deterministic: the same file gives the same tree", () => {
     expect(compile(source).iwpr).to.equal(result.iwpr);
-    expect(result.iwpr).to.match(/<NODE_UUID>[A-Za-z0-9+/]{22}==<\/NODE_UUID>/);
+    // a node id is base64 of 16 bytes, so 22 significant characters and "==";
+    // the "==" is a consequence of the byte count, not something stapled on --
+    // it used to be, and 55 of 59 ids decoded with non-zero padding bits
+    expect(result.iwpr).to.match(/<NODE_UUID>[A-Za-z0-9+/]{21}[AEIMQUYcgkosw048]==<\/NODE_UUID>/);
   });
 
   it("writes the tree the way SEGW does: its fields, in its order, so segw-tree imports and exports it byte for byte", () => {

@@ -99,7 +99,11 @@ export function exportIwpr(tables, project, spec) {
     }
     body += `   </_-IWBEP_-I_${tag}>\n`;
   }
-  return `<?xml version="1.0" encoding="utf-8"?>
+  // A BOM: every real IWPR has one (EF BB BF on all 44 corpus files and on
+  // everything abapGit wrote for S_APS_ODATA_GBT_NTE). Without it the round
+  // trip here loses a byte it was given, which is how the defect showed:
+  // import kept the BOM and export dropped it.
+  return `\ufeff<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>

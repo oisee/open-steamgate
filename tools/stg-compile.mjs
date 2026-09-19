@@ -612,9 +612,22 @@ function clasXml(name, description) {
 
 // ----------------------------------------------------------------- IWPR
 
-// a stable 22-character node id in the shape SEGW uses (base64 of a GUID)
+/** A stable node id in the shape SEGW uses: base64 of a 16-byte GUID.
+ *
+ *  **It is the bytes that are cut to 16, not the text to 22.** This used to
+ *  take the first 22 characters of a base64 digest and staple "==" on, which
+ *  produces a string of the right length and the wrong content: base64 only
+ *  ends in "==" when the last significant character has its low four bits
+ *  clear, and a sliced digest does not care. 55 of our 59 node ids decoded
+ *  with non-zero padding bits; all 60 in a real export were canonical.
+ *  abapGit answered "Error during deserialization" and named no field, which
+ *  is what a decoder does when it refuses input it cannot describe.
+ *
+ *  Sixteen bytes of a sha1 digest encode to exactly 24 characters ending in
+ *  "==", by construction -- so the shape is a consequence rather than
+ *  something arranged afterwards. */
 function nodeId(...parts) {
-  return createHash("sha1").update(parts.join("")).digest("base64").slice(0, 22) + "==";
+  return createHash("sha1").update(parts.join("")).digest().subarray(0, 16).toString("base64");
 }
 
 const X = (b) => (b ? "X" : "");
@@ -832,7 +845,12 @@ export function iwprXml(m, opts = {}) {
   for (const tag of Object.keys(rows).sort()) {
     body += table(tag, rows[tag]);
   }
-  return `<?xml version="1.0" encoding="utf-8"?>
+  // A BOM, because every real export has one: `EF BB BF` on all 44 corpus
+  // files and on everything abapGit wrote for S_APS_ODATA_GBT_NTE. The class
+  // XML above already had it, these three did not, and zcl_stg_segw_repo adds
+  // one on the ABAP side -- so the two implementations differed here too, in
+  // a place the test that holds them byte-identical does not look.
+  return `\ufeff<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
@@ -845,7 +863,12 @@ ${body}  </asx:values>
 // --------------------------------------------------------- IWSV / IWMO
 
 export function iwsvXml(m) {
-  return `<?xml version="1.0" encoding="utf-8"?>
+  // A BOM, because every real export has one: `EF BB BF` on all 44 corpus
+  // files and on everything abapGit wrote for S_APS_ODATA_GBT_NTE. The class
+  // XML above already had it, these three did not, and zcl_stg_segw_repo adds
+  // one on the ABAP side -- so the two implementations differed here too, in
+  // a place the test that holds them byte-identical does not look.
+  return `\ufeff<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_IWSV" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
@@ -881,7 +904,12 @@ export function iwsvXml(m) {
 }
 
 export function iwmoXml(m) {
-  return `<?xml version="1.0" encoding="utf-8"?>
+  // A BOM, because every real export has one: `EF BB BF` on all 44 corpus
+  // files and on everything abapGit wrote for S_APS_ODATA_GBT_NTE. The class
+  // XML above already had it, these three did not, and zcl_stg_segw_repo adds
+  // one on the ABAP side -- so the two implementations differed here too, in
+  // a place the test that holds them byte-identical does not look.
+  return `\ufeff<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_IWMO" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
