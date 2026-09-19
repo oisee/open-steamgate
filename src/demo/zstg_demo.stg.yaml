@@ -40,7 +40,7 @@ entities:
       TravelId: {type: String(8), field: TRAVEL_ID, label: Travel}
       BookingId: {type: String(4), field: BOOKING_ID, label: Booking}
       Customer: {type: String(40), label: Customer}
-      FlightDate: {type: DateTime, digits: 0, field: FLIGHT_DATE, label: Flight date}
+      FlightDate: {type: Date, field: FLIGHT_DATE, label: Flight date}
 
   # a media entity: its content is a stream, read and written at
   # PhotoSet('T0001')/$value through the DPC's GET_STREAM / UPDATE_STREAM
@@ -64,7 +64,23 @@ entities:
     updatable: false
     deletable: false
     searchable: true
-    operations: [R, Q]
+    # The tree says where the values come from, because the code already
+    # did. STATUSVHSET_GET_ENTITYSET calls the search-help runtime through
+    # /IWBEP/IF_SB_GENDPC_SHLP_DATA, and a class may only call an interface
+    # it implements -- A4H: "the class ZCL_..._DPC_EXT does not contain an
+    # interface /IWBEP/IF_SB_GENDPC_SHLP_DATA" (2026-09-19). SEGW puts that
+    # INTERFACES line in the generated _DPC when, and only when, the project
+    # maps a search help, which is measured: 8 corpus DPCs declare
+    # IF_SB_DPC_COMM_SERVICES and IF_SB_GEN_DPC_INJECTION and none declares
+    # this one; SAP's own /IWBEP/CL_GWSAMPLE_BAS_DPC, which has value helps,
+    # declares all three. So the fix is not a line in a class, it is the
+    # data source the model was missing.
+    operations:
+      read:
+      query:
+        searchhelp: ZSTG_STATUS_SH
+        in: {Status: STATUS}
+        out: {Status: "RESULT_LIST\\STATUS", Text: "RESULT_LIST\\STATUS_TEXT"}
     properties:
       Status: {type: String(1), readonly: true, label: Status}
       # the DDIC column is STATUS_TEXT; the OData property stays Text. The

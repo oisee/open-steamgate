@@ -61,8 +61,18 @@ import SPEC from "../src/segw/segw-tables.json" with {type: "json"};
 
 // ------------------------------------------------------------- the model
 
+// `date` and `datetime` are the same Edm type and not the same ABAP type,
+// which is the whole reason `date` exists. OData V2 has one temporal type,
+// so a model that only names Edm types cannot say which of the two a field
+// is, and the generated structure component came out TIMESTAMP for a column
+// that is DATS -- A4H refused to activate the DPC over it (2026-09-19,
+// "the data type of the component FLIGHT_DATE ... is not compatible").
+// SEGW says it in the tree instead: TYPE_KIND D, LENGTH 8 and a TYPE_NAME,
+// which is what three date properties in SAP's own sample projects carry
+// (EPM_DEVELOPER_SCENARIO, S_EPM_SADL_GW_DEV_SCEN_TX).
 const EDM = {
   string: "Edm.String", int32: "Edm.Int32", int16: "Edm.Int16", int64: "Edm.Int64", boolean: "Edm.Boolean", datetime: "Edm.DateTime",
+  date: "Edm.DateTime",
   decimal: "Edm.Decimal", guid: "Edm.Guid", time: "Edm.Time", byte: "Edm.Byte", double: "Edm.Double", binary: "Edm.Binary", datetimeoffset: "Edm.DateTimeOffset",
 };
 
@@ -80,7 +90,16 @@ function parseTypeText(text) {
   if (m === null) {
     throw new Error(`cannot read the type ${JSON.stringify(text)}`);
   }
+  const spelling = String(m[1]).replace(/^Edm\./, "").toLowerCase();
   const type = edmType(m[1]);
+  if (spelling === "date") {
+    // The ABAP side of a date, in SEGW's own shape. SYDATE and not SYDATUM:
+    // the corpus shows SYDATUM, both are DATS(8) and only SYDATE is in
+    // open-abap-core and in the S/4 2022 data-element dump, so this one
+    // generates code that compiles here as well as on a system. A property
+    // may still name its own data element with `typeName:`.
+    return {type, typeName: "SYDATE", typeKind: "D", abapLength: "8"};
+  }
   if (type === "Edm.Decimal" || type === "Edm.DateTime") {
     return {type, digits: m[2] ?? "", scale: m[3] ?? ""};
   }
@@ -96,6 +115,7 @@ function property(name, spec, isKey, complexTypes = []) {
       throw new Error(`${name}: a complex property cannot be a key`);
     }
     return {name, field: s.field ?? name.toUpperCase(), isKey: false, complexType: String(s.type), type: "", length: "", digits: "", scale: "",
+      typeName: "", typeKind: "", abapLength: "",
       creatable: false, updatable: false, sortable: false, nullable: false, filterable: false, label: "", semantics: "", unicode: true};
   }
   const t = parseTypeText(s.type ?? "String");
@@ -109,6 +129,9 @@ function property(name, spec, isKey, complexTypes = []) {
     length: s.length !== undefined ? String(s.length) : t.length ?? "",
     digits: s.digits !== undefined ? String(s.digits) : t.digits ?? "",
     scale: s.scale !== undefined ? String(s.scale) : t.scale ?? "",
+    typeName: s.typeName ?? t.typeName ?? "",
+    typeKind: t.typeKind ?? "",
+    abapLength: t.abapLength ?? "",
     creatable: flag("creatable", !readonly),
     updatable: flag("updatable", !readonly && !isKey),
     sortable: flag("sortable", true),
@@ -750,6 +773,7 @@ export function iwprXml(m, opts = {}) {
       PROJECT: P, NODE_UUID: uuid, PARENT_UUID: parent, NAME: p.name, IS_KEY: X(p.isKey), CREATABLE: X(p.creatable), UPDATABLE: X(p.updatable),
       SORTABLE: X(p.sortable), FILTERABLE: X(p.filterable), IS_NULLABLE: X(p.nullable), MAX_LENGTH: p.length, PROP_PRECISION: p.digits, SCALE: p.scale,
       SEMANTICS: p.semantics, EDM_CORE_TYPE: p.type, REF_TYPE: "T", ABAP_FIELD: p.field, ABTY_XU: "X", SORT_ORDER: String(p.order),
+      TYPE_NAME: p.typeName ?? "", TYPE_KIND: p.typeKind ?? "", LENGTH: p.abapLength ?? "",
       IS_UNICODE_XU: X(!p.unicode), DESCRIPTION_XU: "X",
     });
   for (const c of m.complexTypes ?? []) {
@@ -998,7 +1022,7 @@ export function iwmoXml(m) {
 // `zui5_code_search_srv` at 39, and the first "fix" made the second wrong.
 // Taking one measurement and generalising it over a second object type is
 // how a correct fixture gets edited to match a broken generator.
-const KEY_WIDTH = {".iwsv.xml": 35, ".iwmo.xml": 32, ".iwvb.xml": 32};
+export const KEY_WIDTH = {".iwsv.xml": 35, ".iwmo.xml": 32, ".iwvb.xml": 32};
 const objectFile = (name, ext) => name.toLowerCase().replaceAll("/", "#") + ext;
 const versionedFile = (name, ext) => {
   const width = KEY_WIDTH[ext];

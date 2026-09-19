@@ -91,7 +91,14 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'TravelId' iv_abap_fieldname = 'TRAVEL_ID' ). \"#EC NOTEXT\nlo_property->set_is_key( ).\nlo_property->set_label_from_text_element(");
     expect(mpc).to.contain("lo_property->set_type_edm_string( ).\nlo_property->set_maxlength( iv_max_length = 8 ). \"#EC NOTEXT");
     expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'FlightDate' iv_abap_fieldname = 'FLIGHT_DATE' ). \"#EC NOTEXT\nlo_property->set_label_from_text_element(");
-    expect(mpc).to.contain("lo_property->set_type_edm_datetime( ).\nlo_property->set_precison( iv_precision = 0 ). \"#EC NOTEXT");
+    // A date is an Edm.DateTime with no precision and an ABAP type behind
+    // it, which is what SAP's own sample projects carry for one
+    // (TYPE_KIND D, LENGTH 8, a TYPE_NAME; no PROP_PRECISION). The
+    // timestamp shape -- set_precison( 0 ) and a TIMESTAMP component -- is
+    // what A4H refused to activate the DPC over, because the column is DATS.
+    expect(mpc).to.contain("lo_property->set_type_edm_datetime( ).\nlo_property->set_creatable( abap_true ).");
+    expect(mpc).to.not.contain("set_precison( iv_precision = 0 )");
+    expect(mpc, "the structure component is a date, not a timestamp").to.contain("FLIGHT_DATE type SYDATE,");
     expect(mpc).to.contain("lo_entity_set->set_has_ftxt_search( abap_true ).");
     expect(mpc).to.contain("lo_association = model->create_association(\n                            iv_association_name = 'TravelToBookings' \"#EC NOTEXT\n                            iv_left_type        = 'Travel' \"#EC NOTEXT\n                            iv_right_type       = 'Booking' \"#EC NOTEXT\n                            iv_right_card       = 'N' \"#EC NOTEXT\n                            iv_left_card        = '1'  \"#EC NOTEXT");
     expect(mpc).to.contain("lo_ref_constraint->add_property( iv_principal_property = 'TravelId'   iv_dependent_property = 'TravelId' ). \"#EC NOTEXT");
