@@ -19,8 +19,21 @@ describe("tools/osd-xref: the cross-reference, derived from the parse", () => {
 
   it("a function module call becomes a CROSS row of type F", () => {
     const callers = where(tables.cross.filter((r) => r.TYPE === "F"), "BAPI_TRANSACTION_COMMIT");
-    expect(callers).to.include("ZCL_ZSTG_MAPPED_DPC");
-    // the generated DPCs call it, the hand-written gateway does not
+    // **Named after an object the BUILD produces.**
+    //
+    // This used to name `ZCL_ZSTG_MAPPED_DPC`, which lives only in
+    // `gen/segw-editor/` -- a folder the SEGW editor's "Save to gen/" dev
+    // route writes when somebody presses a button, and which
+    // `abap_transpile.json` excludes from the build. So the test passed on a
+    // machine where a human had once used the editor and failed in a fresh
+    // worktree, which is where it was found (2026-09-19).
+    //
+    // `ZCL_ZOSD_STATUS_DPC` comes out of `stg-compile --all`, which runs in
+    // `transpile`, so it is in every built tree.
+    expect(callers).to.include("ZCL_ZOSD_STATUS_DPC");
+    // and the claim underneath the name: the generated DPCs call it, the
+    // hand-written gateway does not
+    expect(callers.filter((c) => /_DPC(_EXT)?$/.test(c)).length).to.be.greaterThan(1);
     expect(callers).to.not.include("ZCL_STG_DISPATCHER");
   });
 

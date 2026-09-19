@@ -128,7 +128,21 @@ describe("tools/segw-tables + tools/segw-tree: the project tree as tables", () =
       const tables = importIwpr(xml, spec);
       expect(exportIwpr(tables, projectOf(tables), spec), file).to.equal(xml);
     }
-    // and the spec is what those files say
+  });
+
+  // **A partial corpus is not a small corpus, it is another question.**
+  //
+  // These were one test, guarded by `files.length === 0`. The round trip is
+  // true of any file taken one at a time, so one file passes that guard --
+  // and the line below needs the WHOLE corpus the tracked spec was derived
+  // from (21 projects). Measured in a fresh worktree, where `.local/corpus`
+  // and `.local/corpus-sap` do not exist and `.local/lars` contributes one
+  // IWPR: the guard let it through and the comparison failed, naming 21
+  // tables against 52. On a differently partial machine it could instead
+  // have PASSED, having derived the spec from almost nothing.
+  //
+  // So the two claims are separated and the second says what it needs.
+  (existsSync(".local/corpus") ? it : it.skip)("and the spec is what the corpus says (needs .local/corpus)", () => {
     expect(derive(corpus).spec).to.deep.equal(spec);
   });
 });
