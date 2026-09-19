@@ -221,6 +221,13 @@ describe("SQLScript IR: the schema a typer reads, and where it comes from", () =
     expect(() => schemaOf(rel, catalogue)).to.throw(/do not have the same columns/);
   });
 
+  it("a materialised relation carries the schema of the plan that made it", async () => {
+    const {refTo} = await import("../tools/sqlscript-ir.mjs");
+    const made = {K: T.char(3)};
+    expect(schemaOf(filter(refTo("H1", made), bin("=", col("K"), lit("a", T.char(1)), T.bool)), {}))
+      .to.deep.equal(made);
+  });
+
   it("an expression with no measured rule refuses instead of inventing one", () => {
     expect(() => typeOfExpr({node: "bin", op: "+", left: col("N"), right: col("N")}, {N: T.int}))
       .to.throw(/no rule has been measured/);

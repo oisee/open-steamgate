@@ -71,6 +71,18 @@ export const scan = (table) => ({rel: "scan", table});
 export const varRef = (name) => ({rel: "var", name});
 /** a relation the seam already knows by name (a barrier materialised it) */
 export const ref = (handle) => ({rel: "ref", handle});
+
+/**
+ * The same, with the schema of the plan that was materialised.
+ *
+ * Use this one in the binder. A `ref` is the only node whose columns cannot
+ * be derived from anything below it - there is nothing below it - so the
+ * schema has to be carried, and the moment it is known is the moment the
+ * barrier is created. `schemaOf` refuses a bare `ref` rather than guessing,
+ * which is correct and also easy to hit; this exists so it is easier to do
+ * the right thing than the wrong one.
+ */
+export const refTo = (handle, schema) => ({rel: "ref", handle, schema});
 export const filter = (input, pred) => ({rel: "filter", input, pred});
 export const project = (input, items) => ({rel: "project", input, items});
 export const join = (left, right, on, kind = "inner") => ({rel: "join", left, right, on, kind});
