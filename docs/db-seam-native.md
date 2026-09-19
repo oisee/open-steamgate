@@ -193,12 +193,24 @@ feature not supported: param is not allowed in DDL statement
 DuckDB and sql.js take the parameter in the one statement. HANA does it in
 two, which DML makes legal:
 
-1. `CREATE COLUMN TABLE t AS (<the select, every placeholder replaced by a
-   typed NULL>) WITH NO DATA` — the columns and their types, nothing executed;
+1. `CREATE COLUMN TABLE t (<columns>)`, where the columns are **HANA's own
+   inference on the real statement**, read off a prepare;
 2. `INSERT INTO t (<the real select>)` with the values bound.
 
-The substitution is `shapeWithoutParameters()` in `tools/hana-client.mjs`. It
-scans rather than replaces blindly: a `?` inside a string literal, a quoted
-identifier or a comment is content and is left alone. Getting that wrong would
-change the program instead of its shape, which is why it has its own tests and
-why they run without a database.
+The first version of step 1 built a shape query instead: the same select with
+every placeholder standing in as a typed NULL taken from the parameter's
+declared type, created `WITH NO DATA`. fable-osd named the hazard before it
+shipped, and measuring it made it worse than the description — the column
+would be typed by the **stand-in** while the rows arrive from the **value**,
+and an expression around the parameter can widen the type between them:
+
+| | fused | forced, with an INTEGER stand-in |
+| --- | --- | --- |
+| `? + 1` over `1.5` | `2.5` | **`2`** |
+
+Silent, and the forced half of the comparison would have carried a divergence
+the instrument itself invented — which is the one failure a divergence
+instrument cannot have. The fix is not a better guess: HANA works the types
+out at prepare time, parameters and all, so asking it removes the guess. A
+type code it returns and we cannot name is refused rather than approximated,
+and that translation has its own tests, which run without a database.

@@ -165,31 +165,37 @@ describe("a materialised relation may carry its values, and a definition may not
   });
 });
 
-// The one function in the two-step HANA path that can silently change a
-// program rather than its shape, tested without a database.
-describe("HANA takes no parameter in DDL, so the shape query stands one in", () => {
-  it("replaces a placeholder with a typed NULL, per the value's own type", async () => {
-    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
-    const shape = shapeWithoutParameters("SELECT K FROM T WHERE A >= ? AND N = ? AND P > ?",
-      [{type: "I"}, {type: "C(3)"}, {type: "P(15,2)"}]);
-    expect(shape).to.equal(
-      "SELECT K FROM T WHERE A >= CAST(NULL AS INTEGER) AND N = CAST(NULL AS NVARCHAR(3)) AND P > CAST(NULL AS DECIMAL(15,2))");
+// The two-step HANA path types its table from HANA's own inference on the
+// real statement, so there is nothing here to guess. What is left to test
+// without a database is the one translation: a wire type code into a name a
+// CREATE TABLE accepts.
+//
+// The first version guessed instead, from the parameter's declared type, and
+// fable-osd named the hazard before it shipped: the column typed by the
+// stand-in, the rows arriving from the value, and an expression between them
+// able to widen the type. Measured on HANA Express and silent -- with an
+// INTEGER stand-in, `? + 1` over 1.5 stored 2 where the fused half answers
+// 2.5, so the forced half would have carried a divergence the instrument
+// invented. The fix was not a better guess; it was to stop guessing.
+describe("a wire type code becomes a type a CREATE TABLE accepts", () => {
+  it("carries the size where the type has one, and nothing where it does not", async () => {
+    const {hanaColumnType} = await import("../tools/hana-client.mjs");
+    expect(hanaColumnType({dataType: 3, length: 10, fraction: 0})).to.equal("INTEGER");
+    expect(hanaColumnType({dataType: 11, length: 3, fraction: 0})).to.equal("NVARCHAR(3)");
+    expect(hanaColumnType({dataType: 5, length: 16, fraction: 2})).to.equal("DECIMAL(16,2)");
+    expect(hanaColumnType({dataType: 14})).to.equal("DATE");
   });
 
-  it("leaves a question mark that is content alone, in a literal, a name or a comment", async () => {
-    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
-    const sql = `SELECT '?' AS "WHY?" FROM T -- ? really\n WHERE A = ? /* ? */`;
-    const shape = shapeWithoutParameters(sql, [{type: "I"}]);
-    expect(shape).to.contain(`'?'`);
-    expect(shape).to.contain(`"WHY?"`);
-    expect(shape).to.contain("-- ? really");
-    expect(shape).to.contain("/* ? */");
-    expect(shape).to.contain("A = CAST(NULL AS INTEGER)");
+  it("refuses a code it has no name for, rather than inventing a column type", async () => {
+    const {hanaColumnType} = await import("../tools/hana-client.mjs");
+    expect(() => hanaColumnType({dataType: 999})).to.throw(/no name for HANA type code 999/);
   });
 
-  it("refuses when the placeholders and the values do not match, rather than guessing", async () => {
-    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
-    expect(() => shapeWithoutParameters("SELECT ? FROM T", [{type: "I"}, {type: "I"}]))
-      .to.throw(/1 placeholders for 2 values/);
+  it("names the columns as the statement displays them, quoted", async () => {
+    const {columnsFromMetadata} = await import("../tools/hana-client.mjs");
+    expect(columnsFromMetadata([
+      {dataType: 3, length: 10, columnDisplayName: "V"},
+      {dataType: 11, length: 5, columnName: 'ODD"NAME'},
+    ])).to.deep.equal(['"V" INTEGER', '"ODD""NAME" NVARCHAR(5)']);
   });
 });

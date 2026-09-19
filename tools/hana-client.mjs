@@ -366,6 +366,21 @@ export class HanaDatabaseClient {
   /** A named relation later statements may refer to. The name is **ours**:
    *  the caller may not invent one, because quoting and escaping are the
    *  engine's business and this is the only place that knows them. */
+  /** what a statement will produce, without running it: HANA works the types
+   *  out at prepare time, parameters and all */
+  #resultMetadata(sql) {
+    return new Promise((resolve, reject) =>
+      this.client.prepare(sql, (err, stmt) => {
+        if (err) return reject(err);
+        const metadata = stmt.resultSetMetadata;
+        stmt.drop?.(() => undefined);
+        if (metadata === undefined || metadata.length === 0) {
+          return reject(new Error("defineRelation: that statement produces no columns to materialise"));
+        }
+        resolve(metadata);
+      }));
+  }
+
   async defineRelation({name = "rel", sql, params = [], materialise}) {
     // A **definition** carrying bind values would have to keep them alive for
     // the life of the relation, which is why this refuses. A **materialised**
@@ -402,10 +417,23 @@ export class HanaDatabaseClient {
       } else {
         // HANA takes no parameter in a DDL statement -- measured, it answers
         // `param is not allowed in DDL statement` -- so the one statement the
-        // other two engines manage becomes two here: the shape, with every
-        // placeholder standing in as a typed NULL and no data behind it, and
-        // then a bound INSERT, which is DML and may carry values.
-        await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${shapeWithoutParameters(sql, params)}) WITH NO DATA`);
+        // other two engines manage becomes two here: the table, and then a
+        // bound INSERT, which is DML and may carry values.
+        //
+        // **The table's columns come from HANA's own inference on the real
+        // statement**, read off a prepare. The first version of this built a
+        // shape query instead, with every placeholder standing in as a typed
+        // NULL taken from the parameter's declared type -- and fable-osd
+        // named the hazard before it was shipped: the column would then be
+        // typed by the STAND-IN while the rows arrive from the VALUE, and an
+        // expression around the parameter can widen the type between them.
+        // Measured, and worse than expected, because it is silent: with an
+        // INTEGER stand-in, `? + 1` over 1.5 stored 2 where the fused run
+        // answers 2.5. The forced half would have carried a divergence the
+        // instrument invented. Asking the engine to type the real statement
+        // removes the guess rather than improving it.
+        const metadata = await this.#resultMetadata(sql);
+        await this.#run(`CREATE COLUMN TABLE ${handle.ref} (${columnsFromMetadata(metadata).join(", ")})`);
         await this.native({sql: `INSERT INTO ${handle.ref} (${sql})`, params, expect: "none"});
       }
     }
@@ -485,79 +513,41 @@ export function hanaInserts(inserts) {
   });
 }
 
-/** A seam parameter type (`I`, `C(3)`, `P(15,2)`, `STRING`) as HANA spells it.
+/** HANA's wire type codes, as a name a `CREATE TABLE` will accept.
  *
- *  Used only to give a column its type in a shape query -- see
- *  `shapeWithoutParameters` below -- so it has to be a type HANA accepts and
- *  wide enough not to truncate, never a value. */
-function hanaTypeOf(seam) {
-  const text = String(seam ?? "STRING").toUpperCase();
-  const size = /\((\d+)(?:,(\d+))?\)/.exec(text);
-  const letter = text.charAt(0);
-  if (letter === "I" || letter === "B" || letter === "S") return "INTEGER";
-  if (letter === "F") return "DOUBLE";
-  if (letter === "P") return `DECIMAL(${size?.[1] ?? 15},${size?.[2] ?? 2})`;
-  if (letter === "D" && text === "D") return "DATE";
-  if (letter === "T" && text === "T") return "TIME";
-  if (letter === "C" || letter === "N") return `NVARCHAR(${size?.[1] ?? 5000})`;
-  return "NVARCHAR(5000)";
+ *  These are the protocol's own numbers and they do not move; hdb carries the
+ *  same table internally, but reaching into a dependency's `lib/` for it would
+ *  make this break on one of its releases for no gain. Anything not here is
+ *  refused by name rather than guessed at -- a column created with the wrong
+ *  type is the silent-wrong-answer shape this whole file exists to avoid. */
+const TYPE_CODES = {
+  1: "TINYINT", 2: "SMALLINT", 3: "INTEGER", 4: "BIGINT", 5: "DECIMAL",
+  6: "REAL", 7: "DOUBLE", 8: "CHAR", 9: "VARCHAR", 10: "NCHAR", 11: "NVARCHAR",
+  12: "BINARY", 13: "VARBINARY", 14: "DATE", 15: "TIME", 16: "TIMESTAMP",
+  25: "CLOB", 26: "NCLOB", 27: "BLOB", 28: "BOOLEAN", 29: "STRING",
+  30: "NSTRING", 47: "SMALLDECIMAL", 62: "SECONDDATE", 63: "DAYDATE",
+  64: "SECONDTIME",
+};
+
+/** one column of a prepared statement's result, as DDL spells it */
+export function hanaColumnType({dataType, length, fraction}) {
+  const name = TYPE_CODES[dataType];
+  if (name === undefined) throw new Error(`hanaColumnType: no name for HANA type code ${dataType}`);
+  if (name === "DECIMAL" || name === "SMALLDECIMAL") return `DECIMAL(${length ?? 15},${fraction ?? 0})`;
+  if (["CHAR", "VARCHAR", "NCHAR", "NVARCHAR", "BINARY", "VARBINARY"].includes(name)) {
+    return `${name}(${length ?? 5000})`;
+  }
+  // STRING and NSTRING are how the protocol names an unbounded character
+  // column; a table wants a bounded one
+  if (name === "STRING") return "VARCHAR(5000)";
+  if (name === "NSTRING") return "NVARCHAR(5000)";
+  return name;
 }
-/** The same statement with every placeholder replaced by a typed NULL.
- *
- *  HANA answers `param is not allowed in DDL statement` to a
- *  `CREATE TABLE ... AS (SELECT ... ?)`, measured -- so a materialised
- *  relation that carries values cannot be made in one statement here, the way
- *  it can on DuckDB and sql.js. It can be made in two: this shape gives the
- *  table its columns with `WITH NO DATA`, and a bound `INSERT INTO t (<the
- *  real select>)` then fills it, because DML **does** take parameters.
- *
- *  The scan skips string literals, quoted identifiers and comments, so a `?`
- *  that is content rather than a placeholder is left alone. That is the one
- *  thing this function must not get wrong: substituting inside a literal
- *  would change the program rather than its shape. */
-export function shapeWithoutParameters(sql, params) {
-  let out = "";
-  let i = 0;
-  let seen = 0;
-  while (i < sql.length) {
-    const c = sql[i];
-    if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < sql.length) {
-        if (sql[j] === c) {
-          if (sql[j + 1] === c) j += 2;
-          else { j += 1; break; }
-        } else j += 1;
-      }
-      out += sql.slice(i, j);
-      i = j;
-      continue;
-    }
-    if (c === "-" && sql[i + 1] === "-") {
-      const end = sql.indexOf("\n", i);
-      const j = end === -1 ? sql.length : end;
-      out += sql.slice(i, j);
-      i = j;
-      continue;
-    }
-    if (c === "/" && sql[i + 1] === "*") {
-      const end = sql.indexOf("*/", i + 2);
-      const j = end === -1 ? sql.length : end + 2;
-      out += sql.slice(i, j);
-      i = j;
-      continue;
-    }
-    if (c === "?") {
-      out += `CAST(NULL AS ${hanaTypeOf(params[seen]?.type)})`;
-      seen += 1;
-      i += 1;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  if (seen !== params.length) {
-    throw new Error(`shapeWithoutParameters: ${seen} placeholders for ${params.length} values`);
-  }
-  return out;
+
+/** the columns a statement will produce, as HANA itself works them out */
+export function columnsFromMetadata(metadata) {
+  return (metadata ?? []).map((c, i) => {
+    const name = c.columnDisplayName ?? c.columnName ?? `C${i + 1}`;
+    return `"${String(name).replace(/"/g, '""')}" ${hanaColumnType(c)}`;
+  });
 }
