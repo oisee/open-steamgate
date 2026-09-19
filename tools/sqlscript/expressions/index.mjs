@@ -186,7 +186,7 @@ export class Declare extends Expression {
       altPrio(
         seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
         seq(new Name(), str("CURSOR"), str("FOR"), new SetOperation()),
-        seq(new Name(), new TypeName(), opt(seq("=", new Expr())))),
+        seq(new Name(), new TypeName(), opt(seq(altPrio(":=", "="), new Expr())))),
       ";");
   }
 }

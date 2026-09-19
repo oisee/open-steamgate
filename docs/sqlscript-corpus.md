@@ -435,3 +435,24 @@ The other ABAP comment is deliberately **not** handled: `"` begins a comment
 in ABAP and a quoted identifier in SQLScript, so the same character is a name
 in one language and a comment in the other. Guessing would silently delete
 half a statement, which is the shape of defect this project keeps paying for.
+
+### The double quote: measured, not guessed
+
+The question was whether `"` inside an AMDP body is an ABAP comment (ABAP)
+or a quoted identifier (SQLScript). Counting settles it without a probe:
+
+| | |
+| --- | --- |
+| bodies in the corpus | 473 |
+| containing a double quote | 232 |
+| containing something shaped like a quoted identifier | **189** |
+
+`"STATUS"`, `"OBJECT"`, `"CL_MD_SUBSTN_READ_GRAPH=>SET_GRAPH_WORK_SPACE_READ"`
+-- names, in SQL positions, in 189 bodies. So the ABAP scanner does **not**
+treat `"` as a comment inside an AMDP body, and a lexer that did would
+destroy two bodies in five. The caution was right and is now a measurement.
+
+This does not make the surrounding point wrong: the language being parsed is
+**SQLScript as ABAP hands it over**, and `*` in column one is a comment
+because ABAP says so and SQLScript does not. The reference for that class of
+question is what reaches the database, not the book.
