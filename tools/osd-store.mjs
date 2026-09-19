@@ -219,6 +219,19 @@ function ddlsIssues(registry, object) {
   }
   const at = {file: object.getFiles?.()[0]?.getFilename?.(), line: 1, column: 1};
   const issues = [];
+  // **A table function is not a broken view.** `define table function` has
+  // no SELECT by design -- its rows come from an AMDP method -- so
+  // `parseDDLS` skips it with "no select", and reporting that as an error
+  // tells a person their table function is broken. Measured over the whole
+  // tree: 11 of 13 views checked clean and one of the two was this, a false
+  // positive of the check rather than a defect of the object.
+  //
+  // The kinds this generator does not handle are silent; the views it cannot
+  // READ are not. Those are different answers and they were getting one word.
+  const declares = (object.getFiles?.() ?? []).map((f) => f.getRaw?.() ?? "").join("\n");
+  if (/\bdefine\s+table\s+function\b/i.test(declares)) {
+    return [];
+  }
   // A source that is not in the system at all. Measured: a view selecting
   // from `znot_a_table` parsed without complaint, checked clean, and the
   // BUILD then failed naming a consumer -- `zcl_zosd_status_dpc:43`, "not

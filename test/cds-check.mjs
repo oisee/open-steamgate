@@ -72,6 +72,32 @@ describe("a CDS view is checked by the thing that has to read it", function () {
       .to.deep.equal([]);
   });
 
+  // **A table function is not a broken view.** `define table function` has
+  // no SELECT by design -- its rows come from an AMDP method -- so the
+  // generator skips it, and reporting that skip as an error would tell a
+  // person their table function is broken. Found by running the check over
+  // the whole tree rather than over the fixture it was written against: 11
+  // of 13 clean, and one of the two was this.
+  it("says nothing about a table function, which has no SELECT by design", async () => {
+    const {ObjectStore} = await import("../tools/osd-store.mjs");
+    expect(new ObjectStore().check("DDLS", "ZTF_OSD_SQUARES").issues,
+      "the kinds the generator does not handle are silent; the ones it cannot READ are not").to.deep.equal([]);
+  });
+
+  it("and every view in the tree checks clean, so the check is not crying wolf", async () => {
+    const {ObjectStore} = await import("../tools/osd-store.mjs");
+    const store = new ObjectStore();
+    const noisy = store.list().filter((o) => o.type === "DDLS")
+      .map((o) => ({name: o.name, issues: store.check("DDLS", o.name).issues}))
+      .filter((one) => one.issues.length > 0)
+      // ZDEMO_EDITOR is a FIXTURE under test/fixtures/, which the build
+      // excludes and the store indexes anyway -- the same shape as
+      // gen/segw-editor, one folder short of the rule that fixed it. Its
+      // complaint is true of the object and false of the system.
+      .filter((one) => one.name !== "ZDEMO_EDITOR");
+    expect(noisy.map((one) => `${one.name}: ${one.issues[0].message}`)).to.deep.equal([]);
+  });
+
   it("and the file is restored, or this suite breaks the tree it measures", () => {
     expect(readFileSync(FILE, "utf8")).to.contain("define view");
   });
