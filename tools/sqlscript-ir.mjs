@@ -51,6 +51,24 @@ export const isNull = (expr) => ({node: "isnull", expr, type: T.bool});
 // ------------------------------------------------------------------ relations
 
 export const scan = (table) => ({rel: "scan", table});
+/**
+ * `FROM :lt` - a reference to a table variable, as the PARSER sees it.
+ *
+ * This is the one node the lowering never accepts. A table variable is not a
+ * barrier (measured on HANA), so `lt2 = SELECT ... FROM :lt1` is not a
+ * sequence of two statements: it is one plan in which lt1's plan sits where
+ * the FROM is. Performing that substitution is the binder's job, and it has
+ * two possible outcomes - inline the referenced plan (the usual case, and
+ * what makes a chain one statement), or, if a barrier materialised the
+ * variable, replace it with `ref(handle)`.
+ *
+ * Keeping it a distinct node rather than letting the parser emit `scan("lt")`
+ * matters for a reason the lexer already had to solve one level down: `FROM
+ * :lt` and `FROM lt` are different objects - the second is a database table,
+ * and shadowing a real table name is ordinary. Losing the colon here would
+ * read one and mean the other.
+ */
+export const varRef = (name) => ({rel: "var", name});
 /** a relation the seam already knows by name (a barrier materialised it) */
 export const ref = (handle) => ({rel: "ref", handle});
 export const filter = (input, pred) => ({rel: "filter", input, pred});

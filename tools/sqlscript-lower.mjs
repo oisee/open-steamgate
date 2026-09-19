@@ -133,6 +133,7 @@ export function lower(rel, dialectName, options = {}) {
   // not a barrier.
   let alias = 0;
   const from = (r) => {
+    if (r.rel === "var") return select(r); // refuses, with the right message
     if (r.rel === "scan") return d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
@@ -140,6 +141,12 @@ export function lower(rel, dialectName, options = {}) {
 
   const select = (r) => {
     switch (r.rel) {
+      case "var":
+        // deliberately not lowered: see varRef() in sqlscript-ir.mjs. Getting
+        // here means the binder did not run, and quietly treating the name as
+        // a table would read a database table with the same name - which is
+        // an ordinary thing to exist.
+        throw new Refused(`the table variable :${r.name} reached the lowering unresolved - the binder must inline it or point it at a materialised relation`);
       case "scan":
       case "ref":
         return `SELECT * FROM ${from(r)}`;

@@ -176,6 +176,12 @@ describe("SQLScript IR: what it refuses", () => {
       .to.throw(Refused, /not lowered yet/);
   });
 
+  it("refuses an unresolved table variable rather than reading a table of that name", async () => {
+    const {varRef} = await import("../tools/sqlscript-ir.mjs");
+    const rel = filter(varRef("lt1"), bin(">", col("N"), lit(0, T.int), T.bool));
+    expect(() => lower(rel, "duckdb")).to.throw(Refused, /:lt1 reached the lowering unresolved/);
+  });
+
   it("refuses an unknown dialect instead of guessing one", () => {
     expect(() => lower(scan("A"), "oracle")).to.throw(Refused, /no dialect/);
   });
