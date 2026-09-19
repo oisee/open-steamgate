@@ -389,6 +389,20 @@ describe("SQLScript IR: attributing a bare column to a table", () => {
     expect(shapes.unattributed).to.contain("K");
   });
 
+  it("a side that is itself a join attributes nothing from the outer predicate", async () => {
+    const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
+    // (A join B) join C: the outer predicate says OUTER is under the left,
+    // which is two tables - narrowing three candidates to two is not
+    // attribution, and placing it in both is the ambiguity again
+    const inner = join(scan("A"), scan("B"), bin("=", col("KA"), col("KB"), T.bool));
+    const rel = join(inner, scan("C"), bin("=", col("OUTER"), col("KC"), T.bool));
+    const shapes = tableShapesPerTable(rel);
+    expect(shapes.unattributed, "the outer predicate could not place it").to.contain("OUTER");
+    // but the inner predicate still did its own work
+    expect(Object.keys(shapes.perTable.A)).to.contain("KA");
+    expect(Object.keys(shapes.perTable.B)).to.contain("KB");
+  });
+
   it("columns the predicate does not mention are reported, not silently placed", async () => {
     const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
     const rel = filter(join(scan("A"), scan("B"), bin("=", col("KA"), col("KB"), T.bool)),

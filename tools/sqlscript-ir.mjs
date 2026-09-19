@@ -462,6 +462,19 @@ export function attributeColumns(rel) {
         r.on.left.name !== r.on.right.name) {
       const left = tablesUnder(r.left);
       const right = tablesUnder(r.right);
+      // **Exactly one table on each side, or nothing is claimed.**
+      //
+      // If the left subtree is itself a join of two tables, then "this
+      // column is somewhere under the left" narrows the candidates from
+      // three to two - which is not attribution, and placing the column in
+      // both recreates the ambiguity this exists to remove. So the outer
+      // predicate says nothing here and the column stays unattributed.
+      //
+      // In practice that costs less than it sounds: a nested join has its
+      // own predicate, and this walk visits every join, so the inner one
+      // usually attributes the inner columns. What is left over is a column
+      // mentioned only by an outer predicate whose side holds more than one
+      // table - and for that, nobody knows.
       if (left.length === 1 && right.length === 1) {
         owner.set(r.on.left.name, left[0]);
         owner.set(r.on.right.name, right[0]);
