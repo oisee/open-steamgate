@@ -99,6 +99,24 @@ symlinkSync(live, join(out, "build", "live"));
 symlinkSync(join("build", "live", "output"), join(out, "output"));
 say(`generation: ${basename(live)}`);
 
+// **The commit the release was built from, written down here because the
+// release is the one place that cannot work it out.**
+//
+// `/sap/bc/adt/core/http/build` answers `commit` by asking git, and a
+// release directory is not a checkout -- so a deployment reported
+// `"unknown"` and the rule the two targets are supposed to share ("the i7
+// follows Pages, both show the same commit", docs/backlog.md) could not be
+// checked on the half that matters. It was not checked for weeks, because
+// the field existed and read like a measurement.
+const commit = (process.env.GITHUB_SHA ?? execFileSync("git", ["rev-parse", "HEAD"],
+  {cwd: root, encoding: "utf8"}).trim());
+writeFileSync(join(out, "release.json"), `${JSON.stringify({
+  commit,
+  generation: basename(live),
+  builtAt: new Date().toISOString(),
+}, undefined, 2)}\n`);
+say(`commit: ${commit.slice(0, 7)}`);
+
 writeFileSync(join(out, "run.sh"), `#!/bin/sh
 # OSD on a machine that has none of this installed.
 #

@@ -1053,6 +1053,22 @@ export function adtRouter(options = {}) {
   const sourceCommit = () => {
     if (commitCache !== undefined) return commitCache;
     commitCache = process.env.GITHUB_SHA ?? "";
+    // A **release** is not a checkout, so git cannot answer there and the
+    // field read `unknown` on the one target the commit rule exists to
+    // check. `scripts/make-release.mjs` writes it into `release.json` beside
+    // the binary; that file is read first because where it exists it is the
+    // only correct answer -- a release carried to another machine has no
+    // repository at all.
+    if (commitCache === "") {
+      for (const dir of [store.root ?? process.cwd(), process.cwd()]) {
+        try {
+          commitCache = JSON.parse(readFileSync(join(dir, "release.json"), "utf8")).commit ?? "";
+        } catch {
+          commitCache = "";
+        }
+        if (commitCache !== "") break;
+      }
+    }
     if (commitCache === "") {
       try {
         commitCache = execFileSync("git", ["rev-parse", "HEAD"],
