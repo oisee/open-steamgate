@@ -2016,21 +2016,42 @@ R.1  **The ticket, from the browser into RFC.**
         which is enough for testing and not enough for anything else
 
 R.2  **The dispatcher: an HTTP request executed through a function module.**
-     ├─ **This is the unknown that decides the track.** It needs a
-     │  remote-enabled function module on the system that will take a method,
-     │  a path, headers and a body, run the ICF handler for that path, and
-     │  give back status, headers and body. Whether such a module exists in a
-     │  stock system is **not known here** and is the first thing to find
-     │  out -- naming a candidate from memory is exactly the mistake this
-     │  backlog keeps recording
-     ├─ if none exists, the fallback is ours to install: one function module
-     │  of our own, deployed the way level 2 already deploys objects, calling
-     │  `cl_http_server`-side dispatch in the system. That turns the track
-     │  from "find the door" into "carry our own", which is slower but
-     │  entirely within what we can already do
-     └─ either way the seam is the same shape as `cl_express_icf_shim`, only
-        with RFC where express is: a request object filled from the wire, a
-        handler, a response read back
+     **It is not unknown, and the answer was already in this repository.**
+     Written here first as "whether such a module exists is not known", which
+     Alice corrected in one sentence: it is the module that lets Eclipse in.
+     Its name was in `docs/adt-over-rfc.md` and **twice in this very file**,
+     once with a measurement beside it. The mistake was not memory this time,
+     it was not reading our own notes -- and a search for the thing by its
+     shape would have found it, while a search for it by name could not,
+     because the name was what was missing.
+     ├─ **`SADT_REST_RFC_ENDPOINT`**, remote-enabled, two recursive
+     │  parameters: `REQUEST` of `SADT_REST_REQUEST` and `RESPONSE` of
+     │  `SADT_REST_RESPONSE`. Both are the same three fields -- a line, a
+     │  `TIHTTPNVP` table of name/value pairs, and an `RSTR` body. **An HTTP
+     │  exchange**, which is why our own bridge for it "needs no opinion
+     │  about ADT"
+     ├─ function group `SADT_REST`, and it has been **exercised**, not only
+     │  read: this file records `GET /sap/bc/adt/discovery` over RFC
+     │  answering 200 with the atomsvc document (2026-09-14, Tier 2b). So
+     │  the door exists, is stock, carries a generic HTTP exchange and has
+     │  been opened once
+     ├─ **what is still open is narrower, and it is the whole question**:
+     │  that measurement used an **ADT** path. Does the module dispatch *any*
+     │  ICF path -- `/sap/opu/odata/…`, `/sap/bc/ui5_ui5/…` -- or only
+     │  `/sap/bc/adt/…`? The payload does not restrict it; the handler behind
+     │  it may. One call with a non-ADT path answers it, and until that call
+     │  is made this track reaches ADT and nothing that has been shown
+     ├─ the bootstrap is documented too and is not free: `RFC_GET_FUNCTION_INTERFACE`
+     │  for the parameters, then DDIC lookups for `SADT_REST_REQUEST`,
+     │  `SADT_REST_RESPONSE` and `TIHTTPNVP`, and only then the call. A
+     │  client that has never spoken to the system pays for all of it
+     ├─ the payload is SAP Binary XML rather than text xRFC, which the same
+     │  document works through -- so this is a decode we already own rather
+     │  than one to invent
+     └─ if the path does turn out to be restricted, the fallback stands:
+        carry one function module of our own, deployed the way level 2
+        already deploys objects. That turns the track from "use the door"
+        into "carry our own", which is slower and entirely within reach
 
 R.3  **The local front.** Ordinary `http`/`https` here, so a browser, a test
      and `abap-adt-api` all speak to it without knowing what is behind. This
