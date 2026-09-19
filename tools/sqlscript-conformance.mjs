@@ -73,6 +73,24 @@ const CASES = [
    why: "casting to a narrower character type: HANA truncates to three, the others keep all six"},
   {id: "cast_round", sql: "SELECT CAST(d1 AS INTEGER) AS v FROM t WHERE k = 'r3'",
    why: "casting a fraction to an integer: HANA truncates toward zero, DuckDB rounds - this one was ours, and it shipped"},
+  // One case per name the lowering calls PORTABLE. The list says "these mean
+  // the same thing on all three engines", and until these rows existed that
+  // was a belief about twelve of thirteen names: only LENGTH had ever been
+  // measured. A list of portable functions with no measurement behind it is
+  // the same claim-wider-than-evidence this table was built to catch, and it
+  // was ours.
+  {id: "fn_lower", sql: "SELECT LOWER(upper_txt) AS v FROM t WHERE k = 'r1'", why: "LOWER"},
+  {id: "fn_upper", sql: "SELECT UPPER(ch) AS v FROM t WHERE k = 'r1'", why: "UPPER"},
+  {id: "fn_trim", sql: "SELECT TRIM(ch) AS v FROM t WHERE k = 'r1'", why: "TRIM, and over a padded CHAR it is also the padding regime"},
+  {id: "fn_ltrim", sql: "SELECT LTRIM(ch) AS v FROM t WHERE k = 'r1'", why: "LTRIM"},
+  {id: "fn_rtrim", sql: "SELECT RTRIM(ch) AS v FROM t WHERE k = 'r1'", why: "RTRIM"},
+  {id: "fn_abs", sql: "SELECT ABS(c) AS v FROM t WHERE k = 'r1'", why: "ABS over a negative integer"},
+  {id: "fn_coalesce", sql: "SELECT COALESCE(nullable, -1) AS v FROM t WHERE k = 'r2'", why: "COALESCE, which is IFNULL under another name on some engines"},
+  {id: "fn_sum", sql: "SELECT SUM(a) AS v FROM t", why: "SUM over integers"},
+  {id: "fn_min", sql: "SELECT MIN(ch) AS v FROM t", why: "MIN over characters, which is collation as much as function"},
+  {id: "fn_max", sql: "SELECT MAX(c) AS v FROM t", why: "MAX over negative integers"},
+  {id: "fn_count", sql: "SELECT COUNT(nullable) AS v FROM t", why: "COUNT of a column with a NULL in it, which is the interesting half of COUNT"},
+  {id: "fn_avg", sql: "SELECT AVG(a) AS v FROM t", why: "AVG over integers: an integer average, or a decimal one - the likeliest of these to differ"},
 ];
 
 /** the fixture, in our own DDIC shapes: a padded CHAR, a packed decimal, integers */
