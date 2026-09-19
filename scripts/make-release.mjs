@@ -24,7 +24,8 @@
 //   output         the link the runtime loads the generation through
 import {cpSync, existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
-import {basename, join, resolve} from "node:path";
+import {basename, dirname, join, relative, resolve} from "node:path";
+import {pathToFileURL} from "node:url";
 
 const root = resolve(import.meta.dir ?? process.cwd(), "..");
 const out = resolve(process.argv[2] ?? join(root, ".local", "release"));
@@ -41,6 +42,32 @@ for (const entry of TREE) {
   }
 }
 say(`content: ${TREE.filter((e) => existsSync(join(root, e))).join(", ")}`);
+
+// **The libraries, because a system that can edit has to be able to check.**
+//
+// The build reads six library folders (abap_transpile.json `libs`), and so
+// does the object store since 2026-09-19 -- that is what makes a check
+// truthful. A release without them answered `Super class
+// "cl_apc_wsp_ext_stateful_base" not found or contains errors` for a class
+// that is perfectly fine, which is the same lie the store's own hand-written
+// list used to tell, one layer further out. Found by deploying and reading
+// what was served rather than by the suite, which runs in a checkout.
+//
+// Only the files the build actually reads are copied, by the same body that
+// decides that for the store: abapGit is configured file by file, and its
+// folder is 11 MB against the 97 files wanted.
+const {libraryFiles} = await import(pathToFileURL(join(root, "tools", "osd-inputs.mjs")).href);
+let libFiles = 0;
+for (const {folder, files} of libraryFiles(root)) {
+  for (const file of files) {
+    const target = join(out, relative(root, file));
+    mkdirSync(dirname(target), {recursive: true});
+    cpSync(file, target);
+    libFiles += 1;
+  }
+  say(`library: ${folder}`);
+}
+say(`${libFiles} library files, so a check in the release sees the system the build compiled`);
 
 // the hosts
 for (const artefact of ["osd", "osd-sea"]) {
