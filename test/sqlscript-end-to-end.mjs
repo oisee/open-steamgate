@@ -159,3 +159,39 @@ describe("SELECT * is the absence of a projection, not a projection of a star", 
       .to.throw(/would change what this body means/);
   });
 });
+
+describe("both forms of CASE, and the simple one becoming the searched one", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+
+  it("CASE x WHEN v is rewritten into WHEN x = v, which is what it means", () => {
+    // it was going down the searched path and coming out as "a comparison
+    // without an operator" -- ten bodies, because the subject of a simple
+    // CASE is an expression and therefore not a word, so a check on the word
+    // list always answered "searched"
+    const {sql} = compile("SELECT CASE n WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END AS V FROM src;",
+      "duckdb", CAT);
+    expect(sql).to.contain('WHEN ("N" = 1)');
+    expect(sql).to.contain('WHEN ("N" = 2)');
+    expect(sql).to.contain("ELSE");
+  });
+
+  it("the searched form goes through as it is", () => {
+    const {sql} = compile("SELECT CASE WHEN n > 1 THEN 1 ELSE 2 END AS V FROM src;", "duckdb", CAT);
+    expect(sql).to.contain('WHEN ("N" > 1)');
+  });
+
+  it("with no ELSE, nothing is invented for the missing branch", () => {
+    const {sql} = compile("SELECT CASE n WHEN 1 THEN 'one' END AS V FROM src;", "duckdb", CAT);
+    expect(sql).to.not.contain("ELSE");
+  });
+
+  it("and both forms answer on both engines", async () => {
+    const body = "SELECT k, CASE n WHEN 1 THEN 'one' ELSE 'other' END AS LABEL FROM src ORDER BY k;";
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    const shapes = new Set(answered.map((r) => JSON.stringify(r.rows.map((row) => Object.values(row)))));
+    expect(shapes.size, [...shapes].join(" vs ")).to.equal(1);
+    expect(answered[0].rows.map((r) => r.LABEL ?? r.label)).to.deep.equal(["one", "other", "other"]);
+  });
+});

@@ -129,7 +129,18 @@ export function toIr(tree, options = {}) {
         const parts = (node.children ?? []).filter((c) => c.node !== "word");
         const words = (node.children ?? []).filter((c) => c.node === "word")
           .map((w) => String(w.value).toUpperCase());
-        const searched = words[1] === "WHEN";
+        // **Which form this is, read from the ordered children and not from
+        // the word list.** The word list was the first attempt and it is
+        // wrong in a way that always answers "searched": the subject of a
+        // simple CASE is an expression, so it is not a word, so `words[1]`
+        // is "WHEN" in both forms. Every `CASE x WHEN v` in the corpus then
+        // went down the searched path and came out as "a comparison without
+        // an operator" -- ten bodies, and the message pointed at the
+        // predicate rather than at the CASE that built it.
+        const ordered = node.children ?? [];
+        const afterCase = ordered[ordered.findIndex((c) => c.node === "word"
+          && String(c.value).toUpperCase() === "CASE") + 1];
+        const searched = afterCase === undefined || afterCase.node === "word";
         const subject = searched ? undefined : expression(parts[0]);
         const rest = searched ? parts : parts.slice(1);
         // WHEN/THEN come in pairs; an odd tail is the ELSE

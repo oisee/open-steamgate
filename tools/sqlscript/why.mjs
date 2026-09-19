@@ -17,9 +17,18 @@ import {lex, LexError} from "./lexer.mjs";
 import {parse, ParseError} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
 import {bodiesOf, classesIn, reasonOf} from "./coverage.mjs";
+import {toIr} from "./to-ir.mjs";
+import {lower} from "../sqlscript-lower.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
+// The coverage report prints **two** histograms -- one for bodies the
+// grammar stopped, one for bodies it read and the lowering then refused --
+// and this tool only ever spoke for the first. That made the looking step
+// available for exactly half the questions, and the half it could not answer
+// is the one that moves the number that counts. So a body is put through
+// both stages here, and a line from either histogram is a thing you can ask
+// about by the same command.
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
@@ -46,25 +55,42 @@ for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
   for (const file of classesIn(join(root, zip), join("/tmp/sqlscript-coverage", pkg))) {
     for (const {body} of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) {
       let tokens = [];
+      let tree;
+      let why;
+      let at = 1;
+      let col;
       try {
         tokens = lex(body);
-        parse(new Body(), tokens);
-        continue;                                   // it goes through; not our case
+        tree = parse(new Body(), tokens);
       } catch (error) {
         if (!(error instanceof ParseError) && !(error instanceof LexError)) continue;
-        if (!reasonOf(error, tokens).includes(wanted)) continue;
-        const key = `${file.split("/").slice(-1)[0]}:${error.line}:${error.col}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const lines = body.split("\n");
-        const at = error.line ?? 1;
-        console.log(`\n=== ${file.split("/").slice(-1)[0]}  line ${at}, col ${error.col ?? "?"}  (${reasonOf(error, tokens)})`);
-        for (let i = Math.max(1, at - context); i <= Math.min(lines.length, at + context); i += 1) {
-          console.log(`${i === at ? ">" : " "} ${String(i).padStart(4)}  ${lines[i - 1]}`);
-        }
-        shown += 1;
-        if (shown >= want) break outer;
+        why = reasonOf(error, tokens);
+        at = error.line ?? 1;
+        col = error.col;
       }
+      if (tree !== undefined) {
+        // it went through the grammar; the lowering is the other half of the
+        // question, and its message is the line of the second histogram
+        try {
+          const ir = toIr(tree, {catalogue: {}, signature: undefined});
+          lower(ir.rel, "hana");
+          continue;                                 // it goes through whole
+        } catch (error) {
+          why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
+          at = Number(/line (\d+)/.exec(String(error.message ?? ""))?.[1] ?? 1);
+        }
+      }
+      if (!why.includes(wanted)) continue;
+      const key = `${file.split("/").slice(-1)[0]}:${at}:${col ?? "-"}:${why}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const lines = body.split("\n");
+      console.log(`\n=== ${file.split("/").slice(-1)[0]}  line ${at}, col ${col ?? "?"}  (${why})`);
+      for (let i = Math.max(1, at - context); i <= Math.min(lines.length, at + context); i += 1) {
+        console.log(`${i === at ? ">" : " "} ${String(i).padStart(4)}  ${lines[i - 1]}`);
+      }
+      shown += 1;
+      if (shown >= want) break outer;
     }
   }
 }
