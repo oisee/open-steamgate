@@ -1,6 +1,6 @@
 // The scoreboard for "who answers a path", as a ratchet.
 import {expect} from "chai";
-import {hostRoutes, icfNodes, rivalCount, scoreboard} from "../tools/osd-routes.mjs";
+import {hostRoutes, icfNodes, needs, rivalCount, scoreboard} from "../tools/osd-routes.mjs";
 
 // **The number that must go down.** Two sessions counted the registries
 // independently on 2026-09-19 and both found four where there should be one.
@@ -51,6 +51,21 @@ describe("tools/osd-routes: four registries answer one question", () => {
     for (const r of routes) {
       expect(r.method).to.match(/^(all|use|get|post|put|delete)$/);
       expect(r.line).to.be.greaterThan(0);
+    }
+  });
+
+  it("a rival is classified by what it needs, and the three are different promises", () => {
+    expect(needs('app.use("/app", express.static(x))')).to.equal("fs");
+    expect(needs('res.json(dumps)', 'const d = runtime.dumps')).to.equal("state");
+    expect(needs('res.redirect(302, "/elsewhere")')).to.equal("pure");
+    // the split matters because it is not one move: content in the store can
+    // travel to a system, process state cannot travel at all and does not
+    // work in the preview ever -- calling both "needs the host" would make
+    // one of the two promises false
+    const rivals = hostRoutes().filter((r) => r.kind === "rival");
+    expect(rivals.length).to.be.greaterThan(0);
+    for (const r of rivals) {
+      expect(r.needs, `${r.path} must say what it needs`).to.be.oneOf(["pure", "fs", "state"]);
     }
   });
 });

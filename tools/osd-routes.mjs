@@ -105,6 +105,30 @@ export function icfNodes(root = "src") {
 const ICF_PATHS = [/^\/sap\/opu\/odata/, /^\/sap\/bc\/gui/, /^\/sap\/bc\/adt/, /^\/sap\/bc\/osd/];
 const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 
+// **What a rival needs decides how it can move, and they are not one group.**
+// fable-osd's split, which is sharper than "needs the host":
+//
+//   fs     needs the FILE SYSTEM -- static content, a directory listing.
+//          Moves as a node plus content in the object store; that is the
+//          WAPA work, and it can travel to a system.
+//   state  needs PROCESS STATE -- what the facade could not answer, the
+//          dumps, the SQL log. It lives in memory and dies with the host, so
+//          it moves as a node plus a LIVE host, and in the browser preview
+//          it does not work **ever**, not "yet". A different promise.
+//   pure   neither. Moves today.
+//
+// Counting them together would make "the host stops routing" look like one
+// move. It is three, and one of them is a refusal.
+const NEEDS_FS = /existsSync|readFileSync|readdirSync|writeFileSync|express\.static|join\(process\.cwd|tilesOf|pack\.dir/;
+const NEEDS_STATE = /runtime\b|facade|dumps|notServed|not-served|serving|sqlLog|status\b/;
+
+export function needs(line, body = "") {
+  const text = `${line} ${body}`;
+  if (NEEDS_FS.test(text)) return "fs";
+  if (NEEDS_STATE.test(text)) return "state";
+  return "pure";
+}
+
 export function classify(line, path) {
   if (path === "(no path: middleware)") {
     return "plumbing";
@@ -130,7 +154,12 @@ export function hostRoutes(hosts = HOSTS) {
       const m = /app\.(all|use|get|post|put|delete)\(\s*(`[^`]*`|"[^"]*"|'[^']*')?/.exec(line);
       if (m === null) continue;
       const path = m[2] ? m[2].slice(1, -1) : "(no path: middleware)";
-      out.push({host, line: i + 1, method: m[1], path, kind: classify(line, path)});
+      // the handler body is the next few lines: what a route touches is not
+      // on the line that registers it
+      const body = text.split("\n").slice(i, i + 12).join("\n");
+      const kind = classify(line, path);
+      out.push({host, line: i + 1, method: m[1], path, kind,
+        needs: kind === "rival" ? needs(line, body) : undefined});
     }
   }
   return out;
@@ -184,12 +213,17 @@ if (runsAs("osd-routes.mjs")) {
     if (list) {
       for (const e of r.entries) {
         const travel = e.travels === false ? "  [local package: does not travel]" : "";
-        console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}${travel}`);
+        const need = e.needs ? `  [needs ${e.needs}]` : "";
+        console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}${travel}${need}`);
       }
     }
   }
   const rivals = board.filter(isRival);
   console.log(`\n${rivals.length} registries rival the tree; ${others} paths live in them.`);
+  const rivalRoutes = board.find((r) => r.name === "host routes (rival)")?.entries ?? [];
+  const by = {pure: 0, fs: 0, state: 0};
+  for (const r of rivalRoutes) by[r.needs ?? "pure"] += 1;
+  console.log(`Of the ${rivalRoutes.length} host rivals: ${by.pure} move today, ${by.fs} need content in the store (the WAPA work), ${by.state} need a live host and never work in the preview.`);
   console.log(`The mount/wrapper row is not one of them -- deleting it would unplug the tree, not move a path into it.`);
   console.log("A registry is not migrated until its code is deleted -- see docs/icf-as-the-registry.md.");
 }
