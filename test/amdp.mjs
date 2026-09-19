@@ -276,3 +276,44 @@ describe("the AMDP destination fails where the calling ABAP can catch it", () =>
     }
   });
 });
+
+// The other abaplint gap this tree works around, and the older of the two:
+// `tools/amdp-extract.mjs` takes an AMDP body **by source position**, between
+// the end of the method statement and the start of its ENDMETHOD, rather than
+// from the NativeSQL statements abaplint produces. The reason is asserted here
+// for the same reason the !VALUE one is: a workaround with no expiry becomes
+// load-bearing by forgetting.
+//
+// abaplint/abaplint#4307, opened 2026-09-19, with a fix offered the same day.
+describe("the abaplint gap the position-based AMDP extraction exists for", () => {
+  it("is still there — and when this fails, take the body from the statements, do not adjust this", async () => {
+    const abaplint = await import("@abaplint/core");
+    const source = `CLASS zcl_amdp_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS squares.
+ENDCLASS.
+
+CLASS zcl_amdp_probe IMPLEMENTATION.
+  METHOD squares BY DATABASE PROCEDURE FOR HDB
+                 LANGUAGE SQLSCRIPT
+                 OPTIONS READ-ONLY.
+    SELECT :a AS x, :b AS y FROM dummy;
+  ENDMETHOD.
+ENDCLASS.`;
+    const registry = new abaplint.Registry()
+      .addFile(new abaplint.MemoryFile("zcl_amdp_probe.clas.abap", source)).parse();
+    const native = registry.getFirstObject().getABAPFiles()[0].getStatements()
+      .filter((s) => s.get().constructor.name === "NativeSQL")
+      .map((s) => s.concatTokens());
+    const todo = "abaplint now keeps a colon inside native SQL (#4307). Do this, in order: take the " +
+      "body from the NativeSQL statements in tools/amdp-extract.mjs instead of by source position; " +
+      "delete this describe block; mark the anomaly fixed with the version; re-run " +
+      "`node tools/sqlscript/coverage.mjs` and check the count did not fall.";
+    // the SPECIFIC breakage, twice over, so that an unrelated change to how
+    // abaplint reports statements cannot leave this green while it checks
+    // nothing: the body is cut in two, and the colons are gone from it
+    expect(native, todo).to.have.length(2);
+    expect(native.join(" "), todo).to.not.contain(":a");
+  });
+});
