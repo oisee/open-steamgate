@@ -73,17 +73,32 @@ bug, five materialisations where HANA builds one plan.
 That single measurement decides the shape of the IR, which is why it was
 first.
 
-**One question behind it is still open, and it changes what we promise.**
-HANA's behaviour here may be *plan-dependent*: inlining has heuristics, and the same body
+**And the question behind it is now answered too, in the hardest way.**
+Four runs on HANA Express: the failing cast on its own **raises**; assign,
+filter, observe returns **two rows**; the same body with `WITH HINT(NO_INLINE)`
+**raises**; and assigning then reading the variable **twice** still returns two
+rows. One hint, the same code and the same data, and success becomes a failure.
+
+So **an exception is a property of the plan, not of the program**. Bit-exact
+fidelity of *when* an error is raised is unattainable by anyone, including HANA
+itself tomorrow on different statistics, and the conformance suite must
+therefore compare **values**. It also kills a heuristic we were about to adopt:
+"a variable read twice must be materialised" is **not** what HANA does — the
+fourth run was built to force materialisation and did not. If we adopt that
+rule it is ours, justified by our own cost model, and it must not be defended
+with the words "because HANA does it".
+
+*(Measured on one version, small tables, and inlining is heuristic: see
+`docs/sqlscript-hana-observed.md`.)*
+
+**What this no longer leaves open.**
+HANA's behaviour here is *plan-dependent*: inlining has heuristics, and the same body
 can fuse or not depending on how the variable is used. If error timing is
 optimiser-dependent on HANA itself, then bit-exact error fidelity is not
 achievable by anyone, including HANA across two releases. The honest response
 is to define **our** model, state that the moment an error is raised may
 differ, and compare **values** rather than exceptions in the conformance
-suite. The `NO_INLINE` half of the experiment has not run yet — the first
-attempt died on a fixture collision, not on HANA — so "is the moment of an
-error stable on HANA itself" remains unanswered, and it is the question that
-decides whether exceptions belong in the conformance suite at all.
+suite.
 
 ## The two compatibility problems, which are not one problem
 
