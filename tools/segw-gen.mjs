@@ -566,6 +566,9 @@ ${STARS}
 
 lo_action = model->create_action( '${fi.name}' ).  "#EC NOTEXT
 `;
+    if (fi.textElement) {
+      s += `lo_action->set_label_from_text_element( iv_text_element_symbol = '${fi.textElement}' iv_text_element_container = gc_incl_name ).  "#EC NOTEXT\n`;
+    }
     if (fi.returnKind === "ETYP") {
       s += `*Set return entity type\nlo_action->set_return_entity_type( '${fi.returnType}' ). "#EC NOTEXT\n`;
     } else if (fi.returnKind === "CTYP") {
@@ -575,14 +578,23 @@ lo_action = model->create_action( '${fi.name}' ).  "#EC NOTEXT
     if (fi.httpMethod) {
       s += `*Set HTTP method GET or POST\nlo_action->set_http_method( '${fi.httpMethod}' ). "#EC NOTEXT\n`;
     }
-    s += `* Set return type multiplicity\nlo_action->set_return_multiplicity( '${fi.returnCard}' ). "#EC NOTEXT\n`;
+    // `set_action_for` BEFORE `set_return_multiplicity`, which is the order
+    // SEGW itself writes -- read off ZCL_ZOSD_002_DEMO_MPC after SEGW
+    // regenerated it from our own tree on A4H (2026-09-19). Nothing depends
+    // on the order that we know of; the point is that the two generators
+    // should be comparable line for line, and every difference that is not a
+    // difference in meaning makes the comparison harder to read.
     if (fi.actionFor) {
       s += `*Set the action for entity\nlo_action->set_action_for( '${fi.actionFor}' ). "#EC NOTEXT\n`;
     }
+    s += `* Set return type multiplicity\nlo_action->set_return_multiplicity( '${fi.returnCard}' ). "#EC NOTEXT\n`;
     if (fi.parameters.length > 0) {
       s += `${STARS}\n* Parameters\n${STARS}\n\n`;
       for (const fp of fi.parameters) {
         s += `lo_parameter = lo_action->create_input_parameter( iv_parameter_name = '${fp.name}'    iv_abap_fieldname = '${fp.abapField}' ). "#EC NOTEXT\n`;
+        if (fp.textElement) {
+          s += `lo_parameter->set_label_from_text_element( iv_text_element_symbol = '${fp.textElement}' iv_text_element_container = gc_incl_name ). "#EC NOTEXT\n`;
+        }
         s += `lo_parameter->/iwbep/if_mgw_odata_property~set_type_edm_${EDM_SETTER[fp.edmType] ?? "string"}( ).\n`;
         if (fp.maxLength && fp.edmType === "Edm.String") {
           s += `lo_parameter->/iwbep/if_mgw_odata_property~set_maxlength( iv_max_length = ${fp.maxLength} ). "#EC NOTEXT\n`;
@@ -1559,16 +1571,33 @@ export function assignTextElements(m) {
     .map((p) => Number(p.textElement)).filter((n) => Number.isFinite(n));
   let next = existing.length === 0 ? 1 : Math.max(...existing) + 1;
   const pool = [];
-  for (const et of m.entityTypes) {
-    for (const pr of et.properties) {
-      if (pr.textElement) {
-        pool.push([String(pr.textElement), pr.label ?? pr.name]);
-        continue;
-      }
-      if (!pr.label) continue;
-      pr.textElement = String(next++).padStart(3, "0");
-      pool.push([pr.textElement, pr.label]);
+  /** `orName` for the nodes SEGW labels with their own name when nothing
+   *  else is given -- actions and their parameters, whose $metadata on a
+   *  system reads `sap:label="CancelTravel"` and `sap:label="Status"`. A
+   *  property is not one of them: a property with no label has none, and
+   *  inventing one would put a text in the model the author never wrote. */
+  const take = (node, orName = false) => {
+    if (node.textElement) {
+      pool.push([String(node.textElement), node.label ?? node.name]);
+      return;
     }
+    const label = node.label ?? (orName ? node.name : undefined);
+    if (!label) return;
+    node.textElement = String(next++).padStart(3, "0");
+    node.label = label;
+    pool.push([node.textElement, label]);
+  };
+  for (const et of m.entityTypes) {
+    for (const pr of et.properties) take(pr);
+  }
+  // Actions and their parameters carry labels too -- SEGW writes
+  // `lo_action->set_label_from_text_element` and one per input parameter.
+  // They were missed the first time because the fix was written for the
+  // defect that had been seen, a duplicated sap:label on a property, rather
+  // than for the rule it came from.
+  for (const fi of m.functionImports ?? []) {
+    take(fi, true);
+    for (const fp of fi.parameters ?? []) take(fp, true);
   }
   return pool;
 }
@@ -1576,7 +1605,9 @@ export function assignTextElements(m) {
 export function mpcXml(m) {
   const names = [...(m.complexTypes.length > 0 ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.defineStem}`), ...(m.associations.length > 0 || m.navigation.length > 0 ? ["DEFINE_ASSOCIATIONS"] : []), ...(m.functionImports.length > 0 ? ["DEFINE_ACTIONS"] : []), "LOAD_TEXT_ELEMENTS"].sort();
   return clasXml(m.classes.mpc, m.classes.mpc, names.map((n) => [n, n]), [],
-    m.entityTypes.flatMap((et) => et.properties)
+    [...m.entityTypes.flatMap((et) => et.properties),
+     ...(m.functionImports ?? []),
+     ...(m.functionImports ?? []).flatMap((fi) => fi.parameters ?? [])]
       .filter((p) => p.textElement && p.label)
       .map((p) => [String(p.textElement), p.label]));
 }

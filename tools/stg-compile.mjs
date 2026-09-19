@@ -196,6 +196,10 @@ function operationsOf(spec, entity, props, file) {
 // the YAML, checked and defaulted
 export function readModel(text, file = "stg.yaml") {
   const y = yaml.load(text) ?? {};
+  // things the model may legally say that a system will not accept; collected
+  // rather than thrown, and carried out on the model so compile() can report
+  // them beside everything else
+  const modelWarnings = [];
   for (const key of ["project", "service", "entities"]) {
     if (!y[key]) {
       throw new Error(`${file}: "${key}" is required`);
@@ -288,6 +292,33 @@ export function readModel(text, file = "stg.yaml") {
     if (returns.complexType && returns.entity) {
       throw new Error(`${file}: function ${name}: returns either an entity or a complex type`);
     }
+    // **A function import must declare a return.** SEGW refuses to generate
+    // runtime objects without one -- "No return is currently not supported by
+    // the runtime" -- and the tree we wrote without it looked fine here,
+    // because our own dispatcher does not mind (measured on A4H 2026-09-19).
+    //
+    // Refused rather than guessed. Defaulting to the entity of `set:` would
+    // put a return type in the model that the author did not write, and a
+    // model that quietly says more than its source is the thing this file
+    // exists to avoid.
+    if (!returns.complexType && !returns.entity && !returns.primitive) {
+      throw new Error(`${file}: function ${name}: no return. A function import must declare one: ` +
+        `returns: {entity: <Entity>}, {complexType: <CT>} or {primitive: <Edm type>}. SEGW will ` +
+        `not generate runtime objects for a function import without a return.`);
+    }
+    // **A primitive return is ours and not SEGW's.** Our dispatcher answers
+    // `{"d":{"TravelCount":3}}` for one, which is the correct OData V2 shape,
+    // and classic SEGW's model has no return kind for it: on A4H the project
+    // would not generate until the function import was given an entity or a
+    // complex type by hand. So the YAML may say it -- the model should
+    // describe what we actually serve -- and the compiler says out loud what
+    // a system will do with it, rather than the author finding out from a
+    // browser (measured 2026-09-19).
+    if (returns.primitive) {
+      modelWarnings.push(`function ${name}: returns the primitive ${returns.primitive}, which this ` +
+        `runtime serves and classic SEGW cannot model. The tree carries no return kind for it, ` +
+        `and SEGW on a system will refuse to generate runtime objects until one is given by hand.`);
+    }
     return {
       name,
       method: (spec.method ?? "POST").toUpperCase(),
@@ -311,6 +342,7 @@ export function readModel(text, file = "stg.yaml") {
     project, service, model, description: y.description ?? "", namespace: y.namespace ?? service,
     classes: {mpc: cls("MPC"), mpcExt: cls("MPC_EXT"), dpc: cls("DPC"), dpcExt: cls("DPC_EXT"), mpcAnn: cls("MPC_ANN")},
     entities, associations, functions, annotations, complexTypes,
+    warnings: modelWarnings,
   };
 }
 
@@ -983,7 +1015,8 @@ export function compile(text, opts = {}) {
   if (m.annotations.length > 0) {
     ext[objectFile(m.classes.mpcExt, ".clas.abap")] = mpcExtWithAnnotations(m);
   }
-  return {model: m, iwpr, files, classes, ext, segw: generated.model, warnings};
+  return {model: m, iwpr, files, classes, ext, segw: generated.model,
+    warnings: [...(m.warnings ?? []), ...warnings]};
 }
 
 // ---------------------------------------------------- the build step

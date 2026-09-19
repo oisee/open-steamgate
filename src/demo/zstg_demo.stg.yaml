@@ -78,6 +78,13 @@ functions:
       TravelId: {type: String(8), field: TRAVEL_ID}
   TravelCount:
     method: GET
+    # A scalar count, which is what the dispatcher answers:
+    # {"d":{"TravelCount":3}}. Classic SEGW has no return kind for a
+    # primitive, so `stg-compile` warns that a system will refuse to generate
+    # runtime objects for this one until it is given an entity or a complex
+    # type by hand -- measured on A4H 2026-09-19. The model says what we
+    # serve; the warning says what SEGW will do about it.
+    returns: {primitive: Edm.Int32}
     parameters:
       Status: {type: String(1)}
 

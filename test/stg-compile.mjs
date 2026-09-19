@@ -92,7 +92,10 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     expect(mpc).to.contain("lo_association = model->create_association(\n                            iv_association_name = 'TravelToBookings' \"#EC NOTEXT\n                            iv_left_type        = 'Travel' \"#EC NOTEXT\n                            iv_right_type       = 'Booking' \"#EC NOTEXT\n                            iv_right_card       = 'N' \"#EC NOTEXT\n                            iv_left_card        = '1'  \"#EC NOTEXT");
     expect(mpc).to.contain("lo_ref_constraint->add_property( iv_principal_property = 'TravelId'   iv_dependent_property = 'TravelId' ). \"#EC NOTEXT");
     expect(mpc).to.contain("iv_property_name  = 'to_Bookings'");
-    expect(mpc).to.contain("lo_action = model->create_action( 'CancelTravel' ).  \"#EC NOTEXT\n*Set return entity type\nlo_action->set_return_entity_type( 'Travel' ). \"#EC NOTEXT\n*Set HTTP method GET or POST\nlo_action->set_http_method( 'POST' ). \"#EC NOTEXT\n* Set return type multiplicity\nlo_action->set_return_multiplicity( '1' ). \"#EC NOTEXT\n*Set the action for entity\nlo_action->set_action_for( 'Travel' ). \"#EC NOTEXT");
+    // the order SEGW itself writes: action_for before multiplicity, read off
+    // the class SEGW regenerated from our tree on A4H (2026-09-19)
+    expect(mpc).to.contain("lo_action = model->create_action( 'CancelTravel' ).  \"#EC NOTEXT\nlo_action->set_label_from_text_element(");
+    expect(mpc).to.contain("lo_action->set_return_entity_type( 'Travel' ). \"#EC NOTEXT\n*Set HTTP method GET or POST\nlo_action->set_http_method( 'POST' ). \"#EC NOTEXT\n*Set the action for entity\nlo_action->set_action_for( 'Travel' ). \"#EC NOTEXT\n* Set return type multiplicity\nlo_action->set_return_multiplicity( '1' ). \"#EC NOTEXT");
     const dpc = result.classes["zcl_zstg_demo_dpc.clas.abap"];
     expect(dpc).to.contain("  methods TRAVELSET_GET_ENTITYSET\n    importing");
     expect(dpc).to.contain("      method = 'BOOKINGSET_CREATE_ENTITY'.");
