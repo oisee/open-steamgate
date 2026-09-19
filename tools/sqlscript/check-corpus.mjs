@@ -82,7 +82,27 @@ export function candidates(root = ".local/a4h-export", scratch = "/tmp/sqlscript
 
 if (basename(process.argv[1] ?? "") === "check-corpus.mjs") {
   const list = candidates(process.argv[2]);
+  // **Two numbers, printed together, because one of them alone says the
+  // wrong thing** (fable-osd, 2026-09-19). "Seven bodies compared and no
+  // divergence found" reads as a result about the engines; it is a result
+  // about the corpus if none of the seven contains an expression that could
+  // diverge. A body with no hazard that passes the comparison is a line in
+  // the denominator, not a confirmation -- so the count of bodies that CAN
+  // diverge is printed next to the count that ran, and it is the second one
+  // that "no divergences found" may be signed under.
+  const hazardous = list.filter((one) => {
+    try {
+      return adversarialRows(one.ir.rel, schemaOf(one.ir.rel, {})).length > 0;
+    } catch {
+      return adversarialRows(one.ir.rel, {}).length > 0;
+    }
+  });
   console.log(`${list.length} corpus bodies read nothing but their own IN table parameters`);
+  console.log(`${hazardous.length} of them contain an expression that can diverge at all`);
+  if (hazardous.length === 0) {
+    console.log(`  so a clean run here says nothing about the engines: it says the ${list.length} bodies`);
+    console.log("  that can be run are projections, and a projection agrees everywhere by construction");
+  }
   for (const one of list.slice(0, 20)) {
     const schema = (() => {
       try {
