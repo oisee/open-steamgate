@@ -68,3 +68,46 @@ TABLE` survives into the next body and a fixed name collides with itself on
 the second run -- which is how the first attempt at the table above failed,
 with an error about a duplicate table name that looked like a defect in the
 body under test. Every probe gives its temporary tables a name of their own.
+
+## 3. Is the trailing blank stored at all?
+
+fable-osd's hypothesis, 2026-09-19, and it is the cheapest thing measured all
+day: the padding of a CHAR column may live in **our data** rather than in the
+expressions, in which case the four conformance rows about padding are one
+decision at the write boundary rather than four compatibility functions.
+
+Measured on **A4H**, which is a real ABAP system on HANA -- not a probe of
+our own writing, which is the point:
+
+| | |
+| --- | --- |
+| `TADIR-DEVCLASS` in DDIC (`DD03L`) | `CHAR`, length **30** |
+| `SELECT LENGTH(devclass) ... WHERE devclass = '$TMP'` | **4** |
+| `SELECT COUNT(*) ... WHERE devclass = '$TMP' AND LENGTH(devclass) = 4` | **12132 rows** |
+
+The second form matters more than the first: the predicate is evaluated in
+the database, so 12132 rows come back only if HANA itself agrees the stored
+value is four characters long. A value trimmed on the way out by the ABAP
+layer could not satisfy a filter the database applied.
+
+**So a real ABAP system on HANA does not store the trailing blanks**, and the
+local engines' agreement with each other -- `LENGTH` 10, `'abc       |'`,
+a padded column not equal to its unpadded literal -- is agreement about a
+value that a real system would never have written.
+
+### What follows, and it is cheaper than the alternative
+
+The correct local behaviour is **not to write the padding**, rather than to
+emulate trimming inside `CONCAT`, `SUBSTR`, `LENGTH` and every comparison.
+One rule at the write boundary for CHAR columns, and four of the five real
+conformance differences collapse on their own, leaving the arithmetic family
+(browser engine only) and the refusal for casts that cannot fail.
+
+### The limits of this one
+
+- One column of one table on one system. The rule "ABAP CHAR is stored
+  unpadded on HANA" is what the evidence supports; whether anything in the
+  stack ever stores a padded CHAR deliberately is not settled by it.
+- It says nothing about what our own runtime currently writes -- that is the
+  thing to change, and changing it is a data-shape change, so it needs its
+  own check that nothing reads the padding on purpose.
