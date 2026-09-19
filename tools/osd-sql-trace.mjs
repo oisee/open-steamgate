@@ -35,6 +35,26 @@ const STATEMENT_OF = {
   native: (args) => String(args[0]?.sql ?? ""),
 };
 
+/** the table a statement touches, for the summary a trace is read for.
+ *  Taken from the OPTIONS where the seam gives them, and from the text only
+ *  where it does not -- a regular expression over SQL is a guess, and the
+ *  seam is not. */
+export function tableOf(op, args, sql = "") {
+  const named = args?.[0]?.table;
+  if (typeof named === "string" && named !== "") return named.replace(/["\u0027]/g, "").toUpperCase();
+  const match = /\bFROM\s+"?(\w+)"?/i.exec(sql) ?? /\bINTO\s+"?(\w+)"?/i.exec(sql)
+    ?? /\bUPDATE\s+"?(\w+)"?/i.exec(sql);
+  return match === null || match === undefined ? undefined : match[1].toUpperCase();
+}
+
+/** how many rows came back, where the answer says so */
+export function rowsOf(answer) {
+  if (answer === null || typeof answer !== "object") return undefined;
+  if (Array.isArray(answer.rows)) return answer.rows.length;
+  if (typeof answer.dbcnt === "number") return answer.dbcnt;
+  return undefined;
+}
+
 /** the members that mark the shape of the LUW rather than issue a statement */
 const MARKERS = ["beginTransaction", "commit", "rollback"];
 
@@ -48,9 +68,9 @@ const MARKERS = ["beginTransaction", "commit", "rollback"];
 export function installSqlTrace(client, sink, {label} = {}) {
   if (client === undefined || client.__sqlTraced === true) return client;
   let n = 0;
-  const record = (op, sql) => {
+  const record = (entry) => {
     try {
-      sink({n: n++, op, sql, label});
+      sink({...entry, label});
     } catch {
       // a tracer that can break the thing it traces is worse than no tracer
     }
@@ -59,15 +79,45 @@ export function installSqlTrace(client, sink, {label} = {}) {
     const original = client[op];
     if (typeof original !== "function") continue;
     client[op] = function (...args) {
-      record(op, statementOf(args));
-      return original.apply(this, args);
+      // **Timed around the call, and written after it.** A trace without a
+      // duration cannot answer the question a trace is opened for -- which
+      // statement cost the request -- and writing the entry before the call
+      // is what makes a duration impossible to add later. `ms` is rounded to
+      // a tenth: a microsecond figure invites a comparison between two runs
+      // that is noise, and the sieve next door compares statements, not
+      // clocks.
+      const index = n++;
+      const sql = statementOf(args);
+      const started = performance.now();
+      const done = (rows) => {
+        record({n: index, op, sql, ms: Math.round((performance.now() - started) * 10) / 10,
+          table: tableOf(op, args, sql), rows});
+      };
+      let answer;
+      try {
+        answer = original.apply(this, args);
+      } catch (error) {
+        done(undefined);
+        throw error;
+      }
+      if (answer !== null && typeof answer?.then === "function") {
+        return answer.then((value) => {
+          done(rowsOf(value));
+          return value;
+        }, (error) => {
+          done(undefined);
+          throw error;
+        });
+      }
+      done(rowsOf(answer));
+      return answer;
     };
   }
   for (const op of MARKERS) {
     const original = client[op];
     if (typeof original !== "function") continue;
     client[op] = function (...args) {
-      record(op, "");
+      record({n: n++, op, sql: ""});
       return original.apply(this, args);
     };
   }
@@ -168,8 +218,80 @@ export function compareTraces(a, b, {rules = []} = {}) {
   return {same: true, statements: left.length, masked: [...fired]};
 }
 
+/**
+ * What a trace is opened for: where the request went, and what it did twice.
+ *
+ * This is the analysis a screen would show (backlog G.10), written before the
+ * screen on purpose -- the backlog's own warning is that G.10 built first is
+ * "a handsome page with no consumer and no normaliser behind it". The
+ * normaliser is next door and the analysis is here; the page is then a
+ * rendering job.
+ *
+ * `repeated` is the one the response sieve cannot see at all. The same
+ * statement, with only its VALUES differing, run once per row is an N+1: the
+ * answer is right and the system did the work n times. It is found by
+ * counting canonical statements with the literals masked, which is the one
+ * place masking literals is the point rather than a concession.
+ */
+export function summarise(trace, {slowest = 5, repeated = 5} = {}) {
+  const statements = trace.filter((e) => e.sql !== undefined && e.sql !== "");
+  const byTable = new Map();
+  const byShape = new Map();
+  let ms = 0;
+  for (const entry of statements) {
+    ms += entry.ms ?? 0;
+    const table = entry.table ?? "(none)";
+    const t = byTable.get(table) ?? {table, count: 0, ms: 0, rows: 0};
+    t.count += 1;
+    t.ms += entry.ms ?? 0;
+    t.rows += entry.rows ?? 0;
+    byTable.set(table, t);
+
+    const shape = canonical(entry.sql, ["literals", "numbers"]).text;
+    const s = byShape.get(shape) ?? {shape, count: 0, ms: 0, op: entry.op, table};
+    s.count += 1;
+    s.ms += entry.ms ?? 0;
+    byShape.set(shape, s);
+  }
+  const markers = trace.filter((e) => MARKERS.includes(e.op));
+  return {
+    statements: statements.length,
+    ms: Math.round(ms * 10) / 10,
+    luw: {commits: markers.filter((m) => m.op === "commit").length,
+      rollbacks: markers.filter((m) => m.op === "rollback").length},
+    tables: [...byTable.values()].sort((a, b) => b.count - a.count),
+    // "run more than once with only the values differing" is the shape; how
+    // interesting it is depends on how many times, so it is ordered by that
+    repeated: [...byShape.values()].filter((s) => s.count > 1).sort((a, b) => b.count - a.count).slice(0, repeated),
+    slowest: [...statements].sort((a, b) => (b.ms ?? 0) - (a.ms ?? 0)).slice(0, slowest)
+      .map((e) => ({ms: e.ms, op: e.op, table: e.table, sql: canonical(e.sql).text.slice(0, 120)})),
+  };
+}
+
 if (basename(process.argv[1] ?? "") === "osd-sql-trace.mjs") {
-  const files = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const files = process.argv.slice(2).filter((a, i, all) => !a.startsWith("--") && all[i - 1] !== "--rule");
+  if (process.argv.includes("--summary")) {
+    const report = summarise(readTrace(files[0]));
+    console.log(`${report.statements} statements, ${report.ms} ms, ` +
+      `${report.luw.commits} commits, ${report.luw.rollbacks} rollbacks\n`);
+    console.log("  table                  count      ms    rows");
+    for (const t of report.tables.slice(0, 12)) {
+      console.log(`  ${String(t.table).padEnd(22)}${String(t.count).padStart(5)}` +
+        `${String(Math.round(t.ms)).padStart(8)}${String(t.rows).padStart(8)}`);
+    }
+    if (report.repeated.length > 0) {
+      console.log("\n  run more than once with only the values differing -- an N+1 looks like this:");
+      for (const r of report.repeated) {
+        console.log(`  ${String(r.count).padStart(5)}x ${Math.round(r.ms)} ms  ${r.shape.slice(0, 110)}`);
+      }
+    }
+    console.log("\n  slowest:");
+    for (const one of report.slowest) console.log(`  ${String(one.ms).padStart(7)} ms  ${one.sql}`);
+    console.log("\nA count is not a defect: a statement run twice may be two different reads.");
+    console.log("What it is, is the only place an N+1 is visible at all -- the response sieve");
+    console.log("cannot see one, because the answer is right.");
+    process.exit(0);
+  }
   const rules = process.argv.reduce((acc, a, i) => (a === "--rule" ? [...acc, process.argv[i + 1]] : acc), []);
   if (files.length !== 2) {
     console.log("osd-sql-trace: <a.ndjson> <b.ndjson> [--rule literals] [--rule numbers]");

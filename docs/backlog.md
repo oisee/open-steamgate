@@ -3135,3 +3135,41 @@ name that generation again. Consequences, in the order they cost something:
 Not fixed here: `gen/` is an input on purpose (CLAUDE.md records why), so
 taking it out is a decision about what a generation *is*, not a repair. What
 is fixed is that it is now measured rather than surprising.
+
+### G.10 wave 1 — the analysis, before the screen (2026-09-19)
+
+`npm run sql:summary -- <trace.ndjson>` reads a trace the second sieve wrote
+and answers the two questions a trace is opened for: **where the request
+went** (per table: count, milliseconds, rows) and **what it did twice**.
+
+Written before the page deliberately. The backlog's own warning about G.10 is
+that a screen built first is "a handsome page with no consumer and no
+normaliser behind it"; the normaliser is `tools/osd-sql-trace.mjs` and the
+analysis is now beside it, so the screen is a rendering job rather than the
+work.
+
+The tracer gained what a screen needs and a log alone does not: a **duration**
+timed around the call, the **table** taken from the seam's own options where
+it gives one (a regular expression over SQL is a guess; `insert({table})` is
+not), and the **row count**. A statement that RAISED is recorded too — it is
+exactly the one somebody opens a trace for.
+
+`repeated` is the entry the response sieve cannot produce at all: the same
+statement with only its values differing, run n times. The answer is right
+and the system did the work n times, so nothing shows in a response body. It
+is found by counting canonical statements with the literals masked, which is
+the one place masking literals is the point rather than a concession.
+
+**First run, on `npm run unit` (6793 statements, 1563 ms):**
+
+```
+2263x  217 ms  INSERT INTO "wbcrossgt" (...)
+1537x  175 ms  INSERT INTO "tadir" (...)
+ 906x  161 ms  INSERT INTO reposrc (...)
+```
+
+4706 of 6793 statements and 553 of 1563 ms are three tables seeded one row at
+a time. Whether that is worth batching is a separate question — a count is
+not a defect, and a seed writing one row per object is not surprising — but
+it is now a number instead of a feeling, and it is where a third of the
+database time of every unit run goes.

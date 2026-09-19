@@ -158,3 +158,86 @@ describe("the tracer records the seam and does not change it", () => {
     expect(seen).to.have.lengthOf(1);
   });
 });
+
+// What a trace is opened for, which is not the same as what it records.
+//
+// Written before the screen on purpose: the backlog's own warning about G.10
+// is that a page built first is "a handsome page with no consumer and no
+// normaliser behind it". The normaliser is above, the analysis is here, and
+// the page is then a rendering job.
+describe("the summary answers where the request went, and what it did twice", () => {
+  const trace = [
+    {n: 0, op: "beginTransaction", sql: ""},
+    {n: 1, op: "select", sql: "SELECT * FROM t WHERE k = 'a'", ms: 2, table: "T", rows: 1},
+    {n: 2, op: "select", sql: "SELECT * FROM t WHERE k = 'b'", ms: 3, table: "T", rows: 1},
+    {n: 3, op: "select", sql: "SELECT * FROM t WHERE k = 'c'", ms: 1, table: "T", rows: 1},
+    {n: 4, op: "select", sql: "SELECT * FROM u ORDER BY k", ms: 40, table: "U", rows: 9},
+    {n: 5, op: "commit", sql: ""},
+  ];
+
+  it("counts per table, and the markers of the LUW are not statements", async () => {
+    const {summarise} = await import("../tools/osd-sql-trace.mjs");
+    const report = summarise(trace);
+    expect(report.statements, "beginTransaction and commit are not statements").to.equal(4);
+    expect(report.luw).to.deep.equal({commits: 1, rollbacks: 0});
+    expect(report.tables[0]).to.include({table: "T", count: 3, rows: 3});
+  });
+
+  // The one the response sieve cannot see at all: the answer is right and
+  // the system did the work n times.
+  it("finds the N+1 -- one statement run three times with only the values differing", async () => {
+    const {summarise} = await import("../tools/osd-sql-trace.mjs");
+    const report = summarise(trace);
+    expect(report.repeated).to.have.lengthOf(1);
+    expect(report.repeated[0].count).to.equal(3);
+    expect(report.repeated[0].shape, "the values are masked HERE, which is the point rather than a concession")
+      .to.contain("'?'");
+  });
+
+  it("and a statement run once is not in it, so the list is a finding and not a listing", async () => {
+    const {summarise} = await import("../tools/osd-sql-trace.mjs");
+    expect(summarise(trace).repeated.some((r) => r.shape.includes("FROM u"))).to.equal(false);
+  });
+
+  it("names the slowest by time, not by position", async () => {
+    const {summarise} = await import("../tools/osd-sql-trace.mjs");
+    expect(summarise(trace).slowest[0]).to.include({ms: 40, table: "U"});
+  });
+});
+
+describe("the tracer times the call rather than the bookkeeping", () => {
+  it("records a duration, and the table from the seam rather than from a regex", async () => {
+    const {installSqlTrace, tableOf} = await import("../tools/osd-sql-trace.mjs");
+    const seen = [];
+    const client = {
+      async select() { return {rows: [{K: 1}, {K: 2}]}; },
+      async insert() { return {subrc: 0, dbcnt: 1}; },
+    };
+    installSqlTrace(client, (e) => seen.push(e));
+    await client.select({select: "SELECT * FROM zosd_svc"});
+    await client.insert({table: "ZOSD_SYS", columns: ["A"], values: ["1"]});
+
+    expect(seen[0].ms, "a trace without a duration cannot answer what a trace is opened for").to.be.a("number");
+    expect(seen[0].rows).to.equal(2);
+    expect(seen[0].table, "read from the text, because select() gives no table").to.equal("ZOSD_SVC");
+    expect(seen[1].table, "read from the OPTIONS, because insert() does").to.equal("ZOSD_SYS");
+    // the seam is not a guess and the text is
+    expect(tableOf("insert", [{table: "ZOSD_SYS"}], "nonsense")).to.equal("ZOSD_SYS");
+  });
+
+  it("still records when the statement raises, or the slow ones would all be missing", async () => {
+    const {installSqlTrace} = await import("../tools/osd-sql-trace.mjs");
+    const seen = [];
+    const client = {async select() { throw new Error("no such table"); }};
+    installSqlTrace(client, (e) => seen.push(e));
+    let raised;
+    try {
+      await client.select({select: "SELECT * FROM nope"});
+    } catch (error) {
+      raised = error;
+    }
+    expect(raised.message).to.contain("no such table");
+    expect(seen, "a statement that failed is exactly the one somebody opens a trace for").to.have.lengthOf(1);
+    expect(seen[0].ms).to.be.a("number");
+  });
+});

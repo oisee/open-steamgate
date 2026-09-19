@@ -73,7 +73,8 @@
     "conformance:sqlscript": "node tools/sqlscript-conformance.mjs",
     "conformance:sqlscript:bun": "bun tools/sqlscript-conformance.mjs",
     "sqlscript:clauses": "node tools/sqlscript/clause-audit.mjs",
-    "sql:compare": "node tools/osd-sql-trace.mjs"
+    "sql:compare": "node tools/osd-sql-trace.mjs",
+    "sql:summary": "node tools/osd-sql-trace.mjs --summary"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
