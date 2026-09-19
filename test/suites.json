@@ -40,6 +40,7 @@
     "test/sqlscript-ir.mjs",
     "test/sqlscript-lexer.mjs",
     "test/sqlscript-parser.mjs",
+    "test/sqlscript-to-ir.mjs",
     "test/sqlscript-values.mjs",
     "test/stg-compile.mjs",
     "test/transaction.mjs",

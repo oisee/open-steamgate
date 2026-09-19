@@ -22,7 +22,12 @@ export class ColumnRef extends Expression {
 /** a value: a literal, a host variable, or a bound parameter placeholder */
 export class Value extends Expression {
   getRunnable() {
-    return altPrio(tok(TokenKind.string), tok(TokenKind.number), tok(TokenKind.host), "?");
+    // the placeholder is matched as an **operator token**, not with str():
+    // str() produces a `word` node whatever the token was, and a `?` that
+    // arrives as a word is indistinguishable downstream from the keyword it
+    // is not. It cost one failing case to notice.
+    return altPrio(tok(TokenKind.string), tok(TokenKind.number), tok(TokenKind.host),
+      tok(TokenKind.operator, /^\?$/));
   }
 }
 
