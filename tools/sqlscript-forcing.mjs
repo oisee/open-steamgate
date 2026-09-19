@@ -51,13 +51,24 @@ export function count(root, {dialect = "hana", paramsOnMaterialise = true, scrat
     let lowered = 0;
     let full = 0;
     let steps = 0;
+    // How many bodies came with a signature that names parameters, counted
+    // separately for the ones that lower. Asked for because "three bodies
+    // fail on an unknown table variable" is a number about the refusals that
+    // got that far, not about how many signatures were read at all - and the
+    // two differ whenever something fails earlier.
+    let withParams = 0;
+    let loweredWithParams = 0;
     const blockedBy = new Map();
     for (const {body, signature} of bodies) {
+      const params = signature?.parameters ?? signature?.params ?? [];
+      const hasParams = Array.isArray(params) ? params.length > 0 : Object.keys(params ?? {}).length > 0;
+      if (hasParams) withParams += 1;
       let rel;
       try {
         rel = toIr(parse(new Body(), lex(body)), {catalogue: {}, signature}).rel;
         lower(rel, dialect);
         lowered += 1;
+        if (hasParams) loweredWithParams += 1;
       } catch {
         continue; // counted by the denominator tool, not by this one
       }
@@ -66,7 +77,8 @@ export function count(root, {dialect = "hana", paramsOnMaterialise = true, scrat
       if (verdict.full) full += 1;
       for (const one of verdict.blocked) blockedBy.set(one.rel, (blockedBy.get(one.rel) ?? 0) + 1);
     }
-    report[which] = {bodies: bodies.length, lowered, full, steps, blockedBy: [...blockedBy].sort((a, b) => b[1] - a[1])};
+    report[which] = {bodies: bodies.length, lowered, full, steps, withParams, loweredWithParams,
+                     blockedBy: [...blockedBy].sort((a, b) => b[1] - a[1])};
   }
   return report;
 }
@@ -92,6 +104,7 @@ if (process.argv[1]?.endsWith("sqlscript-forcing.mjs")) {
       continue;
     }
     console.log(`\n${which}: **${r.full} of ${r.lowered} lowered bodies force completely** (${r.steps} steps in all)`);
+    console.log(`  signatures with parameters: ${r.withParams} of ${r.bodies} bodies, ${r.loweredWithParams} of the ${r.lowered} that lower`);
     if (r.blockedBy.length > 0) {
       console.log("  what stays fused, by node:");
       for (const [rel, n] of r.blockedBy) console.log(`    ${String(rel).padEnd(12)} ${n}`);
