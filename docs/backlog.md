@@ -1276,13 +1276,26 @@ A.14 Coverage by driving a real client, with A4H as the oracle  [S/R]  new 09-19
      │  against OSD alone it already prints the worklist, ranked by what a
      │  real client does most. Only the second run needs A4H, and that is
      │  the ask
+     ├─ **a call the client refused is a third value, not a match**
+     │  (fable-osd, 2026-09-19, and it is the sharpest thing in this entry):
+     │  a call neither side made produces nothing on **both** sides, and
+     │  "both silent" reads as agreement. The harness has to write "not
+     │  attempted" as its own value the way every other instrument here
+     │  writes "not measured" -- otherwise the coverage number counts the
+     │  calls nobody dared make as successes
      └─ **the boundary, stated before the work**: driving the library
         measures **the server's surface**, not the client's willingness.
         Most façade failures are decided client-side -- the extension does
         not call, and a capture shows nothing -- so this closes "we answer
         wrongly" and leaves "the client refused" to reading the client's own
         bundle. Two different instruments; naming which one is being bought
-        is half the estimate
+        is half the estimate.
+        **And the gates are NOT in the library**: they are in the extension
+        above it, which decides whether to call at all. Driving
+        `abap-adt-api` therefore reproduces the client's *vocabulary* and
+        not its *judgement* -- which is precisely why the boundary above
+        holds and why "including the client's gates" would be the wrong
+        claim to make for this harness
 
 A.5  Stateful session affinity across parallel connections               [R]
      ├─ Eclipse opens many RFC connections at once; each gets its own cookie

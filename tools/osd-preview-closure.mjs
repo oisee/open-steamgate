@@ -18,6 +18,7 @@
 // Three green suites did not cover this, because none of them bundles.
 import {readFileSync, existsSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
+import {runsAs} from "./osd-main.mjs";
 
 export const ENTRY = "web/preview-worker.mjs";
 
@@ -87,12 +88,26 @@ export function uncovered(root = process.cwd()) {
   return out.sort((a, b) => (a.builtin < b.builtin ? -1 : 1));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// **What this answers, and what it does not.** The unit here is the MODULE:
+// it says every node builtin the graph reaches has a polyfill or a stub. It
+// says nothing about the **exports** of that polyfill, and a polyfill can be
+// partial -- measured 2026-09-19, the day this was written: `node:url` is
+// polyfilled, so this printed a clean line, and the preview build failed on
+// `fileURLToPath`, which the browser `url` package does not have (it has
+// `Url`, `format`, `parse`, `resolve`, `resolveObject`). The check was green
+// and the bundle was broken, in the same commit.
+//
+// So the clean line says it out loud rather than implying more than it
+// measured. Widening it to exports is real work -- the imported names per
+// module against what each fallback package actually exports -- and until
+// that exists the sentence is the honest half of the answer.
+if (runsAs("osd-preview-closure.mjs")) {
   const bad = uncovered();
   const {modules} = previewClosure();
   console.log(`preview closure: ${modules.length} modules from ${ENTRY}`);
   if (bad.length === 0) {
     console.log("every node builtin it reaches is polyfilled or stubbed in webpack.config.cjs");
+    console.log("  (modules, not their exports: a partial polyfill passes this and can still fail the build)");
     process.exit(0);
   }
   for (const one of bad) {
