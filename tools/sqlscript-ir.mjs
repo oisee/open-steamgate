@@ -346,3 +346,86 @@ export function adversarialRows(rel, schema = {}) {
   walk(rel);
   return out;
 }
+
+/**
+ * The tables a plan needs, invented from the plan.
+ *
+ * Seven of the corpus bodies could be compared, and none of them could
+ * diverge - all projections. The reason is not that hazardous bodies fail to
+ * lower: it is that a body doing arithmetic almost always READS A TABLE, and
+ * the only bodies runnable here were the self-contained ones that read
+ * nothing but their parameters. The filter that made them runnable is the
+ * same filter that removed everything interesting.
+ *
+ * So the tables are derived instead of found. A plan says which tables it
+ * scans, which columns it touches, and - from what is done to each column -
+ * enough about its type to build something the body will run against:
+ *
+ *   compared with a character literal, or cast to a number  -> character
+ *   used in arithmetic, or compared with a number           -> integer
+ *   only ever selected                                      -> character
+ *
+ * The last line is a guess and is marked as one. Everything here is a
+ * scaffold for running a body against invented data, never a claim about
+ * what the table really is: a column whose use says nothing gets `guessed:
+ * true`, and a caller that cares can refuse it.
+ */
+export function tableShapesFor(rel) {
+  const tables = new Map();
+  const seen = new Map();
+  const note = (name, type, why, guessed = false) => {
+    if (name === undefined) return;
+    const already = seen.get(name);
+    // a use that determines the type beats one that guesses at it
+    if (already !== undefined && already.guessed === false) return;
+    seen.set(name, {type, why, guessed});
+  };
+  const colOf = (e) => (e?.node === "col" ? e.name : undefined);
+
+  const walkExpr = (e) => {
+    if (e === undefined || e === null) return;
+    if (e.node === "col") note(e.name, T.char(20), "only ever read, so nothing says what it is", true);
+    if (e.node === "cast" || (e.node === "call" && /^TO_(INTEGER|DECIMAL)$/.test(e.fn ?? ""))) {
+      note(colOf(e.expr ?? e.args?.[0]), T.str, "cast to a number, so it is written as text");
+    }
+    if (e.node === "bin" && ["+", "-", "*", "/"].includes(e.op)) {
+      note(colOf(e.left), T.int, "arithmetic");
+      note(colOf(e.right), T.int, "arithmetic");
+    }
+    if (e.node === "bin" && ["=", "<>", "<", ">", "<=", ">="].includes(e.op)) {
+      const other = e.right?.node === "lit" ? e.right : e.left?.node === "lit" ? e.left : undefined;
+      const column = colOf(e.left) ?? colOf(e.right);
+      if (other !== undefined) {
+        note(column, typeof other.value === "number" ? T.int : T.char(20),
+          `compared with a ${typeof other.value === "number" ? "number" : "character"} literal`);
+      }
+    }
+    for (const key of ["left", "right", "expr"]) walkExpr(e[key]);
+    for (const one of e.args ?? []) walkExpr(one);
+    if (e.rel !== undefined) walk(e);
+  };
+
+  const walk = (r) => {
+    if (r === undefined) return;
+    if (r.rel === "scan") tables.set(r.table, true);
+    walkExpr(r.pred);
+    for (const item of r.items ?? []) walkExpr(item.expr);
+    for (const agg of r.aggs ?? []) walkExpr(agg.expr);
+    walkExpr(r.on);
+    for (const key of ["input", "left", "right"]) walk(r[key]);
+    for (const one of r.inputs ?? []) walk(one);
+  };
+  walk(rel);
+
+  // one table or several, the columns cannot be told apart by the plan: a
+  // reference is a bare name. With one table that is exact; with more it is
+  // said rather than hidden.
+  const names = [...tables.keys()];
+  const columns = Object.fromEntries([...seen].map(([name, one]) => [name, one]));
+  return {
+    tables: names,
+    columns,
+    ambiguous: names.length > 1,
+    guessed: Object.entries(columns).filter(([, one]) => one.guessed).map(([name]) => name),
+  };
+}

@@ -291,3 +291,41 @@ describe("SQLScript IR: data chosen to break a plan, derived from the plan", () 
     expect(adversarialRows(project(scan("SRC"), [{as: "K", expr: col("K")}]), {K: T.char(3)})).to.be.empty;
   });
 });
+
+describe("SQLScript IR: the tables a body needs, invented from the body", () => {
+  it("names the table and types each column from what is done to it", async () => {
+    const {tableShapesFor} = await import("../tools/sqlscript-ir.mjs");
+    const rel = filter(project(scan("SRC"), [
+      {as: "N", expr: cast(col("TXT"), T.int)},
+      {as: "R", expr: bin("/", col("A"), col("B"), T.dec(15, 2))},
+    ]), bin("<>", col("K"), lit("b", T.char(1)), T.bool));
+    const shapes = tableShapesFor(rel);
+    expect(shapes.tables).to.deep.equal(["SRC"]);
+    expect(shapes.columns.TXT.type.abap, "cast to a number, so written as text").to.equal("STRING");
+    expect(shapes.columns.A.type.abap, "arithmetic").to.equal("I");
+    expect(shapes.columns.K.type.abap, "compared with a character literal").to.equal("C");
+    expect(shapes.guessed, "every column's use said something").to.be.empty;
+  });
+
+  it("marks a column whose use says nothing, instead of pretending to know", async () => {
+    const {tableShapesFor} = await import("../tools/sqlscript-ir.mjs");
+    const shapes = tableShapesFor(project(scan("SRC"), [{as: "K", expr: col("K")}]));
+    expect(shapes.guessed).to.deep.equal(["K"]);
+    expect(shapes.columns.K.why).to.contain("nothing says what it is");
+  });
+
+  it("says when more than one table is read, because a bare column cannot be attributed", async () => {
+    const {tableShapesFor, join} = await import("../tools/sqlscript-ir.mjs");
+    const rel = join(scan("A"), scan("B"), bin("=", col("K"), col("K2"), T.bool));
+    expect(tableShapesFor(rel).ambiguous, "said rather than hidden").to.equal(true);
+  });
+
+  it("a determining use beats a guessing one, whichever is walked first", async () => {
+    const {tableShapesFor} = await import("../tools/sqlscript-ir.mjs");
+    // K is selected (says nothing) and also compared with a number (says int)
+    const rel = filter(project(scan("SRC"), [{as: "K", expr: col("K")}]),
+                       bin(">", col("K"), lit(3, T.int), T.bool));
+    expect(tableShapesFor(rel).columns.K.type.abap).to.equal("I");
+    expect(tableShapesFor(rel).guessed).to.be.empty;
+  });
+});
