@@ -732,15 +732,33 @@ files:
     optional external config on top of our inline `sap-ushell-config`. The
     page works without it. The path is absolute, so answering it needs a
     route in all three hosts or a file in the preview root, written once.
-  - `500 /sap/bc/osd/amdp/engine` — the tile asks whether anything here runs
-    SQLScript. In a browser there is no RFC destination, and `CALL FUNCTION
-    ... DESTINATION` throws a **JavaScript** Error that the ABAP `CATCH
-    cx_root` around it cannot catch, so a question with an honest answer
-    (`none`) comes back 500. The tile greys anyway; the 500 is the defect,
-    and the fact that ABAP cannot defend itself against it is the larger one.
+  - `500 /sap/bc/osd/amdp/engine` — **fixed 2026-09-19**, and it was three
+    layers, each hiding the next:
+    1. the destination raised a plain JavaScript `Error`, which the ABAP
+       `CATCH cx_root` around the CALL FUNCTION cannot catch (fable-osd);
+    2. `tools/amdp-destination.mjs` imported `connection` from
+       `amdp-run.mjs` **statically**, and the preview bundle ignores that
+       module on purpose — webpack turns such an import into a
+       `webpackMissingModule` that throws the moment the binding is touched,
+       before any guard can run. The comment beside the IgnorePlugin already
+       said "the destination itself says so when it is called". It did not;
+       the intention was written next to the code that was supposed to carry
+       it, and not carried;
+    3. `loadProcedures` calls `existsSync`, and a service worker has no disk
+       — the polyfill has no such function, so the constructor threw.
+    Each fix uncovered the next, which is what a guard written at the bottom
+    rather than at the boundary does. It answers `200 {"engine":"none"}` now,
+    and the guard asserts that rather than allowing the 500.
   - `uncaught: Cannot read properties of undefined (reading
-    'appSpecificRoute')` — inside the shell, ours, and not about a missing
-    file. This one was not in the entry at all.
+    'appSpecificRoute')` — **fixed 2026-09-19**, and it was **not ours**, as
+    the first version of this entry claimed. It is inside
+    `sap/ushell/library-preload.js`, and there is nothing of ours between the
+    page loading and the throw. Measured by entry: an empty hash throws once
+    and `#Shell-home` throws not at all, with the same 96 tiles; every real
+    intent opens cleanly either way; an intent that does **not** exist throws
+    the same thing twice, which is the shape of the underlying fault and is
+    theirs. The launchpad sets `#Shell-home` before the bootstrap runs —
+    choosing the entry that works out of two the shell offers.
 
   **How it was nearly filed as "does not reproduce".** The first look read
   the console of the public preview and found one error and zero bad

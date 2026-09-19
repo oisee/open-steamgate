@@ -14,7 +14,25 @@ import {readFileSync, existsSync, writeFileSync, mkdirSync} from "node:fs";
 import {randomBytes} from "node:crypto";
 import {join, dirname} from "node:path";
 import {fromJson} from "./rfc-replay.mjs";
-import {connection} from "./amdp-run.mjs";
+// **Not a static import.** The preview bundle ignores `amdp-run.mjs` on
+// purpose (it pulls in `hdb` and `fileURLToPath`), and webpack turns a static
+// import of an ignored module into a `webpackMissingModule` that throws the
+// moment the binding is touched -- before any guard below can run. So the
+// browser got `Error: Cannot find module './amdp-run.mjs'` as a 500 page,
+// while the comment beside the IgnorePlugin said "the destination itself says
+// so when it is called". It did not: an intention written next to the code
+// that was supposed to carry it, and not carried.
+//
+// Loaded where it is used instead, so that "there is no driver here" is an
+// answer rather than a crash.
+async function hanaSettings() {
+  try {
+    const {connection} = await import("./amdp-run.mjs");
+    return typeof connection === "function" ? connection() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const SCHEMA = process.env.HANA_SCHEMA ?? process.env.HXE_SCHEMA ?? "OSD";
 
@@ -63,6 +81,13 @@ async function refuse(message, name = "AMDP") {
 
 /** what amdp-gen wrote: one entry per AMDP method, keyed by module name */
 export function loadProcedures(folder = "gen/amdp") {
+  // **There is no disk in a service worker.** `node:fs` is polyfilled in the
+  // preview bundle to something without `existsSync`, so this threw a
+  // TypeError out of the constructor and the browser got a crash page for a
+  // question whose answer is "there is no HANA here". Third layer of the same
+  // onion: each fix uncovered the next node-only call, which is what a guard
+  // written at the bottom rather than at the boundary does.
+  if (typeof existsSync !== "function") return new Map();
   const file = join(folder, "procedures.json");
   if (!existsSync(file)) return new Map();
   const {procedures} = JSON.parse(readFileSync(file, "utf8"));
@@ -129,7 +154,8 @@ export class AmdpDestination {
     // destination, because a developer needs "there is no HANA here" rather
     // than "unknown destination AMDP". Say that, rather than fail on an
     // undefined import.
-    if (typeof connection !== "function") {
+    const settings = await hanaSettings();
+    if (settings === undefined) {
       await refuse("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a " +
         "database that speaks SQLScript");
     }
@@ -141,7 +167,6 @@ export class AmdpDestination {
     // was red for everybody who did not have `~/.osd/hxe-password`. It was
     // green here, which is the whole shape of the defect: the suite was
     // passing on the author's machine and on no other.
-    const settings = connection();
     if (settings.password === undefined || settings.password === "") {
       await refuse("AMDP: no HANA is configured here -- set HXE_HOST / HXE_PASSWORD, or put the " +
         "password in ~/.osd/hxe-password. An AMDP method needs a database that speaks SQLScript");
@@ -156,6 +181,9 @@ export class AmdpDestination {
       this.client = undefined;
       await refuse(`AMDP: the configured HANA did not answer: ${String(reason?.message ?? reason).slice(0, 120)}`);
     }
+    // the privileged settings, kept for the restricted-user path below, which
+    // runs only after this has succeeded
+    this.settings = settings;
     return this.client;
   }
 
@@ -229,7 +257,7 @@ export class AmdpDestination {
   async #sandboxClient() {
     if (process.env.OSD_AMDP_SUPERUSER === "1") {
       await this.#connect();
-      return {client: this.client, user: connection().user, schema: SCHEMA, restricted: false};
+      return {client: this.client, user: this.settings.user, schema: SCHEMA, restricted: false};
     }
     if (this.sbx !== undefined) return this.sbx;
 
@@ -247,7 +275,7 @@ export class AmdpDestination {
       if (this.trace) console.log(`AMDP: created the restricted sandbox user ${user}`);
     }
     const hdb = (await import("hdb")).default;
-    const client = hdb.createClient({...connection(), user, password});
+    const client = hdb.createClient({...this.settings, user, password});
     await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
     this.sbx = {client, user, schema: user, restricted: true};
     return this.sbx;

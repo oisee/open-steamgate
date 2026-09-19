@@ -850,11 +850,6 @@ test("the launchpad's console and network, characterised", async () => {
          "`sap-ushell-config`. The launchpad works without it — this is a 404 in a stranger's " +
          "network tab, not a broken page. Fix is to answer it; the path is absolute, so it needs a " +
          "route in all three hosts or a file in the preview root, written once."},
-      {match: "/sap/bc/osd/amdp/engine",
-       reason: "E.5: the tile asks whether anything here runs SQLScript. In the browser there is no " +
-         "RFC destination, and `CALL FUNCTION ... DESTINATION` throws a JavaScript Error that the " +
-         "ABAP `CATCH cx_root` around it cannot catch — so a question with an honest answer " +
-         "(`none`) comes back 500. The tile still greys; the 500 is the defect."},
     ];
     const unexplained = refused.filter((r) => !known.some((k) => r.includes(k.match)));
     expect(unexplained, `the page asked for something it did not get:\n${unexplained.join("\n")}`).toHaveLength(0);
@@ -864,6 +859,14 @@ test("the launchpad's console and network, characterised", async () => {
       expect(refused.some((r) => r.includes(k.match)),
         `${k.match} no longer fails — remove it from the allowance and from backlog E.5`).toBe(true);
     }
+    // and the one that was fixed: the tile's question now has an answer
+    const engine = await page.evaluate(async () => {
+      const res = await fetch("/sap/bc/osd/amdp/engine");
+      return {status: res.status, body: await res.text()};
+    });
+    expect(engine.status, "the tile asks whether anything here runs SQLScript").toBe(200);
+    expect(JSON.parse(engine.body).engine, "and in a browser the honest answer is none").toBe("none");
+
     // The console, characterised rather than demanded clean. Three kinds, and
     // only one of them is ours:
     const chatter = [
@@ -873,11 +876,10 @@ test("the launchpad's console and network, characterised", async () => {
       "Failed to load resource",
     ];
     const ours = complaints.filter((c) => !chatter.some((k) => c.includes(k)));
-    // **The one that is ours, and it is a real find** — an uncaught TypeError
-    // inside the shell, not a message about a missing file. It is listed
-    // rather than tolerated silently, and the day it changes this says so.
-    expect(ours, `the console has something new in it:\n${ours.join("\n")}`)
-      .toEqual(["uncaught: Cannot read properties of undefined (reading 'appSpecificRoute')"]);
+    // Nothing left. The uncaught TypeError that used to be here came from
+    // `sap/ushell/library-preload.js` resolving an empty hash, and the page
+    // lands on `#Shell-home` now — measured: same 96 tiles, no throw.
+    expect(ours, `the console has something new in it:\n${ours.join("\n")}`).toEqual([]);
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
