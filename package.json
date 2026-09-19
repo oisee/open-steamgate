@@ -71,7 +71,8 @@
     "leak:all": "node tools/osd-leak-scan.mjs . --all",
     "osd:restart": "sh scripts/osd-restart.sh",
     "conformance:sqlscript": "node tools/sqlscript-conformance.mjs",
-    "conformance:sqlscript:bun": "bun tools/sqlscript-conformance.mjs"
+    "conformance:sqlscript:bun": "bun tools/sqlscript-conformance.mjs",
+    "sqlscript:clauses": "node tools/sqlscript/clause-audit.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
