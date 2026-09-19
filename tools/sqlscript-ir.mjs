@@ -92,3 +92,24 @@ export function effects(rel) {
   walk(rel);
   return out;
 }
+
+/**
+ * The seam speaks a different type language, and this is the translation.
+ *
+ * Inside the IR a type is an object, because the lowering has to ask it
+ * questions - is this division integer, how wide is this character field.
+ * The native channel's contract (docs/db-seam-native.md) says `type` is "an
+ * ABAP type letter with length and decimals", which is a string. Both halves
+ * were written against the same document and still disagreed here, and
+ * nothing said so until a plan was actually executed: the text-level tests
+ * were green throughout. That is the argument for running the fixtures and
+ * not only spelling them.
+ */
+export function seamType(type) {
+  if (type === undefined || type === null) return "STRING";
+  if (typeof type === "string") return type;
+  const {abap, len, dec} = type;
+  if (abap === "P" && len !== undefined) return `P(${len},${dec ?? 0})`;
+  if (len !== undefined) return `${abap}(${len})`;
+  return abap;
+}

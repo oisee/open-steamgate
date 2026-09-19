@@ -88,7 +88,7 @@ describe("SQLScript IR: values are bound, identifiers are generated", () => {
     expect(sql).to.contain("?");
     expect(params).to.have.length(1);
     expect(params[0].name).to.equal("lv_key");
-    expect(params[0].type.abap).to.equal("C");
+    expect(params[0].type, "the seam speaks a type string, not our object").to.equal("C(3)");
   });
 
   it("a string literal is bound too, because a literal in the text is the old defect", () => {

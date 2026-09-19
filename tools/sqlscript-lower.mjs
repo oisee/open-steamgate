@@ -77,6 +77,8 @@ const DIALECTS = {
   },
 };
 
+import {seamType} from "./sqlscript-ir.mjs";
+
 export class Refused extends Error {}
 
 export function lower(rel, dialectName, options = {}) {
@@ -92,10 +94,10 @@ export function lower(rel, dialectName, options = {}) {
         if (typeof e.value === "number") return String(e.value);
         // a string literal still goes through a parameter: a literal in the
         // text is the class of defect this contract exists to remove
-        params.push({name: `p${params.length}`, value: e.value, type: e.type});
+        params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type)});
         return d.placeholder(params.length);
       case "param":
-        params.push({name: e.name, value: e.value, type: e.type, isNull: e.isNull});
+        params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
         return d.placeholder(params.length);
       case "bin": {
         const left = expr(e.left);
