@@ -177,12 +177,22 @@ export const ddlFor = (dialect) => `CREATE TABLE ${dialect === "hana" ? '"T"' : 
 const DDL = {duckdb: ddlFor("duckdb"), sqlite: ddlFor("sqlite"), hana: ddlFor("hana")};
 
 // Two fixtures, and the difference between them is the whole padding
-// question. The padded one is what our runtime writes today; the unpadded one
-// is what a real system holds, measured on A4H: a CHAR(30) column whose value
-// is '$TMP' answers LENGTH 4, and 12132 rows satisfy a LENGTH = 4 predicate
-// evaluated by HANA itself. `--unpadded` therefore does not simulate a fix -
-// it asks what the table would say once the write boundary stops padding,
-// which turns a forecast into a measurement.
+// question. The unpadded one is what a real system holds, measured on A4H: a
+// CHAR(30) column whose value is '$TMP' answers LENGTH 4, and 12132 rows
+// satisfy a LENGTH = 4 predicate evaluated by HANA itself.
+//
+// **And it is now what our runtime writes as well**, which is why it is the
+// default. This comment used to say the opposite -- "the padded one is what
+// our runtime writes today" -- and it was true until the write boundary was
+// fixed on 2026-09-19 (tools/sql-literals.mjs: two of the four clients
+// trimmed and two did not, so the answer depended on STG_DB). A fixture
+// described as "what we write" while we write something else is the same
+// stale claim this table exists to catch, one level up.
+//
+// `--padded` keeps the historical question askable, because the seven rows
+// between the two are the size of the decision and somebody will want to see
+// them again. A column measured on one fixture cannot be merged into a run
+// of the other: it is refused by name.
 const PADDED = [
   `INSERT INTO t VALUES ('r1', 'abc       ', 'oops', '42', 'ABC', 'abcdef', 1, 2, -7, 0, 0.10, 0.20, 5)`,
   `INSERT INTO t VALUES ('r2', 'zz        ', 'oops', '7',  'ZZ',  'zz',     1, 2, -7, 0, 1.00, 2.00, NULL)`,
@@ -215,8 +225,8 @@ export function rowsMatchColumns(rows = [...PADDED, ...UNPADDED]) {
   return wrong;
 }
 
-const FIXTURE = process.argv.includes("--unpadded") ? "unpadded" : "padded";
-const ROWS = FIXTURE === "unpadded" ? UNPADDED : PADDED;
+const FIXTURE = process.argv.includes("--padded") ? "padded" : "unpadded";
+const ROWS = FIXTURE === "padded" ? PADDED : UNPADDED;
 
 /** Which build answered each column.
  *
@@ -458,7 +468,7 @@ async function main() {
       // there is no --padded, so telling somebody to add it costs the hour
       // this message was written to save
       console.error(`refusing to merge: ${merged} was measured on the ${file.fixture} fixture and this run is ` +
-        `${FIXTURE}. Re-measure it, or ${file.fixture === "unpadded" ? "add --unpadded" : "drop --unpadded"}.`);
+        `${FIXTURE}. Re-measure it, or ${file.fixture === "padded" ? "add --padded" : "drop --padded"}.`);
       process.exit(2);
     }
     engines.hana = file.hana;

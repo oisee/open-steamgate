@@ -261,7 +261,8 @@ runtime writes it today:
 `'abc'` in an `NCHAR(10)` and answers `LENGTH` **3**: it does not store the
 blanks, so every question asked about them differed for one reason and not
 seven. The measurement is now on both sides of that boundary
-(`--unpadded`), which is what turns "we should stop padding" from a plan
+(`--padded` asks the historical question now that the boundary is fixed),
+which is what turns "we should stop padding" from a plan
 into a number.
 
 It also clears three names that were under suspicion. `UPPER`, `LTRIM` and
