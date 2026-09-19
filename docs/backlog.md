@@ -2034,13 +2034,28 @@ B.15 Does our CDS pipeline read a view entity?                           [S]
         nobody has run one through. Write one, build, and either record
         that it works or fix it (docs/cds-publish.md, "Unverified here")
 
-B.14 A cast in a CDS view drops the field                                [S]
-     └─ found 2026-09-17 building the status service:
-        `cast(pid as abap.char(10)) as Pid` in a view is parsed, but the
-        field is missing from the row the generated source class returns
-        and an entity keyed on it answers `PortSet()` with no key. Until
-        it is fixed, change the type in the stg.yaml instead. A test over
-        a casted element in tools/cds2ddic.mjs would pin it.
+B.14 A cast in a CDS view drops the field            [S]  DONE 2026-09-19
+     ├─ found 2026-09-17 building the status service:
+     │  `cast(pid as abap.char(10)) as Pid` in a view is parsed, but the
+     │  field is missing from the row the generated source class returns
+     │  and an entity keyed on it answers `PortSet()` with no key
+     ├─ **the cause**: the generator handled a cast only when the element
+     │  carried `@ObjectModel.virtualElement`. Without it the element has no
+     │  direct `CDSName` child at all — the source column sits *inside* the
+     │  cast — so the field was skipped by a `continue` meant for elements
+     │  with no source. Reproduced before fixing: a three-element view
+     │  generated **two** fields
+     ├─ a cast over a real column is a column now: the name is the alias, the
+     │  type is the cast's, and the column underneath is still named so the
+     │  view reads it. A cast the generator cannot read — a constant with no
+     │  virtualElement annotation — is **named as a skip** rather than
+     │  dropped, because silence was the defect
+     └─ `test/cds-cast.mjs`. The first attempt at finding the source column
+        scanned the cast for a `CDSName` and picked `char` out of
+        `cast( '' as abap.char(12) )` — a field pointing at a column that
+        does not exist, which is a disappearance with a name on it. Its own
+        test caught that. `parseDDLS` is exported for this; the tool only
+        runs `main()` when it is the program.
 
 U.2  The status app on the browser deployment                            [S]
      ├─ DONE 2026-09-17: the worker takes the snapshot itself and posts it

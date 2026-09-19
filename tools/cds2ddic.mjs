@@ -19,7 +19,7 @@ import * as abaplint from "@abaplint/core";
 import {contentFoldersOf} from "./osd-packs.mjs";
 import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync} from "node:fs";
 import {createHash} from "node:crypto";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 
 const OUT = "gen/cds";
 const LIBS = [".local/lars/open-abap-core/src", ".local/fork/open-abap-odata/src"];
@@ -81,7 +81,7 @@ function edmOf(type) {
   }
 }
 
-function parseDDLS(obj, reg) {
+export function parseDDLS(obj, reg) {
   const p = obj.getParsedData();
   const tree = p?.tree;
   if (!tree) return undefined;
@@ -125,6 +125,40 @@ function parseDDLS(obj, reg) {
       const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean);
       fields.push({name: fieldName, base: "", key: false, ...t.edm, abapType: t.abap,
         virtual: true, calculatedBy: by.toUpperCase(), label: label ?? fieldName, annotations: annos});
+      continue;
+    }
+    // **A cast over a real column is a column, and it used to vanish.**
+    //
+    // The branch above handles `cast( '' as abap.char(12) ) as X` when the
+    // element is annotated as a virtual one. Without that annotation the
+    // element has no direct `CDSName` child at all -- the source column sits
+    // *inside* the cast -- so `srcName` came out undefined and the `continue`
+    // below dropped the field without a word. Three elements in, two fields
+    // out; an entity keyed on the casted one then answered with no key
+    // (backlog B.14, found 2026-09-17 building the status service).
+    //
+    // The type is the cast's, because that is what the cast is for. The
+    // column underneath is still named, so the view reads it.
+    if (cast && !srcName) {
+      // What is being cast, read as the text between `cast(` and ` as abap.`.
+      // Scanning the cast for a CDSName was the first attempt and it is worse
+      // than the defect it fixes: in `cast( '' as abap.char(12) )` it finds
+      // `char`, and a field pointing at a column that does not exist is a
+      // disappearance with a name on it.
+      const castText = tokensOf(cast).replace(/\s+/g, " ");
+      const between = /^\s*cast\s*\(\s*(.*?)\s+as\s+abap\s*\./i.exec(castText)?.[1];
+      const inner = between !== undefined && /^[\w.]+$/.test(between) ? between : undefined;
+      const t = castType(tokensOf(cast));
+      if (inner === undefined || t === undefined) {
+        // a cast of a literal with no virtualElement annotation is a constant
+        // column and needs a decision of its own; say so rather than drop it
+        return {name, skip: `${(alias ?? "?").toUpperCase()}: a cast this generator cannot read ` +
+          `(${inner === undefined ? "no column inside it" : "no ABAP type"})`};
+      }
+      const fieldName = (alias ?? inner).toUpperCase();
+      const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean);
+      fields.push({name: fieldName, base: inner.split(".").pop().toUpperCase(), key: isKey,
+        ...t.edm, abapType: t.abap, casted: true, label: label ?? fieldName, annotations: annos});
       continue;
     }
     if (!srcName) continue;
@@ -831,4 +865,4 @@ function main() {
     console.log(`cds2ddic: removed ${stale}, nothing generates it any more`);
   }
 }
-main();
+if (basename(process.argv[1] ?? "") === "cds2ddic.mjs") main();
