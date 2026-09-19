@@ -863,7 +863,15 @@ export function iwprXml(m, opts = {}) {
       PROJECT: P, NODE_UUID: fiId, MODEL: modelId, NAME: f.name, HTTP_METHOD: f.method, ACTION_FOR: f.actionFor ? etId(f.actionFor) : "",
       RETURN_CARD: f.multiplicity, RETURN_REF_TYPE: f.returnEntity ? etId(f.returnEntity) : f.returnComplex ? ctId({name: f.returnComplex}) : "",
       RETURN_TYPE_KIND: f.returnEntity ? "ETYP" : f.returnComplex ? "CTYP" : "",
-      RETURN_ENTITYSET: f.returnSet ? esId(m.entities.find((e) => e.set === f.returnSet) ?? f.returnEntity) : "", REF_TYPE: "T", DESCRIPTION_XU: "X",
+      // **An action bound to an entity type may not name a return entity
+      // set.** SEGW refuses the project with "Function Import 'CancelTravel'
+      // may not specify an Entity Set" (A4H, 2026-09-19) -- and the entity
+      // set is in the metadata anyway, because Gateway derives it from the
+      // type the action is for. We were writing it as well, which is the
+      // conflict. A free-standing function import still names its set.
+      RETURN_ENTITYSET: (f.returnSet && !f.actionFor)
+        ? esId(m.entities.find((e) => e.set === f.returnSet) ?? f.returnEntity) : "",
+      REF_TYPE: "T", DESCRIPTION_XU: "X",
     });
     rows.SBO_FIT.push(text(fiId, "FI_LABEL", f.name));
     for (const p of f.parameters) {
