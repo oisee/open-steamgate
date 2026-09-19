@@ -39,6 +39,7 @@
     "test/osd-persist.mjs",
     "test/osd-proxy.mjs",
     "test/osd-rfc.mjs",
+    "test/osd-routes.mjs",
     "test/osd-runtime.mjs",
     "test/osd-status.mjs",
     "test/osd-store.mjs",
