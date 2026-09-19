@@ -203,7 +203,23 @@ export function toIr(tree, options = {}) {
         return built;
       }
       case "ColumnRef": {
-        const name = nameOf(node);
+        // **`s.k` is the column K, qualified by S -- and `nameOf` took the
+        // FIRST name.** So every qualified reference lowered to the
+        // qualifier: `SELECT s.k FROM src AS s` became `SELECT "S" AS "S"`,
+        // and `SELECT s.k, s.a` became the same wrong column twice. Bodies
+        // written that way -- which is most bodies with a join in them --
+        // counted as lowered and could not run.
+        //
+        // The column is the LAST name. The qualifier is dropped rather than
+        // emitted, because our joins are lowered into a subquery with
+        // generated aliases and the writer's alias does not exist in the SQL
+        // we produce: emitting `"S"."K"` would be invalid where dropping it
+        // is correct for one source and AMBIGUOUS for several -- and an
+        // ambiguous column is an error the engine states out loud, which the
+        // instruments read as our SQL being refused. A loud wrong is worth
+        // having; a quiet wrong is what this was.
+        const names = kids(node, "Name");
+        const name = names.length > 1 ? nameOf(names[names.length - 1]) : nameOf(node);
         return col(name, typeOfColumn(name));
       }
       case "identifier":
@@ -553,6 +569,24 @@ export function toIr(tree, options = {}) {
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
     if (selects.length === 1) return orderAndLimit(node, select(selects[0]));
+    // **Which set operation it was is a word, and the word was never read.**
+    //
+    // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were
+    // lowered as a union -- so a body asking for the rows of A that are NOT
+    // in B got the rows of A *plus* B. That is not a dropped clause, it is
+    // the opposite answer, returned plausibly, with nothing to notice. Found
+    // by asking every clause of the grammar what it lowers to, one day after
+    // the same sweep found GROUP BY, HAVING and DISTINCT in the same state
+    // (2026-09-19).
+    //
+    // The IR carries one set operation. Until it carries three, the other two
+    // are refused by name.
+    for (const word of ["INTERSECT", "EXCEPT"]) {
+      if (hasWord(node, word)) {
+        throw new BindError(`${word} is parsed and the IR has only UNION, so this body would lower to the ` +
+          `opposite set; it is refused until the IR carries ${word}`, node);
+      }
+    }
     const all = hasWord(node, "ALL");
     return orderAndLimit(node, union(selects.map(select), all));
   }

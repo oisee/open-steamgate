@@ -106,3 +106,51 @@ describe("a clause the grammar reads and the IR does not carry is refused, not d
     expect(() => plan("RETURN SELECT distinct k FROM src;")).to.throw(/read as a column name/);
   });
 });
+
+// The second sweep of the grammar, one day after the first, and it found two
+// more -- one of them the worst shape this project has produced.
+describe("a set operation the IR cannot express is refused, not turned into another one", () => {
+  const plan = (body) => toIr(parse(new Body(), lex(body)), {catalogue: {}}).rel;
+
+  it("EXCEPT is refused, because lowering it as UNION returns the OPPOSITE set", () => {
+    expect(() => plan("RETURN SELECT k FROM src EXCEPT SELECT k FROM other;"))
+      .to.throw(/EXCEPT is parsed and the IR has only UNION/);
+  });
+
+  it("INTERSECT likewise", () => {
+    expect(() => plan("RETURN SELECT k FROM src INTERSECT SELECT k FROM other;"))
+      .to.throw(/INTERSECT is parsed/);
+  });
+
+  it("and UNION, which the IR does carry, still lowers - both with and without ALL", () => {
+    for (const body of ["RETURN SELECT k FROM src UNION SELECT k FROM other;",
+                        "RETURN SELECT k FROM src UNION ALL SELECT k FROM other;"]) {
+      expect(lower(plan(body), "hana").sql).to.contain("UNION");
+    }
+  });
+});
+
+describe("a qualified column is the column, not the qualifier", () => {
+  const sqlOf = (body) => lower(toIr(parse(new Body(), lex(body)), {catalogue: {}}).rel, "hana").sql;
+
+  // `nameOf` took the first Name of `s.k`, so every qualified reference
+  // lowered to the alias: bodies with a join counted as lowered and could
+  // not run.
+  it("s.k is K", () => {
+    expect(sqlOf("RETURN SELECT s.k FROM src AS s;")).to.contain('"K" AS "K"');
+  });
+
+  it("and two qualified columns are two different columns, not one twice", () => {
+    const sql = sqlOf("RETURN SELECT s.k, s.a FROM src AS s;");
+    expect(sql).to.contain('"K"');
+    expect(sql).to.contain('"A"');
+  });
+
+  it("a table qualifier works the same as an alias", () => {
+    expect(sqlOf("RETURN SELECT src.k FROM src;")).to.contain('"K" AS "K"');
+  });
+
+  it("and an unqualified column is untouched", () => {
+    expect(sqlOf("RETURN SELECT k FROM src;")).to.contain('"K" AS "K"');
+  });
+});
