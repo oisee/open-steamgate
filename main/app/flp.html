@@ -126,6 +126,20 @@
                       }
                     },
                     {
+                      // greyed by launchpad.js when nothing behind the
+                      // destination can run SQLScript: a tile that looks
+                      // alive and does nothing is worse than a grey one
+                      id: "amdp",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "AMDP sandbox",
+                        subtitle: "SQLScript, typed and run",
+                        info: "needs HDB",
+                        icon: "sap-icon://database",
+                        targetURL: "#Amdp-play"
+                      }
+                    },
+                    {
                       id: "source",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -245,6 +259,13 @@
           description: "the sap-lsd light-show, recorded as SAP GUI screens and replayed over a push channel",
           applicationType: "URL",
           url: "../sap/bc/lsd",
+          navigationMode: "embedded"
+        },
+        "Amdp-play": {
+          title: "AMDP sandbox",
+          description: "a SQLScript body, deployed, run and dropped again",
+          applicationType: "URL",
+          url: "../sap/bc/osd/amdp/",
           navigationMode: "embedded"
         },
         "Source-open": {

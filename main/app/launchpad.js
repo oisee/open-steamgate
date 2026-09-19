@@ -48,7 +48,38 @@ sap.ui.define([], function () {
     });
   }
 
-  withPackTiles().then(function () {
+  // The AMDP tile is only useful where something can run SQLScript. Ask,
+  // rather than read a configuration: a name in a config says what somebody
+  // intended, and /engine says what happens -- it runs the smallest possible
+  // body and reports. A tile that looks alive and then cannot do anything is
+  // worse than a grey one, and this is the same screen that refuses to draw
+  // a menu entry for a transaction it cannot start.
+  function greyAmdpWithoutEngine() {
+    return fetch("../sap/bc/osd/amdp/engine").then(function (r) {
+      return r.ok ? r.json() : {engine: "none"};
+    }).then(function (answer) {
+      if (!launchPage || (answer && answer.engine === "HDB")) {
+        return;
+      }
+      (launchPage.groups || []).forEach(function (group) {
+        (group.tiles || []).forEach(function (tile) {
+          if (tile.id !== "amdp") {
+            return;
+          }
+          tile.properties.info = "no SQLScript engine here";
+          tile.properties.subtitle = "needs a database that speaks it";
+          // no target: the sandbox would answer honestly, but a tile that
+          // goes nowhere says so before the click rather than after
+          delete tile.properties.targetURL;
+        });
+      });
+    }).catch(function () {
+      // no server (the browser preview) is the same answer as no engine
+      greyAmdpWithoutEngine.failed = true;
+    });
+  }
+
+  withPackTiles().then(greyAmdpWithoutEngine).then(function () {
     return sap.ushell.Container.createRenderer("fiori2", true);
   }).then(function (renderer) {
     renderer.placeAt("content");
