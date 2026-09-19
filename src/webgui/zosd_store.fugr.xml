@@ -46,6 +46,10 @@
        <PARAMETER>ET_TYPE</PARAMETER>
        <DBSTRUCT>ZOSD_TYPE_S</DBSTRUCT>
       </RSTBL>
+      <RSTBL>
+       <PARAMETER>ET_TOKEN</PARAMETER>
+       <DBSTRUCT>ZOSD_TOKEN_S</DBSTRUCT>
+      </RSTBL>
      </TABLES>
     </item>
    </FUNCTIONS>

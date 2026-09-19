@@ -18,6 +18,17 @@ const BASE = `http://localhost:${PORT}/sap/bc/osd/edit/`;
 const OBJECT = "ZCL_OSD_ST05";
 const FILE = "src/webgui/zcl_osd_st05.clas.abap";
 
+// HTML entities back to text, numeric ones included: the escaper on the
+// screen writes `&#39;` for an apostrophe, and ABAP source is full of them.
+// `&amp;` is undone LAST, or an entity that was in the source to begin with
+// -- this screen's own code writes HTML -- gets unescaped twice, and the
+// comparison fails on a difference the page does not have. Both were red
+// once, in that order.
+const unescape = (html) => html
+  .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+  .replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"')
+  .replaceAll("&amp;", "&");
+
 const post = (body) => fetch(BASE, {
   method: "POST",
   headers: {"content-type": "application/x-www-form-urlencoded"},
@@ -41,11 +52,15 @@ describe("the editor", function () {
     expect(page, "a count of what matched").to.match(/\d+ shown of \d+ objects/);
   });
 
-  it("opens one object with its source in the box", async () => {
+  it("opens one object, shown before it is changed", async () => {
+    // display first, change on a click -- the pair the original had
     const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}`)).text();
-    expect(page, "the text area").to.contain('<textarea name="src"');
-    expect(page, "holding the source as it is on disk").to.contain("CLASS zcl_osd_st05 DEFINITION");
+    expect(page, "the source, rendered").to.contain("CLASS");
     expect(page, "and the file it came from").to.contain(FILE);
+    expect(page, "a way into the text area").to.contain("change=x");
+    const box = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}&change=x`)).text();
+    expect(box, "the text area").to.contain('<textarea name="src"');
+    expect(box, "holding the source as it is on disk").to.contain("CLASS zcl_osd_st05 DEFINITION");
   });
 
   it("checks the source it was POSTED, which is the form-body gap this screen found", async () => {
@@ -74,10 +89,42 @@ describe("the editor", function () {
     // did not happen. The source here is the file's own, so the save is a
     // no-op on disk and the assertion is about the box.
     const source = readFileSync(FILE, "utf8");
-    const page = await (await post({type: "CLAS", name: OBJECT, do: "save", src: source})).text();
+    // the form carries change=x, so a save comes back in the text area with
+    // what the person typed -- posting without it would test a form nobody
+    // submits
+    const page = await (await post({type: "CLAS", name: OBJECT, do: "save", change: "x", src: source})).text();
     expect(page, "saved").to.contain("Saved.");
     expect(page, "and the box still holds it").to.contain("CLASS zcl_osd_st05 DEFINITION");
     expect(readFileSync(FILE, "utf8"), "and the file is what it was").to.equal(source);
+  });
+
+  it("shows the source coloured by the parser, and the text is the text", async () => {
+    // Display and change, the pair the original had. The colouring is done
+    // where the parse already is -- so a keyword is a keyword because the
+    // grammar matched it as one, not because it is in a list somebody keeps.
+    const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}`)).text();
+    const pre = /<pre class="src">([\s\S]*?)<\/pre>/.exec(page)?.[1] ?? "";
+    expect(pre, "the display is rendered").to.not.equal("");
+    expect(pre, "a keyword the grammar matched").to.contain('<span class="tkeyword">CLASS</span>');
+    expect(pre, "and a name that is not one").to.contain('<span class="tname">zcl_osd_st05</span>');
+    expect(pre, "comments are comments").to.match(/class="tcomment"/);
+
+    // **the text is the text**: strip the markup and the line numbers and
+    // what is left must be the file, character for character. A display that
+    // loses a character is worse than one that colours nothing
+    // `&amp;` LAST: this screen's own source contains HTML entities, so
+    // unescaping the ampersand first turns `&amp;quot;` into `"` and the
+    // comparison fails on a difference the page does not have. The test was
+    // red for exactly that before the order was fixed
+    const text = unescape(pre.replace(/<span class="ln">\d+<\/span>/g, "").replace(/<[^>]+>/g, ""));
+    const trim = (t) => t.split("\n").map((l) => l.replace(/\s+$/, "")).filter((l, i, a) => i < a.length - 1 || l !== "");
+    expect(trim(text)).to.deep.equal(trim(readFileSync(FILE, "utf8")));
+  });
+
+  it("and Change gives a plain text area, because a caret cannot be styled", async () => {
+    const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}&change=x`)).text();
+    expect(page).to.contain('<textarea name="src"');
+    expect(page, "and the display is not shown twice").to.not.contain('<pre class="src">');
   });
 
   it("ships no JavaScript, like the rest of these screens", async () => {

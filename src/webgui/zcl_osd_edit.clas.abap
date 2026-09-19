@@ -41,6 +41,7 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
     TYPES tt_object TYPE STANDARD TABLE OF zosd_object_s WITH DEFAULT KEY.
     TYPES tt_issue  TYPE STANDARD TABLE OF zosd_issue_s WITH DEFAULT KEY.
     TYPES tt_type   TYPE STANDARD TABLE OF zosd_type_s WITH DEFAULT KEY.
+    TYPES tt_token  TYPE STANDARD TABLE OF zosd_token_s WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_answer,
              source   TYPE string,
@@ -57,6 +58,7 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
              objects  TYPE tt_object,
              issues   TYPE tt_issue,
              types    TYPE tt_type,
+             tokens   TYPE tt_token,
            END OF ty_answer.
 
 *   one call of the store, with everything the screen ever asks for
@@ -85,6 +87,23 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
         iv_source      TYPE string
         is_answer      TYPE ty_answer
         iv_did         TYPE string
+        iv_change      TYPE abap_bool
+      RETURNING
+        VALUE(rv_html) TYPE string.
+
+*   the source with its keywords coloured, built from the tokens the PARSER
+*   classified: a TokenNode is a keyword because the grammar matched it as
+*   one, so `VALUE` is a keyword in a DATA statement and a name in a method
+*   called `value`. No word list, and nothing to keep in step with ABAP.
+*
+*   It is display only -- the text area stays plain, because a caret cannot
+*   be styled and an editor that fought the browser for it would be a worse
+*   editor. Display and change, the pair the original had, and the colouring
+*   is done where the parse already is (backlog G.8).
+    CLASS-METHODS coloured
+      IMPORTING
+        iv_source      TYPE string
+        it_token       TYPE tt_token
       RETURNING
         VALUE(rv_html) TYPE string.
 
@@ -145,7 +164,8 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                     ev_error    = rs_answer-error
           TABLES    et_object   = rs_answer-objects
                     et_issue    = rs_answer-issues
-                    et_type     = rs_answer-types.
+                    et_type     = rs_answer-types
+                    et_token    = rs_answer-tokens.
       CATCH cx_root INTO lx_root.
 *       The same rule as the AMDP tile and the trace screen: the ABAP guards
 *       itself, and what is thrown has to SAY why. An exception with no
@@ -165,6 +185,8 @@ CLASS zcl_osd_edit IMPLEMENTATION.
     DATA lv_title  TYPE string.
     DATA ls_answer TYPE ty_answer.
     DATA lt_fields TYPE tihttpnvp.
+    DATA lv_change TYPE abap_bool.
+    DATA ls_tokens TYPE ty_answer.
 
 *   read through zcl_osd_form, not through `get_form_field`: the shim fills
 *   the form fields from the query string only, so the body of the POST this
@@ -177,6 +199,9 @@ CLASS zcl_osd_edit IMPLEMENTATION.
     lv_filter = zcl_osd_form=>value( it_fields = lt_fields iv_name = `q` ).
     lv_source = zcl_osd_form=>value( it_fields = lt_fields iv_name = `src` ).
     lv_do = zcl_osd_form=>value( it_fields = lt_fields iv_name = `do` ).
+    IF zcl_osd_form=>value( it_fields = lt_fields iv_name = `change` ) IS NOT INITIAL.
+      lv_change = abap_true.
+    ENDIF.
     TRANSLATE lv_type TO UPPER CASE.
     TRANSLATE lv_name TO UPPER CASE.
     TRANSLATE lv_filter TO UPPER CASE.
@@ -225,6 +250,15 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                              iv_name    = lv_name ).
           lv_source = ls_answer-source.
       ENDCASE.
+*     the tokens for the coloured display, and only when it is shown: the
+*     parse costs seconds the first time and a text area does not need it
+      IF lv_change = abap_false AND ls_answer-error IS INITIAL.
+        ls_tokens = store( iv_command = `TOKENS`
+                           iv_type    = lv_type
+                           iv_name    = lv_name
+                           iv_source  = lv_source ).
+        ls_answer-tokens = ls_tokens-tokens.
+      ENDIF.
 *     after a write the box keeps what the person typed, not what a READ
 *     would give back: the two are the same file, and a round trip that
 *     silently replaced the text would hide a write that failed
@@ -232,7 +266,8 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                         iv_name   = lv_name
                         iv_source = lv_source
                         is_answer = ls_answer
-                        iv_did    = lv_did ).
+                        iv_did    = lv_did
+                        iv_change = lv_change ).
     ENDIF.
 
     server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
@@ -296,6 +331,7 @@ CLASS zcl_osd_edit IMPLEMENTATION.
   METHOD editor.
     DATA lv_head  TYPE string.
     DATA lv_state TYPE string.
+    DATA lv_box   TYPE string.
 
     IF is_answer-error IS NOT INITIAL.
       lv_head = |<div class="err"><b>The store refused.</b><div class="msg">{ esc( is_answer-error ) }</div></div>|.
@@ -304,26 +340,83 @@ CLASS zcl_osd_edit IMPLEMENTATION.
       lv_state = ` <span class="dim">read only</span>`.
     ENDIF.
 
+*   Display and change, the pair the original had. In display the source is
+*   coloured by the parser that is already in this process; in change it is
+*   a plain text area, because a caret cannot be styled and an editor that
+*   fought the browser over it would be a worse editor.
+    IF iv_change = abap_false.
+      lv_box = coloured( iv_source = iv_source it_token = is_answer-tokens ) &&
+               |<div class="bar"><a class="btn" href="?type={ esc( iv_type ) }| &&
+               |&amp;name={ esc( iv_name ) }&amp;change=x">Change</a>| &&
+               |<span class="dim">coloured on the server, by the same parse the check runs on</span></div>|.
+    ELSE.
+      lv_box =
+        `<form method="post" action="">` &&
+        |<input type="hidden" name="type" value="{ esc( iv_type ) }">| &&
+        |<input type="hidden" name="name" value="{ esc( iv_name ) }">| &&
+        |<input type="hidden" name="change" value="x">| &&
+        |<textarea name="src" rows="28" spellcheck="false">{ esc( iv_source ) }</textarea>| &&
+        `<div class="bar">` &&
+        `<button type="submit" name="do" value="check">Check</button>` &&
+        `<button type="submit" name="do" value="save">Save</button>` &&
+        `<button type="submit" name="do" value="activate">Activate</button>` &&
+        `<span class="dim">Check is a parse of the system, seconds. ` &&
+        `Activate is that check over every caller and then a build, and a build ` &&
+        `of changed sources is never cached.</span>` &&
+        `</div></form>`.
+    ENDIF.
+
     rv_html = lv_head &&
       |<p class="note"><a href="?">objects</a> &middot; <code>{ esc( is_answer-file ) }</code>| &&
       |{ lv_state }</p>| &&
-      `<form method="post" action="">` &&
-      |<input type="hidden" name="type" value="{ esc( iv_type ) }">| &&
-      |<input type="hidden" name="name" value="{ esc( iv_name ) }">| &&
-      |<textarea name="src" rows="28" spellcheck="false">{ esc( iv_source ) }</textarea>| &&
-      `<div class="bar">` &&
-      `<button type="submit" name="do" value="check">Check</button>` &&
-      `<button type="submit" name="do" value="save">Save</button>` &&
-      `<button type="submit" name="do" value="activate">Activate</button>` &&
-      `<span class="dim">Check is a parse of the system, seconds. ` &&
-      `Activate is that check over every caller and then a build, and a build ` &&
-      `of changed sources is never cached.</span>` &&
-      `</div></form>` &&
+      lv_box &&
       issue_table( it_issue  = is_answer-issues
                    iv_active = is_answer-active
                    iv_ms     = is_answer-ms
                    iv_did    = iv_did
                    iv_note   = is_answer-note ).
+  ENDMETHOD.
+
+  METHOD coloured.
+    DATA lt_lines TYPE string_table.
+    DATA lv_line  TYPE string.
+    DATA lv_no    TYPE i.
+    DATA lv_at    TYPE i.
+    DATA ls_token TYPE zosd_token_s.
+    DATA lv_out   TYPE string.
+    DATA lv_num   TYPE string.
+
+    SPLIT iv_source AT |{ cl_abap_char_utilities=>newline }| INTO TABLE lt_lines.
+
+    LOOP AT lt_lines INTO lv_line.
+      lv_no = sy-tabix.
+      lv_at = 1.
+      CLEAR lv_out.
+*     the tokens of this line, in order; everything between two of them is
+*     written as it is, so the text always comes out whole even where the
+*     parser understood nothing
+      LOOP AT it_token INTO ls_token WHERE line = lv_no.
+        IF ls_token-col > lv_at.
+          lv_out = lv_out && esc( substring( val = lv_line
+                                             off = lv_at - 1
+                                             len = ls_token-col - lv_at ) ).
+        ENDIF.
+        IF ls_token-col - 1 + ls_token-len <= strlen( lv_line ).
+          lv_out = lv_out && |<span class="t{ esc( ls_token-kind ) }">| &&
+                   esc( substring( val = lv_line off = ls_token-col - 1 len = ls_token-len ) ) &&
+                   `</span>`.
+          lv_at = ls_token-col + ls_token-len.
+        ENDIF.
+      ENDLOOP.
+      IF lv_at <= strlen( lv_line ).
+        lv_out = lv_out && esc( substring( val = lv_line off = lv_at - 1 ) ).
+      ENDIF.
+      lv_num = |{ lv_no }|.
+      rv_html = |{ rv_html }<span class="ln">{ lv_num }</span>{ lv_out }| &&
+                cl_abap_char_utilities=>newline.
+    ENDLOOP.
+
+    rv_html = |<pre class="src">{ rv_html }</pre>|.
   ENDMETHOD.
 
   METHOD issue_table.
@@ -403,6 +496,13 @@ CLASS zcl_osd_edit IMPLEMENTATION.
       `form.sel{margin:0 0 12px;display:flex;gap:6px}` &&
       `input[type=text]{font:12px "Courier New",monospace;padding:3px 6px;border:1px solid #b9c6d6}` &&
       `code{font:12px "Courier New",monospace;background:#e7eef7;padding:0 3px}` &&
+      `pre.src{margin:0;padding:8px;background:#fff;border:1px solid #b9c6d6;overflow:auto;` &&
+      `font:12px "Courier New",monospace;line-height:1.45}` &&
+      `pre.src .ln{display:inline-block;width:3.5em;color:#a8b6c6;user-select:none}` &&
+      `.tkeyword{color:#0a6ed1;font-weight:bold}.tcomment{color:#5c8a5c;font-style:italic}` &&
+      `.tstring{color:#b03060}.tpragma{color:#8a6d3b}.tpunct{color:#8496a9}` &&
+      `a.btn{display:inline-block;padding:4px 12px;border:1px solid #b9c6d6;` &&
+      `background:linear-gradient(#ffffff,#e6eef7);text-decoration:none;color:#1c2f43}` &&
       `</style></head><body>` &&
       |<div class="hd"><b>Editor</b><span>{ esc( lv_title ) }</span></div>| &&
       |<div class="pane">{ iv_body }</div></body></html>|.
