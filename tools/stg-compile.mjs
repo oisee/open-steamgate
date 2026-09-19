@@ -906,10 +906,24 @@ export function iwmoXml(m) {
 `;
 }
 
-// abapGit names: /NS/X -> #ns#x; IWSV/IWMO keys are the technical name
-// padded to 34 plus the version
+// abapGit names: /NS/X -> #ns#x; an IWSV/IWMO key is the technical name
+// padded to **32** plus a four-character version, 36 in all.
+//
+// It was 34 here and in zcl_stg_segw_repo, and both agreed, so the test that
+// holds the two implementations byte-identical passed for months: they were
+// compared with each other and never with a system. Measured on A4H
+// 2026-09-19, from the percent-encoded ADT URIs so the spaces are exact:
+//
+//   /DMO/UI_TRAVEL_A_D_O2      name 21 -> key 36
+//   /DMO/UI_TRAVEL_A_D_O2_VAN  name 25 -> key 36
+//   /DMO/API_TRAVEL_U_V2       name 20 -> key 36
+//
+// abapGit refused the import with "This syntax cannot be used for an object
+// name": two characters too long is not a near miss, it is a different name.
+const IWSV_NAME_WIDTH = 32;
 const objectFile = (name, ext) => name.toLowerCase().replaceAll("/", "#") + ext;
-const versionedFile = (name, ext) => name.toLowerCase().padEnd(34, " ") + "0001" + ext;
+const versionedFile = (name, ext) =>
+  name.toLowerCase().padEnd(IWSV_NAME_WIDTH, " ") + "0001" + ext;
 
 // everything the folder gets: the tree, the registration objects, the
 // classes (generated from the tree by segw-gen, so what SEGW would write)

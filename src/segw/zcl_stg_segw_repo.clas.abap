@@ -35,8 +35,13 @@ CLASS zcl_stg_segw_repo DEFINITION PUBLIC CREATE PUBLIC.
         VALUE(rv_xml) TYPE string.
 
   PRIVATE SECTION.
-* abapGit names an IWSV/IWMO file by the technical name padded to 34 plus
-* the version
+* abapGit names an IWSV/IWMO file by the technical name padded to 32 plus
+* the four-character version, 36 in all. It was 34 here and 34 in
+* tools/stg-compile.mjs, and the two agreed, so the test holding them
+* byte-identical passed: they were compared with each other and never with a
+* system. Measured on A4H 2026-09-19 (/DMO/UI_TRAVEL_A_D_O2 and two more,
+* read off the percent-encoded ADT URIs so the spaces are exact). abapGit
+* refused the import: "This syntax cannot be used for an object name".
     CLASS-METHODS versioned_file
       IMPORTING
         iv_name        TYPE string
@@ -57,8 +62,8 @@ CLASS zcl_stg_segw_repo IMPLEMENTATION.
 
   METHOD versioned_file.
     rv_name = to_lower( iv_name ).
-    IF strlen( rv_name ) < 34.
-      rv_name = rv_name && repeat( val = ` ` occ = 34 - strlen( rv_name ) ).
+    IF strlen( rv_name ) < 32.
+      rv_name = rv_name && repeat( val = ` ` occ = 32 - strlen( rv_name ) ).
     ENDIF.
     rv_name = rv_name && '0001' && iv_ext.
   ENDMETHOD.
