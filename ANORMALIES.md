@@ -985,3 +985,36 @@ ENDLOOP.
 - Upstream issue: https://github.com/abaplint/abaplint/issues/4308, opened 2026-09-19; **PR https://github.com/abaplint/abaplint/pull/4311** the same day, after Lars answered "PRs welcome". Three expressions matched the keyword as a literal and all three are fixed: `MethodParam`, `MethodDefReturning` and `PassByValue`. The second was found by a test — `RETURNING !VALUE(rv_x)` still failed after the first was fixed — which is why the test cases were written before the second site was looked for. That repository takes no branch from us and its regression workflow skips forks, so an issue is the whole of what we can offer there, and the issue offers a PR if the maintainer names the shape he wants. Related upstream: abaplint#2529, the same escape in front of a builtin function, open since 2022
 - Regression-test location: `test/amdp.mjs`, "a parameter written `!VALUE(x)` is still a parameter" — **and, separately, "the abaplint gap the !VALUE workaround exists for"**, which asserts the upstream defect itself so that the workaround has an expiry. A workaround with no expiry is how a tree collects code nobody dares remove: the reason lives in a commit message, the commit message is read once, and later the normalisation looks load-bearing. When abaplint learns the form, that test fails and says to delete the workaround rather than to adjust the expectation
 - Upstream version containing a fix: `unknown`
+
+
+### NOTE-2026-09-19-shared-library-clone — a library clone shared by symlink has no private checkout
+
+Not an anomaly in anybody's software; a property of how this tree is
+arranged, written down because it produced a real disagreement about a
+measurement and cost two sessions half an hour.
+
+- Discovery date: `2026-09-19`
+- What happened: two sessions counted the objects the store indexes and got
+  **1134** and **1140** within a minute of each other. The repository content
+  was identical — grouped by origin, the two agreed on **420** own objects
+  and differed only in the libraries, 714 against 720
+- Why: `.local/lars/*` are single working directories, and every worktree
+  `osd-branch` makes points at them by symlink
+  (`.local/worktrees/*/.local/lars -> <main>/.local/lars`). **There is no
+  private checkout to differ**; there is one checkout that either session can
+  move. This one was moved: a branch was created in
+  `.local/lars/open-abap-core` to send open-abap-core#1253, which carried the
+  clone from `4eec777` to `origin/main`, and the twenty commits in between
+  added exactly six objects — `char5`, `char64`, `char100`, `char200`,
+  `cx_osql_failure`, `if_ixml_text`
+- What follows for `osd-branch`: a worktree is isolated **by repository and
+  by `$HOME`, and not by libraries.** That is a real limit on what "a clean
+  tree" means, and it is worth stating in the same breath as the Playwright
+  browsers: a shared clone is shared files **and a shared checkout**, and a
+  symlink makes the second look like the first
+- What follows for measuring: a count of objects is only comparable when the
+  library checkouts are named alongside it. The two readings were both
+  correct and were about different systems
+- The cheap check, which settled it in one step: print the count, the types,
+  **and `git -C .local/lars/open-abap-core rev-parse HEAD` together**, so
+  that a number can never travel without the state it was taken in
