@@ -3508,3 +3508,33 @@ travelling with somebody else's state is worse than one travelling with
 none. It checks `--show-toplevel` against the folder now and says "not a
 clone" rather than borrowing a hash — with a test that asserts no library
 ever reports this repository's HEAD.
+
+### `npm run unit` can say it ran nothing (2026-09-19)
+
+`OK` meant "nothing failed", never "something passed", and the two were
+printed with one word. osg-osd-i7 met it from the sharp end: eight tests
+written, `OK` printed, not one of them executed, ever.
+
+`tools/osd-unit-run.mjs` runs the transpiled suite and then compares what
+the **tree** holds against what the **runtime reported**. A test class in
+the tree that never appears is named and the run fails. Nothing here checks
+whether a test passed — the runtime already does that, loudly.
+
+The classes are counted from the files (`*.clas.testclasses.abap` under an
+input folder), not from a generated index, so a test written and not yet
+transpiled is a finding rather than an absence. A test include with **no
+class beside it** is named as such, because an include without its class is
+not an object at all.
+
+**And it uses the build's own `exclude_filter` rather than a second list.**
+Its first run named `ZCL_EDITOR` — a fixture under `test/fixtures/`, with
+its own `abaplint.jsonc` and an empty test class that exists so the ADT
+editor tests have something to read. It never runs because the build skips
+that folder. A check that did not know would have cried wolf on its first
+run, and a check that cries wolf stops being read.
+
+Note what this does **not** claim: the rule "a test class without its own
+`.clas.xml` does not run" is **false in this tree** — five such classes run
+every build (`zcl_osd_rfc_test`, `zcl_stg_gateway_test`,
+`zcl_stg_phase0_test`, `zcl_stg_segw_test`, `zcl_stg_shlp_test`). Whatever
+silenced those eight tests, it was not the missing file.

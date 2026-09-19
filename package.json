@@ -17,7 +17,7 @@
     "dev": "node tools/osd-build.mjs && STG_SERVE=child STG_DEV=1 node test/run.mjs",
     "ps": "node tools/osd-runtime.mjs ps",
     "dbs": "node tools/osd-db.mjs list",
-    "unit": "npm run transpile && echo RUNNING && node --expose-gc output/index.mjs && echo OK",
+    "unit": "npm run transpile && echo RUNNING && node tools/osd-unit-run.mjs",
     "integration": "node tools/osd-suites.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",

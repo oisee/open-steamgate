@@ -68,6 +68,7 @@
     "test/store-exclusions.mjs",
     "test/transaction.mjs",
     "test/type-graph.mjs",
+    "test/unit-run.mjs",
     "test/webgui.mjs",
     "test/write-boundary.mjs",
     "test/zosd-test.mjs"
