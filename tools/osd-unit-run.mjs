@@ -1,15 +1,23 @@
 // `npm run unit`, with a way to say "I ran nothing".
 //
-// The run printed `OK` and exited 0 whether it executed 156 test classes or
-// none of them: there was no relation between what the tree contains and
-// what the runtime reported. osg-osd-i7 met it from the sharp end --
-// eight tests written, `OK` printed, and not one of them executed, ever
-// (2026-09-19).
+// **The honest provenance, because the one this was written for was wrong.**
+// osg-osd-i7 reported eight tests that printed `OK` and never ran. They had
+// run all along: the first reading was `npm run unit 2>&1 | tail -15` over a
+// seventeen-line file, and the lines were in the middle. A log truncated by
+// the command that produced it is indistinguishable from a log of something
+// that never happened -- `tail -15` and "it did not run" look the same on a
+// screen. So there was no green-without-a-run that day.
 //
-// That is the same shape as every other defect this tree has paid for today:
-// a verdict with two outcomes that quietly has a third, and the third
-// impersonates the nearer one. "Passed" and "did not run" are different
-// claims, and only one of them was printable.
+// This exists anyway, for two reasons that do not depend on that:
+//
+//   1. its first run found a REAL one -- `ZCL_EDITOR`, a test class that
+//      genuinely never executes -- and named why (its folder is outside the
+//      build). That is the check's finding, not anybody's report.
+//   2. `OK` meant "nothing failed" and never "something passed", and the two
+//      were printed with one word. "Nothing ran" is the third value of a
+//      test run's verdict, the way "not measured" is the third value
+//      everywhere else in this tree, and a verdict that cannot print its
+//      third value will one day print the nearest of the other two.
 //
 // So the classes are counted from the **parse** -- every
 // `*.clas.testclasses.abap` under an input folder -- and compared with the

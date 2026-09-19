@@ -3,15 +3,21 @@ import {testClassesIn, reported, missing} from "../tools/osd-unit-run.mjs";
 
 // **`npm run unit` printed OK whether it executed 156 test classes or none.**
 //
-// There was no relation between what the tree contains and what the runtime
-// reported, so a test class that never ran was indistinguishable from one
-// that passed. osg-osd-i7 met it from the sharp end: eight tests written,
-// `OK` printed, not one of them executed, ever (2026-09-19).
+// The report that prompted this was wrong and the correction is worth more
+// than the report: eight tests said to have printed `OK` without running had
+// run all along, and the first reading of them was `npm run unit 2>&1 |
+// tail -15` over a seventeen-line file. **A log truncated by the command
+// that produced it is indistinguishable from a log of something that never
+// happened** (osg-osd-i7, who paid for that twice in one day).
 //
-// It is the same shape as everything else this tree has paid for today -- a
-// verdict with two outcomes that quietly has a third, and the third
-// impersonates the nearer one. "Passed" and "did not run" are different
-// claims and only one was printable.
+// What survives the correction, and why this is still here:
+//
+//   its first run found a real one -- ZCL_EDITOR, which genuinely never
+//   executes -- and named why;
+//
+//   and `OK` still meant "nothing failed" rather than "something passed".
+//   "Nothing ran" is the third value of a test run's verdict, the way "not
+//   measured" is the third value everywhere else in this tree.
 describe("a unit run can say it ran nothing", () => {
   it("counts the test classes from the FILES, not from a generated index", () => {
     const inTree = testClassesIn();

@@ -3511,9 +3511,26 @@ ever reports this repository's HEAD.
 
 ### `npm run unit` can say it ran nothing (2026-09-19)
 
-`OK` meant "nothing failed", never "something passed", and the two were
-printed with one word. osg-osd-i7 met it from the sharp end: eight tests
-written, `OK` printed, not one of them executed, ever.
+**The provenance, honestly, because the report this came from was wrong.**
+osg-osd-i7 reported eight tests that printed `OK` and never ran. They had
+run all along: the first reading was `npm run unit 2>&1 | tail -15` over a
+seventeen-line file, and the lines were in the middle of it. **A log
+truncated by the command that produced it is indistinguishable from a log of
+something that never happened** — `tail -15` and "it did not run" look the
+same on a screen. (The same knife twice in one day: the morning's
+`coverage.mjs` header went the same way through `tail -25`.)
+
+So there was no green-without-a-run. The check stayed for two reasons that
+do not depend on the report:
+
+1. **its first run found a real one** — `ZCL_EDITOR`, a test class that
+   genuinely never executes — and named why. That is the check's finding,
+   not anybody's report.
+2. `OK` meant "nothing failed" and never "something passed", and the two
+   were printed with one word. "Nothing ran" is the third value of a test
+   run's verdict, the way "not measured" is the third value everywhere else
+   here, and a verdict that cannot print its third value eventually prints
+   the nearest of the other two.
 
 `tools/osd-unit-run.mjs` runs the transpiled suite and then compares what
 the **tree** holds against what the **runtime reported**. A test class in
@@ -3536,5 +3553,9 @@ run, and a check that cries wolf stops being read.
 Note what this does **not** claim: the rule "a test class without its own
 `.clas.xml` does not run" is **false in this tree** — five such classes run
 every build (`zcl_osd_rfc_test`, `zcl_stg_gateway_test`,
-`zcl_stg_phase0_test`, `zcl_stg_segw_test`, `zcl_stg_shlp_test`). Whatever
-silenced those eight tests, it was not the missing file.
+`zcl_stg_phase0_test`, `zcl_stg_segw_test`, `zcl_stg_shlp_test`). And the
+cause is now known rather than merely excluded: **nothing was silenced.**
+The class ran with the file and without it — eight methods both times — and
+what differed between the two readings was not the file but **how the log
+was read**. Two things changed between the runs and only one was noticed,
+which is the control an experiment needs and did not have.
