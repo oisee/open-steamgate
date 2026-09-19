@@ -1006,29 +1006,37 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `.fld>summary::-webkit-details-marker{display:none}` &&
       `.fld>summary::before{content:"\25B6";color:#5d7186;font-size:9px;width:10px;display:inline-block}` &&
       `.fld[open]>summary::before{content:"\25BC"}` &&
-      `.fld>summary:hover{background:#e1f0d2}` &&
-*     Nesting the way SAP Easy Access draws it, measured off three
-*     screenshots of the real screen rather than guessed (2026-09-19).
-*     Two rules, and both are about the subtree, not the row:
-*       - each level's background is one step **lighter**, so the
-*         shallower a level, the greener it is. Written as nested
-*         selectors, so a tree of any depth shades itself and nobody
-*         has to pass a level number into the markup.
-*       - the border is horizontal and sits on the subtree block, which
-*         is why the original shows a line where a level begins and ends
-*         and none between siblings.
-*     Measured: indent 18px = the row height; backgrounds #ECF8E2,
-*     #F3FBED, #F9FEF6 at depths 1-3; rule #B3C69E; the selected row
-*     #E1F0D2. The fourth step is extrapolated by the same delta -- the
-*     screenshots have no fourth level, and it is said here rather than
-*     left to look measured.
-      `.kids{margin-left:18px;padding:0;background:#ecf8e2;`  &&
-      `border-top:1px solid #b3c69e;border-bottom:1px solid #b3c69e}` &&
-      `.kids .kids{background:#f3fbed}` &&
-      `.kids .kids .kids{background:#f9fef6}` &&
-      `.kids .kids .kids .kids{background:#fcfffc}` &&
+      `.fld>summary:hover{background:#dbe7f4}` &&
+*     Nesting the way SAP Easy Access draws it -- the **step**, measured off
+*     three screenshots of the real screen, in our own hue (2026-09-19).
+*
+*     What was measured there: each level keeps about 0.6 of the previous
+*     level's distance to white (0.63/0.57/0.62, then 0.5/0.25/0.5), the
+*     indent is 18px = the row height, and the rule is horizontal and sits on
+*     the subtree, which is why the original shows a line where a level
+*     begins and ends and none between siblings. A horizontal scan confirmed
+*     the background never changes with x, so what reads as a vertical band
+*     of a level is not one.
+*
+*     What is **not** taken from there is the colour. The first version
+*     transplanted SAP's greens into a blue screen, which is copying the
+*     answer instead of the rule. The ladder is counted from this screen's
+*     own base tone, #eaf4ff -- the tint it already uses everywhere -- by the
+*     measured ratio, so the hue is ours and the rhythm is the original's.
+*
+*     `color-mix` states the derivation instead of hiding it in four hex
+*     literals: 60%, 36%, 22% are 0.6, 0.6^2, 0.6^3. The plain value before
+*     each is the same number for a browser that does not know the function.
+*     The fourth step is extrapolation -- the screenshots have no fourth
+*     level -- and says so rather than looking measured.
+      `.kids{margin-left:18px;padding:0;background:#eaf4ff;`  &&
+      `background:color-mix(in srgb,#eaf4ff 100%,#fff);`  &&
+      `border-top:1px solid #b9c6d6;border-bottom:1px solid #b9c6d6}`  &&
+      `.kids .kids{background:#f2f8ff;background:color-mix(in srgb,#eaf4ff 60%,#fff)}`  &&
+      `.kids .kids .kids{background:#f7fbff;background:color-mix(in srgb,#eaf4ff 36%,#fff)}`  &&
+      `.kids .kids .kids .kids{background:#fafdff;background:color-mix(in srgb,#eaf4ff 22%,#fff)}`  &&
       `.leaf{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 14px;text-decoration:none;color:#1c2f43;border-radius:2px}` &&
-      `a.leaf:hover{background:#e1f0d2}` &&
+      `a.leaf:hover{background:#dbe7f4}` &&
       `a.leaf:hover .lbl{text-decoration:underline}` &&
       `.leaf.dead{color:#5d7186}` &&
       `.lbl{white-space:nowrap}` &&
