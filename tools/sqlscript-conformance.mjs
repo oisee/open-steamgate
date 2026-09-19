@@ -63,16 +63,28 @@ const CASES = [
    why: "a scalar read from an empty result: NULL, or an error"},
   {id: "div_zero", sql: "SELECT a / zero AS v FROM t WHERE k = 'r1'",
    why: "division by zero: an error, or NULL, or infinity"},
+  // Three rows added after they were found the expensive way - by reading
+  // bodies and measuring one at a time. A divergence that is only ever
+  // measured by hand is a divergence that comes back: these are here so the
+  // standing run re-checks them on every engine, every time.
+  {id: "like_case", sql: "SELECT COUNT(*) AS v FROM t WHERE upper_txt LIKE 'abc'",
+   why: "LIKE and case: HANA and DuckDB do not match, sql.js did - and Open SQL on a real system is case-sensitive too"},
+  {id: "cast_char_narrow", sql: "SELECT CAST(long_txt AS VARCHAR(3)) AS v FROM t WHERE k = 'r1'",
+   why: "casting to a narrower character type: HANA truncates to three, the others keep all six"},
+  {id: "cast_round", sql: "SELECT CAST(d1 AS INTEGER) AS v FROM t WHERE k = 'r3'",
+   why: "casting a fraction to an integer: HANA truncates toward zero, DuckDB rounds - this one was ours, and it shipped"},
 ];
 
 /** the fixture, in our own DDIC shapes: a padded CHAR, a packed decimal, integers */
 const DDL = {
   duckdb: `CREATE TABLE t (
       k VARCHAR, ch CHAR(10), txt VARCHAR, num VARCHAR,
+      upper_txt VARCHAR, long_txt VARCHAR,
       a INTEGER, b INTEGER, c INTEGER, zero INTEGER,
       d1 DECIMAL(15,2), d2 DECIMAL(15,2), nullable INTEGER)`,
   sqlite: `CREATE TABLE t (
       k TEXT, ch NCHAR(10), txt TEXT, num TEXT,
+      upper_txt TEXT, long_txt TEXT,
       a INTEGER, b INTEGER, c INTEGER, zero INTEGER,
       d1 NUMERIC, d2 NUMERIC, nullable INTEGER)`,
 };
@@ -84,13 +96,20 @@ const DDL = {
 // it asks what the table would say once the write boundary stops padding,
 // which turns a forecast into a measurement.
 const PADDED = [
-  `INSERT INTO t VALUES ('r1', 'abc       ', 'oops', '42', 1, 2, -7, 0, 0.10, 0.20, 5)`,
-  `INSERT INTO t VALUES ('r2', 'zz        ', 'oops', '7',  1, 2, -7, 0, 1.00, 2.00, NULL)`,
+  `INSERT INTO t VALUES ('r1', 'abc       ', 'oops', '42', 'ABC', 'abcdef', 1, 2, -7, 0, 0.10, 0.20, 5)`,
+  `INSERT INTO t VALUES ('r2', 'zz        ', 'oops', '7',  'ZZ',  'zz',     1, 2, -7, 0, 1.00, 2.00, NULL)`,
+  `INSERT INTO t VALUES ('r3', 'cc        ', '3',    '3',  'CC',  'cc',     1, 2, -7, 0, 1.70, 0.30, NULL)`,
 ];
 const UNPADDED = [
-  `INSERT INTO t VALUES ('r1', 'abc', 'oops', '42', 1, 2, -7, 0, 0.10, 0.20, 5)`,
-  `INSERT INTO t VALUES ('r2', 'zz',  'oops', '7',  1, 2, -7, 0, 1.00, 2.00, NULL)`,
+  `INSERT INTO t VALUES ('r1', 'abc', 'oops', '42', 'ABC', 'abcdef', 1, 2, -7, 0, 0.10, 0.20, 5)`,
+  `INSERT INTO t VALUES ('r2', 'zz',  'oops', '7',  'ZZ',  'zz',     1, 2, -7, 0, 1.00, 2.00, NULL)`,
+  `INSERT INTO t VALUES ('r3', 'cc',  '3',    '3',  'CC',  'cc',     1, 2, -7, 0, 1.70, 0.30, NULL)`,
 ];
+// The third row exists only for the cast-rounding case, and its other
+// columns are chosen so that no case measured before it existed answers
+// differently now: a new row that changed an old answer would invalidate the
+// oracle column silently, which is a worse fault than the one it was added
+// to catch.
 const ROWS = process.argv.includes("--unpadded") ? UNPADDED : PADDED;
 
 async function runDuckDB() {
@@ -262,18 +281,32 @@ if (process.argv.includes("--json")) {
   const others = names.filter((n) => n !== oracle);
   const nominal = [];
   const real = [];
+  const unmeasured = [];
   for (const one of CASES) {
+    // A row the oracle has not answered is NOT a difference - it is a row
+    // nobody has measured, and counting it as a difference is the instrument
+    // reporting its own incompleteness as a finding. Three cases added after
+    // the oracle column was captured did exactly that until this line existed.
+    if (normalise(engines[oracle][one.id]).kind === "missing") {
+      unmeasured.push(one);
+      continue;
+    }
     const differs = others.filter((n) => show(engines[n][one.id]) !== show(engines[oracle][one.id]));
     const actually = others.filter((n) => !agree(engines[n][one.id], engines[oracle][one.id]));
     if (differs.length > 0) nominal.push({one, who: differs});
     if (actually.length > 0) real.push({one, who: actually});
   }
-  console.log(`against ${oracle}: ${nominal.length} of ${CASES.length} rows differ nominally, **${real.length} after normalisation**`);
+  const compared = CASES.length - unmeasured.length;
+  console.log(`against ${oracle}: ${nominal.length} of ${compared} rows compared differ nominally, **${real.length} after normalisation**`);
+  if (unmeasured.length > 0) {
+    console.log(`  NOT measured against ${oracle} (re-run the oracle column): ${unmeasured.map((one) => one.id).join(", ")}`);
+  }
   // per engine, because "nine rows differ" is not a number anybody can act
   // on: one engine may account for all of them
+  const comparable = CASES.filter((one) => normalise(engines[oracle][one.id]).kind !== "missing");
   for (const name of others) {
-    const nom = CASES.filter((one) => show(engines[name][one.id]) !== show(engines[oracle][one.id])).length;
-    const act = CASES.filter((one) => !agree(engines[name][one.id], engines[oracle][one.id])).length;
+    const nom = comparable.filter((one) => show(engines[name][one.id]) !== show(engines[oracle][one.id])).length;
+    const act = comparable.filter((one) => !agree(engines[name][one.id], engines[oracle][one.id])).length;
     console.log(`  ${name.padEnd(8)} ${nom} nominal, ${act} real`);
   }
   const formattingOnly = nominal.filter((n) => !real.some((r) => r.one.id === n.one.id));
