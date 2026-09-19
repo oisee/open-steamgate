@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {writeFileSync, readFileSync, rmSync, mkdirSync} from "node:fs";
 import {join} from "node:path";
-import {hashOf, generatorClosure} from "../tools/osd-build.mjs";
+import {hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
 
 // **A generation's name was a function of the tree AND of how many times the
 // tree had been built.**
@@ -61,5 +61,50 @@ describe("a generation's name is a function of the tree, not of its build histor
   it("and the closure is stable, so the hash does not depend on the order it was read", () => {
     expect(generatorClosure()).to.deep.equal(generatorClosure());
     expect([...generatorClosure()], "sorted").to.deep.equal([...generatorClosure()].sort());
+  });
+});
+
+// **Taking `gen/` out of the hash removed an accidental protection.**
+//
+// A cache hit skips the generators -- reasonably, since the generation is
+// reused because its INPUTS match. `gen/` is an output. So after
+//
+//   edit a view -> build -> restore the source -> build again
+//
+// the second build reused the generation and three files under `gen/` still
+// held the edit. The served system was right; the working tree was not, and
+// the next thing to read `gen/` -- the object store, the ADT façade, the
+// next build's own generators -- believes it (measured 2026-09-19, and the
+// defect was mine, introduced the same afternoon).
+//
+// So the manifest records what `gen/` held when the generation was made, and
+// a cache hit that finds it different runs the generators again. Measured
+// after: the reuse takes 2.4 s instead of 0.12 s, against 9.7 s for a full
+// build, and `gen/` comes out consistent.
+describe("a cache hit does not leave gen/ holding somebody else's edit", () => {
+  it("genHash reads the content, so a changed file changes it", async () => {
+    const {writeFileSync, rmSync, mkdirSync} = await import("node:fs");
+    const before = genHash(process.cwd());
+    expect(before, "gen/ exists and is hashed").to.match(/^[0-9a-f]{16}$/);
+    mkdirSync("gen", {recursive: true});
+    writeFileSync("gen/osd-genhash-probe.tmp.abap", "* a probe\n");
+    try {
+      expect(genHash(process.cwd()), "a file under gen/ must move it").to.not.equal(before);
+    } finally {
+      rmSync("gen/osd-genhash-probe.tmp.abap", {force: true});
+    }
+    expect(genHash(process.cwd()), "and removing it must bring it back").to.equal(before);
+  });
+
+  it("and it is NOT the generation hash, which is the whole point", () => {
+    expect(genHash(process.cwd()), "one is the output, the other the inputs")
+      .to.not.equal(hashOf(process.cwd()));
+  });
+
+  it("the live manifest carries what gen/ held when it was built", async () => {
+    const {readFileSync, existsSync} = await import("node:fs");
+    if (!existsSync("build/live/manifest.json")) return;
+    const manifest = JSON.parse(readFileSync("build/live/manifest.json", "utf8"));
+    expect(manifest.gen, "without it a cache hit cannot tell that gen/ drifted").to.be.a("string");
   });
 });

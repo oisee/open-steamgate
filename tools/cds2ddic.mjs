@@ -22,7 +22,19 @@ import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
 
 const OUT = "gen/cds";
-const LIBS = [".local/lars/open-abap-core/src", ".local/fork/open-abap-odata/src"];
+// **The libraries this generator resolves types against, and they have to be
+// the ones the build uses.** This list said `.local/fork/open-abap-odata`,
+// which `abap_transpile.json` does not configure and `osd-worktree` does not
+// share -- `SHARED` carries `.local/lars` and not `.local/fork` -- so in
+// **every planted worktree** the folder was absent, `filter(existsSync)`
+// dropped it, and the generator ran with one dependency fewer than in the
+// checkout it was written in. Silently: an absent library was not an error,
+// it was an absence.
+//
+// Measured before changing it: the two clones are identical here, 119 files
+// each, `diff -rq` empty -- so this is the same content read from the place
+// the rest of the system reads it (2026-09-19).
+const LIBS = [".local/lars/open-abap-core/src", ".local/lars/open-abap-odata/src"];
 
 function walk(dir, out = []) {
   // sorted: the registry this writes lists entities in this order, and a
@@ -960,6 +972,14 @@ function main() {
   // every CDS view and every table of the repository, wherever it lives under src/
   mains.push(...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).flatMap((f) => walk(f)).filter((f) => /\.(ddls\.asddls|ddls\.xml|tabl\.xml|dtel\.xml|doma\.xml|ttyp\.xml)$/.test(f)));
   reg.addFiles(mem(mains));
+  // and a library that is not there is SAID, not skipped: the output
+  // changes without it, and a generator that shrugs at a missing dependency
+  // produces a different system and calls it the same one
+  const absent = LIBS.filter((l) => !existsSync(l));
+  if (absent.length > 0) {
+    console.log(`cds2ddic: WARNING ${absent.join(", ")} missing -- types from ${absent.length === 1 ? "it" : "them"} ` +
+      "will not resolve, and what this writes is not what a complete tree writes");
+  }
   reg.addDependencies(mem(LIBS.filter(existsSync).flatMap((l) => walk(l))));
   reg.parse();
 

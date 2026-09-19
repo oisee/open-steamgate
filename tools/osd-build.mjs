@@ -165,6 +165,28 @@ export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
   return [...seen].sort();
 }
 
+/** the generators, in order, writing into the working `gen/` as they always do */
+export function runGenerators(root, log = () => {}) {
+  let output = "";
+  for (const [script, ...args] of GENERATORS) {
+    log(`${script} ${args.join(" ")}`.trim());
+    const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
+    output += run(cmd, argv, root);
+  }
+  return output;
+}
+
+/** what `gen/` holds right now, by content: 196 files, milliseconds */
+export function genHash(root) {
+  const dir = join(root, "gen");
+  if (!existsSync(dir)) return "";
+  const h = createHash("sha256");
+  for (const f of walk(dir).sort()) {
+    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
 export function hashOf(root, inputs = inputsOf(root)) {
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(describeBuild(root))).update("\0");
@@ -406,11 +428,26 @@ export async function build(options = {}) {
   const target = join(paths.byInput, hash);
 
   if (options.force !== true && existsSync(join(target, "manifest.json"))) {
-    log(`generation ${hash} is already built`);
+    const manifest = JSON.parse(readFileSync(join(target, "manifest.json"), "utf8"));
+    // **A cache hit must not leave `gen/` holding somebody else's edit.**
+    // The generation is reused because the INPUTS match; `gen/` is an output
+    // and is written by the generators, which a cache hit skips. If what is
+    // on disk is not what this generation was made from, the generators run
+    // again -- the transpile still does not.
+    if (manifest.gen !== undefined && manifest.gen !== genHash(root)) {
+      log(`generation ${hash} is already built, but gen/ has drifted from it -- regenerating`);
+      const unlockAgain = lock(paths);
+      try {
+        runGenerators(root, log);
+      } finally {
+        unlockAgain();
+      }
+    } else {
+      log(`generation ${hash} is already built`);
+    }
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
     }
-    const manifest = JSON.parse(readFileSync(join(target, "manifest.json"), "utf8"));
     return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects};
   }
 
@@ -435,11 +472,7 @@ export async function build(options = {}) {
     };
     writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
 
-    for (const [script, ...args] of GENERATORS) {
-      log(`${script} ${args.join(" ")}`.trim());
-      const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
-      output += run(cmd, argv, root);
-    }
+    output += runGenerators(root, log);
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
     // no parsing a count out of its output
@@ -454,6 +487,17 @@ export async function build(options = {}) {
       objects,
       transpiler: describeBuild(root),
       inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f))},
+      // What `gen/` held when this generation was made. `gen/` is an OUTPUT
+      // and is out of the hash (it used to be in it, which made the name
+      // self-referential) -- and taking it out removed an accidental
+      // protection: a cache hit skips the generators, so `gen/` on disk can
+      // be left holding a previous edit's output while `src/` says
+      // otherwise. Measured: edit a view, build, restore the source, build
+      // again -- the second build reuses the generation and three files
+      // under `gen/` still hold the edit (2026-09-19). The served system is
+      // right; the working tree is not, and the next thing to read `gen/`
+      // believes it.
+      gen: genHash(root),
       overridden: stack.overridden,
     };
     writeFileSync(join(tmp, "manifest.json"), JSON.stringify(manifest, null, 2));
