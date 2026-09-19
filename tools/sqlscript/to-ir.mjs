@@ -391,6 +391,27 @@ export function toIr(tree, options = {}) {
       const expr = expression((item.children ?? []).find((c) => c.node !== "word" && c !== alias));
       return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};
     });
+    // **`SELECT *` is not a projection, it is the absence of one.**
+    //
+    // A `project` whose only item is a star was reaching the lowering as
+    // `{node:"star"}` and being refused there, which was right but late: the
+    // node says "every column of the input", and the relation that already
+    // means that is the input. So it collapses.
+    //
+    // A star **mixed with names** does not collapse and is refused by name.
+    // The schema is at hand and expanding it would be easy, which is exactly
+    // the trap (fable-osd): an expansion freezes the set and the order of
+    // the columns at the moment of compiling, so adding a column to the
+    // table later changes what the body means. That is a quiet dependency on
+    // the state of the dictionary dressed up as a convenience.
+    const stars = items.filter((i) => i.expr?.node === "star");
+    if (stars.length > 0 && items.length > stars.length) {
+      throw new BindError("`*` together with named columns is not lowered: expanding it would fix the set and the order of the columns at compile time, and a column added to the table later would change what this body means", node);
+    }
+    if (stars.length > 0) {
+      const hinted = hintsOf(node);
+      return orderAndLimit(node, hinted === undefined ? rel : {...rel, hints: hinted});
+    }
     rel = project(rel, items);
     const hints = hintsOf(node);
     if (hints !== undefined) rel = {...rel, hints};

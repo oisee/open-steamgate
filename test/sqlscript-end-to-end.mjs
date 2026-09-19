@@ -131,3 +131,31 @@ describe("a subquery inside a condition, run on both engines", function () {
     expect(sql.split("?")).to.have.length(4);
   });
 });
+
+describe("SELECT * is the absence of a projection, not a projection of a star", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+
+  it("collapses into its input, and answers every column", async () => {
+    const {ir, sql} = compile("SELECT * FROM src;", "duckdb", CAT);
+    expect(ir.rel.rel, "no projection was built at all").to.equal("scan");
+    expect(sql).to.equal('SELECT * FROM "SRC"');
+    const results = await run({body: "SELECT * FROM src;", catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length).to.be.greaterThan(1);
+    for (const r of answered) expect(Object.keys(r.rows[0]).length, r.engine).to.equal(2);
+  });
+
+  it("still collapses under a filter, and the filter survives", () => {
+    const {sql} = compile("SELECT * FROM src WHERE n > 1;", "duckdb", CAT);
+    expect(sql).to.contain("WHERE");
+    expect(sql).to.not.contain(" AS ");
+  });
+
+  it("refuses a star mixed with names, rather than expanding it from the schema", () => {
+    // expanding would be easy and is the trap: it fixes the set and the
+    // order of the columns at compile time, so a column added to the table
+    // later changes what the body means
+    expect(() => compile("SELECT *, k FROM src;", "duckdb", CAT))
+      .to.throw(/would change what this body means/);
+  });
+});
