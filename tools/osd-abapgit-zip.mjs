@@ -56,7 +56,37 @@ export const devcXml = (description) => BOM +
  *  Reports the objects by name rather than counting files, because one object
  *  is two files (source and XML) and "13 files" tells a reader nothing about
  *  whether the thing they wanted is there. */
-export function layout(from, into, description) {
+/** Table contents, in abapGit's own shape.
+ *
+ *  It carries them: `zif_abapgit_data_config` names `/data/` as the folder,
+ *  `TABU` as the type and json as the format, and
+ *  `zcl_abapgit_data_utils=>build_data_filename` writes
+ *  `<table>.<type>.json` in lower case. Our `data/*.tabu.json` is that
+ *  format already -- CLAUDE.md calls it "abapGit TABU JSON" and it is not a
+ *  name we invented.
+ *
+ *  **A `.tabu.json` without its `.conf.json` is not carried.** The config
+ *  says which tables to serialise and with what condition; without it
+ *  abapGit has rows and no instruction to take them. So this copies pairs,
+ *  and says which ones it could not pair rather than shipping half.
+ */
+export function dataFiles(from, into) {
+  if (!existsSync(from)) return {carried: [], unpaired: []};
+  const files = readdirSync(from);
+  const carried = [];
+  const unpaired = [];
+  for (const f of files.filter((x) => x.endsWith(".tabu.json"))) {
+    const conf = f.replace(/\.tabu\.json$/, ".conf.json");
+    if (!files.includes(conf)) { unpaired.push(f); continue; }
+    mkdirSync(join(into, "data"), {recursive: true});
+    cpSync(join(from, f), join(into, "data", f));
+    cpSync(join(from, conf), join(into, "data", conf));
+    carried.push(f.replace(/\.tabu\.json$/, ""));
+  }
+  return {carried, unpaired};
+}
+
+export function layout(from, into, description, data) {
   rmSync(into, {recursive: true, force: true});
   mkdirSync(join(into, "src"), {recursive: true});
   writeFileSync(join(into, ".abapgit.xml"), abapgitXml());
@@ -75,14 +105,16 @@ export function layout(from, into, description) {
     if (!objects.has(type)) objects.set(type, new Set());
     objects.get(type).add(m[1].trim());
   }
-  return {files: files.length + 2, objects};
+  const rows = data === undefined ? {carried: [], unpaired: []} : dataFiles(data, into);
+  return {files: files.length + 2 + rows.carried.length * 2, objects, rows};
 }
 
 export function zip(dir, out) {
   rmSync(out, {force: true});
   // -X drops the extra file attributes: the zip is then the same bytes for
   // the same content, which is what makes "did anything change" answerable
-  execFileSync("zip", ["-r", "-X", "-q", resolve(out), ".abapgit.xml", "src"], {cwd: dir});
+  execFileSync("zip", ["-r", "-X", "-q", resolve(out), ".abapgit.xml", "src",
+    ...(existsSync(join(dir, "data")) ? ["data"] : [])], {cwd: dir});
   return statSync(out).size;
 }
 
@@ -109,7 +141,7 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   }
 
   const description = flag("description", `open-steamgate: ${basename(input).replace(/\..*$/, "")}`);
-  const {files, objects: found} = layout(objects, staging, description);
+  const {files, objects: found, rows} = layout(objects, staging, description, flag("data"));
   const size = zip(staging, out);
   rmSync(staging, {recursive: true, force: true});
   if (objects !== input) rmSync(objects, {recursive: true, force: true});
@@ -117,6 +149,10 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   console.log(`${out}: ${files} files, ${(size / 1024).toFixed(1)} KB`);
   for (const [type, names] of [...found].sort()) {
     console.log(`  ${type.padEnd(5)} ${[...names].sort().join(", ")}`);
+  }
+  if (rows?.carried.length > 0) console.log(`  DATA  ${rows.carried.sort().join(", ")}`);
+  for (const u of rows?.unpaired ?? []) {
+    console.log(`  NOT carried: ${u} has no .conf.json, so abapGit has rows and no instruction to take them`);
   }
   console.log(`\nImport it in abapGit: "New Online/Offline" -> Offline -> pick the zip,`);
   console.log(`then give it the package. The zip does not name one, so nothing here`);
