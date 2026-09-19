@@ -3263,7 +3263,32 @@ the rows reach ABAP one of two ways, and the choice is not free:
    screen-read time with the ring paused, or it lands in the trace it is
    writing
 
-(1) is the better shape and (2) is the cheaper one. Neither is half-built
-here, which is the point: the analysis and the buffer are finished and
-useful on their own, and a page over them is an afternoon whichever route is
-taken.
+**Counted, because "cheaper" was an opinion** (osg-osd-i7 asked for the price
+in objects, which is the right question):
+
+| route | files | repository objects |
+| --- | --- | --- |
+| structure + `TABLES` | 7 | 2 — one INTTAB structure, one function group |
+| scalar strings (the AMDP precedent) | 6 | 1 — one function group |
+| a table ABAP reads with Open SQL | 1 + flush plumbing + a ring-pause | 1 transparent table |
+
+The details that settle it, all read off the tree rather than assumed:
+
+- a `TABLES` parameter names the structure **directly** (`<DBSTRUCT>`), so no
+  table type object is needed
+- a structure whose fields use built-in types (`INTTYPE`/`DATATYPE`) needs
+  **no data elements** — `ZOSD_TEST_ITEM_S` mixes both and proves it
+- a function group is **six files** whichever route is taken: the `.fugr.xml`,
+  the TOP include pair, the main program pair, and one `.abap` per module
+- a destination may answer a `TABLES` parameter: the direction comes from the
+  caller's signature at call time (`tools/rfc-replay.mjs`), which is the same
+  mechanism the AMDP tile already uses
+
+So the typed route costs **one file and one object more** than the cheapest
+honest alternative. And the third route's cheapness was never real: a
+persisted DDIC table, flush plumbing, a ring-pause, and a trace that lives
+where it can take part in the run — more than the other two, not less.
+
+**Decided: the structure and `TABLES`.** One extra object buys a signature
+that says what a trace row is, and the alternative to it was a saving of one
+file.
