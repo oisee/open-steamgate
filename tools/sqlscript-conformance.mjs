@@ -215,7 +215,8 @@ export function rowsMatchColumns(rows = [...PADDED, ...UNPADDED]) {
   return wrong;
 }
 
-const ROWS = process.argv.includes("--unpadded") ? UNPADDED : PADDED;
+const FIXTURE = process.argv.includes("--unpadded") ? "unpadded" : "padded";
+const ROWS = FIXTURE === "unpadded" ? UNPADDED : PADDED;
 
 /** Which build answered each column.
  *
@@ -444,14 +445,32 @@ async function main() {
     }
   }
   const merged = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
-  if (merged !== undefined) engines.hana = JSON.parse(readFileSync(merged, "utf8")).hana;
+  if (merged !== undefined) {
+    const file = JSON.parse(readFileSync(merged, "utf8"));
+    // A column measured on the padded fixture, merged into an unpadded run,
+    // compares two different questions and answers confidently. It is the
+    // shape this table keeps finding elsewhere and it would have been easy
+    // to walk into here: the padded and unpadded columns differ by seven
+    // rows, which is exactly the size of a finding. A file written before
+    // this field existed says nothing, and is taken at the caller's word.
+    if (file.fixture !== undefined && file.fixture !== FIXTURE) {
+      // and the advice names a flag that EXISTS: padded is the default and
+      // there is no --padded, so telling somebody to add it costs the hour
+      // this message was written to save
+      console.error(`refusing to merge: ${merged} was measured on the ${file.fixture} fixture and this run is ` +
+        `${FIXTURE}. Re-measure it, or ${file.fixture === "unpadded" ? "add --unpadded" : "drop --unpadded"}.`);
+      process.exit(2);
+    }
+    engines.hana = file.hana;
+  }
 
   if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({cases: CASES, ...engines}, null, 1));
+    console.log(JSON.stringify({fixture: FIXTURE, cases: CASES, ...engines}, null, 1));
   } else {
     const names = Object.keys(engines);
     // the header says which BUILD answered, not only which name: two of these
     // columns are SQLite and they are not the same SQLite
+    console.log(`fixture: ${FIXTURE} (the rows as they are written into the table)`);
     console.log(names.map((n) => `${n}: ${BUILDS[n] ?? "build not recorded"}`).join("\n"));
     console.log(`case              ${names.map((n) => n.padEnd(34)).join("")}`);
     for (const one of CASES) {

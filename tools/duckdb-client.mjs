@@ -4,13 +4,8 @@
 // for the ABAP LUW, subrc/dbcnt from the affected-row count, rows as plain
 // objects with the runtime's lowercase column names.
 import {DuckDBInstance} from "@duckdb/node-api";
+import {trimLiterals} from "./sql-literals.mjs";
 
-// ABAP compares CHAR values ignoring trailing blanks and the runtime pads
-// its literals to the field length; VARCHAR columns keep what they get, so
-// literals are trimmed on the way in and in comparisons.
-function trimLiterals(sql) {
-  return sql.replace(/'((?:[^']|'')*)'/g, (m, inner) => "'" + inner.replace(/ +$/, "") + "'");
-}
 
 function plain(value) {
   if (typeof value === "bigint") return Number(value);

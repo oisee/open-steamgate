@@ -15,7 +15,11 @@ captures/
 # the shared dependencies showed up as an untracked file on that branch
 node_modules/
 node_modules
-output/
+# `/output` and not `output/`: the build makes it a DIRECTORY on one host and
+# a SYMLINK into build/live/ on another, and a rule ending in a slash matches
+# only the directory. So the symlink sat untracked all day and `git add -A`
+# would have committed a link into an untracked build folder.
+/output
 deps/
 dist/
 build/

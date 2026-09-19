@@ -1,5 +1,6 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {bootIdentity} from "../tools/osd-identity.mjs";
+import {installTrim} from "../tools/sql-literals.mjs";
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
 // options.setup). Same shape as every open-abap repo: one in-memory DB,
@@ -19,7 +20,7 @@ export async function setup(abap, schemas, insert) {
   if (preview !== undefined) {
     preview.schemas = schemas;
     preview.insert = insert;
-    db = new SQLiteDatabaseClient();
+    db = installTrim(new SQLiteDatabaseClient());
     abap.context.databaseConnections["DEFAULT"] = db;
     await db.connect(preview.stored);
     if (preview.stored === undefined) {
@@ -158,7 +159,7 @@ export async function setup(abap, schemas, insert) {
     }
     return;
   }
-  db = new SQLiteDatabaseClient();
+  db = installTrim(new SQLiteDatabaseClient());
   abap.context.databaseConnections["DEFAULT"] = db;
   // STG_DB_PATH keeps the rows between runs for SQLite too, which is what
   // a runtime that gets recycled needs: it is read here and written when

@@ -6,8 +6,15 @@
 // confident nonsense and nothing would have said so - a suite that checks a
 // statement's text is checking the author's intention twice.
 //
-// Both engines that ship are here: DuckDB, which the server uses, and sql.js,
-// which is the one the browser preview actually runs. The rows are written
+// **All three engines that ship are here**, and the list used to be two with
+// a wrong reason beside it: "DuckDB, which the server uses". The server does
+// not use DuckDB -- `STG_DB=duckdb` asks for it, and the default is SQLite.
+// The deployed showcase runs `STG_DB=file`, which is `node:sqlite`, and the
+// browser preview runs sql.js. Those are two DIFFERENT SQLite builds (3.53.4
+// against 3.49.1 here, and Bun answers the same import with a third), and
+// they already differ in the open: LOG(10) is 1 on one and 2.302585092994046
+// on the other. So the engine actually serving users was the one this suite
+// did not execute, while its header named it. The rows are written
 // **unpadded**, because that is what a real system holds and what the write
 // boundary will produce (measured on A4H: a CHAR(30) holding '$TMP' answers
 // LENGTH 4).
@@ -42,7 +49,18 @@ async function sqljsClient() {
   return client;
 }
 
-describe("SQLScript IR: executed on both engines that ship", function () {
+/** SQLite as the SERVER runs it: node:sqlite, through the client the deployed
+ *  showcase uses. In memory here - the path is the only difference from the
+ *  file on disk, and what is being measured is the engine. */
+async function serverSqliteClient() {
+  const {FileSqliteClient} = await import("../tools/sqlite-file-client.mjs");
+  const client = new FileSqliteClient({path: ":memory:"});
+  await client.connect();
+  for (const statement of FIXTURE) await client.native({sql: statement, expect: "none"});
+  return client;
+}
+
+describe("SQLScript IR: executed on all three engines that ship", function () {
   this.timeout(30000);
   const clients = {};
 
@@ -57,6 +75,11 @@ describe("SQLScript IR: executed on both engines that ship", function () {
     } catch (error) {
       console.log(`      (sql.js unavailable: ${error.message})`);
     }
+    try {
+      clients.sqlite_node = await serverSqliteClient();
+    } catch (error) {
+      console.log(`      (node:sqlite unavailable: ${error.message})`);
+    }
     // A suite that silently measures nothing is the failure this tree keeps
     // paying for: a leak scan that read no files printed a clean line, and a
     // mocha run of a file that did not exist reported "35 passing".
@@ -65,19 +88,20 @@ describe("SQLScript IR: executed on both engines that ship", function () {
     // The first version of this hook allowed exactly that, and a typo in the
     // DuckDB export name made the whole DuckDB half silently absent while
     // eight tests passed.
-    expect(Object.keys(clients).sort(), "both engines must be reachable, or this suite is claiming more than it measured")
-      .to.deep.equal(["duckdb", "sqlite"]);
+    expect(Object.keys(clients).sort(), "every engine must be reachable, or this suite is claiming more than it measured")
+      .to.deep.equal(["duckdb", "sqlite", "sqlite_node"]);
   });
 
   after(async () => {
     await clients.duckdb?.disconnect?.();
+    await clients.sqlite_node?.disconnect?.();
   });
 
   /** run one plan on every engine present and give back {engine: rows} */
   const run = async (rel) => {
     const out = {};
     for (const [name, client] of Object.entries(clients)) {
-      const {sql, params} = lower(rel, name === "sqlite" ? "sqlite" : "duckdb");
+      const {sql, params} = lower(rel, name.startsWith("sqlite") ? "sqlite" : "duckdb");
       const answer = await client.native({sql, params, expect: "rows"});
       out[name] = answer.rows;
     }
@@ -86,7 +110,7 @@ describe("SQLScript IR: executed on both engines that ship", function () {
 
   const values = (rows, column) => rows.map((r) => r[column] ?? r[column.toLowerCase()] ?? r[column.toUpperCase()]);
 
-  it("a filter and a projection answer the same rows on both", async () => {
+  it("a filter and a projection answer the same rows on every engine", async () => {
     const rel = project(filter(scan("src"), bin(">", col("a"), lit(1, T.int), T.bool)),
                         [{as: "K", expr: col("k")}]);
     const answers = await run(rel);
@@ -126,7 +150,7 @@ describe("SQLScript IR: executed on both engines that ship", function () {
     const rel = project(filter(scan("src"), bin("=", col("k"), param("lv_k", T.char(1)), T.bool)),
                         [{as: "CH", expr: col("ch")}]);
     for (const [name, client] of Object.entries(clients)) {
-      const {sql, params} = lower(rel, name === "sqlite" ? "sqlite" : "duckdb");
+      const {sql, params} = lower(rel, name.startsWith("sqlite") ? "sqlite" : "duckdb");
       params[0].value = "a";
       const answer = await client.native({sql, params, expect: "rows"});
       expect(values(answer.rows, "CH"), name).to.deep.equal(["abc"]);
@@ -159,6 +183,25 @@ describe("SQLScript IR: executed on both engines that ship", function () {
       // lowering forces it with * 1.0. Both must land on 0.5 here.
       expect(Number(rows[0].R ?? rows[0].r), name).to.equal(0.5);
     }
+  });
+
+  // The guarantee the third engine rests on: it is really executing, through
+  // the same channel the tests use, and it is really a DIFFERENT engine from
+  // the browser's. Without this, adding a client that quietly shared the
+  // other's answers would raise the count and measure nothing - which is the
+  // shape of half the defects this tree has paid for.
+  it("the two SQLite clients are live and are not the same engine", async () => {
+    const answers = {};
+    for (const name of ["sqlite", "sqlite_node"]) {
+      const build = await clients[name].native({sql: "SELECT sqlite_version() AS V"});
+      const log = await clients[name].native({sql: "SELECT LOG(10) AS V"});
+      answers[name] = {build: String(Object.values(build.rows[0])[0]), log: String(Object.values(log.rows[0])[0])};
+    }
+    expect(answers.sqlite.build, "two builds, or one of them is standing in for the other")
+      .to.not.equal(answers.sqlite_node.build);
+    // measured: base ten on the server build, natural in the browser's
+    expect(answers.sqlite_node.log).to.equal("1");
+    expect(answers.sqlite.log).to.equal("2.302585092994046");
   });
 
   it("sql.js refuses the cast it cannot make raise, and DuckDB raises", async () => {

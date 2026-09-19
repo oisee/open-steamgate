@@ -14,6 +14,7 @@
 // and the browser; DuckDB stays where it is. Same eleven methods, so
 // nothing above the seam knows which of the three it is talking to.
 import {DatabaseSync} from "node:sqlite";
+import {trimLiterals} from "./sql-literals.mjs";
 import {mkdirSync, renameSync} from "node:fs";
 import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
@@ -121,7 +122,7 @@ export class FileSqliteClient {
     if (this.trace) {
       console.log(sql);
     }
-    this.db.exec(sql);
+    this.db.exec(/^\s*INSERT/i.test(sql) ? trimLiterals(sql) : sql);
   }
 
   async beginTransaction() {
@@ -159,7 +160,7 @@ export class FileSqliteClient {
     await this.beginTransaction();
     let sql = `DELETE FROM ${options.table}`;
     if (options.where !== "") {
-      sql += ` WHERE ${options.where}`;
+      sql += trimLiterals(` WHERE ${options.where}`);
     }
     try {
       const dbcnt = this.#changes(sql);
@@ -171,7 +172,7 @@ export class FileSqliteClient {
 
   async update(options) {
     await this.beginTransaction();
-    const sql = `UPDATE ${options.table} SET ${options.set.join(", ")} WHERE ${options.where}`;
+    const sql = trimLiterals(`UPDATE ${options.table} SET ${options.set.join(", ")} WHERE ${options.where}`);
     try {
       const dbcnt = this.#changes(sql);
       return {subrc: dbcnt === 0 ? 4 : 0, dbcnt};
@@ -182,7 +183,15 @@ export class FileSqliteClient {
 
   async insert(options) {
     await this.beginTransaction();
-    const sql = `INSERT INTO ${options.table} (${options.columns.map((c) => "'" + c + "'").join(",")}) VALUES (${options.values.join(",")})`;
+    // The padding goes no further than here. ABAP hands over a CHAR padded
+    // to its field length, a real system does not keep the blanks (measured
+    // on A4H: a CHAR(30) holding '$TMP' answers LENGTH 4), and the DuckDB
+    // and HANA clients have trimmed since they were written. This one did
+    // not, so the same ABAP INSERT stored three characters there and ten
+    // here -- on the engine the deployed showcase runs. SQLite got away with
+    // it because its columns are COLLATE RTRIM and comparisons therefore
+    // ignore the blanks; LENGTH, SUBSTR and || do not (2026-09-19).
+    const sql = trimLiterals(`INSERT INTO ${options.table} (${options.columns.map((c) => "'" + c + "'").join(",")}) VALUES (${options.values.join(",")})`);
     try {
       this.#changes(sql);
       return {subrc: 0, dbcnt: 1};

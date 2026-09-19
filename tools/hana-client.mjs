@@ -33,12 +33,8 @@ import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
+import {trimLiterals} from "./sql-literals.mjs";
 
-/** ABAP pads its CHAR literals; HANA compares the padding. Trim inside quotes
- *  only, and leave an escaped quote ('') alone. */
-function trimLiterals(sql) {
-  return sql.replace(/'((?:[^']|'')*)'/g, (m, inner) => "'" + inner.replace(/ +$/, "") + "'");
-}
 
 /** Every identifier this client sends goes to HANA quoted in UPPER case.
  *

@@ -55,6 +55,7 @@
     "test/stg-compile.mjs",
     "test/transaction.mjs",
     "test/webgui.mjs",
+    "test/write-boundary.mjs",
     "test/zosd-test.mjs"
   ]
 }

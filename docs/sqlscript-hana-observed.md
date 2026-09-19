@@ -280,3 +280,44 @@ engine rejecting the **data**, because `normalise()` carried a second copy of
 the "was the statement refused" predicate and only the copy in
 `sqlscript-eager.mjs` had ever been taught HANA's wording. Two copies of a
 predicate is one predicate and one stale opinion.
+
+## The padding was ours, and it was written in two of four clients
+
+*2026-09-19, the other half of the finding above.* If HANA does not keep the
+trailing blanks, the question is where ours came from -- and it came from the
+write boundary, which had been implemented twice and skipped twice.
+
+Measured, with the same ABAP-facing `insert` on each client:
+
+| client | what `'abc       '` stored |
+| --- | --- |
+| `tools/duckdb-client.mjs` | 3 |
+| `tools/hana-client.mjs` | 3 |
+| `tools/sqlite-file-client.mjs` (**the deployed showcase**) | 10 |
+| `@abaplint/database-sqlite` (**the default, and the browser**) | 10 |
+
+So the system's own behaviour depended on `STG_DB`, and the two engines that
+disagreed with a real system are the two that serve people. `trimLiterals()`
+existed character-for-character in the DuckDB and HANA clients and nowhere
+else; it is now `tools/sql-literals.mjs`, called by both SQLite clients too
+-- the second of them through `installTrim()`, since the package is not ours
+and wrapping it in `test/setup.mjs` reaches every host at once.
+
+**Why it survived so long:** SQLite declares these columns `COLLATE RTRIM`,
+so *comparisons* already ignored the padding. Comparisons were never the
+question. `LENGTH`, `SUBSTR` and `||` see the blanks, and an application that
+concatenates two CHARs got ten characters of one and three of the other
+depending on which database it had been started with.
+
+`npm run unit` and `npm run unit:file` are both green after it, which is the
+evidence that mattered: the whole transpiled ABAP suite does not depend on
+the padding it was being handed.
+
+`test/write-boundary.mjs` is the guard -- the same write on every client,
+asserted to store the same thing, with each engine demanded by name.
+
+And the table now records **which fixture** a column was measured on.
+Merging a padded HANA column into an unpadded run compares two different
+questions and answers confidently; the two differ by seven rows, which is
+exactly the size of a finding. It is refused, and the refusal names a flag
+that exists.
