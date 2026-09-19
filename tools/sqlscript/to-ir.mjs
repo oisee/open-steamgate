@@ -188,7 +188,19 @@ export function toIr(tree, options = {}) {
         if (fn === "CAST" || fn === "TO_INTEGER") {
           return cast(args[0] ?? lit(null, T.str), fn === "TO_INTEGER" ? T.int : T.str);
         }
-        return inner.length === 0 ? call(fn, args, T.str) : {...call(fn, args, T.str), orderBy: inner};
+        const over = kid(node, "Window");
+        const window = over === undefined ? undefined : {
+          partitionBy: kids(over, "Expr").map(expression),
+          orderBy: kids(over, "OrderKey").map((k) => {
+            const e = expression(k);
+            if (e.node !== "col") throw new BindError("ORDER BY over an expression inside OVER is not lowered yet", k);
+            return {col: e.name, desc: hasWord(k, "DESC")};
+          }),
+        };
+        const built = call(fn, args, T.str);
+        if (inner.length > 0) built.orderBy = inner;
+        if (window !== undefined) built.window = window;
+        return built;
       }
       case "ColumnRef": {
         const name = nameOf(node);

@@ -47,7 +47,7 @@ function namesIn(listName) {
  *  fix is to read every list the lowering renders from, and this comment is
  *  the note to the next person adding a third. */
 function portableNames() {
-  return [...new Set([...namesIn("PORTABLE"), ...namesIn("AGGREGATES")])];
+  return [...new Set([...namesIn("PORTABLE"), ...namesIn("AGGREGATES"), ...namesIn("WINDOW")])];
 }
 
 describe("nothing is portable without a measurement", () => {

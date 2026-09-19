@@ -139,6 +139,12 @@ export function effects(rel) {
     if (e.node === "call" && ["STRING_AGG", "GROUP_CONCAT"].includes(e.fn) && (e.orderBy ?? []).length === 0) {
       out.nonDeterministic = true;
     }
+    // ROW_NUMBER over an unordered window numbers the rows in whatever order
+    // the engine produced them, which is not an order anybody promised
+    if (e.node === "call" && ["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(e.fn)
+        && (e.window?.orderBy ?? []).length === 0) {
+      out.nonDeterministic = true;
+    }
     for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) walkExpr(e[key]);
     for (const one of e.args ?? []) walkExpr(one);
     for (const one of e.values ?? []) walkExpr(one);

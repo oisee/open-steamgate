@@ -114,6 +114,18 @@ export const CASES = [
    why: "a concatenating aggregate told what order to use"},
   {id: "agg_concat_unordered", sql: "SELECT GROUP_CONCAT(ch, ',') AS v FROM t",
    why: "the same without an ordering, whose result is unspecified everywhere: agreement here is not evidence"},
+  // Ranking over a window. The fixture has a tie, which is the only part of
+  // these that could differ: RANK leaves a gap after one and DENSE_RANK does
+  // not. Measured 2026-09-19 — all three engines agreed on all five shapes,
+  // syntax included.
+  {id: "win_row_number", sql: "SELECT ROW_NUMBER() OVER (ORDER BY a) AS v FROM t",
+   why: "numbering over an ordered window"},
+  {id: "win_rank", sql: "SELECT RANK() OVER (ORDER BY ch) AS v FROM t",
+   why: "RANK over a column with repeats: does a tie leave a gap"},
+  {id: "win_dense_rank", sql: "SELECT DENSE_RANK() OVER (ORDER BY ch) AS v FROM t",
+   why: "the same without the gap, which is the whole difference between the two"},
+  {id: "win_count_over", sql: "SELECT COUNT(*) OVER (PARTITION BY ch) AS v FROM t",
+   why: "an ordinary aggregate over a partition rather than over the whole set"},
   {id: "fn_round_half", sql: "SELECT ROUND(2.5) AS v FROM t WHERE k = 'r1'",
    why: "the tie rule: half away from zero, or to even"},
   {id: "fn_round_half_negative", sql: "SELECT ROUND(-2.5) AS v FROM t WHERE k = 'r1'",

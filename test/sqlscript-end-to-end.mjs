@@ -311,3 +311,39 @@ describe("a concatenating aggregate, and the ordering that makes it a value", ()
     expect(effects(ordered.ir.rel).nonDeterministic, "ordered").to.equal(false);
   });
 });
+
+describe("a window function, and the tie that is the only thing that could differ", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+
+  it("renders identically on all three, because all three take the same syntax", () => {
+    const body = "SELECT ROW_NUMBER() OVER (PARTITION BY k ORDER BY n DESC) AS V FROM src;";
+    const rendered = ["hana", "duckdb", "sqlite"].map((d) => compile(body, d, CAT).sql);
+    expect(new Set(rendered).size, rendered.join("\n")).to.equal(1);
+    expect(rendered[0]).to.contain('ROW_NUMBER() OVER (PARTITION BY "K" ORDER BY "N" DESC)');
+  });
+
+  it("answers the same numbers on both engines that ship", async () => {
+    const body = "SELECT ROW_NUMBER() OVER (ORDER BY n DESC) AS V FROM src;";
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    const shapes = new Set(answered.map((r) => JSON.stringify(r.rows.map((x) => Number(Object.values(x)[0])).sort())));
+    expect(shapes.size, [...shapes].join(" vs ")).to.equal(1);
+    expect(answered[0].rows.map((r) => Number(r.V ?? r.v)).sort()).to.deep.equal([1, 2, 3]);
+  });
+
+  it("a ranking function without an OVER clause is refused, not invented", () => {
+    // ROW_NUMBER exists only with a window; a call without one is a defect in
+    // the body, and guessing a window would be guessing the answer
+    expect(() => compile("SELECT ROW_NUMBER() AS V FROM src;", "duckdb", CAT))
+      .to.throw(/is a window function and this call has no OVER clause/);
+  });
+
+  it("and an unordered window is non-deterministic, because the numbering is", async () => {
+    const {effects} = await import("../tools/sqlscript-ir.mjs");
+    const loose = compile("SELECT ROW_NUMBER() OVER (PARTITION BY k) AS V FROM src;", "duckdb", CAT);
+    const tight = compile("SELECT ROW_NUMBER() OVER (PARTITION BY k ORDER BY n) AS V FROM src;", "duckdb", CAT);
+    expect(effects(loose.ir.rel).nonDeterministic, "no ordering").to.equal(true);
+    expect(effects(tight.ir.rel).nonDeterministic, "ordered").to.equal(false);
+  });
+});

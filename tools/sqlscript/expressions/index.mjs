@@ -43,7 +43,23 @@ export class FunctionCall extends Expression {
     // makes the answer a value rather than a sample.
     return seq(tok(TokenKind.identifier), "(",
       opt(altPrio("*", seq(new Expr(), star(seq(",", new Expr()))))),
-      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))), ")");
+      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))), ")",
+      opt(new Window()));
+  }
+}
+
+/** `OVER ( PARTITION BY a, b ORDER BY c DESC )`.
+ *
+ *  Measured on all three engines before it was written: ROW_NUMBER, RANK,
+ *  DENSE_RANK and an aggregate over a window answer identically, ties
+ *  included, and the syntax is the same on each. The frame clause
+ *  (`ROWS BETWEEN ...`) is deliberately absent -- nobody has measured it. */
+export class Window extends Expression {
+  getRunnable() {
+    return seq(str("OVER"), "(",
+      opt(seq(str("PARTITION"), str("BY"), new Expr(), star(seq(",", new Expr())))),
+      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
+      ")");
   }
 }
 

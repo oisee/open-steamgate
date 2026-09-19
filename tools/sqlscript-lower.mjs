@@ -188,6 +188,11 @@ import {seamType} from "./sqlscript-ir.mjs";
  *  unordered one non-deterministic for exactly that reason. */
 const AGGREGATES = new Set(["STRING_AGG", "GROUP_CONCAT"]);
 
+/** Ranking functions, which exist only with an `OVER` clause and whose tie
+ *  behaviour was measured rather than recalled: RANK leaves a gap after a
+ *  tie and DENSE_RANK does not, identically on all three. */
+const WINDOW = new Set(["ROW_NUMBER", "RANK", "DENSE_RANK"]);
+
 const PORTABLE = new Set([
   "LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "TRIM", "LTRIM", "RTRIM",
   "SUM", "MIN", "MAX", "COUNT", "AVG",
@@ -293,11 +298,30 @@ export function lower(rel, dialectName, options = {}) {
         if (e.fn === "IFNULL") return d.ifnull(args[0], args[1]);
         if (e.fn === "SUBSTR" || e.fn === "SUBSTRING") return d.substr(args[0], args[1], args[2]);
         if (e.fn === "TO_INTEGER" || e.fn === "TO_INT") return d.castInt(args[0]);
+        // **The window, rendered after the call and identically on all
+        // three.** Measured 2026-09-19: ROW_NUMBER, RANK, DENSE_RANK and an
+        // aggregate over a partition answer the same on HANA, DuckDB and
+        // sql.js, ties included. A frame clause is not rendered because
+        // nobody has measured one -- the name of a construct being familiar
+        // is not the same as its behaviour being known.
+        const over = (w) => {
+          if (w === undefined) return "";
+          const parts = [];
+          if (w.partitionBy.length > 0) parts.push(`PARTITION BY ${w.partitionBy.map(expr).join(", ")}`);
+          if (w.orderBy.length > 0) {
+            parts.push(`ORDER BY ${w.orderBy.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`);
+          }
+          return ` OVER (${parts.join(" ")})`;
+        };
+        if (WINDOW.has(e.fn)) {
+          if (e.window === undefined) throw new Refused(`${e.fn} is a window function and this call has no OVER clause`);
+          return `${e.fn}(${args.join(", ")})${over(e.window)}`;
+        }
         if (PORTABLE.has(e.fn) || AGGREGATES.has(e.fn)) {
           const name = AGGREGATES.has(e.fn) ? d.aggName(e.fn) : e.fn;
           const ordering = (e.orderBy ?? []).length === 0 ? ""
             : ` ORDER BY ${e.orderBy.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`;
-          return `${name}(${args.join(", ")}${ordering})`;
+          return `${name}(${args.join(", ")}${ordering})${over(e.window)}`;
         }
         // **An unknown function is refused, not rendered.**
         //
