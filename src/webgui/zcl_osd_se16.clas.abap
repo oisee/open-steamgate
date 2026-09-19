@@ -52,8 +52,22 @@ CLASS zcl_osd_se16 DEFINITION PUBLIC CREATE PUBLIC.
         iv_max         TYPE i
         it_criteria    TYPE tt_criterion
         it_columns     TYPE string_table
+        iv_sort        TYPE string
+        iv_desc        TYPE abap_bool
       RETURNING
         VALUE(rv_html) TYPE string.
+
+*   the query string of a link back to this table, with one thing changed
+    CLASS-METHODS link
+      IMPORTING
+        is_entity      TYPE zcl_stg_cds_registry=>ty_entity
+        it_criteria    TYPE tt_criterion
+        it_columns     TYPE string_table
+        iv_max         TYPE i
+        iv_sort        TYPE string
+        iv_desc        TYPE abap_bool
+      RETURNING
+        VALUE(rv_href) TYPE string.
 
 *   one typed-in value into one select-option, in SE16's own conventions
     CLASS-METHODS option_of
@@ -110,6 +124,8 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
     DATA lt_columns  TYPE string_table.
     DATA lv_columns  TYPE string.
     DATA lv_column   TYPE string.
+    DATA lv_sort     TYPE string.
+    DATA lv_desc     TYPE abap_bool.
 
     lv_name = server->request->get_form_field( 't' ).
     TRANSLATE lv_name TO UPPER CASE.
@@ -148,10 +164,24 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
           ENDIF.
         ENDIF.
       ENDLOOP.
+*     the column to sort by is read against the entity's own fields, like
+*     every other parameter here: a name that is not a field of this entity
+*     never reaches the dynamic ORDER BY, because nothing looks for it
+      lv_sort = server->request->get_form_field( 's' ).
+      TRANSLATE lv_sort TO UPPER CASE.
+      READ TABLE ls_entity-fields TRANSPORTING NO FIELDS WITH KEY name = lv_sort.
+      IF sy-subrc <> 0.
+        CLEAR lv_sort.
+      ENDIF.
+      IF server->request->get_form_field( 'd' ) = 'x'.
+        lv_desc = abap_true.
+      ENDIF.
       lv_body = rows_of( iv_name     = lv_name
                          iv_max      = lv_max
                          it_criteria = lt_criteria
-                         it_columns  = lt_columns ).
+                         it_columns  = lt_columns
+                         iv_sort     = lv_sort
+                         iv_desc     = lv_desc ).
     ENDIF.
 
     server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
@@ -285,6 +315,38 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
               `OData <code>$filter</code>, so the same text means the same thing in both.</p>`.
   ENDMETHOD.
 
+  METHOD link.
+*   Every link on this page keeps what the person already chose and changes
+*   one thing. Built in one place because the alternative -- each link
+*   assembling the query string itself -- is four places that drift, and the
+*   first one to drift silently drops the filter somebody typed.
+    DATA ls_crit   TYPE ty_criterion.
+    DATA lv_col    TYPE string.
+    DATA lv_column TYPE string.
+
+    rv_href = |?t={ esc( is_entity-name ) }&max={ iv_max }|.
+    LOOP AT it_criteria INTO ls_crit.
+      rv_href = |{ rv_href }&f_{ esc( to_lower( ls_crit-field ) ) }={ esc( ls_crit-value ) }|.
+    ENDLOOP.
+    IF it_columns IS NOT INITIAL.
+      CLEAR lv_col.
+      LOOP AT it_columns INTO lv_column.
+        IF lv_col IS INITIAL.
+          lv_col = lv_column.
+        ELSE.
+          lv_col = |{ lv_col },{ lv_column }|.
+        ENDIF.
+      ENDLOOP.
+      rv_href = |{ rv_href }&c={ esc( lv_col ) }|.
+    ENDIF.
+    IF iv_sort IS NOT INITIAL.
+      rv_href = |{ rv_href }&s={ esc( iv_sort ) }|.
+      IF iv_desc = abap_true.
+        rv_href = |{ rv_href }&d=x|.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD rows_of.
     DATA ls_entity  TYPE zcl_stg_cds_registry=>ty_entity.
     DATA lo_source  TYPE REF TO zif_stg_cds_source.
@@ -299,6 +361,13 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
     DATA lv_class   TYPE string.
     DATA lv_where   TYPE string.
     DATA lv_form    TYPE string.
+    DATA lv_href    TYPE string.
+    DATA lv_arrow   TYPE string.
+    DATA lv_keys    TYPE string.
+    DATA lv_row     TYPE string.
+    DATA lt_sort    TYPE string_table.
+    DATA lt_one     TYPE tt_criterion.
+    DATA ls_one     TYPE ty_criterion.
     DATA lx_root    TYPE REF TO cx_root.
     FIELD-SYMBOLS <lt_table> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>   TYPE any.
@@ -314,11 +383,23 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
     lv_where = where_of( is_entity   = ls_entity
                          it_criteria = it_criteria ).
 
+*   The ORDER BY is a table of names, and the name in it has already been
+*   checked against this entity's fields by the caller. It is built here
+*   rather than passed as text so that the DESC is ours and not something a
+*   person can put in a URL.
+    IF iv_sort IS NOT INITIAL.
+      IF iv_desc = abap_true.
+        APPEND |{ iv_sort } DESCENDING| TO lt_sort.
+      ELSE.
+        APPEND iv_sort TO lt_sort.
+      ENDIF.
+    ENDIF.
+
     TRY.
         lv_class = ls_entity-source_class.
         CREATE OBJECT lo_source TYPE (lv_class).
         lr_data = lo_source->read( iv_where   = lv_where
-                                   it_orderby = lt_orderby ).
+                                   it_orderby = lt_sort ).
       CATCH cx_root INTO lx_root.
 *       a source that cannot be created or cannot read says why, rather than
 *       showing an empty table -- which reads as "there is nothing here"
@@ -352,7 +433,21 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
           CONTINUE.
         ENDIF.
       ENDIF.
-      lv_head = |{ lv_head }<th>{ esc( ls_field-name ) }</th>|.
+*     a header is a link that sorts by that column, and clicking the column
+*     already sorted turns it round -- which is what a person expects and is
+*     one comparison to implement
+      lv_href = link( is_entity   = ls_entity
+                      it_criteria = it_criteria
+                      it_columns  = it_columns
+                      iv_max      = iv_max
+                      iv_sort     = ls_field-name
+                      iv_desc     = COND #( WHEN ls_field-name = iv_sort AND iv_desc = abap_false
+                                            THEN abap_true ELSE abap_false ) ).
+      lv_arrow = ``.
+      IF ls_field-name = iv_sort.
+        lv_arrow = COND #( WHEN iv_desc = abap_true THEN ` &#9660;` ELSE ` &#9650;` ).
+      ENDIF.
+      lv_head = |{ lv_head }<th><a href="{ lv_href }">{ esc( ls_field-name ) }</a>{ lv_arrow }</th>|.
     ENDLOOP.
 
     LOOP AT <lt_table> ASSIGNING <ls_row>.
@@ -375,7 +470,26 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
         ENDIF.
         ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
         IF <lv_value> IS ASSIGNED.
-          lv_cells = |{ lv_cells }<td>{ esc( CONV string( <lv_value> ) ) }</td>|.
+*         A key cell is a link to the one row it identifies -- which is the
+*         drill-down SE16 has, and here it is the filter that already exists
+*         rather than a second way of reading a row. So the record a person
+*         opens is read by the same path as the list they opened it from,
+*         and cannot disagree with it.
+          IF ls_field-is_key = abap_true.
+            CLEAR lt_one.
+            ls_one-field = ls_field-name.
+            ls_one-value = CONV string( <lv_value> ).
+            APPEND ls_one TO lt_one.
+            lv_row = link( is_entity   = ls_entity
+                           it_criteria = lt_one
+                           it_columns  = it_columns
+                           iv_max      = iv_max
+                           iv_sort     = iv_sort
+                           iv_desc     = iv_desc ).
+            lv_cells = |{ lv_cells }<td><a href="{ lv_row }">{ esc( CONV string( <lv_value> ) ) }</a></td>|.
+          ELSE.
+            lv_cells = |{ lv_cells }<td>{ esc( CONV string( <lv_value> ) ) }</td>|.
+          ENDIF.
           UNASSIGN <lv_value>.
         ELSE.
           lv_cells = |{ lv_cells }<td class="dim">-</td>|.

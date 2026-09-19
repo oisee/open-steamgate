@@ -96,7 +96,7 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.6  a class with an interface becomes a screen (the Neptune       open
 │       concept, named by Alice 2026-09-18)
 ├─ G.8  an AMDP sandbox first, an SE80-shaped workbench after        open, weighed
-├─ G.9  SE16-shaped data browser: a page over reads we already have  w1+w2 DONE 09-19
+├─ G.9  SE16-shaped data browser: a page over reads we already have  DONE 09-19
 ├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument        open, two for one
 ├─ G.1c the name is ours and the picture is the joke                DONE 09-18
 ├─ G.1d the naming rule as a check, not as a list                   DONE 09-19
@@ -780,8 +780,16 @@ files:
   then names every refused request and every console line that is ours. It
   goes red on a fourth thing, and red when one of the three is fixed — an
   allowance that outlives its defect is the failure this shape is for.
-- **G.9, the remainder**: sort by clicking a column, and a link from a row to
-  the object that owns it.
+- **G.9, the remainder** — **done 2026-09-19.** Sort by clicking a column
+  (and round again on the second click, with an arrow saying which way), and
+  a key cell that opens the one row it identifies. The drill-down is
+  deliberately **not** a second way of reading a row: it is the filter that
+  already exists, so the record a person opens is read by the same path as
+  the list they opened it from and the two cannot disagree. Every link is
+  built in one place and keeps what the person already chose, because four
+  places drift and the first to drift silently drops a filter somebody typed.
+  The sort column is read against the entity's own fields, the same rule as
+  the filter, so a name that is not one never reaches the dynamic ORDER BY.
 - **E.4**, the Zork console not fitting its box.
 - **B.14** and **B.15**, one build each.
 - then **D.3**, the signature → metadata graph, since D.1 put the channel
