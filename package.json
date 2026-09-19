@@ -21,6 +21,7 @@
     "integration": "node tools/osd-suites.mjs",
     "test": "npm run lint && npm run unit && npm run integration",
     "start": "npm run transpile && node test/run.mjs",
+    "example": "node tools/osd-example.mjs",
     "osd:serve": "npm run transpile && STG_SERVE=child STG_PORT=8099 node test/run.mjs",
     "osd:worktree": "node tools/osd-worktree.mjs",
     "osd:closure": "node tools/osd-closure.mjs",

@@ -2973,8 +2973,14 @@ Nothing below them starts until the answer.
 0.5  RAP oracle: build the sample objects on A4H?                     [A]
      └─ plan: docs/oracle-rap.md
      └─ external: SAP-samples/abap-platform-refscen-flight (Apache-2.0) is
-        most of the oracle already; A4H only adds the 1909 BDEF dialect
-     └─ external: A4H 1909 is unmanaged-only, no managed, no draft
+        most of the oracle already
+     └─ **CORRECTED 2026-09-19 by asking the system.** The line that used to
+        stand here said "A4H 1909 is unmanaged-only, no managed, no draft".
+        It is wrong. `abapRelease 758` -- ABAP Platform 2022 -- and the whole
+        flight reference scenario is already installed: /DMO/FLIGHT_MANAGED
+        (managed), /DMO/FLIGHT_DRAFT (draft, with the draft table
+        /DMO/D_TRAVEL_D), /DMO/FLIGHT_UNMANAGED, /DMO/FLIGHT_LEGACY, and
+        service bindings in OData V2 **and** V4. Nothing has to be built
 
 0.6  Is depending on ZADT_VSP being installed on the target ok?       [A]
      └─ decides V's deploy route (2. vs 3. on the ladder in 4.2)
@@ -2998,10 +3004,26 @@ would have been wasted. Measure the premise before paying for the
 experiment.
 
 **0.5 — RAP oracle: `SAP-samples/abap-platform-refscen-flight`, without
-A4H.** Apache-2.0 and already most of the oracle. A4H would add only the
-1909 BDEF dialect, and A4H 1909 is unmanaged-only — no managed, no draft —
-so half of RAP is unreachable there in principle. Nothing is asked of anyone
-and nothing is risked.
+A4H.** Apache-2.0 and already most of the oracle.
+
+**The reason given for it was false, and the decision survives anyway.** The
+argument was "A4H 1909 is unmanaged-only, so half of RAP is unreachable
+there in principle". Asked the system instead of the memory: `abapRelease
+758`, ABAP Platform **2022**, and the reference scenario is installed in
+full — managed, draft with its draft table, unmanaged, legacy, and bindings
+in V2 and V4. So A4H is not a lesser oracle; it is a **better** one, and it
+costs nothing because the objects are already there.
+
+What that changes: 0.5 stays as answered, because the repository is still
+the thing to read and version. What it opens is that the answers can now be
+**measured** against a system rather than read off source — which is the
+difference this project keeps paying for everywhere else.
+
+**And 0.4 is answered by the same look.** A writable draft service on that
+system is `SRVD` + `SRVB` — no IWPR, so not a SEGW artifact, which is
+exactly the risk `docs/oracle-draft.md` named. But those bindings **do**
+carry IWMO entries: they register in the same `/IWBEP/` model registry a
+SEGW service registers in. Different front door, one registry.
 
 **0.6 — `ZADT_VSP` as the fast path, clean ADT attempted, plain abapGit as
 the mandatory fallback.** Three routes in that order, and the last one is

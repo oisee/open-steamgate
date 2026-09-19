@@ -22,10 +22,26 @@ import {fingerprintOf} from "./osd-persist.mjs";
 
 const STAMP = "osd_schema";
 
-// where the rows live when nobody says: beside the tree, out of git. One
-// constant, so the supervisor that names the database and the child that
+// Where the rows live when nobody says: beside the tree, out of git. One
+// expression, so the supervisor that names the database and the child that
 // opens it cannot disagree about which file that is.
-export const DEFAULT_DATABASE = ".local/db/osd.sqlite";
+//
+// **It follows the port, and that is not cosmetic.** `STG_PORT` isolates the
+// socket so two sessions can run side by side -- CLAUDE.md says so in as many
+// words -- but the database file was one constant, so the second instance
+// opened the file the first one was writing and got `SQLITE_IOERR_SHORT_READ`
+// (errcode 522), which surfaces as "disk I/O error" and names nothing. Found
+// 2026-09-19 by running `npm run example` on port 3141 while a deployment
+// held 3030. The port isolated the socket and nothing isolated the data.
+//
+// The default port keeps the plain name, so an existing database is still
+// found and nobody's rows move.
+export const DEFAULT_DATABASE = (() => {
+  const port = process.env.STG_PORT;
+  return port === undefined || port === "3030"
+    ? ".local/db/osd.sqlite"
+    : `.local/db/osd-${port}.sqlite`;
+})();
 
 // where a seeded database is kept once per DDIC, so the next instance copies
 // it instead of seeding again: .local/db/base/<schema-hash>.sqlite
