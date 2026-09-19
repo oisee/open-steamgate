@@ -499,13 +499,26 @@ it arrived inactive.
 
 ### A page here, reading a service there
 
-The other direction. Put the other system in
-`.local/gateway-destinations.json` (gitignored — a host name and a logon are
-not repository content):
+The other direction. Two things are named apart, the way SM59 names them: a
+**destination** is a system, and a **binding** says which of this system's
+paths that one answers. Both live in `.local/destinations.json` (gitignored
+— a host name and a logon are not repository content;
+[`destinations.example.json`](destinations.example.json) is the shape):
 
 ```json
-{ "ZOSD_006_DEMO_SRV": { "url": "http://…", "user": "…", "password": "…", "client": "001" } }
+{
+  "destinations": {
+    "A4H": { "type": "http", "url": "http://…", "user": "…", "password": "…", "client": "001" }
+  },
+  "services": { "ZOSD_006_DEMO_SRV": "A4H" }
+}
 ```
+
+RFC destinations live in the same file with `"type": "rfc"`, keeping their
+own `mode` (`local`, `live`, `replay`, `record`, `fallback`) — that is *how
+to satisfy a call* and not a transport, which is why it is not called `type`.
+The older `.local/rfc-destinations.json` and `.local/gateway-destinations.json`
+are still read when this file is absent, and the tool says which it read.
 
 and OSD answers that service on **its own origin**, so a page it serves
 reads it with no CORS and no logon prompt. A local service of the same name

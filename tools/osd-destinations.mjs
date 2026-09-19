@@ -1,0 +1,127 @@
+// One registry for "which other system is that", and one for "who answers
+// this path with it".
+//
+// **Why this exists, and it is a mess of mine from yesterday.** Within a day
+// this tree grew two files for one idea:
+//
+//   .local/rfc-destinations.json       name -> {kind: local|live|replay|…}
+//   .local/gateway-destinations.json   SERVICE NAME -> {url, user, password}
+//
+// fable-osd found the seam by needing a third use: a preflight is keyed by
+// **system**, not by service, and bending the second file into that shape
+// would have made a third. The right split is the one SM59 already has, and
+// it is not "one file with a kind" -- that was my first answer and it is
+// wrong, because RFC's `kind` already means *how to satisfy this call*
+// (local, replay, live, record, fallback) and would have collided with a
+// transport discriminator.
+//
+// So two things, named apart:
+//
+//   a **destination** is a system            A4H = {type: http|rfc, …}
+//   a **binding** says who uses it here      ZOSD_006_DEMO_SRV -> A4H
+//
+// A preflight names a destination. A proxy names a binding. An RFC call
+// names a destination. Nothing has to be re-keyed to be reused, which was
+// the whole complaint.
+//
+// **Nothing on disk has to change to keep working.** Without the unified
+// file this reads the two legacy ones and says so, once, because a tool that
+// silently reads something other than what it documents is how the next
+// session loses an evening.
+import {existsSync, readFileSync} from "node:fs";
+
+export const FILE = ".local/destinations.json";
+export const LEGACY_RFC = ".local/rfc-destinations.json";
+export const LEGACY_HTTP = ".local/gateway-destinations.json";
+
+const read = (file) => {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    console.error(`${file}: ${error?.message ?? error} -- treated as absent`);
+    return undefined;
+  }
+};
+
+/** A destination is a system. `type` is the transport and nothing else:
+ *  `rfc` keeps its own `mode` (the old `kind`), `http` carries a url and a
+ *  logon. A destination with a url and no type is http, which is inference
+ *  and is only applied to the legacy file where the shape is unambiguous. */
+export function destinations({file = FILE, rfcFile = LEGACY_RFC, httpFile = LEGACY_HTTP, say = console.error} = {}) {
+  const unified = existsSync(file) ? read(file) : undefined;
+  if (unified !== undefined) {
+    const out = {};
+    for (const [name, d] of Object.entries(unified.destinations ?? unified)) {
+      out[name] = {...d, type: d.type ?? (d.url === undefined ? "rfc" : "http")};
+    }
+    return out;
+  }
+  const out = {};
+  const legacyRfc = existsSync(rfcFile) ? read(rfcFile) : undefined;
+  for (const [name, d] of Object.entries(legacyRfc ?? {})) {
+    // the old `kind` is the RFC mode, not the transport
+    const {kind, ...rest} = d;
+    out[name] = {type: "rfc", mode: kind, ...rest};
+  }
+  const legacyHttp = existsSync(httpFile) ? read(httpFile) : undefined;
+  for (const [service, d] of Object.entries(legacyHttp ?? {})) {
+    // its key was a SERVICE name, which is the defect; the system it names
+    // has no name of its own, so it gets one derived from the service and a
+    // binding is synthesised below
+    out[`${service}@legacy`] = {type: "http", ...d};
+  }
+  if (legacyRfc !== undefined || legacyHttp !== undefined) {
+    say(`osd-destinations: ${FILE} is absent; read ${[legacyRfc && rfcFile, legacyHttp && httpFile].filter(Boolean).join(" and ")} instead`);
+  }
+  return out;
+}
+
+/** A binding says which of this system's paths another system answers.
+ *  Today there is one kind of binding: an OData service by name. */
+export function bindings({file = FILE, httpFile = LEGACY_HTTP, say = console.error} = {}) {
+  const unified = existsSync(file) ? read(file) : undefined;
+  if (unified !== undefined) {
+    return {...(unified.services ?? {})};
+  }
+  const legacyHttp = existsSync(httpFile) ? read(httpFile) : undefined;
+  if (legacyHttp === undefined) {
+    return {};
+  }
+  void say;
+  // the legacy file's key IS the service, so every entry is its own binding
+  return Object.fromEntries(Object.keys(legacyHttp).map((service) => [service, `${service}@legacy`]));
+}
+
+/** Every OData service another system answers, as {service, destination}.
+ *  A binding naming a destination that is not there is an error and not a
+ *  silent omission -- the whole point of naming them apart is that the two
+ *  halves can now disagree, so somebody has to check. */
+export function remoteServices(options = {}) {
+  const all = destinations(options);
+  const bound = bindings(options);
+  const out = [];
+  for (const [service, name] of Object.entries(bound)) {
+    const destination = all[name];
+    if (destination === undefined) {
+      (options.say ?? console.error)(`osd-destinations: service ${service} is bound to ${name}, which is not a destination`);
+      continue;
+    }
+    if (destination.type !== "http") {
+      (options.say ?? console.error)(`osd-destinations: service ${service} is bound to ${name}, which is a ${destination.type} destination and cannot answer HTTP`);
+      continue;
+    }
+    out.push({service, name, destination});
+  }
+  return out;
+}
+
+/** One system by name, for a caller that has one -- a preflight, a capture,
+ *  anything that asks a system a question rather than serving a path. */
+export function destinationOf(name, options = {}) {
+  const all = destinations(options);
+  const d = all[name];
+  if (d === undefined) {
+    throw new Error(`no destination ${name}: ${Object.keys(all).join(", ") || "none are defined"}`);
+  }
+  return d;
+}

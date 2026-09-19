@@ -29,6 +29,7 @@
     "test/osd-build.mjs",
     "test/osd-closure.mjs",
     "test/osd-data.mjs",
+    "test/osd-destinations.mjs",
     "test/osd-git.mjs",
     "test/osd-host.mjs",
     "test/osd-icf.mjs",

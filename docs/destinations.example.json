@@ -1,0 +1,28 @@
+{
+  "destinations": {
+    "NONE": {
+      "type": "rfc",
+      "mode": "local"
+    },
+    "A4H_RFC": {
+      "type": "rfc",
+      "mode": "live",
+      "connection": "~/.rfc.json#A4H"
+    },
+    "ERP": {
+      "type": "rfc",
+      "mode": "replay",
+      "capture": ".local/capture/erp/rfc"
+    },
+    "A4H": {
+      "type": "http",
+      "url": "http://a-system:50000",
+      "user": "SOMEBODY",
+      "password": "\u2026",
+      "client": "001"
+    }
+  },
+  "services": {
+    "ZOSD_006_DEMO_SRV": "A4H"
+  }
+}

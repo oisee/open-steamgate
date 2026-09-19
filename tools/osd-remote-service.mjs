@@ -4,7 +4,7 @@
 // nothing in the application says which host. This is that, at the one place
 // it is needed here: a page served by OSD asks
 // `/sap/opu/odata/sap/<SERVICE>/…` on its own origin, and if the registry
-// does not have that service, the destination does.
+// does not have that service, a destination does.
 //
 // Why it has to be OSD and not a proxy beside it (Alice, 2026-09-19): an app
 // **inside** the system is the measurement. A second process on another port
@@ -13,26 +13,12 @@
 // does every day. And in a browser it cannot be done any other way -- another
 // origin means CORS and a logon prompt per request.
 //
-// The destinations live in `.local/gateway-destinations.json`, gitignored,
-// because a host name and a logon are not repository content:
-//
-//   { "ZOSD_006_DEMO_SRV": {"url": "http://…", "user": "…",
-//                           "password": "…", "client": "001"} }
-import {existsSync, readFileSync} from "node:fs";
-
-export const DESTINATIONS = ".local/gateway-destinations.json";
-
-export function destinationsOf(file = DESTINATIONS) {
-  if (existsSync(file) === false) {
-    return {};
-  }
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    console.error(`${file}: ${error?.message ?? error} -- no remote services`);
-    return {};
-  }
-}
+// **Where the systems live is not this file's business any more.**
+// `tools/osd-destinations.mjs` holds them: a *destination* is a system, a
+// *binding* says which of this system's paths another one answers. This file
+// had both jobs and keyed the systems by service name, which is what made a
+// preflight -- keyed by system -- need a second file.
+import {remoteServices} from "./osd-destinations.mjs";
 
 // What a transparent proxy has to carry, and why each one.
 //
@@ -105,17 +91,17 @@ export function remoteService(name, target, known = () => false) {
   };
 }
 
-/** every destination, mounted. Returns what it mounted, so a host can say so
- *  at start rather than leaving it to be discovered. */
-export function mountRemoteServices(app, known = () => false, file = DESTINATIONS) {
+/** every binding, mounted. Returns what it mounted, so a host can say so at
+ *  start rather than leaving it to be discovered. */
+export function mountRemoteServices(app, known = () => false, options = {}) {
   const mounted = [];
-  for (const [name, target] of Object.entries(destinationsOf(file))) {
-    if (target?.url === undefined || target?.user === undefined) {
-      console.error(`${file}: ${name} has no url or user -- skipped`);
+  for (const {service, name, destination} of remoteServices(options)) {
+    if (destination.url === undefined || destination.user === undefined) {
+      console.error(`osd-destinations: ${name} has no url or user -- ${service} not mounted`);
       continue;
     }
-    app.use(remoteService(name, target, known));
-    mounted.push(name);
+    app.use(remoteService(service, destination, known));
+    mounted.push(`${service} -> ${name}`);
   }
   return mounted;
 }
