@@ -971,6 +971,59 @@ one of them parsed, lowered or passed, and computed something else.
 
 ---
 
+## The container, 2026-09-19: five fixed, two open, and both open ones named
+
+Written down because the session that measured it will not be the one that
+finishes it, and because four of the five were invisible until somebody ran
+the thing rather than read it.
+
+**Fixed.**
+- `wget` and `libatomic1` are in the image. `debian:12-slim` had neither, so
+  the health check -- a wget pipeline -- could never pass, **in either
+  profile**. A container serving `$metadata` 200 the whole time reported
+  `unhealthy` five probes running.
+- The health check reads `system.serving` instead of grepping for the word
+  `commit`, anchored on the `live` field before it because `database.serving`
+  is a second field of that name one level down.
+- **And then it asks for a row**, because the corrected check went green on a
+  HANA container whose seed had died and whose every entity set was empty. A
+  failed seed leaves a schema `hasSchema()` accepts, so the next boot skips
+  seeding and serves nothing, healthily, at 200. Proven both ways: sqlite
+  `exit=0` five times, hana `exit=1` five times.
+- One check for two services, by YAML anchor. They were copies; correcting
+  one left the other -- and the other was the service the false green had
+  been measured on.
+- `make-release` derives the runtime closure instead of listing it (the list
+  shipped `temporal-polyfill` without `temporal-utils`/`temporal-spec`), and
+  bundles `hdb` into **one CJS file**, because the package directory does not
+  resolve in a compiled binary.
+
+**Open, and named rather than felt.**
+- **The HANA seed fails with `incorrect syntax near ","` at pos 223** and the
+  statement is still unidentified. Reproducible on the host from
+  `.local/release`, so not a container effect. Excluded by measurement: the
+  generation's 2642 inserts (no multi-row VALUES), the 36 seed statements
+  (none after rewrite), the 104 pg DDL statements, and `loadScaledData`
+  (a no-op without `STG_DATA_SCALE`). The one statement matching the
+  geometry was sent to HANA live and **accepted**. The live finding is that
+  the error does **not** pass through `HanaDatabaseClient.#run`, whose
+  explainer is proven to work against a real HANA -- so something outside
+  the client is sending it. That is the next step.
+- **`STG_SERVE=inline` ignores `STG_PORT`** in the compiled binary: it starts,
+  serves, and announces a random port. Confirmed on two binaries a day apart,
+  so not a regression, and `[proxied]` is absent, so the switch does work.
+  Diagnosis through inline is therefore possible -- read the port from its
+  output rather than setting it.
+
+**One fact that explains three different-looking failures.** A compiled Bun
+binary resolves `hdb` from the **cwd's** `node_modules`: from the repository
+root it finds the real package and dies on `Cannot find package
+'iconv-lite'`; from the release directory it finds the pre-bundled file and
+works. Three faces, one cause, and they were called three defects for most
+of a day.
+
+---
+
 ## The order of work, settled 2026-09-18
 
 > **What is actually next, 2026-09-19.** Read this before the buckets below.
