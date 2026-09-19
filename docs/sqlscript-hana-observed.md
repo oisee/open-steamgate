@@ -157,3 +157,30 @@ Consequences, stated so the cost is not discovered later:
   padded stored, there are no trailing blanks for it to ignore.
 - It is still a data-shape change, so it needs its own before-and-after on a
   real read path rather than only on the conformance fixture.
+
+**Why it is safe, as a reason rather than a hope** (fable-osd): the circle
+closes by itself. The client trims on write, the database stores `"abc"`, and
+on the way back the value lands in a `Character(10)` whose `set()` pads it to
+ten again. The in-memory shape does not change at all -- only the stored one
+does -- and ABAP already treats trailing blanks in a `CHAR` as insignificant.
+The argument rests on exactly the runtime behaviour measured above.
+
+**And the boundary that makes it dangerous, which has to be drawn before the
+code is written: trim `CHAR`, never `STRING`.** In ABAP a `STRING`'s trailing
+blanks are **significant** -- they are content, not padding. A rule that keys
+on "the column is character-like" rather than on "the column is mapped from a
+DDIC `CHAR`" would send `"abc   "` in a string field to the database as
+`"abc"` and hand it back changed. No suite here would notice: the defect
+looks like tidiness.
+
+So the rule reads the **DDIC type, not the SQL type**, and it arrives with a
+two-line test:
+
+| | stored | read back |
+| --- | --- | --- |
+| `CHAR(10)` set to `"abc"` | 3 characters | 10 |
+| `STRING` set to `"abc   "` | **6** | **6** |
+
+If the second row is green the change is safe. Without that row we would
+learn about it from the first person who has a significant blank in a string
+field.
