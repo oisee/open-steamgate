@@ -76,7 +76,11 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
     expect(m.associations[0].constraints).to.deep.equal([{principal: "TravelId", dependent: "TravelId"}]);
     expect(m.associations[0].sets).to.deep.equal([{name: "TravelToBookingsSet", leftSet: "TravelSet", rightSet: "BookingSet"}]);
     expect(m.navigation).to.deep.equal([{name: "to_Bookings", abapField: "TO_BOOKINGS", entity: "Travel", association: "TravelToBookings"}, {name: "to_Travel", abapField: "TO_TRAVEL", entity: "Booking", association: "TravelToBookings"}]);
-    expect(m.functionImports[0]).to.include({name: "CancelTravel", httpMethod: "POST", returnCard: "1", returnKind: "ETYP", returnType: "Travel", returnSet: "TravelSet", actionFor: "Travel"});
+    // returnSet is empty on purpose: an action bound to an entity type may
+    // not name one, and SEGW refuses the project if it does. Gateway puts
+    // EntitySet="TravelSet" into $metadata anyway, derived from actionFor
+    // (A4H, 2026-09-19).
+    expect(m.functionImports[0]).to.include({name: "CancelTravel", httpMethod: "POST", returnCard: "1", returnKind: "ETYP", returnType: "Travel", returnSet: "", actionFor: "Travel"});
     expect(m.functionImports[0].parameters[0]).to.include({name: "TravelId", abapField: "TRAVEL_ID", edmType: "Edm.String", maxLength: "8"});
   });
 
@@ -328,5 +332,87 @@ describe("stg-compile --all sweeps a project no YAML declares", () => {
     } finally {
       rmSync(out, {recursive: true, force: true});
     }
+  });
+});
+
+// The hand-written demo MPC against the generated one, FILE AGAINST FILE.
+//
+// The suite above compares the generator with literals written into this
+// file -- `expect(mpc).to.contain("lo_property = …")` -- which is a
+// transcription of the generator, not an oracle. Somebody copied fragments
+// of the output in once and they have agreed with it ever since. The only
+// thing here read off disk was the IWSV and IWMO pair (lines 39-40), so the
+// header's claim that this file "keeps the hand-written model in step" was
+// true of two XML files and of nothing else.
+//
+// That is the third edition of one shape in a single day: two
+// implementations agreeing with each other, a real fixture edited to match
+// the generator, and now an oracle transcribed into the test. None of them
+// looks suspicious, and in all three the external thing stopped being
+// external.
+//
+// So this compares `src/demo/zcl_zstg_demo_mpc.clas.abap` with what
+// stg-compile makes of `src/demo/zstg_demo.stg.yaml`. The divergences it
+// finds today are real and each is named below with what has to happen to
+// it -- an exception with a reason can be told from a way of making the
+// build green.
+describe("the hand-written demo MPC and the generated one declare the same types", () => {
+  /** `TYPES: BEGIN OF x … END OF x` as {name: [fields]}, plus table types. */
+  const typesOf = (src) => {
+    const out = {};
+    for (const m of src.matchAll(/TYPES:?\s*BEGIN OF\s+([a-z0-9_]+)\s*,?([\s\S]*?)END OF\s+\1/gi)) {
+      out[m[1].toLowerCase()] = [...m[2].matchAll(/^\s*([a-z0-9_]+)\s+TYPE\s/gim)].map((x) => x[1].toLowerCase());
+    }
+    for (const m of src.matchAll(/TYPES:?\s*([a-z0-9_]+)\s+TYPE\s+STANDARD TABLE OF\s+([a-z0-9_]+)/gi)) {
+      out[m[1].toLowerCase()] = [`TABLE OF ${m[2].toLowerCase()}`];
+    }
+    return out;
+  };
+
+  // Measured 2026-09-19. Each entry says why it differs and what closes it.
+  const KNOWN = {
+    // the generator's machinery, which the hand-written class predates
+    ts_text_element: "generated: the text pool types, added with set_label_from_text_element",
+    tt_text_elements: "generated: the text pool types",
+    ts_canceltravel: "generated: the function import's input structure",
+    ts_travelcount: "generated: the function import's input structure",
+    // TO FIX: the hand-written class names the model's own entity differently
+    ts_status_vh: "hand: the model says StatusVH/Text, this says ts_status_vh/status_text -- bring the class to the model",
+    tt_status_vh: "hand: same, the table type",
+    ts_statusvh: "generated from the model; the pair of ts_status_vh above",
+    tt_statusvh: "generated from the model; the pair of tt_status_vh above",
+    // TO FIX: belongs in _MPC_EXT, which SEGW does not regenerate. Two of two
+    // real projects in the corpus declare their deep structure there and
+    // INCLUDE TYPE the flat part from the base class.
+    ts_travel_deep: "hand: a deep-insert structure in a class SEGW regenerates -- move it to _MPC_EXT",
+  };
+
+  const generated = async () => {
+    const {readFileSync} = await import("node:fs");
+    const {compile} = await import("../tools/stg-compile.mjs");
+    return compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"))
+      .classes["zcl_zstg_demo_mpc.clas.abap"];
+  };
+
+  it("and every difference is one we have named", async () => {
+    const {readFileSync} = await import("node:fs");
+    const hand = typesOf(readFileSync("src/demo/zcl_zstg_demo_mpc.clas.abap", "utf8"));
+    const gen = typesOf(await generated());
+    expect(Object.keys(hand).length, "read nothing from the hand-written class").to.be.greaterThan(3);
+
+    const differing = [...new Set([...Object.keys(hand), ...Object.keys(gen)])]
+      .filter((k) => JSON.stringify(hand[k]) !== JSON.stringify(gen[k]))
+      .filter((k) => KNOWN[k] === undefined);
+    expect(differing, `types that differ and are not named in KNOWN: ${differing.join(", ")}`)
+      .to.deep.equal([]);
+  });
+
+  it("and the ones we share are identical, field for field", async () => {
+    const {readFileSync} = await import("node:fs");
+    const hand = typesOf(readFileSync("src/demo/zcl_zstg_demo_mpc.clas.abap", "utf8"));
+    const gen = typesOf(await generated());
+    const shared = Object.keys(hand).filter((k) => gen[k] !== undefined);
+    expect(shared.length, "no shared type at all: this would pass on nothing").to.be.greaterThan(2);
+    for (const k of shared) expect(gen[k], `${k} differs`).to.deep.equal(hand[k]);
   });
 });

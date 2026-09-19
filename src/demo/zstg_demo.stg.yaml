@@ -2,8 +2,16 @@
 # writes the SEGW project tree (IWPR), the registration objects (IWSV, IWMO)
 # and the _MPC/_DPC classes SEGW would generate from that tree; the
 # hand-written classes in this folder are what a developer writes on top
-# (their _EXT). test/stg-compile.mjs keeps this file and the hand-written
-# model in step.
+# (their _EXT).
+#
+# test/stg-compile.mjs compares this file's output with the hand-written
+# classes in two ways and it is worth knowing which: the IWSV and IWMO
+# registration objects are read off disk and compared byte for byte, and the
+# MPC's TYPES declarations are compared with the hand-written MPC's, file
+# against file, with every remaining difference named. Everything else in
+# that suite compares the generator with literals written into the test --
+# which is a transcription of the generator, and agreed with it for months
+# while the class said `status_text` and the model said `Text` (2026-09-19).
 project: ZSTG_DEMO
 service: ZSTG_DEMO_SRV
 model: ZSTG_DEMO_MDL
