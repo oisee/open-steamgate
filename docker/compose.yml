@@ -24,9 +24,26 @@ services:
     ports: ["3130:3030"]
     volumes: ["osd-data:/osd/data-run"]
     healthcheck:
-      # by content, not by "the port is open": an unbuilt or half-started
-      # system listens and answers 503 to everything
-      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -q commit"]
+      # By content, not by "the port is open" -- and by the RIGHT field, which
+      # took a second measurement to get. `grep -q commit` passes while the
+      # system serves nothing at all: /build answers 200 with a commit in it
+      # even when the serving runtime died, and OData answers 503. The body
+      # already carries the true signal and the old check threw it away:
+      #
+      #   {"commit":"4d1633e…","system":{"serving":null,
+      #    "database":{"serving":null},"synchronized":false}}
+      #
+      # So the check asserts that `system.serving` is a string. A three-valued
+      # instrument whose consumer reads two of the values is not a check, it
+      # is a habit.
+      #
+      # It is anchored on the `live` field before it rather than matching
+      # `"serving":"` anywhere, because `database.serving` is a second field
+      # of that name one level down: an unanchored grep would pass on the
+      # database's value while the system served nothing. Both patterns work
+      # today; only one of them says what it means.
+      test: &serving_check ["CMD", "sh", "-c",
+             "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -qE '\"live\":\"[^\"]+\",\"serving\":\"[^\"]+\"'"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -57,7 +74,20 @@ services:
       timeout: 10s
       retries: 120
 
-  # **Not verified in a container.** `STG_DB=hana` serves, and `npm run unit`
+  # **`STG_DB=hana` fails at startup in this image**, and the reason is not
+  # HANA: the image carries no `hdb` at all. `scripts/make-release.mjs` copies
+  # four packages and that is not one of them, and the compiled binary cannot
+  # bundle it either, because `tools/hana-client.mjs` reaches it through
+  # `createRequire(import.meta.url)` and in a binary that url is
+  # `/$bunfs/root/osd`. Measured 2026-09-19: the container starts, parses 1492
+  # objects, then answers 503 with `Cannot find package 'hdb'` -- honestly,
+  # rather than falling back to SQLite. Vendoring the package directory does
+  # not fix it; only a pre-bundled single file does, because a compiled binary
+  # resolves the top-level bare specifier and relative FILE paths, and nothing
+  # a required module then asks for by name.
+  #
+  # The rest of the original note, which still stands: `STG_DB=hana` serves
+  # outside a container, and `npm run unit`
   # against HANA is 19.1 s green -- both measured on a HANA Express beside the
   # host, not through this file. What is measured and negative: the WIRE suite
   # against HANA hangs rather than runs slowly -- 21 minutes, no output, two
@@ -88,7 +118,11 @@ services:
       # it is asked to connect, which is the right place for it.
       HANA_PASSWORD: ${HANA_PASSWORD:-}
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -q commit"]
+      # The same check as `osd`, by reference and not by copy. The two were
+      # copies, and when the first was corrected the second kept the defect --
+      # and this is the service the false green was actually measured on. A
+      # rule that two callers must obey does not live next to one of them.
+      test: *serving_check
       interval: 5s
       timeout: 5s
       retries: 60

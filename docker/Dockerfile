@@ -10,8 +10,21 @@
 #   docker build -f docker/Dockerfile -t osd:local .
 FROM debian:12-slim
 
+# Three packages, and each one was added because something measurably did not
+# work without it (2026-09-19):
+#   ca-certificates  TLS out of the container
+#   wget             the health check below. `debian:12-slim` has neither wget
+#                    nor curl, so the check could never pass -- in EITHER
+#                    profile. Measured: a container serving $metadata 200 the
+#                    whole time reported `unhealthy` five probes running,
+#                    `sh: 1: wget: not found`. Anything waiting on
+#                    `service_healthy` waited for ever.
+#   libatomic1       the Node and SEA hosts (`run.sh node`, `run.sh sea`) die
+#                    instantly without it: "error while loading shared
+#                    libraries". The comment further down advertises those
+#                    hosts, so the image has to carry what they need.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates wget libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /osd
