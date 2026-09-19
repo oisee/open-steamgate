@@ -1151,37 +1151,52 @@ of a day.
 
 ## The order of work, settled 2026-09-18
 
-> **What is actually next, 2026-09-19.** Read this before the buckets below.
-> The standing queue that gets recited at us — *"stage 2 of the SQLScript
-> parser, then G.9 wave 2, then G.1d"* — is **stale in all three places**:
-> all three SQLScript stages exist and the track is on a declared pause at
-> 78 of 364 bodies; G.9 finished wave 3 and is closed; and the naming check
-> is not what anyone is waiting on. Working from that list means redoing
-> finished work, so it is written down here rather than corrected from
-> memory each time.
+> **What is actually next, 2026-09-19, fourth correction (21:50).** Four
+> corrections in one day. Keep reading this file rather than reciting a
+> queue; a list that is edited four times is edited a fifth time late.
 >
-> The real queue is upstream-shaped, because that is where the deadline is,
-> and it is **ordered by what blocks whom**:
+> **Closed this evening, and it was not on any list:** the last mile of the
+> README's loop. One YAML is now a SEGW project, a DDIC, seed rows, an
+> activated service **and a Fiori application** on an A4H sandbox, carried
+> as abapGit zips. Eight numbered attempts; `$metadata` 8 of 8 kinds
+> identical with the system's; `TravelSet` and the search help answering
+> there; the page served at `/sap/bc/ui5_ui5/sap/<app>/`. Thirteen defects
+> found, seven of them in hand-written files no check compared with
+> anything, and every constant is written down in
+> [`a4h-deploy.md`](a4h-deploy.md) rather than in a person.
 >
-> 1. **The `database-hdb` LUW fix**, and it goes before any release.
->    `execute()` never opened the LUW, so with autocommit off nothing sent
->    through it was ever committed. Invisible on one connection — including
->    in upstream's own `test/_utils.ts:98-99`, which seeds HANA through
->    `execute()` and is green for exactly that reason. A release without
->    this ships silent data loss to anyone with two connections.
-> 2. **The three-backend report** on open-abap-core's own suite (819 methods:
->    SQLite 819/0/0, DuckDB 816/3/0, HANA 815/3/1), with declines separated
->    from failures. Drafted.
-> 3. **The AMDP placement issue** — a question, not a PR: `execute()` returns
->    `void`, so a procedure's result set has nowhere to go, and the four
->    options for where AMDP support could live. Drafted, in the critic gate.
+> That the three "levels" existed at all is worth noting: they were invented
+> during the evening, not planned. The plan is what follows.
 >
-> Behind those, and not started: G.5 (SICF as an application) from the loud
-> bucket, and the SEGW one-command example. The horizon Alice named is
-> CDS-BOPF and RAP end to end, and it is deliberately behind the HANA path
-> being released: it would be a second storey on a ground floor that only
-> stands in our own checkout.
-
+> **Upstream is merged and unshipped**, unchanged from the third
+> correction: transpiler #1874 and #1877 merged,
+> `@abaplint/database-hdb` still answers 404 on npm and the transpiler is
+> still 2.13.89 (`hdb: ["todo"]`). #1878 open, no comments. Not ours to
+> push; nothing of ours depends on the package.
+>
+> **The next unstarted items, in the order they block each other:**
+>
+> 1. **OSD does not serve a WAPA** (new, born tonight). The application
+>    goes to a system as one object and comes back here as a folder of
+>    static files that `express` serves — the only place in this tree where
+>    the request path is not ABAP. Serving `/sap/bc/ui5_ui5/sap/<app>/<page>`
+>    out of the object store, in ABAP, makes one artefact run in both
+>    runtimes. Small, and it closes a real asymmetry.
+> 2. **G.5, SICF as a real application** — the same neighbourhood, and
+>    tonight added the reason: this tree now creates ICF nodes on somebody
+>    else's system and cannot show its own.
+> 3. **A.12, SRVD + SRVB** — what the 09-18 list said to take after B.1 and
+>    D.3, both of which were done on 09-19.
+> 4. **The machine deploy.** `/sap/bc/adt/filestore/ui5-bsp/objects` answers
+>    200 for an ordinary developer and is what the Fiori tools speak;
+>    nothing here speaks it. It would turn "a person with a zip" into a
+>    command. `/UI5/ABAP_REPOSITORY_SRV` answers 403 there, so that route is
+>    unmeasured.
+>
+> **The horizon Alice named stays CDS-BOPF and RAP end to end**, and stays
+> deliberately behind the HANA path being released: it would be a second
+> storey on a ground floor that only stands in our own checkout. The
+> SQLScript front end (B.19) is on its declared pause at 78 of 364 bodies.
 
 Alice asked for the queue to be sorted into three, and it was agreed between
 the two sessions rather than decided by one. A bucket is not a priority

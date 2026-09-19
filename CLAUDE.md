@@ -497,6 +497,30 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   `window.status`); and a server that must outlive a command is started
   `setsid nohup … & disown`, since the harness reaps its own background
   tasks and a plain `&` dies with the shell.
+- **A system is reached with a zip, and the last mile is measured**
+  (`docs/a4h-deploy.md`, 2026-09-19). `npm run segw:zip` builds an abapGit
+  offline repository out of a compiled project; `.local/make-level.sh <nnn>`
+  builds one numbered attempt, because a failed import leaves rows in
+  `/IWBEP/I_MGW_SRG` and the next attempt with the same names dumps on them
+  -- so every attempt gets its own package and its own prefix. What a real
+  system checks and this runtime does not: a versioned file name is a fixed
+  width (IWSV 39, IWMO/IWVB 36) **and a prefix rename loses it**; a BSP
+  application name is at most 15 because it becomes an `ICFNAME`; a generic
+  `TYPE STANDARD TABLE OF x` may not be a structure component; a date is
+  `TYPE_KIND D` + `TYPE_NAME` in the tree and not an `Edm.DateTime` with a
+  precision; a class may only call an interface it implements, and where the
+  `INTERFACES` line belongs is counted in the corpus (8 of 8 for
+  `IF_SB_DPC_COMM_SERVICES`, 0 of 8 for `IF_SB_GENDPC_SHLP_DATA`, which is
+  conditional on a mapped search help); a seed row for another client is
+  rewritten into the logon client, so it must not travel. A Fiori app goes
+  as a BSP application (`tools/osd-bsp-app.mjs`, format read off
+  `ZUI5_CODE_SEA` in the corpus) **plus its ICF node** -- abapGit creates the
+  application and not the node, and has no UI5-repository integration at all,
+  but a node is an ordinary SICF object with no handler, and abapGit inserts
+  it already active. Going the other way, `tools/osd-remote-service.mjs`
+  answers a service this registry lacks out of a destination on this origin,
+  carrying the CSRF token **with** its session cookie, which is the pair a
+  write needs.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 - **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in

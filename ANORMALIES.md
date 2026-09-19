@@ -864,9 +864,74 @@ ENDLOOP.
 - Regression-test location: `cl_gui_html_viewer.clas.testclasses.abap` in the fork (`show_url_shows_what_was_loaded`), `test/sapevent.mjs` here
 - Upstream version containing a fix: `unknown`
 
-## Resolved anomalies
+### ANOMALY-2026-09-19-interface-call-without-interfaces — a call through an interface the class does not implement is accepted here and refused on a system
 
-(none yet)
+- Discovery date: `2026-09-19`
+- What happened: `zcl_zstg_demo_dpc_ext` has, and has had since the search
+  help was added, `me->/iwbep/if_sb_gendpc_shlp_data~get_search_help_values(
+  ... )`, while no class in its hierarchy declares
+  `INTERFACES /IWBEP/IF_SB_GENDPC_SHLP_DATA`. `npm test` is green, abaplint
+  says nothing, and the request is served here. A4H refuses to activate it:
+  *"The class ZCL_ZOSD_005_DEMO_DPC_EXT does not contain an interface
+  /IWBEP/IF_SB_GENDPC_SHLP_DATA. However, there is a similarly named
+  interface /IWBEP/IF_SB_GEN_DPC_INJECTION."*
+- What is right: A4H. `me->intf~meth` requires the class to implement the
+  interface; the interface existing is not enough. The interface does exist
+  on A4H, in `/IWBEP/SB_GENDPC_SHLP`, and open-abap-odata has it too — so
+  both sides resolve the **name**, and only one checks the **binding**
+- Why it stayed invisible: the call is legal-looking and the type
+  (`=>tt_result_list`) resolves either way, so nothing on this side has a
+  reason to ask. It took a real system to ask
+- What was done about it: not a workaround. The model was missing the data
+  source the code already used — `StatusVH` now maps its query operation to
+  `ZSTG_STATUS_SH` in `src/demo/zstg_demo.stg.yaml`, so segw-gen writes the
+  `INTERFACES` line into the generated `_DPC`, which is where SEGW puts it.
+  Measured before deciding where: SAP's own `/IWBEP/CL_GWSAMPLE_BAS_DPC`
+  declares three interfaces (`IF_SB_DPC_COMM_SERVICES`,
+  `IF_SB_GENDPC_SHLP_DATA`, `IF_SB_GEN_DPC_INJECTION`); eight corpus DPCs
+  declare the first and third and **none** declares the second, and none of
+  the eight maps a search help. So the third is conditional on the mapping,
+  which is exactly what our generator already did with `hasShlp` — the
+  generator was right and the tree was wrong
+- Upstream: **needs an issue** in abaplint. A syntax rule for "call through
+  an interface the class does not implement" would have caught this here,
+  and would catch it for everyone generating ABAP for a real system. No fix
+  proposed; the reproducer is four lines
+
+### NOTE-2026-09-19-date-facets — one facet differs, and it took three readings to say which
+
+Written down mostly as a record of getting the same small question wrong
+twice out loud before reading the code that answers it.
+
+- Discovery date: `2026-09-19`
+- The tree, after `type: Date`, carries `Edm.DateTime`, `TYPE_NAME SYDATE`,
+  `TYPE_KIND D`, `LENGTH 8` and **no** `PROP_PRECISION` — SAP's own sample
+  projects' shape for a date
+- A4H answers `<Property Name="FlightDate" Type="Edm.DateTime"
+  Precision="0" sap:unicode="false" sap:label="Flight date"/>` — a
+  precision nothing in the tree asked for, and no `sap:display-format`
+- **`Precision` is not a divergence.** Said twice that it was, in opposite
+  directions, both times from a reading rather than the code.
+  `zcl_oao_http_handler` emits `Precision="{ mv_precision }"`
+  *unconditionally* for `Edm.DateTime`, and `mv_precision` is an `i`, so a
+  property whose MPC never calls `set_precison` gets `Precision="0"` here
+  too. Same answer, different route
+- **`sap:display-format` is the one that differs.** We derive it in
+  `zcl_oao_entity_typ=>bind_structure` for a DATS-bound field; 38
+  `Edm.DateTime` properties across 17 real `$metadata` documents in the
+  corpus (measured by fable-osd) and one live A4H service carry it **zero**
+  times. 39 observations, no occurrences, several vendors
+- **And it is still not enough to act on.** All 39 could share a binding
+  style; the case that would settle it is a SAP-delivered service with a
+  DDIC-bound date. Tried on A4H: `/IWFND/GWDEMO_SP2` answers 403 and
+  `/IWBEP/TEA_TEST_COMP_APP` 500 for this user, and
+  `EPM_DEVELOPER_SCENARIO_SRV` and `GWSAMPLE_BASIC` are not activated. So
+  the measurement is blocked on an authorisation, not on an argument, and
+  nothing changes until it is not
+- What fable-osd's numbers do settle: `Precision` on `Edm.DateTime` is
+  derived from the ABAP type, `0` for DATS (26 properties) and `7` for
+  TIMESTAMP (9). The three with no `Precision` at all are Northwind in a
+  `localService` copy, not a Gateway's answer
 
 ### ANOMALY-2026-09-12-transpiler-concat-chain — An `&`/`&&` chain nests one concat( ) call per operand
 

@@ -438,7 +438,85 @@ The rest, including what is not solved yet, is
 
 ---
 
-## 8. When something is wrong
+## 8. Taking it to a real SAP system
+
+Everything above runs here. This step puts the same objects on a system
+that has never seen this repository, as an abapGit offline repository — a
+zip somebody imports. The full account, with every constant that a real
+system checks and this runtime does not, is
+[`a4h-deploy.md`](a4h-deploy.md); this is the recipe.
+
+### The service
+
+```bash
+npm run segw:zip -- src/demo --out /tmp/zstg_demo.zip --data data
+```
+
+In abapGit on the system: **New Offline Repository** → pick a package →
+*Import zip* → *Pull zip*. The zip names no package, so nothing in it
+decides where it lands.
+
+It prints what it carried, **by object and not by file**, and names what it
+did not carry and why — a `.tabu.json` with no `.conf.json` beside it, a row
+written for a client other than the file's own (abapGit deserializes into
+the logon client, so such a row would arrive as *this* client's).
+
+### Give each attempt its own name
+
+A failed import leaves registry rows behind, and the next import with the
+same names dumps on them (`DBSQL_DUPLICATE_KEY_ERROR` in
+`/IWBEP/I_MGW_SRG`). So rename per attempt:
+
+```bash
+node tools/osd-rename.mjs --from ZSTG_ --to ZOSD_004_ --out <dir> src/demo
+```
+
+It renames whole identifiers only, and re-pads the two versioned file names
+— an IWSV is the object padded to 35 plus `0001`, an IWMO padded to 32, and
+a prefix that is four characters longer silently breaks both.
+
+### The Fiori application
+
+A UI5 app on a system is a BSP application **plus an ICF node**. abapGit
+creates the first and not the second, so both are generated:
+
+```bash
+node tools/osd-bsp-app.mjs webapp --name ZOSD_008_APP --out <dir> \
+     --service ZOSD_006_DEMO_SRV
+npm run segw:zip -- <dir> --out /tmp/app.zip
+```
+
+The name is at most **15 characters** — it becomes the ICF node name — and
+the tool refuses a longer one rather than letting the system answer
+`WAPA - error from create_new: 4`. `--service` rewrites the one line in
+`manifest.json` that names the data source, in the written copy and not in
+the tree.
+
+After the import the system answers on
+`/sap/bc/ui5_ui5/sap/<app>/index.html`. If that is a 404 saying *ICF Node
+NOT found*, the node did not arrive; a 403 *Service cannot be reached* means
+it arrived inactive.
+
+### A page here, reading a service there
+
+The other direction. Put the other system in
+`.local/gateway-destinations.json` (gitignored — a host name and a logon are
+not repository content):
+
+```json
+{ "ZOSD_006_DEMO_SRV": { "url": "http://…", "user": "…", "password": "…", "client": "001" } }
+```
+
+and OSD answers that service on **its own origin**, so a page it serves
+reads it with no CORS and no logon prompt. A local service of the same name
+always wins. The CSRF token and its session cookie are carried together,
+which is what a modifying `$batch` needs; without the pair a Create answers
+`/IWFND/CM_MGW/098`.
+
+`packs/travels-a4h` is such a page: the demo app, one line different,
+reading a service on another system.
+
+## 9. When something is wrong
 
 ```
 npm run ps                                   # what is running
