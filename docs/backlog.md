@@ -12,7 +12,7 @@ transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
 
 ---
 
-# Where it stands, and what is next — 2026-09-17
+# Where it stands, and what is next — 2026-09-19
 
 OSD is a system a client cannot tell from one: Eclipse works over HTTPS and
 over RFC, the demo runs on three machines and in a browser, content arrives
@@ -20,6 +20,20 @@ as packs fetched from repositories, and the runtime is measured against a
 real system frame by frame. What is left is not "make it work" but "make it
 answer the way a system answers", and two or three tracks that were never
 started.
+
+**Since 2026-09-18 it also has its own screens, and they are the shortest
+way to show what it is.** SAP Easy Access, a data browser in SE16's shape, an
+SQL trace in ST05's shape, an AMDP sandbox the original cannot do at all,
+and an editor that writes through the same object store the ADT façade
+writes through — all of them ABAP, all of them without a line of JavaScript,
+each on the path the original answers on. Beside them a branch of a whole
+system is now real: a worktree with its own port and database, and two
+sieves — responses and SQL — each calibrated on a system compared with
+itself before it was pointed at anything interesting.
+
+**Both "loud" and "small and safe" buckets of the order of work below are
+empty as of 2026-09-19.** What is named next there was chosen by the same
+rule and is not started: G.5, G.6, G.7, and W.2, the differential debugger.
 
 ```
 A — the ADT surface: what a client may ask
@@ -40,7 +54,7 @@ A — the ADT surface: what a client may ask
 
 B — the runtime underneath: what the answers are made of
 │   the track is done; these are the named gaps
-├─ B.1  SADL beyond read-only, and beyond one table            reads DONE 09-19
+├─ B.1  SADL beyond read-only, and beyond one table              DONE 09-19
 ├─ B.2  BOPF / RAP / drafts: one runtime, two front ends           decided 09-18
 ├─ B.19 HANA and AMDP: the i7 runs it, A4H is the oracle            decided 09-18
 ├─ B.3  OData V4                                                    a track of its own
@@ -71,7 +85,7 @@ D — the RFC gateway: every RFC-enabled module, exposed
 │   the channel calls any module of the tree; no wire face yet
 ├─ D.1  a generic "call this module" endpoint                       DONE 09-17
 ├─ D.2  which modules are exposed, and finding them                 half done
-├─ D.3  the signature -> metadata graph builder                     open, next
+├─ D.3  the signature -> metadata graph builder                  half DONE 09-19
 ├─ D.4  the bridge becomes a generic RFC server                     open
 ├─ D.5  the SOAP-RFC facade, likely the easiest win                 open
 └─ D.9  docs/adt-facade.md for abapGit #7880                        DONE 09-17
@@ -547,7 +561,7 @@ W — what this actually is, and the two things to bet on
 │   that a system fits in a file. The product's main surface is then not
 │   `/sap/opu/odata/` but `osd clone && osd up`.
 │
-├─ W.1  **a branch of a whole system, data and all**            the bet
+├─ W.1  a branch of a whole system, data and all      two sieves + plumbing DONE
 │    If a system can be cloned it can be branched, and a git branch of an
 │    entire system *including its data* does not exist in the ABAP world at
 │    all: there, code is branched by transports and data is not branched by
@@ -980,7 +994,35 @@ paid for differently.
    (a ref into a worktree, its own port and database file) and then the
    second sieve, SQL at the O.1 seam.
 4. **G.10, the ST05-shaped SQL trace** — a screen over a log that W.1 will
-   by then be filling, which is what makes it nearly free.
+   by then be filling, which is what makes it nearly free. **Done
+   2026-09-19**, in three waves and in that order: the tracer at the seam,
+   then the analysis (`npm run sql:summary`: where the request went, and
+   what it did twice), then the screen at `/sap/bc/osd/st05/`. Written
+   analysis-first on purpose — this entry's own warning was that a screen
+   built first is a handsome page with no consumer behind it.
+
+**This bucket is now empty, 2026-09-19**, which is worth saying rather than
+quietly starting the next thing. All four are done, the two sessions took
+roughly half each, and every one of them was demonstrated rather than
+described: a data browser, a trace, a sandbox, an editor, and a branch of a
+whole system with two sieves over it.
+
+What would go in it next, ranked by the same rule — what a stranger can be
+shown per hour — and **not started**:
+- **G.5, SICF as a real application.** Half the model is already in SAP's
+  own shape (`*.sicf.xml` carries URL, service, docu and an ordered handler
+  table), and the tree already serves those nodes, so this is a Fiori
+  Elements app over data that exists. The loud part is that a changed
+  handler goes live with the recycle
+- **G.6, a class with an interface becomes a screen** (the Neptune concept,
+  Alice's name for it). The parse is in the process, so the input is
+  already there; this is the one that turns the workbench into something
+  people build *with* rather than look at
+- **G.7, the screen from the keyboard.** Small, and it is the difference
+  between a demo and a tool: a tree nobody can walk without a mouse is half
+  a transaction
+- and **W.2, the differential debugger**, which is the other bet and is now
+  the only part of W.1's story that does not exist
 
 **Small and safe.** Low risk, and each one removes a future evening.
 - the exception that walked past the transactional bracket — **done
@@ -1003,6 +1045,15 @@ paid for differently.
   and it catches the silent name override that has cost an evening before
   (run 2026-09-18: two overrides, both intended and both named)
 
+**This bucket is empty too, 2026-09-19.** Everything named in it is done,
+and two of them turned out to be worth more than "small": B.9 found a
+generation carrying the builder's pid, and the hash defect behind it was
+then fixed at the cause (`gen/` was an input to the hash it produced;
+the generators are the input now). What replaced this bucket during the day
+came from doing the work rather than from planning it — a posted form that
+arrives with no form fields, a unit run that could not say it had run
+nothing — which is the argument for keeping the bucket rather than the list.
+
 **Waiting its turn, and waiting is the right answer.** Structural work whose
 cost is real and whose harm is already contained.
 - B.18, the release bundle 3.5x slower than the same build. Not deferral:
@@ -1010,8 +1061,15 @@ cost is real and whose harm is already contained.
   the harm, so the bundle is worth fixing and is not worth hurrying.
 - B.6, the client and MANDT story — dormant, and W.1 makes it *more*
   dormant, not less: see B.6.
-- B.1 (SADL beyond read-only), B.3 (OData V4), A.12 (SRVD + SRVB)
-- D.3 / D.4, the RFC server whole; G.6, a screen out of a class interface
+- ~~B.1 (SADL beyond read-only)~~ — **done 2026-09-19, both halves**: a
+  projection carries the associations it re-exposes, and a projection of a
+  writable view writes through to the table under it, with every link of the
+  chain that refuses named. It came out of this bucket because it was split
+  by read and write and taken by the two sessions at once
+- B.3 (OData V4), A.12 (SRVD + SRVB)
+- D.3 **half done 2026-09-19** (the channel answers a type's resolved
+  closure; the codecs are the bridge's half) / D.4, the RFC server whole;
+  G.6, a screen out of a class interface
 
 **The SQLScript front end, which this list did not name and should.** It is
 its own track (B.19 / the splitter docs), it has been the bulk of two
@@ -1039,9 +1097,12 @@ where the estimates are. Where it stands, 2026-09-19:
 - next by the histogram: `SELECT *` at the root, the ten "comparison without
   an operator", then `FOR` (which is two constructs under one token)
 
-**What I would take after those:** B.1 (SADL beyond one table — A.11 walked
-half of that road already), D.3 (the signature -> metadata graph, now that D.1 has put a channel
-under it), then A.12 (SRVD, the native shape of a service definition).
+**What I would take after those** — written 2026-09-18 and kept as a record
+of how well a queue predicts a day: B.1, D.3, then A.12. **B.1 and D.3's
+first half were done on 2026-09-19**, and A.12 is still next. What the list
+did not contain is most of what the day actually produced — the editor, the
+trace, the branch plumbing, and four defects nobody could have named in
+advance. A queue is worth keeping and is not worth believing.
 
 > The numbered sections below ("The standing list", 0 to 8) are the older
 > plan and stay as history; the tree above is the current one.
@@ -1206,7 +1267,7 @@ A.8  CTS                                                                 [S]
 *Deepen what the answers are made of: OData, SADL, RFC, and the database seam.*
 
 ```
-B.1  SADL beyond read-only                           [S]  reads DONE 09-19
+B.1  SADL beyond read-only                           [S]  DONE 2026-09-19
      ├─ today: CDS projections, an analytics cube, $select -> GROUP BY,
      │  and writes only on a projection of exactly one table
      ├─ **associations in a projection — done 2026-09-19.** `parseDDLS`
