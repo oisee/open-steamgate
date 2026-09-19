@@ -245,9 +245,38 @@ export class HanaDatabaseClient {
     this.inTransaction = false;
   }
 
+  /** One statement, and **the statement is in the failure**.
+   *
+   *  Without this, HANA's own message is all you get: `sql syntax error:
+   *  incorrect syntax near ",": line 2 col 88 (at pos 223)`. It names a
+   *  position in a statement it does not show you, and finding the statement
+   *  then needs a trace -- which in a container needs `STG_DB_TRACE=1` to
+   *  reach a child process, and `STG_SERVE=inline` to put it in one. Both
+   *  failed on 2026-09-19 and the seed defect stayed undiagnosed for it.
+   *
+   *  A position without its text is a measurement of nothing, so the text
+   *  travels with the error: the first 400 characters, plus the line and
+   *  column HANA named, marked. Truncated because a batched INSERT can be
+   *  hundreds of kilobytes and the useful part is where it broke. */
   #run(sql) {
     return new Promise((resolve, reject) =>
-      this.client.exec(sql, (err, result) => (err ? reject(err) : resolve(result))));
+      this.client.exec(sql, (err, result) => (err ? reject(this.#explain(err, sql)) : resolve(result))));
+  }
+
+  #explain(err, sql) {
+    if (err === undefined || err === null) return err;
+    const at = /line (\d+) col (\d+)/i.exec(String(err.message ?? ""));
+    let where = "";
+    if (at !== null) {
+      const line = sql.split("\n")[Number(at[1]) - 1];
+      if (line !== undefined) {
+        const col = Number(at[2]);
+        where = `\n  line ${at[1]}: ${line.slice(Math.max(0, col - 60), col + 60)}` +
+          `\n  ${" ".repeat(Math.min(col, 60) + 10)}^ col ${col}`;
+      }
+    }
+    err.message = `${err.message}\n  statement: ${sql.length > 400 ? sql.slice(0, 400) + ` … (${sql.length} chars)` : sql}${where}`;
+    return err;
   }
 
   async connect() {
