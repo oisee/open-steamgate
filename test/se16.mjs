@@ -102,6 +102,20 @@ describe("the data browser", function () {
     expect(page, "nothing was built from it").to.contain("WHERE <code>(none)</code>");
   });
 
+  it("reads a view entity, which has no SQL view behind it", async () => {
+    // B.15: every other view here is DDIC-based, and the modern shape is
+    // `define view entity`. The parsing half is pinned in test/cds-cast.mjs;
+    // this is the rest of the path — generated, registered, listed, read —
+    // which a unit test on the parser cannot reach.
+    const list = await (await fetch(BASE)).text();
+    expect(list, "the registry knows it").to.contain("?t=ZC_OSD_PORT_VE");
+    const page = await (await fetch(`${BASE}?t=ZC_OSD_PORT_VE`)).text();
+    const headers = [...(/<table class="rows">([\s\S]*?)<\/table>/.exec(page)?.[1] ?? "")
+      .matchAll(/<th>(?:<a[^>]*>)?([A-Z_0-9]+)/g)].map((m) => m[1]);
+    expect(headers, "its own columns, in its own order").to.deep.equal(["PORT", "PROTOCOL", "PURPOSE"]);
+    expect(page, "read through a generated source class like any other").to.match(/read through <b>ZCL_STG_CDS_\w+<\/b>/);
+  });
+
   it("says a name it does not have is not there, rather than showing nothing", async () => {
     const page = await (await fetch(`${BASE}?t=NOPE_NOT_HERE`)).text();
     expect(page, "named, not silent").to.contain("No entity called");

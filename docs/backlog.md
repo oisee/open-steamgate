@@ -2026,13 +2026,20 @@ B.17 The arithmetic protocol: 30 ns an operation, and who fixes it   [S/T]
         itself. The patch is under .local/hotabap/ and belongs to
         vivid-vibes, not here
 
-B.15 Does our CDS pipeline read a view entity?                           [S]
-     └─ every view here is DDIC-based (`define view` + sqlViewName);
-        the modern shape is `define view entity` with no SQL view, and
-        that is what a system now wants. parseDDLS takes the view's own
-        name when there is no sqlViewName, so it may already work -
-        nobody has run one through. Write one, build, and either record
-        that it works or fix it (docs/cds-publish.md, "Unverified here")
+B.15 Does our CDS pipeline read a view entity?       [S]  DONE 2026-09-19
+     ├─ **yes, and nothing had to be fixed** — which is worth as much as a
+     │  fix, because it was a guess before. `parseDDLS` falls back to the
+     │  view's own name when there is no sqlViewName, and that turns out to
+     │  carry the whole path: generated, registered, listed in the data
+     │  browser, read through a generated source class, a cast inside it
+     │  behaving exactly as in a DDIC-based view
+     ├─ `src/cds/zc_osd_port_ve.ddls.asddls` is the one view entity in the
+     │  tree and is there on purpose, so that every build exercises the
+     │  shape. It duplicates ZC_OSD_PORT, and that is the price: an
+     │  unexercised code path is the more expensive of the two
+     └─ pinned in two halves, because one test could not reach both:
+        `test/cds-cast.mjs` reads one element without a build,
+        `test/se16.mjs` asserts the rest of the path through the browser
 
 B.14 A cast in a CDS view drops the field            [S]  DONE 2026-09-19
      ├─ found 2026-09-17 building the status service:

@@ -96,3 +96,37 @@ define view ZC_CAST as select from ztest_cast {
     expect(e.skip, "it says which element and why").to.match(/CONSTANT.*no column inside it/);
   });
 });
+
+// B.15: does the pipeline read a **view entity**?
+//
+// Every view here is DDIC-based — `define view` plus `@AbapCatalog.sqlViewName`
+// — and the modern shape is `define view entity`, which has no SQL view at
+// all. `parseDDLS` was written to fall back to the view's own name when there
+// is no sqlViewName, so it may already work; the entry says nobody has run
+// one through. This runs one through.
+describe("a view entity, which has no SQL view behind it", () => {
+  it("is read, and takes its own name where a DDIC view would have one", () => {
+    const e = entityOf(`define view entity ZC_VE as select from ztest_cast {
+  key port as Port,
+      protocol as Protocol
+}`, "ZC_VE");
+    expect(e.skip, e.skip).to.equal(undefined);
+    expect(e.fields.map((f) => f.name)).to.deep.equal(["PORT", "PROTOCOL"]);
+    // the name it reads under: with no sqlViewName there is nothing else it
+    // could be, and something has to be the name the runtime selects from
+    expect(e.sqlView, "its own name stands in for the SQL view").to.be.a("string").and.to.not.equal("");
+  });
+
+  it("carries a cast the same way a DDIC-based view does", () => {
+    // the two shapes must not be two behaviours: whatever B.14 fixed has to
+    // be true here as well, or the fix is about a spelling
+    const e = entityOf(`define view entity ZC_VE as select from ztest_cast {
+  key port as Port,
+      cast( protocol as abap.char( 10 ) ) as Proto
+}`, "ZC_VE");
+    expect(e.skip, e.skip).to.equal(undefined);
+    const proto = e.fields.find((f) => f.name === "PROTO");
+    expect(proto?.base).to.equal("PROTOCOL");
+    expect(proto?.abapType).to.equal("c LENGTH 10");
+  });
+});
