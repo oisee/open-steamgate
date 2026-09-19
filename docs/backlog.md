@@ -706,6 +706,54 @@ statement to make is not "I built them from the same commit" but **"both
 pages show the same generation"**. Anyone can check that, including the
 person who did not do the deploying.
 
+## Who drives what, settled 2026-09-19
+
+Alice asked the two sessions to agree a division and get on with it. It is by
+**what each already has in hand**, so that neither of us is in the other's
+files:
+
+**fable-osd** — one connected thread, journal → sieve → screen:
+- **W.1, the remainder**: the branch plumbing (a ref into a worktree, its own
+  port and its own database file), then the **second sieve, SQL at the O.1
+  seam**. It is the machinery she built all day — three comparing
+  instruments, a normaliser with a reason per rule, the third value kept
+  apart from the two — and it carries over whole.
+- **G.10, the ST05-shaped SQL trace**: a screen over the log W.1 will by then
+  be filling. The backlog says "nearly free", and that is only true if the
+  sieve and the screen are the same person.
+- Before pausing: a mechanical comparison of the grammar against the binder,
+  so that "we found five silent substitutions by hand" becomes "the two are
+  compared automatically".
+
+**this session** — what it has already shipped and owns:
+- **E.5**, the launchpad asking for a config we do not serve — first if it
+  shows in the console of the **public preview**, because a breakage a
+  stranger sees costs more than it costs to fix.
+- **G.9, the remainder**: sort by clicking a column, and a link from a row to
+  the object that owns it.
+- **E.4**, the Zork console not fitting its box.
+- **B.14** and **B.15**, one build each.
+- then **D.3**, the signature → metadata graph, since D.1 put the channel
+  under it.
+
+**Together, later**: **B.1**, SADL beyond read-only — the largest of the
+waiting ones, split by read and write.
+
+**Deliberately not taken**: **B.18**, the release bundle 3.5x slower. The rule
+"no performance number is taken through a release bundle" already closed the
+harm, and closed harm is a poor reason to hurry.
+
+**The SQLScript front end is paused**, and the line is a property rather than
+a percentage: **no body silently computes a different program.** Where it
+stands at the pause — 78 of 364 bodies reach an engine; of the rest, **174
+are blocked by the imperative shell** we decided at the outset not to
+interpret (54 calls of another procedure, 51 FOR loops, 21 writes, 17 WHILE,
+15 CALL) and 111 by relational SQL not yet written. So the ceiling without an
+interpreter is 190, and the cliff has been descended: **no construct left in
+the relational remainder is worth more than eleven bodies.** What follows is
+a tail, and each step of it costs what the last one did and buys a third as
+much.
+
 ## The order of work, settled 2026-09-18
 
 Alice asked for the queue to be sorted into three, and it was agreed between
