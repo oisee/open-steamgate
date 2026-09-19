@@ -3,6 +3,8 @@ import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
 import {tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {mountRemoteServices} from "../tools/osd-remote-service.mjs";
+import {segwRegistrations} from "../tools/segw-registry.mjs";
 import {createServer as createHttpsServer} from "node:https";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -92,6 +94,19 @@ export function startServer(quiet) {
   // a pack brings its own static files, served under its name (backlog E.2)
   for (const pack of webappsOf(process.cwd())) {
     app.use(`/app/${pack.name}`, express.static(pack.dir));
+  }
+
+  // a service on another system, answered on this origin. A page this system
+  // serves may then read it the way it reads ours, which a proxy on another
+  // port cannot demonstrate -- see tools/osd-remote-service.mjs. Local
+  // services always win: this is mounted before them and refuses any name the
+  // registry has.
+  // "local wins" asks the same registry the dispatcher asks, so a
+  // destination can never shadow a service this system actually has
+  const ours = new Set(segwRegistrations(["src", "gen"]).map((r) => r.external || r.service));
+  const remote = mountRemoteServices(app, (name) => ours.has(name));
+  if (remote.length > 0) {
+    console.log(`remote services (a destination answers these): ${remote.join(", ")}`);
   }
 
   // the SEGW editor's dev-time seam (webapp/segw/): the files GenerateSet
