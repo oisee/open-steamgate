@@ -127,9 +127,15 @@ describe("the data the plan asks for, and what it finds", function () {
   });
 });
 
-// What the instrument cannot do today, pinned so that it is a known gap
-// rather than a surprise, and so that the day it changes, this says so.
-describe("what cannot be forced, and why it is said out loud", function () {
+// This block was written to pin a known gap: a step carrying a bound value
+// could not be forced, because `defineRelation` refused values outright. It
+// said "the day it changes, this says so" -- and the day was the same day.
+// The seam now accepts values when the relation is MATERIALISED, since
+// `CREATE TABLE ... AS <select>` consumes them once (docs/db-seam-native.md),
+// so the gap is closed and this asserts the closure instead of the gap. The
+// honest-fallback machinery stays, and is tested below against a client that
+// refuses, because a seam that refuses is still a seam we may meet.
+describe("a step carrying a bound value is forced now, and a refusal is still reported", function () {
   this.timeout(30000);
   let client;
 
@@ -144,17 +150,33 @@ describe("what cannot be forced, and why it is said out loud", function () {
     await client?.disconnect?.();
   });
 
-  it("a step carrying a bound value is left fused, and the verdict carries that fact", async () => {
-    // a string literal is bound, never interpolated - so this body's filter
-    // is a step the seam will not accept as a definition
+  it("a bound literal no longer leaves the step fused", async () => {
+    // a string literal is bound, never interpolated - and that used to mean
+    // the step could not be forced at all, which is most real bodies
     const body = `lt = SELECT k, n FROM src WHERE k <> 'x';
                   SELECT k FROM :lt;`;
     const result = await checkBody(client, body, "duckdb");
+    expect(result.notForced ?? [], "every step was forced, so nothing is reported unforced")
+      .to.have.length(0);
+    expect(result.agree).to.equal(true);
+  });
+
+  it("but a client that refuses is still reported, next to the verdict", async () => {
+    // the fallback is not dead code: a seam may refuse for its own reasons,
+    // and "they agree" means less when some steps were never forced
+    const refusing = Object.create(client);
+    refusing.defineRelation = async (request) => {
+      if ((request.params ?? []).length > 0) {
+        throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
+      }
+      return client.defineRelation(request);
+    };
+    const body = `lt = SELECT k, n FROM src WHERE k <> 'x';
+                  SELECT k FROM :lt;`;
+    const result = await checkBody(refusing, body, "duckdb");
     expect(result.notForced, "the fact belongs next to the verdict, not buried in the eager half")
       .to.be.an("array").with.length.greaterThan(0);
     expect(result.notForced[0].params).to.be.greaterThan(0);
-    // and it still answers: leaving a step fused is a weaker comparison, not
-    // a broken one
     expect(result.agree).to.equal(true);
   });
 });
