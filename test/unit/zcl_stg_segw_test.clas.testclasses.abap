@@ -244,7 +244,13 @@ CLASS ltcl_import IMPLEMENTATION.
   METHOD iwpr.
     DATA lv_nl TYPE string.
     lv_nl = cl_abap_char_utilities=>newline.
-    rv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
+*   The byte order mark, because every IWPR a real system writes begins with
+*   one and this fixture says "the same bytes as went in". A fixture that
+*   differs from a real file in its first three bytes cannot prove anything
+*   about the first three bytes -- the same correction the two Node fixtures
+*   needed on 2026-09-19.
+    rv_xml = zcl_stg_segw_gen=>bom( )
+      && `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
       && `<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">` && lv_nl
       && ` <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">` && lv_nl
       && `  <asx:values>` && lv_nl
