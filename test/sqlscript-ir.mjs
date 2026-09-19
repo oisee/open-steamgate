@@ -45,19 +45,24 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
 });
 
 describe("SQLScript IR: the divergences that were measured, not assumed", () => {
-  // 1/2 is 0.5 in DuckDB and 0 in SQLite, so the node must carry HANA's
-  // result type and each dialect must render it
-  const intDiv = project(scan("SRC"), [{as: "R", expr: bin("/", col("A"), col("B"), T.int)}]);
+  // The oracle corrected this suite: HANA's `/` over two INTEGERs yields a
+  // DECIMAL (0.500000, -3.500000), it does not truncate. So DuckDB already
+  // matches and the browser engine is the outlier - the opposite of what
+  // this file asserted before HANA Express was asked.
+  const decDiv = project(scan("SRC"), [{as: "R", expr: bin("/", col("A"), col("B"), T.dec(15, 2))}]);
 
-  it("integer division is rendered per engine, never passed through", () => {
-    expect(sqlOf(intDiv, "duckdb")).to.contain('("A" // "B")');
-    expect(sqlOf(intDiv, "sqlite")).to.contain('("A" / "B")');
-    expect(sqlOf(intDiv, "hana")).to.contain('("A" / "B")');
+  it("plain division keeps its decimal result, and only sql.js needs help", () => {
+    expect(sqlOf(decDiv, "hana")).to.contain('("A" / "B")');
+    expect(sqlOf(decDiv, "duckdb")).to.contain('("A" / "B")');
+    // `/` truncates over two integers here, so the decimal has to be forced
+    expect(sqlOf(decDiv, "sqlite")).to.contain('* 1.0 /');
   });
 
-  it("decimal division is a different node and is not turned into integer division", () => {
-    const decDiv = project(scan("SRC"), [{as: "R", expr: bin("/", col("A"), col("B"), T.dec(15, 2))}]);
-    expect(sqlOf(decDiv, "duckdb")).to.contain('("A" / "B")');
+  it("integer division is the one that has to be asked for, and is rendered per engine", () => {
+    const intDiv = project(scan("SRC"), [{as: "R", expr: bin("/", col("A"), col("B"), T.int)}]);
+    expect(sqlOf(intDiv, "duckdb")).to.contain('("A" // "B")');
+    expect(sqlOf(intDiv, "sqlite")).to.contain('("A" / "B")');
+    expect(sqlOf(intDiv, "hana")).to.contain('DIV("A", "B")');
   });
 
   // SQLite's CAST cannot raise: 'x' becomes 0. There is no expression that

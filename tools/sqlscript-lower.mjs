@@ -12,11 +12,18 @@
 //
 // The divergences below are measured, not assumed:
 //
-//   1 / 2         DuckDB 0.5, SQLite 0, HANA truncates to 0
-//   -7 / 2        DuckDB -3.5, SQLite -3
-//   CAST('x' AS INTEGER)  DuckDB raises, SQLite returns 0
+//   1 / 2         HANA 0.500000, DuckDB 0.5, sql.js 0
+//   -7 / 2        HANA -3.500000, DuckDB -3.5, sql.js -3
+//   CAST('x' AS INTEGER)  HANA raises, DuckDB raises, sql.js returns 0
 //
-// so integer division and casts have a per-dialect rendering rather than a
+// The first line was written the other way round here until the oracle
+// answered: this file assumed HANA truncated integer division, and it does
+// not - `/` over two INTEGERs yields a decimal. So DuckDB was the engine
+// that already matched and the browser engine is the outlier, which is the
+// opposite of what the code did. Fixed below, and left on the record,
+// because the assumption was plausible, uncontested and wrong.
+//
+// So division and casts have a per-dialect rendering rather than a
 // pass-through, and a dialect that cannot express one refuses instead of
 // approximating. Refusing is a feature: an engine that quietly returns a
 // different number is the failure this project has already paid for twice.
@@ -25,8 +32,10 @@ const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     placeholder: () => "?",
-    // HANA divides two integers as integers; nothing to do
-    intDiv: (a, b) => `(${a} / ${b})`,
+    // `/` yields a decimal even over two INTEGERs - measured, not assumed
+    divide: (a, b) => `(${a} / ${b})`,
+    // and when the source asked for integer division, it says so
+    intDiv: (a, b) => `DIV(${a}, ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
@@ -36,7 +45,9 @@ const DIALECTS = {
   duckdb: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     placeholder: () => "?",
-    // `/` is always floating point here, `//` is the integer one
+    // `/` is floating point here, which is what HANA does too
+    divide: (a, b) => `(${a} / ${b})`,
+    // `//` is the integer one, for when the source asked for it
     intDiv: (a, b) => `(${a} // ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
@@ -48,7 +59,10 @@ const DIALECTS = {
   sqlite: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     placeholder: () => "?",
-    // `/` on two integers already truncates
+    // `/` over two integers truncates here and does NOT on HANA, so a
+    // decimal division has to be forced. This is the typed rewrite the
+    // conformance table found, and it exists only for this engine.
+    divide: (a, b) => `((${a}) * 1.0 / (${b}))`,
     intDiv: (a, b) => `(${a} / ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
@@ -86,7 +100,13 @@ export function lower(rel, dialectName, options = {}) {
       case "bin": {
         const left = expr(e.left);
         const right = expr(e.right);
-        if (e.op === "/" && e.type?.abap === "I") return d.intDiv(left, right);
+        if (e.op === "/") {
+          // The result type decides which of the two divisions this is, and
+          // it is the reason every node carries one: plain `/` in SQLScript
+          // yields a decimal, and only an explicitly integer result means
+          // the truncating operator.
+          return e.type?.abap === "I" ? d.intDiv(left, right) : d.divide(left, right);
+        }
         return `(${left} ${e.op} ${right})`;
       }
       case "cast":
