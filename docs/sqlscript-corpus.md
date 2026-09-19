@@ -341,3 +341,27 @@ list, which is the one shape that cannot expose it -- it was found by corpus
 bodies. There is now a table of the three forms a `*` takes, and an
 `undefined` reaching the expression walker is a **named refusal** rather than
 a crash, because a stack trace tells a reader nothing.
+
+### The instrument, pointed at the corpus: four bodies, and nothing to say
+
+`tools/sqlscript/check-corpus.mjs` takes the bodies that lower, keeps the ones
+that read **nothing but their own IN table parameters** -- a body reading
+somebody else's table would need a schema we invent, and an invented schema
+answers an invented question -- and asks each plan for the rows that would
+make a difference show up (`adversarialRows`).
+
+**Four bodies qualify, and not one of them has an expression that can
+diverge.** All four are projections and filters over a parameter. The
+instrument is correct to say nothing.
+
+That is a finding rather than a failure, and it is worth stating plainly
+because the opposite reading is so available: "we ran the comparison on the
+corpus and found no differences" would be true and would mean nothing. The
+bodies with a cast, a division or a null-sensitive expression are the ones
+still blocked at `BEGIN`, `DECLARE` and `IF` -- so the divergence-finder has
+nothing to find **until the grammar reaches them**, and any reassurance taken
+from today's silence would be reassurance about four projections.
+
+The order that follows is therefore unchanged and now has a second reason:
+grammar first, because it is what puts anything interesting in front of every
+other instrument we built.
