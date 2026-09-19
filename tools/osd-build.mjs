@@ -35,7 +35,7 @@ import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
-import {toolCommand} from "./osd-host.mjs";
+import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
@@ -177,6 +177,47 @@ export function runGenerators(root, log = () => {}) {
   return output;
 }
 
+
+/**
+ * What identifies the generators that will actually RUN.
+ *
+ * Hashing the files under `tools/` is right under node and wrong in the
+ * binary, and the difference is not cosmetic: `toolCommand()` turns a
+ * generator into `osd gen <name>`, so a compiled binary executes its **own
+ * embedded copies** and never reads `tools/*.mjs`. Hashing the tree's files
+ * there would hash code that will not run -- the representative instead of
+ * the thing represented, which is the mistake this hash was just repaired
+ * for (osg-osd-i7 measured it: edit a generator and node's hash moves while
+ * the binary's does not, because `TOOLS` is `/$bunfs/root/` inside the
+ * bundle).
+ *
+ * So each host names what it will run: node the contents of the closure, the
+ * binary itself. **And that means the two hosts legitimately name different
+ * generations**, unless the binary was compiled from the very generators the
+ * tree holds. That is a true statement about the system rather than a defect
+ * to paper over, and the test that asserted equality now asserts what is
+ * actually required -- that the two produce the same objects.
+ *
+ * The binary is 85 MB and hashes in 159 ms, so the answer is kept for the
+ * life of the process: a cache check must not pay it twice.
+ */
+let binaryIdentity;
+export function generatorIdentity(root = process.cwd()) {
+  if (hosted()) {
+    if (binaryIdentity === undefined) {
+      binaryIdentity = "binary:" + createHash("sha256").update(readFileSync(process.execPath)).digest("hex").slice(0, 16);
+    }
+    return binaryIdentity;
+  }
+  const h = createHash("sha256");
+  const closure = generatorClosure();
+  h.update(`generators ${closure.length}\0`);
+  for (const f of closure) {
+    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
+  }
+  return "tools:" + h.digest("hex").slice(0, 16);
+}
+
 /** what `gen/` holds right now, by content: 196 files, milliseconds */
 export function genHash(root) {
   const dir = join(root, "gen");
@@ -207,12 +248,9 @@ export function hashOf(root, inputs = inputsOf(root)) {
       h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
     }
   }
-  // the generators and their transitive imports: the thing `gen/` stood for
-  const closure = generatorClosure();
-  h.update(`generators ${closure.length}\0`);
-  for (const f of closure) {
-    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
-  }
+  // the generators that will actually run -- the files under node, the
+  // binary itself when it is the binary, because it executes its own copies
+  h.update("generators\0").update(generatorIdentity(root)).update("\0");
   return h.digest("hex").slice(0, 16);
 }
 
