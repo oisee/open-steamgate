@@ -46,6 +46,7 @@
     "test/sqlscript-lexer.mjs",
     "test/sqlscript-parser.mjs",
     "test/sqlscript-portable.mjs",
+    "test/sqlscript-refusals.mjs",
     "test/sqlscript-to-ir.mjs",
     "test/sqlscript-values.mjs",
     "test/stg-compile.mjs",

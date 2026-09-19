@@ -227,6 +227,7 @@ export function toIr(tree, options = {}) {
   }
 
   function condition(node) {
+    if (node === undefined) throw new BindError("a condition was expected here and the tree has none");
     // Read in order, because NOT binds to the term that FOLLOWS it and a
     // filtered list of children loses which one that was.
     let left;
@@ -253,6 +254,7 @@ export function toIr(tree, options = {}) {
   const COMPARISONS = new Set(["=", "<>", "!=", "<", ">", "<=", ">="]);
 
   function predicate(node) {
+    if (node === undefined) throw new BindError("a predicate was expected here and the tree has none");
     const words = (node.children ?? []).filter((c) => c.node === "word")
       .map((w) => String(w.value).toUpperCase());
     const negated = words.includes("NOT");
@@ -309,6 +311,7 @@ export function toIr(tree, options = {}) {
   }
 
   function source(node) {
+    if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
@@ -373,6 +376,7 @@ export function toIr(tree, options = {}) {
   }
 
   function select(node) {
+    if (node === undefined) throw new BindError("a SELECT was expected here and the tree has none");
     let rel;
     const from = kid(node, "Source");
     if (from !== undefined) rel = source(from);
@@ -440,6 +444,7 @@ export function toIr(tree, options = {}) {
    *  not a bug report. A clause the parser can read and the binder cannot is
    *  worse than one neither of them has. */
   function orderAndLimit(node, input) {
+    if (node === undefined) throw new BindError("an ORDER BY / LIMIT was read off a tree that is not there");
     let rel = input;
     const keys = kids(node, "OrderKey");
     if (keys.length > 0) {
@@ -473,6 +478,9 @@ export function toIr(tree, options = {}) {
   }
 
   function relation(node) {
+    if (node === undefined) {
+      throw new BindError("a relation was expected here and the tree has none");
+    }
     const selects = kids(node, "Select");
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
@@ -507,7 +515,16 @@ export function toIr(tree, options = {}) {
     switch (node.node) {
       case "Assignment": {
         const name = nameOf(kid(node, "Name"));
-        const rel = relation(kid(node, "SetOperation"));
+        const set = kid(node, "SetOperation");
+        if (set === undefined) {
+          // `c_is_active := 'X';` -- an assignment to a **scalar**, which
+          // this IR does not carry: it holds relations and the expressions
+          // inside them. Refused by name rather than crashing three frames
+          // down in `kids`, where the message named the line that fell over
+          // and not the thing that was wrong.
+          throw new BindError(`the assignment to ${name.toLowerCase()} is of a scalar, and this IR carries relations`, node);
+        }
+        const rel = relation(set);
         bound.set(name, {rel});
         statements.push({stmt: "assign", name, rel});
         break;
