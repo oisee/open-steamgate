@@ -75,7 +75,8 @@
     "sqlscript:clauses": "node tools/sqlscript/clause-audit.mjs",
     "sql:compare": "node tools/osd-sql-trace.mjs",
     "sql:summary": "node tools/osd-sql-trace.mjs --summary",
-    "branch": "node tools/osd-branch.mjs"
+    "branch": "node tools/osd-branch.mjs",
+    "preview:closure": "node tools/osd-preview-closure.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
