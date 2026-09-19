@@ -131,3 +131,47 @@ describe("tools/osd-persist: a database that outlives its process", function () 
     expect(save(db), "nothing to save without a file").to.equal(undefined);
   });
 });
+
+// `STG_DB_PATH` answers "where should a file go", and was read as "which
+// database is this". The container sets it for the volume, so `STG_DB=hana`
+// had the parent seed HANA -- 82 tables -- while the work processes opened an
+// empty SQLite file: no error, HTTP 200, healthy, every entity set empty.
+describe("databasePath: which file the rows live in, including the default", () => {
+  const around = (env, fn) => {
+    const before = {STG_DB: process.env.STG_DB, STG_DB_PATH: process.env.STG_DB_PATH};
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    try { return fn(); } finally {
+      for (const [k, v] of Object.entries(before)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+  };
+
+  it("a server backend gets no file, even when a path is set", async () => {
+    const {databasePath} = await import("../tools/osd-persist.mjs");
+    expect(around({STG_DB: "hana", STG_DB_PATH: "/osd/data-run/osd.sqlite"},
+      () => databasePath("default.sqlite"))).to.equal(undefined);
+  });
+
+  it("the file backend gets the path it was given", async () => {
+    const {databasePath} = await import("../tools/osd-persist.mjs");
+    expect(around({STG_DB: "file", STG_DB_PATH: "/tmp/given.sqlite"},
+      () => databasePath("default.sqlite"))).to.equal("/tmp/given.sqlite");
+  });
+
+  it("no STG_DB is the file backend, because test/run.mjs defaults it there", async () => {
+    const {databasePath} = await import("../tools/osd-persist.mjs");
+    expect(around({STG_DB: undefined, STG_DB_PATH: "/tmp/given.sqlite"},
+      () => databasePath("default.sqlite"))).to.equal("/tmp/given.sqlite");
+  });
+
+  it("and falls back to the default only for a backend that has a file", async () => {
+    const {databasePath} = await import("../tools/osd-persist.mjs");
+    expect(around({STG_DB: "file", STG_DB_PATH: undefined},
+      () => databasePath("default.sqlite"))).to.equal("default.sqlite");
+    expect(around({STG_DB: "hana", STG_DB_PATH: undefined},
+      () => databasePath("default.sqlite"))).to.equal(undefined);
+  });
+});

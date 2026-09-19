@@ -82,6 +82,29 @@ export function databaseFile() {
   return path;
 }
 
+/** The file the rows live in, INCLUDING the default one, for a caller that
+ *  has to name the database before anything is connected.
+ *
+ *  `test/start.mjs` had its own copy of this decision and it was wrong in the
+ *  way the comment above describes: it read `STG_DB_PATH` and never asked
+ *  `STG_DB`. The container sets `STG_DB_PATH` so the rows land on a volume,
+ *  so with `STG_DB=hana` the parent seeded HANA -- 82 tables -- and the work
+ *  processes opened an empty SQLite file. No error, HTTP 200, healthy, and
+ *  every entity set empty.
+ *
+ *  `STG_DB_PATH` answers "where should a file go", truthfully, and was read
+ *  as "which database is this". Same shape as `builtAt` answering "when was
+ *  this release assembled" and being read as "what is inside it". So the
+ *  decision lives here once, and start.mjs asks rather than deciding. */
+export function databasePath(fallback) {
+  const path = databaseFile();
+  if (path !== undefined) {
+    return path;
+  }
+  const file = process.env.STG_DB === undefined || process.env.STG_DB === "file";
+  return file ? fallback : undefined;
+}
+
 // true when the database came back from the file and the caller should not
 // seed over it; false when the caller has to build it, which is a file that
 // never existed, an empty one, or one made for a different schema

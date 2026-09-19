@@ -1,3 +1,4 @@
+import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
@@ -127,7 +128,12 @@ export function startServer(quiet) {
   // the build endpoint say the same file the child opens — including the
   // default one, which used to be chosen inside the child and reported as
   // "memory" outside it
-  const database = process.env.STG_DB_PATH ?? (process.env.STG_DB === "file" ? DEFAULT_DATABASE : undefined);
+  // asked, not decided: tools/osd-persist.mjs holds the one answer to "does
+  // this backend keep its rows in a file, and which one". This line used to
+  // decide for itself, read STG_DB_PATH and never ask STG_DB, and in the
+  // container -- which sets STG_DB_PATH for the volume -- that meant
+  // STG_DB=hana seeded HANA and served an empty SQLite file.
+  const database = databasePath(DEFAULT_DATABASE);
   const runtime = MODE === "child"
     ? store.serving({root: process.cwd(), database})
     : undefined;
