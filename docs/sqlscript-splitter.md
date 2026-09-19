@@ -194,3 +194,32 @@ is measured **at fixture size only** — nothing has been run over a large
 table, so "harmless" is not yet a fact about a join over twenty million rows.
 It is the first candidate for an optimisation pass, and the first thing the
 fused-against-forced instrument should be pointed at when it is.
+
+## The blocker histogram was an artefact, and how it announced itself
+
+For three hours the next construct to implement was chosen from a ranked list
+of what bodies stopped on. The list was stable across runs, the constructs in
+it were real, and it was **measuring our own diagnostics**: a parse error
+reported the position where the outermost alternative gave up, which for a
+body that is one `BEGIN … END` is the first character. Every body whose block
+failed anywhere inside was therefore filed under `BEGIN`.
+
+Fixed by reporting the furthest position anything reached across all the
+alternatives tried. The honest histogram has **no `BEGIN` and no `DECLARE`**
+in it at all, and three of its entries were constructs neither of us knew
+existed: `:=`, `BEGIN SEQUENTIAL EXECUTION`, and `$ABAP.TYPE( )`.
+
+**It had announced itself an hour earlier and we explained it away.** `BEGIN`
+blocked 91 bodies before its grammar existed and 115 after, and that was read
+as "partially implemented — the grammar accepts one form and the corpus
+writes another", which is a real phenomenon and was the wrong explanation
+here. A count that **goes up** after the thing it names is implemented is not
+first evidence of partial implementation; it is first evidence that the
+count is measuring something else. The cheap check is the one this project
+keeps rediscovering: open one of the things the number is about and look at
+it.
+
+Worth stating plainly because it is the worst of the day's five instances of
+"the claim is wider than the measurement": the other four looked suspicious.
+This one looked like good work - stable, ordered, reproducible, and made of
+real constructs.
