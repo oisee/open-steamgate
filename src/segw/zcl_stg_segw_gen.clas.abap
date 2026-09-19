@@ -177,6 +177,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              edm_type     TYPE string,
              data_element TYPE string,
              max_length   TYPE string,
+             text_element TYPE string,
            END OF ty_parameter.
     TYPES tt_parameter TYPE STANDARD TABLE OF ty_parameter WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_function_import,
@@ -188,6 +189,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              return_set  TYPE string,
              action_for  TYPE string,
              parameters  TYPE tt_parameter,
+             text_element TYPE string,
            END OF ty_function_import.
     TYPES tt_function_import TYPE STANDARD TABLE OF ty_function_import WITH DEFAULT KEY.
 
@@ -317,7 +319,7 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
 *   every labelled property gets a text symbol, in tree order
     CLASS-METHODS assign_text_elements
       CHANGING
-        ct_types TYPE tt_entity_type.
+        cs_model TYPE ty_model.
 
     CLASS-METHODS property_of
       IMPORTING
@@ -777,10 +779,6 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       <ls_type>-define_stem = lv_stem.
     ENDLOOP.
 
-*   symbols are given after the types are in their final order, because the
-*   numbering follows the order the class will print them in
-    assign_text_elements( CHANGING ct_types = rs_model-entity_types ).
-
 * complex types
     LOOP AT lt_ct INTO ls_row.
       CLEAR ls_ct.
@@ -878,6 +876,12 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       ENDLOOP.
       APPEND ls_fi TO rs_model-function_imports.
     ENDLOOP.
+
+*   Symbols last, when everything is assembled and in its final order: the
+*   numbering follows the order the class prints, and actions are numbered
+*   after properties because that is where they appear.
+    assign_text_elements( CHANGING cs_model = rs_model ).
+
   ENDMETHOD.
 
   METHOD generate.
@@ -1268,18 +1272,31 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 * renumbering them points the generated calls at somebody else's text -- the
 * difference between reproducing a corpus file and rewriting it.
 *
-* A property with no label gets no symbol. Actions and their parameters are
-* labelled with their own name when nothing else is given, and a property is
-* not: inventing one would put a text in the model the author never wrote.
-    DATA ls_type  TYPE ty_entity_type.
-    DATA lv_next  TYPE i.
-    DATA lv_max   TYPE i.
-    DATA lv_num   TYPE i.
-    FIELD-SYMBOLS <ls_type> TYPE ty_entity_type.
-    FIELD-SYMBOLS <ls_prop> TYPE ty_property.
+* Properties first, then actions and their parameters, because that is the
+* order the class prints them in.
+*
+* **Two rules, not one.** A property with no label gets no symbol: inventing
+* one would put a text in the model the author never wrote. An action and a
+* parameter take their **own name** when nothing else is given, because that
+* is what a system shows -- `sap:label="CancelTravel"`, `sap:label="Status"`.
+* The first version of this had one rule and was written for the defect that
+* had been seen rather than for the rule behind it.
+*
+* The label of an action is not read from SBO_FIT here: `ty_function_import`
+* carries no node uuid to look one up by, and `stg-compile` writes
+* `FI_LABEL` equal to the name, so the two paths agree today. A project
+* imported from a real IWPR with a different label would not be served
+* correctly, and that is a gap rather than a decision.
+    DATA lv_next TYPE i.
+    DATA lv_max  TYPE i.
+    DATA lv_num  TYPE i.
+    FIELD-SYMBOLS <ls_type>  TYPE ty_entity_type.
+    FIELD-SYMBOLS <ls_prop>  TYPE ty_property.
+    FIELD-SYMBOLS <ls_fi>    TYPE ty_function_import.
+    FIELD-SYMBOLS <ls_param> TYPE ty_parameter.
 
-    LOOP AT ct_types INTO ls_type.
-      LOOP AT ls_type-properties ASSIGNING <ls_prop>.
+    LOOP AT cs_model-entity_types ASSIGNING <ls_type>.
+      LOOP AT <ls_type>-properties ASSIGNING <ls_prop>.
         IF <ls_prop>-text_element IS NOT INITIAL.
           lv_num = <ls_prop>-text_element.
           IF lv_num > lv_max.
@@ -1290,13 +1307,26 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     ENDLOOP.
     lv_next = lv_max + 1.
 
-    LOOP AT ct_types ASSIGNING <ls_type>.
+    LOOP AT cs_model-entity_types ASSIGNING <ls_type>.
       LOOP AT <ls_type>-properties ASSIGNING <ls_prop>.
         IF <ls_prop>-text_element IS NOT INITIAL OR <ls_prop>-label IS INITIAL.
           CONTINUE.
         ENDIF.
         <ls_prop>-text_element = |{ lv_next WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
         lv_next = lv_next + 1.
+      ENDLOOP.
+    ENDLOOP.
+
+    LOOP AT cs_model-function_imports ASSIGNING <ls_fi>.
+      IF <ls_fi>-text_element IS INITIAL.
+        <ls_fi>-text_element = |{ lv_next WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+        lv_next = lv_next + 1.
+      ENDIF.
+      LOOP AT <ls_fi>-parameters ASSIGNING <ls_param>.
+        IF <ls_param>-text_element IS INITIAL.
+          <ls_param>-text_element = |{ lv_next WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+          lv_next = lv_next + 1.
+        ENDIF.
       ENDLOOP.
     ENDLOOP.
   ENDMETHOD.
@@ -1312,6 +1342,15 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     IF is_property-is_key = abap_true.
       rv_text = rv_text && |lo_property->set_is_key( ).\n|.
     ENDIF.
+*   The label goes after the key and **before** the type, and it carries two
+*   spaces before the comment where a parameter's carries one. Neither is a
+*   choice: both are what SEGW writes, and a byte comparison is the only
+*   reader that can tell.
+    IF is_property-text_element IS NOT INITIAL.
+      rv_text = rv_text
+        && |lo_property->set_label_from_text_element( iv_text_element_symbol = '{ is_property-text_element }' |
+        && |iv_text_element_container = gc_incl_name ).  "#EC NOTEXT\n|.
+    ENDIF.
     rv_text = rv_text && |lo_property->set_type_edm_{ edm_setter( is_property-edm_type ) }( ).\n|.
     IF is_property-precision IS NOT INITIAL.
       rv_text = rv_text && |lo_property->set_precison( iv_precision = { is_property-precision } ). "#EC NOTEXT\n|.
@@ -1321,11 +1360,6 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     ENDIF.
     IF is_property-semantics IS NOT INITIAL.
       rv_text = rv_text && |lo_property->set_semantic( '{ is_property-semantics }' ). "#EC NOTEXT\n|.
-    ENDIF.
-    IF is_property-text_element IS NOT INITIAL.
-      rv_text = rv_text
-        && |lo_property->set_label_from_text_element( iv_text_element_symbol = '{ is_property-text_element }' |
-        && |iv_text_element_container = gc_incl_name ). "#EC NOTEXT\n|.
     ENDIF.
     rv_text = rv_text
       && |lo_property->set_creatable( { ab( is_property-creatable ) } ).\n|
@@ -1499,6 +1533,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     LOOP AT is_model-function_imports INTO ls_fi.
       rv_text = rv_text && |\n{ gc_stars }\n*   ACTION - { ls_fi-name }\n{ gc_stars }\n\n|
         && |lo_action = model->create_action( '{ ls_fi-name }' ).  "#EC NOTEXT\n|.
+      IF ls_fi-text_element IS NOT INITIAL.
+        rv_text = rv_text
+          && |lo_action->set_label_from_text_element( iv_text_element_symbol = '{ ls_fi-text_element }' |
+          && |iv_text_element_container = gc_incl_name ).  "#EC NOTEXT\n|.
+      ENDIF.
       IF ls_fi-return_kind = 'ETYP'.
         rv_text = rv_text && |*Set return entity type\nlo_action->set_return_entity_type( '{ ls_fi-return_type }' ). "#EC NOTEXT\n|.
       ELSEIF ls_fi-return_kind = 'CTYP'.
@@ -1507,15 +1546,28 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       IF ls_fi-http_method IS NOT INITIAL.
         rv_text = rv_text && |*Set HTTP method GET or POST\nlo_action->set_http_method( '{ ls_fi-http_method }' ). "#EC NOTEXT\n|.
       ENDIF.
-      rv_text = rv_text && |* Set return type multiplicity\nlo_action->set_return_multiplicity( '{ ls_fi-return_card }' ). "#EC NOTEXT\n|.
+*     SEGW writes the action-for before the multiplicity, and the order is
+*     the generator's own rather than a reading of the calls: swapping them
+*     changes nothing a system does and everything a byte comparison says.
       IF ls_fi-action_for IS NOT INITIAL.
         rv_text = rv_text && |*Set the action for entity\nlo_action->set_action_for( '{ ls_fi-action_for }' ). "#EC NOTEXT\n|.
       ENDIF.
+      rv_text = rv_text && |* Set return type multiplicity\nlo_action->set_return_multiplicity( '{ ls_fi-return_card }' ). "#EC NOTEXT\n|.
       IF ls_fi-parameters IS NOT INITIAL.
         rv_text = rv_text && |{ gc_stars }\n* Parameters\n{ gc_stars }\n\n|.
         LOOP AT ls_fi-parameters INTO ls_fp.
           rv_text = rv_text
-            && |lo_parameter = lo_action->create_input_parameter( iv_parameter_name = '{ ls_fp-name }'    iv_abap_fieldname = '{ ls_fp-abap_field }' ). "#EC NOTEXT\n|
+            && |lo_parameter = lo_action->create_input_parameter( iv_parameter_name = '{ ls_fp-name }'    iv_abap_fieldname = '{ ls_fp-abap_field }' ). "#EC NOTEXT\n|.
+*         The label goes between the parameter and its type, where SEGW
+*         puts it. Emitted after the type instead, the file compares equal
+*         for one line more and then does not -- the order of two calls
+*         that a system does not care about is the whole of the difference.
+          IF ls_fp-text_element IS NOT INITIAL.
+            rv_text = rv_text
+              && |lo_parameter->set_label_from_text_element( iv_text_element_symbol = '{ ls_fp-text_element }' |
+              && |iv_text_element_container = gc_incl_name ). "#EC NOTEXT\n|.
+          ENDIF.
+          rv_text = rv_text
             && |lo_parameter->/iwbep/if_mgw_odata_property~set_type_edm_{ edm_setter( ls_fp-edm_type ) }( ).\n|.
           IF ls_fp-max_length IS NOT INITIAL AND ls_fp-edm_type = 'Edm.String'.
             rv_text = rv_text && |lo_parameter->/iwbep/if_mgw_odata_property~set_maxlength( iv_max_length = { ls_fp-max_length } ). "#EC NOTEXT\n|.

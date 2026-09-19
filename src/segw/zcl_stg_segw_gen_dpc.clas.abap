@@ -135,8 +135,16 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
         iv_description TYPE string
         it_components  TYPE tt_named OPTIONAL
         it_subs        TYPE string_table OPTIONAL
+*       the class's text pool: key and text, in the order the symbols were given
+        it_pool        TYPE tt_named OPTIONAL
       RETURNING
         VALUE(rv_xml)  TYPE string.
+
+    CLASS-METHODS xml_text
+      IMPORTING
+        iv_text        TYPE string
+      RETURNING
+        VALUE(rv_text) TYPE string.
 
     CLASS-METHODS op_subs
       IMPORTING
@@ -1138,10 +1146,39 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       ENDLOOP.
       rv_xml = rv_xml && |   </DESCRIPTIONS_SUB>\n|.
     ENDIF.
+*   The text pool, when the class has one. `LENGTH` is 132 for every entry
+*   regardless of the text: it is the width of the pool field, not of the
+*   string -- measured across ten real MPC classes, where it is 132 without
+*   exception.
+    IF it_pool IS NOT INITIAL.
+      rv_xml = rv_xml && |   <TPOOL>\n|.
+      LOOP AT it_pool INTO ls_component.
+        rv_xml = rv_xml
+          && |    <item>\n|
+          && |     <ID>I</ID>\n|
+          && |     <KEY>{ ls_component-name }</KEY>\n|
+          && |     <ENTRY>{ xml_text( ls_component-content ) }</ENTRY>\n|
+          && |     <LENGTH>132</LENGTH>\n|
+          && |    </item>\n|.
+      ENDLOOP.
+      rv_xml = rv_xml && |   </TPOOL>\n|.
+    ENDIF.
     rv_xml = rv_xml
       && |  </asx:values>\n|
       && | </asx:abap>\n|
       && |</abapGit>\n|.
+  ENDMETHOD.
+
+  METHOD xml_text.
+* A text pool entry is XML, and a label may contain any of the three
+* characters that are not. `=/!=/</>/<=/>=` is a real one, out of the search
+* corpus, and it made the generated file both different from SEGW's and not
+* well-formed -- the second of which no comparison against our own twin
+* could have found, because the twin was writing the same invalid file.
+    rv_text = iv_text.
+    REPLACE ALL OCCURRENCES OF `&` IN rv_text WITH `&amp;`.
+    REPLACE ALL OCCURRENCES OF `<` IN rv_text WITH `&lt;`.
+    REPLACE ALL OCCURRENCES OF `>` IN rv_text WITH `&gt;`.
   ENDMETHOD.
 
   METHOD op_subs.
@@ -1213,6 +1250,12 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD mpc_xml.
+    DATA lt_pool   TYPE tt_named.
+    DATA ls_pool   TYPE ty_named.
+    DATA ls_type_p TYPE zcl_stg_segw_gen=>ty_entity_type.
+    DATA ls_prop_p TYPE zcl_stg_segw_gen=>ty_property.
+    DATA ls_fi_p   TYPE zcl_stg_segw_gen=>ty_function_import.
+    DATA ls_fp_p   TYPE zcl_stg_segw_gen=>ty_parameter.
     DATA lt_names TYPE string_table.
     DATA lv_name  TYPE string.
     DATA ls_type  TYPE zcl_stg_segw_gen=>ty_entity_type.
@@ -1238,9 +1281,47 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       ls_comp-content = lv_name.
       APPEND ls_comp TO lt_comp.
     ENDLOOP.
+*   Three groups in a row, not one walk: every property, then every action,
+*   then every action's parameters. That is why a two-action model pools its
+*   symbols 016, 018, 017, 019 -- the numbering follows the model and the
+*   pool follows the groups, and the two orders are not the same. Reading it
+*   as one traversal produces a file that is right about every entry and
+*   wrong about their order.
+    LOOP AT is_model-entity_types INTO ls_type_p.
+      LOOP AT ls_type_p-properties INTO ls_prop_p.
+        IF ls_prop_p-text_element IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_pool.
+        ls_pool-name    = ls_prop_p-text_element.
+        ls_pool-content = ls_prop_p-label.
+        APPEND ls_pool TO lt_pool.
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT is_model-function_imports INTO ls_fi_p.
+      IF ls_fi_p-text_element IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      CLEAR ls_pool.
+      ls_pool-name    = ls_fi_p-text_element.
+      ls_pool-content = ls_fi_p-name.
+      APPEND ls_pool TO lt_pool.
+    ENDLOOP.
+    LOOP AT is_model-function_imports INTO ls_fi_p.
+      LOOP AT ls_fi_p-parameters INTO ls_fp_p.
+        IF ls_fp_p-text_element IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_pool.
+        ls_pool-name    = ls_fp_p-text_element.
+        ls_pool-content = ls_fp_p-name.
+        APPEND ls_pool TO lt_pool.
+      ENDLOOP.
+    ENDLOOP.
     rv_xml = clas_xml( iv_name        = is_model-mpc
                        iv_description = is_model-mpc
-                       it_components  = lt_comp ).
+                       it_components  = lt_comp
+                       it_pool        = lt_pool ).
   ENDMETHOD.
 
   METHOD dpc_xml.
