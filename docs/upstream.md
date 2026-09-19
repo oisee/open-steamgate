@@ -470,3 +470,47 @@ all of them: a performance change that alters one frame is wrong.
   `docs/bun-spike.md` part one.
 - **Node**: nothing to send. A single executable could not import a file
   outside itself on 26.3 and can on 26.9 (`docs/bun-spike.md` part four).
+
+## The HANA line, 2026-09-19
+
+Sent in one afternoon, in the order they block each other, and every one of
+them went through the critic gate first.
+
+- **transpiler #1877** — `execute()` never opened the LUW on the HANA client.
+  `connect()` turns autocommit off, `inTransaction` is set only by the
+  modifying path, and `commit()` returns at its first line while it is false,
+  so `disconnect()`'s documented implicit commit never happened. One file,
+  eight lines. **Before any release of `database-hdb`**: a release without it
+  ships silent data loss to anyone with two connections. Invisible on one,
+  including in upstream's own `test/_utils.ts:97-99`.
+- **open-abap-core #1254** — the three-backend report. 819 test methods:
+  SQLite 819/0/0, DuckDB 816/3/0, HANA 815/3/1. Declines separated from
+  failures. The one red is diagnosed and it is theirs: `get_location` takes
+  the stack frame after the last `cl_abap_unit_assert`, and on HANA the
+  awaits reach the event loop, so V8 drops the async user frame and the test
+  sees the tick queue. Logs at `.local/hana-report/run-{sqlite,duckdb,hana}.log`
+  — keep them, the next session must not re-derive the table.
+- **transpiler #1878** — a question, not a PR: `execute()` returns `void`, so
+  a procedure's rows have nowhere to go, and nothing in the interface binds a
+  parameter. ADBC in open-abap-core is the same gap in their own ecosystem
+  (`set_param`, `execute_procedure` are `ASSERT 1 = 'not supported'`). Four
+  options for where AMDP support could live; B (the seam only) is the one
+  answerable without any AMDP opinion.
+
+**What the critic caught, because the value of the gate is in the misses.**
+Two drafts, ten must-fixes between them, and the four that mattered were all
+the same kind — a claim I believed because I had not gone to look:
+
+1. "there is no native channel" — `execute()` is one, and our own
+   `docs/db-seam-native.md` already said so
+2. "the parse is already there, only the emit is missing" — written for a
+   repository whose sister tracker holds **our own** open issue saying the
+   parse loses colons (abaplint#4307, PR #4312)
+3. "one file different between the three runs" — the generated runner was
+   patched too, and Lars would have diffed it in ten seconds
+4. the one red reported as having no cause — the critic reproduced and
+   diagnosed it in five minutes
+
+And one number was cut for being second-hand: a colleague's measurement of
+our own suite, which neither the author nor the critic had run. Unverifiable
+and about us, not about them.
