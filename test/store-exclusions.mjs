@@ -67,13 +67,24 @@ ENDCLASS.
     expect(views.length, "the CDS views are objects of this system").to.be.greaterThan(5);
   });
 
-  it("keeps the fixture program the ADT tests read, which is in an excluded folder too", () => {
-    // `/test/fixtures/` is excluded from the build and its program is read by
-    // the ADT façade as a system object. That is the second direction this
-    // was wrong in: a folder-shaped rule removed it
+  it("and a fixture is NOT an object of the system, however useful it is to a test", () => {
+    // This test used to assert the opposite, and the reason it changed is
+    // the point. `/test/fixtures/` was kept in the store because one façade
+    // test read `ZDEMO_EDITOR` through it as a system object -- so the
+    // system contained an object the build had never compiled, and a check
+    // of it was right about the object and wrong about the system: it
+    // selects from a table the system does not have (fable-osd, running her
+    // CDS check over the whole tree instead of over its own fixture,
+    // 2026-09-19).
+    //
+    // The fix is the rule, not a second place: the folder joined
+    // `not_in_system`, and the one test that needed a plain program now
+    // reads `ZOSD_TEST_DEMO_PLAIN`, which is in the system. A test's need
+    // for a subject is not a reason for the system to contain one.
     const store = new ObjectStore({root: process.cwd()});
-    expect(store.list().map((o) => o.name), "the ADT tests read this one")
-      .to.include("ZDEMO_EDITOR");
+    const names = store.list().map((o) => o.name);
+    expect(names, "a fixture the build never compiles is not an object").to.not.include("ZDEMO_EDITOR");
+    expect(names, "and the subject that replaced it is one").to.include("ZOSD_TEST_DEMO_PLAIN");
   });
 
   it("every entry of not_in_system is also an exclusion of the build", () => {

@@ -25,11 +25,30 @@
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
-import {fileURLToPath} from "node:url";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+// The tree this file lives in, resolved on FIRST USE rather than at module
+// scope.
+//
+// `fileURLToPath` is not in the browser polyfill for `node:url` -- the
+// polyfill has `Url`, `format`, `parse`, `resolve`, `resolveObject` and
+// nothing else -- and this module reached the service worker's graph the day
+// the editor's destination imported `objectOf` from it. A call at module
+// scope is evaluated by the bundler's target whether or not anybody calls
+// the function, so the preview build failed on an export that is never used
+// in a browser (2026-09-19; the second time this module's arrival in that
+// graph broke Pages, the first being the object store itself).
+//
+// Reading it lazily also states the truth: a browser has no tree, so the
+// question has no answer there and is never asked.
+let ROOT;
+const treeRoot = () => {
+  if (ROOT === undefined) {
+    ROOT = new URL("../", import.meta.url).pathname;
+  }
+  return ROOT;
+};
 
 /** the abapGit object a file belongs to: zcl_x.clas.abap and zcl_x.clas.xml are one object */
 export function objectOf(filename) {
@@ -146,8 +165,9 @@ export function describeDuplicates(duplicates) {
   return duplicates.map((d) => `${d.object} is in ${d.folder} twice, and no order decides: ${d.files.join(", ")}`).join("; ");
 }
 
-export function report(configPath = resolve(root, "abap_transpile.json"), options = {}) {
-  const base = options.root ?? root;
+export function report(configPath = undefined, options = {}) {
+  const base = options.root ?? treeRoot();
+  configPath = configPath ?? resolve(base, "abap_transpile.json");
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   const {folders, overridden, hidden, duplicates, shadows, total} = layers(base, config);
   return {folders, clashes: overridden, hidden, duplicates, shadows, total};

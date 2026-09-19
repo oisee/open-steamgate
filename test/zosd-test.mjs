@@ -37,6 +37,11 @@ const OBJECTS = [
   ["INTF", "ZIF_ZOSD_TEST_GREETER", SRC],
   ["PROG", "ZOSD_TEST_DEMO_PROG", SRC],
   ["PROG", "ZOSD_TEST_DEMO_INC", SRC],
+  // the plainest program a system can hold: no local class, no event block,
+  // no subroutine. The façade's structure test reads it, and it is here
+  // rather than under test/fixtures/ because a fixture is not an object of
+  // the system (2026-09-19)
+  ["PROG", "ZOSD_TEST_DEMO_PLAIN", SRC],
   ["FUGR", "ZOSD_TEST_FG", SRC],
   ["MSAG", "ZOSD_TEST_MSG", SRC],
   ["TABL", "ZOSD_TEST_ITEM", DDIC],

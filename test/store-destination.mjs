@@ -19,7 +19,12 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
 
-const FOLDER = join("test", "fixtures", "store-destination");
+// **In `src/`, not under `test/fixtures/`.** The probe has to be an object of
+// the system, and a fixture is not one: `/test/fixtures/` is excluded from
+// the build and, since 2026-09-19, from the object store with it. This suite
+// planted its subject there and went red the moment the two lists were made
+// to agree -- which is the rule it is testing, arriving from the other side.
+const FOLDER = join("src", "store_destination_probe");
 const NAME = "ZCL_STORE_DEST_PROBE";
 const FILE = join(FOLDER, "zcl_store_dest_probe.clas.abap");
 const XML = join(FOLDER, "zcl_store_dest_probe.clas.xml");

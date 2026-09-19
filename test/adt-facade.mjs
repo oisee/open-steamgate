@@ -311,8 +311,13 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     });
 
     // A program's structure is never empty either, for the same reader.
+    //
+    // The subject is `ZOSD_TEST_DEMO_PLAIN`, which is IN the system. It used
+    // to be `ZDEMO_EDITOR`, under `test/fixtures/` -- a folder the build
+    // excludes and the store indexed, so this test's subject was an object
+    // the system did not contain.
     it("gives a two-line report a structure with its text elements, and nothing invented", async () => {
-      const xml = await (await call("/programs/programs/zdemo_editor/objectstructure?version=active")).text();
+      const xml = await (await call("/programs/programs/zosd_test_demo_plain/objectstructure?version=active")).text();
       const children = [...xml.matchAll(/adtcore:type="(PROG\/[A-Z]+)"/g)].map((m) => m[1]).slice(1);
       expect(children, "PROG/PX is what the system lists for a program, and all this one has").to.deep.equal(["PROG/PX"]);
     });

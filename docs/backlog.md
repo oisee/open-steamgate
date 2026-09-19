@@ -474,16 +474,21 @@ G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      │     ANORMALIES `posted-form-has-no-fields`, workaround
      │     `src/webgui/zcl_osd_form`, and the fix belongs in the shim
      ├─ **wave 3's first item, from fable-osd using the screen** (the way a
-     │  defect should be found): the default list is cut at 300 and the
-     │  types are alphabetical, so 607 classes fill it and **no CDS view is
-     │  visible at all**. The screen is honest -- it says "300 shown of
-     │  1140" -- but a person who does not already know to type `DDLS` will
-     │  not find one. The fix is not a bigger limit, it is a **tally beside
-     │  the list**: `CLAS 607 · DDLS 13 · TABL 124 · …`, each a link to
-     │  `?type=`. Then the cut hides the tail of one type instead of hiding
-     │  whole types. It wants a structure of its own (type, count) rather
-     │  than a count squeezed into the object row -- two things obliged to
-     │  differ
+     │  defect should be found) -- **DONE 2026-09-19**: the default list is
+     │  cut at 300 and the types sort together, so 607 classes filled it and
+     │  **no CDS view was visible at all**. The screen was honest -- "300
+     │  shown of 1140" -- and still unfindable by anyone who did not already
+     │  know to type `DDLS`. Honest and unfindable are different failures.
+     │  ├─ the fix is not a bigger limit but a **tally beside the list**:
+     │  │  `CLAS 702 · INTF 210 · TABL 199 · … · DDLS 13 · …`, each a link
+     │  │  to `?type=` that keeps whatever filter was already typed. The cut
+     │  │  now hides the tail of one type instead of whole types
+     │  ├─ a structure of its own (`ZOSD_TYPE_S`: a type and a count), not a
+     │  │  number pushed into the object row -- two things obliged to differ
+     │  └─ and the half that is easy to get wrong, which is a test: the
+     │     tally counts what the **filter** matched, **before** the type
+     │     narrows it. Counted after, asking for DDLS would answer "DDLS is
+     │     all there is" -- an instrument confirming the choice just made
      ├─ **what wave 3 is, and what it is not.** Not a tree in SE80's shape:
      │  the expensive part for the cheapest reward, which the critic already
      │  said once. The three that are worth it are server-rendered
