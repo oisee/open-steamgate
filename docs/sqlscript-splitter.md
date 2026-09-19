@@ -155,3 +155,42 @@ And one facility to build early because it pays for itself: the ability to run
 a body **both ways** — lazy and forced-eager — and diff the results. That is
 how the fusion defects will be found, and it is the same instrument as the
 branch comparison in track W, one storey down.
+
+---
+
+## Where this actually stands, 2026-09-19
+
+A body goes end to end and three engines agree:
+
+```
+lt = SELECT k, n FROM src WHERE n > 1;
+SELECT k, n FROM :lt ORDER BY k;
+```
+
+text → lexer → grammar → binder and typer → lowering → the native channel →
+rows, and **HANA Express, DuckDB and sql.js all answer the same two rows** —
+each in **one statement**, because the assignment is fused rather than
+materialised. A test asserts that by looking for a `;` in the output and a
+`var` in the plan and finding neither, so the lazy-with-barriers model is
+behaviour that a change can break rather than a paragraph.
+
+Values are compared, never exceptions, for the reason measured earlier: the
+moment an error is raised is a property of the plan, and HANA does not promise
+it to itself across two runs.
+
+**What is built:** lexer, grammar, binder, a partial typer (division and casts
+know their rule, everything else passes through), the IR and its lowering to
+three dialects, the native channel on all three engines, the conformance table
+with the oracle merged, and the fused-against-forced instrument.
+
+**What is not:** the corpus coverage this reaches, which is the only number
+the plan is measured by, and which nobody has counted yet against a parser
+that now exists. That is the next thing worth knowing.
+
+**Known and deliberately not fixed:** the emitted SQL carries a redundant
+double projection where an assignment's projection meets the final select's.
+All three engines collapse it and the values are right. That it is harmless
+is measured **at fixture size only** — nothing has been run over a large
+table, so "harmless" is not yet a fact about a join over twenty million rows.
+It is the first candidate for an optimisation pass, and the first thing the
+fused-against-forced instrument should be pointed at when it is.
