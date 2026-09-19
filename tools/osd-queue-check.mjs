@@ -45,7 +45,19 @@ const REPOS = [
 
 // A line says the item is still out there. Deliberately a small list: every
 // word here has to be one that would be **wrong** beside a merged PR.
-const OPEN_WORDS = /\b(open|waiting|unanswered|pending|not (yet )?(sent|answered|merged)|awaiting)\b|открыт|ждfт|ждёт|не отвечен/i;
+const OPEN_WORDS = /\b(open|waiting|unanswered|pending|not (yet )?(sent|answered|merged)|awaiting)\b|открыт|ждёт|не отвечен/i;
+
+// And the other direction, which `osd-parked.mjs` already complains in and
+// this did not: a line calling something finished while the tracker still
+// has it open. That lie is the more comfortable of the two -- it reads as
+// progress -- so leaving it out made the check flattering.
+//
+// Only lines carrying **one** reference are tested for it. "#1845 and #1846
+// are both merged" is true of one and false of the other, and a tool that
+// flagged it would be right about the line and wrong about the item; a
+// check that cries wolf stops being read, which is the rule this tree
+// already has about the leak scan.
+const DONE_WORDS = /\b(merged|done|landed|shipped|released|closed|fixed)\b|слит|отправлен|закрыт/i;
 
 /** every `#nnnn` on a line, with the repository named nearest before it */
 function nearest(before) {
@@ -115,6 +127,11 @@ export function withoutNames(line) {
   return out;
 }
 
+/** does this line carry exactly one reference? */
+export function alone(line) {
+  return [...line.matchAll(/(^|[^A-Za-z0-9/#])#\d{3,5}\b/g)].length === 1;
+}
+
 export function contradictions(refs, ask = stateOf) {
   const seen = new Map();
   const out = [];
@@ -129,7 +146,9 @@ export function contradictions(refs, ask = stateOf) {
     if (state === undefined) {
       out.push({...r, kind: "unreachable"});
     } else if ((state === "closed" || state === "merged") && OPEN_WORDS.test(withoutNames(r.text))) {
-      out.push({...r, kind: state, state});
+      out.push({...r, kind: state, state, said: "open"});
+    } else if (state === "open" && alone(r.text) && DONE_WORDS.test(withoutNames(r.text))) {
+      out.push({...r, kind: "open", state, said: "done"});
     }
   }
   return out;
@@ -148,16 +167,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(2);
   }
   const bad = contradictions(refs);
-  const said = bad.filter((b) => b.kind === "closed" || b.kind === "merged");
-  const mute = bad.filter((b) => b.kind !== "closed" && b.kind !== "merged");
+  const said = bad.filter((b) => b.said !== undefined);
+  const mute = bad.filter((b) => b.said === undefined);
   console.error(`osd-queue-check: ${refs.length} references in ${files.length} file(s)`);
   for (const b of said) {
-    console.log(`${b.file}:${b.line}  #${b.number} is ${b.state} upstream, the line calls it open`);
+    console.log(`${b.file}:${b.line}  #${b.number} is ${b.state} upstream, the line calls it ${b.said}`);
     console.log(`   ${b.text.slice(0, 110)}`);
   }
   for (const b of mute) console.error(`  ${b.file}:${b.line}  #${b.number} ${b.kind}`);
   if (said.length > 0) {
-    console.error(`\n${said.length} line(s) say open about something that is not.`);
+    console.error(`\n${said.length} line(s) disagree with the tracker.`);
     process.exit(1);
   }
   if (mute.length === refs.length) {
