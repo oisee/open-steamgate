@@ -209,8 +209,16 @@ export class Join extends Expression {
 /** SELECT ... FROM ... [WHERE] [GROUP BY] [ORDER BY] */
 export class Select extends Expression {
   getRunnable() {
-    return seq(str("SELECT"), opt(str("DISTINCT")),
-      new SelectItem(), star(seq(",", new SelectItem())),
+    // **`altPrio`, not `opt`, for DISTINCT.** With `opt` the grammar admits
+    // two readings of `SELECT DISTINCT k` -- the keyword, or a column named
+    // DISTINCT with `k` as its alias -- and the second won, so `hasWord` did
+    // not see it and the binder built a projection of a column called
+    // DISTINCT. `altPrio` commits to the first branch that matches, which is
+    // the keyword. Found by fable-osd running the same body on HANA twice,
+    // once through HANA's own compiler and once through our lowering.
+    return seq(str("SELECT"),
+      altPrio(seq(str("DISTINCT"), new SelectItem(), star(seq(",", new SelectItem()))),
+        seq(new SelectItem(), star(seq(",", new SelectItem())))),
       // `FROM a, b` is a cross join written with a comma, and the corpus uses
       // it for exactly that -- `FROM public.m_services s, public.m_volume_files v`
       // with the join written out in the WHERE

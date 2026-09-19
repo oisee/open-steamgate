@@ -79,31 +79,59 @@ describe("a shape the binder does not expect is refused by name, never crashed o
 //
 // They are refused by name until the IR grows an aggregate. A refusal is a
 // number going down and a claim becoming true.
-describe("a clause the grammar reads and the IR does not carry is refused, not dropped", () => {
+// **These were refusals for one commit, and are now carried.**
+//
+// fable-osd found GROUP BY, HAVING and DISTINCT parsed and not read, by
+// running a body's own SQLScript on HANA beside our lowering of it, and
+// refused all three by name so the numerator would stop lying. The IR had
+// `aggregate(input, groupBy, aggs)` all along and the lowering rendered it;
+// nothing read a GROUP BY into it. So the refusals lasted one commit and this
+// block asserts the carrying instead -- a test written against a refusal ages
+// with the refusal, and keeping it would have meant keeping the refusal.
+//
+// What each one lowered to before, which is why "it parsed" was never the
+// question:
+//
+//   SELECT DISTINCT k  ->  SELECT "DISTINCT" AS "K"   (a COLUMN called DISTINCT)
+//   ... GROUP BY n     ->  the grouping silently gone
+//   ... HAVING c > 1   ->  the condition moved into the WHERE
+describe("the three clauses are carried now, and what is still refused is named", () => {
   const plan = (body) => toIr(parse(new Body(), lex(body)), {catalogue: {}}).rel;
+  const sqlOf = (body) => lower(plan(body), "hana").sql;
 
-  it("GROUP BY: refused, rather than lowering to an ungrouped select", () => {
-    expect(() => plan("RETURN SELECT n FROM src GROUP BY n;")).to.throw(/GROUP BY is parsed but not carried/);
+  it("GROUP BY becomes the aggregate rather than disappearing", () => {
+    expect(sqlOf("RETURN SELECT n, COUNT(*) AS c FROM src GROUP BY n;")).to.contain('GROUP BY "N"');
   });
 
-  it("HAVING: refused, rather than becoming a WHERE", () => {
-    expect(() => plan("RETURN SELECT n FROM src GROUP BY n HAVING COUNT(*) > 1;")).to.throw(/not carried into the IR/);
+  it("HAVING becomes a HAVING, not a WHERE", () => {
+    const sql = sqlOf("RETURN SELECT n, COUNT(*) AS c FROM src GROUP BY n HAVING COUNT(*) > 1;");
+    expect(sql).to.match(/GROUP BY .* HAVING /);
+    expect(sql).to.not.contain("WHERE");
   });
 
-  it("DISTINCT: refused, and the refusal says the grammar is ambiguous rather than blaming the body", () => {
-    expect(() => plan("RETURN SELECT DISTINCT k FROM src;")).to.throw(/read as a column name/);
+  it("DISTINCT is the keyword, whatever case it is written in", () => {
+    for (const body of ["RETURN SELECT DISTINCT k FROM src;", "RETURN SELECT distinct k FROM src;"]) {
+      const sql = sqlOf(body);
+      expect(sql, body).to.contain("SELECT DISTINCT");
+      expect(sql, body).to.not.contain('"DISTINCT"');
+    }
   });
 
-  it("and a body without any of them still lowers, so the refusals are narrow", () => {
-    const sql = lower(plan("RETURN SELECT k FROM src WHERE n > 1;"), "hana").sql;
+  it("a body without any of them still lowers, so nothing was traded for this", () => {
+    const sql = sqlOf("RETURN SELECT k FROM src WHERE n > 1;");
     expect(sql).to.contain('FROM "SRC"');
     expect(sql).to.not.contain("DISTINCT");
   });
 
-  it("a column that is merely CALLED distinct in lower case is still the keyword's shape, and is refused once", () => {
-    // the check is on the name, not on the spelling in the source: both
-    // parses produce a column named DISTINCT and neither is what was written
-    expect(() => plan("RETURN SELECT distinct k FROM src;")).to.throw(/read as a column name/);
+  it("but a column that is neither an aggregate nor a key is refused, by name", () => {
+    // every engine rejects it too; rejecting it here says which column
+    expect(() => plan("RETURN SELECT k, n FROM src GROUP BY k;"))
+      .to.throw(/N is neither an aggregate nor one of the GROUP BY columns/);
+  });
+
+  it("and a HAVING with no GROUP BY is refused rather than treated as a WHERE", () => {
+    expect(() => plan("RETURN SELECT k FROM src HAVING COUNT(*) > 1;"))
+      .to.throw(/HAVING without a GROUP BY/);
   });
 });
 

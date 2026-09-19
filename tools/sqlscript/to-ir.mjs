@@ -23,7 +23,16 @@
 // point of the IR is that the lowering can trust the node names.
 
 import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
-  subquery, scan, refTo, filter, project, join, union, order, limit, schemaOf} from "../sqlscript-ir.mjs";
+  subquery, scan, refTo, filter, project, join, union, order, limit, aggregate,
+  schemaOf} from "../sqlscript-ir.mjs";
+
+/** Functions that compute over a group. A window function with an `OVER`
+ *  clause is **not** one of these even when it is spelt the same -- it
+ *  computes per row over a frame, and putting it in the aggregate half of a
+ *  GROUP BY would be a different statement. */
+const AGGREGATE_FUNCTIONS = new Set([
+  "COUNT", "SUM", "MIN", "MAX", "AVG", "STRING_AGG", "GROUP_CONCAT",
+]);
 
 export class BindError extends Error {
   constructor(message, node) {
@@ -158,6 +167,11 @@ export function toIr(tree, options = {}) {
       case "FunctionCall": {
         const fn = String(leaf(node).value).toUpperCase();
         const args = (node.children ?? []).filter((c) => c.node === "Expr").map(expression);
+        // `COUNT(*)` -- the star is a word, not an Expr, so an arg list read
+        // only from Expr children turned it into `COUNT()`, which every
+        // engine rejects and which says nothing about why
+        const starArg = (node.children ?? []).some((c) =>
+          (c.node === "word" || c.node === "operator") && c.value === "*");
         // an ordering inside the call belongs to the call, in the shape the
         // lowering already reads elsewhere: {col, desc}
         const inner = kids(node, "OrderKey").map((k) => {
@@ -198,6 +212,7 @@ export function toIr(tree, options = {}) {
           }),
         };
         const built = call(fn, args, T.str);
+        if (starArg) built.star = true;
         if (inner.length > 0) built.orderBy = inner;
         if (window !== undefined) built.window = window;
         return built;
@@ -428,6 +443,41 @@ export function toIr(tree, options = {}) {
     return kept.length === 0 ? undefined : kept;
   }
 
+  /** the GROUP BY columns, or undefined when there is no GROUP BY.
+   *
+   *  Grouping by an expression is refused rather than approximated: the
+   *  lowering renders keys as quoted names, and rendering an expression
+   *  there would need the same expression in the select list to line up,
+   *  which nothing checks. */
+  function groupKeys(node) {
+    if (!hasWord(node, "GROUP")) return undefined;
+    // the GROUP BY expressions are the Expr children that follow the word
+    const children = node.children ?? [];
+    const at = children.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "GROUP");
+    const out = [];
+    for (const child of children.slice(at + 1)) {
+      if (child.node === "word" && !["BY", ","].includes(String(child.value).toUpperCase())) break;
+      if (child.node !== "Expr") continue;
+      const e = expression(child);
+      if (e.node !== "col") throw new BindError("GROUP BY over an expression is not lowered yet", child);
+      out.push(e.name);
+    }
+    if (out.length === 0) throw new BindError("a GROUP BY with nothing in it", node);
+    return out;
+  }
+
+  /** does this expression compute over the group rather than over a row */
+  function isAggregate(e) {
+    if (e === undefined || e === null || typeof e !== "object") return false;
+    if (e.node === "call" && AGGREGATE_FUNCTIONS.has(e.fn) && e.window === undefined) return true;
+    for (const key of ["left", "right", "expr", "otherwise"]) {
+      if (isAggregate(e[key])) return true;
+    }
+    for (const one of e.args ?? []) if (isAggregate(one)) return true;
+    for (const one of e.whens ?? []) if (isAggregate(one.when) || isAggregate(one.then)) return true;
+    return false;
+  }
+
   function select(node) {
     if (node === undefined) throw new BindError("a SELECT was expected here and the tree has none");
     let rel;
@@ -447,22 +497,21 @@ export function toIr(tree, options = {}) {
     // neither of them has** -- written one function below, about ORDER BY,
     // and three more clauses were in exactly that state until a HANA ran the
     // body's own SQLScript beside our lowering of it and the two answers
-    // parted (2026-09-19):
+    // parted (fable-osd, 2026-09-19):
     //
     //   SELECT DISTINCT k  ->  SELECT "DISTINCT" AS "K"   (a COLUMN called DISTINCT)
     //   ... GROUP BY n     ->  the grouping silently gone
     //   ... HAVING c > 1   ->  the condition moved into the WHERE
     //
     // Each of the three parsed, each lowered, and each was therefore counted
-    // as a body that works while computing a different program. Refusing by
-    // name costs one measurement and buys back the meaning of the number.
-    for (const [word, what] of [["DISTINCT", "DISTINCT"], ["GROUP", "GROUP BY"], ["HAVING", "HAVING"]]) {
-      if (hasWord(node, word)) {
-        throw new BindError(`${what} is parsed but not carried into the IR, so this body would lower to a ` +
-          "different program; it is refused until the IR has an aggregate", node);
-      }
-    }
-    const where = kid(node, "Condition");
+    // as a body that works while computing a different program. They are
+    // carried now; what is still refused below is refused by name.
+    // **Only when there IS a WHERE.** `kid(node, "Condition")` takes the
+    // first Condition child, and with `... GROUP BY k HAVING c > 1` the first
+    // one is the HAVING -- so the having condition was applied as a WHERE as
+    // well, filtering rows by an aggregate before the aggregate existed. Two
+    // clauses, one of them invented.
+    const where = hasWord(node, "WHERE") ? kid(node, "Condition") : undefined;
     if (where !== undefined) rel = filter(rel, condition(where));
     const items = kids(node, "SelectItem").map((item) => {
       // `*` arrives as a **word**, because the grammar matches it with
@@ -511,7 +560,49 @@ export function toIr(tree, options = {}) {
       const hinted = hintsOf(node);
       return orderAndLimit(node, hinted === undefined ? rel : {...rel, hints: hinted});
     }
+    // **GROUP BY, and the split the IR already wanted.**
+    //
+    // `aggregate(input, groupBy, aggs)` has been in the IR since it was
+    // written and the lowering has rendered it all along; nothing read a
+    // GROUP BY into it. The split is by shape rather than by a list of
+    // function names: an item that mentions no column outside an aggregate
+    // call is an aggregate, the rest are keys, and a key that is not also in
+    // the GROUP BY is refused rather than guessed at -- every engine rejects
+    // that anyway, and rejecting it here says which column.
+    const grouped = groupKeys(node);
+    if (grouped !== undefined) {
+      const keyNames = new Set(grouped.map((k) => k.toUpperCase()));
+      const keys = [];
+      const aggs = [];
+      for (const item of items) {
+        if (item.expr?.node === "star") {
+          throw new BindError("`*` with a GROUP BY is not lowered: which columns it stands for is a question about the dictionary, not about this body", node);
+        }
+        if (isAggregate(item.expr)) aggs.push(item);
+        else if (item.expr?.node === "col" && keyNames.has(String(item.expr.name).toUpperCase())) keys.push(item);
+        else {
+          throw new BindError(`${item.as} is neither an aggregate nor one of the GROUP BY columns`, node);
+        }
+      }
+      rel = aggregate(rel, keys.map((k) => k.expr.name), aggs);
+      const having = kids(node, "Condition")[hasWord(node, "WHERE") ? 1 : 0];
+      if (hasWord(node, "HAVING")) {
+        if (having === undefined) throw new BindError("a HAVING with no condition in it", node);
+        // above the aggregate, which is what HAVING means and where the
+        // lowering already puts a filter
+        rel = filter(rel, condition(having));
+      }
+      const hinted = hintsOf(node);
+      return orderAndLimit(node, hinted === undefined ? rel : {...rel, hints: hinted});
+    }
+    if (hasWord(node, "HAVING")) {
+      throw new BindError("a HAVING without a GROUP BY is not lowered", node);
+    }
     rel = project(rel, items);
+    // DISTINCT rides on the projection rather than becoming a relation of its
+    // own: it is a property of how the rows come out, which is what the
+    // lowering renders.
+    if (hasWord(node, "DISTINCT")) rel = {...rel, distinct: true};
     const hints = hintsOf(node);
     if (hints !== undefined) rel = {...rel, hints};
     return orderAndLimit(node, rel);

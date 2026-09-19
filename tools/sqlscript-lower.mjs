@@ -292,8 +292,12 @@ export function lower(rel, dialectName, options = {}) {
         if (e.fn === "SUBSTR_AFTER") return d.substrAfter(arg(0), arg(1));
         if (e.fn === "TO_NVARCHAR" || e.fn === "TO_VARCHAR") return d.toChar(arg(0));
         if (e.fn === "LOCATE") return d.locate(arg(0), arg(1));
-        // and the rest use each argument once, so one rendering is right
-        const args = e.args.map(expr);
+        // and the rest use each argument once, so one rendering is right.
+        // `COUNT(*)` carries no argument expression at all: the star is the
+        // argument. Returning early for it was the first attempt and it
+        // dropped the OVER clause, because everything after this line is
+        // what renders a window.
+        const args = e.star === true && e.args.length === 0 ? ["*"] : e.args.map(expr);
         if (e.fn === "CONCAT") return `(${d.concat(args)})`;
         if (e.fn === "IFNULL") return d.ifnull(args[0], args[1]);
         if (e.fn === "SUBSTR" || e.fn === "SUBSTRING") return d.substr(args[0], args[1], args[2]);
@@ -382,9 +386,19 @@ export function lower(rel, dialectName, options = {}) {
       case "ref":
         return `SELECT * FROM ${from(r)}`;
       case "filter":
+        // **A filter over an aggregate is a HAVING, and has to be rendered
+        // as one.** Wrapped, it came out as `SELECT * FROM (… GROUP BY k)
+        // WHERE SUM(n) > 1` -- and `SUM(n)` is not a column of that
+        // subquery, it is aliased in it, so the statement is invalid. The
+        // same shape as the ORDER BY defect two commits ago: a clause of the
+        // select rendered as a wrapper around it.
+        if (r.input?.rel === "aggregate") {
+          return `${select(r.input)} HAVING ${expr(r.pred)}`;
+        }
         return `SELECT * FROM ${from(r.input)} WHERE ${expr(r.pred)}`;
       case "project":
-        return `SELECT ${r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ")} FROM ${from(r.input)}`;
+        return `SELECT ${r.distinct === true ? "DISTINCT " : ""}` +
+          `${r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ")} FROM ${from(r.input)}`;
       case "join": {
         // A cross join has no ON, and asking for one crashed rather than
         // refused: `FROM a, b` binds to exactly this node, and every engine

@@ -347,3 +347,69 @@ describe("a window function, and the tie that is the only thing that could diffe
     expect(effects(tight.ir.rel).nonDeterministic, "ordered").to.equal(false);
   });
 });
+
+// GROUP BY, HAVING and DISTINCT: three clauses the grammar read and the
+// binder did not, found by running a body's own SQLScript on HANA beside our
+// lowering of it (fable-osd). Each parsed, each lowered, and each therefore
+// counted as a body that works while computing a different program.
+describe("the three clauses that were read and not carried", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+  const rows = async (body) => {
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    return answered.map((r) => JSON.stringify(r.rows.map((x) => Object.values(x)).sort()));
+  };
+  const agree = async (body) => {
+    const shapes = new Set(await rows(body));
+    expect(shapes.size, [...shapes].join(" vs ")).to.equal(1);
+    return JSON.parse([...shapes][0]);
+  };
+
+  it("DISTINCT is the keyword, not a column called DISTINCT", async () => {
+    // the grammar admitted two parses and the wrong one won, so this lowered
+    // to `SELECT "DISTINCT" AS "K"`. altPrio commits to the keyword now
+    expect(compile("SELECT DISTINCT k FROM src;", "duckdb", CAT).sql)
+      .to.equal('SELECT DISTINCT "K" AS "K" FROM "SRC"');
+    expect(await agree("SELECT DISTINCT k FROM src;")).to.have.length(3);
+  });
+
+  it("GROUP BY reaches the aggregate the IR already had", async () => {
+    expect(compile("SELECT k, COUNT(*) AS C FROM src GROUP BY k;", "duckdb", CAT).sql)
+      .to.contain('COUNT(*) AS "C"');
+    expect(await agree("SELECT k, COUNT(*) AS C FROM src GROUP BY k;"))
+      .to.deep.equal([["a", 1], ["b", 1], ["c", 1]]);
+  });
+
+  it("HAVING is a clause of the grouped select, not a wrapper around it", async () => {
+    // wrapped it read `SELECT * FROM (… GROUP BY k) WHERE SUM(n) > 1`, and
+    // SUM(n) is not a column of that subquery — the same shape as the ORDER
+    // BY defect, and invalid for the same reason
+    const {sql} = compile("SELECT k, SUM(n) AS S FROM src GROUP BY k HAVING SUM(n) > 1;", "duckdb", CAT);
+    expect(sql).to.match(/GROUP BY .* HAVING /);
+    expect(await agree("SELECT k, SUM(n) AS S FROM src GROUP BY k HAVING SUM(n) > 1;"))
+      .to.deep.equal([["b", 2], ["c", 3]]);
+  });
+
+  it("a WHERE and a HAVING are two clauses, and only one of them was written", async () => {
+    // `kid(node, "Condition")` took the first Condition, which with no WHERE
+    // is the HAVING — so the having condition was also applied as a WHERE,
+    // filtering by an aggregate before the aggregate existed
+    const {sql} = compile("SELECT k, SUM(n) AS S FROM src WHERE n > 0 GROUP BY k HAVING SUM(n) > 1;", "duckdb", CAT);
+    expect((sql.match(/WHERE/g) ?? []).length, sql).to.equal(1);
+    expect((sql.match(/HAVING/g) ?? []).length, sql).to.equal(1);
+  });
+
+  it("a column that is neither an aggregate nor a key is refused, by name", () => {
+    expect(() => compile("SELECT k, n FROM src GROUP BY k;", "duckdb", CAT))
+      .to.throw(/N is neither an aggregate nor one of the GROUP BY columns/);
+  });
+
+  it("and a window function is not an aggregate, however it is spelt", () => {
+    // COUNT(*) OVER (...) computes per row over a frame; putting it in the
+    // aggregate half of a GROUP BY would be a different statement
+    const {sql} = compile("SELECT k, COUNT(*) OVER (PARTITION BY k) AS C FROM src;", "duckdb", CAT);
+    expect(sql).to.contain("OVER (PARTITION BY");
+    expect(sql).to.not.contain("GROUP BY");
+  });
+});
