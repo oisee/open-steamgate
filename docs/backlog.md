@@ -1418,9 +1418,21 @@ B.9  A forced build mutates a generation under its name                 [S]
      │  generation), and the rule that decides the output is part of the
      │  hash, so a forced build differs from the cached one only when the
      │  transpiler or the builder changed under the same inputs
-     └─ still to do: a forced build should check reproducibility (build,
-        compare, report) or publish under a name of its own, never both
-        keep the name and change the bytes
+     └─ DONE 2026-09-19: a forced build compares and reports. Identical ->
+        the name keeps its bytes and nothing is written. Different -> it is
+        a FINDING, said out loud and not overwritten; `--replace` takes the
+        new bytes under the same name, in so many words.
+        **Measured before any of it was written, because the answer was not
+        known**: two forced builds of one generation differed in **1 of 2249
+        files**, and the cause was single -- the builder's own process id,
+        baked into the copy of `abap_transpile.json` the generation carries
+        (`output_folder: build/tmp/<hash>.<pid>/output`). An artefact
+        addressed by the hash of its inputs must not carry the number of the
+        process that wrote it; nothing reads that copy after the build, so
+        it now describes itself (`output_folder: "output"`). With that gone
+        the build is byte-for-byte reproducible, twice in a row, 2249 of
+        2249 files. So the promise in the name was true and one defect was
+        hiding it -- a repair, not a property to rewrite.
 
 B.10 The base image is named by the schema alone                  [S]  DONE 2026-09-17
      ├─ Astra, 2026-09-16: .local/db/base/<schema-hash>.sqlite; a change to

@@ -25,6 +25,7 @@
 // generation is 44 MB; keeping the last few is cheap. docs/generations.md
 // is the design this implements.
 import {createHash} from "node:crypto";
+import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, join, relative, resolve} from "node:path";
@@ -413,20 +414,57 @@ export async function build(options = {}) {
       overridden: stack.overridden,
     };
     writeFileSync(join(tmp, "manifest.json"), JSON.stringify(manifest, null, 2));
+    // **The generation's own copy of the config described the process that
+    // made it.** `output_folder` held the build's tmp path, pid and all, so
+    // two builds of one generation differed in exactly one of 2249 files --
+    // and the difference was a process id. An artefact addressed by the hash
+    // of its inputs must not carry the number of the process that wrote it.
+    // Nothing reads this copy after the build (every reader takes the root's
+    // one), so it is rewritten to describe ITSELF: the output is at `output`,
+    // relative to the generation (2026-09-19, B.9).
+    writeFileSync(join(tmp, "abap_transpile.json"),
+      JSON.stringify({...own, output_folder: "output"}, null, 2));
     linkRoots(root, tmp, config, log);
 
     mkdirSync(paths.byInput, {recursive: true});
     if (existsSync(target) && options.force === true) {
-      // asked to build again over a generation that exists: the new one
-      // replaces it, which is what "again" means. Found 2026-09-16 when a
-      // forced rebuild reported the new rule and left the old output. Two
-      // renames rather than a remove and a rename, so there is no moment
-      // at which the live link points at nothing (backlog B.9 has the rest:
-      // a name that keeps its bytes is what a generation is for)
-      const replaced = `${target}.replaced.${process.pid}`;
-      renameSync(target, replaced);
-      renameSync(tmp, target);
-      rmSync(replaced, {recursive: true, force: true});
+      // **Build, compare, report -- never both keep the name and change the
+      // bytes** (backlog B.9). A generation is addressed by the hash of its
+      // inputs so that a name means one set of bytes; a forced build that
+      // replaced the directory gave a consumer pinned to `<hash>` different
+      // content under an unchanged name, which is the thing immutability was
+      // for.
+      const verdict = compareGenerations(target, tmp);
+      if (verdict.same) {
+        log(`generation ${hash} rebuilt byte for byte: ${verdict.files} files` +
+          (verdict.collapsed.length > 0 ? `, after ${verdict.collapsed.join("; ")}` : ""));
+        rmSync(tmp, {recursive: true, force: true});
+      } else if (options.replace === true) {
+        // asked for, in so many words. Two renames rather than a remove and
+        // a rename, so there is no moment at which the live link points at
+        // nothing.
+        const changed = [...verdict.differing, ...verdict.onlyInA, ...verdict.onlyInB];
+        log(`generation ${hash} REPLACED, ${changed.length} files differ: ${changed.slice(0, 5).join(", ")}`);
+        const replaced = `${target}.replaced.${process.pid}`;
+        renameSync(target, replaced);
+        renameSync(tmp, target);
+        rmSync(replaced, {recursive: true, force: true});
+      } else {
+        // The interesting case, and it is a FINDING rather than a nuisance:
+        // the same inputs produced different output, so the transpiler or the
+        // builder changed under them. Saying so is the point; overwriting
+        // would hide it.
+        const changed = [...verdict.differing, ...verdict.onlyInA, ...verdict.onlyInB];
+        rmSync(tmp, {recursive: true, force: true});
+        const error = new Error(
+          `generation ${hash} is NOT reproducible: ${changed.length} of ${verdict.files} files differ ` +
+          `(${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", …" : ""}). The same inputs gave ` +
+          "different output, so the transpiler or the builder changed under them -- which is a finding, " +
+          "not a nuisance. Nothing was overwritten: a name that keeps its bytes is what a generation is " +
+          "for. Pass --replace to take the new bytes under the same name anyway.");
+        error.notReproducible = {hash, changed, files: verdict.files};
+        throw error;
+      }
     } else if (existsSync(target)) {
       // a build of the same inputs finished while this one ran (a race the
       // lock did not cover); theirs is as good as ours
@@ -509,7 +547,8 @@ export async function main(args) {
     return 0;
   }
   try {
-    const r = await build({root, force: args.includes("--force"), switch: !args.includes("--no-switch"), log: say});
+    const r = await build({root, force: args.includes("--force"), replace: args.includes("--replace"),
+      switch: !args.includes("--no-switch"), log: say});
     say(`${r.cached ? "reused" : "built"} ${r.hash} in ${r.ms} ms, ${r.objects} objects${r.live ? ", live" : ""}`);
     return 0;
   } catch (error) {
