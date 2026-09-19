@@ -37,6 +37,7 @@
     "test/segw-tree.mjs",
     "test/segw.mjs",
     "test/sqlscript-eager.mjs",
+    "test/sqlscript-end-to-end.mjs",
     "test/sqlscript-ir.mjs",
     "test/sqlscript-lexer.mjs",
     "test/sqlscript-parser.mjs",

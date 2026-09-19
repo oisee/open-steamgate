@@ -222,7 +222,18 @@ export function toIr(tree, options = {}) {
     rel = project(rel, items);
     const keys = kids(node, "OrderKey");
     if (keys.length > 0) {
-      rel = order(rel, keys.map((k) => ({expr: expression(k), dir: hasWord(k, "DESC") ? "desc" : "asc"})));
+      // the shape the lowering reads is {col, desc}, not {expr, dir}: the IR
+      // is the contract and the parser conforms to it. Producing a
+      // near-miss here would have created exactly the translation layer we
+      // agreed not to build -- and it would have been found at run time, on
+      // an engine, rather than here.
+      rel = order(rel, keys.map((k) => {
+        const e = expression(k);
+        if (e.node !== "col") {
+          throw new BindError("ORDER BY over an expression is not lowered yet", k);
+        }
+        return {col: e.name, desc: hasWord(k, "DESC")};
+      }));
     }
     return rel;
   }
