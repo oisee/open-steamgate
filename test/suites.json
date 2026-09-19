@@ -60,6 +60,7 @@
     "test/sqlscript-values.mjs",
     "test/sqlscript-vs-hana.mjs",
     "test/stg-compile.mjs",
+    "test/store-exclusions.mjs",
     "test/transaction.mjs",
     "test/webgui.mjs",
     "test/write-boundary.mjs",

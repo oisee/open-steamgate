@@ -120,6 +120,36 @@ const packageWord = (s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 // both, the way a layer does; a library never wins over a root). A tree
 // without the config is read the old way. gen/ is never written by hand,
 // and what sits under local/ was imported, not written here.
+/** The exclusions that mean "this is not an object of this system".
+ *
+ *  The gap this closes: `gen/segw-editor/` is written by the SEGW editor's
+ *  "Save to gen/" button and left out of the build on purpose, and the store
+ *  indexed it anyway -- so the ADT façade and the cross reference described
+ *  objects the system does not contain. Measured on this tree, which had
+ *  been used: four such classes (fable-osd found the symptom in
+ *  `test/osd-xref.mjs`, which named one of them).
+ *
+ *  **It is a named list rather than a rule read off `exclude_filter`, and
+ *  that is the finding.** Three attempts at inferring which entries meant
+ *  "not ours" were wrong in three different directions: all of them removed
+ *  13 CDS views, because `\.ddls\.` is there to stop the transpiler reading
+ *  a file it cannot compile; folder-shaped ones removed the program in
+ *  `test/fixtures/` that the ADT tests read. The build's question is "can
+ *  the transpiler read this file", the store's is "is this an object of the
+ *  system", and no amount of looking at the pattern turns one into the
+ *  other. It is intent, so it is stated.
+ *
+ *  `test/store-exclusions.mjs` checks that every entry is also in
+ *  `exclude_filter`, so the two cannot drift into disagreeing. */
+export function exclusionsOf(root) {
+  try {
+    const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+    return (config.not_in_system ?? []).map((pattern) => new RegExp(pattern));
+  } catch {
+    return [];
+  }
+}
+
 export function rootsOf(root) {
   let folders;
   try {
@@ -141,6 +171,8 @@ export class ObjectStore {
     this.root = options.root ?? process.cwd();
     this.explicitRoots = options.roots !== undefined;
     this.roots = options.roots ?? rootsOf(this.root);
+    // the build's exclusions are the store's too, from the same file
+    this.excluded = options.excluded ?? exclusionsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
     this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
@@ -193,6 +225,11 @@ export class ObjectStore {
       if (statSync(join(this.root, relative)).isDirectory()) {
         this.#walk(relative, out);
       } else {
+        // the build's exclusions, matched the way the transpiler matches them
+        // -- against the path with a leading slash
+        if (this.excluded.some((re) => re.test("/" + relative))) {
+          continue;
+        }
         out.push(relative);
       }
     }
