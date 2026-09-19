@@ -19,7 +19,7 @@
 // see the registries a reader of this repository would have to know about,
 // and a running host has already collapsed them into one table.
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
-import {join} from "node:path";
+import {dirname, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 
 const HOSTS = ["test/start.mjs", "tools/osd-serve.mjs", "web/preview-backend.mjs"];
@@ -34,16 +34,88 @@ function walk(dir, hit = []) {
   return hit;
 }
 
+/** The package an object belongs to: the nearest `package.devc.xml` above
+ *  it, which is how abapGit decides it too.
+ *
+ *  **And with it, whether the object can travel -- using the system's own
+ *  rule rather than a flag of ours.** A package whose name begins with `$`
+ *  is local and does not transport; everything else does. fable-osd's
+ *  requirement was that a node must carry whether it can leave, "in the
+ *  object rather than in somebody's memory" -- and it already does, as soon
+ *  as we stop inventing a field and use the thing SAP has had all along.
+ *
+ *  That matters for the two host routes nobody should ever deploy:
+ *  `POST /segw/generate/:project` writes to a developer's file system and
+ *  `GET /osd/not-served` reports what the facade could not answer. When they
+ *  become nodes they go in a local package, and then "does not travel" is a
+ *  property a system would agree with rather than a convention of ours. */
+export function packageOf(file, root = ".") {
+  let at = resolve(dirname(file));
+  const stop = resolve(root);
+  while (at.startsWith(stop)) {
+    const devc = join(at, "package.devc.xml");
+    if (existsSync(devc)) {
+      const xml = readFileSync(devc, "utf8");
+      const name = /<DEVCLASS>([^<]*)/.exec(xml)?.[1] ?? relative(stop, at).replaceAll("/", "_").toUpperCase();
+      return {name, file: devc, travels: name.startsWith("$") === false};
+    }
+    const up = dirname(at);
+    if (up === at) break;
+    at = up;
+  }
+  // no package above it: it belongs to whatever the import names, so it
+  // travels -- and saying "unknown" would be a third value nobody asked for
+  return {name: "", file: "", travels: true};
+}
+
 /** An ICF node: the one registry this tree is trying to keep. */
 export function icfNodes(root = "src") {
   return walk(root).filter((f) => f.endsWith(".sicf.xml")).map((file) => {
     const xml = readFileSync(file, "utf8");
+    const pkg = packageOf(file, root);
     return {
       file,
       url: /<URL>([^<]*)/.exec(xml)?.[1] ?? "",
-      handlers: [...xml.matchAll(/<ICFHANDLER>([^<]*)/g)].map((m) => m[1]).filter(Boolean),
+      // `<ICFHANDLER>` is the name of the row wrapper AND of the field
+      // inside it, so a naive match returns the wrapper's whitespace beside
+      // the class name -- a true value answering a question nobody asked.
+      // Take the ones that look like a class.
+      handlers: [...xml.matchAll(/<ICFHANDLER>([^<\s][^<]*)</g)].map((m) => m[1].trim()).filter(Boolean),
+      package: pkg.name,
+      travels: pkg.travels,
     };
   }).sort((a, b) => (a.url < b.url ? -1 : 1));
+}
+
+// **Not every express registration is a rival registry, and counting them
+// as one overstates the case.** Looking at the twenty-one, three kinds:
+//
+//   mount    it IS the ICF wiring -- `app.all("/sap/opu/odata/sap/*", ...)`
+//            hands the path to the dispatcher. Deleting it would not move a
+//            path into the tree, it would unplug the tree.
+//   wrapper  middleware on a path that is ALREADY a node -- `withFreshStatus`
+//            in front of the webgui. It decorates; it does not decide.
+//   rival    a path answered outside the tree entirely: static content, the
+//            dev-only writes, the facade's own router.
+//
+// Only the last kind is the thing the proposal is about. The first version of
+// this tool counted all three and printed 21, which is a true number
+// answering a question nobody asked -- the same shape we have caught four
+// times today, and this time in my own instrument.
+const ICF_PATHS = [/^\/sap\/opu\/odata/, /^\/sap\/bc\/gui/, /^\/sap\/bc\/adt/, /^\/sap\/bc\/osd/];
+const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
+
+export function classify(line, path) {
+  if (path === "(no path: middleware)") {
+    return "plumbing";
+  }
+  if (MOUNTS.some((r) => r.test(line))) {
+    return "mount";
+  }
+  if (ICF_PATHS.some((r) => r.test(path))) {
+    return "wrapper";
+  }
+  return "rival";
 }
 
 /** Every express registration in every host. The same path registered in two
@@ -57,7 +129,8 @@ export function hostRoutes(hosts = HOSTS) {
     for (const [i, line] of text.split("\n").entries()) {
       const m = /app\.(all|use|get|post|put|delete)\(\s*(`[^`]*`|"[^"]*"|'[^']*')?/.exec(line);
       if (m === null) continue;
-      out.push({host, line: i + 1, method: m[1], path: m[2] ? m[2].slice(1, -1) : "(no path: middleware)"});
+      const path = m[2] ? m[2].slice(1, -1) : "(no path: middleware)";
+      out.push({host, line: i + 1, method: m[1], path, kind: classify(line, path)});
     }
   }
   return out;
@@ -84,10 +157,18 @@ export async function destinationBindings(options = {}) {
   return remoteServices({say: () => {}, ...options}).map((r) => ({path: `/sap/opu/odata/sap/${r.service}`, destination: r.name}));
 }
 
+/** Which rows of the scoreboard count against the proposal, and the total.
+ *  Exported because the CLI and the test both need the answer and a copy in
+ *  each is how they came to print 12 and 18 of the same tree -- the rule a
+ *  module's callers must share lives in the module. */
+export const isRival = (row) => row.name !== "ICF nodes" && row.name.includes("mount/wrapper") === false;
+export const rivalCount = (board) => board.filter(isRival).reduce((n, r) => n + r.count, 0);
+
 export async function scoreboard(options = {}) {
   const registries = [
     ["ICF nodes", icfNodes(options.root ?? "src"), "the one this tree is keeping"],
-    ["host routes", hostRoutes(options.hosts), "express registrations, across every host"],
+    ["host routes (rival)", hostRoutes(options.hosts).filter((r) => r.kind === "rival"), "a path answered outside the tree"],
+    ["host routes (mount/wrapper)", hostRoutes(options.hosts).filter((r) => r.kind === "mount" || r.kind === "wrapper"), "the tree's own wiring and decoration -- NOT a rival"],
     ["pack mounts", packMounts(options.at ?? "."), "a pack's page under its name"],
     ["destination bindings", await destinationBindings(options), "a path another system answers"],
   ];
@@ -97,16 +178,18 @@ export async function scoreboard(options = {}) {
 if (runsAs("osd-routes.mjs")) {
   const list = process.argv.includes("--list");
   const board = await scoreboard();
-  const others = board.filter((r) => r.name !== "ICF nodes").reduce((n, r) => n + r.count, 0);
+  const others = rivalCount(board);
   for (const r of board) {
     console.log(`${String(r.count).padStart(4)}  ${r.name.padEnd(22)} ${r.why}`);
     if (list) {
       for (const e of r.entries) {
-        console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}`);
+        const travel = e.travels === false ? "  [local package: does not travel]" : "";
+        console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}${travel}`);
       }
     }
   }
-  console.log(`\n${board.length} registries answer "who serves this path". One is the target;`);
-  console.log(`${others} entries live in the other ${board.length - 1}.`);
+  const rivals = board.filter(isRival);
+  console.log(`\n${rivals.length} registries rival the tree; ${others} paths live in them.`);
+  console.log(`The mount/wrapper row is not one of them -- deleting it would unplug the tree, not move a path into it.`);
   console.log("A registry is not migrated until its code is deleted -- see docs/icf-as-the-registry.md.");
 }
