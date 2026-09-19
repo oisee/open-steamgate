@@ -323,10 +323,42 @@ export function toIr(tree, options = {}) {
     return scan(table);
   }
 
+  /** Hints, which are a request to one engine rather than part of the meaning.
+   *
+   *  Two of them are not: `INLINE` and `NO_INLINE` change what is observable,
+   *  measured on HANA, so they are kept as a fact about the node and the
+   *  lowering expresses the barrier structurally instead of emitting the
+   *  text. The rest are plan-only and are dropped -- but only by name, from
+   *  this list. A hint nobody has looked at is refused, because silently
+   *  dropping an unknown one is exactly how a hint that mattered would
+   *  disappear. */
+  const PLAN_ONLY_HINTS = new Set([
+    "NO_USE_HEX_PLAN", "USE_HEX_PLAN", "NO_USE_OLAP_PLAN", "USE_OLAP_PLAN",
+    "IGNORE_PLAN_CACHE", "NO_CS_JOIN", "OPTIMIZE_METAMODEL", "ROUTE_TO",
+  ]);
+
+  function hintsOf(node) {
+    const hint = kid(node, "Hint");
+    if (hint === undefined) return undefined;
+    const names = kids(hint, "HintName").map((h) => String(leaf(h).value).toUpperCase());
+    const kept = [];
+    for (const name of names) {
+      if (name === "INLINE" || name === "NO_INLINE") kept.push(name);
+      else if (!PLAN_ONLY_HINTS.has(name)) {
+        throw new BindError(`the hint ${name} has not been looked at; it is dropped or it matters, and nobody has said which`, hint);
+      }
+    }
+    return kept.length === 0 ? undefined : kept;
+  }
+
   function select(node) {
     let rel;
     const from = kid(node, "Source");
     if (from !== undefined) rel = source(from);
+    // `FROM a, b` -- a cross join written with a comma
+    for (const extra of kids(node, "Source").slice(1)) {
+      rel = join(rel, source(extra), undefined, "cross");
+    }
     for (const j of kids(node, "Join")) {
       const right = source(kid(j, "Source"));
       const on = kid(j, "Condition");
@@ -350,6 +382,8 @@ export function toIr(tree, options = {}) {
       return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};
     });
     rel = project(rel, items);
+    const hints = hintsOf(node);
+    if (hints !== undefined) rel = {...rel, hints};
     return orderAndLimit(node, rel);
   }
 

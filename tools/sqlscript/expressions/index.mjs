@@ -190,12 +190,41 @@ export class Select extends Expression {
   getRunnable() {
     return seq(str("SELECT"), opt(str("DISTINCT")),
       new SelectItem(), star(seq(",", new SelectItem())),
-      opt(seq(str("FROM"), new Source(), star(new Join()))),
+      // `FROM a, b` is a cross join written with a comma, and the corpus uses
+      // it for exactly that -- `FROM public.m_services s, public.m_volume_files v`
+      // with the join written out in the WHERE
+      opt(seq(str("FROM"), new Source(), star(seq(",", new Source())), star(new Join()))),
       opt(seq(str("WHERE"), new Condition())),
       opt(seq(str("GROUP"), str("BY"), new Expr(), star(seq(",", new Expr())))),
       opt(seq(str("HAVING"), new Condition())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
-      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));
+      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))),
+      opt(new Hint()));
+  }
+}
+
+/** `WITH HINT ( NO_USE_HEX_PLAN )`, `WITH hint(inline)`.
+ *
+ *  A hint is a **request to one engine**, not part of what the program means,
+ *  so it is read here and never rendered -- carrying it to another engine
+ *  would either be refused or, worse, change a plan where the author meant
+ *  HANA. The two that are not plan-only are `INLINE` and `NO_INLINE`: those
+ *  change observable behaviour, measured (docs/sqlscript-hana-observed.md),
+ *  and the binder keeps them as a fact about the node rather than dropping
+ *  them with the rest. A hint the binder has not been told about is refused
+ *  by name; silently dropping an unknown one is how a hint that mattered
+ *  would disappear. */
+export class Hint extends Expression {
+  getRunnable() {
+    return seq(str("WITH"), str("HINT"), "(",
+      opt(seq(new HintName(), star(seq(",", new HintName())))), ")");
+  }
+}
+
+export class HintName extends Expression {
+  getRunnable() {
+    return seq(tok(TokenKind.identifier),
+      opt(seq("(", star(altPrio(tok(TokenKind.identifier), tok(TokenKind.number), tok(TokenKind.string), ",", ".")), ")")));
   }
 }
 

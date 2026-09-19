@@ -157,8 +157,13 @@ describe("SQLScript IR: the shapes the corpus actually contains", () => {
     // the idiom is a join against a one-row relation; here the one row is a
     // bound parameter rather than a literal, which is the whole improvement
     const oneRow = project(scan("DUMMY"), [{as: "SIG", expr: param("lv_sig", T.char(1))}]);
-    const rel = join(scan("SRC"), oneRow, lit(1, T.int), "cross");
+    // no ON: a cross join has none, and this used to pass `lit(1)` as one,
+    // which rendered `CROSS JOIN ... ON 1` -- not valid SQL on any of the
+    // three engines. The test never ran the statement, so it stayed green
+    // until the lowering started refusing the shape instead of rendering it.
+    const rel = join(scan("SRC"), oneRow, undefined, "cross");
     expect(sqlOf(rel, "duckdb")).to.contain("CROSS JOIN");
+    expect(sqlOf(rel, "duckdb")).to.not.match(/CROSS JOIN.* ON /);
     expect(lower(rel, "duckdb").params[0].name).to.equal("lv_sig");
   });
 

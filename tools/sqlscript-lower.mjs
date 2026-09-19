@@ -199,8 +199,20 @@ export function lower(rel, dialectName, options = {}) {
         return `SELECT * FROM ${from(r.input)} WHERE ${expr(r.pred)}`;
       case "project":
         return `SELECT ${r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ")} FROM ${from(r.input)}`;
-      case "join":
-        return `SELECT * FROM ${from(r.left)} ${r.kind.toUpperCase()} JOIN ${from(r.right)} ON ${expr(r.on)}`;
+      case "join": {
+        // A cross join has no ON, and asking for one crashed rather than
+        // refused: `FROM a, b` binds to exactly this node, and every engine
+        // spells it `CROSS JOIN`.
+        const kind = r.kind.toUpperCase();
+        const on = r.on === undefined ? "" : ` ON ${expr(r.on)}`;
+        if (kind === "CROSS" && r.on !== undefined) {
+          throw new Refused("a CROSS JOIN carries no ON condition");
+        }
+        if (kind !== "CROSS" && r.on === undefined) {
+          throw new Refused(`a ${kind} JOIN without an ON condition is a cross join written by accident, not a join`);
+        }
+        return `SELECT * FROM ${from(r.left)} ${kind} JOIN ${from(r.right)}${on}`;
+      }
       case "union":
         return r.inputs.map(select).join(r.all ? " UNION ALL " : " UNION ");
       case "aggregate": {

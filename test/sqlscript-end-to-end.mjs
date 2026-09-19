@@ -53,3 +53,32 @@ describe("a SQLScript body, all the way to rows", function () {
       .to.throw(/not lowered yet/);
   });
 });
+
+describe("the two constructs a hint and a comma bring", () => {
+  it("a comma in the FROM is a cross join, and the join carries no ON", () => {
+    const {sql} = compile("SELECT k FROM src, src2 WHERE k <> 'x';", "duckdb",
+      {SRC: {K: {abap: "C", len: 1}}, SRC2: {N: {abap: "I"}}});
+    expect(sql).to.contain("CROSS JOIN");
+    expect(sql).to.not.match(/CROSS JOIN [^)]*ON /);
+  });
+
+  it("a plan-only hint is dropped by name, and the statement carries no trace of it", () => {
+    const {sql} = compile("SELECT k FROM src WITH HINT ( NO_USE_HEX_PLAN );", "duckdb",
+      {SRC: {K: {abap: "C", len: 1}}});
+    expect(sql).to.not.match(/HINT/i);
+    expect(sql).to.contain('FROM "SRC"');
+  });
+
+  it("but a hint nobody has looked at is refused, rather than dropped with the rest", () => {
+    // dropping an unknown hint silently is how a hint that mattered would
+    // disappear; INLINE and NO_INLINE are the two that change behaviour
+    expect(() => compile("SELECT k FROM src WITH HINT ( SOME_FUTURE_HINT );", "duckdb",
+      {SRC: {K: {abap: "C", len: 1}}})).to.throw(/SOME_FUTURE_HINT has not been looked at/);
+  });
+
+  it("and NO_INLINE is kept on the node, because it changes what is observable", () => {
+    const {ir} = compile("SELECT k FROM src WITH HINT ( NO_INLINE );", "duckdb",
+      {SRC: {K: {abap: "C", len: 1}}});
+    expect(ir.rel.hints).to.deep.equal(["NO_INLINE"]);
+  });
+});
