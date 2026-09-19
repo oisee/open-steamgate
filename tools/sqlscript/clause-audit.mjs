@@ -116,6 +116,52 @@ export function missingColumns(sql = "", columns = []) {
   return columns.filter((c) => !new RegExp(`"${c}"`).test(sql));
 }
 
+/**
+ * The invariants that need only ONE body, so they can be run over a corpus.
+ *
+ * Invariants 1, 2 and 5 need a pair -- with and without, or this operator
+ * against that one -- and a pair cannot be derived from a body somebody else
+ * wrote. These two can:
+ *
+ *   every column the PLAN names must appear in the statement (the plan is
+ *   the authority here, not the source text: a `col` node is what the binder
+ *   decided the body says)
+ *   no keyword of the language may come out as an identifier
+ *
+ * This is the half that can go looking rather than stand guard, and it is
+ * the half this session cannot run: the corpus is on the other machine.
+ */
+export function auditBody(body, catalogue = {}) {
+  let rel;
+  try {
+    rel = toIr(parse(new Body(), lex(body)), {catalogue}).rel;
+  } catch (error) {
+    return {skipped: String(error.message ?? error).split("\n")[0].slice(0, 90)};
+  }
+  let sql;
+  try {
+    sql = lower(rel, "hana").sql;
+  } catch (error) {
+    return {skipped: String(error.message ?? error).split("\n")[0].slice(0, 90)};
+  }
+  const named = new Set();
+  const walk = (node) => {
+    if (node === undefined || node === null || typeof node !== "object") return;
+    if (node.node === "col" && typeof node.name === "string") named.add(node.name.toUpperCase());
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(walk);
+      else walk(value);
+    }
+  };
+  walk(rel);
+  const findings = [];
+  const missing = missingColumns(sql, [...named]);
+  if (missing.length > 0) findings.push({kind: "column lost", detail: missing.join(", ")});
+  const taken = keywordsTakenAsNames(sql);
+  if (taken.length > 0) findings.push({kind: "a keyword became an identifier", detail: taken.join(", ")});
+  return {sql, findings};
+}
+
 export function audit() {
   const findings = [];
 

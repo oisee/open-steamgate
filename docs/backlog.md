@@ -3052,3 +3052,58 @@ data, so a different value is a difference until somebody says otherwise;
 **What is left for O.1**: the other half, an ST05 or ADT trace taken on A4H
 and brought to the same canonical form. That needs the sandbox and therefore
 an ask — the cheap half is done and the ask is now a single one.
+
+## W.1 branch plumbing, and what its first real run found (2026-09-19)
+
+`node tools/osd-branch.mjs add <name> [--from <ref>] [--port N]` plants a
+worktree with **its own port and its own database file**, `list`, `remove`.
+`tools/osd-branch.mjs`, suite `test/osd-branch.mjs`.
+
+The worktree half already existed — `tools/osd-worktree.mjs` shares
+`node_modules`, `.local/lars` and `.local/tls` by symlink — and was nearly
+written a second time. This is only what W.1 needs on top.
+
+Three things a fresh worktree does not have, and all three fail quietly:
+
+- **a port.** Asked of the operating system, not picked from a range. The
+  first version read `address()` on the line after `listen()` and
+  destructured `null`; a guess from a range would have worked most of the
+  time, and when it did not, two branches would not error — they would
+  answer each other's requests.
+- **a build.** An unbuilt tree **listens**. It answers 503 to everything, so
+  the first replay against one reported thirteen differences of "200 against
+  503", which is a true statement about nothing. `isBuilt()` is checked and
+  said out loud.
+- **the packs' `upstream/`.** The third thing git does not carry. A fresh
+  worktree refuses with `UNFETCHED`, correctly. It is **fetched, not shared**:
+  a pack pins its upstream by commit in its own manifest, so a ref that moved
+  the pin needs different content and a shared folder would quietly hand it
+  the other branch's.
+
+### The finding: a generation name is not a function of the commit
+
+Two worktrees at one commit, built by the same command:
+
+```
+w1probe  build 1 -> f3ad1cc3189dd5c7
+w1twin   build 1 -> fd5fd5a895011136      same commit, another name
+w1twin   build 2 -> c0071cd2fef44a3e
+w1probe  build 2 -> c0071cd2fef44a3e      the two converge
+either   build 3 -> "already built"       and only now does the cache hit
+```
+
+`gen/` is an input to the generation hash **and is written by the build**, so
+the hash is self-referential: the first build of a fresh tree names itself
+from the pre-generation state, and no later build of that commit will ever
+name that generation again. Consequences, in the order they cost something:
+
+- "the build is cached by input hash, so the second branch is often free" is
+  **false for the first build** of a fresh tree, always
+- a generation reported by a freshly built system is not comparable with one
+  reported by a settled system, at the same commit
+- which is the mechanism behind the deploy rule already in force — compare
+  the **commit**, never the generation hash
+
+Not fixed here: `gen/` is an input on purpose (CLAUDE.md records why), so
+taking it out is a decision about what a generation *is*, not a repair. What
+is fixed is that it is now measured rather than surprising.
