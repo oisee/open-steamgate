@@ -203,6 +203,9 @@ export function seamType(type) {
  * file, and nothing here knows that a registry exists.
  */
 export function schemaOf(rel, catalogue = {}) {
+  if (rel === undefined || rel === null || rel.rel === undefined) {
+    throw new Error(`schemaOf: a relation arrived without a rel kind: ${JSON.stringify(rel)?.slice(0, 60)}`);
+  }
   const need = (r) => schemaOf(r, catalogue);
   switch (rel.rel) {
     case "scan": {
@@ -222,6 +225,7 @@ export function schemaOf(rel, catalogue = {}) {
     case "limit":
       return need(rel.input);
     case "project":
+      if (rel.items === undefined) throw new Error("schemaOf: a project arrived without its items");
       return Object.fromEntries(rel.items.map((item) => [item.as, typeOfExpr(item.expr, need(rel.input))]));
     case "join": {
       const left = need(rel.left);
@@ -254,6 +258,9 @@ export function schemaOf(rel, catalogue = {}) {
 
 /** the type an expression produces, given the schema it reads from */
 export function typeOfExpr(expr, schema = {}) {
+  if (expr === undefined || expr === null || expr.node === undefined) {
+    throw new Error(`typeOfExpr: an expression arrived without a node kind: ${JSON.stringify(expr)?.slice(0, 60)}`);
+  }
   switch (expr.node) {
     case "col": {
       const type = schema[expr.name] ?? schema[expr.name?.toUpperCase?.()];

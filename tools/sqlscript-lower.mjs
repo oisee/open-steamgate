@@ -135,6 +135,15 @@ export function lower(rel, dialectName, options = {}) {
   const refOf = options.relationRef ?? ((handle) => handle);
 
   const expr = (e) => {
+    // A missing or shapeless node is refused by name, not dereferenced. A
+    // TypeError here says "Cannot read properties of undefined (reading
+    // 'node')", which names the line that fell over rather than the thing
+    // that was wrong, and a histogram of such messages is a histogram of
+    // where walkers stand - measured across both halves of this project on
+    // 2026-09-19 and fixed in both.
+    if (e === undefined || e === null || e.node === undefined) {
+      throw new Refused(`an expression arrived without a node kind: ${JSON.stringify(e)?.slice(0, 60)}`);
+    }
     switch (e.node) {
       case "col": return d.quote(e.name);
       case "lit":
@@ -226,6 +235,19 @@ export function lower(rel, dialectName, options = {}) {
   };
 
   const select = (r) => {
+    if (r === undefined || r === null || r.rel === undefined) {
+      throw new Refused(`a relation arrived without a rel kind: ${JSON.stringify(r)?.slice(0, 60)}`);
+    }
+    // the parts each kind cannot do without, checked before they are read
+    // A CROSS JOIN has no predicate by definition, so demanding `on` of
+    // every join refused the very idiom the corpus uses most (60 bodies) -
+    // caught by its own test, which is what that test is for.
+    const needs = {filter: ["pred"], project: ["items"],
+                   join: r.kind === "cross" ? ["left", "right"] : ["left", "right", "on"],
+                   union: ["inputs"], aggregate: ["groupBy", "aggs"], order: ["keys"], limit: ["n"]};
+    for (const key of needs[r.rel] ?? []) {
+      if (r[key] === undefined) throw new Refused(`a ${r.rel} arrived without its ${key}`);
+    }
     switch (r.rel) {
       case "var":
         // deliberately not lowered: see varRef() in sqlscript-ir.mjs. Getting

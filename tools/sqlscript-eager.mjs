@@ -187,6 +187,9 @@ export async function runBothWays(client, rel, dialect) {
  * no predictor, because it is quoted.
  */
 export function forceability(rel, dialect, {paramsOnMaterialise = true} = {}) {
+  if (rel === undefined || rel === null || rel.rel === undefined) {
+    throw new Error(`forceability: a relation arrived without a rel kind: ${JSON.stringify(rel)?.slice(0, 60)}`);
+  }
   const blocked = [];
   let steps = 0;
   const walk = (node) => {
