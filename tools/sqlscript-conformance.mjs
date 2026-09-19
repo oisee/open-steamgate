@@ -76,10 +76,22 @@ const DDL = {
       a INTEGER, b INTEGER, c INTEGER, zero INTEGER,
       d1 NUMERIC, d2 NUMERIC, nullable INTEGER)`,
 };
-const ROWS = [
+// Two fixtures, and the difference between them is the whole padding
+// question. The padded one is what our runtime writes today; the unpadded one
+// is what a real system holds, measured on A4H: a CHAR(30) column whose value
+// is '$TMP' answers LENGTH 4, and 12132 rows satisfy a LENGTH = 4 predicate
+// evaluated by HANA itself. `--unpadded` therefore does not simulate a fix -
+// it asks what the table would say once the write boundary stops padding,
+// which turns a forecast into a measurement.
+const PADDED = [
   `INSERT INTO t VALUES ('r1', 'abc       ', 'oops', '42', 1, 2, -7, 0, 0.10, 0.20, 5)`,
   `INSERT INTO t VALUES ('r2', 'zz        ', 'oops', '7',  1, 2, -7, 0, 1.00, 2.00, NULL)`,
 ];
+const UNPADDED = [
+  `INSERT INTO t VALUES ('r1', 'abc', 'oops', '42', 1, 2, -7, 0, 0.10, 0.20, 5)`,
+  `INSERT INTO t VALUES ('r2', 'zz',  'oops', '7',  1, 2, -7, 0, 1.00, 2.00, NULL)`,
+];
+const ROWS = process.argv.includes("--unpadded") ? UNPADDED : PADDED;
 
 async function runDuckDB() {
   const {DuckDBInstance} = await import("@duckdb/node-api");
