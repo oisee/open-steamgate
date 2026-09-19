@@ -57,7 +57,7 @@ CLASS zcl_stg_segw_export IMPLEMENTATION.
         EXPORTING
           message = |no project { iv_project }|.
     ENDIF.
-    rv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
+    rv_xml = zcl_stg_segw_gen=>bom( ) && `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
       && `<abapGit version="v1.0.0" serializer="LCL_OBJECT_IWPR" serializer_version="v1.0.0">` && lv_nl
       && ` <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">` && lv_nl
       && `  <asx:values>` && lv_nl

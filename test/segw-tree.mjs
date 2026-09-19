@@ -121,10 +121,14 @@ describe("tools/segw-tables + tools/segw-tree: the project tree as tables", () =
   });
 
   // the strong claim, on the untracked corpus: every IWPR file a SEGW
-  // system wrote comes back byte for byte (the byte order mark aside)
+  // system wrote comes back **byte for byte**, and the byte order mark is
+  // not an aside. Every real IWPR in the corpus begins `ef bb bf`; the
+  // writer emits one; and this test used to strip it from the input and
+  // then demand output without it, which is the one place the corpus is
+  // strongest and the comparison was weakest.
   (files.length === 0 ? it.skip : it)(`the SEGW-written IWPR files of the corpus round trip byte for byte (${files.length} files)`, () => {
     for (const file of files) {
-      const xml = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+      const xml = readFileSync(file, "utf8");
       const tables = importIwpr(xml, spec);
       expect(exportIwpr(tables, projectOf(tables), spec), file).to.equal(xml);
     }

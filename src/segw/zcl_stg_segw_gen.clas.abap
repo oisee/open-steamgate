@@ -5,6 +5,17 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
 * byte (test/segw-tree.mjs runs both over the fixtures and the corpus).
 * Stage 1: the model provider base class (_MPC). The DPC follows.
   PUBLIC SECTION.
+*   The byte order mark every SEGW-written XML begins with, in one place.
+*   It was in three: the Node writers gained it and two of the three ABAP
+*   ones did not, so `export` and `RepoFileSet` came back three bytes short
+*   of the file they claim to reproduce and test/segw-tree went red on the
+*   published branch for a whole push cycle with nothing to announce it.
+*   A rule about what every writer must do does not live in a comment next
+*   to one of them.
+    CLASS-METHODS bom
+      RETURNING
+        VALUE(rv_bom) TYPE string.
+
     TYPES: BEGIN OF ty_property,
              name         TYPE string,
              abap_field   TYPE string,
@@ -393,6 +404,11 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_stg_segw_gen IMPLEMENTATION.
+
+  METHOD bom.
+    rv_bom = cl_abap_conv_in_ce=>uccp( 'FEFF' ).
+  ENDMETHOD.
+
 
 * ------------------------------------------------------------- the model
 

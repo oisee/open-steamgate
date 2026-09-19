@@ -1105,7 +1105,7 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     DATA lv_sub       TYPE string.
     DATA lv_bom       TYPE string.
 
-    lv_bom = cl_abap_conv_in_ce=>uccp( 'FEFF' ).
+    lv_bom = zcl_stg_segw_gen=>bom( ).
     rv_xml = |{ lv_bom }<?xml version="1.0" encoding="utf-8"?>\n|
       && |<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">\n|
       && | <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">\n|
