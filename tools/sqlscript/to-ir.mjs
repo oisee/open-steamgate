@@ -249,14 +249,24 @@ export function toIr(tree, options = {}) {
   // binds a name the statements after it may use. The grammar wraps each one
   // in a `Statement`, so the list is flattened one level -- and not deeper:
   // an assignment inside a subquery is not a statement of this body.
+  // A BEGIN..END block contributes its statements to the body: the block
+  // introduces no scope the lowering can see, because a table variable
+  // declared inside one is still a name the statements after it use. So the
+  // list is flattened through blocks as well as through Statement wrappers
+  // -- and still not into a subquery, which is not a statement of this body.
   const flat = [];
-  for (const child of tree.children ?? []) {
-    if (child.node === "Statement") flat.push(...(child.children ?? []));
-    else flat.push(child);
-  }
+  const collect = (node) => {
+    for (const child of node.children ?? []) {
+      if (child.node === "Statement") collect(child);
+      else if (child.node === "Block") collect(child);
+      else flat.push(child);
+    }
+  };
+  collect(tree);
 
   const statements = [];
   let last;
+  let returnedRel;
   for (const node of flat) {
     switch (node.node) {
       case "Assignment": {
@@ -269,6 +279,35 @@ export function toIr(tree, options = {}) {
       case "SetOperation":
         last = node;
         break;
+      case "Return": {
+        // `RETURN :lt;` or `RETURN SELECT ...;` -- what the body answers
+        // with. Blocked 17 of the 34 bodies that parsed, which is why it is
+        // the first thing lowered rather than the next thing parsed.
+        const returned = kid(node, "SetOperation");
+        if (returned !== undefined) {
+          last = returned;
+          break;
+        }
+        const expr = kid(node, "Expr");
+        const host = expr === undefined ? undefined : (function find(n) {
+          if (n.node === "host") return n;
+          for (const c of n.children ?? []) {
+            const got = find(c);
+            if (got !== undefined) return got;
+          }
+          return undefined;
+        })(expr);
+        if (host === undefined) {
+          throw new BindError("RETURN of something that is not a table variable or a select", node);
+        }
+        const name = String(host.value).slice(1).toUpperCase();
+        const known = bound.get(name);
+        if (known === undefined) {
+          throw new BindError(`RETURN of an unassigned table variable :${name.toLowerCase()}`, host);
+        }
+        returnedRel = known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue));
+        break;
+      }
       case "word":
       case "operator":
         break;
@@ -280,6 +319,7 @@ export function toIr(tree, options = {}) {
         throw new BindError(`${node.node} is parsed but not lowered yet`, node);
     }
   }
+  if (returnedRel !== undefined) return {statements, rel: returnedRel};
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
   return {statements, rel: relation(last)};
 }

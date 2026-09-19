@@ -285,3 +285,30 @@ The list to work from now, by bodies blocked: `BEGIN` 115, `DECLARE` 58,
 `*` 31, `RETURN` 29, `IF` 11, `CALL` 6, `UPSERT`/`DELETE` 10. The first four
 are the same names as before, which means each was **partly** implemented --
 the grammar accepts a form and the corpus writes another.
+
+### Lowering `RETURN` and flattening `BEGIN`: 0 → 17, and what is left says why
+
+| | bodies | parsed | lowered |
+| --- | ---: | ---: | ---: |
+| working | 405 | 34 | **17 (4%)** |
+
+`RETURN :lt` names what the body answers with, and a `BEGIN … END` block
+contributes its statements to the body rather than introducing a scope the
+lowering can see -- a table variable declared inside one is still a name the
+statements after it use.
+
+**The refusals that remain are one finding, not seven.** Of the 17 bodies
+that parse and still do not lower, 8 "end without a statement that produces
+rows" and 7 refuse an "unknown table variable" -- and both are the **method
+signature**, which the binder is not given:
+
+- an AMDP procedure answers through its `et_*` **OUT table parameter**, so it
+  assigns and never selects at the end. There is no missing statement; there
+  is a parameter we do not know about.
+- `:it_*` is an **IN table parameter**. It is unassigned in the body because
+  it arrives from the caller.
+
+So the next step is not a construct at all: hand the binder the signature
+`tools/amdp-extract.mjs` already reads, bind the IN parameters as sources and
+treat the OUT parameter as what the body returns. Fourteen of the fifteen
+remaining refusals go with it, and none of them needed grammar.
