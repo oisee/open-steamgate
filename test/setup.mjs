@@ -181,7 +181,7 @@ export async function setup(abap, schemas, insert) {
   // and a second connection can read them. The default path keeps them
   // beside the tree, out of git.
   if (process.env.STG_DB === "file") {
-    const {FileSqliteClient, DEFAULT_DATABASE, BASE_DIR} = await import("../tools/sqlite-file-client.mjs");
+    const {FileSqliteClient, DEFAULT_DATABASE, BASE_DIR, setAsideDatabase} = await import("../tools/sqlite-file-client.mjs");
     const {fingerprintOf, SchemaDrift} = await import("../tools/osd-persist.mjs");
     const {existsSync, renameSync, copyFileSync, mkdirSync} = await import("node:fs");
     const {join, dirname} = await import("node:path");
@@ -231,7 +231,9 @@ export async function setup(abap, schemas, insert) {
       }
       await db.disconnect();
       const aside = `${path}.${found ?? "unstamped"}.drift`;
-      renameSync(path, aside);
+      // the -wal and the -shm go with it: a shared-memory index left behind
+      // under the old name is what a later runtime maps and dies on
+      setAsideDatabase(path, aside);
       console.log(`${said}: moved to ${aside}, starting with an empty database`);
       db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
       abap.context.databaseConnections["DEFAULT"] = traced(db);

@@ -16,7 +16,7 @@
 import {DatabaseSync} from "node:sqlite";
 import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
-import {mkdirSync, renameSync} from "node:fs";
+import {existsSync, mkdirSync, renameSync, rmSync} from "node:fs";
 import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
 
@@ -46,6 +46,45 @@ export const DEFAULT_DATABASE = (() => {
 // where a seeded database is kept once per DDIC, so the next instance copies
 // it instead of seeding again: .local/db/base/<schema-hash>.sqlite
 export const BASE_DIR = process.env.STG_DB_BASE ?? ".local/db/base";
+
+// A WAL database is three files and only one of them is the database.
+// Moving `x.sqlite` aside and leaving `x.sqlite-shm` where it was leaves a
+// shared-memory WAL index named after a database that is no longer there,
+// and the next process to open a fresh `x.sqlite` maps it: the index says
+// the database has a thousand pages, the file has one, and the read past
+// the end comes back as `SQLITE_IOERR_SHORT_READ` (522), which prints as
+// "disk I/O error" and names nothing.
+//
+// That is not a theory. It took the i7 deployment down for eight hours on
+// 2026-09-19: the drift path moved a database aside at 10:28 while a
+// runtime from the previous night still had it open, so SQLite's own rule
+// -- the last connection to close deletes the -wal and the -shm -- did not
+// fire, because that connection never closed. The -wal was unlinked and the
+// -shm was not, and every runtime that booted afterwards died on
+// `PRAGMA journal_mode = WAL` before answering anything.
+//
+// So the sidecars travel with the database, and a caller that only wants
+// the database gone says so by passing no destination.
+export const SIDECARS = ["-wal", "-shm"];
+
+export function setAsideDatabase(path, aside) {
+  if (aside === undefined) {
+    rmSync(path, {force: true});
+  } else {
+    renameSync(path, aside);
+  }
+  for (const suffix of SIDECARS) {
+    if (existsSync(`${path}${suffix}`) === false) {
+      continue;
+    }
+    if (aside === undefined) {
+      rmSync(`${path}${suffix}`, {force: true});
+    } else {
+      renameSync(`${path}${suffix}`, `${aside}${suffix}`);
+    }
+  }
+  return aside;
+}
 
 // A fork: a consistent single-file copy of a database, taken while it is
 // open and even while its writer holds an open LUW — the copy carries the
