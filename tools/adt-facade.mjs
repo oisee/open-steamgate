@@ -18,6 +18,7 @@
 // from the object store, table contents from its data layer. The store never
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
+import {execFileSync} from "node:child_process";
 import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join} from "node:path";
@@ -1046,10 +1047,35 @@ export function adtRouter(options = {}) {
   //
   // The digest is over the façade's own sources, so it changes when the
   // answers change and not when the process merely restarts.
+  /** the commit this tree is at, asked once: a release is built from a
+   *  checkout, so the answer does not change while the process lives */
+  let commitCache;
+  const sourceCommit = () => {
+    if (commitCache !== undefined) return commitCache;
+    commitCache = process.env.GITHUB_SHA ?? "";
+    if (commitCache === "") {
+      try {
+        commitCache = execFileSync("git", ["rev-parse", "HEAD"],
+          {cwd: store.root ?? process.cwd(), encoding: "utf8"}).trim();
+      } catch {
+        commitCache = "unknown";
+      }
+    }
+    return commitCache;
+  };
+
   router.get(`${BASE}/core/http/build`, (req, res) => {
     res.type("application/json; charset=utf-8").send(JSON.stringify({
       build: facadeBuildStamp(),
       generation: liveHash(store.root),
+      // The commit, and it is the **only** number the two deployment targets
+      // can share (docs/backlog.md, "Deploying: the i7 follows Pages"). The
+      // generation above is the transpiler's, the preview's `stamp` is
+      // webpack's, and those two cannot agree even when built from one
+      // source -- a check on them produces a false alarm, which is worse
+      // than no check. `unknown` when there is no git, rather than a field
+      // that looks measured and is not.
+      commit: sourceCommit(),
       // Are we serving what we are running? Three names, and they are
       // synchronized when all three agree. source is what a build of the
       // tree would produce now (105 ms to compute); live is the build on
