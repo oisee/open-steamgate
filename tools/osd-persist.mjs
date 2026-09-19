@@ -62,7 +62,21 @@ export async function stamp(db, schema) {
 // file, which it can write to as it goes
 export function databaseFile() {
   const path = process.env.STG_DB_PATH;
-  if (path === undefined || path === "" || process.env.STG_DB === "duckdb") {
+  // The stamp travels with a saved database **file**, so a backend that has
+  // no file has nothing to stamp. duckdb was excluded by name and HANA was
+  // not, which is the wrong shape of test: the list of engines that are not
+  // a file grows, and the one that is does not. `STG_DB` unset or "file" is
+  // the file client; everything else is a server or a memory database.
+  //
+  // Measured on HANA before fixing it, because the statements below are not
+  // merely pointless there, they are refused:
+  //   CREATE TABLE IF NOT EXISTS …  -> incorrect syntax near "IF"
+  //   INSERT INTO t ('a', 'b') …    -> incorrect syntax near "a"
+  // The second is the same defect this tree sent upstream today as
+  // abaplint/transpiler#1876: column names in single quotes, which SQLite
+  // accepts as identifiers and no other engine does.
+  const file = process.env.STG_DB === undefined || process.env.STG_DB === "file";
+  if (path === undefined || path === "" || file === false) {
     return undefined;
   }
   return path;
