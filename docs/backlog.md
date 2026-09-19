@@ -971,6 +971,44 @@ one of them parsed, lowered or passed, and computed something else.
 
 ---
 
+## A pre-flight for the ABAP we generate (2026-09-19, next)
+
+Six findings in one evening had one shape: a file that describes **enough
+for this runtime and not enough for a system**. abaplint passed every one of
+them, because abaplint checks the language and these were facts about a
+system -- a buffering flag with no type, a search help parameter with no
+data element, a date in the internal format where abapGit wants ISO, a
+generic table type used as a structure component. The only reader that could
+tell us was A4H, and the loop was: build a zip, a person imports it, an
+error comes back in a chat message.
+
+**That loop can be two steps shorter.** ADT answers a syntax check for
+source that is *not on the system*: `/sap/bc/adt/checkruns` with reporter
+`abapCheckRun`, which the system's own `checkruns/reporters` lists as
+supporting `CLAS*`, `INTF*`, `PROG*`, `TABL/DT`, `DTEL/DE` and the rest.
+Measured tonight through the MCP: the wrong version of
+`ZCL_ZOSD_004_DEMO_MPC_EXT` returns
+
+    "TT_BOOKING" is a generic type. Use this type only for typing field
+    symbols and formal parameters.
+
+and the fixed one returns nothing at all -- **before** any import,
+activation, or person.
+
+So: `stg-compile` (and segw-gen) should be able to ask a system about what
+they just wrote. Off by default and never in CI, because it needs a system
+and credentials; on when a developer asks for it, the way `STG_DB=hana` is.
+The connection belongs under `.local/` with everything else that names a
+host.
+
+Worth doing for one reason above the others: **abaplint and a system
+disagree, and the disagreement is the interesting part.** Every one of
+tonight's six was invisible here and obvious there, and each cost a round
+trip through a human. A check that asks the system turns that into a build
+message.
+
+---
+
 ## The loop is closed: a SEGW project from one YAML is on a real system (2026-09-19)
 
 The README has promised "transpile -> Open SQL -> OData -> Fiori, deploying
