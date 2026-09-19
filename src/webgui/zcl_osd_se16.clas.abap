@@ -40,6 +40,13 @@ CLASS zcl_osd_se16 DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_html) TYPE string.
 
+*   every column the request asked for, in one string, however it spelled it
+    CLASS-METHODS columns_asked
+      IMPORTING
+        ii_request        TYPE REF TO if_http_request
+      RETURNING
+        VALUE(rv_columns) TYPE string.
+
     TYPES: BEGIN OF ty_criterion,
              field TYPE string,
              value TYPE string,
@@ -143,8 +150,7 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
 *     cannot reach the WHERE, because nothing ever looks for it. The same
 *     rule gives the column choice its validation for free.
       ls_entity = zcl_stg_cds_registry=>get( lv_name ).
-      lv_columns = server->request->get_form_field( 'c' ).
-      TRANSLATE lv_columns TO UPPER CASE.
+      lv_columns = columns_asked( server->request ).
       LOOP AT ls_entity-fields INTO ls_field.
 *       the form field name is **lower case**, and that is not cosmetic:
 *       `get_form_field` lower-cases the name it is asked for and compares it
@@ -186,6 +192,41 @@ CLASS zcl_osd_se16 IMPLEMENTATION.
 
     server->response->set_header_field( name = 'content-type' value = 'text/html; charset=utf-8' ).
     server->response->set_cdata( page( iv_body = lv_body iv_title = lv_name ) ).
+  ENDMETHOD.
+
+  METHOD columns_asked.
+*   This screen produces the column choice in **two** spellings and has to
+*   read both, because it writes both itself. A checkbox group sends one
+*   parameter per box -- `c=MASTER&c=INCLUDE` -- while `link` builds the
+*   same choice as one comma list, `c=MASTER,INCLUDE`. `get_form_field`
+*   answers the **first** match and has no way to say there were others, so
+*   the form's second column was not rejected, it was never seen: pressing
+*   Execute came back with one column while following a link kept them all
+*   (Alice, 2026-09-19).
+*
+*   The general shape is worth naming because it is not a typo: a reader
+*   whose answer cannot express "there were more" turns a multiple choice
+*   into a first choice **silently**. `get_form_fields` returns the table,
+*   which is the same question asked so that it can.
+    DATA lt_field TYPE tihttpnvp.
+    DATA ls_field LIKE LINE OF lt_field.
+
+*   `get_form_fields` lower-cases the names it returns, exactly as
+*   `get_form_field` lower-cases the name it is asked for, so the comparison
+*   is against a lower-case literal here too (ANORMALIES, "get_form_field
+*   lowercases the question and not the answer").
+    ii_request->get_form_fields( CHANGING fields = lt_field ).
+    LOOP AT lt_field INTO ls_field WHERE name = 'c'.
+      IF ls_field-value IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      IF rv_columns IS INITIAL.
+        rv_columns = ls_field-value.
+      ELSE.
+        rv_columns = |{ rv_columns },{ ls_field-value }|.
+      ENDIF.
+    ENDLOOP.
+    TRANSLATE rv_columns TO UPPER CASE.
   ENDMETHOD.
 
   METHOD entity_list.

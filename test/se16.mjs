@@ -97,6 +97,41 @@ describe("the data browser", function () {
     expect(junk).to.not.contain("NOT_A_FIELD");
   });
 
+  it("keeps every column the form ticked, and not just the first", async () => {
+    // Alice pressed Execute with three boxes ticked and got one column back
+    // (2026-09-19). The screen writes the choice in **two** spellings: a
+    // checkbox group sends one parameter per box, `c=A&c=B`, and `link`
+    // builds the same choice as one comma list, `c=A,B`. The reader used
+    // `get_form_field`, which answers the first match and cannot say there
+    // were others, so following a link kept the columns and pressing
+    // Execute silently dropped all but one.
+    //
+    // The test above this one had covered columns since wave 2 and missed
+    // it, because it wrote `c=TRAVELID,STATUS` itself -- the spelling the
+    // *links* use. So this one does not compose a query at all: it reads
+    // the form off the page and submits it the way a browser does. A test
+    // that invents the request can only ever check the encoding it invented.
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL`)).text();
+    const boxes = [...page.matchAll(/<input type="checkbox" name="([^"]+)" value="([^"]+)"( checked)?>/g)];
+    expect(boxes.length, "a checkbox per field").to.be.greaterThan(2);
+    const headers = (html) => [...(/<table class="rows">([\s\S]*?)<\/table>/.exec(html)?.[1] ?? "")
+      .matchAll(/<th>(?:<a[^>]*>)?([A-Z_0-9]+)/g)].map((m) => m[1]);
+    const submit = async (ticked) => {
+      const q = new URLSearchParams([["t", "ZC_STG_TRAVEL"], ...ticked.map((b) => [b[1], b[2]]), ["max", "5"]]);
+      return headers(await (await fetch(`${BASE}?${q}`)).text());
+    };
+    expect(await submit(boxes), "all of them ticked, all of them shown")
+      .to.deep.equal(boxes.map((b) => b[2]));
+    const three = boxes.slice(0, 3);
+    expect(await submit(three), "and the choice narrows rather than collapsing")
+      .to.deep.equal(three.map((b) => b[2]));
+    // both spellings mean the same thing, including mixed, because the
+    // screen produces both and a reader of one of them is half a reader
+    const mixed = await (await fetch(
+      `${BASE}?t=ZC_STG_TRAVEL&c=${boxes[0][2]},${boxes[1][2]}&c=${boxes[2][2]}`)).text();
+    expect(headers(mixed)).to.deep.equal(boxes.slice(0, 3).map((b) => b[2]));
+  });
+
   it("a criterion on a field the entity does not have cannot reach the WHERE", async () => {
     const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_not_a_field=${encodeURIComponent("x' OR '1'='1")}`)).text();
     expect(page, "nothing was built from it").to.contain("WHERE <code>(none)</code>");
