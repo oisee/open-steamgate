@@ -527,9 +527,23 @@ async function main() {
       console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
     }
     for (const {one, who} of real) console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${one.why}`);
+    // This footer used to end "the HANA column has to be merged in before any
+    // of them can be assigned" -- and it is printed **only** when that column
+    // is there, since everything above it compares against the oracle. So it
+    // asked for the one thing that had just been done. A closing line that
+    // names the next step is read as the next step; one that names a step
+    // already taken teaches the reader to skip the footer (2026-09-19).
     console.log("\nA count is not the verdict. Each differing row needs a class -");
-    console.log("native / rewrite / typed / compat / host / refuse - and the HANA");
-    console.log("column has to be merged in before any of them can be assigned.");
+    console.log("native / rewrite / typed / compat / host / refuse - and with the");
+    console.log(oracle === "hana"
+      ? `HANA column merged, the ${real.length} rows above can be given one.`
+      // and when the oracle is a stand-in, the original warning is the true
+      // one and has to survive: a class assigned against DuckDB is a class
+      // assigned against a guess. Removing it along with the stale half was
+      // the first thing this edit did, and it cost a real warning to fix a
+      // false one -- the over-correction is as much a defect as the lie.
+      : `HANA column absent, so this compares against ${oracle.toUpperCase()}, ` +
+        `a stand-in: merge it before assigning any.`);
   }
 
 }
