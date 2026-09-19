@@ -726,9 +726,37 @@ files:
   compared automatically".
 
 **this session** — what it has already shipped and owns:
-- **E.5**, the launchpad asking for a config we do not serve — first if it
-  shows in the console of the **public preview**, because a breakage a
-  stranger sees costs more than it costs to fix.
+- **E.5**, the launchpad asking for a config we do not serve — **confirmed
+  2026-09-19, and it is three things rather than one**:
+  - `404 /appconfig/fioriSandboxConfig.json` — the UShell sandbox fetches an
+    optional external config on top of our inline `sap-ushell-config`. The
+    page works without it. The path is absolute, so answering it needs a
+    route in all three hosts or a file in the preview root, written once.
+  - `500 /sap/bc/osd/amdp/engine` — the tile asks whether anything here runs
+    SQLScript. In a browser there is no RFC destination, and `CALL FUNCTION
+    ... DESTINATION` throws a **JavaScript** Error that the ABAP `CATCH
+    cx_root` around it cannot catch, so a question with an honest answer
+    (`none`) comes back 500. The tile greys anyway; the 500 is the defect,
+    and the fact that ABAP cannot defend itself against it is the larger one.
+  - `uncaught: Cannot read properties of undefined (reading
+    'appSpecificRoute')` — inside the shell, ours, and not about a missing
+    file. This one was not in the entry at all.
+
+  **How it was nearly filed as "does not reproduce".** The first look read
+  the console of the public preview and found one error and zero bad
+  responses, which said "no". It said no because the page had **not run**:
+  an ephemeral browser profile has no durable storage, the service worker
+  cannot register, and `web/index.html` renders "the preview could not
+  start". A second look with a persistent profile rendered 96 tiles — and
+  counted tiles rather than responses. Two probes, each blind to what the
+  other saw, and the conclusion came from the union of their blind spots.
+  The guard below is what settled it.
+
+  `test/e2e/preview.spec.mjs`, "the launchpad's console and network,
+  characterised": it waits for the worker, proves the tiles rendered, and
+  then names every refused request and every console line that is ours. It
+  goes red on a fourth thing, and red when one of the three is fixed — an
+  allowance that outlives its defect is the failure this shape is for.
 - **G.9, the remainder**: sort by clicking a column, and a link from a row to
   the object that owns it.
 - **E.4**, the Zork console not fitting its box.

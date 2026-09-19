@@ -798,3 +798,88 @@ test("the status app says what the deployment in the browser is", async () => {
     await rm(profile, {recursive: true, force: true});
   }
 });
+
+// E.5 was filed as "the launchpad asks for a config we do not serve", to be
+// taken first **if it shows in the console of the public preview**. It does
+// not: loaded from GitHub Pages the launchpad answers 96 tiles with zero
+// failed requests and zero 4xx, so the entry drops down the list.
+//
+// What an ephemeral browser profile does show is one error — "Failed to
+// access storage", the service worker refusing to register because there is
+// no durable storage to register into — and that is the browser, not the
+// site: the same page in a persistent profile renders. `web/index.html`
+// already turns it into a sentence a person can act on, and the helper at the
+// top of this file already reads that sentence back.
+//
+// So the durable part is not a fix, it is this: a check that would have shown
+// the reported breakage if it had been real, and will show the next one.
+test("the launchpad's console and network, characterised", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    const complaints = [];
+    const refused = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") complaints.push(m.text().slice(0, 200));
+    });
+    page.on("pageerror", (e) => complaints.push(`uncaught: ${String(e.message).slice(0, 200)}`));
+    page.on("requestfailed", (r) => refused.push(`${r.failure()?.errorText ?? "failed"} ${r.url()}`));
+    page.on("response", (r) => {
+      // 404 on a favicon is a different conversation; anything the page asks
+      // for and does not get is this one
+      if (r.status() >= 400) refused.push(`${r.status()} ${r.url()}`);
+    });
+
+    await page.goto("http://localhost:3031/app/flp.html");
+    await controlled(page);
+    // the tiles are the proof the page actually ran, so that a silent page
+    // cannot pass this test by complaining about nothing
+    const tiles = page.locator("[class*=Tile], .sapMGT");
+    await expect(tiles.first()).toBeVisible({timeout: 60000});
+    expect(await tiles.count(), "the launchpad rendered its tiles").toBeGreaterThan(3);
+
+    // **The two E.5 is about, named and dated rather than hidden.** A guard
+    // that cannot land because of known debt is a guard nobody writes; one
+    // that allows the known debt by name goes red the moment a THIRD thing
+    // appears, which is what it is for. Same shape as `.leak-allow.json`:
+    // the reason is what tells an allowance from a way of going green.
+    const known = [
+      {match: "/appconfig/fioriSandboxConfig.json",
+       reason: "E.5: the UShell sandbox fetches an optional external config on top of the inline " +
+         "`sap-ushell-config`. The launchpad works without it — this is a 404 in a stranger's " +
+         "network tab, not a broken page. Fix is to answer it; the path is absolute, so it needs a " +
+         "route in all three hosts or a file in the preview root, written once."},
+      {match: "/sap/bc/osd/amdp/engine",
+       reason: "E.5: the tile asks whether anything here runs SQLScript. In the browser there is no " +
+         "RFC destination, and `CALL FUNCTION ... DESTINATION` throws a JavaScript Error that the " +
+         "ABAP `CATCH cx_root` around it cannot catch — so a question with an honest answer " +
+         "(`none`) comes back 500. The tile still greys; the 500 is the defect."},
+    ];
+    const unexplained = refused.filter((r) => !known.some((k) => r.includes(k.match)));
+    expect(unexplained, `the page asked for something it did not get:\n${unexplained.join("\n")}`).toHaveLength(0);
+    // and the known two must still be exactly two: if one is fixed, this says
+    // so rather than letting the allowance quietly outlive the defect
+    for (const k of known) {
+      expect(refused.some((r) => r.includes(k.match)),
+        `${k.match} no longer fails — remove it from the allowance and from backlog E.5`).toBe(true);
+    }
+    // The console, characterised rather than demanded clean. Three kinds, and
+    // only one of them is ours:
+    const chatter = [
+      // SAPUI5's own deprecation and lifecycle notices, from the CDN build
+      "must not have a return value", "is deprecated",
+      // the browser's line for the two 4xx/5xx above, already accounted for
+      "Failed to load resource",
+    ];
+    const ours = complaints.filter((c) => !chatter.some((k) => c.includes(k)));
+    // **The one that is ours, and it is a real find** — an uncaught TypeError
+    // inside the shell, not a message about a missing file. It is listed
+    // rather than tolerated silently, and the day it changes this says so.
+    expect(ours, `the console has something new in it:\n${ours.join("\n")}`)
+      .toEqual(["uncaught: Cannot read properties of undefined (reading 'appSpecificRoute')"]);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
