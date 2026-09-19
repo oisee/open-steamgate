@@ -38,6 +38,18 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              type_name    TYPE string,
              complex_type TYPE string,
              uuid         TYPE string,
+*            The label a person typed, out of SBO_PRT -- the text table, not
+*            the property row. It is here because without it there is nothing
+*            to give a text symbol, and the JS twin has had it since the
+*            evening: byte-identity between the two held only while both were
+*            equally ignorant of labels (docs/retro-2026-09-19.md).
+             label        TYPE string,
+*            The three-digit symbol this label gets in the class's text pool.
+*            SEGW never writes a label as an annotation -- in the corpus
+*            `set_label_from_text_element(` occurs 1014 times and
+*            `iv_key = 'label'` not once -- because Gateway adds its own
+*            sap:label from the DDIC and two of them is invalid XML.
+             text_element TYPE string,
            END OF ty_property.
     TYPES tt_property TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
 
@@ -302,10 +314,16 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_name) TYPE string.
 
+*   every labelled property gets a text symbol, in tree order
+    CLASS-METHODS assign_text_elements
+      CHANGING
+        ct_types TYPE tt_entity_type.
+
     CLASS-METHODS property_of
       IMPORTING
         is_row             TYPE ty_row
         it_complex         TYPE tt_row
+        it_text            TYPE tt_row
         iv_with_key        TYPE abap_bool
       RETURNING
         VALUE(rs_property) TYPE ty_property.
@@ -476,6 +494,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 * carries SCALE the digits go to the max length
     DATA lv_decimal TYPE abap_bool.
     DATA ls_complex TYPE ty_row.
+    DATA ls_text    TYPE ty_row.
 
     rs_property-name       = val( is_row = is_row iv_field = 'NAME' ).
     rs_property-abap_field = val( is_row = is_row iv_field = 'ABAP_FIELD' ).
@@ -513,6 +532,15 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     ENDIF.
     rs_property-type_name = val( is_row = is_row iv_field = 'TYPE_NAME' ).
     rs_property-uuid      = is_row-uuid.
+*   The label lives one table over, keyed by the property's own node: SEGW
+*   keeps language-dependent text apart from the row, the way it keeps every
+*   *T table apart. A property with no row there has no label, and none is
+*   invented for it -- an invented label would put a text in the model that
+*   nobody wrote.
+    READ TABLE it_text INTO ls_text WITH KEY uuid = is_row-uuid.
+    IF sy-subrc = 0.
+      rs_property-label = val( is_row = ls_text iv_field = 'PROP_LABEL' ).
+    ENDIF.
     IF iv_with_key = abap_true.
       rs_property-complex_type = val( is_row = is_row iv_field = 'COMPLEX_TYPE' ).
       IF rs_property-complex_type IS NOT INITIAL.
@@ -534,6 +562,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA lt_ga   TYPE tt_row.
     DATA lt_et   TYPE tt_row.
     DATA lt_prop TYPE tt_row.
+    DATA lt_prtx TYPE tt_row.
     DATA lt_es   TYPE tt_row.
     DATA lt_aso  TYPE tt_row.
     DATA lt_at   TYPE tt_row.
@@ -584,6 +613,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     lt_ga   = rows( iv_tag = 'SBD_GA'  iv_project = iv_project ).
     lt_et   = rows( iv_tag = 'SBO_ET'  iv_project = iv_project ).
     lt_prop = rows( iv_tag = 'SBO_PR'  iv_project = iv_project ).
+    lt_prtx = rows( iv_tag = 'SBO_PRT' iv_project = iv_project ).
     lt_es   = rows( iv_tag = 'SBO_ES'  iv_project = iv_project ).
     lt_aso  = rows( iv_tag = 'SBO_ASO' iv_project = iv_project ).
     lt_at   = rows( iv_tag = 'SBO_AT'  iv_project = iv_project ).
@@ -685,7 +715,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         IF val( is_row = ls_sub iv_field = 'PARENT_UUID' ) <> ls_row-uuid.
           CONTINUE.
         ENDIF.
-        APPEND property_of( is_row = ls_sub it_complex = lt_ct iv_with_key = abap_true ) TO ls_type-properties.
+        APPEND property_of( is_row = ls_sub it_complex = lt_ct it_text = lt_prtx iv_with_key = abap_true ) TO ls_type-properties.
         APPEND val( is_row = ls_sub iv_field = 'SORT_ORDER' ) TO lt_order.
       ENDLOOP.
       sort_properties( EXPORTING it_order      = lt_order
@@ -747,6 +777,10 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       <ls_type>-define_stem = lv_stem.
     ENDLOOP.
 
+*   symbols are given after the types are in their final order, because the
+*   numbering follows the order the class will print them in
+    assign_text_elements( CHANGING ct_types = rs_model-entity_types ).
+
 * complex types
     LOOP AT lt_ct INTO ls_row.
       CLEAR ls_ct.
@@ -763,7 +797,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         IF val( is_row = ls_sub iv_field = 'PARENT_UUID' ) <> ls_row-uuid.
           CONTINUE.
         ENDIF.
-        APPEND property_of( is_row = ls_sub it_complex = lt_ct iv_with_key = abap_false ) TO ls_ct-properties.
+        APPEND property_of( is_row = ls_sub it_complex = lt_ct it_text = lt_prtx iv_with_key = abap_false ) TO ls_ct-properties.
         APPEND val( is_row = ls_sub iv_field = 'SORT_ORDER' ) TO lt_order.
       ENDLOOP.
       sort_properties( EXPORTING it_order      = lt_order
@@ -1228,6 +1262,45 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       && |*&---------------------------------------------------------------------*\n|.
   ENDMETHOD.
 
+  METHOD assign_text_elements.
+* Numbering starts **above whatever the tree already carries**, not at 001.
+* A project read from a real IWPR arrives with SEGW's own symbols, and
+* renumbering them points the generated calls at somebody else's text -- the
+* difference between reproducing a corpus file and rewriting it.
+*
+* A property with no label gets no symbol. Actions and their parameters are
+* labelled with their own name when nothing else is given, and a property is
+* not: inventing one would put a text in the model the author never wrote.
+    DATA ls_type  TYPE ty_entity_type.
+    DATA lv_next  TYPE i.
+    DATA lv_max   TYPE i.
+    DATA lv_num   TYPE i.
+    FIELD-SYMBOLS <ls_type> TYPE ty_entity_type.
+    FIELD-SYMBOLS <ls_prop> TYPE ty_property.
+
+    LOOP AT ct_types INTO ls_type.
+      LOOP AT ls_type-properties ASSIGNING <ls_prop>.
+        IF <ls_prop>-text_element IS NOT INITIAL.
+          lv_num = <ls_prop>-text_element.
+          IF lv_num > lv_max.
+            lv_max = lv_num.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+    lv_next = lv_max + 1.
+
+    LOOP AT ct_types ASSIGNING <ls_type>.
+      LOOP AT <ls_type>-properties ASSIGNING <ls_prop>.
+        IF <ls_prop>-text_element IS NOT INITIAL OR <ls_prop>-label IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        <ls_prop>-text_element = |{ lv_next WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+        lv_next = lv_next + 1.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD property_code.
     IF is_property-complex_type IS NOT INITIAL.
       rv_text = |lo_complex_type = lo_entity_type->create_complex_property( iv_property_name = '{ is_property-name }'\n|
@@ -1248,6 +1321,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     ENDIF.
     IF is_property-semantics IS NOT INITIAL.
       rv_text = rv_text && |lo_property->set_semantic( '{ is_property-semantics }' ). "#EC NOTEXT\n|.
+    ENDIF.
+    IF is_property-text_element IS NOT INITIAL.
+      rv_text = rv_text
+        && |lo_property->set_label_from_text_element( iv_text_element_symbol = '{ is_property-text_element }' |
+        && |iv_text_element_container = gc_incl_name ). "#EC NOTEXT\n|.
     ENDIF.
     rv_text = rv_text
       && |lo_property->set_creatable( { ab( is_property-creatable ) } ).\n|
@@ -1465,6 +1543,15 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA lv_i         TYPE i.
     DATA lt_named     TYPE STANDARD TABLE OF ty_file.
     DATA ls_named     TYPE ty_file.
+*   every labelled property, flattened: the text pool is written in the order
+*   the properties are printed, and it needs the entity each one came from
+    TYPES: BEGIN OF ty_text_el,
+             name   TYPE string,
+             entity TYPE string,
+             symbol TYPE string,
+           END OF ty_text_el.
+    DATA lt_text      TYPE STANDARD TABLE OF ty_text_el.
+    DATA ls_text_el   TYPE ty_text_el.
     DATA lt_methods   TYPE string_table.
     DATA lv_method    TYPE string.
     DATA lt_impls     TYPE STANDARD TABLE OF ty_file.
@@ -1536,6 +1623,19 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    LOOP AT is_model-entity_types INTO ls_type.
+      LOOP AT ls_type-properties INTO ls_property.
+        IF ls_property-text_element IS INITIAL.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_text_el.
+        ls_text_el-name   = ls_property-name.
+        ls_text_el-entity = ls_type-name.
+        ls_text_el-symbol = ls_property-text_element.
+        APPEND ls_text_el TO lt_text.
+      ENDLOOP.
+    ENDLOOP.
+
     rv_source = |class { lv_cls } definition\n|
       && |  public\n|
       && |  inheriting from /IWBEP/CL_MGW_PUSH_ABS_MODEL\n|
@@ -1580,6 +1680,18 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
       && |protected section.\n|
       && |private section.\n|
       && |\n|.
+
+*   The text pool lives in the class's own include, and SEGW names it by
+*   padding the class to thirty characters with '=' and adding CP. It goes in
+*   the **private** section, after the redefinitions and before the DEFINE_*
+*   methods -- where SEGW puts it, which is not where a reader would guess:
+*   the first attempt put it beside the entity constants in the public
+*   section and moved the first difference from line 81 to line 67 instead of
+*   removing it.
+    IF lt_text IS NOT INITIAL.
+      rv_source = rv_source
+        && |  constants GC_INCL_NAME type STRING value '{ lv_cls WIDTH = 30 PAD = '=' }CP' ##NO_TEXT.\n\n|.
+    ENDIF.
 
     IF lv_has_cplx = abap_true.
       APPEND 'DEFINE_COMPLEXTYPES' TO lt_methods.
@@ -1655,9 +1767,28 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     APPEND ls_impl TO lt_impls.
     ls_impl-name    = 'LOAD_TEXT_ELEMENTS'.
     ls_impl-content = |  method LOAD_TEXT_ELEMENTS.\n{ banner( ) }\n\nDATA:\n|
-      && |     ls_text_element TYPE ts_text_element.                                 "#EC NEEDED\n|
-      && |CLEAR ls_text_element.\n|
-      && |  endmethod.\n|.
+      && |     ls_text_element TYPE ts_text_element.                                 "#EC NEEDED\n|.
+*   A class with no labelled property keeps the empty body SEGW writes for
+*   it; one with labels gets a block per symbol, in the order the properties
+*   are printed. The spacing is the generator's own and is reproduced rather
+*   than tidied: this file is compared to SEGW's output byte for byte, and a
+*   neater column is a difference.
+    IF lt_text IS INITIAL.
+      ls_impl-content = ls_impl-content && |CLEAR ls_text_element.\n|.
+    ELSE.
+      ls_impl-content = ls_impl-content && |\n\n|.
+      LOOP AT lt_text INTO ls_text_el.
+        ls_impl-content = ls_impl-content
+          && |clear ls_text_element.\n|
+          && |ls_text_element-artifact_name          = '{ ls_text_el-name }'.                 "#EC NOTEXT\n|
+          && |ls_text_element-artifact_type          = 'PROP'.                                       "#EC NOTEXT\n|
+          && |ls_text_element-parent_artifact_name   = '{ ls_text_el-entity }'.                            "#EC NOTEXT\n|
+          && |ls_text_element-parent_artifact_type   = 'ETYP'.                                       "#EC NOTEXT\n|
+          && |ls_text_element-text_symbol            = '{ ls_text_el-symbol }'.              "#EC NOTEXT\n|
+          && |APPEND ls_text_element TO rt_text_elements.\n|.
+      ENDLOOP.
+    ENDIF.
+    ls_impl-content = ls_impl-content && |  endmethod.\n|.
     APPEND ls_impl TO lt_impls.
     SORT lt_impls BY name.
     LOOP AT lt_impls INTO ls_impl.
