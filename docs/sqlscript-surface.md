@@ -213,3 +213,38 @@ Two cautions about the shape, both of which change what gets built:
   `IF`/`ELSE`, `CALL`, session variables, dynamic SQL — and of those only
   `CALL` is structural, because it needs a procedure registry and a call
   stack. The coverage is bought far more cheaply than the row count suggests.
+
+---
+
+## The language here is not SQLScript. It is SQLScript as ABAP hands it over
+
+This document enumerates the language from the reference, and for most
+questions that is the right source. For one class of question it is not the
+last word, and the class is easy to miss because it does not look like a
+language question at all.
+
+An AMDP body lives **inside an ABAP method**, and ABAP's own lexical
+conventions reach into it. Two cases, both found by the corpus rather than by
+reading:
+
+- **`*` in column one is a comment**, because ABAP says so. SQLScript says
+  nothing of the kind, and `*` anywhere else is multiplication — so the rule
+  is positional, not textual, and it was the single largest blocker in the
+  corpus at one point (40 bodies) while looking like a parser bug.
+- **`"` is *not* a comment**, although in ABAP it usually is. Settled by
+  counting rather than by argument: of 473 corpus bodies, 232 contain a double
+  quote and **189 contain something shaped like a quoted identifier** —
+  `"STATUS"`, `"OBJECT"`, generated procedure names — in SQL positions. Those
+  bodies run in production; if the scanner ate the rest of the line they would
+  not. A lexer that treated `"` as a comment would silently destroy two bodies
+  in five.
+
+**So for this class the reference is what reaches the database, not the
+book.** Where the two disagree, the one that executes wins, and the cheap way
+to settle such a question is to count the corpus or to look at the deployed
+procedure text — both of which have now answered one each, in opposite
+directions, which is exactly why neither could be guessed.
+
+It is worth stating because it moves the source of truth for a whole family of
+questions, and the next person to open the reference should know that the
+reference is not the last authority here.
