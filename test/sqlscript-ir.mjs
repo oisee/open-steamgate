@@ -366,3 +366,35 @@ describe("SQLScript IR: a function is rendered only where it has been measured",
     expect(sqlOf(rel, "hana")).to.contain("IFNULL");
   });
 });
+
+describe("SQLScript IR: attributing a bare column to a table", () => {
+  it("a join predicate says which side each column is on", async () => {
+    const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
+    const rel = project(join(scan("A"), scan("B"), bin("=", col("KA"), col("KB"), T.bool)),
+                        [{as: "X", expr: col("KA")}]);
+    const shapes = tableShapesPerTable(rel);
+    expect(Object.keys(shapes.perTable.A)).to.deep.equal(["KA"]);
+    expect(Object.keys(shapes.perTable.B)).to.deep.equal(["KB"]);
+    expect(shapes.unattributed, "the predicate attributed both").to.be.empty;
+  });
+
+  it("a self-join on the same column name attributes nothing, and says so", async () => {
+    const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
+    // the same name on both sides: the predicate cannot tell them apart, and
+    // neither can we - pointing both scans at one table would only move the
+    // ambiguity into a self-join
+    const rel = join(scan("A"), scan("A"), bin("=", col("K"), col("K"), T.bool));
+    const shapes = tableShapesPerTable(rel);
+    expect(shapes.attributed).to.be.empty;
+    expect(shapes.unattributed).to.contain("K");
+  });
+
+  it("columns the predicate does not mention are reported, not silently placed", async () => {
+    const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
+    const rel = filter(join(scan("A"), scan("B"), bin("=", col("KA"), col("KB"), T.bool)),
+                       bin(">", col("OTHER"), lit(1, T.int), T.bool));
+    const shapes = tableShapesPerTable(rel);
+    expect(shapes.unattributed, "put somewhere to run, and named so nobody mistakes it for knowledge")
+      .to.contain("OTHER");
+  });
+});

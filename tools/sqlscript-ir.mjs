@@ -429,3 +429,71 @@ export function tableShapesFor(rel) {
     guessed: Object.entries(columns).filter(([, one]) => one.guessed).map(([name]) => name),
   };
 }
+
+/**
+ * Which table each column came from, where the plan says so.
+ *
+ * A column reference in this IR is a bare name, so with two tables in a plan
+ * a name cannot be attributed - and giving every table every column does not
+ * help, because then the name exists twice and the engine says the same
+ * thing back: ambiguous. Pointing both scans at ONE table does not help
+ * either; it turns the join into a self-join and the name exists twice
+ * again. The ambiguity moves, it does not go.
+ *
+ * But a join predicate usually says it outright. `ON a = b` compares one
+ * side with the other, so `a` belongs under the left subtree and `b` under
+ * the right. That is derivable rather than invented, and where it is not
+ * derivable - a self-join on the same column name, a predicate that is not a
+ * simple comparison of two columns - nothing is claimed.
+ */
+export function attributeColumns(rel) {
+  const owner = new Map();
+  const tablesUnder = (r, out = []) => {
+    if (r === undefined) return out;
+    if (r.rel === "scan") out.push(r.table);
+    for (const key of ["input", "left", "right"]) tablesUnder(r[key], out);
+    for (const one of r.inputs ?? []) tablesUnder(one, out);
+    return out;
+  };
+  const walk = (r) => {
+    if (r === undefined) return;
+    if (r.rel === "join" && r.on?.node === "bin" && r.on.op === "=" &&
+        r.on.left?.node === "col" && r.on.right?.node === "col" &&
+        r.on.left.name !== r.on.right.name) {
+      const left = tablesUnder(r.left);
+      const right = tablesUnder(r.right);
+      if (left.length === 1 && right.length === 1) {
+        owner.set(r.on.left.name, left[0]);
+        owner.set(r.on.right.name, right[0]);
+      }
+    }
+    for (const key of ["input", "left", "right"]) walk(r[key]);
+    for (const one of r.inputs ?? []) walk(one);
+  };
+  walk(rel);
+  return owner;
+}
+
+/**
+ * The shapes, split per table when the plan allows it.
+ *
+ * Columns the join predicate attributes go to their own table; everything
+ * else goes to the first table, and the fact is reported rather than hidden.
+ * A caller that refuses to run on a guess can look at `unattributed`.
+ */
+export function tableShapesPerTable(rel) {
+  const flat = tableShapesFor(rel);
+  const owner = attributeColumns(rel);
+  const perTable = Object.fromEntries(flat.tables.map((name) => [name, {}]));
+  const unattributed = [];
+  for (const [column, one] of Object.entries(flat.columns)) {
+    const table = owner.get(column);
+    if (table !== undefined && perTable[table] !== undefined) {
+      perTable[table][column] = one;
+    } else {
+      unattributed.push(column);
+      perTable[flat.tables[0]][column] = one;
+    }
+  }
+  return {...flat, perTable, unattributed, attributed: [...owner.keys()]};
+}
