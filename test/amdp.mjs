@@ -163,3 +163,55 @@ ENDCLASS.`;
       .to.equal("a = '!VALUE(x)'; METHODS m IMPORTING VALUE(iv) TYPE i.");
   });
 });
+
+// **The test that has to go red the day the workaround stops being needed.**
+//
+// `withoutBangValue` exists only because abaplint cannot parse `!VALUE(x)`.
+// A workaround with no expiry is how a tree collects code nobody dares
+// remove: the reason lives in a commit message, the commit message is read
+// once, and five years later the normalisation looks load-bearing. So the
+// upstream defect itself is asserted. When abaplint learns the form, this
+// fails, and what it says to do is delete the workaround and this test with
+// it.
+describe("the abaplint gap the !VALUE workaround exists for", () => {
+  it("is still there — and when this fails, remove withoutBangValue, not this test's expectation", async () => {
+    const abaplint = await import("@abaplint/core");
+    const source = `CLASS c DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS m1 IMPORTING !VALUE(iv_x) TYPE i.
+ENDCLASS.
+CLASS c IMPLEMENTATION.
+ENDCLASS.`;
+    const registry = new abaplint.Registry()
+      .addFile(new abaplint.MemoryFile("c.clas.abap", source)).parse();
+    const object = registry.getFirstObject();
+    const kinds = object.getABAPFiles()[0].getStatements().map((s) => s.get().constructor.name);
+    // A sentinel has to do two things or it goes stale unnoticed
+    // (fable-osd): assert the **specific** way it breaks, and say in its own
+    // message what to do when it goes red. It will go red in months, when
+    // the context is gone.
+    const todo = "abaplint now parses !VALUE(x). Do this, in order: delete withoutBangValue and its " +
+      "call in tools/amdp-extract.mjs; delete this describe block; mark " +
+      "ANOMALY-2026-09-19-bang-value fixed with the version; re-run " +
+      "`node tools/sqlscript/coverage.mjs` and check the count did not fall.";
+    expect(kinds, todo).to.contain("Unknown");
+    // the specific breakage, not "something failed": not one method
+    // mis-read, the whole class silently parameterless. Without this, an
+    // unrelated change to how abaplint reports a refusal would leave the
+    // test green while it checked nothing.
+    expect(object.getClassDefinition?.()?.methods ?? [], todo).to.have.length(0);
+  });
+
+  it("while the two halves apart are parsed, which is what makes it a gap and not a policy", async () => {
+    const abaplint = await import("@abaplint/core");
+    for (const decl of ["CLASS-METHODS m1 IMPORTING !iv_x TYPE i.",
+                        "CLASS-METHODS m1 IMPORTING VALUE(iv_x) TYPE i."]) {
+      const source = `CLASS c DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    ${decl}\nENDCLASS.\nCLASS c IMPLEMENTATION.\nENDCLASS.`;
+      const registry = new abaplint.Registry()
+        .addFile(new abaplint.MemoryFile("c.clas.abap", source)).parse();
+      const kinds = registry.getFirstObject().getABAPFiles()[0].getStatements()
+        .map((s) => s.get().constructor.name);
+      expect(kinds, decl).to.not.contain("Unknown");
+    }
+  });
+});
