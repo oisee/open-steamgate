@@ -10,6 +10,7 @@
 // What may legitimately differ is named, with the reason, the way the
 // response and SQL sieves name theirs. Nothing else is allowed to.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {join, relative} from "node:path";
 
 /** fields of manifest.json that are about the BUILD and not about its output */
@@ -75,4 +76,52 @@ export function compareGenerations(a, b) {
     onlyInA, onlyInB, differing,
     collapsed: [...collapsed],
   };
+}
+
+/**
+ * What a build rewrote under `gen/` -- which is not what a generation holds.
+ *
+ * A generation directory carries `output/` (the transpiled modules) and the
+ * manifest, and **no `gen/`**: the generated ABAP is an input to the
+ * transpile, not part of its result. So `compareGenerations` answers "which
+ * modules changed", and the question a screen asks after activating a CDS
+ * view is "which OBJECTS were regenerated" -- a different population, one
+ * hop away (osg-osd-i7 asked which of the two this machinery gives;
+ * measured rather than remembered, it gives the first).
+ *
+ * Why the question is worth answering at all: activating a **class** writes
+ * one file. Activating a plain CDS view writes **three** -- the DDIC view
+ * under the CDS name, the same under the SQL view name, and the source
+ * class. Activating a view with `@OData.publish` writes **fourteen**,
+ * because the YAML goes through `stg-compile` and a whole service comes out:
+ * MPC, MPC_EXT, DPC, DPC_EXT with their XML, IWSV, IWMO. A screen that says
+ * "activated" and lists nothing hides that it has just rewritten a service
+ * nobody opened.
+ */
+export function snapshotOf(dir) {
+  const out = new Map();
+  if (!existsSync(dir)) return out;
+  const walk = (at) => {
+    for (const e of readdirSync(at, {withFileTypes: true}).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const path = join(at, e.name);
+      if (e.isSymbolicLink()) continue;
+      if (e.isDirectory()) walk(path);
+      else out.set(relative(dir, path), createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 16));
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+/** @returns {{written: string[], removed: string[], unchanged: number}} */
+export function changedSince(before, dir) {
+  const after = snapshotOf(dir);
+  const written = [];
+  let unchanged = 0;
+  for (const [path, hash] of after) {
+    if (before.get(path) === hash) unchanged += 1;
+    else written.push(path);
+  }
+  const removed = [...before.keys()].filter((path) => !after.has(path));
+  return {written: written.sort(), removed: removed.sort(), unchanged};
 }
