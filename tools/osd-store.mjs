@@ -13,6 +13,7 @@
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {parseDDLS} from "./cds2ddic.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 
 import {basename, dirname, join} from "node:path";
@@ -164,6 +165,55 @@ export function rootsOf(root) {
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
   })), ...packRootsOf(root)];
+}
+
+/**
+ * What the generator says about a CDS view, as issues.
+ *
+ * `parseDDLS` is the only thing here that reads one, and it already refuses
+ * by name -- `skip` for a shape it will not generate, `unresolvedAssociations`
+ * for an element naming an association the source does not have, `write.why`
+ * for a view that asked to be written and cannot be. Those are exactly the
+ * sentences a person editing the view needs, and they were being thrown away.
+ */
+function ddlsIssues(registry, object) {
+  let view;
+  try {
+    view = parseDDLS(object, registry);
+  } catch (error) {
+    return [{severity: "E", rule: "cds", message: `the view cannot be read: ${String(error.message ?? error)}`,
+      file: object.getFiles?.()[0]?.getFilename?.(), line: 1, column: 1}];
+  }
+  if (view === undefined) {
+    return [{severity: "E", rule: "cds", message: "the view has no parse tree: it is not a CDS view this system can read",
+      file: object.getFiles?.()[0]?.getFilename?.(), line: 1, column: 1}];
+  }
+  const at = {file: object.getFiles?.()[0]?.getFilename?.(), line: 1, column: 1};
+  const issues = [];
+  // A source that is not in the system at all. Measured: a view selecting
+  // from `znot_a_table` parsed without complaint, checked clean, and the
+  // BUILD then failed naming a consumer -- `zcl_zosd_status_dpc:43`, "not
+  // found" -- and never the view. The generator does not refuse it because
+  // it has no opinion about names it cannot resolve; the registry does.
+  if (view.source !== undefined && view.source !== ""
+      && registry.getObject("TABL", view.source) === undefined
+      && registry.getObject("VIEW", view.source) === undefined
+      && registry.getObject("DDLS", view.source) === undefined) {
+    issues.push({severity: "E", rule: "cds",
+      message: `${view.name} selects from ${view.source}, which is not a table or a view of this system`, ...at});
+  }
+  if (view.skip !== undefined) {
+    issues.push({severity: "E", rule: "cds", message: `the generator will not generate this view: ${view.skip}`, ...at});
+  }
+  for (const name of view.unresolvedAssociations ?? []) {
+    issues.push({severity: "E", rule: "cds",
+      message: `the element ${name} names an association ${view.source} does not expose`, ...at});
+  }
+  if (view.write?.asked === true && view.write?.writable !== true) {
+    issues.push({severity: "W", rule: "cds",
+      message: `the view asks to be written and is not: ${view.write.why}`, ...at});
+  }
+  return issues;
 }
 
 export class ObjectStore {
@@ -868,6 +918,7 @@ export class ObjectStore {
     return this.#withSource(target.file, options.source, (registry) => this.#issues(registry, type, target.name));
   }
 
+
   // the issues of one object, in the shape the façade returns
   #issues(registry, type, name) {
     // an include is a program to abaplint: the registry files it as PROG,
@@ -876,14 +927,27 @@ export class ObjectStore {
     if (object === undefined) {
       return {type, name, issues: [{severity: "E", message: `${type} ${name} is not in the registry`, line: 1, column: 1}]};
     }
-    const issues = registry.findIssuesObject(object).map((issue) => ({
+    // **A CDS view was checked by nobody.** `findIssuesObject` answers `[]`
+    // for a DDLS whatever it contains: measured on `ZC_OSD_PACK` mangled to
+    // `definnnne vieeew` and on one selecting from a table that does not
+    // exist -- both "no issues", and `npm run lint` agreed, 0 of 416. The
+    // build then failed naming a CONSUMER (`zcl_zosd_status_dpc:43`, "ZC_OSD_PACK
+    // not found") and never the file somebody had just edited. For a screen
+    // with a Check button that is the worst of the three: it says fine, and
+    // Activate fails somewhere else (2026-09-19).
+    //
+    // The generator already reads these, and its refusals are named. So the
+    // check asks it: "the check passed" now means "the thing that has to
+    // read this can", which is what activation will need anyway.
+    const extra = type === "DDLS" ? ddlsIssues(registry, object) : [];
+    const issues = [...extra, ...registry.findIssuesObject(object).map((issue) => ({
       severity: "E",
       rule: issue.getKey(),
       message: issue.getMessage(),
       file: issue.getFilename(),
       line: issue.getStart().getRow(),
       column: issue.getStart().getCol(),
-    }));
+    }))];
     return {type, name, issues};
   }
 
