@@ -26,7 +26,7 @@ import {Body} from "./sqlscript/expressions/index.mjs";
 import {toIr} from "./sqlscript/to-ir.mjs";
 import {CATALOGUE} from "./sqlscript/end-to-end.mjs";
 import {runBothWays} from "./sqlscript-eager.mjs";
-import {adversarialRows, seamType} from "./sqlscript-ir.mjs";
+import {adversarialRows, seamType, tableShapesFor} from "./sqlscript-ir.mjs";
 
 /** text in, relational IR out - the front end, with nothing lowered yet */
 export function planOf(body, catalogue = CATALOGUE) {
@@ -46,8 +46,9 @@ export async function checkBody(client, body, dialect, catalogue = CATALOGUE) {
 
 /** a benign value of the right shape, for the columns a hazard row does not care about */
 function benign(type) {
-  const letter = (typeof type === "string" ? type : type?.abap ?? "C").charAt(0).toUpperCase();
-  return ["I", "P", "F", "B", "S"].includes(letter) ? 1 : "x";
+  const abap = (typeof type === "string" ? type : type?.abap ?? "C").toUpperCase();
+  if (abap === "STRING") return "x";
+  return ["I", "P", "F", "B", "S"].includes(abap.charAt(0)) ? 1 : "x";
 }
 
 /**
@@ -146,4 +147,142 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } finally {
     await client.disconnect?.();
   }
+}
+
+/** the SQL type to declare a column as, per dialect, from our own type shape */
+function declaredAs(type, dialect) {
+  const abap = (type?.abap ?? "C").toUpperCase();
+  // STRING before the letter test, and this is not pedantry: the letters are
+  // single characters, "STRING" is a word, and `charAt(0)` turned it into
+  // "S" - a short integer. So a column holding text was declared INTEGER and
+  // the hazard row could not be inserted at all. A test on the first letter
+  // is wider than the letters it means, which is the same shape as a suffix
+  // test being wider than the filename it means, one day earlier.
+  if (abap === "STRING") return "VARCHAR";
+  const letter = abap.charAt(0);
+  if (["I", "B", "S"].includes(letter)) return "INTEGER";
+  if (["P", "F"].includes(letter)) return dialect === "sqlite" ? "NUMERIC" : "DECIMAL(15,2)";
+  return "VARCHAR";
+}
+
+/**
+ * Run a body against tables invented from the body itself.
+ *
+ * The seven corpus bodies that could be compared were the self-contained
+ * ones - reading nothing but their parameters - and not one of them could
+ * diverge, because a body that divides or casts almost always reads a table.
+ * The filter that made bodies runnable is the filter that removed everything
+ * worth looking at. So the tables are built from the plan: what is done to a
+ * column says enough to declare it, and the hazardous rows come from the plan
+ * too.
+ *
+ * What this proves and what it does not, kept together on purpose. It
+ * compares **fusing against forcing** on the same invented data, which is a
+ * real answer about the body's shape. It says **nothing** about whether the
+ * body returns what it returns on a real system, because the data is not the
+ * real data - and no amount of care here can make it so.
+ */
+export async function runOnInventedTables(client, rel, dialect, {rows = 3} = {}) {
+  const shapes = tableShapesFor(rel);
+  if (shapes.tables.length === 0) {
+    return {skipped: "the plan reads no table, so there is nothing to invent"};
+  }
+  if (shapes.ambiguous) {
+    // a column reference is a bare name and the plan cannot say which table
+    // it belongs to; inventing both tables with all the columns would run,
+    // and would be a fixture nobody could reason about
+    return {skipped: `the plan reads ${shapes.tables.length} tables and a column cannot be attributed to one`};
+  }
+  const table = shapes.tables[0];
+  const columns = Object.entries(shapes.columns);
+  if (columns.length === 0) return {skipped: "the plan names no column of the table"};
+
+  let stage = "create the table";
+  const quote = (id) => `"${id}"`;
+  const schema = Object.fromEntries(columns.map(([name, one]) => [name, one.type]));
+  await client.native({
+    sql: `CREATE TABLE ${quote(table)} (${columns.map(([name, one]) => `${quote(name)} ${declaredAs(one.type, dialect)}`).join(", ")})`,
+    expect: "none",
+  });
+  try {
+    return await fill();
+  } catch (error) {
+    // Setting the fixture up is not the measurement, so a failure here is
+    // reported rather than thrown: an escaping error from the scaffolding
+    // looks exactly like a divergence found, and it is not one. Seen once
+    // already - a conversion raised while the engine was replaying its own
+    // aborted transaction, and it arrived with no JavaScript frames at all,
+    // which is how long it took to place.
+    if (process.env.OSD_DEBUG_INVENT === "1") console.error("stage:", stage, String(error.message ?? error).slice(0, 80));
+    return {skipped: `the invented fixture could not be built or run: ${String(error.message ?? error).slice(0, 120)}`};
+  } finally {
+    await client.native({sql: `DROP TABLE ${quote(table)}`, expect: "none"}).catch(() => {});
+  }
+
+  async function fill() {
+    stage = "insert benign rows";
+    for (let i = 0; i < rows; i++) {
+      await client.native({
+        sql: `INSERT INTO ${quote(table)} (${columns.map(([name]) => quote(name)).join(", ")}) ` +
+             `VALUES (${columns.map(() => "?").join(", ")})`,
+        expect: "none",
+        params: columns.map(([name, one]) => ({name, value: benignFor(one.type, i), type: seamType(one.type)})),
+      });
+    }
+    // The fixture is committed before anything is run against it. A failure
+    // in the measurement aborts the transaction it happens in, and if the
+    // inserts are still inside that transaction the client replays them -
+    // and the replay raises again, from no JavaScript frame at all, which
+    // reads as an escaping error rather than as the failed statement it is.
+    // Ending the LUW first makes the measurement's failures the
+    // measurement's own.
+    stage = "commit the fixture";
+    await client.commit?.();
+    stage = "plant the hazard";
+    // The hazard row has to be one the body REMOVES, or both halves evaluate
+    // the dangerous expression and both raise - which agrees, and says
+    // nothing. The plan already knows which value is removed: a predicate
+    // `col <> literal` names it exactly. Derived rather than asked for,
+    // because the caller would be guessing at the same thing from outside.
+    const {planted, unplanted} = await plantHazards(client, rel, {table, schema, fill: fillThatIsFilteredOut(rel)});
+    stage = "commit the hazard";
+    await client.commit?.();
+    stage = "run both ways";
+    const verdict = await runBothWays(client, rel, dialect);
+    return {...verdict, invented: {table, columns: schema, guessed: shapes.guessed}, planted, unplanted};
+  }
+}
+
+/** ordinary values, varied a little so a filter has something to remove */
+function benignFor(type, i) {
+  const abap = (type?.abap ?? "C").toUpperCase();
+  if (abap === "STRING") return String.fromCharCode(97 + i).repeat(2);
+  const letter = abap.charAt(0);
+  if (["I", "B", "S", "P", "F"].includes(letter)) return i + 1;
+  return String.fromCharCode(97 + i).repeat(2);
+}
+
+/** values that a `col <> literal` in the plan will remove, so a hazard row can hide behind one */
+export function fillThatIsFilteredOut(rel) {
+  const fill = {};
+  const walkExpr = (e) => {
+    if (e === undefined || e === null) return;
+    if (e.node === "bin" && e.op === "<>") {
+      const column = e.left?.node === "col" ? e.left.name : e.right?.node === "col" ? e.right.name : undefined;
+      const literal = e.right?.node === "lit" ? e.right : e.left?.node === "lit" ? e.left : undefined;
+      if (column !== undefined && literal !== undefined) fill[column] = literal.value;
+    }
+    for (const key of ["left", "right", "expr"]) walkExpr(e[key]);
+    for (const one of e.args ?? []) walkExpr(one);
+  };
+  const walk = (r) => {
+    if (r === undefined) return;
+    walkExpr(r.pred);
+    for (const item of r.items ?? []) walkExpr(item.expr);
+    walkExpr(r.on);
+    for (const key of ["input", "left", "right"]) walk(r[key]);
+    for (const one of r.inputs ?? []) walk(one);
+  };
+  walk(rel);
+  return fill;
 }

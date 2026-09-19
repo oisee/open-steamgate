@@ -5,7 +5,7 @@
 // already knew. These are bodies as a person would type them, so the
 // comparison is doing the thing it was built for.
 import {expect} from "chai";
-import {checkBody, planOf, plantHazards} from "../tools/sqlscript-check.mjs";
+import {checkBody, planOf, plantHazards, runOnInventedTables} from "../tools/sqlscript-check.mjs";
 import {CATALOGUE} from "../tools/sqlscript/end-to-end.mjs";
 
 const FIXTURE = [
@@ -178,5 +178,55 @@ describe("a step carrying a bound value is forced now, and a refusal is still re
       .to.be.an("array").with.length.greaterThan(0);
     expect(result.notForced[0].params).to.be.greaterThan(0);
     expect(result.agree).to.equal(true);
+  });
+});
+
+// The bodies that could be compared were the ones reading nothing but their
+// parameters, and none of those could diverge - a body that casts or divides
+// reads a table. These run such a body anyway, against a table built from
+// the body itself.
+describe("a body that reads a table, run against a table invented from it", function () {
+  this.timeout(30000);
+  let client;
+
+  beforeEach(async () => {
+    const {DuckDBDatabaseClient} = await import("../tools/duckdb-client.mjs");
+    client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+  });
+
+  afterEach(async () => {
+    await client?.disconnect?.();
+  });
+
+  it("builds the table from the body, types each column by its use, and plants the hazard", async () => {
+    const body = `lt = SELECT TO_INTEGER(txt) AS num FROM other WHERE n <> 9;
+                  SELECT num FROM :lt;`;
+    const rel = planOf(body, {OTHER: {}});
+    const result = await runOnInventedTables(client, rel, "duckdb");
+
+    expect(result.skipped, "the table is invented, so nothing should be skipped").to.equal(undefined);
+    // the plan said TXT holds text, because it is cast to a number
+    expect(result.invented.columns.TXT.abap).to.equal("STRING");
+    expect(result.planted.map((one) => one.column)).to.deep.equal(["TXT"]);
+    // and both halves ran: a verdict, not a scaffolding failure
+    expect(result.agree, JSON.stringify(result, null, 1)).to.be.a("boolean");
+    // on this body DuckDB evaluates the cast in both halves, so they agree by
+    // both raising - a real answer about this body, not a divergence. The
+    // shape that DOES diverge is the one above, where the filter sits in an
+    // outer select: the engine can push it under the projection there and
+    // cannot here, and that difference is the whole subject.
+    expect(result.both ?? result.kind).to.equal("raised");
+  });
+
+  it("refuses rather than inventing when a column cannot be attributed to a table", async () => {
+    const body = `SELECT k FROM a, b WHERE k = 1;`;
+    const result = await runOnInventedTables(client, planOf(body, {}), "duckdb");
+    expect(result.skipped, "two tables, and a bare column name").to.contain("cannot be attributed");
+  });
+
+  it("says so when the plan reads no table at all", async () => {
+    const result = await runOnInventedTables(client, planOf(`SELECT 1 AS v FROM dummy;`, {}), "duckdb");
+    expect(result.skipped).to.be.a("string");
   });
 });
