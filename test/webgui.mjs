@@ -191,14 +191,17 @@ describe("webgui: Easy Success, the screen SAP calls Easy Access", () => {
     expect(page, "a step changes the width").to.match(/#w2:checked~\.body \.tree\{width:\d+%\}/);
     expect(page, "and it hides the picture and widens the tree").to.contain("#nopic:target~.body .art{display:none}");
     expect(page, "the old one-pixel border is gone").to.not.match(/\.tree\{[^}]*border-right:1px/);
-    // The screen carried no script for a week on purpose, and now it carries
-    // exactly one, for exactly one thing: pulling the boundary, which a
-    // browser cannot be made to do any other way. What is asserted is no
-    // longer its absence but its smallness and its subject - and the browser
-    // test proves the page still works with scripting switched off, which is
-    // the property a script count never checked.
-    expect((page.match(/<script/gi) ?? []).length, "exactly one script").to.equal(1);
-    expect(page, "and it is about the boundary").to.contain("pointerdown");
+    // The screen carried no script for a week on purpose, then one for
+    // pulling the boundary, and now that one covers a second thing: the
+    // arrow keys in the tree. Both are things a browser cannot be made to do
+    // any other way -- `<details>` gives Enter and Space and nothing else,
+    // so Up/Down and Left/Right have to be written. What is asserted is not
+    // absence but that it stays one inline script with a named subject, and
+    // the browser test proves the page still works with scripting switched
+    // off, which is the property a script count never checked.
+    expect((page.match(/<script/gi) ?? []).length, "still one script").to.equal(1);
+    expect(page, "the boundary").to.contain("pointerdown");
+    expect(page, "and the tree's arrow keys").to.contain("ArrowRight");
     expect(page, "nothing is loaded from anywhere").to.not.match(/<script[^>]+src=/i);
   });
 

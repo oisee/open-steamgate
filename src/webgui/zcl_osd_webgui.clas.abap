@@ -902,6 +902,63 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
 * just as it was let go
       `s.addEventListener('click',function(e){` &&
       `if(moved){e.preventDefault();e.stopPropagation();}},true);` &&
+*
+* The arrow keys, because a tree that can only be walked with Tab is not a
+* tree. `<details>` gives Enter and Space for free and nothing else: Tab
+* reaches every row, including the ones inside a folded folder in some
+* browsers, and neither Up/Down nor Left/Right mean anything. This is the
+* ordinary treeview behaviour and it has to be written.
+*
+* Visibility is read off the `open` attribute of the ancestors, and the
+* first version read it off `offsetParent` on exactly the argument that
+* sounds better: the browser has already computed it, so why ask twice.
+* Measured -- the folder closed, `open` went false, and the count of
+* "visible" rows did not move. Chromium hides a folded `<details>` with
+* `content-visibility`, which skips painting and **keeps the layout box**,
+* so `offsetParent` stays non-null. The instrument was accurate and
+* answered a different question: it says "has a box", not "is on screen".
+*
+* A summary starts the search one level up, above its own `<details>`,
+* because the summary of a folded folder is visible and its siblings are
+* not.
+*
+* Left on a leaf or on a closed folder goes to the **parent**, which is the
+* part people miss when they write this from the keys rather than from the
+* shape: the key is not "close", it is "out".
+*
+* And the parent is not one expression. For a leaf it is the folder the leaf
+* is in; for a closed folder it is the folder **above** that one. Written as
+* a single climb it silently does the right thing for a summary and nothing
+* at all for a leaf -- which is what it did, measured by pressing the key
+* rather than by reading it back.
+      `var tr=document.querySelector('.tree');if(tr){` &&
+      `var items=function(){` &&
+      `return [].slice.call(tr.querySelectorAll('summary,a.leaf'))` &&
+      `.filter(function(n){var d=n.tagName==='SUMMARY'?n.parentNode.parentNode:n;` &&
+      `return !d||!d.closest||!d.closest('details.fld:not([open])');});};` &&
+      `var owner=function(n){` &&
+      `return n.tagName==='SUMMARY'?n.parentNode:n.closest('details.fld');};` &&
+      `tr.addEventListener('keydown',function(e){` &&
+      `var a=document.activeElement;` &&
+      `if(!a||!tr.contains(a)){return;}` &&
+      `var k=e.key,l=items(),i=l.indexOf(a);if(i<0){return;}` &&
+      `var go=function(n){if(n){n.focus();e.preventDefault();}};` &&
+      `if(k==='ArrowDown'){go(l[i+1]);return;}` &&
+      `if(k==='ArrowUp'){go(l[i-1]);return;}` &&
+      `if(k==='ArrowRight'){` &&
+      `if(a.tagName!=='SUMMARY'){return;}` &&
+      `var d=a.parentNode;` &&
+      `if(!d.open){d.open=true;e.preventDefault();return;}` &&
+      `go(l[i+1]);return;}` &&
+      `if(k==='ArrowLeft'){` &&
+      `if(a.tagName==='SUMMARY'&&a.parentNode.open){` &&
+      `a.parentNode.open=false;e.preventDefault();return;}` &&
+      `var d=owner(a),up=a.tagName==='SUMMARY'` &&
+      `?(d&&d.parentNode&&d.parentNode.closest?d.parentNode.closest('details.fld'):null)` &&
+      `:d;` &&
+      `go(up&&up.querySelector('summary'));return;}` &&
+      `if(k==='Home'){go(l[0]);return;}` &&
+      `if(k==='End'){go(l[l.length-1]);}});}` &&
       `})();</script>`.
   ENDMETHOD.
 
