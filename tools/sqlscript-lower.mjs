@@ -113,6 +113,19 @@ const DIALECTS = {
 
 import {seamType} from "./sqlscript-ir.mjs";
 
+/** Functions that mean the same thing on HANA, DuckDB and SQLite.
+ *
+ *  Short on purpose. Membership is a claim, and the claim is "the same
+ *  arguments give the same answer on all three" -- not "all three have a
+ *  function with this name", which is how a portability hole gets written by
+ *  somebody being helpful. `ROUND` and `LOCATE` are deliberately absent:
+ *  they exist everywhere and their tie rule and argument order have not been
+ *  measured here. */
+const PORTABLE = new Set([
+  "LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "TRIM", "LTRIM", "RTRIM",
+  "SUM", "MIN", "MAX", "COUNT", "AVG",
+]);
+
 export class Refused extends Error {}
 
 export function lower(rel, dialectName, options = {}) {
@@ -175,9 +188,26 @@ export function lower(rel, dialectName, options = {}) {
         const args = e.args.map(expr);
         if (e.fn === "CONCAT") return `(${d.concat(args)})`;
         if (e.fn === "IFNULL") return d.ifnull(args[0], args[1]);
-        if (e.fn === "SUBSTR") return d.substr(args[0], args[1], args[2]);
-        if (e.fn === "TO_INTEGER") return d.castInt(args[0]);
-        return `${e.fn}(${args.join(", ")})`;
+        if (e.fn === "SUBSTR" || e.fn === "SUBSTRING") return d.substr(args[0], args[1], args[2]);
+        if (e.fn === "TO_INTEGER" || e.fn === "TO_INT") return d.castInt(args[0]);
+        if (PORTABLE.has(e.fn)) return `${e.fn}(${args.join(", ")})`;
+        // **An unknown function is refused, not rendered.**
+        //
+        // This used to pass any name straight through, which is the same
+        // mistake as passing a cast through to DuckDB and for once the
+        // corpus made it visible: `SUBSTR_BEFORE`, `SUBSTR_AFTER`, `MAP`,
+        // `TO_NVARCHAR`, `SESSION_CONTEXT` are HANA's, and on DuckDB they
+        // raise "Scalar Function ... does not exist". Raising is the LUCKY
+        // half. The other half is a name that exists on both engines and
+        // means something slightly different -- `LOCATE`'s argument order,
+        // `ROUND`'s tie rule, `TO_DATE`'s format string -- and that one
+        // answers a number instead of an error.
+        //
+        // `PORTABLE` is therefore a list of functions whose meaning is the
+        // same on all three, not a list of functions that exist. A name is
+        // added to it by measuring, the way division and casts were.
+        throw new Refused(`the function ${e.fn} has no measured rendering on ${dialectName}: ` +
+          "it is either HANA's own, or it exists on both engines and may not mean the same thing");
       }
       default: throw new Refused(`expression ${e.node} not lowered`);
     }

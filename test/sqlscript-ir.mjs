@@ -329,3 +329,40 @@ describe("SQLScript IR: the tables a body needs, invented from the body", () => 
     expect(tableShapesFor(rel).guessed).to.be.empty;
   });
 });
+
+// A function name that reaches another engine unchanged is the same class of
+// defect as a cast that reaches it unchanged, and the corpus made it visible:
+// SUBSTR_BEFORE, SUBSTR_AFTER, MAP, TO_NVARCHAR and SESSION_CONTEXT are
+// HANA's, and DuckDB answers "Scalar Function ... does not exist". Raising is
+// the lucky half; the other half is a name that exists on both engines and
+// means something slightly different.
+describe("SQLScript IR: a function is rendered only where it has been measured", () => {
+  const sqlOf = (rel, engine) => lower(rel, engine).sql;
+
+  it("renders the ones whose meaning is the same on all three", () => {
+    const rel = project(scan("SRC"), [{as: "V", expr: call("LOWER", [col("A")], T.str)}]);
+    for (const engine of ["hana", "duckdb", "sqlite"]) {
+      expect(sqlOf(rel, engine)).to.contain('LOWER("A")');
+    }
+  });
+
+  it("refuses one of HANA's own by name, rather than sending it somewhere it does not exist", () => {
+    const rel = project(scan("SRC"), [{as: "V", expr: call("SUBSTR_BEFORE", [col("A"), lit("-", T.char(1))], T.str)}]);
+    expect(() => lower(rel, "duckdb")).to.throw(Refused, /SUBSTR_BEFORE has no measured rendering/);
+  });
+
+  it("refuses ROUND and LOCATE too, which exist everywhere and have not been measured", () => {
+    // the dangerous kind: present on all three, and the tie rule and the
+    // argument order are not the same thing as the name being the same
+    for (const fn of ["ROUND", "LOCATE"]) {
+      const rel = project(scan("SRC"), [{as: "V", expr: call(fn, [col("A")], T.str)}]);
+      expect(() => lower(rel, "duckdb"), fn).to.throw(Refused, /has no measured rendering/);
+    }
+  });
+
+  it("still translates the ones that were measured and differ", () => {
+    const rel = project(scan("SRC"), [{as: "V", expr: call("IFNULL", [col("A"), lit(0, T.int)], T.int)}]);
+    expect(sqlOf(rel, "duckdb")).to.contain("COALESCE");
+    expect(sqlOf(rel, "hana")).to.contain("IFNULL");
+  });
+});
