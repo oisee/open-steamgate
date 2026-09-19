@@ -146,7 +146,11 @@ export async function setup(abap, schemas, insert) {
     db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1"});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
-    if (process.env.STG_DB_FRESH !== "1" && await db.hasSchema()) {
+    // Seed once per run, not once per connection. A run opens more than one
+    // (the database client, and the AMDP destination holds its own), and both
+    // used to build the whole schema. The connection that made the schema
+    // fresh is the one that seeds it; every other finds it there.
+    if (await db.hasSchema() && db.droppedSchema !== true) {
       return;
     }
     await db.execute(hanaSchema(schemas));

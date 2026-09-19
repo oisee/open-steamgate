@@ -237,6 +237,7 @@ export class HanaDatabaseClient {
     this.name = "HDB";
     this.trace = input.trace === true;
     this.schema = input.schema ?? process.env.HANA_SCHEMA ?? "OSD";
+    this.droppedSchema = false;
     /** did *this* connection make the schema fresh? see `freshened` */
     this.droppedSchema = false;
     this.options = input;
@@ -262,6 +263,7 @@ export class HanaDatabaseClient {
       // Marked **before** the await, not after: two connects racing here
       // would both see "not yet dropped" and both issue the DROP.
       freshened.add(this.schema);
+      this.droppedSchema = true;
       // and the caller needs to know which connection did it: the one that
       // dropped is the one that has to seed, and every other one must not
       this.droppedSchema = true;
@@ -298,6 +300,14 @@ export class HanaDatabaseClient {
       return;
     }
     if (sql === "") return;
+    // A statement opens the LUW here exactly as a modifying one does. Without
+    // this the flag stayed false, `commit()` returned early -- it begins with
+    // `if (this.inTransaction === false) return` -- and with autocommit off
+    // the whole seed lived inside the session that wrote it. Invisible with
+    // one connection, because a session sees its own uncommitted rows; a
+    // second connection reads an empty schema and the suite fails on the
+    // seeded rows it cannot see (measured 2026-09-19).
+    await this.beginTransaction();
     const folded = multiRowInsert(foldIdentifiers(sql));
     if (this.trace) console.log(folded);
     await this.#run(folded);
