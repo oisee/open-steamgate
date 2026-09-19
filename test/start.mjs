@@ -392,12 +392,31 @@ export function startServer(quiet) {
   }
 
   const close = server.close.bind(server);
+  // **Returns a promise when called without a callback**, and that is what
+  // makes the suites wait. Every one of them writes `after(() =>
+  // server?.close())`, and a mocha hook waits for what its function returns;
+  // this returned the server object, so the hook finished while the listener
+  // was still closing and the next file's `before` met the port still bound.
+  //
+  // Measured on HANA, where closing takes longer because the connections do:
+  // 28 of 26 failures in a full run were `EADDRINUSE`, on this port and on
+  // the supervised runtime's. Not on SQLite, where the race is simply won --
+  // which is why this sat unnoticed while one backend was fast enough.
+  //
+  // `runtime.stop()` is awaited for the same reason it exists: the child
+  // holds the port and the database the next listener needs, and `void` on
+  // it meant "start stopping and carry on".
   server.close = (cb) => {
-    secure?.close();
-    // the supervised runtime is this listener's child; leaving it behind
-    // would hold the port and the database the next one needs
-    void runtime?.stop();
-    return close(cb);
+    if (typeof cb === "function") {
+      secure?.close();
+      void runtime?.stop();
+      return close(cb);
+    }
+    return (async () => {
+      await new Promise((resolve) => (secure === undefined ? resolve() : secure.close(resolve)));
+      await runtime?.stop();
+      await new Promise((resolve) => close(resolve));
+    })();
   };
   return server;
 }
