@@ -43,6 +43,7 @@
     "test/osd-store.mjs",
     "test/osd-unit.mjs",
     "test/osd-xref.mjs",
+    "test/preflight.mjs",
     "test/preview-closure.mjs",
     "test/replay-compare.mjs",
     "test/rfc-live.mjs",
