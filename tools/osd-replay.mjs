@@ -171,8 +171,18 @@ if (basename(process.argv[1] ?? "") === "osd-replay.mjs") {
       process.exit(2);
     }
     const answers = await replay(bases[0], calls);
+    const unasked = answers.filter((a) => a.failed).length;
     writeFileSync("replay.json", `${JSON.stringify(answers, undefined, 1)}\n`);
-    console.log(`${answers.length} calls, ${answers.filter((a) => a.failed).length} could not be asked -> replay.json`);
+    console.log(`${answers.length} calls, ${unasked} could not be asked -> replay.json`);
+    // **"Asked nothing" is not "recorded a run".** This printed the line
+    // above and exited 0 against a port with no server on it, minutes after
+    // the module was written to stop exactly that -- the third value of a
+    // verdict is always cheaper to fake than to have, and this one faked
+    // success. `compare` already refused it; `record` did not.
+    if (unasked === answers.length) {
+      console.error(`nothing answered at ${bases[0]}: this is not a recording`);
+      process.exit(2);
+    }
     process.exit(0);
   }
   if (mode === "compare") {

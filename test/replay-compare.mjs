@@ -131,3 +131,22 @@ describe("one system served twice answers the same thing", function () {
     expect(found, found.map((d) => `${d.path}: ${d.why}\n  L ${d.first?.left}\n  R ${d.first?.right}`).join("\n")).to.have.length(0);
   });
 });
+
+// The tool's own third value, caught in it minutes after it was written to
+// stop exactly this elsewhere: `record` printed "13 calls, 13 could not be
+// asked" against a port with no server on it and exited 0. "Asked nothing"
+// is not "recorded a run" — and the cheapest thing a missing third value can
+// do is look like one of the two that exist.
+describe("asking nothing is not a recording", () => {
+  it("record exits 2 when no call could be asked at all", async () => {
+    const {execFileSync} = await import("node:child_process");
+    let code = 0;
+    try {
+      execFileSync(process.execPath, ["tools/osd-replay.mjs", "record", "http://localhost:59999"],
+        {stdio: "pipe"});
+    } catch (error) {
+      code = error.status;
+    }
+    expect(code, "a port with nothing on it must not read as a successful recording").to.equal(2);
+  });
+});
