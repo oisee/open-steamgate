@@ -53,7 +53,13 @@ for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
   const pkg = zip.replace(/\.zip$/, "");
   if (TEACHING.test(pkg)) continue;  // the working corpus is what decides
   for (const file of classesIn(join(root, zip), join("/tmp/sqlscript-coverage", pkg))) {
-    for (const {body} of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) {
+    for (const {body, signature, language} of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) {
+      // the same pipeline `coverage.mjs` measures, argument for argument.
+      // It was not: this passed `signature: undefined` and skipped no
+      // language, so it could report a refusal the measurement never had --
+      // an explaining tool that reproduces a different program explains
+      // something else, convincingly.
+      if (language !== "SQLSCRIPT") continue;
       let tokens = [];
       let tree;
       let why;
@@ -72,7 +78,7 @@ for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
         // it went through the grammar; the lowering is the other half of the
         // question, and its message is the line of the second histogram
         try {
-          const ir = toIr(tree, {catalogue: {}, signature: undefined});
+          const ir = toIr(tree, {catalogue: {}, signature});
           lower(ir.rel, "hana");
           continue;                                 // it goes through whole
         } catch (error) {

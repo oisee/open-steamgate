@@ -963,3 +963,25 @@ ENDLOOP.
 - Upstream issue: **needs an issue.** The fix is one line either way (compare case-insensitively, or normalise on set), but which one is right depends on what the interface promises, and that is Lars's call rather than ours
 - Regression-test location: `test/se16.mjs`, "filters through the same clause builder an OData $filter goes through"
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-19-bang-value — abaplint loses every parameter of a method declared `!VALUE(x)`
+
+- Status: `workaround`
+- Discovery date: `2026-09-19`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `METHODS` / `CLASS-METHODS` with a parameter written `!VALUE(name)`
+- Minimal ABAP reproducer:
+  ```abap
+  CLASS c DEFINITION PUBLIC.
+    PUBLIC SECTION.
+      CLASS-METHODS m1 IMPORTING !VALUE(iv_x) TYPE i.
+  ENDCLASS.
+  ```
+- Exact command used to run it: parse it with `new Registry().addFile(...).parse()` and read `getFirstObject().getABAPFiles()[0].getStatements()`
+- Expected SAP behaviour: **not claimed, and not needed.** The `!` is a preferred-parameter marker, an editor concern that escapes a name which would otherwise collide with a keyword; it carries no meaning for the interface. What makes this an anomaly does not need a system: abaplint parses `!iv_x` and parses `VALUE(iv_x)`, and does not parse the two **together**. Three forms measured, one fails, and the failing one is the combination
+- Actual open-abap behaviour: the statement comes back as `Unknown`, so `getClassDefinition().methods` is **empty** — not the one method mis-read, the whole class silently parameterless
+- Impact on open-steamgate: SE24 generates exactly this combination, so it is ordinary rather than exotic. In the AMDP corpus it costs the signature of every method in such a class, and a body then looks as though it read an **undeclared table variable** — the refusal names `:it_ddls`, which is declared three lines above it in the ABAP. Measured: 171 of 364 corpus bodies had a signature carrying parameters; with the workaround, **188**
+- Smallest safe workaround: `withoutBangValue()` in `tools/amdp-extract.mjs` — `!VALUE(` becomes `VALUE(` for the parser and for nothing else. Deliberately a normalisation of one token for one parser rather than a parameter parser of our own: re-deriving what abaplint does is the failure mode this project is built to avoid, and it would go stale in silence the day upstream fixes this
+- Upstream issue: **needs an issue**, on `abaplint/abaplint`. That repository takes no branch from us and its regression workflow skips forks, so an issue is the whole of what we can offer there — `npm run parked` prints which rule applies to which repository
+- Regression-test location: `test/amdp.mjs`, "a parameter written `!VALUE(x)` is still a parameter"
+- Upstream version containing a fix: `unknown`

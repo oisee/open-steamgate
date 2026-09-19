@@ -119,3 +119,47 @@ describe("AMDP: cutting a body out of a class", () => {
   });
 
 });
+
+// abaplint parses `!x` and parses `VALUE(x)` and does not parse the two
+// together: the statement comes back `Unknown` and the whole class loses its
+// parameters (ANORMALY-2026-09-19-bang-value). SE24 writes exactly that
+// combination, so a corpus class declared by the editor arrived signatureless
+// and its bodies then looked as though they read undeclared table variables.
+describe("a parameter written !VALUE(x) is still a parameter", () => {
+  const withBody = (decl) => `CLASS c DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    ${decl}
+ENDCLASS.
+CLASS c IMPLEMENTATION.
+  METHOD m1 BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+    et_out = select * from :it_in;
+  ENDMETHOD.
+ENDCLASS.`;
+
+  it("reads the same parameters however the declaration escapes them", async () => {
+    const {extract} = await import("../tools/amdp-extract.mjs");
+    const forms = [
+      "CLASS-METHODS m1 IMPORTING VALUE(it_in) TYPE t EXPORTING VALUE(et_out) TYPE t.",
+      "CLASS-METHODS m1 IMPORTING !VALUE(it_in) TYPE t EXPORTING !VALUE(et_out) TYPE t.",
+      "CLASS-METHODS:\n      m1 IMPORTING !value(it_in) TYPE t EXPORTING !value(et_out) TYPE t,\n      m2 IMPORTING !value(iv_x) TYPE i.",
+    ];
+    for (const decl of forms) {
+      const cls = extract(withBody(decl), "c.clas.abap");
+      expect(cls.methods[0]?.parameters.map((p) => p.name), decl.slice(0, 40))
+        .to.deep.equal(["it_in", "et_out"]);
+    }
+  });
+
+  it("and the marker is removed for the parser only, nowhere else", async () => {
+    const {withoutBangValue} = await import("../tools/amdp-extract.mjs");
+    // `!name` on its own parses and is left alone; only the combination goes
+    expect(withoutBangValue("IMPORTING !iv_x TYPE i")).to.equal("IMPORTING !iv_x TYPE i");
+    expect(withoutBangValue("IMPORTING !VALUE(iv_x)")).to.equal("IMPORTING VALUE(iv_x)");
+    // and never inside a string literal: rewriting there would change a
+    // body rather than a declaration. The first version of this function did
+    // exactly that, and this assertion is the one that caught it
+    expect(withoutBangValue("SELECT '!VALUE(' FROM t")).to.equal("SELECT '!VALUE(' FROM t");
+    expect(withoutBangValue("a = '!VALUE(x)'; METHODS m IMPORTING !VALUE(iv) TYPE i."))
+      .to.equal("a = '!VALUE(x)'; METHODS m IMPORTING VALUE(iv) TYPE i.");
+  });
+});

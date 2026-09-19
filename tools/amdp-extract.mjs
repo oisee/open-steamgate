@@ -85,8 +85,69 @@ export function parameterType(abapType, types) {
   return undefined;
 }
 
+/** `!VALUE(x)` into `VALUE(x)`, for abaplint only.
+ *
+ *  abaplint 2.120.55 parses `!x` and it parses `VALUE(x)`, and it does not
+ *  parse the two together -- the statement comes back `Unknown` and the whole
+ *  method loses its parameters (ANORMALIES-2026-09-19-bang-value). SE24
+ *  generates exactly that combination, so it is not exotic: it costs us the
+ *  signature of every method in such a class, and a body then looks as
+ *  though it read an undeclared table variable.
+ *
+ *  The `!` is a **preferred-parameter marker** and carries no meaning for the
+ *  interface -- it exists to escape a name that would collide with a keyword
+ *  -- so removing it before parsing changes nothing about what is read. This
+ *  is deliberately a normalisation of one token for one parser and not a
+ *  parameter parser of our own: re-deriving what abaplint does is the
+ *  failure mode this project is built to avoid, and it would go stale
+ *  silently the moment upstream fixes this. */
+export function withoutBangValue(source) {
+  // **Outside string literals and comments only.** The first version was a
+  // bare replace, and its own test caught it rewriting `'!VALUE('` inside a
+  // literal -- which would change a body rather than its declaration. It is
+  // the same lesson the HANA shape query paid for two hours earlier: a
+  // substitution over source text scans, or it edits things it never meant
+  // to. `!VALUE(` in a string is far-fetched; so was a `?` in one.
+  const text = String(source);
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === c) {
+          if (text[j + 1] === c) j += 2;
+          else { j += 1; break; }
+        } else j += 1;
+      }
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "\"" && (out === "" || out.endsWith("\n"))) {
+      // a full-line ABAP comment starts with `"` only at the start of a line
+      // here; `*` in column one is handled by the same rule
+      const end = text.indexOf("\n", i);
+      const j = end === -1 ? text.length : end;
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    const match = /^!\s*(?=VALUE\s*\()/i.exec(text.slice(i, i + 12));
+    if (match !== null) {
+      i += match[0].length;
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
 export function extract(source, filename = "x.clas.abap", extraTypeSources = []) {
-  const reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  const reg = new abaplint.Registry()
+    .addFile(new abaplint.MemoryFile(filename, withoutBangValue(source))).parse();
   const obj = reg.getFirstObject();
   if (obj === undefined) throw new Error("nothing parsed out of " + filename);
   const file = obj.getABAPFiles()[0];
