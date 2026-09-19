@@ -44,6 +44,7 @@
     "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs",
     "segw": "node tools/segw-registry.mjs",
     "segw:gen": "node tools/segw-gen.mjs",
+    "segw:zip": "node tools/osd-abapgit-zip.mjs",
     "segw:shlp": "node tools/segw-shlp.mjs",
     "osd:fm": "node tools/osd-fm-registry.mjs",
     "osd:tran": "node tools/osd-tran-registry.mjs",
