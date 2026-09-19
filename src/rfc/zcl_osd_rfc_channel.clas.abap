@@ -56,6 +56,7 @@ CLASS zcl_osd_rfc_channel DEFINITION PUBLIC CREATE PUBLIC.
     TYPES: BEGIN OF ty_interface,
              function   TYPE zcl_osd_fm_registry=>ty_function,
              parameters TYPE zcl_osd_fm_registry=>tt_parameter,
+             types      TYPE zcl_osd_fm_registry=>tt_type,
            END OF ty_interface.
 
     CLASS-METHODS segments
@@ -203,6 +204,10 @@ CLASS zcl_osd_rfc_channel IMPLEMENTATION.
       RETURN.
     ENDIF.
     ls_interface-parameters = zcl_osd_fm_registry=>parameters( iv_name ).
+*   and what those parameter types ARE, not only what they are called: a
+*   caller that has to encode a value needs the letter and the length, and a
+*   data element carries neither -- it names a domain (backlog D.3)
+    ls_interface-types      = zcl_osd_fm_registry=>types( iv_name ).
     rs_response = ok( /ui2/cl_json=>serialize( data = ls_interface ) ).
   ENDMETHOD.
 

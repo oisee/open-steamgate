@@ -137,3 +137,57 @@ describe("the RFC channel over HTTP", () => {
     expect((await get("/nonsense")).status).to.equal(404);
   });
 });
+
+// D.3: the answer says what a parameter's type **is**, not only what it is
+// called. A caller that has to encode a value needs the letter and the
+// length, and a data element carries neither — it names a domain, and the
+// domain carries them.
+//
+// The contract is **ours**, and that is stated rather than implied. The
+// backlog said these handlers are "driven by one hand-built graph
+// (ADTRestGraph)"; fable-osd read the bridge and there is no such thing in
+// it, under that name or any other — what it has is `pkg/graph`, a code
+// dependency graph of CALLS / REFERENCES / LOADS, which answers who
+// references whom and not what a name means. So there is no foreign shape to
+// match, and inventing one would be worse than declaring our own: an
+// invented contract wears somebody else's name and the first reader believes
+// there is a second party to it.
+describe("a signature carries the closure of the types it names", function () {
+  this.timeout(60000);
+  let server;
+  before(() => {
+    server = startServer(true);
+  });
+  after(() => server?.close());
+
+  const describeFm = async (name) =>
+    (await (await fetch(`${BASE}/functions/${name}`)).json());
+
+  it("resolves a data element through its domain, which is where the type lives", async () => {
+    const answer = await describeFm("Z_OSD_TEST_STATUS_TEXT");
+    const status = answer.TYPES.find((t) => t.NAME === "ZOSD_TEST_STATUS");
+    expect(status, "the type the signature names is in the answer").to.not.equal(undefined);
+    // reading the data element alone answers "": it has <DOMNAME> and no
+    // <DATATYPE>, which is how a CHAR(1) reads as an empty type
+    expect({type: status.DATATYPE, length: status.LENG, letter: status.LETTER})
+      .to.deep.equal({type: "CHAR", length: 1, letter: "C"});
+  });
+
+  it("carries a built-in too, because a codec needs its letter as much", async () => {
+    const answer = await describeFm("Z_OSD_TEST_STATUS_TEXT");
+    expect(answer.TYPES.find((t) => t.NAME === "STRING"))
+      .to.include({KIND: "BUILTIN", LETTER: "g"});
+  });
+
+  it("one entry per type, however many parameters share it", async () => {
+    const answer = await describeFm("Z_OSD_TEST_STATUS_TEXT");
+    const names = answer.TYPES.filter((t) => t.FIELD === "").map((t) => t.NAME);
+    expect(names.length, "no repeats").to.equal(new Set(names).size);
+  });
+
+  it("and the parameters still say only what they are called, which is their job", async () => {
+    const answer = await describeFm("Z_OSD_TEST_STATUS_TEXT");
+    expect(answer.PARAMETERS.map((p) => p.NAME)).to.deep.equal(["IV_STATUS", "EV_TEXT"]);
+    expect(answer.PARAMETERS[0].TYPE, "the name, resolved in TYPES").to.equal("ZOSD_TEST_STATUS");
+  });
+});

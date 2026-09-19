@@ -30,6 +30,8 @@
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
 import {basename, join} from "node:path";
 import {contentFoldersOf} from "./osd-packs.mjs";
+import {ObjectStore} from "./osd-store.mjs";
+import {typeGraph} from "./osd-type-graph.mjs";
 
 const OUT = "gen/rfc";
 
@@ -202,7 +204,36 @@ function defaultLiteral(value) {
   return undefined;
 }
 
-export function registryClass(list) {
+/** The types a module's parameters name, resolved, as flat rows.
+ *
+ *  **Flat on purpose.** A resolved type is a tree -- a structure's component
+ *  is a type again -- and ABAP carries a tree badly. One row per type, plus
+ *  one row per component with `field` set, says the same thing and
+ *  serialises to JSON a caller can read in one pass.
+ *
+ *  Generated rather than resolved at run time for the reason everything in
+ *  `gen/rfc/` is: the dictionary is files, and the runtime has no files. */
+export function typeRows(list, store) {
+  const rows = [];
+  for (const fm of list) {
+    const graph = typeGraph(store, fm.parameters.map((p) =>
+      ({TYPE: p.lineType !== "" ? p.lineType : p.type})));
+    for (const [name, t] of Object.entries(graph)) {
+      rows.push({fm: fm.name, name, field: "", kind: t.KIND, datatype: t.DATATYPE ?? "",
+        leng: t.LENG ?? 0, decimals: t.DECIMALS ?? 0, letter: t.LETTER ?? "",
+        text: t.TEXT ?? "", reason: t.REASON ?? ""});
+      for (const f of t.FIELDS ?? []) {
+        const inner = f.TYPE ?? f;
+        rows.push({fm: fm.name, name, field: f.NAME, kind: inner.KIND ?? "INLINE",
+          datatype: inner.DATATYPE ?? "", leng: inner.LENG ?? 0, decimals: inner.DECIMALS ?? 0,
+          letter: inner.LETTER ?? "", text: f.KEY === true ? "KEY" : "", reason: inner.REASON ?? ""});
+      }
+    }
+  }
+  return rows;
+}
+
+export function registryClass(list, store = new ObjectStore()) {
   const rows = list.map((fm) => `    ls_function-name        = ${q(fm.name)}.
     ls_function-fgroup      = ${q(fm.group)}.
     ls_function-short_text  = ${q(fm.shortText)}.
@@ -211,6 +242,23 @@ export function registryClass(list) {
     ls_function-exposed     = ${bool(fm.exposed)}.
     ls_function-reason      = ${q(fm.reason)}.
     APPEND ls_function TO rt_function.`).join("\n\n");
+
+  const rowsByFm = new Map();
+  for (const row of typeRows(list, store)) {
+    if (!rowsByFm.has(row.fm)) rowsByFm.set(row.fm, []);
+    rowsByFm.get(row.fm).push(row);
+  }
+  const typeCases = [...rowsByFm].map(([name, rows]) => [`      WHEN ${q(name)}.`,
+    ...rows.map((r) => `        ls_type-name     = ${q(r.name)}.
+        ls_type-field    = ${q(r.field)}.
+        ls_type-kind     = ${q(r.kind)}.
+        ls_type-datatype = ${q(r.datatype)}.
+        ls_type-leng     = ${r.leng}.
+        ls_type-decimals = ${r.decimals}.
+        ls_type-letter   = ${q(r.letter)}.
+        ls_type-text     = ${q(r.text)}.
+        ls_type-reason   = ${q(r.reason)}.
+        APPEND ls_type TO rt_type.`)].join("\n")).join("\n");
 
   const cases = list.map((fm) => {
     const lines = [`      WHEN ${q(fm.name)}.`];
@@ -265,6 +313,24 @@ export function registryClass(list) {
            END OF ty_parameter.
     TYPES tt_parameter TYPE STANDARD TABLE OF ty_parameter WITH DEFAULT KEY.
 
+*   What a parameter's type IS, not only what it is called (backlog D.3).
+*   A caller that has to encode a value needs the letter and the length, and
+*   a data element usually carries neither: it names a domain, and the domain
+*   carries them. Flat because a resolved type is a tree and ABAP carries a
+*   tree badly - one row per type, one more per component with FIELD set.
+    TYPES: BEGIN OF ty_type,
+             name     TYPE string,
+             field    TYPE string,
+             kind     TYPE string,
+             datatype TYPE string,
+             leng     TYPE i,
+             decimals TYPE i,
+             letter   TYPE string,
+             text     TYPE string,
+             reason   TYPE string,
+           END OF ty_type.
+    TYPES tt_type TYPE STANDARD TABLE OF ty_type WITH DEFAULT KEY.
+
 *   every module the tree declares, remote-enabled or not
     CLASS-METHODS list
       RETURNING VALUE(rt_function) TYPE tt_function.
@@ -276,6 +342,11 @@ export function registryClass(list) {
     CLASS-METHODS parameters
       IMPORTING iv_name            TYPE string
       RETURNING VALUE(rt_parameter) TYPE tt_parameter.
+
+*   the closure of DDIC types those parameters name
+    CLASS-METHODS types
+      IMPORTING iv_name        TYPE string
+      RETURNING VALUE(rt_type) TYPE tt_type.
 ENDCLASS.
 
 CLASS zcl_osd_fm_registry IMPLEMENTATION.
@@ -294,6 +365,16 @@ ${rows === "" ? "    RETURN." : rows}
     IF sy-subrc <> 0.
       CLEAR rs_function.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD types.
+    DATA ls_type TYPE ty_type.
+
+    CASE to_upper( iv_name ).
+${typeCases === "" ? "      WHEN OTHERS." : typeCases}
+      WHEN OTHERS.
+        RETURN.
+    ENDCASE.
   ENDMETHOD.
 
   METHOD parameters.

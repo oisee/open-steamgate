@@ -1620,8 +1620,29 @@ What already exists, and is why this is a track and not a project:
    (zcl_stg_segw_fugr, tools/segw-gen-mapping.mjs, ZSTG_FM_PARAM).
  - the bridge has both metadata halves (RFC_GET_FUNCTION_INTERFACE / DDIF /
    RFC_GET_STRUCTURE_DEFINITION answered) and the codecs that encode arbitrary
-   typed values (internal/xrfc, internal/classicrfc, internal/structure) — all
-   currently driven by one hand-built graph (ADTRestGraph).
+   typed values (internal/xrfc, internal/classicrfc, internal/structure).
+
+**Correction, 2026-09-19.** This paragraph used to end "all currently driven
+by one hand-built graph (ADTRestGraph)". **There is no `ADTRestGraph` in the
+bridge** — fable-osd read the clone (HEAD `1a0e11b`) and searched three
+spellings; none of them appear in any file. What the bridge has is
+`pkg/graph`, which is a **code dependency** graph: `Node{id,name,type,package}`
+and `Edge{from,to,kind}` with kinds `CALLS`, `REFERENCES`, `LOADS`,
+`CONTAINS_INCLUDE`, fed from the ADT API, `CROSS`/`WBCROSSGT` and `D010INC`.
+It answers who references whom, not what `ZOSD_TEST_STATUS` means.
+
+So **there is no consumer with the contract D.3 was written to match**, and
+the type closure is not an `Edge` — it is a name resolved to a value, and
+forcing it into `REFERENCES` would produce a graph a codec cannot read a
+letter out of without a second pass. The contract the channel answers is
+therefore **ours, declared**, which is the honest version of the choice: an
+invented contract wears somebody else's name, and the first reader believes
+there is a second party to it.
+
+Feeding `pkg/graph` from this tree is a separate and cheap thing if it is
+ever wanted — `Node{id:"DTEL:ZOSD_TEST_STATUS", type:"DTEL"}` plus an
+`Edge{kind:"REFERENCES", ref_detail:"FM:..."}` — but that is an **export into
+a graph**, not the channel's contract, and the two should not be mixed.
 
 The one genuinely new piece: a **signature → metadata graph** builder. Every
 handler today is fed a graph made by hand; a generic gateway builds that graph
@@ -1661,10 +1682,18 @@ D.2  Which modules are exposed, and finding them             half done 09-17
         gate and exposes ANY transpiled module — a regeneration with a flag,
         since the dispatcher is generated from the same list
 
-D.3  The signature -> metadata graph builder                            [R]
-     ├─ the one new thing: build the bridge's type graph from a module's real
-     │  parameters and their DDIC types, the way ADTRestGraph is built by hand
-     │  for the one function today
+D.3  The signature -> metadata graph builder          [R]  half DONE 09-19
+     ├─ **done**: `tools/osd-type-graph.mjs` resolves a DDIC type name to
+     │  what it is, and `/sap/bc/osd/rfc/functions/<NAME>` carries the
+     │  closure as `TYPES`. The chain is DTEL -> DOMA (the element usually
+     │  carries no DATATYPE at all: it names a domain) and TABL/TTYP ->
+     │  components, walked. A type the tree does not hold is `UNRESOLVED` by
+     │  name rather than defaulted to CHAR, which is what a caller would
+     │  then encode with
+     ├─ generated into `gen/rfc/` rather than resolved at run time, for the
+     │  reason everything there is: the dictionary is files and the runtime
+     │  has no files
+     ├─ **left**: the codecs, which are the bridge's half (D.4)
      ├─ feeds the generic metadata handlers (RFC_GET_FUNCTION_INTERFACE, DDIF,
      │  RFC_GET_STRUCTURE_DEFINITION) so they answer for ANY module
      └─ and feeds the codecs, so import params decode and exports encode
