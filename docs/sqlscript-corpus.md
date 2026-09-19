@@ -190,3 +190,55 @@ upper-case name followed by a bracket, so a few keywords -- `INSERT`,
   translate.
 - Reproduce with `node tools/amdp-corpus.mjs`; the exports live under
   `.local/` and are never tracked -- they are somebody else's source.
+
+## Measured against the parser that exists: 0 of 405
+
+*2026-09-19, `node tools/sqlscript/coverage.mjs`. Until the front end existed
+this could only be estimated; the curve above counts **constructs** and
+infers. This counts **bodies that go through whole**, which is the only
+number that predicts how much of the corpus runs.*
+
+| | bodies | parse whole |
+| --- | ---: | ---: |
+| working | 405 | **0 (0%)** |
+| teaching | 104 | 11 (11%) |
+
+**Zero.** Not a disappointing number -- a useful one, and it says the
+frequency curve was answering a different question. A body needs all of its
+constructs at once, so a construct in 80% of bodies buys nothing on its own,
+and the grammar so far covers the *relational* half of a language whose
+bodies are mostly **not** relational at the top level.
+
+What stops them, ranked by bodies rather than by occurrences:
+
+| stopped at | working | teaching |
+| --- | ---: | ---: |
+| `DECLARE` | **132** | 9 |
+| `BEGIN` | **91** | - |
+| `RETURN` | **47** | 21 |
+| `*` (in `COUNT(*)` and friends) | 24 | 14 |
+| `CALL` | 4 | 15 |
+| `UPSERT` / `DELETE` / `MERGE` / `IF` | 16 | 5 |
+
+So the next three constructs are decided by measurement and they are not the
+three the frequency table would have picked: **`DECLARE`, `BEGIN … END`, and
+`RETURN`** -- the imperative shell, which the frequency count made look thin
+because it counted how often each *appears* rather than how often it is the
+thing in the way. `COUNT(*)` is a fourth and nearly free: the grammar accepts
+`*` as a select item and not as a function argument.
+
+This is the curve to re-run after each construct, and the question it answers
+after each one is the same: **which construct is now the only thing missing
+in the most bodies.** That list changes every time, which is why the order
+cannot be fixed in advance from a frequency table.
+
+### What the zero does not mean
+
+- Not that the front end is wrong: the chain runs a body end to end on three
+  engines and answers the same values (`test/sqlscript-end-to-end.mjs`). It
+  means the grammar covers a smaller part of the language than the frequency
+  table suggested.
+- Not that the corpus is exotic. The three blockers are the plainest
+  statements in the imperative half.
+- And it is one sandbox of SAP-authored code; a customer corpus would answer
+  its own question, as ever.
