@@ -247,7 +247,14 @@ if (process.argv.includes("--json")) {
     if (differs.length > 0) nominal.push({one, who: differs});
     if (actually.length > 0) real.push({one, who: actually});
   }
-  console.log(`against ${oracle}: ${nominal.length} of ${CASES.length} differ nominally, **${real.length} after normalisation**`);
+  console.log(`against ${oracle}: ${nominal.length} of ${CASES.length} rows differ nominally, **${real.length} after normalisation**`);
+  // per engine, because "nine rows differ" is not a number anybody can act
+  // on: one engine may account for all of them
+  for (const name of others) {
+    const nom = CASES.filter((one) => show(engines[name][one.id]) !== show(engines[oracle][one.id])).length;
+    const act = CASES.filter((one) => !agree(engines[name][one.id], engines[oracle][one.id])).length;
+    console.log(`  ${name.padEnd(8)} ${nom} nominal, ${act} real`);
+  }
   const formattingOnly = nominal.filter((n) => !real.some((r) => r.one.id === n.one.id));
   if (formattingOnly.length > 0) {
     console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
