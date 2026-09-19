@@ -5,6 +5,7 @@
 // Run after `npm run transpile`. No server is involved: GitHub Pages (or any
 // static host) serves these files, the worker answers the OData requests.
 import {copyFile, mkdir, readFile, readdir, writeFile, stat} from "node:fs/promises";
+import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {join, resolve} from "node:path";
@@ -157,8 +158,26 @@ if (emitted.includes(PLACEHOLDER) === false) {
 }
 const stamp = createHash("sha256").update(emitted).digest("hex").slice(0, 16);
 await writeFile(workerPath, emitted.replaceAll(PLACEHOLDER, stamp), "utf8");
+// The commit, and it is the only number the two deployment targets can share.
+// `stamp` and `buildId` are hashes of what THIS pipeline emitted; the i7 runs
+// a binary release with a transpiler generation of its own, and the two can
+// never coincide even when both were built from the same source. So a check
+// phrased as "both show the same generation" is unprovable by construction
+// and reads as drift to whoever tries it. The commit is shared, so the check
+// becomes "both show the same commit", which is true by construction rather
+// than by coincidence (the rule is in docs/backlog.md: i7 follows Pages).
+let commit = process.env.GITHUB_SHA ?? "";
+if (commit === "") {
+  try {
+    commit = execFileSync("git", ["rev-parse", "HEAD"], {encoding: "utf8"}).trim();
+  } catch {
+    // a source tree without git is a legitimate way to build this; say so
+    // rather than writing a field that looks measured and is not
+    commit = "unknown";
+  }
+}
 await writeFile(resolve(build, "build.json"),
-  JSON.stringify({stamp, buildId, builtAt: new Date().toISOString()}, undefined, 2) + "\n", "utf8");
+  JSON.stringify({commit, stamp, buildId, builtAt: new Date().toISOString()}, undefined, 2) + "\n", "utf8");
 console.log(`Stamp: ${stamp}`);
 
 await mkdir(build, {recursive: true});
