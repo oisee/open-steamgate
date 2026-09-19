@@ -14,6 +14,7 @@ import {modulesOf} from "./osd-transpile.mjs";
 import {existsSync, lstatSync, readFileSync, realpathSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {createRequire} from "node:module";
+import {runsAs} from "./osd-main.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -101,7 +102,7 @@ export function describeBuild(root = process.cwd()) {
   return describeTranspiler(root) + "\n" + describeRuntime(root);
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-transpiler.mjs")) {
   console.log(describeBuild());
   process.exit(0);
 }

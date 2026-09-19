@@ -473,6 +473,17 @@ G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      │     `sapevent`, which is why no screen before this one met it.
      │     ANORMALIES `posted-form-has-no-fields`, workaround
      │     `src/webgui/zcl_osd_form`, and the fix belongs in the shim
+     ├─ **wave 3's first item, from fable-osd using the screen** (the way a
+     │  defect should be found): the default list is cut at 300 and the
+     │  types are alphabetical, so 607 classes fill it and **no CDS view is
+     │  visible at all**. The screen is honest -- it says "300 shown of
+     │  1140" -- but a person who does not already know to type `DDLS` will
+     │  not find one. The fix is not a bigger limit, it is a **tally beside
+     │  the list**: `CLAS 607 · DDLS 13 · TABL 124 · …`, each a link to
+     │  `?type=`. Then the cut hides the tail of one type instead of hiding
+     │  whole types. It wants a structure of its own (type, count) rather
+     │  than a count squeezed into the object row -- two things obliged to
+     │  differ
      ├─ **what wave 3 is, and what it is not.** Not a tree in SE80's shape:
      │  the expensive part for the cheapest reward, which the critic already
      │  said once. The three that are worth it are server-rendered
@@ -1696,6 +1707,31 @@ B.12 One work process, and a channel that never waits                    [S]  po
         key — the page already has a CACHED mode
 
 B.11 The binary beyond the checkout                                      [S]
+     ├─ **two defects the binary's own suite caught on 2026-09-19, and both
+     │  are about a path taken from `import.meta.url` inside a bundle** --
+     │  the thing CLAUDE.md warns about, in two new places:
+     │  ├─ **every main-guard fired.** `process.argv[1] &&
+     │  │  import.meta.url.endsWith(argv[1].split("/").pop())` is right for
+     │  │  `node tools/x.mjs` and true in EVERY module of the binary, where
+     │  │  the shared url ends in `/osd` and argv[1] is the binary: the
+     │  │  first such module the bundle evaluates runs its own `main()` and
+     │  │  the binary becomes that tool. `build/osd doctor` answered
+     │  │  "no packs: nothing in packs". Twenty files carried the form; it
+     │  │  had been waiting for an import that changed the evaluation order.
+     │  │  Fixed with `runsAs("<file>.mjs")` in `tools/osd-main.mjs` -- the
+     │  │  name is a **literal**, because it cannot be derived from a url
+     │  │  there is only one of. `test/osd-main.mjs` keeps the form out, and
+     │  │  went red on its first run against the helper's own comment, which
+     │  │  quotes what it replaces
+     │  └─ **the binary and node can no longer name the same generation**,
+     │     and it is not the stale binary it looked like: since `267f9a7`
+     │     the hash covers the generators, and `generatorClosure()` walks
+     │     `fileURLToPath(new URL(".", import.meta.url))`, which inside the
+     │     binary is `/$bunfs/root/`. Measured: editing `tools/cds2ddic.mjs`
+     │     moved the node hash and left the binary's unchanged. Open, and it
+     │     belongs to the hash's design rather than to the binary: either
+     │     the closure is read from the tree being served, or the equality
+     │     of the two hosts stops being the property that test asserts
      ├─ measured on a second machine 2026-09-16 (bun-spike.md part five):
      │  the Bun binary needs nothing; the Node hosts need a closure of four
      │  packages beside the workspace, because generated code imports the

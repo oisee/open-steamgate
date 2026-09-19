@@ -21,6 +21,7 @@ import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {Git} from "./osd-git.mjs";
 import {ObjectStore, TYPES, nameOf} from "./osd-store.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 export const ABAPGIT_XML = ".abapgit.xml";
 
@@ -250,7 +251,7 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-import.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

@@ -19,6 +19,7 @@
 //
 // Never commit a recording: captures stay under .local/ (CLAUDE.md).
 import {writeFileSync} from "node:fs";
+import {runsAs} from "./osd-main.mjs";
 
 const CHANNEL = "/sap/bc/apc/sap/zo4d_demo";
 
@@ -168,7 +169,7 @@ export function summarize(a, b) {
   return {frames: n, framesDiffering, byPath: [...byPath].sort((x, y) => y[1] - x[1]), first, lengths: [a.length, b.length]};
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("o4d-record.mjs")) {
   const args = process.argv.slice(2);
   if (args[0] === "--compare") {
     const {readFileSync} = await import("node:fs");

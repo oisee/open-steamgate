@@ -8,6 +8,7 @@ import {existsSync, readdirSync, statSync} from "node:fs";
 import {join, relative} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {BASE_DIR, forkDatabase} from "./sqlite-file-client.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 const DB_DIR = ".local/db";
 
@@ -63,6 +64,6 @@ function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-db.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }

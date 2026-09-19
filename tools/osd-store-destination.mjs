@@ -25,6 +25,9 @@
 // gives them two buttons: one name over a cheap and an expensive operation
 // is a button people stop pressing.
 import {given, givenText, fill} from "./osd-destination.mjs";
+import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
+import {objectOf} from "./osd-inputs.mjs";
+import {basename, join} from "node:path";
 
 const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"];
 
@@ -221,20 +224,53 @@ export class StoreDestination {
     // destination is usually installed in -- there is nothing to recycle
     // from the inside, and Node has pinned the module graph. So the answer
     // says which of the two happened instead of implying the better one.
+    // **What was regenerated is a list, not a count.** Editing a class
+    // rewrites one file; editing a CDS view rewrites the DDIC views, the
+    // source class and the registry, and editing a published one rewrites
+    // the whole service under it -- three files for a label, seven for a
+    // renamed field, measured by fable-osd 2026-09-19 on a view that *owns*
+    // fourteen. So no number is right for both, and a screen that says
+    // "activated" while it has just rewritten the MPC and DPC of a service
+    // nobody opened is hiding the part worth seeing.
+    const before = snapshotOf(join(this.store.root, "gen"));
     const published = await this.store.publish();
+    const regenerated = changedSince(before, join(this.store.root, "gen"));
+    const objects = [
+      ...regenerated.written.map((path) => generatedRow(path, "generated")),
+      ...regenerated.removed.map((path) => generatedRow(path, "removed")),
+    ];
     return {
       EV_ACTIVE: published?.ok === false ? "" : "X",
       EV_LIVE: published?.recycled === true ? "X" : "",
       EV_NOTE: published?.ok === false
         ? `the check held and the build did not: ${published?.transpile?.error ?? "no reason given"}`
-        : published?.recycled === true
+        : `${published?.recycled === true
           ? `built and live (generation ${published?.generation ?? "?"})`
-          : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted",
+          : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
+          + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),
       EV_COUNT: "0",
       EV_MS: String(Date.now() - started),
       ET_ISSUE: [],
+      ET_OBJECT: objects,
     };
   }
+}
+
+/** a file the generators wrote, as the object it is: the same row shape the
+ *  list uses, because it answers the same question -- which objects, and in
+ *  which files */
+function generatedRow(path, state) {
+  const key = objectOf(basename(path));
+  const [type, name] = key === undefined ? ["", basename(path)] : key.split(" ");
+  return {
+    TYPE: type,
+    NAME: name,
+    PACKAGE: "",
+    FILE: join("gen", path),
+    WRITABLE: "",
+    VERSION: state,
+    CHANGED_AT: "",
+  };
 }
 
 /** one issue, of the object it belongs to -- which is not always the object

@@ -31,6 +31,7 @@
 import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 export const DATA_DIR = "data";
 export const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
@@ -375,7 +376,7 @@ async function main(args) {
   return 2;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("segw-tree.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
     console.error(e.message);
     process.exit(1);

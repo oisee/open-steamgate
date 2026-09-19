@@ -14,6 +14,7 @@
 // the class definition, which abaplint does parse properly.
 import {readFileSync} from "node:fs";
 import * as abaplint from "@abaplint/core";
+import {runsAs} from "./osd-main.mjs";
 
 /** ABAP type -> the HANA type a generated procedure declares */
 const HANA_TYPE = {
@@ -231,7 +232,7 @@ export function procedure(cls, m, schema, types) {
   ].filter((x) => x !== "").join("\n");
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("amdp-extract.mjs")) {
   const args = process.argv.slice(2);
   const path = args.find((a) => !a.startsWith("--") && args[args.indexOf(a) - 1] !== "--types");
   if (path === undefined) { console.error("usage: node tools/amdp-extract.mjs <class.clas.abap> [--types <file>]... [--json] [--procedure]"); process.exit(2); }

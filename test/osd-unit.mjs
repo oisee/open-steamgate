@@ -1,6 +1,8 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun, alertOf, statementAfter} from "../tools/osd-unit.mjs";
+import {writeFileSync, rmSync} from "node:fs";
+import {join} from "node:path";
 
 // The test run of OSD. vsp reads a program, its test classes, their test
 // methods and the alerts under a method, and a method with no alert is a
@@ -67,13 +69,55 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
   });
 
   it("a test class that was never transpiled is an alert, not silence", async () => {
-    // a library's own tests are in the parse but not in output/
-    const result = await runner.runDetached("CLAS", "CL_ABAP_CHAR_UTILITIES");
-    expect(result.ok).to.equal(false);
-    const [alert] = result.testClasses[0].alerts;
-    expect(alert.severity).to.equal("fatal");
-    expect(alert.title).to.contain("has not been transpiled");
-    expect(result.testClasses[0].testMethods).to.deep.equal([]);
+    // **The subject is planted, not borrowed.** This used to run against
+    // `CL_ABAP_CHAR_UTILITIES`, on the note that "a library's own tests are
+    // in the parse but not in output/" -- which was true by accident: the
+    // store walked whole library folders, test classes and all, while the
+    // build has never read a library's test classes. The moment the store
+    // was made to read what the build reads (2026-09-19) the subject stopped
+    // having a test class at all and the test went green over nothing.
+    //
+    // So the case is built instead of found: a class written now, with a test
+    // class beside it, in a tree whose output/ was transpiled before it
+    // existed. That is the property -- in the parse, not in output/ -- rather
+    // than a circumstance of somebody's checkout.
+    const name = "ZCL_OSD_UNTRANSPILED_PROBE";
+    const file = join("src", "zcl_osd_untranspiled_probe.clas.abap");
+    const tests = join("src", "zcl_osd_untranspiled_probe.clas.testclasses.abap");
+    const xml = join("src", "zcl_osd_untranspiled_probe.clas.xml");
+    writeFileSync(file, `CLASS zcl_osd_untranspiled_probe DEFINITION PUBLIC CREATE PUBLIC FOR TESTING
+  DURATION SHORT RISK LEVEL HARMLESS.
+ENDCLASS.
+
+CLASS zcl_osd_untranspiled_probe IMPLEMENTATION.
+ENDCLASS.
+`);
+    writeFileSync(tests, `CLASS ltcl_probe DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS nothing FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_probe IMPLEMENTATION.
+  METHOD nothing.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    writeFileSync(xml, `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><VSEOCLASS>
+<CLSNAME>${name}</CLSNAME><LANGU>E</LANGU><DESCRIPT>probe</DESCRIPT><STATE>1</STATE><CLSCCINCL>X</CLSCCINCL><FIXPT>X</FIXPT><UNICODE>X</UNICODE>
+</VSEOCLASS></asx:values></asx:abap></abapGit>
+`);
+    try {
+      const fresh = new UnitRun(new ObjectStore());
+      const result = await fresh.runDetached("CLAS", name);
+      expect(result.ok).to.equal(false);
+      const [alert] = result.testClasses[0].alerts;
+      expect(alert.severity).to.equal("fatal");
+      expect(alert.title).to.contain("has not been transpiled");
+      expect(result.testClasses[0].testMethods).to.deep.equal([]);
+    } finally {
+      for (const f of [file, tests, xml]) rmSync(f, {force: true});
+    }
   });
 
   it("a method that throws is one failed method, and the rest still run", async () => {

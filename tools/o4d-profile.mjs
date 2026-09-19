@@ -23,6 +23,7 @@
 // other capture (CLAUDE.md).
 import {writeFileSync} from "node:fs";
 import {sceneStart} from "./o4d-record.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 const CHANNEL = "/sap/bc/apc/sap/zo4d_demo";
 const COUNTS = {rect: "rc", line: "lc", tri: "tric", circle: "cc", image: "ic", text: "tc"};
@@ -219,7 +220,7 @@ export function table(rows) {
   return lines.join("\n");
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("o4d-profile.mjs")) {
   const args = process.argv.slice(2);
   const at = (flag, fallback) => {
     const i = args.indexOf(flag);

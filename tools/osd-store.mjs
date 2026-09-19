@@ -15,12 +15,14 @@
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {parseDDLS} from "./cds2ddic.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
+import {libraryFiles} from "./osd-inputs.mjs";
 
-import {basename, dirname, join} from "node:path";
+import {basename, dirname, join, relative} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
 import {ServingRuntime} from "./osd-runtime.mjs";
 import {RuntimePool} from "./osd-pool.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -102,11 +104,38 @@ const DEFAULT_ROOTS = [
 
 // the open-abap clones beside us: a system's worth of standard objects,
 // read-only, and the reason a package tree looks inhabited
-const DEFAULT_LIBS = [
-  ".local/lars/open-abap-core/src",
-  ".local/lars/express-icf-shim/src",
-  ".local/lars/open-abap-odata/src",
-];
+// The libraries, as the BUILD reads them -- folder, `files` patterns and
+// `exclude_filter` of each entry in abap_transpile.json, resolved by the one
+// body in tools/osd-inputs.mjs.
+//
+// It used to be a hand-written list of three folders while the config
+// configured six, and everything compiled and ran: only the **check** was
+// wrong, because the registry it builds could not see `open-abap-apc`,
+// `abapgit` or `open-abap-gui`. A class extending one of their classes was
+// reported broken -- `Super class "cl_apc_wsp_ext_stateful_base" not found or
+// contains errors` -- by an editor that had just been handed to somebody to
+// use (2026-09-19, Alice, on two classes at once). A pair obliged to agree,
+// maintained in two places, is a defect deferred to its first divergence.
+//
+// The path of a root is kept as `<folder>/src` where the file lives under it,
+// because a library object's package is derived from its path and moving the
+// root up a level would rename every one of them.
+function libraryRoots(root) {
+  const byPath = new Map();
+  for (const {folder, files} of libraryFiles(root)) {
+    const base = folder.replace(/^\//, "");
+    for (const full of files) {
+      const file = relative(root, full);
+      const src = base + "/src";
+      const path = file.startsWith(src + "/") ? src : base;
+      if (byPath.has(path) === false) {
+        byPath.set(path, {path, writable: false, library: true, files: []});
+      }
+      byPath.get(path).files.push(file);
+    }
+  }
+  return [...byPath.values()];
+}
 
 // Parsing the system costs seconds and every store of the same tree parses
 // the same thing, so the answer is kept per root and dropped the moment
@@ -245,7 +274,9 @@ export class ObjectStore {
     // the build's exclusions are the store's too, from the same file
     this.excluded = options.excluded ?? exclusionsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
-    this.libs = (options.libs ?? DEFAULT_LIBS).map((p) => ({path: p, writable: false, library: true}));
+    this.libs = options.libs === undefined
+      ? libraryRoots(this.root)
+      : options.libs.map((p) => ({path: p, writable: false, library: true}));
     this.index = undefined;
     this.parsed = undefined;
     // What has been written and not activated since. A system keeps an
@@ -335,7 +366,8 @@ export class ObjectStore {
   build() {
     const index = new Map();
     for (const root of [...this.roots, ...this.libs]) {
-      for (const file of this.#walk(root.path, [])) {
+      // a library brings the file list the BUILD reads; a root is walked
+      for (const file of root.files ?? this.#walk(root.path, [])) {
         const name = basename(file);
         for (const [type, meta] of Object.entries(TYPES)) {
           if (!name.endsWith(meta.ext) || meta.sameFileAs !== undefined) {
@@ -908,7 +940,7 @@ export class ObjectStore {
     // local includes, and a type pool is not an ADT object but the check
     // still needs it
     for (const root of [...this.roots, ...this.libs]) {
-      for (const file of this.#walk(root.path, [])) {
+      for (const file of root.files ?? this.#walk(root.path, [])) {
         if (/\.(abap|xml|asddls)$/.test(file) === false) {
           continue;
         }
@@ -1262,6 +1294,6 @@ function main(args) {
   }
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-store.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }

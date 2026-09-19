@@ -24,6 +24,7 @@
 import {writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {ObjectStore} from "./osd-store.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 // what a reference to another object looks like in a statement
 const TYPE_OBJECTS = new Set(["CLAS", "INTF", "TABL", "DTEL", "DOMA", "TTYP", "VIEW", "DDLS"]);
@@ -188,6 +189,6 @@ function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-xref.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }

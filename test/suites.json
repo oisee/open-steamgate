@@ -30,6 +30,7 @@
     "test/osd-host.mjs",
     "test/osd-icf.mjs",
     "test/osd-inputs.mjs",
+    "test/osd-main.mjs",
     "test/osd-packs.mjs",
     "test/osd-persist.mjs",
     "test/osd-proxy.mjs",

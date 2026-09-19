@@ -482,3 +482,55 @@ ENDCLASS.
     });
   });
 });
+
+// **The store's libraries are the build's libraries, or the check lies.**
+//
+// They were two lists: a hand-written DEFAULT_LIBS of three folders in
+// tools/osd-store.mjs, and the six libs of abap_transpile.json. Everything
+// compiled and ran -- only the syntax check was wrong, and in the direction
+// that costs most: it told a person their class was broken. Alice found it on
+// the deployed editor, 2026-09-19, on two classes at once, both of them
+// extending a superclass that lives in a library the store could not see.
+//
+// So the assertion is the PROPERTY ("the same libraries") and the SYMPTOM
+// ("this class checks clean"), not the list of folders, which would go stale
+// with the next library added.
+describe("the libraries the store reads are the ones the build reads", function () {
+  this.timeout(180000);
+
+  it("every lib of abap_transpile.json is a root of the store", async () => {
+    const {libraryFiles} = await import("../tools/osd-inputs.mjs");
+    const store = new ObjectStore({root: process.cwd()});
+    const configured = libraryFiles(process.cwd()).map((l) => l.folder.replace(/^\//, ""));
+    const seen = store.libs.map((l) => l.path);
+    for (const folder of configured) {
+      expect(seen.some((p) => p === folder || p.startsWith(folder + "/")),
+        `${folder} is configured for the build and is not a library of the store: ${seen.join(", ")}`)
+        .to.equal(true);
+    }
+    expect(configured.length, "the tree has libraries at all").to.be.greaterThan(3);
+  });
+
+  it("a class extending a library superclass is NOT reported broken", () => {
+    // the exact symptom: `Super class "cl_apc_wsp_ext_stateful_base" not
+    // found or contains errors`, where the superclass is in open-abap-apc --
+    // configured for the build, missing from the store's old list
+    const store = new ObjectStore({root: process.cwd()});
+    const result = store.check("CLAS", "ZCL_APC_ZORK");
+    expect(result.issues.map((i) => i.message).join(" | "),
+      "the check sees the same system the build compiles").to.equal("");
+  });
+
+  it("and the file list per library is the build's own, not the whole folder", async () => {
+    // abapGit is configured file by file (a dozen or so of its 592 objects);
+    // walking its folder would put the rest into the registry, and then an
+    // activation would check objects this system does not contain
+    const {libraryFiles} = await import("../tools/osd-inputs.mjs");
+    const abapgit = libraryFiles(process.cwd()).find((l) => l.folder.endsWith("/abapgit"));
+    if (abapgit === undefined) return; // no clone here; the other two tests still hold
+    const store = new ObjectStore({root: process.cwd()});
+    const held = store.libs.filter((l) => l.path.includes("abapgit")).flatMap((l) => l.files ?? []);
+    expect(held.length, "the configured files, not the folder").to.equal(abapgit.files.length);
+    expect(held.length).to.be.lessThan(592);
+  });
+});

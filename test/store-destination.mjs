@@ -13,7 +13,7 @@
 // the bytes sent. Nothing about the destination's own shape would catch a
 // second write path; only asking where the object actually went does.
 import {expect} from "chai";
-import {mkdirSync, writeFileSync, rmSync, readFileSync, existsSync} from "node:fs";
+import {mkdirSync, writeFileSync, rmSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
@@ -234,6 +234,34 @@ ENDCLASS.
     expect(answer.EV_LIVE, "nothing was recycled, and the answer does not pretend otherwise").to.equal("");
     expect(answer.EV_NOTE, "and it says so in words a person can act on")
       .to.match(/still runs the code it started with/);
+  });
+
+  it("an activation says WHICH generated objects it rewrote, because no count is right", async () => {
+    // A class edit rewrites one file; a CDS view rewrites its two DDIC views,
+    // its source class and the registry; a published view rewrites the whole
+    // service under it -- three files for a label, seven for a renamed field,
+    // on a view that owns fourteen (fable-osd, measured). So the screen is
+    // given the list, and the generators are represented by what they
+    // actually wrote rather than by a number that is wrong for every case but
+    // one.
+    const store = new ObjectStore({root: process.cwd()});
+    const written = join("gen", "cds", "zcl_stg_cds_probe_row.clas.abap");
+    store.publish = async () => {
+      mkdirSync(join(process.cwd(), "gen", "cds"), {recursive: true});
+      writeFileSync(join(process.cwd(), written), "* written by a generator during publish\n");
+      return {ok: true, recycled: false};
+    };
+    try {
+      const answer = await call(new StoreDestination({store: () => store}),
+        {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
+      expect(answer.EV_ACTIVE).to.equal("X");
+      const rewritten = answer.ET_OBJECT.map((r) => r.FILE);
+      expect(rewritten, JSON.stringify(answer.ET_OBJECT)).to.include(written);
+      expect(answer.ET_OBJECT.find((r) => r.FILE === written).VERSION).to.equal("generated");
+      expect(answer.EV_NOTE, "and the note counts what the list holds").to.match(/generated object/);
+    } finally {
+      rmSync(join(process.cwd(), written), {force: true});
+    }
   });
 
   it("a build that fails leaves the object NOT active, and says why", async () => {

@@ -11,6 +11,7 @@
 import {existsSync, mkdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {ObjectStore} from "./osd-store.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 export class Git {
   constructor(store = new ObjectStore()) {
@@ -148,7 +149,7 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-git.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

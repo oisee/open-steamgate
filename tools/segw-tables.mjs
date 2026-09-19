@@ -28,6 +28,7 @@
 //        node tools/segw-tables.mjs --derive <folder>... [--spec <file>]
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {runsAs} from "./osd-main.mjs";
 
 export const SPEC_FILE = "src/segw/segw-tables.json";
 export const DDIC_DIR = "src/segw/ddic";
@@ -449,6 +450,6 @@ function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("segw-tables.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }

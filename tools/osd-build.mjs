@@ -36,6 +36,7 @@ import {transpile} from "./osd-transpile.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand} from "./osd-host.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -648,6 +649,6 @@ export async function main(args) {
   }
 }
 
-if (process.argv[1] && import.meta.url.endsWith(basename(process.argv[1]))) {
+if (runsAs("osd-build.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
 }

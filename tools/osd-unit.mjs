@@ -26,6 +26,7 @@ import {basename, join} from "node:path";
 import {resolveFrame} from "./osd-where.mjs";
 export {statementAfter} from "./osd-where.mjs";
 import {ObjectStore, NotFound} from "./osd-store.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 // ADT's own words for what a class declares
 const RISK = {HARMLESS: "harmless", DANGEROUS: "dangerous", CRITICAL: "critical"};
@@ -471,7 +472,7 @@ export async function main(args) {
   return result.ok ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-unit.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

@@ -25,6 +25,7 @@ import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, r
 import {tmpdir} from "node:os";
 import {basename, join, relative, resolve} from "node:path";
 import {packsOf} from "./osd-packs.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 // one marker per pack, beside its manifest: which commit each fetched
 // folder holds, so a second run at the same ref is a no-op and a build log
@@ -198,7 +199,7 @@ export async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(basename(process.argv[1]))) {
+if (runsAs("osd-fetch.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`osd-fetch: ${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

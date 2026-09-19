@@ -12,6 +12,7 @@
 // façade sees what a program running inside sees.
 import {existsSync} from "node:fs";
 import {join} from "node:path";
+import {runsAs} from "./osd-main.mjs";
 
 // What a client sends is Open SQL, and the database speaks SQL. The one
 // difference that reaches this door: Eclipse's data preview writes the
@@ -170,7 +171,7 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-data.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

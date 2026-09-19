@@ -27,6 +27,7 @@ import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {inputFoldersOf} from "./osd-packs.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
@@ -167,6 +168,84 @@ function main() {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (runsAs("osd-inputs.mjs")) {
   main();
+}
+
+// ---------------------------------------------------------------- libraries
+
+/**
+ * Which files each configured library contributes, by the build's own rules:
+ * the folder, its `files` patterns (default `/src/**`), its
+ * `exclude_filter`, and never a library's test classes.
+ *
+ * It lives here rather than in the transpile wrapper because **two lists
+ * obliged to agree had diverged**. `tools/osd-store.mjs` carried a
+ * hand-written `DEFAULT_LIBS` of three folders while `abap_transpile.json`
+ * configured six, so the abaplint registry the store builds could not see
+ * `open-abap-apc`, `abapgit` or `open-abap-gui`. Everything compiled and ran;
+ * only the *check* was wrong, and it was wrong in the direction that costs
+ * most -- it told a person their class was broken. Alice found it on the
+ * deployed editor, on two classes at once: `Super class
+ * "cl_apc_wsp_ext_stateful_base" not found or contains errors`, where the
+ * superclass is in a library the build reads and the store did not
+ * (2026-09-19).
+ *
+ * A lib with no folder on disk is skipped rather than cloned: the transpile
+ * may clone a URL-only library, a store asked for one object may not.
+ */
+export function libraryFiles(root = process.cwd(), config = undefined) {
+  // a tree with no config configures no libraries -- which is a tree that is
+  // not this one (a fixture, a fresh folder), and asking it for libraries is
+  // a question with an empty answer rather than an error
+  let cfg = config;
+  if (cfg === undefined) {
+    const file = resolve(root, "abap_transpile.json");
+    if (existsSync(file) === false) {
+      return [];
+    }
+    cfg = JSON.parse(readFileSync(file, "utf8"));
+  }
+  const out = [];
+  for (const lib of cfg.libs ?? []) {
+    if (lib.folder === undefined || lib.folder === "") continue;
+    const dir = resolve(root, "." + lib.folder);
+    if (existsSync(dir) === false) continue;
+    const patterns = typeof lib.files === "string" && lib.files !== ""
+      ? [lib.files]
+      : Array.isArray(lib.files) ? lib.files : ["/src/**"];
+    const exclude = (lib.exclude_filter ?? []).map((p) => new RegExp(p, "i"));
+    const base = dir.split("/").join("/");
+    const rules = patterns.map((p) => globToRegExp(base + p));
+    const files = walkFiles(dir)
+      .filter((f) => rules.some((r) => r.test(f)))
+      .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
+      .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
+    out.push({folder: lib.folder, dir, files});
+  }
+  return out;
+}
+
+/** "/src/**" and "/src/git/zcl_abapgit_git_pack.*": ** is any depth, * stays
+ *  inside a segment. The same reading tools/osd-transpile.mjs does. */
+export function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/\0/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function walkFiles(dir, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir).sort();
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry === ".git" || entry === "node_modules" || entry === "output") continue;
+    const full = dir + "/" + entry;
+    if (statSync(full).isDirectory()) walkFiles(full, out);
+    else out.push(full);
+  }
+  return out;
 }

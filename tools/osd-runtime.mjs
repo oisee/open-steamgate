@@ -25,6 +25,7 @@ import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {liveHash} from "./osd-build.mjs";
 import {serveCommand} from "./osd-host.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 
@@ -364,7 +365,7 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-runtime.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
     console.error(`${error.code ?? "ERROR"}: ${error.message}`);
     process.exit(1);

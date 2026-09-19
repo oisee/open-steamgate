@@ -10,6 +10,7 @@
 import {execFileSync} from "node:child_process";
 import {readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {runsAs} from "./osd-main.mjs";
 
 // everything under src/ (the gateway and the DDIC the SEGW code stands on),
 // the generated table sources and the generated ZSTG_SEGW classes
@@ -89,6 +90,6 @@ function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("segw-cloud.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }

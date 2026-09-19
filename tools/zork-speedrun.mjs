@@ -13,6 +13,7 @@
 // game's, `%*text*` expects the output to contain text, `%!text` expects it
 // not to, `%=text` is case-sensitive, `#` is a comment).
 import {readFileSync} from "node:fs";
+import {runsAs} from "./osd-main.mjs";
 
 const DEFAULT_SCRIPT = ".local/cpm-abap/test-games/MINIZORK_TEST.TXT";
 const CHANNEL = "/sap/bc/apc/sap/zapc_zork";
@@ -90,7 +91,7 @@ export async function speedrun(base, script, options = {}) {
   return {commands: sent, checks, failures, ms: Date.now() - started};
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("zork-speedrun.mjs")) {
   const base = process.argv[2] ?? "http://127.0.0.1:3030";
   const file = process.argv[3] ?? DEFAULT_SCRIPT;
   const script = parseScript(readFileSync(file, "utf8"));

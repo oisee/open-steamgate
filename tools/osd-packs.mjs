@@ -32,6 +32,7 @@
 // pack is a new generation, which is what it should be.
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, isAbsolute, join, relative, resolve} from "node:path";
+import {runsAs} from "./osd-main.mjs";
 
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
@@ -240,6 +241,6 @@ function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+if (runsAs("osd-packs.mjs")) {
   process.exit(main(process.argv.slice(2)));
 }
