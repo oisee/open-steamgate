@@ -143,3 +143,30 @@ clause back without the filter.
 An association's `ON` is not a view filter and is left alone — refusing it
 would refuse every view with an association, which is the over-wide version
 of the same check.
+
+## A projection of a writable view (B.1, the write half, 2026-09-19)
+
+`write.writable` asked for one **table** underneath, so a projection of a
+view — the shape the read half taught to carry associations — was refused
+with "`<view>` is not a table". Correct while nothing composed the mapping,
+and no longer the whole answer: a projection's field names a field of the
+view below it, that field names a column, and writing needs the composition.
+
+`resolveWriteChain` walks down and composes once, so the generated `to_base`
+stays **one hop** — view field → base column — whatever depth it came from,
+and nothing downstream has to know there was a chain. The entity's `source`
+becomes the base table and `write.through` records which view it went
+through.
+
+Each refusal says **which link broke**, because "not writable" over a
+two-level view is a sentence somebody then spends an evening on:
+
+- `ZC_BASE is not written through either (…)` — the view below does not ask,
+  and its own reason is carried up
+- `ZC_PROJ.NONSENSE names NONSENSE, which ZC_BASE does not have`
+- `the key TRAVEL_ID of ZSTG_DEMO is not reachable through ZC_PROJ`
+- deeper than eight views — a chain that long is a mistake, not a design
+
+And a projection that never asked to be written is **left alone** rather than
+refused: "did not ask" and "could not" are different answers, and the pass
+must not turn the first into the second.

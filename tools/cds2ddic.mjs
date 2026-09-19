@@ -225,6 +225,7 @@ export function parseDDLS(obj, reg) {
   const writable = (asked || flag("createEnabled") || flag("updateEnabled") || flag("deleteEnabled"))
     && isTable && missing.length === 0 && !viewAnnotations.some((a) => /@Analytics\.dataCategory/i.test(a));
   const write = {
+    asked: asked || flag("createEnabled") || flag("updateEnabled") || flag("deleteEnabled"),
     writable,
     why: !asked && !flag("createEnabled") && !flag("updateEnabled") && !flag("deleteEnabled") ? "the view does not ask for it"
       : !isTable ? `${source} is not a table`
@@ -303,6 +304,91 @@ ${dd27}
  *  that renames a column used in an ON condition is **not** handled, and
  *  says so rather than producing pairs that name a column the target does
  *  not have. */
+/**
+ * B.1, the write half: a projection of a writable view is writable too.
+ *
+ * `write.writable` asked for one **table** underneath, so a projection of a
+ * view -- the shape the read half just taught to carry associations -- was
+ * refused with "<view> is not a table". Correct while nothing composed the
+ * mapping, and no longer the whole answer: a projection's field names a
+ * field of the view below it, that field names a column, and writing needs
+ * the composition of the two.
+ *
+ * Refusals are by name and each says which link of the chain broke, because
+ * "not writable" over a two-level view is a sentence somebody then spends an
+ * evening on. What is refused:
+ *
+ *   the chain does not end at a table          (a view of a view of a view…)
+ *   the view below is not itself writable      (its own reason is carried up)
+ *   a field names something the view below does not have
+ *   a key of the base table is not reachable through the chain
+ *
+ * The mapping is composed once here rather than at each use, so the
+ * generated `to_base` stays one hop: view field -> base column, whatever the
+ * depth it came from.
+ */
+export function resolveWriteChain(views, byName, depth = 8) {
+  for (const view of views) {
+    const below = byName.get(String(view.source ?? "").toUpperCase());
+    if (below === undefined) continue;                  // it selects from a table already
+    const w = view.write;
+    if (w === undefined || w.asked !== true) continue;  // it never asked to be written
+
+    // walk down, composing the field mapping as we go
+    let current = view;
+    let mapping = new Map((view.fields ?? []).filter((f) => !f.virtual && f.base)
+      .map((f) => [f.name.toUpperCase(), String(f.base).toUpperCase()]));
+    let next = below;
+    let hops = 0;
+    let broke;
+    while (next !== undefined && hops < depth) {
+      hops += 1;
+      if (next.write?.asked !== true) {
+        broke = `${next.name} is not written through either (${next.write?.why ?? "it does not ask for it"})`;
+        break;
+      }
+      const theirs = new Map((next.fields ?? []).filter((f) => !f.virtual && f.base)
+        .map((f) => [f.name.toUpperCase(), String(f.base).toUpperCase()]));
+      const composed = new Map();
+      for (const [name, base] of mapping) {
+        const deeper = theirs.get(base);
+        if (deeper === undefined) {
+          broke = `${view.name}.${name} names ${base}, which ${next.name} does not have`;
+          break;
+        }
+        composed.set(name, deeper);
+      }
+      if (broke !== undefined) break;
+      mapping = composed;
+      current = next;
+      next = byName.get(String(next.source ?? "").toUpperCase());
+    }
+    if (broke === undefined && next !== undefined) broke = `the chain under ${view.name} is deeper than ${depth} views`;
+    if (broke !== undefined) {
+      view.write = {...w, writable: false, why: broke};
+      continue;
+    }
+    // `current` is now the last view in the chain, the one that reads a table
+    const keys = (current.write?.keyColumns ?? []).map((k) => k.toUpperCase());
+    const reachable = new Set(mapping.values());
+    const missing = keys.filter((k) => !reachable.has(k));
+    if (missing.length > 0) {
+      view.write = {...w, writable: false,
+        why: `the key ${missing.join(", ")} of ${current.source} is not reachable through ${view.name}`};
+      continue;
+    }
+    // it composes: the projection writes the base table directly, with the
+    // mapping flattened, so nothing downstream has to know there was a chain
+    view.source = current.source;
+    view.fields = (view.fields ?? []).map((f) => (f.virtual || !f.base ? f
+      : {...f, base: mapping.get(f.name.toUpperCase()) ?? f.base}));
+    view.write = {...w, writable: current.write.writable === true, why: "",
+      keyColumns: current.write.keyColumns, mandt: current.write.mandt,
+      through: current.name};
+  }
+  return views;
+}
+
 export function inheritAssociations(views, byName) {
   for (const view of views) {
     const source = byName.get(String(view.source ?? "").toUpperCase());
@@ -900,6 +986,7 @@ function main() {
   }
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
   inheritAssociations(views, byName);
+  resolveWriteChain(views, byName);
   for (const e of views) {
     entities.push(e);
     write(e.sqlView.toLowerCase() + ".view.xml", viewXml(e));
