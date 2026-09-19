@@ -300,6 +300,113 @@ export class HanaDatabaseClient {
     return {rows: await this.query(options.select)};
   }
 
+  // ---------------------------------------------------------------------
+  // The native channel (docs/db-seam-native.md). Four methods beside the
+  // eleven, for one caller only: the SQLScript splitter's lowering.
+  //
+  // **Nothing transpiled from ABAP may reach these.** Open SQL goes through
+  // select()/insert()/update()/delete(), which rewrite and fold and trim; a
+  // statement arriving here is sent to the engine untouched, which is the
+  // whole point and also the reason it must never carry ABAP SQL.
+  // ---------------------------------------------------------------------
+
+  /** this client can carry a lowered plan */
+  get supportsNative() {
+    return true;
+  }
+
+  /** ABAP's type letters into what hdb wants to bind. The caller knows the
+   *  ABAP type and nothing about HANA; the mapping belongs here. */
+  #bind(params = []) {
+    return params.map((p) => {
+      if (p.isNull === true) return null;
+      switch ((p.type ?? "").charAt(0).toUpperCase()) {
+        case "I": case "B": case "S": return Number(p.value);
+        case "P": case "F": return Number(p.value);
+        case "X": return Buffer.from(String(p.value), "hex");
+        default: return p.value === undefined ? null : String(p.value);
+      }
+    });
+  }
+
+  /** One lowered statement, sent as written, with its values bound. */
+  async native({sql, params = [], expect = "rows"}) {
+    if (this.trace) console.log("native:", sql, params.length ? JSON.stringify(params) : "");
+    const stmt = await new Promise((resolve, reject) =>
+      this.client.prepare(sql, (err, s) => (err ? reject(err) : resolve(s))));
+    try {
+      if (expect === "none") {
+        const affected = await new Promise((resolve, reject) =>
+          stmt.exec(this.#bind(params), (err, r) => (err ? reject(err) : resolve(r))));
+        return {rowCount: typeof affected === "number" ? affected : undefined};
+      }
+      const rows = await new Promise((resolve, reject) =>
+        stmt.exec(this.#bind(params), (err, r) => (err ? reject(err) : resolve(r))));
+      // the engine's declared column types, not a guess from the value:
+      // blank padding, decimals and dates are exactly where guessing hurts
+      const columns = (stmt.resultSetMetadata ?? []).map((c) => ({
+        name: c.columnDisplayName ?? c.columnName,
+        type: c.dataType,
+      }));
+      const plainRows = (rows ?? []).map((r) => {
+        const row = {};
+        for (const k of Object.keys(r)) row[k] = plain(r[k]);
+        return row;
+      });
+      if (expect === "scalar") {
+        const first = plainRows[0];
+        return {value: first === undefined ? undefined : first[Object.keys(first)[0]], columns};
+      }
+      return {rows: plainRows, columns, rowCount: plainRows.length};
+    } finally {
+      stmt.drop?.(() => undefined);
+    }
+  }
+
+  /** A named relation later statements may refer to. The name is **ours**:
+   *  the caller may not invent one, because quoting and escaping are the
+   *  engine's business and this is the only place that knows them. */
+  async defineRelation({name = "rel", sql, params = [], materialise}) {
+    this.relationCount = (this.relationCount ?? 0) + 1;
+    const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
+    const handle = {
+      ident,
+      ref: `"${this.schema}"."${ident}"`,
+      kind: materialise === undefined ? "definition" : "materialised",
+      reason: materialise,
+    };
+    if (materialise === undefined) {
+      // a view is HANA's cheapest definition, and it keeps the relation
+      // inside the engine rather than becoming rows on the way through us
+      await this.#run(`CREATE VIEW ${handle.ref} AS ${sql}`);
+    } else {
+      // A materialised relation is a **column table**, not a local temporary
+      // one: HANA insists a local temporary name begins with '#', which is
+      // not a name a schema-qualified reference can carry, and the splitter
+      // needs a reference it can splice anywhere. The client drops it.
+      handle.ref = `"${this.schema}"."${ident}"`;
+      await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${sql}) WITH DATA`);
+    }
+    return handle;
+  }
+
+  /** what to splice into a statement: quoted and escaped for this engine */
+  relationRef(handle) {
+    return handle.ref;
+  }
+
+  /** what the client actually did, and why -- materialising is not a
+   *  performance hint here, it changes whether an exception happens
+   *  (docs/sqlscript-hana-observed.md) */
+  relationKind(handle) {
+    return {kind: handle.kind, reason: handle.reason};
+  }
+
+  async dropRelation(handle) {
+    const what = handle.kind === "definition" ? "VIEW" : "TABLE";
+    await this.#run(`DROP ${what} ${handle.ref}`).catch(() => undefined);
+  }
+
   /** the seam allows a cursor to be served by reading everything and slicing,
    *  which is what the DuckDB client does and what this does */
   async openCursor(options) {

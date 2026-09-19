@@ -39,28 +39,48 @@ degrading quietly.
 ```
 supportsNative: boolean
 
-native({sql, params, expect}) -> {rows?, rowCount?}
-  sql     a statement in THIS ENGINE's dialect, sent unchanged. No rewriting,
-          no folding, no trimming. The caller has already lowered it.
-  params  [{name, value, type}], bound by the driver, never interpolated.
-          type is an ABAP type letter plus length/decimals, because that is
-          what the caller knows; the client maps it to its own.
-  expect  "rows" | "none". Explicit, so a client need not guess from the text
-          whether a result set is coming.
-  rows    plain objects, keys exactly as the engine named them -- no
-          lower-casing, no padding, no trimming. Conversion belongs to the
-          caller, which is the only party that knows the ABAP target type.
+native({sql, params, expect}) -> {rows?, columns?, value?, rowCount?}
+  sql      a statement in THIS ENGINE's dialect, sent unchanged. No
+           rewriting, no folding, no trimming. The caller has already
+           lowered it.
+  params   [{name, value, type, isNull}], bound by the driver, never
+           interpolated. `type` is an ABAP type letter with length and
+           decimals, because that is what the caller knows; the client maps
+           it. `isNull: true` means SQL NULL and is the only way to say it --
+           ABAP has no NULL, so "an empty CHAR(10)" and "NULL" are different
+           requests and a client must not guess which was meant.
+  expect   "rows" | "scalar" | "none". Explicit, so a client need not read
+           the text to find out, and so a scalar does not drag a result set
+           into memory.
+  rows     plain objects, keys exactly as the engine named them -- no
+           lower-casing, no trimming, no padding.
+  columns  [{name, type}], the engine's **declared** column types. Without
+           them the caller converts by guessing from the JavaScript value,
+           which is precisely where this project's old defects live: blank
+           padding, decimals, dates.
 
 defineRelation({name, sql, params, materialise}) -> handle
-  A named relation the following statements may refer to. `materialise`
-  false is a request to keep it as a definition (a view, a CTE the client
-  splices, whatever the engine offers); true forces a temporary object.
-  The client may materialise anyway and must say which it did, because the
-  difference is observable (see below).
+  A named relation later statements may refer to. `materialise` is a
+  **reason**, not a boolean: "scalar-read" | "dml" | "dynamic" | "no-inline"
+  | "lowering-declined" | undefined (no preference). See below for why a
+  reason rather than a flag.
+
+relationRef(handle) -> string
+  The identifier to splice into a statement, already quoted and escaped for
+  this engine. The seam generates names; the caller only inserts them, and
+  never invents one. This is the line the contract draws: **values are
+  bound, identifiers are generated.** A handle is not a parameter -- a
+  parameter is a value and never becomes text, while a relation reference
+  must become text, at a position only the statement's author knows. Allowing
+  a handle in `params` would put text substitution back inside the contract
+  built to remove it, and would force the seam to understand SQL syntax in
+  order to know where to put it.
+
+relationKind(handle) -> {kind: "definition" | "materialised", reason?}
+  What the client actually did, and why. A client may materialise a
+  definition it was not asked to materialise; it must then say so.
 
 dropRelation(handle) -> void
-
-relationKind(handle) -> "definition" | "materialised"
 ```
 
 ## The one property the contract must not hide
@@ -74,6 +94,12 @@ So `materialise` is not a performance hint -- it changes whether an exception
 happens. A client that silently materialises a definition changes the meaning
 of the program. That is why `relationKind` exists: the caller must be able to
 find out what it got, and a conformance run must be able to record it.
+
+It is also why `materialise` carries a **reason** rather than a boolean
+(fable-osd, 2026-09-19). Recording "materialised because a scalar was read
+out of it" costs nothing at the moment of the decision and saves an hour when
+a difference has to be explained later: the question is never only *what*
+became a table, it is *why* this one did.
 
 It also means the caller cannot promise exception-faithfulness to anybody,
 and should not try. The conformance table compares **values**.
