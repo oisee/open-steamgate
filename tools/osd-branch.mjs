@@ -26,9 +26,9 @@
 //   node tools/osd-branch.mjs list
 //   node tools/osd-branch.mjs remove <name>
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, rmSync} from "node:fs";
+import {existsSync, readFileSync, rmSync} from "node:fs";
 import {createServer} from "node:net";
-import {basename, join, resolve} from "node:path";
+import {basename, join, relative, resolve} from "node:path";
 import {create, remove, list, WORKTREES} from "./osd-worktree.mjs";
 
 /** a name as a directory name: a ref carries slashes and a worktree is a path */
@@ -172,6 +172,69 @@ export function planted(root = process.cwd()) {
     .map((w) => ({...w, name: basename(w.path), database: databaseFor(basename(w.path), root)}));
 }
 
+/**
+ * The state a count has to travel with.
+ *
+ * Two sessions read the object store 55 seconds apart and got 1140 and 1134.
+ * Both readings were correct; they were of different systems, because the
+ * library clones are ONE checkout shared by every worktree and one session
+ * had moved `open-abap-core` onto a PR branch -- twenty upstream commits
+ * away, carrying exactly the six objects of the difference (four DTEL, one
+ * CLAS, one INTF).
+ *
+ * Nothing said so. `git status` in the repository does not see it, the input
+ * list does not see it, and the number left without the state it was taken
+ * in. So a number is not printed here without it: the count, the types, and
+ * the HEAD of every library beside them (2026-09-19).
+ */
+export function libraryState(root = process.cwd()) {
+  let config;
+  try {
+    config = JSON.parse(readFileSync(resolve(root, "abap_transpile.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  const at = (folder) => {
+    const path = resolve(root, folder.replace(/^\//, ""));
+    if (!existsSync(path)) return {folder, missing: true};
+    try {
+      // **`git -C` in a directory that is not a repository answers about the
+      // ENCLOSING one**, silently. `.local/lars/open-abap-apc` is not a
+      // clone -- it is a plain folder -- and the first version of this
+      // function reported open-steamgate's own HEAD as the library's: a
+      // number travelling with somebody else's state, which is worse than a
+      // number travelling with none. Caught within a minute because the hash
+      // was one I recognised from the other repository (2026-09-19).
+      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {cwd: path, encoding: "utf8"}).trim();
+      if (resolve(top) !== resolve(path)) {
+        return {folder, head: "not a clone", inside: relative(root, top) || "."};
+      }
+      const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], {cwd: path, encoding: "utf8"}).trim();
+      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {cwd: path, encoding: "utf8"}).trim();
+      const dirty = execFileSync("git", ["status", "--short"], {cwd: path, encoding: "utf8"})
+        .split("\n").filter((l) => l.trim() !== "").length;
+      return {folder, head, branch, dirty};
+    } catch {
+      return {folder, head: "not a clone"};
+    }
+  };
+  return (config.libs ?? []).map((l) => l.folder).filter((f) => typeof f === "string" && f !== "").map(at);
+}
+
+/** the count, the shape, and the state it was taken in -- together or not at all */
+export async function systemState(root = process.cwd()) {
+  const {ObjectStore} = await import("./osd-store.mjs");
+  const list = new ObjectStore({root}).list();
+  const types = new Map();
+  for (const o of list) types.set(o.type, (types.get(o.type) ?? 0) + 1);
+  return {
+    at: new Date().toISOString(),
+    objects: list.length,
+    types: [...types.entries()].sort((a, b) => b[1] - a[1]),
+    libraries: libraryState(root),
+  };
+}
+
 if (basename(process.argv[1] ?? "") === "osd-branch.mjs") {
   const words = process.argv.slice(2).filter((a, i, all) =>
     !a.startsWith("--") && all[i - 1] !== "--from" && all[i - 1] !== "--port");
@@ -181,6 +244,21 @@ if (basename(process.argv[1] ?? "") === "osd-branch.mjs") {
     return at < 0 ? undefined : process.argv[at + 1];
   };
 
+  if (command === "state") {
+    const state = await systemState();
+    console.log(`${state.at}   ${state.objects} objects`);
+    console.log("  " + state.types.map(([t, n]) => `${t} ${n}`).join(", "));
+    console.log("  libraries, which every worktree SHARES -- a count is only comparable beside these:");
+    for (const one of state.libraries) {
+      const where = one.missing ? "not cloned"
+        : one.head === "not a clone"
+          ? `not a clone -- a plain folder inside ${one.inside ?? "this repository"}`
+          : `${one.head}${one.branch && one.branch !== "HEAD" ? " on " + one.branch : ""}` +
+            `${one.dirty ? `, ${one.dirty} uncommitted` : ""}`;
+      console.log(`    ${one.folder.replace(/^\//, "").padEnd(34)} ${where}`);
+    }
+    process.exit(0);
+  }
   if (command === "list" || command === undefined) {
     const rows = planted();
     if (rows.length === 0) console.log("osd-branch: nothing planted");
@@ -191,7 +269,7 @@ if (basename(process.argv[1] ?? "") === "osd-branch.mjs") {
     process.exit(0);
   }
   if (name === undefined) {
-    console.log("osd-branch: add <name> [--from <ref>] [--port N] | list | remove <name>");
+    console.log("osd-branch: add <name> [--from <ref>] [--port N] | list | remove <name> | state");
     process.exit(2);
   }
   if (command === "remove") {
@@ -220,6 +298,6 @@ if (basename(process.argv[1] ?? "") === "osd-branch.mjs") {
     console.log(`\n  cd ${spec.path} && STG_PORT=${spec.port} STG_DB=file STG_DB_PATH=${spec.database} node test/run.mjs`);
     process.exit(0);
   }
-  console.log("osd-branch: add <name> [--from <ref>] [--port N] | list | remove <name>");
+  console.log("osd-branch: add <name> [--from <ref>] [--port N] | list | remove <name> | state");
   process.exit(2);
 }

@@ -3422,3 +3422,29 @@ stand — but the boundary was stated more widely than it was measured, which
 is the thing this tree keeps paying for, and naming it is the repair.
 `tools/osd-branch.mjs` prints the list, with a reason per entry, on every
 `add`.
+
+### `npm run branch -- state`: a count that cannot travel alone (2026-09-19)
+
+Two sessions read the object store 55 seconds apart and got **1140 and
+1134**. Both readings were correct, and they were of different systems: the
+library clones are ONE checkout shared by every worktree, and one session
+had moved `open-abap-core` onto a PR branch twenty upstream commits away —
+carrying exactly the six objects of the difference (`char5`, `char64`,
+`char100`, `char200`, `cx_osql_failure`, `if_ixml_text`: four DTEL, one
+CLAS, one INTF, matching the type deltas to the unit).
+
+Nothing said so. `git status` in the repository does not see it, the input
+list does not see it, and the number left without the state it was taken in.
+
+`node tools/osd-branch.mjs state` prints the count, the types **and** the
+HEAD, branch and dirty count of every library the build reads — together, so
+one cannot be quoted without the others.
+
+**And the first version of it lied within a minute.** `git -C` in a
+directory that is not a repository answers about the **enclosing** one,
+silently: `.local/lars/open-abap-apc` is a plain folder, and the tool
+reported open-steamgate's own HEAD as that library's state. A number
+travelling with somebody else's state is worse than one travelling with
+none. It checks `--show-toplevel` against the folder now and says "not a
+clone" rather than borrowing a hash — with a test that asserts no library
+ever reports this repository's HEAD.

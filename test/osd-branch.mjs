@@ -91,3 +91,49 @@ describe("what a branch does not isolate is listed, not implied", () => {
     }
   });
 });
+
+// **A number must not be able to travel without the state it was taken in.**
+//
+// Two sessions read the object store 55 seconds apart and got 1140 and 1134.
+// Both readings were correct and they were of different systems: the library
+// clones are ONE checkout shared by every worktree, and one session had moved
+// open-abap-core onto a PR branch twenty upstream commits away, carrying
+// exactly the six objects of the difference -- four DTEL, one CLAS, one INTF.
+describe("a count is printed with the state it was taken in", () => {
+  it("names every library the build reads, and whether it is a clone at all", async () => {
+    const {libraryState} = await import("../tools/osd-branch.mjs");
+    const state = libraryState();
+    expect(state.length, "abap_transpile.json lists six").to.be.greaterThan(1);
+    for (const one of state) {
+      expect(one.folder).to.be.a("string");
+      expect(one.head ?? (one.missing ? "missing" : undefined), one.folder).to.be.a("string");
+    }
+  });
+
+  // The trap this function fell into in its first minute.
+  it("never reports the ENCLOSING repository as a library's state", async () => {
+    const {libraryState} = await import("../tools/osd-branch.mjs");
+    const {execFileSync} = await import("node:child_process");
+    const ours = execFileSync("git", ["rev-parse", "--short", "HEAD"], {encoding: "utf8"}).trim();
+    // `git -C` in a plain folder answers about the repository above it,
+    // silently. `.local/lars/open-abap-apc` is such a folder, and the first
+    // version reported open-steamgate's own HEAD as its library's -- a
+    // number travelling with somebody else's state, which is worse than one
+    // travelling with none.
+    for (const one of libraryState()) {
+      expect(one.head, `${one.folder} reported this repository's HEAD`).to.not.equal(ours);
+    }
+    expect(libraryState().some((one) => one.head === "not a clone"),
+      "and the folder that is not a clone says so rather than borrowing a hash").to.equal(true);
+  });
+
+  it("the whole state carries a time, a count and the libraries together", async () => {
+    const {systemState} = await import("../tools/osd-branch.mjs");
+    const state = await systemState();
+    expect(state.at).to.match(/^\d{4}-\d{2}-\d{2}T/);
+    expect(state.objects).to.be.a("number").and.be.greaterThan(100);
+    expect(state.types[0][1], "sorted, commonest first").to.be.greaterThan(1);
+    expect(state.libraries, "a count without them is not comparable with anybody else's")
+      .to.have.length.greaterThan(1);
+  });
+});
