@@ -80,7 +80,7 @@ E — content packs and layers: what the tree is made of
 ├─ E.1  ordered source roots, duplicates refused                    DONE 09-16
 ├─ E.2  a pack is a directory, not a rebuild                        DONE 09-16
 ├─ E.3  what a pack may carry                                       open
-├─ E.4  the Zork console does not fit its box                       open, small
+├─ E.4  the Zork console does not fit its box                       DONE 09-19
 ├─ E.5  the launchpad asks for a config we do not serve             open, small
 ├─ E.6  a pack cut out of a system, with stubs on the perimeter     open
 ├─ E.7  the oracle's leftovers: Pages stops mid-show, profiling     open
@@ -1771,12 +1771,25 @@ E.5  The launchpad sandbox asks for a config we do not serve             [S]
         URL to something we serve; either stops the noise without a change
         to flp.html
 
-E.4  The Zork console does not fit its box                               [S]
+E.4  The Zork console does not fit its box           [S]  DONE 2026-09-19
      ├─ Alice, 2026-09-16, from the launchpad tile: a long line runs past
      │  the right edge of the terminal frame instead of wrapping inside it,
      │  and the block cursor sits on its own line
-     └─ the page is written by ZCL_ZORK_HTTP_HANDLER (a pack now); the
-        wrapping is the page's, not the Z-machine's
+     ├─ **it was arithmetic, not a CSS opinion.** xterm renders `cols` x
+     │  `rows` at whatever the font measures and the element only clips it:
+     │  100 columns of 16px Courier is about 960px, in a box declared 820px
+     │  wide. Measured before the fix, in a browser: the drawn terminal stuck
+     │  out **127px** past the drawn border. The box is sized by its contents
+     │  now, so the frame is exactly as wide as the terminal it draws,
+     │  whatever the font does — the one arrangement that cannot be half a
+     │  column out
+     ├─ the cursor was a consequence of the same thing: with the terminal
+     │  wider than its box, a long line wrapped where nobody could see it and
+     │  the prompt appeared to stand alone. The last line the machine writes
+     │  is `>` with the cursor on it, asserted
+     └─ `test/e2e/zork.spec.mjs` asserts **where the two boxes are**, not what
+        the stylesheet says — a stylesheet that happens to be wrong would pass
+        the second and fails the first
 
 E.3  What a pack may carry                                               [S]
      └─ ABAP and DDIC (today), SEGW projects and CDS (today, through the

@@ -37,7 +37,14 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |    body \{ background-color: #0a0a0a; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; font-family: 'Courier New', monospace; \}{ lv_n }| &&
       |    h1 \{ color: #00ff00; text-shadow: 0 0 10px #00ff00; margin-bottom: 10px; \}{ lv_n }| &&
       |    #terminal-container \{ border: 2px solid #00ff00; border-radius: 8px; padding: 10px; background: #000; box-shadow: 0 0 20px rgba(0, 255, 0, 0.3); \}{ lv_n }| &&
-      |    #terminal \{ width: 820px; height: 600px; \}{ lv_n }| &&
+*     **No fixed size.** xterm renders `cols` x `rows` at whatever the font
+*     measures, and the element only clips it: 100 columns of 16px Courier is
+*     about 960px, which ran past an 820px box and off the right edge of the
+*     frame (backlog E.4). The box is sized by its contents now, so the frame
+*     is exactly as wide as the terminal it draws, whatever the font does --
+*     the one arrangement that cannot be half a column out.
+      |    #terminal-container \{ display: inline-block; \}{ lv_n }| &&
+      |    #terminal \{ line-height: 1; \}{ lv_n }| &&
       |    #status \{ color: #888; margin-top: 10px; font-size: 12px; \}{ lv_n }| &&
       |    .connected \{ color: #00ff00 !important; \}{ lv_n }| &&
       |    .disconnected \{ color: #ff4444 !important; \}{ lv_n }| &&
