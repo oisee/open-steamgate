@@ -28,7 +28,7 @@ import {createHash} from "node:crypto";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
-import {basename, join, relative, resolve} from "node:path";
+import {basename, dirname, join, relative, resolve, resolve as resolvePath} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
@@ -133,6 +133,38 @@ export function inputsOf(root, config = loadConfig(root)) {
 // to a .mjs. Everything in an input folder counts except these.
 const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap)$/i;
 
+/**
+ * The modules that decide what `gen/` will contain: the generators and
+ * everything they import, transitively.
+ *
+ * **`gen/` used to be in the hash as a stand-in for these, and a stand-in
+ * written by the build is a self-reference.** `NOT_AN_INPUT` excludes
+ * `.mjs`, so a generator's own code was not an input while its output was --
+ * the hash watched the representative and not the thing represented. The
+ * cost was visible: two builds of a fresh tree, with no edit between them,
+ * produced two different generation names, because the first wrote `gen/`
+ * and the second hashed it (measured 2026-09-19, and osg-osd-i7 measured the
+ * same from the other side).
+ *
+ * So the representative goes and the thing represented arrives. 27 of the 92
+ * modules in `tools/` are in the closure, which is why it is computed rather
+ * than approximated by "all of them": editing a tool that no generator
+ * reaches should not rename every generation.
+ */
+export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
+  const seen = new Set();
+  const walk = (file) => {
+    const abs = resolvePath(file);
+    if (seen.has(abs) || !existsSync(abs)) return;
+    seen.add(abs);
+    const text = readFileSync(abs, "utf8");
+    for (const m of text.matchAll(/from\s+"(\.[^"]+)"/g)) walk(join(dirname(abs), m[1]));
+    for (const m of text.matchAll(/import\("(\.[^"]+)"\)/g)) walk(join(dirname(abs), m[1]));
+  };
+  for (const [script] of generators) walk(join(toolsDir, script));
+  return [...seen].sort();
+}
+
 export function hashOf(root, inputs = inputsOf(root)) {
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(describeBuild(root))).update("\0");
@@ -141,11 +173,22 @@ export function hashOf(root, inputs = inputsOf(root)) {
   h.update("layers\0later-wins\0");
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
   for (const dir of [...inputs.folders, ...inputs.libs]) {
+    // **`gen/` is an OUTPUT and is left out.** It is written by this build
+    // from the folders above and the generators below, so hashing it made
+    // the name a function of the tree AND of how many times the tree had
+    // been built. What decides its content is hashed instead.
+    if (relative(root, dir) === "gen") continue;
     const files = existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : [];
     h.update(`dir ${relative(root, dir)} ${files.length}\0`);
     for (const f of files) {
       h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
     }
+  }
+  // the generators and their transitive imports: the thing `gen/` stood for
+  const closure = generatorClosure();
+  h.update(`generators ${closure.length}\0`);
+  for (const f of closure) {
+    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
   }
   return h.digest("hex").slice(0, 16);
 }

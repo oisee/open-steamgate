@@ -302,3 +302,38 @@ check-first rule and step 1's rename.
 - [`architecture-split.md`](architecture-split.md) — "driven separately", now with the mechanism
 - [`db-backends.md`](db-backends.md) — the eleven-method seam a base image is seeded through
 - [`adt-facade-shift-left.md`](adt-facade-shift-left.md) — the door, whose results will carry the generation
+
+## The name was a function of the build history (2026-09-19)
+
+A generation is addressed by the hash of its inputs, and `gen/` was one of
+the hashed input folders — while being **written by the build**. So the
+first build of a fresh tree hashed an empty `gen/` and the second hashed the
+one the first had just written: two builds, no edit between them, two
+different names. Measured independently from both sessions:
+
+```
+before   build 1 -> 134909ac…    build 2 -> 910a2f11…    build 3 -> cache
+after    build 1 -> 93addd64…    build 2 -> cache, 0.16 s
+```
+
+The cause was one line: `NOT_AN_INPUT` excludes `.mjs`, so a **generator's
+own code was not an input while its output was**. The hash watched the
+representative and not the thing represented — and the representative was
+written by the thing doing the watching.
+
+`gen/` is out of the hash now, because it is an output. What decides its
+content is in: the generators and everything they import, transitively — 27
+of the 92 modules in `tools/`. Computed rather than approximated by "all of
+them", so editing a tool no generator reaches does not rename every
+generation.
+
+Two consequences worth naming:
+
+- **"the second branch is often free" is true for the first time.** It was
+  false before for every fresh tree, always, and the cache could not hit
+  until the third build.
+- a generation name is now comparable between machines at one commit, which
+  it was not: the name depended on how many times that tree had been built.
+
+`test/generation-hash.mjs` asserts both directions — a change under `gen/`
+does not rename the generation, a change to a generator does.

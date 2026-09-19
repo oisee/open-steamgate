@@ -15,6 +15,7 @@
     "test/cds-write-chain.mjs",
     "test/conformance.mjs",
     "test/generation-diff.mjs",
+    "test/generation-hash.mjs",
     "test/journal.mjs",
     "test/mocha.mjs",
     "test/naming-scan.mjs",
