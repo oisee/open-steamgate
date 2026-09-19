@@ -103,6 +103,20 @@ module.exports = {
     new webpack.IgnorePlugin({resourceRegExp: /^hdb$/}),
     new webpack.IgnorePlugin({resourceRegExp: /hana-client\.mjs$/}),
     new webpack.IgnorePlugin({resourceRegExp: /amdp-run\.mjs$/}),
+    // and the object store, for the same reason one step further out: the
+    // editor screen's destination is installed in every host
+    // (test/setup.mjs), and the store it opens pulls in abaplint, the
+    // transpiler and node:module. A browser preview serves a BUILT system
+    // and has no source tree at all, so the import is one that must never
+    // be evaluated there -- and `await import()` does not keep it out of
+    // the bundle, which is how this was found: webpack follows a dynamic
+    // import as readily as a static one, and the public preview went red on
+    // 13 unresolved node builtins (backlog G.8, 2026-09-19).
+    //
+    // The destination opens the store inside a try, so here the ignore
+    // becomes the sentence the screen shows -- "no object store here" --
+    // rather than a crash. Same shape as the AMDP destination above.
+    new webpack.IgnorePlugin({resourceRegExp: /osd-store\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

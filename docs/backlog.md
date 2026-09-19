@@ -3015,6 +3015,25 @@ open  revisions: reading them out of git instead of a system.
         reported as shipped that had gone into a folder which is not an
         input (9.7, 9.8). The stamp would not have caught that one; the
         input report does
+     └─ a FIFTH, 2026-09-19, and it says what the rule was still missing:
+        **the rule names how to verify an artefact and nowhere names what
+        the artefacts are.** The editor wave went out with abaplint, ABAP
+        Unit and 943 wire tests green, and took the public preview down
+        for three commits -- none of those four suites builds webpack, and
+        the preview build was simply never run. The defect under it was
+        that `await import()` does **not** keep a module out of a bundle:
+        the store was imported lazily *so that* abaplint would stay out of
+        the service worker, webpack followed the dynamic import as readily
+        as a static one, and the one-chunk limit inlined it. A comment
+        stating the intention sat right above it, which is the pair this
+        file already names -- a comment describing behaviour is
+        indistinguishable from one describing intent, and the second is
+        commoner
+     └─ so the list, since the rule needs one: touching `test/setup.mjs`,
+        `web/`, `webpack.config.cjs` or anything they import means
+        `npm run web:preview` **locally before the push**, and reading the
+        bundle rather than the exit code. The IgnorePlugin entry is the
+        fix, next to the AMDP one and for the same reason
      └─ still open: this is the argument for one e2e suite running against
         every packaging target, or the binary becomes a second runtime
         with no second check
