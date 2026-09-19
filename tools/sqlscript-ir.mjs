@@ -131,3 +131,104 @@ export function seamType(type) {
   if (len !== undefined) return `${abap}(${len})`;
   return abap;
 }
+
+/**
+ * The output schema of a plan: {COLUMN: type}.
+ *
+ * The typer needs the type of a COLUMN, not only of a literal, and a column's
+ * type has two different sources depending on what it hangs off:
+ *
+ *   - a `scan` reads it from the **catalogue**, which is passed in rather
+ *     than imported. A pure function with a catalogue argument can be tested
+ *     with four lines of fixture; one that reaches into the runtime registry
+ *     drags the whole system into every test of the type rules.
+ *   - a **table variable has no catalogue entry at all**. Its columns are
+ *     whatever the plan that defined it produces, so the schema is computed
+ *     bottom-up through the tree - which is also why `var` must be resolved
+ *     before this is asked: an unresolved variable has no schema anywhere.
+ *
+ * The catalogue is the smallest thing that answers the question:
+ *
+ *   {"SRC": {"K": {abap: "C", len: 3}, "N": {abap: "I"}}}
+ *
+ * so the runtime's own registry is adapted into it by a caller, outside this
+ * file, and nothing here knows that a registry exists.
+ */
+export function schemaOf(rel, catalogue = {}) {
+  const need = (r) => schemaOf(r, catalogue);
+  switch (rel.rel) {
+    case "scan": {
+      const table = catalogue[rel.table] ?? catalogue[rel.table?.toUpperCase?.()];
+      if (table === undefined) throw new Error(`schemaOf: the catalogue does not describe ${rel.table}`);
+      return {...table};
+    }
+    case "var":
+      throw new Error(`schemaOf: :${rel.name} has no schema until the binder resolves it`);
+    case "ref":
+      // a materialised relation: its schema is the plan's that made it, and
+      // the binder knows which that was - it must carry it on the node
+      if (rel.schema === undefined) throw new Error("schemaOf: a ref must carry the schema of the relation it points at");
+      return {...rel.schema};
+    case "filter":
+    case "order":
+    case "limit":
+      return need(rel.input);
+    case "project":
+      return Object.fromEntries(rel.items.map((item) => [item.as, typeOfExpr(item.expr, need(rel.input))]));
+    case "join": {
+      const left = need(rel.left);
+      const right = need(rel.right);
+      return {...left, ...right};
+    }
+    case "union": {
+      const all = rel.inputs.map(need);
+      const first = Object.keys(all[0]);
+      for (const one of all.slice(1)) {
+        // SQLScript lets a UNION of mismatched shapes through only by
+        // position; refusing here is cheaper than a wrong column later
+        if (JSON.stringify(Object.keys(one)) !== JSON.stringify(first)) {
+          throw new Error("schemaOf: the branches of a UNION do not have the same columns");
+        }
+      }
+      return {...all[0]};
+    }
+    case "aggregate": {
+      const input = need(rel.input);
+      const out = {};
+      for (const key of rel.groupBy) out[key] = input[key];
+      for (const agg of rel.aggs) out[agg.as] = typeOfExpr(agg.expr, input);
+      return out;
+    }
+    default:
+      throw new Error(`schemaOf: no schema rule for ${rel.rel}`);
+  }
+}
+
+/** the type an expression produces, given the schema it reads from */
+export function typeOfExpr(expr, schema = {}) {
+  switch (expr.node) {
+    case "col": {
+      const type = schema[expr.name] ?? schema[expr.name?.toUpperCase?.()];
+      if (type === undefined) throw new Error(`typeOfExpr: ${expr.name} is not in the input schema`);
+      return type;
+    }
+    case "lit":
+    case "param":
+      return expr.type;
+    case "isnull":
+      return T.bool;
+    case "cast":
+      return expr.type;
+    case "bin":
+    case "call":
+      // Only the nodes the LOWERING renders differently actually need a
+      // computed type - division and casts - so a typer that knows those two
+      // and copies the rest through unblocks the first bodies long before
+      // full inference exists. Where the type is already on the node, it wins:
+      // the parser may know better than a rule we have not measured.
+      if (expr.type !== undefined) return expr.type;
+      throw new Error(`typeOfExpr: ${expr.node} ${expr.op ?? expr.fn} carries no type and no rule has been measured for it`);
+    default:
+      throw new Error(`typeOfExpr: no type rule for ${expr.node}`);
+  }
+}

@@ -13,6 +13,7 @@
 import {expect} from "chai";
 import {T, col, lit, param, bin, call, cast, scan, ref, filter, project, join, union, aggregate, order, limit, effects} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
+import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
 const sqlOf = (rel, dialect, options) => lower(rel, dialect, options).sql;
 
@@ -189,5 +190,39 @@ describe("SQLScript IR: what it refuses", () => {
   it("marks a non-deterministic source, because reading it twice is observable", () => {
     const rel = project(scan("SRC"), [{as: "R", expr: call("RAND", [], T.dec(15, 2))}]);
     expect(effects(rel).nonDeterministic).to.equal(true);
+  });
+});
+
+describe("SQLScript IR: the schema a typer reads, and where it comes from", () => {
+  const catalogue = {SRC: {K: T.char(3), N: T.int}};
+
+  it("a scan takes its columns from the catalogue it is handed, not from a registry", () => {
+    expect(schemaOf(scan("SRC"), catalogue)).to.deep.equal({K: T.char(3), N: T.int});
+    expect(() => schemaOf(scan("NOPE"), catalogue)).to.throw(/does not describe NOPE/);
+  });
+
+  it("a projection renames and retypes, and a filter changes nothing", () => {
+    const rel = project(filter(scan("SRC"), bin(">", col("N"), lit(1, T.int), T.bool)),
+                        [{as: "KK", expr: col("K")}]);
+    expect(schemaOf(rel, catalogue)).to.deep.equal({KK: T.char(3)});
+  });
+
+  it("an aggregate keeps its keys and types its aggregates", () => {
+    const rel = aggregate(scan("SRC"), ["K"], [{as: "T", expr: bin("+", col("N"), lit(1, T.int), T.int)}]);
+    expect(schemaOf(rel, catalogue)).to.deep.equal({K: T.char(3), T: T.int});
+  });
+
+  it("a table variable has no schema until the binder resolves it, and says so", () => {
+    expect(() => schemaOf(varRef("lt1"), catalogue)).to.throw(/has no schema until the binder/);
+  });
+
+  it("a UNION whose branches do not line up is refused rather than guessed", () => {
+    const rel = union([scan("SRC"), project(scan("SRC"), [{as: "K", expr: col("K")}])]);
+    expect(() => schemaOf(rel, catalogue)).to.throw(/do not have the same columns/);
+  });
+
+  it("an expression with no measured rule refuses instead of inventing one", () => {
+    expect(() => typeOfExpr({node: "bin", op: "+", left: col("N"), right: col("N")}, {N: T.int}))
+      .to.throw(/no rule has been measured/);
   });
 });
