@@ -36,9 +36,9 @@ import {readFileSync} from "node:fs";
 /** one row of the table: what to ask, and what each answer means */
 const CASES = [
   {id: "int_div", sql: "SELECT a / b AS v FROM t WHERE k = 'r1'",
-   why: "integer division: HANA truncates, DuckDB returns a double"},
+   why: "division: HANA yields a DECIMAL (0.500000) - it does NOT truncate, which this list assumed until the oracle answered"},
   {id: "int_div_neg", sql: "SELECT c / b AS v FROM t WHERE k = 'r1'",
-   why: "and the sign: -7/2 is -3.5 or -3 or -4 depending on who is asked"},
+   why: "and the sign: HANA -3.500000, DuckDB -3.5, sql.js -3 (it truncates)"},
   {id: "dec_arith", sql: "SELECT d1 + d2 AS v FROM t WHERE k = 'r1'",
    why: "decimal addition: binary float or a real decimal"},
   {id: "cast_ok", sql: "SELECT CAST(num AS INTEGER) AS v FROM t WHERE k = 'r1'",
@@ -170,6 +170,32 @@ async function runSqlJs() {
   return out;
 }
 
+// Before anything can be classified the comparison has to stop reporting its
+// own differences. Three of DuckDB's eight nominal differences against HANA
+// were formatting: 0.5 against 0.500000, -3.5 against -3.500000, and a raise
+// against a raise with different words. A count that includes those is the
+// instrument talking about itself, which is the third time in a day this
+// project has had that happen - so normalisation comes before counting, and
+// what it collapsed is printed rather than assumed.
+export function normalise(cell) {
+  if (cell === undefined) return {kind: "missing"};
+  if (cell.error !== undefined) return {kind: "raised"};
+  if (cell.value === null) return {kind: "null"};
+  const asNumber = Number(cell.value);
+  if (cell.value.trim() !== "" && Number.isFinite(asNumber)) return {kind: "number", value: asNumber};
+  return {kind: "text", value: cell.value};
+}
+
+/** same after normalisation? numbers by value, a raise is a raise */
+export function agree(a, b) {
+  const x = normalise(a);
+  const y = normalise(b);
+  if (x.kind !== y.kind) return false;
+  if (x.kind === "number") return x.value === y.value;
+  if (x.kind === "text") return x.value === y.value;
+  return true;
+}
+
 const show = (cell) => {
   if (cell === undefined) return "-";
   if (cell.error !== undefined) return `RAISED ${cell.error}`;
@@ -208,9 +234,25 @@ if (process.argv.includes("--json")) {
     console.log(`${one.id.padEnd(17)} ${names.map((n) => show(engines[n][one.id]).padEnd(34)).join("")}`);
   }
   console.log("");
-  const differing = CASES.filter((one) => new Set(names.map((n) => show(engines[n][one.id]))).size > 1);
-  console.log(`${differing.length} of ${CASES.length} differ between the engines measured here:`);
-  for (const one of differing) console.log(`  ${one.id.padEnd(17)} ${one.why}`);
+  // Against the oracle when there is one, and between the local engines when
+  // there is not. "Differs from HANA" is the only question that matters; two
+  // local engines agreeing says nothing, as the padding rows proved.
+  const oracle = engines.hana !== undefined ? "hana" : names[0];
+  const others = names.filter((n) => n !== oracle);
+  const nominal = [];
+  const real = [];
+  for (const one of CASES) {
+    const differs = others.filter((n) => show(engines[n][one.id]) !== show(engines[oracle][one.id]));
+    const actually = others.filter((n) => !agree(engines[n][one.id], engines[oracle][one.id]));
+    if (differs.length > 0) nominal.push({one, who: differs});
+    if (actually.length > 0) real.push({one, who: actually});
+  }
+  console.log(`against ${oracle}: ${nominal.length} of ${CASES.length} differ nominally, **${real.length} after normalisation**`);
+  const formattingOnly = nominal.filter((n) => !real.some((r) => r.one.id === n.one.id));
+  if (formattingOnly.length > 0) {
+    console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
+  }
+  for (const {one, who} of real) console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${one.why}`);
   console.log("\nA count is not the verdict. Each differing row needs a class -");
   console.log("native / rewrite / typed / compat / host / refuse - and the HANA");
   console.log("column has to be merged in before any of them can be assigned.");
