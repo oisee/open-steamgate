@@ -53,17 +53,35 @@ describe("every measured divergence is answered in the lowering", () => {
     }
   });
 
-  // Known and unanswered, written down rather than left to be rediscovered.
-  // HANA raises on division by zero, DuckDB returns Infinity and sql.js
-  // returns NULL - three answers, and the lowering has none. It is not hard
-  // to answer (a guarded CASE on DuckDB, a refusal on sql.js, which cannot
-  // raise at all); it is simply not done, and this line is the difference
-  // between a gap and an oversight.
-  it("div_zero: OPEN - three engines, three answers, and no decision yet", () => {
+  // Answered on the engine that can raise; not answered, by decision, on the
+  // one that cannot.
+  it("div_zero: DuckDB is made to raise, because HANA does", () => {
     const rel = over(bin("/", col("A"), col("ZERO"), T.dec(15, 2)));
-    const sql = lowerOf(rel, "duckdb");
-    expect(sql, "if this ever stops being a plain division, this test is the one to update")
-      .to.contain('("A" / "ZERO")');
+    expect(lowerOf(rel, "duckdb")).to.contain("error('division by zero')");
+    expect(lowerOf(rel, "hana"), "HANA raises by itself").to.not.contain("CASE WHEN");
+  });
+
+  it("div_zero on sql.js: NOT answered, and that is a decision with a reason", () => {
+    // the browser engine cannot raise at all, so being faithful here would
+    // mean refusing division outright - and division is everywhere while a
+    // zero divisor is rare. The trade is written in the dialect and the
+    // conformance table keeps measuring the difference.
+    const rel = over(bin("/", col("A"), col("ZERO"), T.dec(15, 2)));
+    expect(lowerOf(rel, "sqlite")).to.not.contain("error(");
+    expect(lowerOf(rel, "sqlite")).to.contain("* 1.0");
+  });
+
+  it("the guard renders the divisor twice, so its bound values are pushed twice", async () => {
+    // rendering an operand is what pushes its parameters; an expression that
+    // mentions the divisor twice must render it twice, or two placeholders
+    // stand for one value. Neither the engine nor a check on the text would
+    // notice - only counting does.
+    const {param} = await import("../tools/sqlscript-ir.mjs");
+    const rel = over(bin("/", col("A"), param("p", T.int), T.dec(15, 2)));
+    for (const dialect of ["hana", "duckdb", "sqlite"]) {
+      const {sql, params} = lower(rel, dialect);
+      expect((sql.match(/\?/g) ?? []).length, `${dialect}: placeholders`).to.equal(params.length);
+    }
   });
 
   it("like_case: answered on the connection rather than in the dialect, and deliberately", () => {

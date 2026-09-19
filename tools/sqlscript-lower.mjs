@@ -72,6 +72,10 @@ const DIALECTS = {
     placeholder: () => "?",
     // `/` is floating point here, which is what HANA does too
     divide: (a, b) => `(${a} / ${b})`,
+    // HANA raises on division by zero; this engine answers Infinity or NULL
+    // depending on the types, which is a different program. It can be made
+    // to raise - measured - so it is.
+    guardZero: (divided, divisor) => `CASE WHEN (${divisor}) = 0 THEN error('division by zero') ELSE ${divided} END`,
     // `//` is the integer one, for when the source asked for it
     intDiv: (a, b) => `(${a} // ${b})`,
     concat: (args) => args.join(" || "),
@@ -111,6 +115,14 @@ const DIALECTS = {
     // decimal division has to be forced. This is the typed rewrite the
     // conformance table found, and it exists only for this engine.
     divide: (a, b) => `((${a}) * 1.0 / (${b}))`,
+    // **No guardZero here, and it is a decision rather than an omission.**
+    // This engine cannot raise at all, so faithfulness to HANA on division
+    // by zero would mean refusing division outright - and division is in
+    // ordinary bodies everywhere, while a zero divisor is rare. Refusing a
+    // common operator to be exact about a rare case would cost far more
+    // coverage than it buys fidelity. So: division by zero answers NULL
+    // here where HANA raises, it is written down, and the conformance table
+    // keeps measuring it.
     intDiv: (a, b) => `(${a} / ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
@@ -209,7 +221,15 @@ export function lower(rel, dialectName, options = {}) {
           // it is the reason every node carries one: plain `/` in SQLScript
           // yields a decimal, and only an explicitly integer result means
           // the truncating operator.
-          return e.type?.abap === "I" ? d.intDiv(left, right) : d.divide(left, right);
+          //
+          // `guardZero` renders the divisor a SECOND time, deliberately:
+          // rendering an operand is what PUSHES its bound values, so an
+          // expression that mentions it twice has to render it twice or it
+          // will carry two placeholders for one value. Reusing the string
+          // would look tidier and be wrong, and neither the engine nor a
+          // check on the text would say so.
+          const divided = e.type?.abap === "I" ? d.intDiv(left, right) : d.divide(left, right);
+          return d.guardZero === undefined ? divided : d.guardZero(divided, expr(e.right));
         }
         return `(${left} ${e.op} ${right})`;
       }
