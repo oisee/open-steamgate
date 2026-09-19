@@ -41,6 +41,7 @@
     "test/osd-runtime.mjs",
     "test/osd-status.mjs",
     "test/osd-store.mjs",
+    "test/osd-suites.mjs",
     "test/osd-unit.mjs",
     "test/osd-xref.mjs",
     "test/preflight.mjs",

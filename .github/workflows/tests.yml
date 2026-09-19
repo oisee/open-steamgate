@@ -1,0 +1,105 @@
+name: tests
+
+# The suites, read by something other than a person.
+#
+# Written 2026-09-19 after an independent review pointed at a hole nobody
+# had looked in: this repository had **1020 wire tests, 159 ABAP unit
+# methods and a clean lint, and no workflow that read any of them**.
+# `leak-scan.yml` reads what is about to be published and `preview.yml`
+# builds the browser deployment and checks it; neither runs a test.
+#
+# What that cost, measured rather than imagined: `test/segw-tree.mjs` was
+# **3 failing on the published branch** before that evening and **8 after**
+# it, across a push cycle, and nothing said so. The invariant it holds is
+# not a small one — the ABAP generator and the Node generator write the
+# same bytes — and it is the guarantee the whole SEGW-in-ABAP track rests
+# on.
+#
+# This tree's own rule is "an instrument that cannot go red is
+# indistinguishable from a broken one". It had been applied to every
+# instrument except the suite.
+#
+# The pins are copied from preview.yml on purpose and not factored out: a
+# shared action would make one of the two the follower, and when the pins
+# move they move for different reasons. DEBT-2026-09-14-ci-pinned-transpiler
+# covers both, and when it closes both lose the same block.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OSD_CORE_REF: "52ba51a5662b93bd5093a9c1adef64bd438ce7f0"
+      OSD_GUI_REF: "0324e1c1538f7ac63826ebbddab3fbee31c4501c"
+      OSD_TRANSPILER_REF: "0263e42892063be5008eab42a5f836bc19385b82"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Build the transpiler this tree is pinned to
+        if: env.OSD_TRANSPILER_REF != ''
+        run: |
+          git clone --filter=blob:none https://github.com/oisee/transpiler.git ../transpiler
+          git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
+          npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
+          done
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$package" run compile
+          done
+          chmod +x ../transpiler/packages/cli/abap_transpile
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-transpiler.mjs
+
+      - name: The library patches this tree is pinned to
+        run: |
+          git clone --filter=blob:none https://github.com/oisee/open-abap-core.git .local/lars/open-abap-core
+          git -C .local/lars/open-abap-core checkout -q "$OSD_CORE_REF"
+          git clone --filter=blob:none https://github.com/oisee/open-abap-gui.git .local/lars/open-abap-gui
+          git -C .local/lars/open-abap-gui checkout -q "$OSD_GUI_REF"
+
+      # The build refuses a pack that was not fetched, so this is not
+      # optional: without it the suites would run against a smaller system
+      # than the manifests describe and look complete.
+      - name: Fetch the pack sources
+        run: node tools/osd-fetch.mjs
+
+      - run: npm run lint
+
+      - name: Transpile
+        run: npm run transpile
+
+      - name: ABAP Unit
+        run: node tools/osd-unit-run.mjs
+
+      # **What is skipped is reported, not swallowed.** Several suites are
+      # guarded on `.local/corpus*`, which is not in this repository and
+      # never will be — it holds real customer projects. On a runner those
+      # cases skip, and a run that skips them is a *narrower* run and not a
+      # green one. `--report-skips` prints what did not execute and why, so
+      # "passed" here and "passed" on a workstation are different claims
+      # that say which they are.
+      - name: The suites
+        run: node tools/osd-suites.mjs --report-skips
+        env:
+          STG_PORT: "3030"
