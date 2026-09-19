@@ -130,6 +130,77 @@ export function hanaConnection(input = {}) {
   };
 }
 
+/** HANA has no multi-row `VALUES`, so `INSERT INTO t (a,b) VALUES (1,2),(3,4)`
+ *  becomes `INSERT INTO t (a,b) SELECT 1,2 FROM DUMMY UNION ALL SELECT 3,4
+ *  FROM DUMMY`. Measured on HANA Express 2026-09-19: the first form is
+ *  refused with `incorrect syntax near ","`, the second is accepted and the
+ *  rows land.
+ *
+ *  **This is the second genuine dialect rewrite in this client**, after
+ *  `WHERE true AND true`, and it appeared without anybody touching HANA: the
+ *  seed was batched into 500-row statements to cut the unit run from 6793
+ *  statements to 1711, which is a large win on SQLite and a syntax error
+ *  here. Nothing caught it because the HANA suite needs a container and does
+ *  not run in CI -- a pair that must agree, with the disagreement deferred
+ *  to whoever next asked for HANA.
+ *
+ *  One pass and quote-aware, because `),(` inside a string literal is data.
+ *  Doing this as a regular expression over the joined statement is the exact
+ *  mistake items 7 and 8 of the list in docs/db-backends.md were: a
+ *  transformation that has to tell a literal from the rest cannot be done in
+ *  two passes.
+ *
+ *  A statement that is not a multi-row INSERT comes back unchanged, so the
+ *  single-row path everything else uses is untouched. */
+export function multiRowInsert(sql) {
+  if (/^\s*INSERT\s+INTO\b/i.test(sql) === false) return sql;
+  let quoted = false;
+  let depth = 0;
+  let valuesAt = -1;
+  let start = -1;
+  let lastEnd = -1;
+  const tuples = [];
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (quoted) {
+      // '' inside a literal is an escaped quote, not the end of one
+      if (ch === "'") {
+        if (sql[i + 1] === "'") i++;
+        else quoted = false;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      quoted = true;
+      continue;
+    }
+    if (valuesAt < 0) {
+      if (depth === 0 && (ch === "V" || ch === "v") && /^values\b/i.test(sql.slice(i, i + 7))) {
+        valuesAt = i;
+        i += 5;
+      } else if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      continue;
+    }
+    if (ch === "(") {
+      if (depth === 0) start = i + 1;
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        tuples.push(sql.slice(start, i));
+        lastEnd = i + 1;
+      }
+    }
+  }
+  // one tuple is the ordinary INSERT and needs no help; none means this is
+  // an INSERT ... SELECT, which HANA takes as written
+  if (valuesAt < 0 || tuples.length < 2) return sql;
+  const head = sql.slice(0, valuesAt).trimEnd();
+  const tail = sql.slice(lastEnd);
+  return `${head} ${tuples.map((t) => `SELECT ${t} FROM DUMMY`).join(" UNION ALL ")}${tail}`;
+}
+
 export class HanaDatabaseClient {
   constructor(input = {}) {
     // what sy-dbsys reports; a real system running on HANA says HDB
@@ -189,7 +260,7 @@ export class HanaDatabaseClient {
       return;
     }
     if (sql === "") return;
-    const folded = foldIdentifiers(sql);
+    const folded = multiRowInsert(foldIdentifiers(sql));
     if (this.trace) console.log(folded);
     await this.#run(folded);
   }
