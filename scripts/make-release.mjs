@@ -22,7 +22,7 @@
 //   packs/         the content packs, read at start (backlog E.2)
 //   build/         one prebuilt generation, so nothing transpiles to serve
 //   output         the link the runtime loads the generation through
-import {cpSync, existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -86,15 +86,70 @@ if (existsSync(node)) {
   say(`host: a private ${execFileSync(join(node, "bin", "node"), ["--version"], {encoding: "utf8"}).trim()}`);
 }
 
-// the closure the Node hosts resolve from disk
-mkdirSync(join(out, "node_modules", "@abaplint"), {recursive: true});
-for (const pkg of ["@abaplint/runtime", "@abaplint/database-sqlite", "sql.js", "temporal-polyfill"]) {
-  const from = join(root, "node_modules", pkg);
-  if (existsSync(from)) {
-    cpSync(from, join(out, "node_modules", pkg), {recursive: true, dereference: true});
+// The closure the Node hosts resolve from disk.
+//
+// **Derived, not listed.** The four names used to be written here by hand,
+// and the hand was wrong: `temporal-polyfill` came without `temporal-utils`
+// and `temporal-spec`, so the Node host died on
+// `Cannot find package 'temporal-utils'` the moment anything asked for a
+// date (measured in the container, 2026-09-19). A list of roots is a fine
+// thing to write; a list of a closure is not, because the closure changes
+// when somebody else's package.json does and nothing tells us.
+const ROOTS = ["@abaplint/runtime", "@abaplint/database-sqlite", "sql.js", "temporal-polyfill"];
+
+function closureOf(roots) {
+  const seen = new Set();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const pkg = queue.shift();
+    if (seen.has(pkg)) continue;
+    const from = join(root, "node_modules", pkg);
+    if (!existsSync(from)) continue;
+    seen.add(pkg);
+    try {
+      const own = JSON.parse(readFileSync(join(from, "package.json"), "utf8"));
+      // `dependencies` only: devDependencies are not needed to run, and
+      // optionalDependencies that are absent are absent on purpose.
+      queue.push(...Object.keys(own.dependencies ?? {}));
+    } catch {
+      // a package without a readable package.json is a leaf as far as we care
+    }
   }
+  return [...seen].sort();
 }
-say("runtime closure for the Node hosts: @abaplint/runtime, @abaplint/database-sqlite, sql.js");
+
+const closure = closureOf(ROOTS);
+mkdirSync(join(out, "node_modules", "@abaplint"), {recursive: true});
+for (const pkg of closure) {
+  if (pkg.includes("/")) mkdirSync(join(out, "node_modules", pkg.split("/")[0]), {recursive: true});
+  cpSync(join(root, "node_modules", pkg), join(out, "node_modules", pkg), {recursive: true, dereference: true});
+}
+say(`runtime closure for the Node hosts: ${closure.length} packages from ${ROOTS.length} roots` +
+  ` (${closure.filter((p) => !ROOTS.includes(p)).join(", ") || "no transitive ones"})`);
+
+// **hdb goes in as one pre-bundled file, and the package directory does not
+// work.** A compiled Bun binary resolves the top-level bare specifier from
+// the cwd's node_modules, and relative FILE paths on disk -- and nothing that
+// the required module then asks for by name. So copying `hdb` plus
+// `iconv-lite` gets as far as
+// `Cannot find package 'iconv-lite' from .../hdb/lib/util/convert.js`, and
+// every rewrite of that require fails at the next bare specifier after it
+// (measured, five variants, 2026-09-19). One CJS file has no bare specifiers
+// left to resolve.
+//
+// Without this the image carries no HANA driver at all and `STG_DB=hana`
+// answers 503 `Cannot find package 'hdb'` -- honestly, but uselessly.
+if (existsSync(join(root, "node_modules", "hdb"))) {
+  const target = join(out, "node_modules", "hdb");
+  mkdirSync(target, {recursive: true});
+  execFileSync("bun", ["build", "--target=node", "--format=cjs",
+    join(root, "node_modules", "hdb", "index.js"), `--outfile=${join(target, "index.js")}`],
+    {stdio: "pipe"});
+  writeFileSync(join(target, "package.json"), JSON.stringify(
+    {name: "hdb", version: JSON.parse(readFileSync(join(root, "node_modules", "hdb", "package.json"), "utf8")).version,
+     main: "index.js", license: "MIT"}, undefined, 2) + "\n");
+  say(`HANA driver: hdb bundled to one file, ${(statSync(join(target, "index.js")).size / 1024 / 1024).toFixed(2)} MB`);
+}
 
 // the packs: the same places a served system reads them from, the tree's
 // packs/ first and then whatever OSD_PACKS names, a pack found twice kept
