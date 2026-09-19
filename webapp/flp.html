@@ -126,6 +126,17 @@
                       }
                     },
                     {
+                      id: "se16",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "Data browser",
+                        subtitle: "a table and its rows",
+                        info: "82 entities",
+                        icon: "sap-icon://table-view",
+                        targetURL: "#DataBrowser-show"
+                      }
+                    },
+                    {
                       // greyed by launchpad.js when nothing behind the
                       // destination can run SQLScript: a tile that looks
                       // alive and does nothing is worse than a grey one
@@ -259,6 +270,13 @@
           description: "the sap-lsd light-show, recorded as SAP GUI screens and replayed over a push channel",
           applicationType: "URL",
           url: "../sap/bc/lsd",
+          navigationMode: "embedded"
+        },
+        "DataBrowser-show": {
+          title: "Data browser",
+          description: "pick a table, see its rows -- read through the application, not around it",
+          applicationType: "URL",
+          url: "../sap/bc/osd/se16/",
           navigationMode: "embedded"
         },
         "Amdp-play": {
