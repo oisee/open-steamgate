@@ -50,7 +50,9 @@ A — the ADT surface: what a client may ask
 ├─ A.9  creating an object: the second dialog nobody reads          open
 ├─ A.10 what the client complains about while it works              open
 ├─ A.11 a service of several CDS views, no hand-written class       DONE 09-17
-└─ A.12 SRVD + a minimal SRVB: the service definition as an input   next-ish
+├─ A.12 SRVD + a minimal SRVB: the service definition as an input   next-ish
+├─ A.13 abap-fs over RFC: a client that needs no ADT on HTTPS        new 09-19
+└─ A.14 coverage by driving a real client, with A4H as the oracle    new 09-19
 
 B — the runtime underneath: what the answers are made of
 │   the track is done; these are the named gaps
@@ -1181,6 +1183,106 @@ A.4b An RFC client that can CALL it, not only describe it                [R]
      │  client has that codec (internal/xrfc) but `rfc call` does not use it
      └─ the bridge is not in the way — this is client work, and it would make
         the bridge drivable from a script as well as from Eclipse
+
+A.13 abap-fs over RFC: a client that needs no ADT on HTTPS      [R/S]  new 09-19
+     Alice, 2026-09-19: teach the VS Code client to reach a system
+     **directly over RFC**, so a system whose ICF is closed -- which is most
+     of them -- is still editable. The protocol half is measured and written
+     down already (`docs/adt-over-rfc.md`): a Custom Application Server
+     project tunnels every ADT request inside one call of
+     `SADT_REST_RFC_ENDPOINT`, whose two parameters are an HTTP request and
+     an HTTP response. What is new is the **direction**: the bridge we have
+     *accepts* that call from Eclipse and speaks HTTP outward; this needs a
+     client that *makes* it.
+     ├─ **the cheap shape changes nothing in anybody's editor: a sidecar.**
+     │  A local process listens on `127.0.0.1`, takes an ordinary ADT
+     │  request and forwards it as one `SADT_REST_RFC_ENDPOINT` call.
+     │  `abap-adt-api` is then pointed at `http://127.0.0.1:<port>` and does
+     │  not know the difference; neither does Eclipse, nor vsp, nor a curl.
+     │  **No upstream change is needed to have the feature at all**, which
+     │  is this estimate's hinge
+     ├─ **what it actually costs is A.4b**, and that is where the work is:
+     │  `rfc call SADT_REST_RFC_ENDPOINT` stops in open-rfc's classic
+     │  structure codec, because the parameters are recursive and travel as
+     │  BASXML. The codec exists (`internal/xrfc`); `rfc call` does not use
+     │  it. Until that is done there is no RFC client to build a sidecar on;
+     │  after it, the sidecar is a day
+     ├─ **then three questions that are measurements rather than opinions**,
+     │  each with a known place to look:
+     │  ├─ *session*: ADT is stateful over cookies, CSRF and
+     │  │  `sap-contextid`. Over RFC those ride in the header table, and A.5
+     │  │  records that Eclipse opens several connections at once with a jar
+     │  │  each -- so a lock/write/activate has to land in one context.
+     │  │  Reads first; writes only after A.5
+     │  ├─ *bodies*: the body field is `RSTR`, so binary is free and HTTP
+     │  │  chunking does not exist -- but a 606 KB answer was already seen
+     │  │  split across records (B.5), and the sidecar must reassemble
+     │  └─ *logon*: the sidecar needs the credentials the extension already
+     │     has. Taking them from the client's own settings rather than from
+     │     a second file is the difference between a demo and a thing people
+     │     use -- and it is also the place where a secret would leak
+     ├─ **the upstream half, small if it is wanted**: `abap-adt-api` (MIT,
+     │  8.4.3, marcellourbani/abap-adt-api) builds every call on one HTTP
+     │  client. A pluggable transport there, plus a setting in
+     │  `vscode-abap-remote-fs` that starts the sidecar, turns "run this
+     │  proxy yourself" into a checkbox. Offer it only **after** the sidecar
+     │  has worked against a real system, with the measurement in hand: an
+     │  upstream PR whose premise is untested is the shape our own critic
+     │  rejects
+     ├─ **and the honest boundary**, which decides whether it is worth
+     │  doing: it buys **reachability, not coverage**. A client that could
+     │  not open a port now can; a client that refuses to show a button
+     │  still refuses. Most façade failures are decided in the client
+     │  (`docs/adt-facade.md`), and no transport changes that
+     └─ **ranking, the subaltern's version**: A.4b first, because it is the
+        real cost; the sidecar second, a day; upstream third, small and only
+        with a measurement; **native RFC inside Node never** -- that is
+        `node-rfc` plus SAP's own SDK, a licence and a C++ addon in a place
+        where a separate process does the job
+
+A.14 Coverage by driving a real client, with A4H as the oracle  [S/R]  new 09-19
+     Alice, 2026-09-19: Eclipse is awkward as a 1:1 oracle, so drive the
+     **VS Code** client instead -- and fuzz, or rather use it meaningfully.
+     ├─ **do not simulate the editor.** `vscode-abap-remote-fs` is a shell
+     │  over `abap-adt-api` (MIT, 8.4.3), which is an ordinary typed library:
+     │  logon, nodeContents, objectStructure, getObjectSource, lock /
+     │  setObjectSource / activate / unLock, searchObject, findObjectPath,
+     │  syntaxCheck, unitTestRun, transports. **Its method surface IS the
+     │  client's vocabulary**, so "simulating what a person does in VS Code"
+     │  is calling those in the order the extension calls them -- two orders
+     │  of magnitude cheaper than automating an Electron window, and
+     │  deterministic
+     ├─ **fuzzing: the wrong tool first, the right one second.** Blind URL
+     │  fuzzing buys 404s we already collect for free -- the façade records
+     │  every unanswered path and `/osd/not-served` ranks them. The yield is
+     │  in **parameters of calls the client really makes**: `version=active`
+     │  against `inactive`, `withShortDescriptions`, the facet and depth of
+     │  a node list, `Accept` and the document versions (`…v3+xml` against
+     │  v2), `If-Match` and etags, a lock handle reused or stale. That is
+     │  where a client gives up silently rather than loudly
+     ├─ **the oracle is a second run, not a second instrument**: the same
+     │  script against OSD and against A4H through a recording proxy, then
+     │  the comparison machinery W.1 already has -- normalise, diff, and an
+     │  approved difference carries a reason from the start. Captures stay
+     │  under `.local/`; only protocol facts reach the repository
+     ├─ **three routes, one vocabulary**, which is what makes this worth
+     │  building rather than scripting once: HTTPS to OSD, HTTPS to A4H
+     │  through the proxy, and RFC to A4H through A.13's sidecar. A
+     │  difference between routes is as interesting as a difference between
+     │  systems
+     ├─ **first artefact, and it needs no sandbox**: a driver that runs the
+     │  scripted sequences against one URL and writes one line per call --
+     │  method, arguments, status, a digest of the normalised body. Run
+     │  against OSD alone it already prints the worklist, ranked by what a
+     │  real client does most. Only the second run needs A4H, and that is
+     │  the ask
+     └─ **the boundary, stated before the work**: driving the library
+        measures **the server's surface**, not the client's willingness.
+        Most façade failures are decided client-side -- the extension does
+        not call, and a capture shows nothing -- so this closes "we answer
+        wrongly" and leaves "the client refused" to reading the client's own
+        bundle. Two different instruments; naming which one is being bought
+        is half the estimate
 
 A.5  Stateful session affinity across parallel connections               [R]
      ├─ Eclipse opens many RFC connections at once; each gets its own cookie
