@@ -18,6 +18,8 @@ import {join} from "node:path";
 import {lex, LexError} from "./lexer.mjs";
 import {parse, ParseError} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
+import {toIr} from "./to-ir.mjs";
+import {lower} from "../sqlscript-lower.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
@@ -66,24 +68,45 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
 
   const report = {};
   for (const [which, bodies] of Object.entries(corpora)) {
+    // Three numbers, not one (fable-osd). "Parses" is not "runs": stage 3
+    // refuses Declare, Return and Block by name, so a body can go through
+    // the grammar whole and still never reach an engine. One number called
+    // "coverage" would be quoted a week later as "8% of the corpus works",
+    // and we would be the ones quoting it -- the name of a metric being
+    // wider than what it measures is the defect this project keeps paying
+    // for. Only the third number is showable.
     const reasons = new Map();
-    let whole = 0;
+    const afterParse = new Map();
+    let parsed = 0;
+    let loweredCount = 0;
     for (const body of bodies) {
       let tokens = [];
+      let tree;
       try {
         tokens = lex(body);
-        parse(new Body(), tokens);
-        whole += 1;
+        tree = parse(new Body(), tokens);
+        parsed += 1;
       } catch (error) {
         const reason = reasonOf(error, tokens);
         reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+        continue;
+      }
+      try {
+        const ir = toIr(tree, {catalogue: {}});
+        lower(ir.rel, "hana");
+        loweredCount += 1;
+      } catch (error) {
+        const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
+        afterParse.set(why, (afterParse.get(why) ?? 0) + 1);
       }
     }
     report[which] = {
       bodies: bodies.length,
-      whole,
-      share: bodies.length === 0 ? 0 : Math.round((whole / bodies.length) * 100),
-      stoppedBy: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15),
+      parsed,
+      lowered: loweredCount,
+      share: bodies.length === 0 ? 0 : Math.round((loweredCount / bodies.length) * 100),
+      stoppedBy: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
+      parsedButNotLowered: [...afterParse.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
     };
   }
   return report;
@@ -92,9 +115,18 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
 if (process.argv[1]?.endsWith("coverage.mjs")) {
   const report = measure(process.argv[2]);
   for (const [which, r] of Object.entries(report)) {
-    console.log(`\n${which}: ${r.whole} of ${r.bodies} bodies parse whole (${r.share}%)`);
+    console.log(`\n${which}: ${r.bodies} bodies`);
+    console.log(`  parsed   ${r.parsed}`);
+    console.log(`  lowered  ${r.lowered}  (${r.share}% -- the only one worth quoting)`);
+    console.log("  stopped in the grammar:");
     for (const [reason, count] of r.stoppedBy) {
       console.log(`  ${String(count).padStart(5)}  ${reason}`);
+    }
+    if (r.parsedButNotLowered.length > 0) {
+      console.log("  parsed and then refused by the lowering:");
+      for (const [reason, count] of r.parsedButNotLowered) {
+        console.log(`  ${String(count).padStart(5)}  ${reason}`);
+      }
     }
   }
   console.log("\nA body needs all of its constructs at once, so the next construct to write");

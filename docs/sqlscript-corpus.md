@@ -243,7 +243,28 @@ cannot be fixed in advance from a frequency table.
 - And it is one sandbox of SAP-authored code; a customer corpus would answer
   its own question, as ever.
 
-### After the first four constructs: 0 → 34
+### The number above was mine and it was too kind: parsed is not runs
+
+*Correction, same day, fable-osd's catch. The figures in this section counted
+bodies that **parse**. Stage 3 refuses `Declare`, `Return` and `Block` by
+name, so a body can go through the grammar whole and never reach an engine.
+Published as one number called "coverage", "8%" would have been quoted a week
+later as "eight percent of the corpus works" -- and we would have been the
+ones quoting it. The name of a metric being wider than what it measures is
+the defect this project keeps paying for, and this time it was ours.*
+
+`tools/sqlscript/coverage.mjs` now prints three:
+
+| | bodies | parsed | **lowered** |
+| --- | ---: | ---: | ---: |
+| working | 405 | 34 | **0 (0%)** |
+| teaching | 104 | 40 | **5 (5%)** |
+
+Of the 34 working bodies that parse, **none** lowers: 17 stop at `Return`, 9
+at `Block`, and 8 end without a statement that produces rows. Only the third
+column is showable to anybody.
+
+### After the first four constructs: 0 → 34 parsed (and 0 lowered)
 
 `DECLARE`, `BEGIN … END`, `RETURN` and `*` as a function argument, chosen by
 the table above rather than by frequency:
