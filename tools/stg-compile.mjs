@@ -316,8 +316,8 @@ export function readModel(text, file = "stg.yaml") {
     // browser (measured 2026-09-19).
     if (returns.primitive) {
       modelWarnings.push(`function ${name}: returns the primitive ${returns.primitive}, which this ` +
-        `runtime serves and classic SEGW cannot model. The tree carries no return kind for it, ` +
-        `and SEGW on a system will refuse to generate runtime objects until one is given by hand.`);
+        `runtime serves and classic SEGW's editor has no return kind for. The tree carries no ` +
+        `return kind, and the function import reaches $metadata without a ReturnType.`);
     }
     return {
       name,

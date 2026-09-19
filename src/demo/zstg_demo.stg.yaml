@@ -79,11 +79,15 @@ functions:
   TravelCount:
     method: GET
     # A scalar count, which is what the dispatcher answers:
-    # {"d":{"TravelCount":3}}. Classic SEGW has no return kind for a
-    # primitive, so `stg-compile` warns that a system will refuse to generate
-    # runtime objects for this one until it is given an entity or a complex
-    # type by hand -- measured on A4H 2026-09-19. The model says what we
-    # serve; the warning says what SEGW will do about it.
+    # {"d":{"TravelCount":3}}. Classic SEGW's editor has no return kind for a
+    # primitive, so the tree carries none and stg-compile says so.
+    #
+    # It does NOT refuse. Measured on A4H 2026-09-19: ZOSD_003_DEMO with this
+    # exact tree activated and serves
+    # `<FunctionImport Name="TravelCount" m:HttpMethod="GET">` with no
+    # ReturnType at all. The first version of this warning said a system
+    # would refuse to generate runtime objects -- one error message from one
+    # project turned into a rule, and the prediction failed on the next run.
     returns: {primitive: Edm.Int32}
     parameters:
       Status: {type: String(1)}

@@ -83,3 +83,47 @@ describe("the SEGW file names a real system writes", () => {
     expect(EXPECTED[".iwsv.xml"]).to.not.equal(EXPECTED[".iwmo.xml"]);
   });
 });
+
+// A symbol with no pool entry is a silent empty label.
+//
+// Not hypothetical, and not ours: SAP's own `cl_uconhttp_mpc` calls
+// `set_label_from_text_element` 37 times and its export carries neither
+// <TPOOL> nor <TEXTPOOL> -- symbols 075, 076, 077 point at nothing. Nobody
+// complains: abapGit imports it, the class activates, $metadata is valid,
+// and the labels are simply absent. So the system offers no backstop here,
+// and the shape comparison in tools/osd-metadata-diff.mjs would not notice
+// either, because it compares which things exist and not what they are
+// called.
+//
+// Which makes this the cheap check: every symbol our generator references
+// must be in the pool it writes beside it.
+describe("every text symbol we reference is in the pool we write", () => {
+  it("the demo's MPC references nothing it did not put in the TPOOL", async () => {
+    const {compile} = await import("../tools/stg-compile.mjs");
+    const {readFileSync} = await import("node:fs");
+    const r = compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"));
+    const source = r.classes["zcl_zstg_demo_mpc.clas.abap"];
+    const xml = r.classes["zcl_zstg_demo_mpc.clas.xml"];
+
+    const referenced = [...source.matchAll(/iv_text_element_symbol = '([0-9A-Z]+)'/g)].map((m) => m[1]);
+    const inPool = new Set([...xml.matchAll(/<KEY>([0-9A-Z]+)<\/KEY>/g)].map((m) => m[1]));
+
+    expect(referenced.length, "no symbols at all: this assertion would pass on nothing")
+      .to.be.greaterThan(0);
+    const dangling = [...new Set(referenced)].filter((s) => !inPool.has(s));
+    expect(dangling, `symbols referenced with no <TPOOL> entry: ${dangling.join(", ")}`)
+      .to.deep.equal([]);
+  });
+
+  it("and writes no pool entry nothing refers to", async () => {
+    const {compile} = await import("../tools/stg-compile.mjs");
+    const {readFileSync} = await import("node:fs");
+    const r = compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"));
+    const referenced = new Set([...r.classes["zcl_zstg_demo_mpc.clas.abap"]
+      .matchAll(/iv_text_element_symbol = '([0-9A-Z]+)'/g)].map((m) => m[1]));
+    const pool = [...r.classes["zcl_zstg_demo_mpc.clas.xml"]
+      .matchAll(/<KEY>([0-9A-Z]+)<\/KEY>/g)].map((m) => m[1]);
+    const orphans = pool.filter((k) => !referenced.has(k));
+    expect(orphans, `pool entries nothing references: ${orphans.join(", ")}`).to.deep.equal([]);
+  });
+});
