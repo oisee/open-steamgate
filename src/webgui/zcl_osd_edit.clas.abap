@@ -40,6 +40,7 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
 
     TYPES tt_object TYPE STANDARD TABLE OF zosd_object_s WITH DEFAULT KEY.
     TYPES tt_issue  TYPE STANDARD TABLE OF zosd_issue_s WITH DEFAULT KEY.
+    TYPES tt_type   TYPE STANDARD TABLE OF zosd_type_s WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_answer,
              source   TYPE string,
@@ -55,6 +56,7 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
              error    TYPE string,
              objects  TYPE tt_object,
              issues   TYPE tt_issue,
+             types    TYPE tt_type,
            END OF ty_answer.
 
 *   one call of the store, with everything the screen ever asks for
@@ -142,7 +144,8 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                     ev_ms       = rs_answer-ms
                     ev_error    = rs_answer-error
           TABLES    et_object   = rs_answer-objects
-                    et_issue    = rs_answer-issues.
+                    et_issue    = rs_answer-issues
+                    et_type     = rs_answer-types.
       CATCH cx_root INTO lx_root.
 *       The same rule as the AMDP tile and the trace screen: the ABAP guards
 *       itself, and what is thrown has to SAY why. An exception with no
@@ -239,7 +242,9 @@ CLASS zcl_osd_edit IMPLEMENTATION.
   METHOD object_list.
     DATA ls_answer TYPE ty_answer.
     DATA ls_object TYPE zosd_object_s.
+    DATA ls_type   TYPE zosd_type_s.
     DATA lv_rows   TYPE string.
+    DATA lv_tally  TYPE string.
     DATA lv_shown  TYPE string.
 
     ls_answer = store( iv_command = `LIST`
@@ -261,6 +266,16 @@ CLASS zcl_osd_edit IMPLEMENTATION.
     ENDLOOP.
     lv_shown = |{ lines( ls_answer-objects ) }|.
 
+*   the tally of what the filter matched, before the type narrows it: the
+*   list is cut at a limit and the types sort together, so six hundred
+*   classes filled it and not one CDS view was visible. The screen said
+*   "300 shown of 1140" and was honest; it was still not findable
+    LOOP AT ls_answer-types INTO ls_type.
+      lv_tally = |{ lv_tally }<a href="?type={ esc( ls_type-type ) }| &&
+                 |{ COND string( WHEN iv_filter IS INITIAL THEN `` ELSE |&amp;q={ esc( iv_filter ) }| ) }">| &&
+                 |{ esc( ls_type-type ) }</a> <span class="dim">{ ls_type-count }</span> |.
+    ENDLOOP.
+
     rv_html =
       `<form class="sel" method="get" action="">` &&
       |<input type="text" name="q" value="{ esc( iv_filter ) }" placeholder="name contains" size="30">| &&
@@ -273,6 +288,7 @@ CLASS zcl_osd_edit IMPLEMENTATION.
       `Every one of them is read from the tree this system was built from, ` &&
       `and a change here lands in the file the object came from -- the same ` &&
       `file Eclipse writes through the ADT facade.</p>` &&
+      |<p class="tally">{ lv_tally }</p>| &&
       `<table class="rows"><tr><th>Type</th><th>Name</th><th>Package</th><th>File</th><th>Version</th></tr>` &&
       lv_rows && `</table>`.
   ENDMETHOD.
@@ -376,6 +392,8 @@ CLASS zcl_osd_edit IMPLEMENTATION.
       `textarea{width:100%;box-sizing:border-box;font:12px "Courier New",monospace;` &&
       `border:1px solid #b9c6d6;padding:8px;background:#fff;line-height:1.45}` &&
       `.bar{margin:8px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}` &&
+      `.tally{margin:0 0 10px;line-height:1.9;font:12px "Courier New",monospace}` &&
+      `.tally a{text-decoration:none;font-weight:bold}` &&
       `button{font:13px "72","Segoe UI",Arial,sans-serif;padding:4px 12px;` &&
       `border:1px solid #b9c6d6;background:linear-gradient(#ffffff,#e6eef7);cursor:pointer}` &&
       `table.rows{border-collapse:collapse;background:#fff}` &&

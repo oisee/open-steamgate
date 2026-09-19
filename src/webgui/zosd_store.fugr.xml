@@ -42,6 +42,10 @@
        <PARAMETER>ET_ISSUE</PARAMETER>
        <DBSTRUCT>ZOSD_ISSUE_S</DBSTRUCT>
       </RSTBL>
+      <RSTBL>
+       <PARAMETER>ET_TYPE</PARAMETER>
+       <DBSTRUCT>ZOSD_TYPE_S</DBSTRUCT>
+      </RSTBL>
      </TABLES>
     </item>
    </FUNCTIONS>

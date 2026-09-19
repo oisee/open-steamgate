@@ -68,6 +68,7 @@ async function call(destination, importing = {}) {
     tables: {
       et_object: rows(["TYPE", "NAME", "PACKAGE", "FILE", "WRITABLE", "VERSION", "CHANGED_AT"]),
       ET_ISSUE: rows(["OBJ_TYPE", "OBJ_NAME", "LINE", "COL", "RULE", "MESSAGE"]),
+      et_type: rows(["TYPE", "COUNT"]),
     },
   };
   await destination.call("ZOSD_STORE", signature);
@@ -112,6 +113,32 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(row.WRITABLE, "an object of the tree is writable; a library object is not").to.equal("X");
     expect(row.VERSION).to.equal("active");
     expect(answer.EV_ERROR).to.equal("");
+  });
+
+  it("a tally per type comes back, so a limit cannot hide a whole type", async () => {
+    // fable-osd, using the screen: the list is cut at 300 and the types sort
+    // together, so 607 classes filled it and not one CDS view was visible.
+    // The screen said "300 shown of 1140" and was honest; a person who did
+    // not already know to ask for DDLS still could not find one.
+    const answer = await call(destination, {IV_COMMAND: "LIST", IV_LIMIT: "5"});
+    const byType = Object.fromEntries(answer.ET_TYPE.map((r) => [r.TYPE, r.COUNT]));
+    expect(Object.keys(byType).length, "more than one kind of object in this tree").to.be.greaterThan(3);
+    expect(byType.CLAS, JSON.stringify(byType)).to.be.greaterThan(100);
+    expect(byType.DDLS, "the type the limit was hiding").to.be.greaterThan(0);
+    const total = Object.values(byType).reduce((a, b) => a + b, 0);
+    expect(String(total), "the tally adds up to the count, both being of what matched")
+      .to.equal(answer.EV_COUNT);
+    expect(answer.ET_OBJECT.length, "and the rows are still cut at the limit").to.equal(5);
+  });
+
+  it("the tally is of what the FILTER matched, before the type narrows it", async () => {
+    // otherwise asking for one type would answer "that type is all there is",
+    // and the tally would confirm whatever the person already chose
+    const answer = await call(destination, {IV_COMMAND: "LIST", IV_TYPE: "DDLS"});
+    const kinds = answer.ET_TYPE.map((r) => r.TYPE);
+    expect(kinds, "the other types are still counted").to.include("CLAS");
+    expect(answer.ET_OBJECT.every((r) => r.TYPE === "DDLS"), "while the rows are only the type asked for")
+      .to.equal(true);
   });
 
   it("the count is of what MATCHED, not of what was shown", async () => {

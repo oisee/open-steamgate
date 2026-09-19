@@ -112,9 +112,25 @@ export class StoreDestination {
     const type = givenText(signature, "IV_TYPE").toUpperCase();
     const filter = givenText(signature, "IV_FILTER").toUpperCase();
     const limit = Number(givenText(signature, "IV_LIMIT")) || this.limit;
-    const all = this.store.list()
+    const matching = this.store.list()
+      .filter((entry) => filter === "" || entry.name.includes(filter));
+    // **The tally is of what the FILTER matched, before the type narrows
+    // it**, and it is a structure of its own rather than a number pushed
+    // into an object row: a type and a count are not an object.
+    //
+    // It exists because the list is cut at a limit and the types are sorted
+    // together, so 607 classes filled the first 300 rows and not one CDS
+    // view was visible -- the screen said "300 shown of 1140" and was
+    // honest, and a person who did not already know to ask for DDLS still
+    // could not find one (fable-osd, using the screen, 2026-09-19). With the
+    // tally the cut hides the tail of one type instead of hiding whole
+    // types.
+    const tally = new Map();
+    for (const entry of matching) {
+      tally.set(entry.type, (tally.get(entry.type) ?? 0) + 1);
+    }
+    const all = matching
       .filter((entry) => type === "" || entry.type === type)
-      .filter((entry) => filter === "" || entry.name.includes(filter))
       .sort((a, b) => (a.type + a.name).localeCompare(b.type + b.name));
     return {
       // the count is of what matched, not of what is shown: a list cut at
@@ -130,6 +146,8 @@ export class StoreDestination {
       ET_OBJECT: all.slice(0, limit)
         .map((entry) => this.store.find(entry.type, entry.name) ?? entry)
         .map((entry) => this.#row(entry)),
+      ET_TYPE: [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([kind, count]) => ({TYPE: kind, COUNT: count})),
     };
   }
 
@@ -307,4 +325,5 @@ const EMPTY = {
   EV_ERROR: "",
   ET_OBJECT: [],
   ET_ISSUE: [],
+  ET_TYPE: [],
 };
