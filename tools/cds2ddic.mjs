@@ -853,6 +853,23 @@ function main() {
   }
   for (const obj of reg.getObjectsByType("TABL")) {
     if (!mains.includes(obj.getFiles()[0].getFilename())) continue; // the repository's own tables, not the libraries'
+    // **A structure is not a table.** TABL carries both: TRANSP has rows,
+    // INTTAB is a shape with no storage behind it, and reading, inserting or
+    // deleting one is meaningless. The generator did not look, so it wrote a
+    // source class for every structure in the tree -- and for a KEYLESS one
+    // it wrote a `DELETE` with no WHERE, which does not parse and stopped
+    // the whole build (2026-09-19, found by adding ZOSD_SQLTRACE_S).
+    //
+    // The class it wrote for `ZOSD_TEST_ITEM_S` had been there all along and
+    // nothing referenced it: an object nobody used, generated from a thing
+    // it should not have been generated from, waiting for the first
+    // structure without a key.
+    const kind = /<TABCLASS>(\w+)<\/TABCLASS>/.exec(
+      obj.getFiles().map((f) => f.getRaw()).join("\n"))?.[1];
+    if (kind !== undefined && kind !== "TRANSP") {
+      console.log(`cds2ddic: ${obj.getName()} is ${kind}, not a table, so nothing is generated for it`);
+      continue;
+    }
     const t = parseTABL(obj, reg);
     if (!t) continue;
     entities.push(t);

@@ -11,8 +11,67 @@
 import {expect} from "chai";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 
-const answer = async (d, command, extra = {}) =>
-  JSON.parse((await d.call("ZOSD_SQL_TRACE", {IMPORTING: {IV_COMMAND: command, ...extra}})).EXPORTING.EV_JSON);
+/**
+ * A signature shaped the way the RUNTIME shapes one, not the way I first
+ * imagined it.
+ *
+ * The first version of these tests asked the destination for
+ * `{EXPORTING: {...}}` and it obliged, because both were mine. The real
+ * contract is `tools/rfc-replay.mjs`: a destination does not return an
+ * answer, it FILLS the caller's typed values, the direction names are ABAP's
+ * in lower case, and the ABAP `EXPORTING` is the module's input. Running it
+ * against a real CALL FUNCTION is what said so -- the screen rendered, said
+ * "off", showed no error, and every button did the same thing, because
+ * nothing was ever assigned.
+ *
+ * So the fixture here is the runtime's shape, and the parameter names are
+ * deliberately written in MIXED case: the case a name arrives in is the
+ * runtime's business, and asking for `IV_COMMAND` exactly is what made every
+ * command fall back to the default.
+ */
+function box(value) {
+  return {
+    value,
+    get() { return this.value; },
+    set(v) { this.value = v; return this; },
+  };
+}
+
+/** An internal table the way `fromJson` recognises one: `array`, `clear`,
+ *  `append`, and a row TYPE it clones -- a structure whose `get()` gives the
+ *  fields, each of them a box. Written from the reference implementation
+ *  rather than from memory, because the first fixture I invented had `append`
+ *  making its own row and `fromJson` never touched it. */
+function structure(fields) {
+  const boxes = Object.fromEntries(fields.map((f) => [f, box("")]));
+  return {
+    get() { return boxes; },
+    clone() { return structure(fields); },
+    plain() { return Object.fromEntries(Object.entries(boxes).map(([k, v]) => [k, v.get()])); },
+  };
+}
+
+function rows(fields) {
+  const table = [];
+  const rowType = structure(fields);
+  return {
+    array() { return table; },
+    getRowType() { return rowType; },
+    clear() { table.length = 0; },
+    append(row) { table.push(row); return row; },
+    plain() { return table.map((r) => r.plain()); },
+  };
+}
+
+async function callFunction(destination, command, {limit} = {}) {
+  const signature = {
+    exporting: {iv_command: box(command), IV_LIMIT: box(String(limit ?? 200))},
+    importing: {ev_on: box(""), EV_HELD: box(""), ev_dropped: box(""), EV_MS: box(""), ev_error: box("")},
+    tables: {et_statement: rows(["SEQ", "OPERATION", "TABNAME", "MS", "ROWCOUNT", "STATEMENT"])},
+  };
+  await destination.call("ZOSD_SQL_TRACE", signature);
+  return signature;
+}
 
 describe("the ring is bounded, and says what it dropped", () => {
   it("records nothing until it is turned on", () => {
@@ -47,7 +106,7 @@ describe("the ring is bounded, and says what it dropped", () => {
   });
 });
 
-describe("the destination is the one ABAP already knows how to call", () => {
+describe("the destination fills the caller's signature, which is the contract", () => {
   let ring;
   let destination;
 
@@ -55,40 +114,54 @@ describe("the destination is the one ABAP already knows how to call", () => {
     ring = new TraceRing({size: 10});
     destination = new TraceDestination(ring);
     ring.start();
-    for (const [n, k] of [[0, "a"], [1, "b"], [2, "c"]]) {
-      ring.record({n, op: "select", sql: `SELECT * FROM t WHERE k = '${k}'`, ms: n, table: "T", rows: 1});
+    for (const k of ["a", "b", "c"]) {
+      ring.record({n: 0, op: "select", sql: `SELECT * FROM t WHERE k = '${k}'`, ms: 2, table: "T", rows: 1});
     }
     ring.record({n: 3, op: "select", sql: "SELECT * FROM u", ms: 9, table: "U", rows: 7});
   });
 
-  it("LIST gives the statements in canonical form, so two reads of one screen agree", async () => {
-    const listed = await answer(destination, "LIST");
-    expect(listed.entries).to.have.lengthOf(4);
-    expect(listed.entries[0]).to.include({op: "select", table: "T"});
+  it("returns nothing and assigns everything, the way rfc-replay does", async () => {
+    const signature = await callFunction(destination, "LIST");
+    expect(signature.importing.EV_HELD.get()).to.equal("4");
+    expect(signature.tables.et_statement.array()).to.have.lengthOf(4);
   });
 
-  it("SUMMARY is the analysis, not the rows -- including the N+1", async () => {
-    const report = await answer(destination, "SUMMARY");
-    expect(report.statements).to.equal(4);
-    expect(report.repeated[0].count, "three reads of T differing only in the value").to.equal(3);
-    expect(report.tables[0]).to.include({table: "T", count: 3});
+  it("matches the parameter name WITHOUT case, or every command is the default", async () => {
+    // `iv_command` here, `IV_LIMIT` there -- both are the runtime's choice
+    // and neither is the contract's. Asking for one spelling exactly is what
+    // made START, STOP and CLEAR all render the summary and say "off".
+    const started = await callFunction(destination, "START");
+    expect(started.importing.ev_on.get(), "START must turn it on").to.equal("X");
+    expect(ring.on).to.equal(true);
+  });
+
+  it("LIST gives one row per statement, canonical, so two reads of a screen agree", async () => {
+    const listed = await callFunction(destination, "LIST");
+    const first = listed.tables.et_statement.plain()[0];
+    expect(first).to.include({OPERATION: "select", TABNAME: "T"});
+    expect(first.STATEMENT).to.contain("FROM t");
+  });
+
+  it("SUMMARY is the analysis in the same row shape, including the N+1", async () => {
+    const report = await callFunction(destination, "SUMMARY");
+    const kinds = report.tables.et_statement.plain();
+    expect(report.importing.EV_MS.get(), "the total is a scalar, not a row").to.not.equal("");
+    expect(kinds.filter((r) => r.OPERATION === "table").map((r) => r.TABNAME)).to.contain("T");
+    const repeated = kinds.filter((r) => r.OPERATION === "repeated");
+    expect(Number(repeated[0].SEQ), "three reads of T differing only in the value").to.equal(3);
   });
 
   it("START, STOP and CLEAR are commands rather than a flag somebody has to remember", async () => {
-    expect((await answer(destination, "STOP")).on).to.equal(false);
-    expect((await answer(destination, "START")).on).to.equal(true);
-    expect((await answer(destination, "CLEAR")).held).to.equal(0);
+    expect((await callFunction(destination, "STOP")).importing.ev_on.get()).to.equal("");
+    expect((await callFunction(destination, "START")).importing.ev_on.get()).to.equal("X");
+    expect((await callFunction(destination, "CLEAR")).importing.EV_HELD.get()).to.equal("0");
   });
 
   it("and a command nobody implemented is NAMED, not answered with the summary", async () => {
-    // a screen showing the wrong panel in silence is the third value again
-    expect((await answer(destination, "NOPE")).error).to.contain("unknown trace command");
-  });
-
-  it("takes its command through the ABAP value, not only a plain string", async () => {
-    const typed = {IMPORTING: {IV_COMMAND: {get: () => "SUMMARY"}}};
-    const report = JSON.parse((await destination.call("X", typed)).EXPORTING.EV_JSON);
-    expect(report.statements).to.equal(4);
+    const answer = await callFunction(destination, "NOPE");
+    expect(answer.importing.ev_error.get()).to.contain("unknown trace command");
+    expect(answer.tables.et_statement.plain(), "and it shows no rows, so the page cannot look like an answer")
+      .to.have.lengthOf(0);
   });
 });
 

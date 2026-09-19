@@ -3314,3 +3314,41 @@ where it can take part in the run — more than the other two, not less.
 **Decided: the structure and `TABLES`.** One extra object buys a signature
 that says what a trace row is, and the alternative to it was a saving of one
 file.
+
+### G.10 wave 3 — the screen, at /sap/bc/osd/st05/ (2026-09-19)
+
+`ZCL_OSD_ST05` over `ZOSD_SQL_TRACE DESTINATION 'SQLTRACE'`, rows typed by
+`ZOSD_SQLTRACE_S`. Start, use the system, read what it ran. Measured live:
+7 statements after one OData read and one SE16 page, and the summary naming
+ZSTG_DEMO 2 statements / 8 rows, ZSTG_STATUS 1 / 3.
+
+Cost, against the estimate: **7 files, 2 objects**, exactly as counted.
+
+Three defects on the way, and all three were of one kind -- **a contract I
+had invented rather than read**:
+
+- the destination returned `{EXPORTING: {...}}`. A destination does not
+  return an answer; it **fills the caller's typed values**, the directions
+  are ABAP's in lower case, and the ABAP `EXPORTING` is the module's INPUT
+  (`tools/rfc-replay.mjs` is the reference). My unit tests passed because
+  they asked the invention what the invention did.
+- the parameter name was matched **with** case. `IV_COMMAND` was never
+  found, every command fell back to the default, and so the screen rendered,
+  said "off", showed no error, and every button did the same thing. **A
+  lookup that misses returns a default, and a default is indistinguishable
+  from an answer.**
+- the table fixture in the test had `append` making its own row, so
+  `fromJson` never touched it. The second fixture was written from the
+  reference implementation instead of from memory.
+
+The fourth was somebody else's contract read correctly and mine written
+loosely: `esc( )` typed `string` refuses a DDIC `CHAR`, which the syntax
+check said before anything ran -- which is the whole reason the row is typed.
+
+And one defect in the generator, found because a structure was added:
+`tools/cds2ddic.mjs` wrote a table-access class for **every** TABL, INTTAB
+included. A structure is not a table, and for a **keyless** one it wrote a
+`DELETE` with no WHERE, which does not parse and stopped the build. The
+class it had written for `ZOSD_TEST_ITEM_S` had been there all along, with
+nothing referencing it: an object generated from a thing it should not have
+been generated from, waiting for the first structure without a key.

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <AREAT>SQL trace: what the system ran, and what it ran twice</AREAT>
+   <INCLUDES>
+    <SOBJ_NAME>LZOSD_SQLTRACETOP</SOBJ_NAME>
+    <SOBJ_NAME>SAPLZOSD_SQLTRACE</SOBJ_NAME>
+   </INCLUDES>
+   <FUNCTIONS>
+    <item>
+     <FUNCNAME>ZOSD_SQL_TRACE</FUNCNAME>
+     <SHORT_TEXT>Read the trace the host holds: START STOP CLEAR LIST SUMMARY</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP><PARAMETER>IV_COMMAND</PARAMETER><TYP>STRING</TYP></RSIMP>
+      <RSIMP><PARAMETER>IV_LIMIT</PARAMETER><TYP>STRING</TYP></RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP><PARAMETER>EV_ON</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_HELD</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_DROPPED</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_MS</PARAMETER><TYP>STRING</TYP></RSEXP>
+      <RSEXP><PARAMETER>EV_ERROR</PARAMETER><TYP>STRING</TYP></RSEXP>
+     </EXPORT>
+     <TABLES>
+      <RSTBL>
+       <PARAMETER>ET_STATEMENT</PARAMETER>
+       <DBSTRUCT>ZOSD_SQLTRACE_S</DBSTRUCT>
+      </RSTBL>
+     </TABLES>
+    </item>
+   </FUNCTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>
