@@ -105,6 +105,50 @@ async function runDuckDB() {
   return out;
 }
 
+/** HANA Express, through the native channel of tools/hana-client.mjs.
+ *
+ *  The same fourteen statements over the same fixture, and the fixture is
+ *  written once here rather than twice: two similar tables would answer two
+ *  similar questions. HANA's DDL differs only where it must -- NVARCHAR for
+ *  the variable-length columns, NCHAR(10) for the padded one, DECIMAL(15,2)
+ *  as elsewhere -- and the padding regime is exactly what the case list is
+ *  asking about, so it is not smoothed over.
+ *
+ *  Run where a HANA is reachable: `node tools/sqlscript-conformance.mjs --hana`.
+ */
+async function runHana() {
+  const {HanaDatabaseClient} = await import("./hana-client.mjs");
+  const c = new HanaDatabaseClient({schema: "OSD_CONFORMANCE"});
+  await c.connect();
+  const ddl = `CREATE TABLE "T" (
+      "K" NVARCHAR(10), "CH" NCHAR(10), "TXT" NVARCHAR(20), "NUM" NVARCHAR(20),
+      "A" INTEGER, "B" INTEGER, "C" INTEGER, "ZERO" INTEGER,
+      "D1" DECIMAL(15,2), "D2" DECIMAL(15,2), "NULLABLE" INTEGER)`;
+  await c.native({sql: `DROP TABLE "T"`, expect: "none"}).catch(() => undefined);
+  await c.native({sql: ddl, expect: "none"});
+  for (const row of ROWS) {
+    // the rows are written for the lower-case fixture; HANA holds the names
+    // upper, and a native statement is sent unchanged, so the table name is
+    // the only thing that has to be said in HANA's spelling
+    await c.native({sql: row.replace(/INSERT INTO t /, 'INSERT INTO "T" '), expect: "none"});
+  }
+  const out = {};
+  for (const one of CASES) {
+    try {
+      const sql = one.sql.replace(/\bFROM t\b/g, 'FROM "T"')
+        .replace(/GROUP_CONCAT\(/g, "STRING_AGG(");
+      const answer = await c.native({sql});
+      const rows = answer.rows ?? [];
+      const value = rows.length === 0 ? null : rows[0].V ?? rows[0].v;
+      out[one.id] = {value: value === null || value === undefined ? null : String(value)};
+    } catch (error) {
+      out[one.id] = {error: String(error.message ?? error).split("\n")[0].slice(0, 90)};
+    }
+  }
+  await c.disconnect();
+  return out;
+}
+
 async function runSqlJs() {
   const initSqlJs = (await import("sql.js")).default;
   const SQL = await initSqlJs({
@@ -145,6 +189,13 @@ try {
 }
 
 // a column measured elsewhere (HANA Express lives on another machine) merges in
+if (process.argv.includes("--hana")) {
+  try {
+    engines.hana = await runHana();
+  } catch (error) {
+    console.error("hana: " + (error.message ?? error));
+  }
+}
 const merged = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
 if (merged !== undefined) engines.hana = JSON.parse(readFileSync(merged, "utf8")).hana;
 
