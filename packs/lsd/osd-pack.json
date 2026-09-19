@@ -1,5 +1,5 @@
 {
   "name": "lsd",
-  "description": "SAP LSD: the light-show a rogue dispatcher plays to SAP GUI, recorded screen by screen and replayed over a push channel",
+  "description": "LSD: the light-show a rogue dispatcher plays to SAP GUI, recorded screen by screen and replayed over a push channel",
   "order": 50
 }

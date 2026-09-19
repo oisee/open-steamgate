@@ -44,7 +44,7 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 
   METHOD page.
     rv_html =
-`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SAP LSD - a light-show as SAP GUI screens</title>` &&
+`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>LSD - a light-show as SAP GUI screens</title>` &&
 `<style>body{background:#dfe6ee;color:#1f2d3d;font-family:"72","Segoe UI",Arial,sans-serif;margin:0;padding:24px 16px}` &&
 `.win{max-width:1100px;margin:0 auto;border:1px solid #7f93ab;border-radius:6px;box-shadow:0 8px 24px rgba(20,40,70,.28);background:#f4f7fb;overflow:hidden}` &&
 `.title{background:linear-gradient(#5d8ac0,#2f5f94);color:#fff;font-weight:bold;font-size:14px;padding:6px 12px;letter-spacing:.3px}` &&
@@ -58,7 +58,7 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `.bar{background:#eef2f7;border-top:1px solid #c5d0dd;padding:4px 10px;font-size:12px;color:#4a5a6d;display:flex;justify-content:space-between}` &&
 `.foot{max-width:1100px;margin:10px auto 0;font-size:11px;color:#77869a;text-align:center}.foot a{color:#5a7fa8;text-decoration:none}.foot a:hover{text-decoration:underline}</style></head><body>` &&
 `<div class="win">` &&
-`<div class="title">SAP LSD - Light-Show Dispatcher <span>ZAPC_LSD</span></div>` &&
+`<div class="title">LSD - Light-Show Dispatcher <span>ZAPC_LSD</span></div>` &&
 `<div class="menu"><b>Show</b><b>Screen</b><b>Help</b></div>` &&
 `<div class="tools"><button id="play">&#9654; Play</button><span id="status">Connecting...</span></div>` &&
 `<div class="screen"><canvas id="screen" width="1080" height="648"></canvas></div>` &&

@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_LSD_APC_HANDLER</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>SAP LSD: the recorded screens over a push channel</DESCRIPT>
+    <DESCRIPT>LSD: the recorded screens over a push channel</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

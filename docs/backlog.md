@@ -96,10 +96,10 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.6  a class with an interface becomes a screen (the Neptune       open
 │       concept, named by Alice 2026-09-18)
 ├─ G.8  an AMDP sandbox first, an SE80-shaped workbench after        open, weighed
-├─ G.9  SE16-shaped data browser: a page over reads we already have  open, cheap
+├─ G.9  SE16-shaped data browser: a page over reads we already have  w1+w2 DONE 09-19
 ├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument        open, two for one
 ├─ G.1c the name is ours and the picture is the joke                DONE 09-18
-├─ G.1d the naming rule as a check, not as a list                   open, small
+├─ G.1d the naming rule as a check, not as a list                   DONE 09-19
 ├─ G.7  the screen is usable from the keyboard                       next-ish
 └─ G.5  SICF as a Fiori Elements application, and live                      [S]
      Alice, 2026-09-18: a real application, the analogue of transaction
@@ -273,7 +273,23 @@ G.1c The name is ours and the picture is the joke        [S]  DONE 2026-09-18
         name, the absence of the old one, the slogan, the scene and the
         absence of any <img>; 17 passing, and the six browser tests pass
 
-G.1d The naming rule as a check, not as a list                           [S]
+G.1d The naming rule as a check, not as a list           [S]  DONE 2026-09-19
+     `npm run naming` (`tools/osd-naming-scan.mjs`), in CI beside the leak
+     scan, suite `test/naming-scan.mjs`. Seven naming positions, `.naming-
+     allow.json` tracked with a reason per entry. What it found on the first
+     run: the pack called itself **"SAP LSD"** in eight places -- a name we
+     give ourselves carrying a word we have no claim to -- and that is now
+     "LSD". What is left are four statements of fact, each allowed by name:
+     "...plays to SAP GUI", and the title **"ZORK on SAP HANA"**, which
+     passes the rule's own test -- take the words out and the sentence has
+     no content left, because all of its content is what the thing runs on.
+     `ABAP` is deliberately not a brand word here (the agreed headline
+     contains it), and transaction codes are deliberately not either: in a
+     title they are what the screen is called over there, so flagging them
+     would flag mostly true sentences, and a check that cries wolf gets
+     ignored. The test asserts the scanner **can fail**, which is the
+     property a scanner is least likely to have and most likely to be
+     trusted for.
      Raised 2026-09-18 by fable-osd, who caught her own README headline
      breaking the rule Alice set in G.1c, and agreed with this session.
      ├─ the rule: a name **we give ourselves** carries no third-party brand
@@ -710,9 +726,12 @@ paid for differently.
    or translating SQLScript to plain SQL). So the line to carry is "the
    public preview links to the deployment, not to a sandbox of its own",
    not "the feature is limited".
-2. **G.9, the SE16-shaped data browser** — the cheapest visible thing on the
-   whole list, over reads that already exist, and the one a person actually
-   uses more than the rest put together.
+2. **G.9, the SE16-shaped data browser** — **wave 1 done 2026-09-18, wave 2
+   done 2026-09-19** (a selection per field and a choice of columns, both
+   through `zcl_stg_request_context=>where_for_option`, the same clause
+   builder an OData `$filter` goes through). Deployed and read back on the
+   i7. What is left is not on the critical path: sort by clicking a column,
+   and a link from a row to the object that owns it.
 3. **W.1 minimum** — the request log, its replay and the first sieve. See
    W.1 for why this comes before G.10 and not after it.
 4. **G.10, the ST05-shaped SQL trace** — a screen over a log that W.1 will
@@ -741,6 +760,28 @@ cost is real and whose harm is already contained.
   dormant, not less: see B.6.
 - B.1 (SADL beyond read-only), B.3 (OData V4), A.12 (SRVD + SRVB)
 - D.3 / D.4, the RFC server whole; G.6, a screen out of a class interface
+
+**The SQLScript front end, which this list did not name and should.** It is
+its own track (B.19 / the splitter docs), it has been the bulk of two
+sessions' work, and it is measured rather than estimated, so it belongs here
+where the estimates are. Where it stands, 2026-09-19:
+
+- three stages exist — lexer, combinators in abaplint's shape, binder/typer
+  — and the grammar is extended **by measurement**, not by a syntax list:
+  `node tools/sqlscript/coverage.mjs` says how many corpus bodies go through
+  whole, and `node tools/sqlscript/why.mjs "<histogram line>"` shows the
+  bodies behind one line of it. The second tool exists because three times
+  the top entry meant something other than its name
+- the number that counts is **bodies that reach an engine**: 37 → 67 of 364
+  on 2026-09-19 (10% → 18%). "Parsed" is 121 and is not the same claim
+- the denominator says what it was counted with: 364 SQLScript bodies of 372
+  `BY DATABASE` ones, the rest `LANGUAGE GRAPH`, `SQL` and `LLANG`
+- the comparison instrument has three numbers and only the third signs "no
+  divergences found": 67 lower, 67 of 67 would force whole, **7** are
+  actually run both ways and **0 of the 7** contain an expression that can
+  diverge at all
+- next by the histogram: `SELECT *` at the root, the ten "comparison without
+  an operator", then `FOR` (which is two constructs under one token)
 
 **What I would take after those:** B.1 (SADL beyond one table — A.11 walked
 half of that road already), D.3 (the signature -> metadata graph, now that D.1 has put a channel

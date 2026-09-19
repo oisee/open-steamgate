@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_LSD_MEDIA</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>SAP LSD: an SMW0 object of the pack as bytes</DESCRIPT>
+    <DESCRIPT>LSD: an SMW0 object of the pack as bytes</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

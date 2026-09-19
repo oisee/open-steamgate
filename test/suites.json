@@ -10,6 +10,7 @@
     "test/conformance.mjs",
     "test/journal.mjs",
     "test/mocha.mjs",
+    "test/naming-scan.mjs",
     "test/osd-apc.mjs",
     "test/osd-binary.mjs",
     "test/osd-build.mjs",

@@ -26,3 +26,9 @@ jobs:
       - name: scan every tracked file
         run: |
           node tools/osd-leak-scan.mjs . --all || [ $? -eq 2 ]
+      # The naming rule (G.1d), here for the same reason the leak scan is: a
+      # rule that lives in a document is read once and then goes stale in
+      # silence. This one needs no identifier list, so it either passes or
+      # names the position it failed in.
+      - name: the naming rule
+        run: node tools/osd-naming-scan.mjs

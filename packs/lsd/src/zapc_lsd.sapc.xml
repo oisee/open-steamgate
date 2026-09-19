@@ -15,7 +15,7 @@
      <APPLICATION_ID>ZAPC_LSD</APPLICATION_ID>
      <VERSION>A</VERSION>
      <LANG>E</LANG>
-     <DESCRIPTION>SAP LSD screens over a push channel</DESCRIPTION>
+     <DESCRIPTION>LSD screens over a push channel</DESCRIPTION>
     </TEXT>
    </SAPC>
   </asx:values>
