@@ -3343,8 +3343,8 @@ open  revisions: reading them out of git instead of a system.
      └─ it does NOT let us leave the linked local build, which is what it
         looked like it would do. Checked against the open pull requests:
         #1846 (a W3MI object keyed on its name, not its file name) and
-        #1845 (a binary file survives the copy to output) are both still
-        open, and the whole media path rests on them. Without #1846 the
+        #1845 (a binary file survives the copy to output) are both merged
+        (2026-09-18), and the whole media path rests on them. Without #1846 the
         registry is written abap.W3MI["zork-mini%2ez3"] while
         WWWDATA_IMPORT asks for "ZORK-MINI.Z3" and finds nothing; without
         #1845 the bytes beside the module are corrupt
@@ -3487,7 +3487,7 @@ open  revisions: reading them out of git instead of a system.
 
 ```
 Lars / abaplint
-  ├─ transpiler #1835 (DuckDB driver)          open, see 9.1
+  ├─ transpiler #1835 (DuckDB driver)          closed unmerged, see 9.1
   ├─ transpiler #1836 (flat concat chain)      merged 2026-09-13
   ├─ transpiler #1841 (%23 breaks Bun)         open, blocks 1.3
   │   └─ when it reaches npm, SADL_CHUNK can go from both generators

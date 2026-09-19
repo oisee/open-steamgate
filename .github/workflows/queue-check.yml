@@ -1,0 +1,53 @@
+# What the notes claim about an upstream item, against what the tracker says.
+#
+# The tool exists because a list of tasks is the one instrument in this tree
+# with no test of its own: it is read like a measurement and ages like an
+# opinion. Both sessions found the queue stale twice in a single day.
+#
+# But a tool nobody calls is a tool that does not exist — the defect this
+# repository spent that same day removing from its own code, seven times over.
+# `npm run queue` was a hand command for exactly as long as it took to notice
+# that, which is what this file is.
+#
+# It asks GitHub, so it cannot live in `npm test`: that suite has to run on a
+# machine with no network and no token, and a check that quietly degrades to
+# "could not ask" inside a green suite is worse than no check. Here it has a
+# token, and here it is allowed to fail loudly.
+name: queue check
+
+on:
+  push:
+  pull_request:
+  # The notes go stale on their own, without a commit: a pull request merged
+  # upstream at midnight makes a line untrue while this repository sleeps. So
+  # it is also asked on a schedule rather than only when somebody edits.
+  schedule:
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  queue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Exit 1 is a contradiction and fails the run. Exit 2 is "nothing could
+      # be asked", which on a runner means rate limiting or an outage rather
+      # than a stale note — reported, not passed off as clean, and not failed
+      # either, because it says nothing about the notes.
+      - name: ask the tracker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/osd-queue-check.mjs || {
+            code=$?
+            if [ "$code" -eq 2 ]; then
+              echo "::warning::the tracker could not be asked - the notes were not checked"
+              exit 0
+            fi
+            exit "$code"
+          }

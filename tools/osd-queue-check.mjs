@@ -101,6 +101,20 @@ function stateOf(repo, number) {
   }
 }
 
+/** the line with the repository names taken out of it
+ *
+ *  `open-abap-core` contains the word **open**, and a hyphen is a word
+ *  boundary, so the line naming that repository was read as calling its
+ *  items open -- while the sentence went on to say they were merged. The
+ *  third thing this tool asserted that was not true, caught the same way as
+ *  the other two: by checking its output against the tracker rather than
+ *  believing it. */
+export function withoutNames(line) {
+  let out = line;
+  for (const [word] of REPOS) out = out.replaceAll(word, " ");
+  return out;
+}
+
 export function contradictions(refs, ask = stateOf) {
   const seen = new Map();
   const out = [];
@@ -114,7 +128,7 @@ export function contradictions(refs, ask = stateOf) {
     const state = seen.get(key);
     if (state === undefined) {
       out.push({...r, kind: "unreachable"});
-    } else if ((state === "closed" || state === "merged") && OPEN_WORDS.test(r.text)) {
+    } else if ((state === "closed" || state === "merged") && OPEN_WORDS.test(withoutNames(r.text))) {
       out.push({...r, kind: state, state});
     }
   }
