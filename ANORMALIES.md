@@ -948,6 +948,23 @@ ENDLOOP.
 - Regression-test location: `test/osd-apc.mjs`
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-19-posted-form-has-no-fields — a form posted to a screen arrives with no form fields
+
+- Status: `open`
+- Discovery date: `2026-09-19`
+- Affected versions: `express-icf-shim` as cloned 2026-09-19 (`cl_express_icf_shim`)
+- Affected ABAP statement, runtime API or adapter: the request assembly of `cl_express_icf_shim~run`, seen through `if_http_entity~get_form_field` / `~get_form_fields_cs`
+- Minimal ABAP reproducer: any handler that reads `get_form_field( 'name' )` behind a `<form method="post">`. The shim sets the form fields from the query string alone — `lt_fields = cl_http_utility=>string_to_fields( lv_value )` where `lv_value` is what followed the `?` — and the body, which it has already read into the request as data, is never looked at
+- Exact command used to run it: `STG_PORT=3131 node test/run.mjs`, then a POST of `type=CLAS&name=ZCL_OSD_ST05&do=check` to `/sap/bc/osd/edit/`. The editor answered its **object list**: every field was empty, so the screen behaved exactly as though the person had typed nothing and pressed nothing
+- Expected SAP behaviour: **documented, not measured.** No system was asked (the sandbox is only used when Alice asks), so this claims nothing about a particular release. It does not have to: the interface open-abap ships says it itself — `get_form_fields_cs` takes `search_option TYPE i DEFAULT co_body_before_query_string`. A default named "body before query string" is only meaningful if the body is a source of form fields, and here it never is
+- Actual open-abap behaviour: the body survives intact as the request's data (`get_cdata` returns it), so nothing is lost — it is simply not parsed into fields. The failure is therefore **silent and total** for a posting screen: no error, no empty-ness anywhere a caller can see, just every field reading as if nobody filled it in
+- Impact on open-steamgate: the editor screen (G.8) is the first page here that posts a form at all. The screens written before it did not meet this — SE16 navigates by GET, and the webgui posts through `sapevent`, which carries its payload in the URL. So the gap is one this tree could only find the day it wrote a text area
+- Smallest safe workaround: `src/webgui/zcl_osd_form.clas.abap` — the query-string fields as the shim gives them, plus the body parsed when the method is POST or PUT and the content type is `application/x-www-form-urlencoded`. It is **not** `cl_http_utility=>string_to_fields`, and the two differences are required by the encoding rather than chosen: `+` is a space (that method decodes with `decodeURIComponent`, which leaves `+` alone, so a source posted through a text area would come back with its indentation turned into plus signs), and the **name** is unescaped too
+- Upstream issue: none yet. The fix belongs in the shim, where the request is assembled, and it is small — parse the body into fields when the content type says it is a form. `docs/upstream.md` carries it; it goes out under the critic gate like the rest
+- Regression-test location: `test/unit/zcl_osd_form_test` — the decoding rules, and separately `the_gap_this_exists_for`, which asserts that `get_form_field` over a posted body answers **nothing**. That is the expiry: when the shim learns to parse a body, that test fails and says to delete the workaround rather than to adjust an expectation
+- Upstream version containing a fix: `unknown`
+
+
 ### ANOMALY-2026-09-19-form-field-name-case — `get_form_field` lower-cases the question and not the answer
 
 - Status: `reported`

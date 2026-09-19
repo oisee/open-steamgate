@@ -10,59 +10,13 @@
 // takes part in what it measures is not one.
 import {expect} from "chai";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
+import {box, rows} from "./helpers/destination.mjs";
 
-/**
- * A signature shaped the way the RUNTIME shapes one, not the way I first
- * imagined it.
- *
- * The first version of these tests asked the destination for
- * `{EXPORTING: {...}}` and it obliged, because both were mine. The real
- * contract is `tools/rfc-replay.mjs`: a destination does not return an
- * answer, it FILLS the caller's typed values, the direction names are ABAP's
- * in lower case, and the ABAP `EXPORTING` is the module's input. Running it
- * against a real CALL FUNCTION is what said so -- the screen rendered, said
- * "off", showed no error, and every button did the same thing, because
- * nothing was ever assigned.
- *
- * So the fixture here is the runtime's shape, and the parameter names are
- * deliberately written in MIXED case: the case a name arrives in is the
- * runtime's business, and asking for `IV_COMMAND` exactly is what made every
- * command fall back to the default.
- */
-function box(value) {
-  return {
-    value,
-    get() { return this.value; },
-    set(v) { this.value = v; return this; },
-  };
-}
-
-/** An internal table the way `fromJson` recognises one: `array`, `clear`,
- *  `append`, and a row TYPE it clones -- a structure whose `get()` gives the
- *  fields, each of them a box. Written from the reference implementation
- *  rather than from memory, because the first fixture I invented had `append`
- *  making its own row and `fromJson` never touched it. */
-function structure(fields) {
-  const boxes = Object.fromEntries(fields.map((f) => [f, box("")]));
-  return {
-    get() { return boxes; },
-    clone() { return structure(fields); },
-    plain() { return Object.fromEntries(Object.entries(boxes).map(([k, v]) => [k, v.get()])); },
-  };
-}
-
-function rows(fields) {
-  const table = [];
-  const rowType = structure(fields);
-  return {
-    array() { return table; },
-    getRowType() { return rowType; },
-    clear() { table.length = 0; },
-    append(row) { table.push(row); return row; },
-    plain() { return table.map((r) => r.plain()); },
-  };
-}
-
+// The fixtures -- a box, a structure, an internal table -- moved to
+// test/helpers/destination.mjs when the store destination's tests needed the
+// same ones. What they encode is the runtime's shape and the lesson that
+// paid for it, and that belongs in one file rather than beside whichever
+// destination was written first.
 async function callFunction(destination, command, {limit} = {}) {
   const signature = {
     exporting: {iv_command: box(command), IV_LIMIT: box(String(limit ?? 200))},

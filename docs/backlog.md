@@ -40,7 +40,7 @@ A — the ADT surface: what a client may ask
 
 B — the runtime underneath: what the answers are made of
 │   the track is done; these are the named gaps
-├─ B.1  SADL beyond read-only, and beyond one table                 valuable
+├─ B.1  SADL beyond read-only, and beyond one table            reads DONE 09-19
 ├─ B.2  BOPF / RAP / drafts: one runtime, two front ends           decided 09-18
 ├─ B.19 HANA and AMDP: the i7 runs it, A4H is the oracle            decided 09-18
 ├─ B.3  OData V4                                                    a track of its own
@@ -49,13 +49,13 @@ B — the runtime underneath: what the answers are made of
 ├─ B.6  the client and MANDT story                             dormant + a detector
 ├─ B.7  the database seam beyond three backends                     open
 ├─ B.8  SICF and SM59 as applications, the way SEGW is one          open
-├─ B.9  a forced build mutates a generation under its name          open
+├─ B.9  a forced build mutates a generation under its name       DONE 09-19
 ├─ B.10 the base image named by the schema alone                    DONE 09-17
 ├─ B.11 the binary beyond the checkout (a system pack)              open
 ├─ B.12 work processes, and a channel that never waits              DONE 09-16
 ├─ B.13 a new SMW0 object never reaches an existing database        DONE 09-17
-├─ B.14 a cast in a CDS view drops the field                        open, small
-├─ B.15 does our pipeline read a view entity?                       open, one build
+├─ B.14 a cast in a CDS view drops the field                     DONE 09-19
+├─ B.15 does our pipeline read a view entity?                    DONE 09-19
 ├─ B.16 the demo DPC ignores $orderby                               DONE 09-17
 ├─ B.17 the arithmetic protocol: 30 ns an operation, and who        measured,
 │       fixes it                                                    ranked
@@ -81,7 +81,7 @@ E — content packs and layers: what the tree is made of
 ├─ E.2  a pack is a directory, not a rebuild                        DONE 09-16
 ├─ E.3  what a pack may carry                                       open
 ├─ E.4  the Zork console does not fit its box                       DONE 09-19
-├─ E.5  the launchpad asks for a config we do not serve             open, small
+├─ E.5  the launchpad asks for a config we do not serve           DONE 09-19
 ├─ E.6  a pack cut out of a system, with stubs on the perimeter     open
 ├─ E.7  the oracle's leftovers: Pages stops mid-show, profiling     open
 ├─ E.8  a DIAG stream as a demo                                     milestone 1 DONE
@@ -95,9 +95,9 @@ G — the classic screens, and the GUI substitutes under them
 ├─ G.5  SICF as a Fiori Elements application, and live                open
 ├─ G.6  a class with an interface becomes a screen (the Neptune       open
 │       concept, named by Alice 2026-09-18)
-├─ G.8  an AMDP sandbox first, an SE80-shaped workbench after        open, weighed
+├─ G.8  an AMDP sandbox first, an SE80-shaped workbench after   waves 1-2 DONE
 ├─ G.9  SE16-shaped data browser: a page over reads we already have  DONE 09-19
-├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument        open, two for one
+├─ G.10 ST05-shaped SQL trace, which is also O.1's instrument    DONE 09-19
 ├─ G.1c the name is ours and the picture is the joke                DONE 09-18
 ├─ G.1d the naming rule as a check, not as a list                   DONE 09-19
 ├─ G.7  the screen is usable from the keyboard                       next-ish
@@ -383,21 +383,87 @@ G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      │  display/change pair the original SE80 had, and it is a joke on the
      │  original rather than a compromise: a screen that colours text on the
      │  server, because in nineteen-ninety-something that is how it was done
-     ├─ **and the question that was missing from the estimate entirely, and
-     │  matters more than the two above: where does an edit land?** A
-     │  browser editor means the system starts writing its own sources. Into
-     │  the tracked `src/`, into the object store `gen/`, or into a pack?
-     │  Everything hangs on it: whether the edit takes part in the
-     │  generation hash, whether it survives a rebuild, whether abapGit sees
-     │  it, and what happens when a layer wins the name of an object that
-     │  was edited. Until that is answered the editor is a toy; once it is,
-     │  this is a development environment. **It is the first item of the
-     │  estimate, not a consequence of it.**
+     ├─ **where does an edit land? -- ANSWERED, and it was answered before
+     │  the question was written.** This bullet used to say it was the first
+     │  item of the estimate and that until it was settled the editor was a
+     │  toy. It was settled on 2026-09-15 by the ADT facade, in
+     │  `tools/osd-store.mjs`, and nobody wrote the answer back here:
+     │  ├─ `write()` lands the object **in the file it came from**, in its
+     │  │  own root; a new object goes to the first writable root, in the
+     │  │  folder of its package, as the two files abapGit would write. So
+     │  │  abapGit sees it, git sees it, and the layer that owned the name
+     │  │  still owns it -- an edit cannot silently move an object between
+     │  │  layers, because it never chooses a layer
+     │  ├─ `inactive` is the written-and-not-yet-activated set, `check` is
+     │  │  the parse, `activate` is the check over the object and everyone
+     │  │  who uses it, and `publish` is the transpile plus the replacement
+     │  │  of the serving process
+     │  └─ so the one thing the editor must NOT do is open a second write
+     │     path. That is the whole risk of the wave, and it is the opposite
+     │     of the risk this entry described
+     ├─ **and the danger the old bullet created is worth naming**, because
+     │  it is a failure mode of this document rather than of the code: an
+     │  entry that asks what the tree can already do costs more than a
+     │  missing entry. A missing one is looked for; this one would have been
+     │  believed, and the next session to open G.8 would have spent an
+     │  evening deciding something decided
+     ├─ **what a save costs, measured 2026-09-19** in a worktree of its own
+     │  (`osd-branch add`), 1518 objects:
+     │  ├─ cold build 12.04 s; **a second build with no change at all**
+     │  │  12.10 s and a *different* generation name; one comment changed
+     │  │  12.02 s; the same content again 0.21 s, cached
+     │  ├─ the second line of that table is **historical since `267f9a7`**,
+     │  │  which took `gen/` out of the hash and put the generators and
+     │  │  their imports in instead: a fresh tree now builds in 9.5 s and
+     │  │  its second build is a cache hit at 0.16 s under the same name.
+     │  │  What the measurement had said was that a generation name was a
+     │  │  function of the content **plus the build history of that tree**,
+     │  │  because `gen/` was written by the build and fed its own hash --
+     │  │  a representative standing in for the generators, which the hash
+     │  │  could not see. That is now fixed at the cause
+     │  └─ and what the fix does **not** change is the price of Activate:
+     │     a save changes `src/`, so the hash differs whatever `gen/` does,
+     │     nobody has built that content before, and the transpile runs.
+     │     `publish()` is a full build plus a process recycle, ~12 s here,
+     │     and no edit ever hits the cache -- the cache helps only when the
+     │     content was built before, which is an undo. Which decides a piece of the screen: **Check and
+     │     Activate are two buttons**, because a cheap operation and an
+     │     expensive one under one name is a button people stop pressing
      ├─ **a cheap middle for breakpoints**, which gives most of the feeling
      │  for a fraction of the price: not an interactive debugger but a
      │  **step recording** -- run it and show every statement with the
      │  variables' values. It is a log rather than a protocol, we need it
      │  anyway for O.2, and it costs incomparably less than A.6.
+     ├─ **wave 2 done 2026-09-19: the editor exists** --
+     │  `/sap/bc/osd/edit/`, `src/webgui/zcl_osd_edit`. Pick an object from
+     │  the list, change the source in a text area, Check, Save, Activate.
+     │  No JavaScript, one form, server-rendered like the rest of the webgui
+     │  ├─ it reaches the tree through `CALL FUNCTION 'ZOSD_STORE'
+     │  │  DESTINATION 'STORE'` (`tools/osd-store-destination.mjs`), which
+     │  │  is LIST / READ / WRITE / CHECK / ACTIVATE over the store the ADT
+     │  │  facade already writes through. **The third user of that seam, not
+     │  │  a third seam** -- the AMDP tile and the ST05 screen are the other
+     │  │  two -- and deliberately not a second write path
+     │  ├─ **ACTIVATE builds.** `activate()` is only the verdict; the
+     │  │  modules the runtime loads are written by the transpile behind it.
+     │  │  A screen that said "activated" over a system still answering with
+     │  │  the old code would be a worse sentence than a slow button. Whether
+     │  │  the running process was *replaced* is a second question with a
+     │  │  different answer per host, and the screen says which of the two
+     │  │  happened rather than implying the better one
+     │  └─ and it found the gap that only a posting screen could find:
+     │     **a form posted to a screen arrives with no form fields.** The
+     │     shim fills them from the query string alone, so every button
+     │     answered the object list, silently, as though nobody had typed
+     │     anything. SE16 navigates by GET and the webgui posts through
+     │     `sapevent`, which is why no screen before this one met it.
+     │     ANORMALIES `posted-form-has-no-fields`, workaround
+     │     `src/webgui/zcl_osd_form`, and the fix belongs in the shim
+     ├─ **what wave 3 is, and what it is not.** Not a tree in SE80's shape:
+     │  the expensive part for the cheapest reward, which the critic already
+     │  said once. The three that are worth it are server-rendered
+     │  highlighting (the parser is in the process), the CDS half (fable-osd
+     │  has it), and a step recording instead of a debugger
      └─ **the name is not SE80.** The rule we set for ourselves -- call
         what is ours by our own name, keep "SAP" in a statement of fact --
         does not stretch to transaction codes. A transaction of ours called
@@ -828,7 +894,10 @@ ranking: it says **what kind of thing an item is**, and the three kinds are
 paid for differently.
 
 **Loud per hour.** Every one of these is something a stranger can be shown.
-1. **G.8, the AMDP sandbox** — SQLScript that can be edited and run from the
+1. **G.8, the AMDP sandbox and now the editor** — **wave 1 done 2026-09-18,
+   wave 2 done 2026-09-19** (an object edited, checked and activated from a
+   browser page, through the same store the ADT facade writes through).
+   SQLScript that can be edited and run from the
    screen, which cannot be done in the original at all. It runs **fully on
    any deployment that has a server**: the i7 at 3030 with HANA Express
    beside it is the whole feature, nothing withheld. What it cannot reach is
@@ -844,8 +913,9 @@ paid for differently.
    done 2026-09-19** (a selection per field and a choice of columns, both
    through `zcl_stg_request_context=>where_for_option`, the same clause
    builder an OData `$filter` goes through). Deployed and read back on the
-   i7. What is left is not on the critical path: sort by clicking a column,
-   and a link from a row to the object that owns it.
+   i7. **Wave 3 done 2026-09-19** and the track is closed: sort by clicking
+   a column, and a key cell that opens the one row it names through the
+   filter that already exists rather than through a second read.
 3. **W.1 minimum** — the request log, its replay and the first sieve.
    **Done 2026-09-19**: `tools/osd-replay.mjs` (`npm run replay`),
    `test/request-log.json` as a tracked list of calls rather than a capture,
@@ -863,12 +933,19 @@ paid for differently.
 - the exception that walked past the transactional bracket — **done
   2026-09-18**, and it was ours, not SAP's: see `docs/luw-buffer.md`
 - B.14 (a cast in a CDS view drops the field), B.15 (does the pipeline read
-  a view entity) — one build each
-- E.5, the launchpad asking for a config we do not serve, **first among
-  these if it shows in the console of the public preview**: a breakage a
-  stranger sees costs more than it costs to fix
-- E.4, the Zork console not fitting its box
-- B.9, a forced build mutating a generation under its own name
+  a view entity) — **both done 2026-09-19**, and they cost what was
+  estimated: B.14 one build and a second attempt after the first fix was
+  worse than the defect, B.15 no fix at all, because the answer was yes
+- E.5, the launchpad asking for a config we do not serve — **done
+  2026-09-19**, and the shape of the fix is the point: one body in
+  `tools/osd-sandbox-config.mjs`, served by both express hosts and written
+  as a file by the preview build, rather than three answers that would
+  drift. It did show in the console of the public preview
+- E.4, the Zork console not fitting its box — **done 2026-09-19**
+- B.9, a forced build mutating a generation under its own name — **done
+  2026-09-19**, and it found a real one: the generation's own config
+  carried the builder's pid, so 1 file of 2249 differed. The promise in
+  the hash-addressed name was true all along and one defect hid it
 - `node tools/osd-inputs.mjs` after `src/luw` and `src/amdp` — one command,
   and it catches the silent name override that has cost an evening before
   (run 2026-09-18: two overrides, both intended and both named)
@@ -894,8 +971,12 @@ where the estimates are. Where it stands, 2026-09-19:
   whole, and `node tools/sqlscript/why.mjs "<histogram line>"` shows the
   bodies behind one line of it. The second tool exists because three times
   the top entry meant something other than its name
-- the number that counts is **bodies that reach an engine**: 37 → 67 of 364
-  on 2026-09-19 (10% → 18%). "Parsed" is 121 and is not the same claim
+- the number that counts is **bodies that reach an engine**: 37 → **78 of
+  364** (10% → 21%), re-measured 2026-09-19 at the pause. "Parsed" is 131
+  and is not the same claim — the 53 between the two numbers parse and are
+  then refused, which is the property the pause was declared on. The
+  teaching corpus, the one a reader is likelier to meet, stands at **39 of
+  101 (39%)**
 - the denominator says what it was counted with: 364 SQLScript bodies of 372
   `BY DATABASE` ones, the rest `LANGUAGE GRAPH`, `SQL` and `LLANG`
 - the comparison instrument has three numbers and only the third signs "no
@@ -1822,14 +1903,21 @@ E.2  A pack is a directory, not a rebuild                                [S]  DO
         hash is taken before the generators run and gen/ is an input. The
         dev loop does that second build by itself
 
-E.5  The launchpad sandbox asks for a config we do not serve             [S]
+E.5  The launchpad sandbox asks for a config we do not serve   [S]  DONE 2026-09-19
      ├─ Alice, 2026-09-16, from the browser console on the second machine:
      │  GET /appconfig/fioriSandboxConfig.json answers 404 on every open,
      │  red in the console and harmless — the ushell sandbox looks for its
      │  own file before it takes window["sap-ushell-config"]
-     └─ answer it with {} from test/start.mjs, or set the sandbox's config
-        URL to something we serve; either stops the noise without a change
-        to flp.html
+     ├─ the answer is not {}: the file the sandbox asks for is where the
+     │  sandbox's own settings belong, so what it gets is the config, and
+     │  the 404 stops as a consequence rather than as the fix
+     └─ **one body, three hosts**: `tools/osd-sandbox-config.mjs` is the
+        config, `tools/osd-serve.mjs` and `test/start.mjs` serve it and
+        `scripts/build-preview.mjs` writes it as a file, because the
+        preview has no server to ask. Three hand-written answers to one
+        question is the shape that drifts, and this list already holds the
+        case that proved it (the dialog step, written once next to one of
+        its three callers)
 
 E.4  The Zork console does not fit its box           [S]  DONE 2026-09-19
      ├─ Alice, 2026-09-16, from the launchpad tile: a long line runs past

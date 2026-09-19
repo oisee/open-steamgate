@@ -83,6 +83,21 @@ Ordered by what breaks without them, most first.
    #1848 took the sy-tabix half; this half is still local. Rebase the branch
    on `origin/main` and it is one commit. Needs an issue.
 
+7. **express-icf-shim: a posted form has no form fields** —
+   `ANOMALY-2026-09-19-posted-form-has-no-fields`. `cl_express_icf_shim`
+   fills the request's form fields from the query string alone, so a handler
+   behind `<form method="post">` reads every field as empty and behaves as
+   though nobody typed anything. No branch yet, and no issue yet. The fix is
+   small and belongs where the request is assembled: when the method carries
+   a body and the content type is `application/x-www-form-urlencoded`, parse
+   it into the same fields — and decode `+` as a space, which
+   `cl_http_utility=>string_to_fields` does not do (it decodes with
+   `decodeURIComponent`). The interface already names the body as a source:
+   `get_form_fields_cs` takes `search_option DEFAULT
+   co_body_before_query_string`. Workaround here:
+   `src/webgui/zcl_osd_form`, with `test/unit/zcl_osd_form_test`, whose last
+   test asserts the **gap** so the workaround has an expiry.
+
 ## What we carry, and what we wait for
 
 *Decided 2026-09-17, after the performance work made the question real.*

@@ -1,0 +1,11 @@
+CLASS zcl_osd_form_test DEFINITION PUBLIC FINAL CREATE PUBLIC FOR TESTING
+  DURATION SHORT RISK LEVEL HARMLESS.
+* The fields of a posted form (backlog G.8, ANORMALIES "a posted form has no
+* form fields").
+  PUBLIC SECTION.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS zcl_osd_form_test IMPLEMENTATION.
+ENDCLASS.

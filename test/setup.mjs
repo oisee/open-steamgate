@@ -4,6 +4,7 @@ import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
+import {StoreDestination} from "../tools/osd-store-destination.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
  *  (backlog G.10). It is off until the screen turns it on, and the wrapper
@@ -33,6 +34,41 @@ function traced(db) {
 export function installTraceDestination(abap) {
   abap.context.RFCDestinations ??= {};
   abap.context.RFCDestinations["SQLTRACE"] = new TraceDestination(traceRing);
+}
+
+/**
+ * The destination the editor screen calls (backlog G.8), and the third user
+ * of this seam rather than a third seam.
+ *
+ * The store is opened on the first call, not here: it indexes the tree and
+ * parses it with abaplint, which is seconds, and most processes that install
+ * it never get a request for it. Where there is no tree at all -- the browser
+ * preview, a compiled binary beside no checkout -- opening it fails and the
+ * failure becomes the sentence the screen shows, which is the honest answer
+ * and not an empty object list.
+ */
+export function installStoreDestination(abap, options = {}) {
+  abap.context.RFCDestinations ??= {};
+  abap.context.RFCDestinations["STORE"] = new StoreDestination({
+    // imported inside the opener, never at the top of this file: the store
+    // pulls in abaplint and node:fs, and this module is bundled into the
+    // service worker of the browser preview. A static import would put the
+    // whole parser in a page that can never use it.
+    store: options.store ?? (async () => {
+      if (globalThis.__stgPreview !== undefined) {
+        throw new Error("the browser preview serves a built system: there is no source tree in a page");
+      }
+      const root = globalThis.process?.cwd?.();
+      const {existsSync} = await import("node:fs");
+      const {join} = await import("node:path");
+      if (root === undefined || existsSync(join(root, "abap_transpile.json")) === false) {
+        throw new Error(`no tree at ${root ?? "this process"}: abap_transpile.json is not there`);
+      }
+      const {ObjectStore} = await import("../tools/osd-store.mjs");
+      return new ObjectStore({root});
+    }),
+    ...options,
+  });
 }
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
@@ -81,6 +117,7 @@ export async function setup(abap, schemas, insert) {
     abap.context.RFCDestinations ??= {};
     abap.context.RFCDestinations["AMDP"] = new PreviewAmdp({});
     installTraceDestination(abap);
+    installStoreDestination(abap);
     return;
   }
   const {seedStatements} = await import("./seed.mjs");
@@ -97,6 +134,7 @@ export async function setup(abap, schemas, insert) {
   const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
   abap.context.RFCDestinations["AMDP"] = new AmdpDestination({trace: process.env.STG_AMDP_TRACE === "1"});
   installTraceDestination(abap);
+  installStoreDestination(abap);
   // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
   // procedure and the tables are then in one database and nothing has to be
   // mirrored (docs/amdp-in-hana.md, backlog B.19). Never a default: the cost

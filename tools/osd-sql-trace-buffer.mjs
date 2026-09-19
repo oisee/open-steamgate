@@ -13,7 +13,7 @@
 // reaches HANA: through a destination (`tools/amdp-destination.mjs` is the
 // same shape). No new protocol, and the screen stays ABAP.
 import {canonical, summarise} from "./osd-sql-trace.mjs";
-import {fromJson} from "./rfc-replay.mjs";
+import {given, fill} from "./osd-destination.mjs";
 
 /** A ring, because a trace is bounded by what a person will read and a
  *  server that keeps every statement of a day is a memory leak with a
@@ -93,22 +93,16 @@ export class TraceDestination {
     // back to SUMMARY -- so the screen rendered, said "off", showed no
     // error, and every button did the same thing. A lookup that misses
     // returns a default, and a default is indistinguishable from an answer.
-    const given = (param) => {
-      const box = signature?.exporting ?? signature?.EXPORTING ?? {};
-      const key = Object.keys(box).find((k) => k.toLowerCase() === param.toLowerCase());
-      const value = key === undefined ? undefined : box[key];
-      return value === undefined ? undefined : (typeof value?.get === "function" ? value.get() : value);
-    };
-    const command = String(given("IV_COMMAND") ?? "SUMMARY").trim().toUpperCase();
-    const limit = Number(given("IV_LIMIT") ?? 200) || 200;
+    // Both lessons the parameter reading here was written for now live in
+    // tools/osd-destination.mjs, because the store destination was about to
+    // copy them: the name is matched WITHOUT CASE (asking for `IV_COMMAND`
+    // exactly gave `undefined` on every call, which fell back to SUMMARY --
+    // so the screen rendered, said "off", showed no error, and every button
+    // did the same thing), and a value may be a typed box or a plain value.
+    const command = String(given(signature, "IV_COMMAND") ?? "SUMMARY").trim().toUpperCase();
+    const limit = Number(given(signature, "IV_LIMIT") ?? 200) || 200;
 
-    const answer = this.#answer(command, limit);
-    for (const direction of ["importing", "tables", "changing"]) {
-      for (const [param, value] of Object.entries(signature?.[direction] ?? {})) {
-        const out = answer[param.toUpperCase()] ?? answer[param];
-        if (out !== undefined) fromJson(value, out);
-      }
-    }
+    fill(signature, this.#answer(command, limit));
     return undefined;
   }
 
