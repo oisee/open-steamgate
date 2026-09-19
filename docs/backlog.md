@@ -973,6 +973,38 @@ one of them parsed, lowered or passed, and computed something else.
 
 ## The order of work, settled 2026-09-18
 
+> **What is actually next, 2026-09-19.** Read this before the buckets below.
+> The standing queue that gets recited at us — *"stage 2 of the SQLScript
+> parser, then G.9 wave 2, then G.1d"* — is **stale in all three places**:
+> all three SQLScript stages exist and the track is on a declared pause at
+> 78 of 364 bodies; G.9 finished wave 3 and is closed; and the naming check
+> is not what anyone is waiting on. Working from that list means redoing
+> finished work, so it is written down here rather than corrected from
+> memory each time.
+>
+> The real queue is upstream-shaped, because that is where the deadline is,
+> and it is **ordered by what blocks whom**:
+>
+> 1. **The `database-hdb` LUW fix**, and it goes before any release.
+>    `execute()` never opened the LUW, so with autocommit off nothing sent
+>    through it was ever committed. Invisible on one connection — including
+>    in upstream's own `test/_utils.ts:98-99`, which seeds HANA through
+>    `execute()` and is green for exactly that reason. A release without
+>    this ships silent data loss to anyone with two connections.
+> 2. **The three-backend report** on open-abap-core's own suite (819 methods:
+>    SQLite 819/0/0, DuckDB 816/3/0, HANA 815/3/1), with declines separated
+>    from failures. Drafted.
+> 3. **The AMDP placement issue** — a question, not a PR: `execute()` returns
+>    `void`, so a procedure's result set has nowhere to go, and the four
+>    options for where AMDP support could live. Drafted, in the critic gate.
+>
+> Behind those, and not started: G.5 (SICF as an application) from the loud
+> bucket, and the SEGW one-command example. The horizon Alice named is
+> CDS-BOPF and RAP end to end, and it is deliberately behind the HANA path
+> being released: it would be a second storey on a ground floor that only
+> stands in our own checkout.
+
+
 Alice asked for the queue to be sorted into three, and it was agreed between
 the two sessions rather than decided by one. A bucket is not a priority
 ranking: it says **what kind of thing an item is**, and the three kinds are
