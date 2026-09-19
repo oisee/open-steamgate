@@ -42,10 +42,22 @@ async function refuse(message, name = "AMDP") {
   const cx = classes?.["CX_SY_DYN_CALL_ILLEGAL_FUNC"];
   if (cx === undefined) throw new Error(message);
   const raised = await new cx().constructor_({function: name});
-  // the text a CATCH will print: the class carries a textid, and the reason
-  // is what the developer actually needs to read
+  // **And it has to SAY the reason, or it is the other half of the defect.**
+  //
+  // The ABAP that catches this does `lv_error = lx_root->get_text( )`, and
+  // `get_text()` on a transpiled exception reads the class's textid -- it
+  // returns "An exception was raised." and knows nothing of a property set
+  // on the object. Measured, not assumed: constructed through the real
+  // runtime, that is exactly the string it gives back.
+  //
+  // So the page would have answered `engine: "none"` with a reason that says
+  // nothing, which is ANOMALY-2026-09-14 over again -- an exception with no
+  // message is a 500 that has learnt to return 200. The method is replaced
+  // on the instance so the CATCH reads the sentence a developer needs.
+  const text = globalThis.abap?.types?.String;
+  const carried = text === undefined ? {get: () => message} : new text().set(message);
+  raised.get_text = async () => carried;
   raised.AMDP_REASON = message;
-  if (raised.MESSAGE !== undefined) raised.MESSAGE = message;
   throw raised;
 }
 

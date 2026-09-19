@@ -232,6 +232,7 @@ describe("the AMDP destination fails where the calling ABAP can catch it", () =>
     const before = globalThis.abap;
     globalThis.abap = {Classes: {CX_SY_DYN_CALL_ILLEGAL_FUNC: class {
       async constructor_(input) { this.INPUT = input; return this; }
+      async get_text() { return {get: () => "An exception was raised."}; }
     }}};
     try {
       let raised;
@@ -244,6 +245,14 @@ describe("the AMDP destination fails where the calling ABAP can catch it", () =>
       expect(raised.constructor.name, "a JavaScript Error walks past CATCH cx_root")
         .to.equal("CX_SY_DYN_CALL_ILLEGAL_FUNC");
       expect(raised.AMDP_REASON, "and the reason a developer needs travels with it").to.contain("ZNOT_THERE");
+      // the half that a property does not cover: the ABAP catching this does
+      // `lv_error = lx_root->get_text( )`, which reads the class's TEXTID and
+      // returns "An exception was raised." -- measured through the real
+      // runtime. An exception with no message is a 500 that has learnt to
+      // answer 200, which is ANOMALY-2026-09-14 over again.
+      const said = await raised.get_text();
+      expect(String(said?.get?.() ?? said), "get_text must say the reason, not the class's generic text")
+        .to.contain("ZNOT_THERE");
     } finally {
       globalThis.abap = before;
     }
