@@ -904,7 +904,7 @@ const xmlUnescape = (t) => String(t).replaceAll("&lt;", "<").replaceAll("&gt;", 
 // DATATYPE/LENG/DECIMALS and text) or inline (DATATYPE/LENG). The ABAP type
 // letter is the dictionary's own convention for its built-in types; the
 // data preview shows it as dataPreview:type.
-const ABAP_TYPE_LETTER = {
+export const ABAP_TYPE_LETTER = {
   CHAR: "C", CLNT: "C", CUKY: "C", LANG: "C", UNIT: "C", ACCP: "C", NUMC: "N", DATS: "D", TIMS: "T",
   INT1: "b", INT2: "s", INT4: "X", INT8: "8", DEC: "P", CURR: "P", QUAN: "P", FLTP: "F",
   RAW: "X", RSTR: "y", STRG: "g", SSTR: "g", LRAW: "X", LCHR: "C", DF16_DEC: "a", DF34_DEC: "e",
