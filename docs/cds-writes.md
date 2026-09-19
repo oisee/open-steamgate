@@ -120,3 +120,26 @@ the cascade works regardless, because it is the parent's statement.
 
 What this is not yet: a transactional buffer, a draft, or a deep insert that
 creates header and items in one request. Those are the rest of B.2.
+
+## A WHERE was read and thrown away (2026-09-19)
+
+Measured on the way to B.1's write half, on a fixture rather than on a view
+in the tree — because **no view in the tree has a WHERE**, which is also why
+refusing now costs nothing:
+
+- **reads**: the generated DDIC view carries `DD26V` (the table) and `DD27P`
+  (the fields) and **no selection condition at all**, so a filtered view
+  returned every row
+- **writes**: `write.writable` came back **true**, so a row failing the
+  filter could be INSERTed through a view that can never show it — precisely
+  what SADL refuses to do
+
+Both silent. `parseDDLS` refuses such a view by name now, at generation
+rather than at runtime, because the author is there and the reader of a
+wrong row is not. The reason names **both** consequences: reduced to "not
+supported yet" it reads like a missing feature, and the next person puts the
+clause back without the filter.
+
+An association's `ON` is not a view filter and is left alone — refusing it
+would refuse every view with an association, which is the over-wide version
+of the same check.

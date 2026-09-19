@@ -92,6 +92,21 @@ export function parseDDLS(obj, reg) {
   if (!select) return {name, skip: "no select"};
   const sources = find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
   if (find(select, "CDSJoin").length > 0 || sources.length !== 1) return {name, skip: "joins are not supported yet"};
+  // **A WHERE was read and thrown away, and that was wrong in both
+  // directions.** The generated DDIC view carries `DD26V` (the table) and
+  // `DD27P` (the fields) and no selection condition at all, so a filtered
+  // view returned EVERY row; and `write.writable` did not look, so a row
+  // failing the filter could be INSERTED through a view that can never show
+  // it -- which is precisely what SADL refuses to do. Both silent, and
+  // nothing in the tree has a WHERE, so the cost of refusing now is zero
+  // and the cost of the first one being wrong is a wrong answer.
+  //
+  // Refused at generation rather than at runtime, because the author is here
+  // and the reader of a wrong row is not (2026-09-19, B.1).
+  if (find(select, "CDSWhere").length > 0) {
+    return {name, skip: "a WHERE in the view is not carried yet: the DDIC view would return every row, " +
+      "and a write through it could insert a row the view cannot show"};
+  }
   const source = sources[0].replace(/\s+/g, "");
   const table = reg.getObject("TABL", source) ?? reg.getObject("VIEW", source);
   const comps = new Map();

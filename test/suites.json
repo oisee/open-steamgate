@@ -11,6 +11,7 @@
     "test/batch-inserts.mjs",
     "test/cds-cast.mjs",
     "test/cds-projection.mjs",
+    "test/cds-where.mjs",
     "test/conformance.mjs",
     "test/generation-diff.mjs",
     "test/journal.mjs",
