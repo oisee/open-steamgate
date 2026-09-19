@@ -111,3 +111,49 @@ conformance differences collapse on their own, leaving the arithmetic family
 - It says nothing about what our own runtime currently writes -- that is the
   thing to change, and changing it is a data-shape change, so it needs its
   own check that nothing reads the padding on purpose.
+
+## 4. Where the padding comes from, and who reads it on purpose
+
+The one unmeasured thing in the plan (fable-osd): "do not write the padding"
+is a change of data shape, so before making it — is there anything that reads
+the padding deliberately? Measured rather than reasoned about, and the answer
+has two halves.
+
+**The padding is not ours. It is the runtime's type.**
+
+```
+Character(10).set("abc")  ->  "abc       "   (length 10)
+```
+
+`@abaplint/runtime`'s `Character` pads to the declared length on assignment,
+which is correct — an ABAP `CHAR(10)` *is* ten characters in memory. So every
+value an ABAP program hands to a database client is already padded before any
+client of ours sees it. `test/seed.mjs` says so in its own comment and pads to
+match; it is following the runtime, not inventing anything.
+
+**And something does read it on purpose — upstream.** The transpiler's SQLite
+schema generator emits
+
+```
+NCHAR(n) COLLATE RTRIM
+```
+
+That collation exists precisely *because* the padded value is stored: it makes
+comparisons ignore trailing blanks, papering over the difference that storing
+the padding creates.
+
+**So the rule belongs exactly where the real kernel puts it.** On A4H, ABAP
+holds `CHAR(30)` padded in memory and HANA stores four characters (section 3).
+A real system therefore trims on the way **to** the database, not in memory
+and not in every expression. Our clients currently store what they are given,
+which is the padded form, and that is the single divergence.
+
+Consequences, stated so the cost is not discovered later:
+
+- The change is **per client, at the write boundary** — the same place
+  `trimLiterals` already trims literals in the HANA and DuckDB clients. It is
+  not a change to `Character`, which is right as it is.
+- Upstream's `COLLATE RTRIM` becomes harmless rather than wrong: with nothing
+  padded stored, there are no trailing blanks for it to ignore.
+- It is still a data-shape change, so it needs its own before-and-after on a
+  real read path rather than only on the conformance fixture.
