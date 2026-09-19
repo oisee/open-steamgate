@@ -201,12 +201,44 @@ export function multiRowInsert(sql) {
   return `${head} ${tuples.map((t) => `SELECT ${t} FROM DUMMY`).join(" UNION ALL ")}${tail}`;
 }
 
+/** Schemas already dropped for this run, so the drop happens once.
+ *
+ *  `STG_DB_FRESH=1` says **this run** starts from nothing. It was read by
+ *  **every** `connect()` instead, and a run opens more than one connection:
+ *  the database client, and the AMDP destination, which holds its own.
+ *
+ *  What that cost, measured 2026-09-19: the wire suite on HANA did not run
+ *  at all. Not slowly -- 21 minutes, 2 seconds of CPU, no output. HANA named
+ *  it when asked rather than guessed at:
+ *
+ *      blocked 115923, owner 115920, OSD_ALICE.ZSTG_DEMO, OBJECT_LOCK
+ *
+ *  The first connection was seeding with autocommit off, holding every table
+ *  it had written. The second ran `DROP SCHEMA ... CASCADE`, which needs an
+ *  exclusive lock on each of them, and waited. Forever, and silently: the
+ *  `.catch()` below cannot fire on a statement that never returns, so the
+ *  suite looked like a slow database instead of a deadlock of our own making.
+ *
+ *  The general shape is the one this tree keeps finding: **a rule about the
+ *  run, executed by each participant.** Same as the dialog step written next
+ *  to one host out of three, and as the seed fix that lived outside the
+ *  driver. "Fresh" is a property of the run; a connection is not the run.
+ *
+ *  Per process, which is what a run is here. `STG_SERVE=child` puts the
+ *  runtime in a second process, and there this set is a second copy -- the
+ *  spawner has to clear `STG_DB_FRESH` for the child, because by then the
+ *  schema is already fresh. Not needed by anything measured today, and
+ *  written down rather than guessed at. */
+const freshened = new Set();
+
 export class HanaDatabaseClient {
   constructor(input = {}) {
     // what sy-dbsys reports; a real system running on HANA says HDB
     this.name = "HDB";
     this.trace = input.trace === true;
     this.schema = input.schema ?? process.env.HANA_SCHEMA ?? "OSD";
+    /** did *this* connection make the schema fresh? see `freshened` */
+    this.droppedSchema = false;
     this.options = input;
     this.client = undefined;
     this.inTransaction = false;
@@ -226,7 +258,13 @@ export class HanaDatabaseClient {
     this.client.setAutoCommit(false);
     // STG_DB_FRESH=1 means start from nothing; without it a second run meets
     // the tables the first one left and dies on "duplicate table name"
-    if (process.env.STG_DB_FRESH === "1") {
+    if (process.env.STG_DB_FRESH === "1" && freshened.has(this.schema) === false) {
+      // Marked **before** the await, not after: two connects racing here
+      // would both see "not yet dropped" and both issue the DROP.
+      freshened.add(this.schema);
+      // and the caller needs to know which connection did it: the one that
+      // dropped is the one that has to seed, and every other one must not
+      this.droppedSchema = true;
       await this.#run(`DROP SCHEMA "${this.schema}" CASCADE`).catch(() => undefined);
       await new Promise((resolve, reject) => this.client.commit((e) => (e ? reject(e) : resolve())));
     }
