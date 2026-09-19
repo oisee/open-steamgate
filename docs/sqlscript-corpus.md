@@ -312,3 +312,32 @@ So the next step is not a construct at all: hand the binder the signature
 `tools/amdp-extract.mjs` already reads, bind the IN parameters as sources and
 treat the OUT parameter as what the body returns. Fourteen of the fifteen
 remaining refusals go with it, and none of them needed grammar.
+
+### The signature, handed over: 17 → 30, and a denominator that moved
+
+| | bodies | parsed | lowered |
+| --- | ---: | ---: | ---: |
+| working | **370** | 34 | **30 (8%)** |
+| teaching | 103 | 40 | 23 (22%) |
+
+The binder now gets the method signature `tools/amdp-extract.mjs` already
+read: an IN table parameter is a relation the caller supplies, and a body
+that assigns to its OUT table parameter and never selects is answering
+through it rather than missing a statement. Thirteen more bodies lower, and
+not one line of grammar was written for them.
+
+**The denominator moved and that is worth saying rather than hiding**: 405
+became 370, because the bodies are now taken from the extractor, which reads
+a class, instead of from a regular expression that matched one. So 30/370
+is not comparable with the earlier 17/405 as a percentage; what is
+comparable is that seventeen became thirty on the same corpus.
+
+**And the `str()` trap was paid for a third time**, which is the part worth
+keeping. `SELECT *` arrives as a **word**, because the grammar matches it
+with `str()`; the code looked only for an `operator` child, so the star was
+not seen, the item fell through to `expression(undefined)`, and the stage
+crashed with "cannot read properties of undefined". Every test used a column
+list, which is the one shape that cannot expose it -- it was found by corpus
+bodies. There is now a table of the three forms a `*` takes, and an
+`undefined` reaching the expression walker is a **named refusal** rather than
+a crash, because a stack trace tells a reader nothing.

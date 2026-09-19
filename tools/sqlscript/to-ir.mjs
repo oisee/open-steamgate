@@ -65,6 +65,16 @@ function literalType(token) {
 
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
+  // The method signature, which is where fifteen refusals turned out to come
+  // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
+  // OUT table parameter -- it assigns and never selects at the end -- and
+  // its IN table parameters are unassigned in the body because they arrive
+  // from the caller. Without the signature both look like defects in the
+  // body, and neither is.
+  const signature = options.signature ?? {parameters: []};
+  const tableParams = (signature.parameters ?? []).filter((p) => /^(tt_|.*_tab$|.*TABLE.*)/i.test(String(p.abapType ?? ""))
+    || /^(it|et|ct)_/i.test(String(p.name ?? "")));
+  const outParam = tableParams.find((p) => p.direction === "OUT" || p.direction === "RETURNING");
   /** table variables assigned so far: name -> {rel} or {handle} */
   const bound = new Map();
   /** the table a bare column belongs to, while a SELECT is being read */
@@ -73,6 +83,12 @@ export function toIr(tree, options = {}) {
   const typeOfColumn = (name) => columns[name] ?? T.str;
 
   function expression(node) {
+    if (node === undefined) {
+      // a named refusal rather than a crash: an internal `undefined` reaching
+      // here means the tree had a shape this stage did not expect, and
+      // "cannot read properties of undefined" tells a reader nothing
+      throw new BindError("an expression this stage does not recognise");
+    }
     switch (node.node) {
       case "Expr":
       case "Term": {
@@ -174,6 +190,11 @@ export function toIr(tree, options = {}) {
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
       const known = bound.get(name);
+      if (known === undefined && tableParams.some((p) => String(p.name).toUpperCase() === name)) {
+        // an IN table parameter: a relation the caller supplies. It is
+        // scanned by its own name, which is what the bridge binds it to.
+        return scan(name);
+      }
       if (known === undefined) {
         // named, not guessed: a table called like a variable is ordinary, so
         // reading one silently would be plausible and wrong
@@ -213,7 +234,14 @@ export function toIr(tree, options = {}) {
     const where = kid(node, "Condition");
     if (where !== undefined) rel = filter(rel, condition(where));
     const items = kids(node, "SelectItem").map((item) => {
-      const star = (item.children ?? []).some((c) => c.node === "operator" && c.value === "*");
+      // `*` arrives as a **word**, because the grammar matches it with
+      // str(): the third time this trap has been paid for in this front end
+      // (the comparison operators and the `?` placeholder were the others).
+      // Looking only for an `operator` child made `SELECT *` fall through to
+      // expression(undefined) and crash -- and every test used a column
+      // list, so nothing covered it.
+      const star = (item.children ?? []).some((c) =>
+        (c.node === "operator" || c.node === "word") && c.value === "*");
       if (star) return {as: "*", expr: {node: "star"}};
       const alias = kids(item, "Name")[0];
       const expr = expression((item.children ?? []).find((c) => c.node !== "word" && c !== alias));
@@ -320,6 +348,13 @@ export function toIr(tree, options = {}) {
     }
   }
   if (returnedRel !== undefined) return {statements, rel: returnedRel};
+  if (last === undefined && outParam !== undefined) {
+    // the body answers through its OUT table parameter: the last thing
+    // assigned to it is the plan, and there is no final select because the
+    // procedure does not need one
+    const assigned = bound.get(String(outParam.name).toUpperCase());
+    if (assigned !== undefined) return {statements, rel: assigned.rel};
+  }
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
   return {statements, rel: relation(last)};
 }

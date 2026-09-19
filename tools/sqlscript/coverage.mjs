@@ -20,13 +20,24 @@ import {parse, ParseError} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
+import * as extractor from "../amdp-extract.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
-function bodiesOf(source) {
+/** the bodies of a class, each with the signature its method declares --
+ *  because fifteen of the refusals were the signature and not the body */
+function bodiesOf(source, filename) {
+  try {
+    const {extract} = extractor;
+    const cls = extract(source, filename);
+    const methods = cls?.methods ?? [];
+    if (methods.length > 0) return methods.map((m) => ({body: m.body, signature: m}));
+  } catch {
+    // a class the extractor cannot read still has bodies worth counting
+  }
   const out = [];
   const re = /METHOD\s+[\w~]+\s+BY\s+DATABASE\s+(PROCEDURE|FUNCTION)\b[\s\S]*?\.\s*([\s\S]*?)ENDMETHOD\s*\./gi;
-  for (const m of source.matchAll(re)) out.push(m[2]);
+  for (const m of source.matchAll(re)) out.push({body: m[2], signature: undefined});
   return out;
 }
 
@@ -62,7 +73,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const pkg = zip.replace(/\.zip$/, "");
     const which = TEACHING.test(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
-      for (const body of bodiesOf(readFileSync(file, "utf8"))) corpora[which].push(body);
+      for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push(one);
     }
   }
 
@@ -79,7 +90,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const afterParse = new Map();
     let parsed = 0;
     let loweredCount = 0;
-    for (const body of bodies) {
+    for (const {body, signature} of bodies) {
       let tokens = [];
       let tree;
       try {
@@ -92,7 +103,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         continue;
       }
       try {
-        const ir = toIr(tree, {catalogue: {}});
+        const ir = toIr(tree, {catalogue: {}, signature});
         lower(ir.rel, "hana");
         loweredCount += 1;
       } catch (error) {

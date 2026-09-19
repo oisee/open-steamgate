@@ -98,4 +98,15 @@ describe("the SQLScript tree into the IR", () => {
     const column = walk(own.rel).find((n) => n.node === "col" && n.name === "K");
     expect(column.type).to.deep.equal({abap: "C", len: 8});
   });
+
+  // The `str()` trap, third occurrence, as a table rather than an example:
+  // every form in which a `*` can appear. Each of the first two was found by
+  // a failing corpus body rather than by a test, because every test used a
+  // column list -- the shape that cannot expose it.
+  for (const body of ["SELECT * FROM src;", "SELECT COUNT(*) FROM src;",
+    "lt = SELECT k FROM src;\nSELECT * FROM :lt;"]) {
+    it(`reads ${body.replace(/\n/g, " ")} without falling through to undefined`, () => {
+      expect(() => ir(body)).to.not.throw();
+    });
+  }
 });
