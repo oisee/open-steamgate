@@ -215,3 +215,55 @@ ENDCLASS.`;
     }
   });
 });
+
+// **An ABAP program cannot defend itself against a runtime throw.**
+//
+// `CALL FUNCTION ... DESTINATION 'AMDP'` is ABAP, and the ABAP around it
+// guards itself with `CATCH cx_root`. A JavaScript Error thrown from the
+// destination goes straight past that CATCH and out of the request, so a
+// page that asks an honest question -- "does anything here speak SQLScript?"
+// -- and is written to handle "no" gets a crash page instead of an answer.
+// That is exactly how the AMDP tile answered 500 in the browser preview
+// (osg-osd-i7, E.5, 2026-09-19), and it is the same family as
+// ANOMALY-2026-09-14, the exception with no message.
+describe("the AMDP destination fails where the calling ABAP can catch it", () => {
+  it("raises an ABAP exception when the runtime has one", async () => {
+    const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
+    const before = globalThis.abap;
+    globalThis.abap = {Classes: {CX_SY_DYN_CALL_ILLEGAL_FUNC: class {
+      async constructor_(input) { this.INPUT = input; return this; }
+    }}};
+    try {
+      let raised;
+      try {
+        await new AmdpDestination({}).call("ZNOT_THERE", {});
+      } catch (error) {
+        raised = error;
+      }
+      expect(raised, "it must fail").to.not.equal(undefined);
+      expect(raised.constructor.name, "a JavaScript Error walks past CATCH cx_root")
+        .to.equal("CX_SY_DYN_CALL_ILLEGAL_FUNC");
+      expect(raised.AMDP_REASON, "and the reason a developer needs travels with it").to.contain("ZNOT_THERE");
+    } finally {
+      globalThis.abap = before;
+    }
+  });
+
+  it("and a plain Error where there is no runtime at all, which is a tool calling it directly", async () => {
+    const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
+    const before = globalThis.abap;
+    globalThis.abap = undefined;
+    try {
+      let raised;
+      try {
+        await new AmdpDestination({}).call("ZNOT_THERE", {});
+      } catch (error) {
+        raised = error;
+      }
+      expect(raised.constructor.name).to.equal("Error");
+      expect(raised.message).to.contain("no procedure known");
+    } finally {
+      globalThis.abap = before;
+    }
+  });
+});

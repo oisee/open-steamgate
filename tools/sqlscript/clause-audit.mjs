@@ -86,9 +86,37 @@ export const ALTERNATIVES = [
   }},
 ];
 
-/** 4. keywords that must never appear as an identifier in the output */
-export const KEYWORDS = ["DISTINCT", "GROUP", "HAVING", "UNION", "INTERSECT", "EXCEPT", "ORDER",
-  "WHERE", "SELECT", "FROM", "JOIN", "LIMIT", "INNER", "OUTER", "CROSS", "LEFT", "RIGHT"];
+/**
+ * 4. A keyword that stood in KEYWORD POSITION in the source and did not come
+ *    out as that keyword in the statement.
+ *
+ * The first version asked a simpler question -- "does the output contain a
+ * keyword as an identifier?" -- and on a real corpus it cried wolf on its
+ * first run: `cl_islm_ml_engine_int_util` projects a column genuinely named
+ * ORDER, and `"ORDER" AS "IS_ORDER"` is correct SQL over a correct plan.
+ * SAP tables are full of such names -- ORDER, VALUE, CLIENT, KEY -- so the
+ * check would have fired on hundreds of good bodies, and a check that cries
+ * wolf stops being read (osg-osd-i7 found this on 78 corpus bodies and
+ * proposed the narrowing; the rule is theirs, the file is mine).
+ *
+ * What separates a column called ORDER from a LEAKED keyword is not the
+ * statement -- it is what the SOURCE said. So the question is asked from the
+ * source end: the word stood where only a keyword can stand, and the
+ * statement does not carry it as a keyword. That is exactly the DISTINCT
+ * defect (`SELECT DISTINCT` in, `SELECT "DISTINCT" AS "K"` out) and it is
+ * silent on a column that merely shares a name.
+ */
+export const KEYWORD_POSITION = [
+  {word: "DISTINCT", inSource: /\bSELECT\s+DISTINCT\b/i, inOutput: /\bSELECT\s+DISTINCT\b/i},
+  {word: "GROUP", inSource: /\bGROUP\s+BY\b/i, inOutput: /\bGROUP\s+BY\b/i},
+  {word: "HAVING", inSource: /\bHAVING\b/i, inOutput: /\bHAVING\b/i},
+  {word: "ORDER", inSource: /\bORDER\s+BY\b/i, inOutput: /\bORDER\s+BY\b/i},
+  {word: "UNION", inSource: /\bUNION\b/i, inOutput: /\bUNION\b/i},
+  {word: "INTERSECT", inSource: /\bINTERSECT\b/i, inOutput: /\bINTERSECT\b/i},
+  {word: "EXCEPT", inSource: /\bEXCEPT\b/i, inOutput: /\bEXCEPT\b/i},
+  {word: "JOIN", inSource: /\bJOIN\b/i, inOutput: /\bJOIN\b/i},
+  {word: "LIMIT", inSource: /\bLIMIT\b/i, inOutput: /\bLIMIT\b/i},
+];
 
 /** 5. clauses that must not be read as one another */
 export const NOT_THE_SAME = [
@@ -106,9 +134,29 @@ export const NAMES = [
   {body: "RETURN SELECT k FROM src WHERE a > 1;", columns: ["K", "A"]},
 ];
 
-/** keywords of the language that came out of the lowering as identifiers */
-export function keywordsTakenAsNames(sql = "") {
-  return KEYWORDS.filter((k) => new RegExp(`"${k}"`).test(sql));
+/**
+ * Keywords the SOURCE used as keywords that the STATEMENT does not carry as
+ * keywords -- which is the shape of a keyword read as a name.
+ *
+ * `source` is required for the narrow question. Without it the old, wide
+ * question is asked and the answer is marked as such, because "a keyword
+ * appears quoted" is a fact about SAP's column names at least as often as
+ * about our parser.
+ */
+export function keywordsTakenAsNames(sql = "", source = undefined) {
+  // No wide fallback. The wide question -- "does a keyword appear quoted?" --
+  // is one we have MEASURED to be wrong: it fires on every column SAP named
+  // ORDER or VALUE or CLIENT. Answering it anyway when the source is missing
+  // would put those findings back the first time somebody called this with
+  // one argument, so the missing source is refused by name instead.
+  if (source === undefined) {
+    throw new Error("keywordsTakenAsNames: the source body is required. A keyword quoted in the output is " +
+      "a column named after a keyword at least as often as a parser defect, and the two are told apart " +
+      "only by what the SOURCE said");
+  }
+  return KEYWORD_POSITION
+    .filter((k) => k.inSource.test(source) && !k.inOutput.test(sql))
+    .map((k) => k.word);
 }
 
 /** columns the body named that the statement does not mention */
@@ -157,7 +205,7 @@ export function auditBody(body, catalogue = {}) {
   const findings = [];
   const missing = missingColumns(sql, [...named]);
   if (missing.length > 0) findings.push({kind: "column lost", detail: missing.join(", ")});
-  const taken = keywordsTakenAsNames(sql);
+  const taken = keywordsTakenAsNames(sql, body);
   if (taken.length > 0) findings.push({kind: "a keyword became an identifier", detail: taken.join(", ")});
   return {sql, findings};
 }
@@ -207,7 +255,7 @@ export function audit() {
   for (const one of everyBody) {
     const lowered = sqlOf(one.body);
     if (lowered.refused !== undefined) continue;
-    const taken = keywordsTakenAsNames(lowered.sql);
+    const taken = keywordsTakenAsNames(lowered.sql, one.body);
     if (taken.length > 0) {
       findings.push({kind: "a keyword became an identifier", clause: one.label,
         why: `${taken.join(", ")} is a keyword of the language and came out as a name`, sql: lowered.sql});

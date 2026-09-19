@@ -43,6 +43,17 @@ export async function setup(abap, schemas, insert) {
       await db.execute(preview.seed);
     }
     preview.db = db;
+    // The AMDP destination belongs here too. Three lines below the early
+    // return, the non-preview path says "it is installed whatever the
+    // database is, because the failure a developer needs is 'no HANA to run
+    // this in', not 'unknown destination'" -- and the preview returned before
+    // reaching it, so in the browser there was no destination at all. A
+    // stated intention that the code does not honour is worse than no
+    // intention: the AMDP tile asked an honest question and got a crash page
+    // (E.5, 2026-09-19).
+    const {AmdpDestination: PreviewAmdp} = await import("../tools/amdp-destination.mjs");
+    abap.context.RFCDestinations ??= {};
+    abap.context.RFCDestinations["AMDP"] = new PreviewAmdp({});
     return;
   }
   const {seedStatements} = await import("./seed.mjs");

@@ -27,9 +27,42 @@ describe("the binder carries what the grammar reads, or refuses it by name", () 
 
   // The audit passing means nothing unless its parts can fail, and the two
   // that are pure functions are checked in both directions here.
-  it("a keyword coming out as an identifier is caught", () => {
-    expect(keywordsTakenAsNames('SELECT "DISTINCT" AS "K" FROM "SRC"')).to.deep.equal(["DISTINCT"]);
-    expect(keywordsTakenAsNames('SELECT "K" AS "K" FROM "SRC"')).to.deep.equal([]);
+  // **The narrowing that a real corpus paid for.**
+  //
+  // The first version asked "does the output contain a keyword as an
+  // identifier?" and, run over 78 corpus bodies, fired once -- on
+  // `cl_islm_ml_engine_int_util`, which projects a column genuinely NAMED
+  // ORDER. `"ORDER" AS "IS_ORDER"` is correct SQL over a correct plan, and
+  // SAP tables are full of such names: ORDER, VALUE, CLIENT, KEY. The check
+  // would have cried wolf on hundreds of good bodies, and a check that cries
+  // wolf stops being read -- which is in CLAUDE.md from the first week.
+  //
+  // What separates a column called ORDER from a leaked keyword is not the
+  // statement, it is what the SOURCE said. So the question is asked from the
+  // source end (osg-osd-i7 measured it and proposed the rule).
+  it("a keyword read as a name is caught, from the source end", () => {
+    expect(keywordsTakenAsNames('SELECT "DISTINCT" AS "K" FROM "SRC"', "RETURN SELECT DISTINCT k FROM src;"))
+      .to.deep.equal(["DISTINCT"]);
+  });
+
+  it("and a column genuinely NAMED after a keyword is not a finding", () => {
+    expect(keywordsTakenAsNames('SELECT "ORDER" AS "IS_ORDER", "ORDER" AS "MV_ORDER" FROM "T"',
+      "RETURN SELECT order AS is_order, order AS mv_order FROM t;"),
+    "the corpus body that found this: a column called ORDER is not a leaked ORDER BY").to.deep.equal([]);
+  });
+
+  it("nor is a keyword that stood in the source AND came out as itself", () => {
+    expect(keywordsTakenAsNames('SELECT "ORDER" AS "O" FROM "T" ORDER BY "O" ASC',
+      "RETURN SELECT order AS o FROM t ORDER BY o;"),
+    "both at once: an ORDER BY that survived, beside a column of that name").to.deep.equal([]);
+  });
+
+  it("and with no source it refuses, rather than answering a question measured to be wrong", () => {
+    // the wide question fires on every column SAP named ORDER, VALUE or
+    // CLIENT. Keeping it as a fallback would put those findings back the
+    // first time somebody called this with one argument.
+    expect(() => keywordsTakenAsNames('SELECT "ORDER" AS "O" FROM "T"'))
+      .to.throw(/the source body is required/);
   });
 
   it("a column the body named and the statement does not is caught", () => {

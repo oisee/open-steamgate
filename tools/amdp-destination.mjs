@@ -18,6 +18,37 @@ import {connection} from "./amdp-run.mjs";
 
 const SCHEMA = process.env.HANA_SCHEMA ?? process.env.HXE_SCHEMA ?? "OSD";
 
+
+/**
+ * Fail in a way the calling ABAP can catch.
+ *
+ * `CALL FUNCTION ... DESTINATION 'AMDP'` is ABAP, and the ABAP around it
+ * guards itself with `CATCH cx_root`. A JavaScript `Error` thrown from here
+ * goes straight past that CATCH and out of the request, so a page that asks
+ * an honest question -- "does anything here speak SQLScript?" -- and is
+ * written to handle "no" gets a crash page instead of an answer. That is how
+ * the AMDP tile answered 500 in the browser preview (osg-osd-i7, E.5,
+ * 2026-09-19), and it is the same family as ANOMALY-2026-09-14: **an ABAP
+ * program cannot defend itself against a runtime throw.**
+ *
+ * `CX_SY_DYN_CALL_ILLEGAL_FUNC` is what a system raises when a dynamically
+ * called function cannot be called here, which is exactly the situation, and
+ * our own `src/` already catches it. When there is no runtime at all -- a
+ * tool importing this module directly -- a plain Error is right and is what
+ * happens.
+ */
+async function refuse(message, name = "AMDP") {
+  const classes = globalThis.abap?.Classes;
+  const cx = classes?.["CX_SY_DYN_CALL_ILLEGAL_FUNC"];
+  if (cx === undefined) throw new Error(message);
+  const raised = await new cx().constructor_({function: name});
+  // the text a CATCH will print: the class carries a textid, and the reason
+  // is what the developer actually needs to read
+  raised.AMDP_REASON = message;
+  if (raised.MESSAGE !== undefined) raised.MESSAGE = message;
+  throw raised;
+}
+
 /** what amdp-gen wrote: one entry per AMDP method, keyed by module name */
 export function loadProcedures(folder = "gen/amdp") {
   const file = join(folder, "procedures.json");
@@ -87,7 +118,8 @@ export class AmdpDestination {
     // than "unknown destination AMDP". Say that, rather than fail on an
     // undefined import.
     if (typeof connection !== "function") {
-      throw new Error("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a database that speaks SQLScript");
+      await refuse("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a " +
+        "database that speaks SQLScript");
     }
     const hdb = (await import("hdb")).default;
     this.client = hdb.createClient(connection());
@@ -257,8 +289,8 @@ export class AmdpDestination {
     }
     const p = this.procedures.get(String(name).trimEnd().toUpperCase());
     if (p === undefined) {
-      throw new Error(`AMDP: no procedure known for ${name}. Run 'node tools/amdp-gen.mjs' `
-        + `so gen/amdp/procedures.json carries it.`);
+      await refuse(`AMDP: no procedure known for ${name}. Run 'node tools/amdp-gen.mjs' ` +
+        "so gen/amdp/procedures.json carries it.", name);
     }
     await this.#connect();
     await this.#deploy(p);
