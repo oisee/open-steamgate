@@ -9,7 +9,7 @@
 // engines - which is the precondition for trusting it anywhere else.
 import {expect} from "chai";
 import {T, col, lit, bin, cast, scan, filter, project, order} from "../tools/sqlscript-ir.mjs";
-import {runBothWays, runFused, runEager, compare, isInvalid} from "../tools/sqlscript-eager.mjs";
+import {runBothWays, runFused, runEager, compare, isInvalid, forceability} from "../tools/sqlscript-eager.mjs";
 
 const FIXTURE = [
   `CREATE TABLE src (k VARCHAR, txt VARCHAR, a INTEGER)`,
@@ -220,5 +220,43 @@ describe("a plan that writes is not compared by running it twice", () => {
 
   it("and a plan that only reads is compared as before", async () => {
     expect((await import("../tools/sqlscript-ir.mjs")).effects(scan("src")).writes).to.be.empty;
+  });
+});
+
+// forceability() answers the same question runEager() answers, without a
+// database - which is the only way to count the corpus, whose tables are not
+// here. The two must not drift, so they are checked against each other.
+describe("forceability, decided without a database", () => {
+  it("forces everything against a seam that takes values on a materialised relation", () => {
+    const plan = project(filter(scan("src"), bin("=", col("k"), lit("x", T.char(1)), T.bool)), [{as: "K", expr: col("k")}]);
+    expect(forceability(plan, "duckdb").full, "which is what every client does today").to.equal(true);
+  });
+
+  it("and names what a client that refuses values would leave fused", () => {
+    const plan = project(filter(scan("src"), bin("=", col("k"), lit("x", T.char(1)), T.bool)), [{as: "K", expr: col("k")}]);
+    const verdict = forceability(plan, "duckdb", {paramsOnMaterialise: false});
+    expect(verdict.full).to.equal(false);
+    expect(verdict.blocked.map((one) => one.rel)).to.contain("filter");
+  });
+
+  it("agrees with what runEager actually does, on both kinds of plan", async function () {
+    this.timeout(30000);
+    const {DuckDBDatabaseClient} = await import("../tools/duckdb-client.mjs");
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    for (const statement of FIXTURE) await client.native({sql: statement, expect: "none"});
+    try {
+      for (const plan of [
+        project(filter(scan("src"), bin(">", col("a"), lit(1, T.int), T.bool)), [{as: "K", expr: col("k")}]),
+        project(filter(scan("src"), bin("=", col("k"), lit("x", T.char(1)), T.bool)), [{as: "K", expr: col("k")}]),
+      ]) {
+        const predicted = forceability(plan, "duckdb");
+        const actual = await runEager(client, plan, "duckdb");
+        expect((actual.notForced ?? []).length === 0, JSON.stringify({predicted, actual: actual.notForced}))
+          .to.equal(predicted.full);
+      }
+    } finally {
+      await client.disconnect?.();
+    }
   });
 });

@@ -167,3 +167,43 @@ export async function runBothWays(client, rel, dialect) {
   if ((eager.notForced ?? []).length > 0) verdict.notForced = eager.notForced;
   return {fused, eager, ...verdict};
 }
+
+/**
+ * Would this plan be forced completely, and if not, where not - decided
+ * without a database.
+ *
+ * `runEager` needs live tables, which the corpus bodies do not have here, so
+ * the numerator has to be counted some other way. It can be: whether a step
+ * can be forced is not an execution question but a question about the step
+ * and the client's capability.
+ *
+ * `paramsOnMaterialise` is that capability, and it is a PARAMETER rather than
+ * an assumption because it changed under us: a definition cannot carry bound
+ * values, a materialised relation can, and the seam allowed the second one
+ * the same day it was asked. The first version of this function still assumed
+ * the old answer and reported plans as unforceable that the live run forced
+ * without complaint - caught by the test that holds the two together, on its
+ * first run. A predictor that drifts from the thing it predicts is worse than
+ * no predictor, because it is quoted.
+ */
+export function forceability(rel, dialect, {paramsOnMaterialise = true} = {}) {
+  const blocked = [];
+  let steps = 0;
+  const walk = (node) => {
+    if (node.rel === "scan" || node.rel === "ref" || node.rel === "var") return node;
+    const copy = {...node};
+    for (const key of CHILD_KEYS) {
+      if (copy[key] !== undefined) copy[key] = walk(copy[key]);
+    }
+    if (copy.inputs !== undefined) copy.inputs = copy.inputs.map(walk);
+    steps++;
+    const {params} = lower(copy, dialect, {relationRef: () => '"X"'});
+    if (params.length > 0 && paramsOnMaterialise !== true) {
+      blocked.push({rel: copy.rel, params: params.length});
+      return copy;
+    }
+    return ref("forced");
+  };
+  walk(rel);
+  return {steps, blocked, full: blocked.length === 0};
+}
