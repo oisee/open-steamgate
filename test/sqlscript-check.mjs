@@ -126,3 +126,35 @@ describe("the data the plan asks for, and what it finds", function () {
     expect(loud.fused.rows, "fused never evaluates the conversion on the removed row").to.have.length(3);
   });
 });
+
+// What the instrument cannot do today, pinned so that it is a known gap
+// rather than a surprise, and so that the day it changes, this says so.
+describe("what cannot be forced, and why it is said out loud", function () {
+  this.timeout(30000);
+  let client;
+
+  before(async () => {
+    const {DuckDBDatabaseClient} = await import("../tools/duckdb-client.mjs");
+    client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    for (const statement of FIXTURE) await client.native({sql: statement, expect: "none"});
+  });
+
+  after(async () => {
+    await client?.disconnect?.();
+  });
+
+  it("a step carrying a bound value is left fused, and the verdict carries that fact", async () => {
+    // a string literal is bound, never interpolated - so this body's filter
+    // is a step the seam will not accept as a definition
+    const body = `lt = SELECT k, n FROM src WHERE k <> 'x';
+                  SELECT k FROM :lt;`;
+    const result = await checkBody(client, body, "duckdb");
+    expect(result.notForced, "the fact belongs next to the verdict, not buried in the eager half")
+      .to.be.an("array").with.length.greaterThan(0);
+    expect(result.notForced[0].params).to.be.greaterThan(0);
+    // and it still answers: leaving a step fused is a weaker comparison, not
+    // a broken one
+    expect(result.agree).to.equal(true);
+  });
+});

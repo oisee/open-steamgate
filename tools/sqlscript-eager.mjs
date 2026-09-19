@@ -61,21 +61,28 @@ export async function runEager(client, rel, dialect) {
       copy.inputs = done;
     }
     const {sql, params} = lower(copy, dialect, {relationRef: refOf});
-    if (params.length > 0) {
-      // A definition is a view, and a view with an unbound value has no
-      // meaning until somebody supplies one - the seam says so in as many
-      // words ("bind at use"). So this step CANNOT be forced, and the honest
-      // thing is to leave it fused and say which one, rather than to
-      // interpolate the value into the text (the one thing this whole
-      // contract exists to prevent) or to report a comparison that quietly
-      // forced less than it claimed.
-      notForced.push({rel: copy.rel, params: params.length});
-      return copy;
+    // A step that carries bound values may or may not be forceable, and that
+    // is the seam's decision rather than ours: a *definition* is a view, and
+    // a view with an unbound value has no meaning until somebody supplies
+    // one, but a *materialised* relation consumes its values once, when it is
+    // created. So ask - with the values - and fall back honestly if the
+    // client refuses. What must never happen instead is interpolating the
+    // value into the text, which is the one thing the whole contract exists
+    // to prevent.
+    try {
+      const handle = await client.defineRelation({name: "step", sql, params, materialise: "lowering-declined"});
+      statements++;
+      handles.push(handle);
+      return ref(handle);
+    } catch (error) {
+      if (params.length > 0 && /params are not supported/i.test(String(error.message ?? error))) {
+        // left fused, and said so next to the verdict: "they agree" means
+        // less when some steps were never forced
+        notForced.push({rel: copy.rel, params: params.length, why: String(error.message ?? error)});
+        return copy;
+      }
+      throw error;
     }
-    statements++;
-    const handle = await client.defineRelation({name: "step", sql, materialise: "lowering-declined"});
-    handles.push(handle);
-    return ref(handle);
   };
 
   try {
