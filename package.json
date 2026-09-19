@@ -28,6 +28,7 @@
     "osd:tls-proxy": "node tools/osd-tls-proxy.mjs",
     "conformance": "node test/conformance/run.mjs",
     "probe": "node tools/closure-probe.mjs",
+    "amdp:oracle": "node tools/amdp-oracle.mjs",
     "e2e": "npm run transpile && playwright test",
     "e2e:install": "playwright install chromium",
     "cds": "node tools/cds2ddic.mjs",

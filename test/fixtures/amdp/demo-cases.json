@@ -1,0 +1,10 @@
+{
+  "class": "src/amdp/zcl_osd_amdp_demo.clas.abap",
+  "cases": [
+    {"name": "squares/0",   "method": "squares", "in": {"iv_count": 0}},
+    {"name": "squares/1",   "method": "squares", "in": {"iv_count": 1}},
+    {"name": "squares/3",   "method": "squares", "in": {"iv_count": 3}},
+    {"name": "squares/10",  "method": "squares", "in": {"iv_count": 10}},
+    {"name": "squares/-1",  "method": "squares", "in": {"iv_count": -1}}
+  ]
+}

@@ -7,6 +7,7 @@
     "test/adt-facade.mjs",
     "test/adt-session.mjs",
     "test/amdp-sandbox.mjs",
+    "test/amdp-oracle.mjs",
     "test/analytics.mjs",
     "test/batch-inserts.mjs",
     "test/cds-cast.mjs",
