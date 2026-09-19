@@ -322,3 +322,53 @@ Merging a padded HANA column into an unpadded run compares two different
 questions and answers confidently; the two differ by seven rows, which is
 exactly the size of a finding. It is refused, and the refusal names a flag
 that exists.
+
+## The whole table, counted both ways (2026-09-19)
+
+The hypothesis was that the padding explains most of the list. Counting the
+two recorded runs -- the same 39 cases, one fixture padded and one not, HANA
+answering in both -- says how much, and the number is exact.
+
+**HANA's own answer moved in 0 of 39 cases.** Hand it a padded value or an
+unpadded one and it replies identically, which is the measurement the
+hypothesis actually needed: it does not store the trailing blank, so there is
+nothing for it to disagree about. Nine cases moved for everybody else.
+
+| engine | agrees, padded | agrees, unpadded |
+|---|---|---|
+| DuckDB | 20 / 39 | 29 / 39 |
+| sql.js | 18 / 39 | 27 / 39 |
+| node:sqlite | 18 / 39 | 27 / 39 |
+
+Nine up, for each of the three, and they are the same nine: `concat_padded`,
+`substr_padded`, `length_padded`, `char_equals`, `fn_upper`, `fn_ltrim`,
+`fn_min`, `agg_concat_ordered`, `agg_concat_unordered`. Every one of them
+agrees with HANA once the fixture is unpadded. So the nine were never nine
+divergences between engines -- they were **one decision at the write
+boundary, counted nine times** by a list that asks nine questions about the
+same stored byte.
+
+### What is left is smaller than it looks, and has two kinds in it
+
+Ten cases for DuckDB, twelve for the two SQLite builds. Counting them as one
+number would overstate them, because two different things are in there:
+
+- **Scale only** -- the same number, printed with a different number of
+  decimals: `0.5` against `0.500000`, `3` against `3.0`, `2.35` against
+  `2.350`, `1` against `1.000000`. Six for DuckDB, four for the SQLite
+  builds. Numerically these agree. They are still worth a line, because a
+  caller that compares the *text* of a result sees a difference where there
+  is no difference in value -- which is the same trap as the padding, one
+  layer up.
+- **Genuinely different** -- integer division truncating (`0` against
+  `0.5`), binary float against decimal (`0.30000000000000004`), a CAST that
+  HANA refuses and SQLite answers `0` to, division by zero (raise against
+  `Infinity` against `NULL`), case-sensitive `LIKE`, a CAST to `CHAR(3)` that
+  HANA truncates and nobody else does, half-even against half-up rounding,
+  and `LOG` with the wrong arity.
+
+The second list is the real work, and it is eight entries rather than
+twenty-two. Naming which is which is the point of counting both ways: a
+remainder of "12 divergences" would have sent somebody to fix rounding
+**presentation** at the same priority as integer division, and only one of
+those can give a wrong answer to an application.
