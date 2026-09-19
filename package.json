@@ -76,7 +76,8 @@
     "sql:compare": "node tools/osd-sql-trace.mjs",
     "sql:summary": "node tools/osd-sql-trace.mjs --summary",
     "branch": "node tools/osd-branch.mjs",
-    "preview:closure": "node tools/osd-preview-closure.mjs"
+    "preview:closure": "node tools/osd-preview-closure.mjs",
+    "queue": "node tools/osd-queue-check.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
