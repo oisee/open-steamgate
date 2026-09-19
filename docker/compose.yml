@@ -42,8 +42,24 @@ services:
       # of that name one level down: an unanchored grep would pass on the
       # database's value while the system served nothing. Both patterns work
       # today; only one of them says what it means.
+      # Two questions, because they have different answers and we have been
+      # caught by the difference three times in one day: **is it serving**,
+      # and **is it serving what it should**.
+      #
+      # The first alone is not enough, and the day it was corrected it became
+      # more dangerous rather than less. A HANA container whose seed died
+      # half way answered 200 everywhere, reported `serving` as a string,
+      # went green -- and every entity set was empty. A failed seed leaves a
+      # schema that `hasSchema()` accepts, so the next boot skips seeding and
+      # serves nothing, healthily. An instrument that became more precise and
+      # is now believed is worse than one nobody trusted.
+      #
+      # So the second question asks for a row. It names the demo service on
+      # purpose: this image's payload IS the demo, an empty TravelSet means
+      # the data never arrived, and a check that cannot say that is a habit
+      # rather than a check.
       test: &serving_check ["CMD", "sh", "-c",
-             "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -qE '\"live\":\"[^\"]+\",\"serving\":\"[^\"]+\"'"]
+             "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -qE '\"live\":\"[^\"]+\",\"serving\":\"[^\"]+\"' && wget -qO- 'http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$$top=1&$$format=json' | grep -q '__metadata'"]
       interval: 5s
       timeout: 5s
       retries: 30
