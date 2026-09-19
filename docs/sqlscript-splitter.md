@@ -61,22 +61,29 @@ become five full materialisations where HANA built one plan. Since AMDP is
 written precisely for heavy set processing, the most "faithful-looking" model
 would be slowest exactly on the bodies the language exists for.
 
-**So the model is lazy by default, with barriers.** The measurement that
-settles it is one body on HANA Express: an assignment whose projection can
-raise (`TO_INTEGER` over a column holding one non-numeric row), a second
-assignment that filters the offending row away, and an observation of the
-result. If HANA raises, an assignment is a barrier and we must materialise. If
-HANA returns the row, fusion is not a liberty we are taking — it is the
-semantics, and eager execution would be the bug.
+**So the model is lazy by default, with barriers — and this is now measured,
+not argued.** The body: an assignment whose projection can raise
+(`TO_INTEGER` over a column holding one non-numeric row), a second assignment
+that filters the offending row away, then an observation. **HANA Express
+returned the rows and raised nothing.** So an assignment to a table variable
+is **not** an observable barrier: fusing is not a liberty we are taking, it is
+the semantics, and eager execution would have been the bug — the expensive
+bug, five materialisations where HANA builds one plan.
 
-**A third outcome is the likely one, and it changes what we promise.** HANA's
-behaviour here is *plan-dependent*: inlining has heuristics, and the same body
+That single measurement decides the shape of the IR, which is why it was
+first.
+
+**One question behind it is still open, and it changes what we promise.**
+HANA's behaviour here may be *plan-dependent*: inlining has heuristics, and the same body
 can fuse or not depending on how the variable is used. If error timing is
 optimiser-dependent on HANA itself, then bit-exact error fidelity is not
 achievable by anyone, including HANA across two releases. The honest response
 is to define **our** model, state that the moment an error is raised may
 differ, and compare **values** rather than exceptions in the conformance
-suite.
+suite. The `NO_INLINE` half of the experiment has not run yet — the first
+attempt died on a fixture collision, not on HANA — so "is the moment of an
+error stable on HANA itself" remains unanswered, and it is the question that
+decides whether exceptions belong in the conformance suite at all.
 
 ## The two compatibility problems, which are not one problem
 
