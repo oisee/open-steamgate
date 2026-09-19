@@ -3,6 +3,7 @@ import {lex} from "../tools/sqlscript/lexer.mjs";
 import {parse} from "../tools/sqlscript/combi.mjs";
 import {Body} from "../tools/sqlscript/expressions/index.mjs";
 import {toIr, BindError} from "../tools/sqlscript/to-ir.mjs";
+import {schemaOf, refTo, scan} from "../tools/sqlscript-ir.mjs";
 
 // Stage 3: the syntax tree into the IR the lowering already eats. Two jobs,
 // and the tests are about the two: the binder splices a table variable in
@@ -36,14 +37,22 @@ describe("the SQLScript tree into the IR", () => {
     expect(() => ir("SELECT k FROM :nope;")).to.throw(BindError, /unknown table variable :nope/);
   });
 
-  it("keeps the comparison the body was written with", () => {
-    // the operator arrives as a `word`, not an `operator`, because the
-    // grammar matches it with str(); reading only operator children made
-    // every comparison default to `=` -- silently
-    const ops = walk(ir("SELECT k FROM src WHERE n > 1;").rel)
-      .filter((n) => n.node === "bin").map((n) => n.op);
-    expect(ops).to.include(">").and.to.not.include("=");
-  });
+  // A table, not an example (fable-osd). This stage maps a set of operators
+  // onto one representation, and the defect it had -- every comparison
+  // collapsing to `=` -- was invisible on `=`, which is exactly the element
+  // it collapsed into. A stage that maps many values onto one must be tested
+  // across the whole set, because collapsing always looks correct on the
+  // value collapsed into.
+  for (const op of ["=", "<>", "<", ">", "<=", ">="]) {
+    it(`parses ${op} as ${op}, and the whole table is checked because = hid the defect`, () => {
+      const found = walk(ir(`SELECT k FROM src WHERE n ${op} 1;`).rel)
+        .filter((n) => n.node === "bin").map((n) => n.op);
+      expect(found, `${op} survived`).to.include(op);
+      if (op !== "=") {
+        expect(found, "and did not become equality on the way").to.not.include("=");
+      }
+    });
+  }
 
   it("types a column from the catalogue and a literal from what it is", () => {
     const nodes = walk(ir("SELECT k FROM src WHERE n > 1;").rel);
@@ -62,10 +71,26 @@ describe("the SQLScript tree into the IR", () => {
     expect(division.type).to.deep.equal({abap: "P", len: 15, dec: 2});
   });
 
-  it("makes a host variable a bound parameter, never text", () => {
-    const p = walk(ir("SELECT k FROM src CROSS JOIN (SELECT ? AS v) x;").rel)
-      .find((n) => n.node === "param");
-    expect(p, "the scalar rides in bound").to.not.equal(undefined);
+  it("keeps a placeholder a parameter, not merely a plan that validates", () => {
+    // the assertion is that it stayed a `param`, not that the plan came out
+    // well formed: matched as a word it was invisible as a parameter and the
+    // plan was still perfectly valid
+    const nodes = walk(ir("SELECT k FROM src CROSS JOIN (SELECT ? AS v) x;").rel);
+    expect(nodes.filter((n) => n.node === "param"), "the scalar rides in bound").to.have.length(1);
+    expect(JSON.stringify(nodes), "and never as text").to.not.contain('"?"');
+  });
+
+  it("refuses a bare ref and accepts one carrying its schema, which is what the binder relies on", () => {
+    // `ref` is the one node whose columns cannot be derived from what is
+    // under it, because nothing is. The binder's barrier path therefore uses
+    // refTo(handle, schemaOf(plan)) -- this asserts the contract that makes
+    // that the shorter path, rather than asserting that a function exists,
+    // which is a test that cannot fail.
+    expect(() => schemaOf({rel: "ref", handle: "h"}, CATALOGUE),
+      "a bare ref has nothing to say").to.throw();
+    const carried = refTo("h", schemaOf(scan("SRC"), CATALOGUE));
+    expect(schemaOf(carried, CATALOGUE), "and one that carries it, answers")
+      .to.deep.equal(CATALOGUE.SRC);
   });
 
   it("takes the catalogue as an argument, so it needs no running system", () => {

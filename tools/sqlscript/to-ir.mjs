@@ -22,7 +22,8 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, bin, call, cast, scan, varRef, filter, project, join, union, order} from "../sqlscript-ir.mjs";
+import {T, col, lit, param, bin, call, cast, scan, refTo, filter, project, join, union, order,
+  schemaOf} from "../sqlscript-ir.mjs";
 
 export class BindError extends Error {
   constructor(message, node) {
@@ -178,7 +179,17 @@ export function toIr(tree, options = {}) {
         // reading one silently would be plausible and wrong
         throw new BindError(`unknown table variable :${name.toLowerCase()}`, host);
       }
-      return known.handle === undefined ? known.rel : varRef(name);
+      if (known.handle === undefined) {
+        // the ordinary case: an assignment is not an observable barrier on
+        // HANA, so the plan goes in where the FROM stands
+        return known.rel;
+      }
+      // a barrier materialised it. `ref` is the one node whose columns cannot
+      // be derived from what is under it, because nothing is; the schema has
+      // to be carried, and the moment it is known is the moment the barrier
+      // was made. refTo() puts it there -- a bare ref is refused by
+      // schemaOf, so the right path is also the shorter one (fable-osd).
+      return refTo(known.handle, schemaOf(known.rel, catalogue));
     }
     const sub = kid(node, "SetOperation");
     if (sub !== undefined) return relation(sub);
