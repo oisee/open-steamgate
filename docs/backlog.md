@@ -2930,6 +2930,11 @@ O.3  An AMDP method as the oracle, on three sides            [S]  near-term
 
 ## 0. Decisions waiting on Alice
 
+**Four of them were answered on 2026-09-19 and are recorded below the block.
+0.1 is retired: it asked whether to package as a Bun binary, and the binary
+exists and builds (`npm run binary`), so the gate was removed by fact rather
+than by decision.** What is left open is 0.7 only.
+
 Nothing below them starts until the answer.
 
 ```
@@ -2977,6 +2982,33 @@ Nothing below them starts until the answer.
 0.7  What S does while the above is open                              [A]
      └─ proposal: the analytics chain, 3.1
 ```
+
+### Answered 2026-09-19
+
+**0.3 — A4H, what goes up: a ladder, not a choice.** Level 1 first; on
+success level 2; on success level 3. Each rung is a gate for the next, so a
+failure at 1 stops the climb rather than being worked around. Still needed
+before the first rung: **package name and transport**.
+
+**0.4 — draft oracle: find out whether it is a SEGW artefact first.** One
+cheap query instead of the full build. The risk named in
+`docs/oracle-draft.md` is that a writable draft service may not be a SEGW
+artifact at all, in which case the whole question dissolves and the build
+would have been wasted. Measure the premise before paying for the
+experiment.
+
+**0.5 — RAP oracle: `SAP-samples/abap-platform-refscen-flight`, without
+A4H.** Apache-2.0 and already most of the oracle. A4H would add only the
+1909 BDEF dialect, and A4H 1909 is unmanaged-only — no managed, no draft —
+so half of RAP is unreachable there in principle. Nothing is asked of anyone
+and nothing is risked.
+
+**0.6 — `ZADT_VSP` as the fast path, clean ADT attempted, plain abapGit as
+the mandatory fallback.** Three routes in that order, and the last one is
+not optional: the product may not require a bridge to be installed before it
+can be used. The fast path is an optimisation for systems that have it.
+
+---
 
 ---
 
