@@ -31,7 +31,7 @@ import {parse} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
 import {bodiesOf, classesIn} from "./coverage.mjs";
-import {adversarialRows, tableShapesFor, effects} from "../sqlscript-ir.mjs";
+import {adversarialRows, tableShapesPerTable, effects} from "../sqlscript-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
 import {runBothWays, compare} from "../sqlscript-eager.mjs";
 
@@ -75,18 +75,26 @@ const plausible = (type, n) => (type?.abap === "I" ? n + 1
 
 /** Build the tables the plan reads, fill them, and hand back the schema.
  *
- *  Every table gets every column the plan mentions. That is not sloppiness:
- *  a column reference in this IR is a bare name and the plan genuinely
- *  cannot say which table it came from (`ambiguous`), so the choice is
- *  between giving each table all of them and inventing an attribution.
- *  Inventing one would decide the very thing we do not know. */
+ *  The first version gave **every table every column**, and it was the
+ *  reason seven bodies died on `Ambiguous reference to column name`: two
+ *  tables both carrying `A` make `A` mean nothing, which is the very
+ *  ambiguity the plan had. fable-osd's `attributeColumns` reads the
+ *  attribution out of the join predicate instead -- `ON a = b` compares one
+ *  side with the other, so `a` lives under the left subtree and `b` under
+ *  the right -- and says nothing where nothing can be read: a self-join, or
+ *  a side holding more than one table. A column nobody can place stays
+ *  `unattributed`, and a body with one is **refused rather than run**,
+ *  because a fixture we cannot describe is not evidence. */
 async function build(client, shapes, hazards) {
+  const columnsOf = (table) => Object.entries(shapes.perTable[table] ?? {}).map(([c, one]) => [c, one.type]);
+  if (shapes.tables.every((t) => columnsOf(t).length === 0)) return undefined;
+
   const schema = {};
   for (const [name, one] of Object.entries(shapes.columns)) schema[name] = one.type;
-  const columns = Object.entries(schema);
-  if (columns.length === 0) return undefined;
 
   for (const table of shapes.tables) {
+    const columns = columnsOf(table);
+    if (columns.length === 0) continue;
     await client.native({sql: `DROP TABLE IF EXISTS "${table}"`, expect: "none"});
     await client.native({
       sql: `CREATE TABLE "${table}" (${columns.map(([c, t]) => `"${c}" ${duckType(t)}`).join(", ")})`,
@@ -96,8 +104,8 @@ async function build(client, shapes, hazards) {
     for (let n = 0; n < 2; n += 1) rows.push(columns.map(([, t]) => plausible(t, n)));
     // and the rows the plan asked for, each one changing only its own column
     for (const hazard of hazards) {
-      const row = columns.map(([c, t]) => (c === hazard.column ? hazard.value : plausible(t, 0)));
-      rows.push(row);
+      if (!columns.some(([c]) => c === hazard.column)) continue;
+      rows.push(columns.map(([c, t]) => (c === hazard.column ? hazard.value : plausible(t, 0))));
     }
     for (const row of rows) {
       await client.native({
@@ -115,7 +123,8 @@ export async function run(root, limit = Infinity) {
   const client = new DuckDBDatabaseClient({path: ":memory:"});
   await client.connect();
 
-  const report = {lowered: 0, ran: 0, canDiverge: 0, diverged: [], refused: new Map(), writes: 0};
+  const report = {lowered: 0, ran: 0, canDiverge: 0, diverged: [], refused: new Map(), writes: 0,
+    unplaceable: 0, multiTable: 0};
   try {
     for (const one of lowerable(root)) {
       report.lowered += 1;
@@ -125,9 +134,26 @@ export async function run(root, limit = Infinity) {
         report.writes += 1;
         continue;
       }
-      const shapes = tableShapesFor(one.ir.rel);
+      const shapes = tableShapesPerTable(one.ir.rel);
       if (shapes.tables.length === 0) {
         report.refused.set("reads no table", (report.refused.get("reads no table") ?? 0) + 1);
+        continue;
+      }
+      // Counted **before** the refusal below, because a counter placed after
+      // the branch that removes its own subjects prints an impossible
+      // sentence: the first run of this said "1 of the bodies read more than
+      // one table; 11 of those were refused". Arithmetic that cannot be true
+      // is the friendly kind of defect -- it announces itself.
+      if (shapes.tables.length > 1) report.multiTable += 1;
+      // **A column nobody can place is a refusal, not a guess.** With one
+      // table it cannot happen; with several it means the join predicate did
+      // not say where the column lives -- a self-join, or a side that is
+      // itself a join. Running anyway would need a fixture whose meaning we
+      // could not state, and a comparison on one of those proves nothing
+      // about either engine.
+      if (shapes.tables.length > 1 && shapes.unattributed.length > 0) {
+        report.unplaceable += 1;
+        report.refused.set("a column no join predicate can place", (report.refused.get("a column no join predicate can place") ?? 0) + 1);
         continue;
       }
       let schema;
@@ -184,6 +210,9 @@ if (basename(process.argv[1] ?? "") === "run-corpus.mjs") {
   for (const one of report.diverged) {
     console.log(`\n  ${one.file} ${one.method}: ${one.verdict.kind ?? "disagreed"}`);
   }
+  console.log(`\n${report.multiTable} of the bodies read more than one table; ${report.unplaceable} of those were refused`);
+  console.log("because a column was named only by an outer predicate whose side holds more than one table,");
+  console.log("or by a self-join -- nobody can say which table it belongs to, so nobody builds it a fixture.");
   if (report.writes > 0) console.log(`\n${report.writes} refused before running: the plan writes`);
   if (report.refused.size > 0) {
     console.log("\ncould not be run:");
