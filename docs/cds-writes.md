@@ -170,3 +170,32 @@ two-level view is a sentence somebody then spends an evening on:
 And a projection that never asked to be written is **left alone** rather than
 refused: "did not ask" and "could not" are different answers, and the pass
 must not turn the first into the second.
+
+## Activating a view is a weaker claim than activating a class (2026-09-19)
+
+G.8's CDS half, measured before any screen work:
+
+- a **class**'s dependents are **sources**, and the registry is the truth
+- a **view**'s dependents are **generated**, and the registry lags by one
+  generation
+
+Rename a field in `ZC_OSD_PACK` and `activate` answers `active: true,
+issues: 0, dependents: 0`. Five candidates *are* found — the CDS registry,
+the generated source class, a DPC — and **not one fails its own check**,
+because they still hold the previous shape and agree with each other. The
+build then fails naming a consumer (`zcl_zosd_status_dpc:43`) and never the
+view somebody edited.
+
+The end-to-end behaviour was already honest — `publish()` runs the build and
+the screen says "the check held and the build did not" — but the *reason*
+came from the wrong object. So the check now names the shape change where
+the person is:
+
+```
+W: DESCRIPTION is in the generated view ZVOSDPACK and no longer in
+   ZC_OSD_PACK: whatever reads it breaks when this is generated again
+```
+
+A warning rather than an error: the view is fine, and the consequence lands
+elsewhere. A view whose shape did not change says nothing, which is what
+makes the warning worth reading.

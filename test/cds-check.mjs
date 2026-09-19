@@ -52,6 +52,26 @@ describe("a CDS view is checked by the thing that has to read it", function () {
     expect(issues[0].message).to.contain("ZC_OSD_PACK");
   });
 
+  // The difference between a class and a view, and it is the whole of G.8's
+  // CDS half: a class's dependents are SOURCES and the registry is the
+  // truth; a view's are GENERATED and the registry lags by one generation.
+  // Measured: rename a field and five candidates are found -- the registry,
+  // the source class, a DPC -- and not one fails its own check, because they
+  // still hold the previous shape and agree with each other. The build then
+  // fails naming a consumer and never the view.
+  it("names the field that left the view, which the build never does", () => {
+    const issues = checkWith((s) => s.replace("description as Description", "description as Renamed"));
+    expect(issues, "activation said active, 0 issues, 0 dependents").to.have.length.greaterThan(0);
+    expect(issues[0].message).to.contain("DESCRIPTION");
+    expect(issues[0].message, "and where it still is").to.contain("ZVOSDPACK");
+    expect(issues[0].severity, "a warning: the view is fine, the consequence lands elsewhere").to.equal("W");
+  });
+
+  it("and a view whose shape did not change says nothing, so the warning means something", () => {
+    expect(checkWith((s) => s.replace("@EndUserText.label: \'Folders\'", "@EndUserText.label: \'Directories\'")))
+      .to.deep.equal([]);
+  });
+
   it("and the file is restored, or this suite breaks the tree it measures", () => {
     expect(readFileSync(FILE, "utf8")).to.contain("define view");
   });

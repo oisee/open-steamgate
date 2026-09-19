@@ -209,6 +209,27 @@ function ddlsIssues(registry, object) {
     issues.push({severity: "E", rule: "cds",
       message: `the element ${name} names an association ${view.source} does not expose`, ...at});
   }
+  // **A view's consumers are GENERATED, so at check time they are stale.**
+  // Measured: rename a field and five candidates are found -- the registry,
+  // the source class, a DPC -- and not one of them fails its own check,
+  // because they still hold the previous shape and are consistent with each
+  // other. The build then fails, naming a consumer and never the view.
+  //
+  // So the shape change is named here, where the person is: the field that
+  // the generation exposes and the source no longer has. This is the
+  // sentence the build never says.
+  const generated = registry.getObject("VIEW", view.sqlView);
+  if (generated !== undefined) {
+    const exposed = [...(generated.parseType?.(registry)?.getComponents?.() ?? [])].map((c) => c.name.toUpperCase());
+    const now = new Set((view.fields ?? []).filter((f) => !f.virtual).map((f) => String(f.name).toUpperCase()));
+    const gone = exposed.filter((c) => !now.has(c));
+    if (gone.length > 0) {
+      issues.push({severity: "W", rule: "cds",
+        message: `${gone.join(", ")} ${gone.length === 1 ? "is" : "are"} in the generated view ` +
+          `${view.sqlView} and no longer in ${view.name}: whatever reads ${gone.length === 1 ? "it" : "them"} ` +
+          "breaks when this is generated again", ...at});
+    }
+  }
   if (view.write?.asked === true && view.write?.writable !== true) {
     issues.push({severity: "W", rule: "cds",
       message: `the view asks to be written and is not: ${view.write.why}`, ...at});
