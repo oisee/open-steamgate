@@ -627,9 +627,28 @@ the context (nodes, lead selection, cardinalities, supply functions -- the
 largest piece), the phase model, and drawing with **our own** HTML rather
 than imitating Unified Rendering.
 
-Seven waves. The first is a **corpus measurement designed to close the track
-in a day** if what is out there is mostly Floorplan Manager -- the cheapest
-possible way to be wrong about this.
+Seven waves. The first was to be a corpus measurement designed to close the
+track in a day. **It was run on 2026-09-19 and it did not close it**
+([`docs/webdynpro-measured.md`](webdynpro-measured.md)): against 2710
+components and 151,000 controller method bodies on the sandbox, **25
+framework methods cover 80% of all framework calls and 62 cover 90%** --
+overwhelmingly the context API. The critic expected a long tail, which would
+have ended the track for the price of an afternoon; the tail is there (661 of
+4,735 declared methods are called at all) but the head is small enough to
+build.
+
+What the same review **did** kill is the original argument, and the author
+withdrew it: the data boundary is not where the proposal put it (real
+controllers reach the outside through a model, and in the one real component
+available that model is BOPF), the seam is statement-level so one round trip
+becomes N, and any sound server-side re-validation reconstructs the round
+trip the track existed to remove. What survives is the other product --
+**Web Dynpro running with no system behind it at all**, in the preview where
+the ABAP and the database are already in the page, where none of those three
+objections applies because there is no remote call. The beachhead moves from
+a plain component to an **FPM feeder** (687 of them on the sandbox): an
+ordinary ABAP class that transpiles today, with no generated controller and
+no context API, whose screen is a configuration file.
 
 **The security rule is written before the speed, on purpose:** a handler run
 in the browser is a **prediction, not a decision**. An `AUTHORITY-CHECK` in a
