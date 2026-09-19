@@ -29,6 +29,7 @@
     "test/osd-store.mjs",
     "test/osd-unit.mjs",
     "test/osd-xref.mjs",
+    "test/replay-compare.mjs",
     "test/rfc-live.mjs",
     "test/rfc-replay.mjs",
     "test/sapevent.mjs",

@@ -67,6 +67,7 @@
     "parked": "node tools/osd-parked.mjs",
     "leak": "node tools/osd-leak-scan.mjs .",
     "naming": "node tools/osd-naming-scan.mjs",
+    "replay": "node tools/osd-replay.mjs",
     "leak:all": "node tools/osd-leak-scan.mjs . --all",
     "osd:restart": "sh scripts/osd-restart.sh"
   },

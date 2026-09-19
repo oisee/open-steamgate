@@ -732,8 +732,16 @@ paid for differently.
    builder an OData `$filter` goes through). Deployed and read back on the
    i7. What is left is not on the critical path: sort by clicking a column,
    and a link from a row to the object that owns it.
-3. **W.1 minimum** — the request log, its replay and the first sieve. See
-   W.1 for why this comes before G.10 and not after it.
+3. **W.1 minimum** — the request log, its replay and the first sieve.
+   **Done 2026-09-19**: `tools/osd-replay.mjs` (`npm run replay`),
+   `test/request-log.json` as a tracked list of calls rather than a capture,
+   suite `test/replay-compare.mjs`. Calibrated the way W.1 asks — one system
+   served **twice, in two processes**, silent — and every normaliser rule was
+   put there by that run rather than predicted; the one it found was the
+   process id in `zcl_osd_webgui`'s identity line. An approved difference
+   takes a reason from the start. What is left of W.1 is the branch plumbing
+   (a ref into a worktree, its own port and database file) and then the
+   second sieve, SQL at the O.1 seam.
 4. **G.10, the ST05-shaped SQL trace** — a screen over a log that W.1 will
    by then be filling, which is what makes it nearly free.
 

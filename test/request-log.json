@@ -1,0 +1,18 @@
+{
+  "note": "The calls W.1 replays against two branches of a system. A tracked list rather than a capture, because the property this instrument needs first is that somebody else can reproduce the comparison. Keep it broad rather than deep: one call per kind of answer, so a normaliser that starts hiding differences is caught by some other kind.",
+  "calls": [
+    {"path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata"},
+    {"path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json"},
+    {"path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json&$top=2&$orderby=TravelID"},
+    {"path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json&$filter=Status%20eq%20'A'"},
+    {"path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json&$inlinecount=allpages"},
+    {"path": "/sap/opu/odata/sap/ZSTG_SADL_SRV/$metadata"},
+    {"path": "/sap/bc/osd/se16/"},
+    {"path": "/sap/bc/osd/se16/?t=ZC_STG_TRAVEL"},
+    {"path": "/sap/bc/osd/se16/?t=ZC_STG_TRAVEL&f_status=A"},
+    {"path": "/sap/bc/osd/se16/?t=ZC_STG_TRAVEL&c=TRAVELID,STATUS"},
+    {"path": "/sap/bc/gui/sap/its/webgui/"},
+    {"path": "/sap/bc/adt/core/http/build"},
+    {"path": "/sap/bc/osd/rfc/functions"}
+  ]
+}
