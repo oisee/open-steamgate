@@ -403,3 +403,35 @@ out every run, and it named constructs that really do occur. What made it
 false was that it measured our diagnostics rather than the corpus. The check
 that found it was cheap and is the one we keep having to relearn: **open one
 of the things the number is about and look at it.**
+
+### Constructs named by the honest histogram: 30 → 37 lowered
+
+| | bodies | parsed | lowered |
+| --- | ---: | ---: | ---: |
+| working | 370 | 34 → **48** | 30 → **37 (10%)** |
+
+Five constructs, every one of them named by the corpus rather than chosen:
+
+- **`:=`**, SQLScript's assignment operator, which the grammar simply lacked.
+- **`BEGIN SEQUENTIAL EXECUTION` / `PARALLEL EXECUTION`** -- real SQLScript
+  that nobody here had heard of.
+- **`$ABAP.TYPE( … )`** -- AMDP's own typing syntax, in no SQL dialect. It is
+  a *type*, so the lowering must make it disappear at the boundary; a
+  statement carrying it that still ran would be the case of "works and means
+  something else".
+- **a table function call in `FROM`**, `FROM "CL_X=>GET_ROWS"( … )`: one AMDP
+  calling another, its name a quoted identifier because that is how the
+  generated procedure is named.
+- **`IF … THEN … END IF`**, which had been hiding behind its opening bracket.
+
+**And the new top of the list was not a construct either.** Following the
+rule that has now paid three times -- open one of the bodies the number is
+about -- the 40 bodies "stopping at `*`" begin with `* a comment`: an **ABAP**
+full-line comment, because an AMDP body lives inside an ABAP method and the
+ABAP conventions leak into it. Unambiguous only by column: a `*` anywhere
+else is multiplication, and `SELECT *` has to keep working.
+
+The other ABAP comment is deliberately **not** handled: `"` begins a comment
+in ABAP and a quoted identifier in SQLScript, so the same character is a name
+in one language and a comment in the other. Guessing would silently delete
+half a statement, which is the shape of defect this project keeps paying for.

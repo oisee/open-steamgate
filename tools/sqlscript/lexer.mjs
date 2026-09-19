@@ -100,6 +100,32 @@ export function lex(source, options = {}) {
       continue;
     }
 
+    // An ABAP full-line comment: `*` in **column one**.
+    //
+    // A SQLScript body is not written in a file of its own -- it lives
+    // inside an ABAP method, so the ABAP comment conventions leak into it,
+    // and 40 corpus bodies begin with one. It is unambiguous only because of
+    // the column: `*` anywhere else is multiplication, and `SELECT *` must
+    // keep working.
+    //
+    // The other ABAP comment, `"` to the end of the line, is **not** handled
+    // and must not be guessed at: in SQLScript a double quote opens a quoted
+    // identifier, so the same character means a name in one language and a
+    // comment in the other. Treating it as a comment would silently delete
+    // half a statement.
+    if (c === "*" && col === 1) {
+      let j = i;
+      while (j < source.length && source[j] !== "\n") {
+        j += 1;
+      }
+      const text = source.slice(i, j);
+      advance(j - i);
+      if (keepComments) {
+        push(TokenKind.comment, text, startLine, startCol);
+      }
+      continue;
+    }
+
     // -- to the end of the line
     if (c === "-" && source[i + 1] === "-") {
       let j = i;

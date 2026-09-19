@@ -99,10 +99,21 @@ export class Source extends Expression {
   getRunnable() {
     return seq(altPrio(
       seq("(", new SetOperation(), ")"),
+      new TableFunctionCall(),
       tok(TokenKind.host),
       tok(TokenKind.temp),
       new ColumnRef()),
       opt(seq(opt(str("AS")), tok(TokenKind.identifier))));
+  }
+}
+
+/** `FROM "CL_X=>GET_ROWS"( :iv_a, 1 )` -- one AMDP table function calling
+ *  another. The name arrives as a **quoted identifier** because that is how
+ *  the generated procedure is named, which is why this is not an ordinary
+ *  function call: 45 bodies stopped at the bracket after it. */
+export class TableFunctionCall extends Expression {
+  getRunnable() {
+    return seq(new Name(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
   }
 }
 
@@ -147,15 +158,19 @@ export class SetOperation extends Expression {
  *  (docs/sqlscript-hana-observed.md) */
 export class Assignment extends Expression {
   getRunnable() {
-    return seq(new Name(), "=", new SetOperation(), ";");
+    // `:=` is SQLScript's assignment operator and the grammar simply did not
+    // have it: 27 bodies, named by the corpus once failures pointed at the
+    // right token
+    return seq(new Name(), altPrio(":=", "="),
+      altPrio(new SetOperation(), new Expr()), ";");
   }
 }
 
 /** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
 export class TypeName extends Expression {
   getRunnable() {
-    return seq(tok(TokenKind.identifier),
-      opt(seq("(", tok(TokenKind.number), star(seq(",", tok(TokenKind.number))), ")")));
+    return altPrio(new AbapType(), seq(tok(TokenKind.identifier),
+      opt(seq("(", tok(TokenKind.number), star(seq(",", tok(TokenKind.number))), ")"))));
   }
 }
 
@@ -192,15 +207,47 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new Block(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new Block(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }
 
-/** `BEGIN ... END` -- second on the list, 91 bodies */
+/** `BEGIN … END`, and the two forms HANA allows in front of it.
+ *
+ *  `BEGIN SEQUENTIAL EXECUTION` and `BEGIN PARALLEL EXECUTION` are real
+ *  SQLScript and nobody here had heard of either: they were named by the
+ *  corpus once the failure positions stopped lying (33 bodies). */
 export class Block extends Expression {
   getRunnable() {
-    return seq(str("BEGIN"), star(new Statement()), str("END"), opt(";"));
+    return seq(str("BEGIN"),
+      opt(seq(altPrio(str("SEQUENTIAL"), str("PARALLEL")), str("EXECUTION"))),
+      star(new Statement()), str("END"), opt(";"));
+  }
+}
+
+/** `IF cond THEN … ELSEIF … ELSE … END IF;` -- the imperative conditional,
+ *  which the honest histogram put at the top through its opening bracket */
+export class If extends Expression {
+  getRunnable() {
+    return seq(str("IF"), opt("("), new Condition(), opt(")"), str("THEN"),
+      star(new Statement()),
+      star(seq(str("ELSEIF"), opt("("), new Condition(), opt(")"), str("THEN"), star(new Statement()))),
+      opt(seq(str("ELSE"), star(new Statement()))),
+      str("END"), str("IF"), ";");
+  }
+}
+
+/** `$ABAP.TYPE( SWP_INITIA )` -- AMDP's own typing syntax.
+ *
+ *  It exists in **no SQL dialect**. It is a type, not an expression, so it
+ *  has to disappear at the boundary rather than travel to an engine: a
+ *  statement carrying it that still runs would be the case of "works and
+ *  means something else". */
+export class AbapType extends Expression {
+  getRunnable() {
+    // `$ABAP` lexes as one identifier, because `$` is a name character
+    return seq(str("$ABAP"), ".", str("TYPE"),
+      "(", star(altPrio(tok(TokenKind.identifier), tok(TokenKind.number), ",")), ")");
   }
 }
 
