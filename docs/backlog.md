@@ -793,10 +793,17 @@ files:
 - **E.4**, the Zork console not fitting its box.
 - **B.14** and **B.15**, one build each.
 - then **D.3**, the signature → metadata graph, since D.1 put the channel
-  under it.
+  under it. **Half done**: the channel answers the resolved type closure;
+  the codecs are the bridge's half. And the premise the entry rested on was
+  false — there is no `ADTRestGraph` in the bridge, so the contract is ours
+  and declared rather than matched.
+- and out of D.3, **the data preview's own types**: a table field typed by a
+  data element showed no type and no letter at all, six of 1041 in this
+  tree. Fixed with the same resolver.
 
-**Together, later**: **B.1**, SADL beyond read-only — the largest of the
-waiting ones, split by read and write.
+**Together, next**: **B.1**, SADL beyond read-only — the largest of the
+waiting ones, split by read and write. This session takes **reads**
+(associations in a projection); fable-osd takes writes when B.9 is done.
 
 **Deliberately not taken**: **B.18**, the release bundle 3.5x slower. The rule
 "no performance number is taken through a release bundle" already closed the
