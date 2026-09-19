@@ -142,6 +142,31 @@ export function uproot(name, {root = process.cwd()} = {}) {
   return {name: safe, database};
 }
 
+/**
+ * What a planted branch does NOT isolate, said out loud.
+ *
+ * `tools/osd-worktree.mjs` shares `node_modules`, `.local/lars` and
+ * `.local/tls` by symlink, and for the first and third that is plainly
+ * right. For the **library clones** it is not a detail: every worktree's
+ * `.local/lars` resolves to ONE directory, so there is no private checkout
+ * of open-abap-core -- there is one checkout, and whoever moves it moves it
+ * for every branch at once, in the middle of whatever they are measuring.
+ *
+ * It surfaced as a disagreement about a count: 1140 objects against 1134,
+ * with the repository's own objects matching exactly at 420, so all six of
+ * the difference came from libraries the two sessions believed they each
+ * had (2026-09-19).
+ *
+ * A branch is therefore isolated in its sources, its port, its database and
+ * its build -- and NOT in its libraries. A tool that promises isolation has
+ * to name what it does not isolate, or the promise is the wider claim.
+ */
+export const NOT_ISOLATED = [
+  {path: "node_modules", why: "the install is shared; a ref that changes the dependencies is reported by `missing`"},
+  {path: ".local/lars", why: "ONE checkout of the library clones, shared by every worktree at once"},
+  {path: ".local/tls", why: "the certificate a client was told to trust"},
+];
+
 export function planted(root = process.cwd()) {
   return list(root).filter((w) => resolve(w.path).includes(resolve(root, WORKTREES)))
     .map((w) => ({...w, name: basename(w.path), database: databaseFor(basename(w.path), root)}));
@@ -190,6 +215,8 @@ if (basename(process.argv[1] ?? "") === "osd-branch.mjs") {
       console.log(`            ${spec.missing.join(", ")}`);
       console.log("            npm install inside the worktree, or every measurement is about another program");
     }
+    console.log("  shared, NOT isolated:");
+    for (const one of NOT_ISOLATED) console.log(`    ${one.path.padEnd(14)} ${one.why}`);
     console.log(`\n  cd ${spec.path} && STG_PORT=${spec.port} STG_DB=file STG_DB_PATH=${spec.database} node test/run.mjs`);
     process.exit(0);
   }

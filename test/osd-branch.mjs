@@ -73,3 +73,21 @@ describe("the environment is what makes the server the branch's own", () => {
     expect(environmentFor({port: 1, database: "x"}, {trace: "t.ndjson"}).STG_SQL_TRACE).to.equal("t.ndjson");
   });
 });
+
+// A tool that promises isolation has to name what it does not isolate, or
+// the promise is the wider claim.
+describe("what a branch does not isolate is listed, not implied", () => {
+  it("names the library clones, which are ONE checkout shared by every worktree", async () => {
+    const {NOT_ISOLATED} = await import("../tools/osd-branch.mjs");
+    const lars = NOT_ISOLATED.find((one) => one.path === ".local/lars");
+    expect(lars, "the sharing that cost a count").to.not.equal(undefined);
+    expect(lars.why).to.contain("ONE checkout");
+  });
+
+  it("and every entry says why, because a list of exceptions without reasons is a list of excuses", async () => {
+    const {NOT_ISOLATED} = await import("../tools/osd-branch.mjs");
+    for (const one of NOT_ISOLATED) {
+      expect(one.why, one.path).to.be.a("string").and.have.length.greaterThan(20);
+    }
+  });
+});

@@ -3396,3 +3396,29 @@ than the cost it saves.
 The test that matters runs both versions on a real DuckDB and compares the
 tables: the claim is not "the text is equivalent", it is "the rows are the
 same". `npm run unit`, `unit:file` and `unit:duckdb` are green.
+
+### What a planted branch does not isolate (2026-09-19)
+
+`osd-branch` isolates a branch's **sources, port, database and build**. It
+does not isolate its **libraries**, and that is not a detail:
+
+```
+.local/worktrees/<any>/.local/lars  ->  /home/alice/.../open-steamgate/.local/lars
+```
+
+Every worktree's `.local/lars` resolves to **one directory**. There is no
+private checkout of `open-abap-core` — there is one checkout, and whoever
+moves it moves it for every branch at once, in the middle of whatever
+another session is measuring.
+
+It surfaced as a disagreement about a count: 1140 objects against 1134, with
+the repository's own objects matching **exactly** at 420, so all six of the
+difference came from libraries the two sessions each believed they had.
+
+So the earlier clean-tree numbers (2 failures, then 0; then 0 / 0 / 0) are
+clean of **repository content and `$HOME`**, and not of libraries. The tests
+in question do not depend on that part of `open-abap-core`, so the numbers
+stand — but the boundary was stated more widely than it was measured, which
+is the thing this tree keeps paying for, and naming it is the repair.
+`tools/osd-branch.mjs` prints the list, with a reason per entry, on every
+`add`.
