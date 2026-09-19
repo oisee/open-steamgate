@@ -188,10 +188,14 @@ export async function runOnInventedTables(client, rel, dialect, {rows = 3} = {})
     return {skipped: "the plan reads no table, so there is nothing to invent"};
   }
   if (shapes.ambiguous) {
-    // a column reference is a bare name and the plan cannot say which table
-    // it belongs to; inventing both tables with all the columns would run,
-    // and would be a fixture nobody could reason about
-    return {skipped: `the plan reads ${shapes.tables.length} tables and a column cannot be attributed to one`};
+    // More than one SCAN, which is not the same as more than one table: the
+    // same table scanned twice is a self-join, and a bare column name still
+    // matches twice. Inventing tables here would run and would be a fixture
+    // nobody could reason about.
+    const how = shapes.tables.length === 1
+      ? `reads ${shapes.tables[0]} twice, so a bare column name matches twice`
+      : `reads ${shapes.tables.length} tables and a column cannot be attributed to one`;
+    return {skipped: `the plan ${how}`};
   }
   const table = shapes.tables[0];
   const columns = Object.entries(shapes.columns);

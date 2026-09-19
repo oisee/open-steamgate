@@ -378,6 +378,19 @@ describe("SQLScript IR: attributing a bare column to a table", () => {
     expect(shapes.unattributed, "the predicate attributed both").to.be.empty;
   });
 
+  it("the same table scanned twice is ambiguous, although there is only one table", async () => {
+    const {tableShapesFor, tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
+    // the engine says `Ambiguous reference to table` - and counting distinct
+    // names said one table and looked fine right up until it ran
+    const rel = join(scan("IT_CONF"), scan("IT_CONF"), bin("=", col("A"), col("B"), T.bool));
+    const flat = tableShapesFor(rel);
+    expect(flat.tables).to.deep.equal(["IT_CONF"]);
+    expect(flat.scans, "two scans, one name").to.equal(2);
+    expect(flat.ambiguous, "ambiguity follows the scans, not the names").to.equal(true);
+    expect(tableShapesPerTable(rel).attributed, "naming the same table for both sides attributes nothing")
+      .to.be.empty;
+  });
+
   it("a self-join on the same column name attributes nothing, and says so", async () => {
     const {tableShapesPerTable} = await import("../tools/sqlscript-ir.mjs");
     // the same name on both sides: the predicate cannot tell them apart, and

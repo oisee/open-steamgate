@@ -407,7 +407,7 @@ export function tableShapesFor(rel) {
 
   const walk = (r) => {
     if (r === undefined) return;
-    if (r.rel === "scan") tables.set(r.table, true);
+    if (r.rel === "scan") tables.set(r.table, (tables.get(r.table) ?? 0) + 1);
     walkExpr(r.pred);
     for (const item of r.items ?? []) walkExpr(item.expr);
     for (const agg of r.aggs ?? []) walkExpr(agg.expr);
@@ -417,15 +417,20 @@ export function tableShapesFor(rel) {
   };
   walk(rel);
 
-  // one table or several, the columns cannot be told apart by the plan: a
-  // reference is a bare name. With one table that is exact; with more it is
-  // said rather than hidden.
+  // A bare column name is unattributable whenever the plan holds **more than
+  // one scan** - not more than one table. Counting distinct names missed the
+  // case that matters: the same table scanned twice is a self-join, the
+  // engine says `Ambiguous reference to table`, and the plan looked
+  // single-table right up until it ran. Found in the corpus, by the engine,
+  // which is the wrong place to find it.
   const names = [...tables.keys()];
+  const scans = [...tables.values()].reduce((a, b) => a + b, 0);
   const columns = Object.fromEntries([...seen].map(([name, one]) => [name, one]));
   return {
     tables: names,
+    scans,
     columns,
-    ambiguous: names.length > 1,
+    ambiguous: scans > 1,
     guessed: Object.entries(columns).filter(([, one]) => one.guessed).map(([name]) => name),
   };
 }
@@ -475,7 +480,11 @@ export function attributeColumns(rel) {
       // usually attributes the inner columns. What is left over is a column
       // mentioned only by an outer predicate whose side holds more than one
       // table - and for that, nobody knows.
-      if (left.length === 1 && right.length === 1) {
+      // and the two sides must be DIFFERENT tables. The same table on both
+      // sides is a self-join: naming it for both columns looks like
+      // attribution and attributes nothing, because both scans are that
+      // table and a bare name still matches twice.
+      if (left.length === 1 && right.length === 1 && left[0] !== right[0]) {
         owner.set(r.on.left.name, left[0]);
         owner.set(r.on.right.name, right[0]);
       }
