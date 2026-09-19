@@ -39,6 +39,7 @@
     "test/segw-shlp.mjs",
     "test/segw-tree.mjs",
     "test/segw.mjs",
+    "test/sql-trace.mjs",
     "test/sqlscript-canary.mjs",
     "test/sqlscript-check.mjs",
     "test/sqlscript-clause-audit.mjs",

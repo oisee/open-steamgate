@@ -2963,3 +2963,44 @@ what Lars said on transpiler#1836: a branch inside the repository triggers
 the regression and performance suites and a fork's branch triggers neither.
 Write access is the deciding factor; `oisee` had none on open-abap-core
 (403) and #1218 went as a fork.
+
+## W.1 second sieve — the SQL a system actually ran (2026-09-19)
+
+`STG_SQL_TRACE=<file.ndjson>` records every statement the chosen client is
+asked for; `npm run sql:compare -- a.ndjson b.ndjson [--rule literals]`
+compares two of them. `tools/osd-sql-trace.mjs`, suite `test/sql-trace.mjs`.
+
+**Why this sieve and not another.** The database seam is the one place where
+being wrong is invisible from outside: a missing MANDT, a different ORDER BY,
+an N+1 where the system issues one statement, a different FOR ALL ENTRIES
+chunking — every one can produce the right answer by accident and none of
+them shows in a response body. And our side is nearly free, because all
+transpiled ABAP talks to exactly one object with eleven methods, so there is
+one interception point and no new protocol.
+
+The tracer is installed in `test/setup.mjs` rather than in a client. Six
+paths there choose six different clients, and a tracer written into one of
+them is a tracer the other five do not have.
+
+**Calibrated, not asserted.** Two `npm run unit` runs, in two processes,
+7075 statements each:
+
+- before any rule but whitespace: **34 of 7075 differ**, first at 5398
+- every one of the 34 came from `ZOSD_TSES` — a session id built from the
+  clock, its `created`/`touched` stamps, and the 16 reads carrying that id
+  in a WHERE
+- with one rule for exactly that: **identical, 7075 statements**
+
+The rule is narrow on purpose — a 32-digit run and a date-shaped 14-digit
+stamp, never `\d+` — and the suite asserts both halves: that two runs differ
+without it, and that a `LIMIT 100`, a row count and an eight-digit key
+survive it. The first sieve nearly masked its own row counts with a rule
+that wide, and a check that cries wolf gets turned off.
+
+Literals are **not** masked by default. Two systems of ours hold the same
+data, so a different value is a difference until somebody says otherwise;
+`--rule literals` is for the day the other side is a real system.
+
+**What is left for O.1**: the other half, an ST05 or ADT trace taken on A4H
+and brought to the same canonical form. That needs the sandbox and therefore
+an ask — the cheap half is done and the ask is now a single one.

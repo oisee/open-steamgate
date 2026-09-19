@@ -1,6 +1,20 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
+import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
+
+/** `STG_SQL_TRACE=<file.ndjson>` records every statement the chosen client is
+ *  asked for -- the second sieve of backlog W.1, and the cheap half of O.1.
+ *
+ *  Here rather than in a client, because all six paths below choose a
+ *  different client and every one of them has to be traceable: a tracer
+ *  written into one client is a tracer the other five do not have. This file
+ *  is the transpiler's `options.setup`, so it is the one place the server,
+ *  the unit run and the browser preview all pass through. */
+function traced(db) {
+  const file = globalThis.process?.env?.STG_SQL_TRACE;
+  return file === undefined || file === "" ? db : installSqlTrace(db, fileSink(file));
+}
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
 // options.setup). Same shape as every open-abap repo: one in-memory DB,
@@ -21,7 +35,7 @@ export async function setup(abap, schemas, insert) {
     preview.schemas = schemas;
     preview.insert = insert;
     db = installTrim(new SQLiteDatabaseClient());
-    abap.context.databaseConnections["DEFAULT"] = db;
+    abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect(preview.stored);
     if (preview.stored === undefined) {
       await db.execute(schemas.sqlite);
@@ -53,7 +67,7 @@ export async function setup(abap, schemas, insert) {
   if (process.env.STG_DB === "hana") {
     const {HanaDatabaseClient, hanaSchema, hanaInserts} = await import("../tools/hana-client.mjs");
     db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1"});
-    abap.context.databaseConnections["DEFAULT"] = db;
+    abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_FRESH !== "1" && await db.hasSchema()) {
       return;
@@ -69,7 +83,7 @@ export async function setup(abap, schemas, insert) {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
     // STG_DB_PATH=some.duckdb keeps the data between runs
     db = new DuckDBDatabaseClient({trace: process.env.STG_DB_TRACE === "1", path: process.env.STG_DB_PATH ?? ":memory:"});
-    abap.context.databaseConnections["DEFAULT"] = db;
+    abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_PATH && await db.hasSchema()) {
       return;
@@ -114,7 +128,7 @@ export async function setup(abap, schemas, insert) {
       copyFileSync(base, path);
     }
     db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
-    abap.context.databaseConnections["DEFAULT"] = db;
+    abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     const found = await db.stampedSchema();
     if (found === wanted) {
@@ -139,7 +153,7 @@ export async function setup(abap, schemas, insert) {
       renameSync(path, aside);
       console.log(`${said}: moved to ${aside}, starting with an empty database`);
       db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
-      abap.context.databaseConnections["DEFAULT"] = db;
+      abap.context.databaseConnections["DEFAULT"] = traced(db);
       await db.connect();
     }
     await db.execute(schemas.sqlite);
@@ -160,7 +174,7 @@ export async function setup(abap, schemas, insert) {
     return;
   }
   db = installTrim(new SQLiteDatabaseClient());
-  abap.context.databaseConnections["DEFAULT"] = db;
+  abap.context.databaseConnections["DEFAULT"] = traced(db);
   // STG_DB_PATH keeps the rows between runs for SQLite too, which is what
   // a runtime that gets recycled needs: it is read here and written when
   // this process is asked to go away (tools/osd-persist.mjs). Without it
