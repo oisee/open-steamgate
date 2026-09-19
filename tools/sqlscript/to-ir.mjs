@@ -23,7 +23,7 @@
 // point of the IR is that the lowering can trust the node names.
 
 import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
-  scan, refTo, filter, project, join, union, order, limit, schemaOf} from "../sqlscript-ir.mjs";
+  subquery, scan, refTo, filter, project, join, union, order, limit, schemaOf} from "../sqlscript-ir.mjs";
 
 export class BindError extends Error {
   constructor(message, node) {
@@ -245,11 +245,21 @@ export function toIr(tree, options = {}) {
     const words = (node.children ?? []).filter((c) => c.node === "word")
       .map((w) => String(w.value).toUpperCase());
     const negated = words.includes("NOT");
-    if (words.includes("EXISTS") || words.includes("IN") && (node.children ?? []).some((c) => c.node === "SetOperation")) {
-      // A subquery is a RELATION, and this IR keeps relations out of
-      // expressions on purpose. Naming the refusal is the point: it says what
-      // is missing rather than typing something that is not there.
-      throw new BindError("a subquery inside a condition is not in the IR yet", node);
+    const inner = kid(node, "SetOperation");
+    if (inner !== undefined) {
+      // A subquery is a relation standing where an expression is expected.
+      // It gets its own node rather than a hole in the wall between the two
+      // halves of the IR: everything that walks relations reaches inside it
+      // by walking `rel`, and nothing learns a second shape.
+      const rel = relation(inner);
+      if (words.includes("EXISTS")) return subquery("exists", rel, undefined, negated);
+      const left = kid(node, "Expr");
+      if (left === undefined) throw new BindError("a subquery compared against nothing", node);
+      if (words.includes("IN")) return subquery("in", rel, expression(left), negated);
+      const op = (node.children ?? []).filter((c) => c.node === "operator" || c.node === "word")
+        .map((o) => String(o.value)).find((v) => COMPARISONS.has(v));
+      if (op === undefined) throw new BindError("a subquery compared without an operator", node);
+      return bin(op, expression(left), subquery("scalar", rel, undefined), T.bool);
     }
     const sides = (node.children ?? []).filter((c) => c.node === "Expr");
     if (words.includes("LIKE")) {

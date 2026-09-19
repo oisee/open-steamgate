@@ -32,7 +32,7 @@ export function compile(body, dialect, catalogue = CATALOGUE) {
   return {ir, ...lower(ir.rel, dialect)};
 }
 
-async function onEngine(label, client, dialect, quote) {
+async function onEngine(label, client, dialect, quote, body = BODY, catalogue = CATALOGUE) {
   const out = {engine: label};
   try {
     await client.native({sql: `CREATE TABLE ${quote("SRC")} (${quote("K")} VARCHAR, ${quote("N")} INTEGER)`, expect: "none"});
@@ -40,7 +40,7 @@ async function onEngine(label, client, dialect, quote) {
       await client.native({sql: `INSERT INTO ${quote("SRC")} VALUES (?, ?)`, expect: "none",
         params: [{name: "k", value: k, type: "C"}, {name: "n", value: n, type: "I"}]});
     }
-    const {sql, params} = compile(BODY, dialect);
+    const {sql, params} = compile(body, dialect, catalogue);
     out.sql = sql;
     out.statements = 1;
     const answer = await client.native({sql, params});
@@ -51,27 +51,33 @@ async function onEngine(label, client, dialect, quote) {
   return out;
 }
 
-export async function run({hana = false} = {}) {
+/** Every engine that ships, on one body.
+ *
+ *  `body` and `catalogue` are arguments rather than constants because a
+ *  caller that passes a body it wants run and gets the default one back has
+ *  been told nothing, loudly. Two tests were written that way before this
+ *  signature existed, and one of them passed. */
+export async function run({hana = false, body = BODY, catalogue = CATALOGUE} = {}) {
   const results = [];
 
   const {DuckDBDatabaseClient} = await import("../duckdb-client.mjs");
   const duck = new DuckDBDatabaseClient({});
   await duck.connect();
-  results.push(await onEngine("duckdb", duck, "duckdb", (s) => `"${s}"`));
+  results.push(await onEngine("duckdb", duck, "duckdb", (s) => `"${s}"`, body, catalogue));
   await duck.disconnect();
 
   const {installNative} = await import("../sqljs-native.mjs");
   const initSqlJs = (await import("sql.js")).default;
   const SQL = await initSqlJs({locateFile: () => new URL("../../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname});
   const js = installNative({sqlite: new SQL.Database()});
-  results.push(await onEngine("sqljs", js, "sqlite", (s) => `"${s}"`));
+  results.push(await onEngine("sqljs", js, "sqlite", (s) => `"${s}"`, body, catalogue));
 
   if (hana) {
     const {HanaDatabaseClient} = await import("../hana-client.mjs");
     const c = new HanaDatabaseClient({schema: "OSD_E2E"});
     await c.connect();
     await c.native({sql: `DROP TABLE "SRC"`, expect: "none"}).catch(() => undefined);
-    results.push(await onEngine("hana", c, "hana", (s) => `"${s}"`));
+    results.push(await onEngine("hana", c, "hana", (s) => `"${s}"`, body, catalogue));
     await c.disconnect();
   }
   return results;

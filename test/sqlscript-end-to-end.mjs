@@ -82,3 +82,52 @@ describe("the two constructs a hint and a comma bring", () => {
     expect(ir.rel.hints).to.deep.equal(["NO_INLINE"]);
   });
 });
+
+// A subquery is a relation standing where an expression is expected, and it
+// was the single largest reason a body parsed and then would not lower: 18 of
+// them in the working corpus. Run rather than read, on both local engines,
+// because the shape that matters is not the text -- it is whether the bound
+// values still line up with their placeholders once a whole second statement
+// has been rendered in the middle of a condition.
+describe("a subquery inside a condition, run on both engines", function () {
+  this.timeout(120000);
+
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+
+  const both = async (body) => {
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    const shapes = new Set(answered.map((r) => JSON.stringify(r.rows.map((row) => Object.values(row)))));
+    expect(shapes.size, `the engines disagree: ${[...shapes].join(" vs ")}`).to.equal(1);
+    return answered[0].rows.map((row) => row.K ?? row.k);
+  };
+
+  it("IN over a subquery picks the rows the inner select names", async () => {
+    expect(await both("SELECT k FROM src WHERE k IN ( SELECT k FROM src WHERE n > 1 );"))
+      .to.deep.equal(["b", "c"]);
+  });
+
+  it("EXISTS answers over the whole set, and NOT EXISTS is its complement", async () => {
+    expect(await both("SELECT k FROM src WHERE EXISTS ( SELECT k FROM src WHERE n > 2 );"))
+      .to.have.length(3);
+    expect(await both("SELECT k FROM src WHERE NOT EXISTS ( SELECT k FROM src WHERE n > 99 );"))
+      .to.have.length(3);
+  });
+
+  it("a scalar subquery compares against one value", async () => {
+    expect(await both("SELECT k FROM src WHERE n = ( SELECT max(n) FROM src );"))
+      .to.deep.equal(["c"]);
+  });
+
+  it("the values of an inner select land in the order the text has them", async () => {
+    // the placeholder order is the one thing no engine and no text assertion
+    // would catch: a subquery rendered anywhere but where it appears puts
+    // the params out of step with the `?`s
+    const {sql, params} = compile(
+      "SELECT k FROM src WHERE k <> 'z' AND n IN ( SELECT n FROM src WHERE k <> 'y' ) AND k <> 'x';",
+      "duckdb", CAT);
+    expect(params.map((p) => p.value)).to.deep.equal(["z", "y", "x"]);
+    expect(sql.split("?")).to.have.length(4);
+  });
+});

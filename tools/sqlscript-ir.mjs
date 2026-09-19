@@ -56,6 +56,19 @@ export const like = (expr, pattern, escape, negated = false) =>
  *  belongs in the relational half, which this IR keeps separate on purpose */
 export const inList = (expr, values, negated = false) =>
   ({node: "in", expr, values, negated, type: T.bool});
+/** A relation used where an expression is expected: `x IN (SELECT ...)`,
+ *  `EXISTS (SELECT ...)`, `x = (SELECT ...)`.
+ *
+ *  This IR keeps relations and expressions apart on purpose, and this node is
+ *  the one seam between them rather than a hole in the wall: it carries a
+ *  whole relation, so everything that walks relations -- `effects`, the
+ *  barrier decision, the row chooser -- reaches inside it by walking `rel`,
+ *  and nothing has to learn a second shape. `kind` says which of the three
+ *  it is, because the three render differently and only one of them is
+ *  allowed to answer more than one row. */
+export const subquery = (kind, rel, expr, negated = false) =>
+  ({node: "sub", kind, rel, expr, negated, type: kind === "scalar" ? undefined : T.bool});
+
 /** `CASE WHEN p THEN a ... ELSE b END`, the searched form; the simple form
  *  `CASE x WHEN v THEN ...` is rewritten into it by the binder, because one
  *  shape downstream is one shape to lower and one shape to type */
@@ -124,6 +137,7 @@ export function effects(rel) {
     for (const one of e.args ?? []) walkExpr(one);
     for (const one of e.values ?? []) walkExpr(one);
     for (const one of e.whens ?? []) { walkExpr(one.when); walkExpr(one.then); }
+    if (e.node === "sub") walk(e.rel);
   };
   const walk = (r) => {
     if (r === undefined) return;
@@ -254,6 +268,10 @@ export function typeOfExpr(expr, schema = {}) {
     case "like":
     case "in":
       return T.bool;
+    case "sub":
+      if (expr.kind !== "scalar") return T.bool;
+      if (expr.type !== undefined) return expr.type;
+      throw new Error("typeOfExpr: a scalar subquery carries no type and none has been measured for it");
     case "case":
       if (expr.type !== undefined) return expr.type;
       // every branch has to agree, and saying so is cheaper than guessing
@@ -314,6 +332,7 @@ export function adversarialRows(rel, schema = {}) {
     for (const one of e.args ?? []) walkExpr(one);
     for (const one of e.values ?? []) walkExpr(one);
     for (const one of e.whens ?? []) { walkExpr(one.when); walkExpr(one.then); }
+    if (e.node === "sub") walk(e.rel);
   };
   const walk = (r) => {
     if (r === undefined) return;

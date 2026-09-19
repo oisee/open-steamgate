@@ -155,6 +155,17 @@ export function lower(rel, dialectName, options = {}) {
         return d.like(expr(e.expr), expr(e.pattern), e.escape === undefined ? undefined : expr(e.escape), e.negated);
       case "in":
         return `(${expr(e.expr)}${e.negated ? " NOT" : ""} IN (${e.values.map(expr).join(", ")}))`;
+      case "sub": {
+        // The subquery is rendered **where it appears**, so its own bound
+        // values land in `params` in the order the text has them. Building it
+        // anywhere else would be the one way to get a statement whose
+        // placeholders and values are out of step, which no engine catches
+        // and no test that checks the text would either.
+        const inner = select(e.rel);
+        if (e.kind === "exists") return `(${e.negated ? "NOT " : ""}EXISTS (${inner}))`;
+        if (e.kind === "in") return `(${expr(e.expr)}${e.negated ? " NOT" : ""} IN (${inner}))`;
+        return `(${inner})`;
+      }
       case "case": {
         const whens = e.whens.map((w) => `WHEN ${expr(w.when)} THEN ${expr(w.then)}`).join(" ");
         const other = e.otherwise === undefined ? "" : ` ELSE ${expr(e.otherwise)}`;
