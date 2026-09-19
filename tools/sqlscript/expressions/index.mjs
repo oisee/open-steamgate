@@ -37,8 +37,13 @@ export class FunctionCall extends Expression {
     // `*` is an argument as well as a select item: COUNT(*) stopped 24
     // working bodies and 14 teaching ones, and the grammar accepted `*` in
     // only one of the two places it appears (tools/sqlscript/coverage.mjs)
+    // `STRING_AGG(x, ',' ORDER BY position)` -- an ordering **inside** the
+    // call, which is not decoration: without it the concatenation order is
+    // unspecified on every engine, so the ORDER BY is the only thing that
+    // makes the answer a value rather than a sample.
     return seq(tok(TokenKind.identifier), "(",
-      opt(altPrio("*", seq(new Expr(), star(seq(",", new Expr()))))), ")");
+      opt(altPrio("*", seq(new Expr(), star(seq(",", new Expr()))))),
+      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))), ")");
   }
 }
 

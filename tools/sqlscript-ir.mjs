@@ -133,6 +133,12 @@ export function effects(rel) {
     if (e.node === "bin" && e.op === "/") out.mayThrow = true;
     if (e.node === "call" && ["TO_INTEGER", "TO_DECIMAL", "TO_TIMESTAMP", "TO_DATE"].includes(e.fn)) out.mayThrow = true;
     if (e.node === "call" && ["RAND", "CURRENT_TIMESTAMP", "CURRENT_DATE"].includes(e.fn)) out.nonDeterministic = true;
+    // A concatenating aggregate with no ordering has an **unspecified**
+    // result on all three engines, so two of them agreeing says nothing --
+    // it is the shape that agrees on three rows and parts on three hundred
+    if (e.node === "call" && ["STRING_AGG", "GROUP_CONCAT"].includes(e.fn) && (e.orderBy ?? []).length === 0) {
+      out.nonDeterministic = true;
+    }
     for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) walkExpr(e[key]);
     for (const one of e.args ?? []) walkExpr(one);
     for (const one of e.values ?? []) walkExpr(one);

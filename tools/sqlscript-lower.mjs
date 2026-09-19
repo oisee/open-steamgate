@@ -65,6 +65,7 @@ const DIALECTS = {
     locate: (s, x) => `LOCATE(${s()}, ${x()})`,
     // case-sensitive, which is the reference the other two are measured against
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    aggName: () => "STRING_AGG",
     dummy: "DUMMY",
   },
   duckdb: {
@@ -106,6 +107,7 @@ const DIALECTS = {
     toChar: (x) => `CAST(${x()} AS VARCHAR)`,
     locate: (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    aggName: () => "string_agg",
     dummy: "(SELECT 1) AS dummy",
   },
   sqlite: {
@@ -161,6 +163,8 @@ const DIALECTS = {
     toChar: (x) => `CAST(${x()} AS VARCHAR)`,
     locate: (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    // SQLite calls it group_concat, and takes the ORDER BY inside it
+    aggName: () => "group_concat",
     dummy: "(SELECT 1) AS dummy",
   },
 };
@@ -175,6 +179,15 @@ import {seamType} from "./sqlscript-ir.mjs";
  *  somebody being helpful. `ROUND` and `LOCATE` are deliberately absent:
  *  they exist everywhere and their tie rule and argument order have not been
  *  measured here. */
+/** Aggregates that concatenate, which each engine spells differently and all
+ *  three order identically once told to (measured 2026-09-19: `a,b,c` and
+ *  `c,b,a` on HANA, DuckDB and sql.js alike).
+ *
+ *  **Without an ORDER BY the result is unspecified on every one of them**, so
+ *  two runs agreeing proves nothing about the third. `effects()` marks an
+ *  unordered one non-deterministic for exactly that reason. */
+const AGGREGATES = new Set(["STRING_AGG", "GROUP_CONCAT"]);
+
 const PORTABLE = new Set([
   "LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "TRIM", "LTRIM", "RTRIM",
   "SUM", "MIN", "MAX", "COUNT", "AVG",
@@ -280,7 +293,12 @@ export function lower(rel, dialectName, options = {}) {
         if (e.fn === "IFNULL") return d.ifnull(args[0], args[1]);
         if (e.fn === "SUBSTR" || e.fn === "SUBSTRING") return d.substr(args[0], args[1], args[2]);
         if (e.fn === "TO_INTEGER" || e.fn === "TO_INT") return d.castInt(args[0]);
-        if (PORTABLE.has(e.fn)) return `${e.fn}(${args.join(", ")})`;
+        if (PORTABLE.has(e.fn) || AGGREGATES.has(e.fn)) {
+          const name = AGGREGATES.has(e.fn) ? d.aggName(e.fn) : e.fn;
+          const ordering = (e.orderBy ?? []).length === 0 ? ""
+            : ` ORDER BY ${e.orderBy.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`;
+          return `${name}(${args.join(", ")}${ordering})`;
+        }
         // **An unknown function is refused, not rendered.**
         //
         // This used to pass any name straight through, which is the same

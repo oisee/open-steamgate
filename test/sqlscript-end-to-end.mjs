@@ -281,3 +281,33 @@ describe("ORDER BY is a clause of its SELECT, not a wrapper around it", () => {
     expect(sql).to.not.contain("SELECT * FROM (");
   });
 });
+
+describe("a concatenating aggregate, and the ordering that makes it a value", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 1}, N: {abap: "I"}}};
+
+  it("is spelt per engine and ordered identically on all three", () => {
+    const body = "SELECT STRING_AGG(k, ',' ORDER BY k DESC) AS V FROM src;";
+    expect(compile(body, "hana", CAT).sql).to.contain('STRING_AGG("K", ? ORDER BY "K" DESC)');
+    expect(compile(body, "duckdb", CAT).sql).to.contain('string_agg("K", ? ORDER BY "K" DESC)');
+    expect(compile(body, "sqlite", CAT).sql).to.contain('group_concat("K", ? ORDER BY "K" DESC)');
+  });
+
+  it("answers the same string on both engines that ship", async () => {
+    const body = "SELECT STRING_AGG(k, ',' ORDER BY k DESC) AS V FROM src;";
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    for (const r of answered) expect(r.rows[0].V ?? r.rows[0].v, r.engine).to.equal("c,b,a");
+  });
+
+  it("without an ordering it is marked non-deterministic, because it is", async () => {
+    // all three happen to answer 'a,b,c' on three rows, and none of them
+    // promises to: agreement here is a property of the fixture. The divergence
+    // instrument has to know that before it reports a difference as a finding
+    const {effects} = await import("../tools/sqlscript-ir.mjs");
+    const ordered = compile("SELECT STRING_AGG(k, ',' ORDER BY k) AS V FROM src;", "duckdb", CAT);
+    const loose = compile("SELECT STRING_AGG(k, ',') AS V FROM src;", "duckdb", CAT);
+    expect(effects(loose.ir.rel).nonDeterministic, "no ordering").to.equal(true);
+    expect(effects(ordered.ir.rel).nonDeterministic, "ordered").to.equal(false);
+  });
+});

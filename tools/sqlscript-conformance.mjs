@@ -98,6 +98,20 @@ const CASES = [
   // Measured on HANA Express: ROUND(2.5) is 3.0 and ROUND(-2.5) is -3.0 --
   // half **away from zero**, not banker's rounding -- and the two-argument
   // form ROUND(2.345, 2) is 2.350. DuckDB and sql.js agreed on all three.
+  // A concatenating aggregate, with and without an ordering. Written with
+  // GROUP_CONCAT because the harness rewrites that to STRING_AGG for the
+  // engines that spell it so (see the dialect rewrites below): one case
+  // measures the one function under both its names.
+  //
+  // The ordered form agrees on all three (measured 2026-09-19: 'a,b,c' and
+  // 'c,b,a'). **The unordered form has no specified order on any of them**,
+  // so this case is here to be read rather than to be relied on -- it is the
+  // shape that agrees on three rows and parts on three hundred, which is why
+  // `effects()` marks an unordered one non-deterministic.
+  {id: "agg_concat_ordered", sql: "SELECT GROUP_CONCAT(ch, ',' ORDER BY ch DESC) AS v FROM t",
+   why: "a concatenating aggregate told what order to use"},
+  {id: "agg_concat_unordered", sql: "SELECT GROUP_CONCAT(ch, ',') AS v FROM t",
+   why: "the same without an ordering, whose result is unspecified everywhere: agreement here is not evidence"},
   {id: "fn_round_half", sql: "SELECT ROUND(2.5) AS v FROM t WHERE k = 'r1'",
    why: "the tie rule: half away from zero, or to even"},
   {id: "fn_round_half_negative", sql: "SELECT ROUND(-2.5) AS v FROM t WHERE k = 'r1'",

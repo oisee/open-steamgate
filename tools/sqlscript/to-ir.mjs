@@ -158,6 +158,13 @@ export function toIr(tree, options = {}) {
       case "FunctionCall": {
         const fn = String(leaf(node).value).toUpperCase();
         const args = (node.children ?? []).filter((c) => c.node === "Expr").map(expression);
+        // an ordering inside the call belongs to the call, in the shape the
+        // lowering already reads elsewhere: {col, desc}
+        const inner = kids(node, "OrderKey").map((k) => {
+          const e = expression(k);
+          if (e.node !== "col") throw new BindError("ORDER BY over an expression inside a call is not lowered yet", k);
+          return {col: e.name, desc: hasWord(k, "DESC")};
+        });
         // CAST is its own node in the IR, because the lowering has to decide
         // per engine whether a failing cast can even raise
         // **`MAP(x, a, b, c, d, …, default)` is a CASE and nothing else.**
@@ -181,7 +188,7 @@ export function toIr(tree, options = {}) {
         if (fn === "CAST" || fn === "TO_INTEGER") {
           return cast(args[0] ?? lit(null, T.str), fn === "TO_INTEGER" ? T.int : T.str);
         }
-        return call(fn, args, T.str);
+        return inner.length === 0 ? call(fn, args, T.str) : {...call(fn, args, T.str), orderBy: inner};
       }
       case "ColumnRef": {
         const name = nameOf(node);
