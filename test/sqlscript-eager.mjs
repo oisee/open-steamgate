@@ -199,3 +199,26 @@ describe("a wire type code becomes a type a CREATE TABLE accepts", () => {
     ])).to.deep.equal(['"V" INTEGER', '"ODD""NAME" NVARCHAR(5)']);
   });
 });
+
+// Written before the first writing body exists, on purpose: the rule is
+// cheap now and unaffordable the first time a comparison writes twice into
+// a table somebody owns.
+describe("a plan that writes is not compared by running it twice", () => {
+  it("refuses, and names the table it would have written to twice", async () => {
+    const {effects} = await import("../tools/sqlscript-ir.mjs");
+    const writing = {rel: "insert", into: "ZTARGET", input: scan("src")};
+    expect(effects(writing).writes).to.deep.equal(["ZTARGET"]);
+    let refused;
+    try {
+      await runBothWays({}, writing, "duckdb");
+    } catch (error) {
+      refused = String(error.message);
+    }
+    expect(refused, "the refusal must name the table").to.contain("ZTARGET");
+    expect(refused).to.contain("would write twice");
+  });
+
+  it("and a plan that only reads is compared as before", async () => {
+    expect((await import("../tools/sqlscript-ir.mjs")).effects(scan("src")).writes).to.be.empty;
+  });
+});

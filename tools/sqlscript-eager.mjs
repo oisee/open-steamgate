@@ -17,7 +17,7 @@
 // It is the same instrument as the branch comparison in track W - one
 // question, two executors, the difference is the result - one storey down.
 import {lower} from "./sqlscript-lower.mjs";
-import {ref} from "./sqlscript-ir.mjs";
+import {ref, effects} from "./sqlscript-ir.mjs";
 
 const CHILD_KEYS = ["input", "left", "right"];
 
@@ -147,6 +147,17 @@ export function compare(fused, eager) {
 }
 
 export async function runBothWays(client, rel, dialect) {
+  // Running a plan twice is harmless while a plan only reads. The moment a
+  // body can write - INSERT INTO ... SELECT, MERGE INTO - "run it both ways"
+  // means "write it twice", and the second write lands in a table somebody
+  // owns. The refusal is here BEFORE the first such body exists, because the
+  // alternative is learning the rule from a table that has been written to
+  // twice, and no amount of care at that point undoes it.
+  const writes = effects(rel).writes;
+  if (writes.length > 0) {
+    throw new Error(`runBothWays: this plan writes (${writes.join(", ")}) and running it twice would write twice; ` +
+      "a writing body has to be compared inside something that can be rolled back, or not compared this way at all");
+  }
   const fused = await runFused(client, rel, dialect);
   const eager = await runEager(client, rel, dialect);
   const verdict = compare(fused, eager);

@@ -113,7 +113,7 @@ export const limit = (input, n) => ({rel: "limit", input, n});
  * why (the seam's `materialise` reason).
  */
 export function effects(rel) {
-  const out = {mayThrow: false, nonDeterministic: false, reads: []};
+  const out = {mayThrow: false, nonDeterministic: false, reads: [], writes: []};
   const walkExpr = (e) => {
     if (e === undefined || e === null) return;
     if (e.node === "cast") out.mayThrow = true;
@@ -128,6 +128,12 @@ export function effects(rel) {
   const walk = (r) => {
     if (r === undefined) return;
     if (r.rel === "scan") out.reads.push(r.table);
+    // A body that writes is coming (INSERT INTO ... SELECT, MERGE INTO), and
+    // when it arrives the difference between reading a plan twice and
+    // running it twice stops being academic. Recorded here so that the
+    // instruments can refuse before the first such body exists, rather than
+    // discovering the rule by writing twice into somebody's table.
+    if (["insert", "update", "delete", "merge"].includes(r.rel)) out.writes.push(r.into ?? r.table ?? r.rel);
     walkExpr(r.pred);
     for (const item of r.items ?? []) walkExpr(item.expr);
     for (const agg of r.aggs ?? []) walkExpr(agg.expr);
