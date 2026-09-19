@@ -42,8 +42,19 @@ const STATEMENT_OF = {
 export function tableOf(op, args, sql = "") {
   const named = args?.[0]?.table;
   if (typeof named === "string" && named !== "") return named.replace(/["\u0027]/g, "").toUpperCase();
-  const match = /\bFROM\s+"?(\w+)"?/i.exec(sql) ?? /\bINTO\s+"?(\w+)"?/i.exec(sql)
-    ?? /\bUPDATE\s+"?(\w+)"?/i.exec(sql);
+  // `CREATE TABLE 'x' (...)` names its table too, and 105 of them -- the
+  // whole schema -- were landing under `(none)` and costing 78 ms of a
+  // 441 ms run. `(none)` has to mean "this statement genuinely has no
+  // table", not "I could not tell": a bucket that means the second is the
+  // third value wearing a table's clothes, and it was the largest row on
+  // the screen (2026-09-19, found by reading my own instrument's output).
+  //
+  // The quote is matched as any of the three an engine may use, because
+  // SQLite writes `'x'` where the others write `"x"`.
+  const match = /\bFROM\s+["'`]?(\w+)["'`]?/i.exec(sql)
+    ?? /\bINTO\s+["'`]?(\w+)["'`]?/i.exec(sql)
+    ?? /\bUPDATE\s+["'`]?(\w+)["'`]?/i.exec(sql)
+    ?? /\b(?:CREATE|DROP|ALTER)\s+TABLE\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?["'`]?(\w+)["'`]?/i.exec(sql);
   return match === null || match === undefined ? undefined : match[1].toUpperCase();
 }
 

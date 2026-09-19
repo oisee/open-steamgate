@@ -225,6 +225,29 @@ describe("the tracer times the call rather than the bookkeeping", () => {
     expect(tableOf("insert", [{table: "ZOSD_SYS"}], "nonsense")).to.equal("ZOSD_SYS");
   });
 
+  // **`(none)` has to mean "no table", not "I could not tell".**
+  //
+  // 105 CREATE TABLE statements -- the whole schema, 78 ms of a 441 ms run
+  // -- were landing in a bucket labelled `(none)`, which was the largest row
+  // on the summary. A bucket that means "unreadable" wearing a table's
+  // clothes is the third value again, and this time it was in my own
+  // instrument (2026-09-19).
+  it("DDL names its table too, so the schema is not filed under nothing", async () => {
+    const {tableOf} = await import("../tools/osd-sql-trace.mjs");
+    // SQLite writes 'x' where the others write "x", so all three quotes count
+    expect(tableOf("execute", ["CREATE TABLE 'zstg_demo' (a INT)"], "CREATE TABLE 'zstg_demo' (a INT)"))
+      .to.equal("ZSTG_DEMO");
+    expect(tableOf("execute", [`DROP TABLE "T"`], `DROP TABLE "T"`)).to.equal("T");
+    expect(tableOf("execute", ["CREATE TABLE IF NOT EXISTS x (a INT)"], "CREATE TABLE IF NOT EXISTS x (a INT)"))
+      .to.equal("X");
+  });
+
+  it("and a statement that really has no table still says so", async () => {
+    const {tableOf} = await import("../tools/osd-sql-trace.mjs");
+    expect(tableOf("execute", ["SELECT 1"], "SELECT 1")).to.equal(undefined);
+    expect(tableOf("commit", [], "")).to.equal(undefined);
+  });
+
   it("still records when the statement raises, or the slow ones would all be missing", async () => {
     const {installSqlTrace} = await import("../tools/osd-sql-trace.mjs");
     const seen = [];
