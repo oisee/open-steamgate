@@ -16,6 +16,7 @@
 import {cpSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {basename, join} from "node:path";
 import {runsAs} from "./osd-main.mjs";
+import {KEY_WIDTH} from "./stg-compile.mjs";
 
 /** Every identifier starting with `from`, in either case, becomes `to`. */
 export function rename(text, from, to) {
@@ -35,8 +36,32 @@ export function rename(text, from, to) {
   });
 }
 
-/** The abapGit file name carries the object name, so it is renamed too. */
-export const renameFile = (name, from, to) => rename(name, from, to);
+/** The abapGit file name carries the object name, so it is renamed too.
+ *
+ *  Two of these names are **fixed width** and the padding is part of the
+ *  name, not decoration: an IWSV is the object padded to 35 plus `0001`,
+ *  an IWMO and an IWVB padded to 32. A text rename that makes the object
+ *  four characters longer leaves the padding alone and the name comes out
+ *  four characters too long, which abapGit reads as an object called
+ *  `ZOSD_005_DEMO_SRV 0` and then cannot find the file it just named:
+ *
+ *    File not found: zosd_005_demo_srv 0.iwsv.xml
+ *    This syntax cannot be used for an object name
+ *
+ *  Measured 2026-09-19 on A4H, one import after the rename tool started
+ *  being used for the deployment packages. `test/segw-corpus.mjs` checks
+ *  these widths on what the generator writes, and nothing checked what a
+ *  rename writes -- so the check was right and it was pointed at the wrong
+ *  file. The width lives in stg-compile, once, and is imported here. */
+export function renameFile(name, from, to) {
+  for (const [ext, width] of Object.entries(KEY_WIDTH)) {
+    const m = new RegExp(`^(.+?)\\s*(\\d{4})${ext.replace(/\./g, "\\.")}$`).exec(name);
+    if (name.endsWith(ext) && m !== null) {
+      return rename(m[1].trimEnd(), from, to).padEnd(width, " ") + m[2] + ext;
+    }
+  }
+  return rename(name, from, to);
+}
 
 export function renameAll(inputs, out, from, to) {
   rmSync(out, {recursive: true, force: true});

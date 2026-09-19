@@ -76,6 +76,29 @@ describe("the SEGW file names a real system writes", () => {
     }
   });
 
+  it("and a rename keeps them, which is where they were actually lost", async () => {
+    // The generator was right and the check was pointed at it. What broke
+    // was the rename that builds a deployment package: ZSTG_ -> ZOSD_005_
+    // is four characters longer, a text rename leaves the padding alone,
+    // and A4H answered "File not found: zosd_005_demo_srv 0.iwsv.xml /
+    // This syntax cannot be used for an object name" (2026-09-19). A width
+    // is not decoration; it is part of the name.
+    const {renameFile} = await import("../tools/osd-rename.mjs");
+    const cases = [
+      ["zstg_demo_srv                      0001.iwsv.xml", ".iwsv.xml", 39],
+      ["zstg_demo_mdl                   0001.iwmo.xml", ".iwmo.xml", 36],
+    ];
+    for (const [name, ext, width] of cases) {
+      for (const to of ["ZOSD_005_", "ZX_", "ZSTG_"]) {
+        const out = renameFile(name, "ZSTG_", to);
+        expect(out.endsWith(ext), out).to.equal(true);
+        expect(out.length - ext.length, `${out} after ZSTG_ -> ${to}`).to.equal(width);
+      }
+    }
+    // a name that is not versioned is renamed and not padded
+    expect(renameFile("zcl_zstg_demo_mpc.clas.abap", "ZSTG_", "ZOSD_005_")).to.equal("zcl_zosd_005_demo_mpc.clas.abap");
+  });
+
   it("the widths differ by type, which is the thing one measurement hides", () => {
     // IWSV is not IWMO. Measuring three IWMO objects, finding 32 and applying
     // it to both fixed one and broke the other -- and edited a fixture that

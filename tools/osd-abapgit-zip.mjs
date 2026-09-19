@@ -15,7 +15,7 @@
 // same repository whether it is built here in JavaScript or there in ABAP.
 // `.abapgit.xml` with STARTING_FOLDER /src/ and FOLDER_LOGIC PREFIX, a
 // `src/package.devc.xml`, and every object beside it.
-import {cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, statSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
@@ -70,21 +70,57 @@ export const devcXml = (description) => BOM +
  *  abapGit has rows and no instruction to take them. So this copies pairs,
  *  and says which ones it could not pair rather than shipping half.
  */
+// The client column does not travel, so a row written for another client
+// must not either. abapGit deserialises a client-dependent table into the
+// **logon client**: our seed says MANDT 123 for the real rows and 001 for
+// `T0009 / "Other client, must not leak"`, which exists to prove this
+// runtime does not serve another client's rows. On A4H all four arrived as
+// MANDT 001, so the fixture did not leak -- it was *moved*, and a demo on a
+// real system answered a row labelled "must not leak" (2026-09-19).
+//
+// It is a fixture for a property of this runtime and it has no meaning on a
+// system that decides the client itself, so it stays here. The rule is the
+// general one and not a name: a row whose client is not the client the file
+// is written for is dropped, and the count is printed, because a package
+// that quietly carries fewer rows than the folder is its own trap.
+export function withoutOtherClients(rows) {
+  const client = (r) => String(r?.MANDT ?? r?.mandt ?? "");
+  const clients = rows.map(client).filter((c) => c !== "");
+  if (clients.length === 0) {
+    return {rows, dropped: 0, client: ""};
+  }
+  const count = new Map();
+  for (const c of clients) count.set(c, (count.get(c) ?? 0) + 1);
+  const [own] = [...count].sort((a, b) => b[1] - a[1])[0];
+  const kept = rows.filter((r) => client(r) === "" || client(r) === own);
+  return {rows: kept, dropped: rows.length - kept.length, client: own};
+}
+
 export function dataFiles(from, into) {
-  if (!existsSync(from)) return {carried: [], unpaired: []};
+  if (!existsSync(from)) return {carried: [], unpaired: [], dropped: []};
   const files = readdirSync(from);
   const carried = [];
   const unpaired = [];
+  const dropped = [];
   for (const f of files.filter((x) => x.endsWith(".tabu.json"))) {
     const conf = f.replace(/\.tabu\.json$/, ".conf.json");
     if (!files.includes(conf)) { unpaired.push(f); continue; }
     mkdirSync(join(into, "data"), {recursive: true});
-    cpSync(join(from, f), join(into, "data", f));
+    // abapGit's TABU JSON is a plain array of rows, lower-case keys
+    const table = JSON.parse(readFileSync(join(from, f), "utf8"));
+    if (Array.isArray(table) === false) {
+      cpSync(join(from, f), join(into, "data", f));
+    } else {
+      const out = withoutOtherClients(table);
+      if (out.dropped > 0) dropped.push(`${f.replace(/\.tabu\.json$/, "")}: ${out.dropped} row(s) not in client ${out.client}`);
+      writeFileSync(join(into, "data", f), JSON.stringify(out.rows, undefined, 2) + "\n");
+    }
     cpSync(join(from, conf), join(into, "data", conf));
     carried.push(f.replace(/\.tabu\.json$/, ""));
   }
-  return {carried, unpaired};
+  return {carried, unpaired, dropped};
 }
+
 
 export function layout(from, into, description, data) {
   rmSync(into, {recursive: true, force: true});
@@ -92,7 +128,19 @@ export function layout(from, into, description, data) {
   writeFileSync(join(into, ".abapgit.xml"), abapgitXml());
   writeFileSync(join(into, "src", "package.devc.xml"), devcXml(description));
 
-  const files = readdirSync(from).filter((f) => statSync(join(from, f)).isFile());
+  // Flat, and it says so. abapGit with FOLDER_LOGIC PREFIX reads a
+  // subdirectory of src/ as a sub-package, so a folder here would put the
+  // DDIC in a package of its own -- and the objects are meant to land in
+  // one. What this used to do instead was drop every subdirectory without a
+  // word: a build that nested src/ddic/ produced a zip with no tables in it
+  // and printed "23 files" over the hole (2026-09-19).
+  const entries = readdirSync(from);
+  const nested = entries.filter((f) => statSync(join(from, f)).isDirectory());
+  if (nested.length > 0) {
+    throw new Error(`${from} has ${nested.length} subdirector${nested.length === 1 ? "y" : "ies"} (${nested.join(", ")}). `
+      + "abapGit reads one as a sub-package and this zip puts every object in one package, so flatten them into the folder.");
+  }
+  const files = entries.filter((f) => statSync(join(from, f)).isFile());
   for (const f of files) cpSync(join(from, f), join(into, "src", f));
 
   // an object is its name up to the first dot; `zstg_demo_srv    0001.iwsv.xml`
@@ -151,6 +199,9 @@ if (runsAs("osd-abapgit-zip.mjs")) {
     console.log(`  ${type.padEnd(5)} ${[...names].sort().join(", ")}`);
   }
   if (rows?.carried.length > 0) console.log(`  DATA  ${rows.carried.sort().join(", ")}`);
+  for (const d of rows?.dropped ?? []) {
+    console.log(`  NOT carried: ${d} -- abapGit deserialises into the logon client, so another client's row would arrive as this one's`);
+  }
   for (const u of rows?.unpaired ?? []) {
     console.log(`  NOT carried: ${u} has no .conf.json, so abapGit has rows and no instruction to take them`);
   }
