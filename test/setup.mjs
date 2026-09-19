@@ -2,6 +2,12 @@ import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
+import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
+
+/** The trace a running system holds, for the ST05-shaped screen to read
+ *  (backlog G.10). It is off until the screen turns it on, and the wrapper
+ *  costs nothing while it is. */
+export const traceRing = new TraceRing();
 
 /** `STG_SQL_TRACE=<file.ndjson>` records every statement the chosen client is
  *  asked for -- the second sieve of backlog W.1, and the cheap half of O.1.
@@ -13,7 +19,19 @@ import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
  *  the unit run and the browser preview all pass through. */
 function traced(db) {
   const file = globalThis.process?.env?.STG_SQL_TRACE;
-  return file === undefined || file === "" ? db : installSqlTrace(db, fileSink(file));
+  const toFile = file === undefined || file === "" ? undefined : fileSink(file);
+  // Installed whether or not anything is listening, because the screen turns
+  // it on at runtime; `enabled` keeps that free until something does.
+  return installSqlTrace(db, (entry) => {
+    toFile?.(entry);
+    traceRing.record(entry);
+  }, {enabled: () => toFile !== undefined || traceRing.on === true});
+}
+
+/** the destination the ST05 screen calls, the same shape as AMDP's */
+export function installTraceDestination(abap) {
+  abap.context.RFCDestinations ??= {};
+  abap.context.RFCDestinations["SQLTRACE"] = new TraceDestination(traceRing);
 }
 
 // Called by the transpiled runtime before anything runs (abap_transpile.json
@@ -54,6 +72,7 @@ export async function setup(abap, schemas, insert) {
     const {AmdpDestination: PreviewAmdp} = await import("../tools/amdp-destination.mjs");
     abap.context.RFCDestinations ??= {};
     abap.context.RFCDestinations["AMDP"] = new PreviewAmdp({});
+    installTraceDestination(abap);
     return;
   }
   const {seedStatements} = await import("./seed.mjs");
@@ -69,6 +88,7 @@ export async function setup(abap, schemas, insert) {
   // is "no HANA to run this in", not "unknown destination".
   const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
   abap.context.RFCDestinations["AMDP"] = new AmdpDestination({trace: process.env.STG_AMDP_TRACE === "1"});
+  installTraceDestination(abap);
   // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
   // procedure and the tables are then in one database and nothing has to be
   // mirrored (docs/amdp-in-hana.md, backlog B.19). Never a default: the cost

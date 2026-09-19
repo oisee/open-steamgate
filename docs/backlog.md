@@ -3191,3 +3191,53 @@ a time. Whether that is worth batching is a separate question — a count is
 not a defect, and a seed writing one row per object is not surprising — but
 it is now a number instead of a feeling, and it is where a third of the
 database time of every unit run goes.
+
+### G.10 wave 2 — the buffer, and where a trace may not live (2026-09-19)
+
+`tools/osd-sql-trace-buffer.mjs`: a bounded ring in the host, and a
+destination an ABAP screen calls the way the AMDP tile calls HANA —
+`CALL FUNCTION 'ZOSD_SQL_TRACE' DESTINATION 'SQLTRACE'` with
+`START / STOP / CLEAR / LIST / SUMMARY`. Registered in `test/setup.mjs`, on
+the server path and in the browser preview both. Suite
+`test/sql-trace-buffer.mjs`.
+
+**Why the buffer is not a DDIC table**, which was the obvious design and
+would have made the screen ordinary ABAP with an ordinary SELECT:
+
+- the tracer sits on the one connection every statement goes through, so a
+  trace row would trace itself
+- a trace row written inside an open LUW is **lost when that LUW rolls back**
+  and **changes the commit shape when it does not** — which is the exact
+  thing the trace is measuring
+
+A measurement that takes part in what it measures is not one. So the ring is
+in the host, bounded, and it counts what it dropped: a screen that shows
+three of five statements without saying so is lying quietly.
+
+**Installed always, free while off.** The screen turns tracing on at runtime,
+so the wrapper has to be in place at all times; `enabled` is checked first
+and the call goes straight through. Measured over 200 000 calls:
+
+```
+no wrapper      0.06 us/call
+wrapper, off    0.08 us/call     +0.02
+wrapper, on     0.38 us/call     +0.31
+```
+
+0.02 µs a call is 0.14 ms over the 6793 statements of a whole unit run.
+
+**What is left, and the reason it is a separate wave.** The screen itself.
+ABAP has no JSON reader here — `zcl_stg_json` writes, it does not parse — so
+the rows reach ABAP one of two ways, and the choice is not free:
+
+1. a **DDIC structure** for a trace row and a `TABLES` parameter, which is
+   the honest signature and costs a DDIC object plus a function-group XML
+2. the **`zcl_osd_webgui` precedent**: the host writes rows into a table and
+   ABAP reads them with Open SQL — but the write must be flushed at
+   screen-read time with the ring paused, or it lands in the trace it is
+   writing
+
+(1) is the better shape and (2) is the cheaper one. Neither is half-built
+here, which is the point: the analysis and the buffer are finished and
+useful on their own, and a page over them is an afternoon whichever route is
+taken.

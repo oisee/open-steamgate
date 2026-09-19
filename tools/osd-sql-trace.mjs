@@ -65,8 +65,15 @@ const MARKERS = ["beginTransaction", "commit", "rollback"];
  * rule became a module: four clients exist and a fifth is expected, and a
  * tracer written into one of them is a tracer three clients do not have.
  */
-export function installSqlTrace(client, sink, {label} = {}) {
+export function installSqlTrace(client, sink, {label, enabled} = {}) {
   if (client === undefined || client.__sqlTraced === true) return client;
+  // **The wrapper has to be free when nothing is listening.** A screen that
+  // can turn tracing on at runtime needs the wrapper installed at all times,
+  // and a wrapper that builds a statement string and reads a clock for every
+  // one of the 6793 statements of a unit run would be a tax on a feature
+  // nobody switched on. `enabled` is checked FIRST and the call goes
+  // straight through when it is false.
+  const listening = typeof enabled === "function" ? enabled : () => true;
   let n = 0;
   const record = (entry) => {
     try {
@@ -79,6 +86,7 @@ export function installSqlTrace(client, sink, {label} = {}) {
     const original = client[op];
     if (typeof original !== "function") continue;
     client[op] = function (...args) {
+      if (listening() !== true) return original.apply(this, args);
       // **Timed around the call, and written after it.** A trace without a
       // duration cannot answer the question a trace is opened for -- which
       // statement cost the request -- and writing the entry before the call
@@ -117,6 +125,7 @@ export function installSqlTrace(client, sink, {label} = {}) {
     const original = client[op];
     if (typeof original !== "function") continue;
     client[op] = function (...args) {
+      if (listening() !== true) return original.apply(this, args);
       record({n: n++, op, sql: ""});
       return original.apply(this, args);
     };
