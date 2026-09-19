@@ -2,6 +2,7 @@ import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
+import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
@@ -40,6 +41,13 @@ export function installTraceDestination(abap) {
 // STG_DB=duckdb swaps SQLite for DuckDB (tools/duckdb-client.mjs).
 export async function setup(abap, schemas, insert) {
   let db;
+  // The transpiler hands over the object directory and the sources one row
+  // per statement -- 1542 INSERTs into TADIR and 907 into REPOSRC, measured
+  // on a real unit run after the seed itself was batched (e088c4d). A
+  // statement costs its parse, so consecutive rows of one shape are merged
+  // into one. Here rather than in each branch below: all six of them execute
+  // this same array.
+  insert = batchInserts(insert);
   // the browser preview (web/preview-backend.mjs): seed rows come from the
   // bundle, the database from cache storage when there is one
   const preview = globalThis.__stgPreview;

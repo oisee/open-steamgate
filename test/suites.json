@@ -8,6 +8,7 @@
     "test/adt-session.mjs",
     "test/amdp-sandbox.mjs",
     "test/analytics.mjs",
+    "test/batch-inserts.mjs",
     "test/cds-cast.mjs",
     "test/conformance.mjs",
     "test/journal.mjs",

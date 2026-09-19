@@ -3352,3 +3352,47 @@ included. A structure is not a table, and for a **keyless** one it wrote a
 class it had written for `ZOSD_TEST_ITEM_S` had been there all along, with
 nothing referencing it: an object generated from a thing it should not have
 been generated from, waiting for the first structure without a key.
+
+### The rest of the one-row inserts, and what the seed fix did not reach (2026-09-19)
+
+`tools/osd-batch-inserts.mjs`, called once in `test/setup.mjs`. Suite
+`test/batch-inserts.mjs`.
+
+The seed fix (e088c4d) was measured against an empty database — statement
+count, not end-to-end. Measured end to end, on a real `npm run unit`, with
+the SQL sieve:
+
+```
+6793 statements, 1563 ms    before either
+4315 statements,  976 ms    after the seed was batched
+1711 statements,  441 ms    after this
+```
+
+`WBCROSSGT` left the table entirely after the seed fix — it came from the
+seed. `TADIR` (1542) and `REPOSRC` (907) did not, because they come from a
+**different writer**: the statements the transpiler hands `setup()`. Not
+ours, and one row each.
+
+Two things decided the design, and the second is the one worth keeping:
+
+**The values are never parsed.** A statement is split at `VALUES ` and
+everything after is carried verbatim, so a comma or a bracket inside a
+quoted string cannot be misread — which is the defect the seed's own test
+had, where splitting a five-column row on commas found seven parts. The
+answer here is to need no parser at all.
+
+**Merging only consecutive runs caught barely a third**, because the rows
+arrive interleaved — a directory entry, then its source, then the next
+object's. Merging across other INSERTs is what got TADIR from 1542 to zero,
+and it is safe for a reason that can be stated: **an INSERT reads nothing**,
+so two inserts into different tables commute, and the rows that end up in
+the database do not depend on which went first. Order *within* a shape is
+kept. Anything that is not an INSERT is a **barrier** — a CREATE, a DELETE
+or a statement the batcher cannot read may depend on what came before it,
+and a statement it cannot read keeps its place untouched. A batcher that
+dropped what it could not read would be silent data loss, which is worse
+than the cost it saves.
+
+The test that matters runs both versions on a real DuckDB and compares the
+tables: the claim is not "the text is equivalent", it is "the rows are the
+same". `npm run unit`, `unit:file` and `unit:duckdb` are green.
