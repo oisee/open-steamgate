@@ -30,6 +30,22 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# **`pipefail`, and it is not paranoia.** A `run:` step without a `shell:`
+# key runs under `bash -e {0}` — `-e`, and **no** `pipefail`. So a step that
+# pipes anything reports the status of the last stage of the pipe, and a
+# failing suite piped into `tee` or `tail` is a green step. That is not
+# hypothetical: the author of this file did exactly that from a terminal an
+# hour before writing it (`node tools/osd-suites.mjs | tail -6` → exit 0,
+# tail's), and fable-osd pointed out that the same trap fits in here.
+#
+# `shell: bash` is GitHub's own alias for `bash --noprofile --norc -eo
+# pipefail {0}`. Setting it once for the job closes the class instead of
+# checking each step for pipes, which is the difference between a rule and a
+# habit.
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 
