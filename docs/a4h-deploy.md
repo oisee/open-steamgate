@@ -317,6 +317,29 @@ system answers on
 /sap/bc/ui5_ui5/sap/<app>/index.html
 ```
 
+### It serves, and the platform's own tooling does not see it
+
+Measured after the node landed, and it is the difference between two
+claims that sound the same:
+
+```
+/sap/bc/ui5_ui5/sap/zosd_008_app/index.html        200, 1326 b
+/sap/bc/adt/filestore/ui5-bsp/objects/ZOSD_008_APP/content   0 entries
+```
+
+The application answers. The UI5 repository still reports no content for
+it, because `put_file` writes the page **and** the repository's own index of
+what the application contains, and abapGit's WAPA handler writes the page.
+The BSP runtime finds a page by its key and does not need that index; the
+Fiori tools, `/UI5/UI5_REPOSITORY_LOAD`'s download, and anything else that
+asks the repository what is in an application, do.
+
+So: **abapGit can deploy a UI5 application that works, and not one the
+platform's own tooling can read back.** For a demo and for a system that
+only serves it, that is enough. For a system where somebody will later
+download, diff or redeploy it with SAP's tools, it is not, and the machine
+route below is the answer rather than a nicer zip.
+
 ### Reading the system before importing
 
 Two endpoints on the sandbox were worth more than any amount of reasoning:
@@ -375,6 +398,46 @@ Measured through OSD into A4H: `POST TravelSet` inside a changeset answered
 
 The zips of one evening are eight numbered files; nothing about the route
 depends on which number an attempt has.
+
+## The launchpad, mapped but not walked
+
+Deferred by Alice on 2026-09-19; the probing is recorded so the next session
+does not repeat it. Serving a page at a URL and having a **tile** are two
+different things, and the second needs the app to be discoverable.
+
+What answers on the sandbox, for an ordinary developer:
+
+```
+/sap/bc/ui2/app_index/                         200   87 apps, keyed by sap.app/id
+/sap/opu/odata/UI2/PAGE_BUILDER_PERS/          200   catalogs, groups, tiles
+/sap/opu/odata/UI2/INTEROP/                    200   target mappings
+/sap/bc/ui5_ui5/ui2/ushell/…/FioriLaunchpad.html  200
+/sap/bc/ui2/start_up                           403   needs a role
+/sap/bc/adt/filestore/…/<APP>/appindex         404   not that resource
+```
+
+**Our app is not among the 87.** The app index is built by scanning BSP
+applications' `manifest.json`, and ours has what it needs already — a
+`sap.app.crossNavigation.inbounds` entry (`Travel-manage`, semantic object
+`Travel`, action `manage`), because the same manifest drives the launchpad
+here. So the manifest is not the gap; the index has simply never been
+recalculated since the application arrived.
+
+The remaining steps, in the order they depend on each other, none measured:
+
+1. **the app index** — `/UI2/APP_INDEX_CALCULATE` (or `/UI2/APPIDX`) picks
+   the manifest up. Until then no intent resolves to it;
+2. **a target mapping and a tile** — a catalog, a group, and the mapping
+   from `Travel-manage` to the BSP application. That is launchpad
+   customizing, not a repository object, so whether it can travel in a zip
+   at all is the open question; `PAGE_BUILDER_PERS` and `INTEROP` are the
+   services behind it and both answer;
+3. **a role** — `start_up` is 403 for this user, so even a correct tile
+   would not appear for it.
+
+The honest summary: **the page is deployable today, the tile is not**, and
+the wall between them is customizing and authorization rather than anything
+this repository generates.
 
 ## What is not done
 
