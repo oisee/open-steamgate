@@ -38,14 +38,24 @@ describe("the binder carries what the grammar reads, or refuses it by name", () 
   });
 
   // A refusal passes the audit on purpose: not carrying a clause is fine,
-  // not SAYING so is not. This pins the difference, so nobody "fixes" the
-  // audit by making the refusals silent.
-  it("a refused clause passes, and it is a refusal rather than a statement", () => {
-    for (const body of ["RETURN SELECT a FROM src GROUP BY a;",
-                        "RETURN SELECT k FROM src EXCEPT SELECT k FROM other;",
-                        "RETURN SELECT DISTINCT k FROM src;"]) {
+  // not SAYING so is not. Both halves of that are pinned here, and the LIST
+  // moves as the IR grows -- GROUP BY and DISTINCT were refusals this
+  // morning and are carried by lunchtime, which is the right direction and
+  // is exactly why the audit above is written to need no such list.
+  it("a clause the IR carries lowers with the clause visible in the statement", () => {
+    for (const [body, must] of [["RETURN SELECT a FROM src GROUP BY a;", /GROUP BY/],
+                                ["RETURN SELECT DISTINCT k FROM src;", /SELECT DISTINCT/]]) {
       const answer = sqlOf(body);
-      expect(answer.sql, `${body} must not lower`).to.equal(undefined);
+      expect(answer.refused, `${body} is carried now, so it must lower`).to.equal(undefined);
+      expect(answer.sql, `${body} must show the clause it was given`).to.match(must);
+    }
+  });
+
+  it("and a clause the IR does not carry refuses by name rather than lowering to something else", () => {
+    for (const body of ["RETURN SELECT k FROM src EXCEPT SELECT k FROM other;",
+                        "RETURN SELECT k FROM src INTERSECT SELECT k FROM other;"]) {
+      const answer = sqlOf(body);
+      expect(answer.sql, `${body} must not lower as a UNION`).to.equal(undefined);
       expect(answer.refused, `${body} must refuse by name`).to.be.a("string");
     }
   });
