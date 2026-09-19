@@ -88,15 +88,19 @@ export function parameterType(abapType, types) {
 /** `!VALUE(x)` into `VALUE(x)`, for abaplint only.
  *
  *  abaplint 2.120.55 parses `!x` and it parses `VALUE(x)`, and it does not
- *  parse the two together -- the statement comes back `Unknown` and the whole
- *  method loses its parameters (ANORMALIES-2026-09-19-bang-value). SE24
- *  generates exactly that combination, so it is not exotic: it costs us the
- *  signature of every method in such a class, and a body then looks as
+ *  parse the two together -- the statement comes back `Unknown` and **that
+ *  method** is missing from the class definition
+ *  (ANOMALY-2026-09-19-bang-value). It is rare by file count and total where
+ *  it occurs: 6 of 3052 classes read off a system have it, and there it is
+ *  generated for every parameter of every method, so abaplint reads 2 of 15
+ *  methods in one of them. A body whose signature went missing then looks as
  *  though it read an undeclared table variable.
  *
- *  The `!` is a **preferred-parameter marker** and carries no meaning for the
- *  interface -- it exists to escape a name that would collide with a keyword
- *  -- so removing it before parsing changes nothing about what is read. This
+ *  The `!` is the **identifier escape** -- it stops the name being read as a
+ *  keyword -- and carries no meaning for the interface, so removing it
+ *  before parsing changes nothing about what is read. (Not `PREFERRED
+ *  PARAMETER`, which is a different addition; abaplint's own rule for this
+ *  is `no_exclamation_escape`.) This
  *  is deliberately a normalisation of one token for one parser and not a
  *  parameter parser of our own: re-deriving what abaplint does is the
  *  failure mode this project is built to avoid, and it would go stale

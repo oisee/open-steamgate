@@ -950,7 +950,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-19-form-field-name-case — `get_form_field` lower-cases the question and not the answer
 
-- Status: `workaround`
+- Status: `reported`
 - Discovery date: `2026-09-19`
 - Affected versions: `open-abap-core` as cloned 2026-09-19
 - Affected ABAP statement, runtime API or adapter: `if_http_entity~get_form_field` / `~set_form_fields`
@@ -960,13 +960,13 @@ ENDLOOP.
 - Actual open-abap behaviour: as above. `get_form_fields` (plural) lower-cases on the way out, which is a third spelling of the same decision and the reason the single getter's asymmetry is easy to miss
 - Impact on open-steamgate: any page whose form field names are not already lower case reads them as empty. Found in the data browser (G.9 wave 2), where the field names come from DDIC and DDIC names are upper case. The failure is silent: the filter simply selected everything, which looks like a working screen with no filter typed
 - Smallest safe workaround: name the form fields in lower case and ask for them that way — `f_{ to_lower( ls_field-name ) }` in `src/webgui/zcl_osd_se16.clas.abap`, both where the input is rendered and where it is read. One line each, no dependency on which half upstream fixes
-- Upstream issue: **needs an issue.** The fix is one line either way (compare case-insensitively, or normalise on set), but which one is right depends on what the interface promises, and that is Lars's call rather than ours
+- Upstream issue: https://github.com/open-abap/open-abap-core/issues/1252, opened 2026-09-19. The issue names the side that looks right and says why — the header path normalises on both sides, and the interface ships `_cs` variants, which only makes sense if the plain getter is the case-insensitive one — and offers a PR with a test
 - Regression-test location: `test/se16.mjs`, "filters through the same clause builder an OData $filter goes through"
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-09-19-bang-value — abaplint loses every parameter of a method declared `!VALUE(x)`
+### ANOMALY-2026-09-19-bang-value — abaplint does not parse a method declared `!VALUE(x)`, and the method is lost
 
-- Status: `workaround`
+- Status: `reported`
 - Discovery date: `2026-09-19`
 - Affected versions: `@abaplint/core` 2.120.55
 - Affected ABAP statement, runtime API or adapter: `METHODS` / `CLASS-METHODS` with a parameter written `!VALUE(name)`
@@ -978,10 +978,10 @@ ENDLOOP.
   ENDCLASS.
   ```
 - Exact command used to run it: parse it with `new Registry().addFile(...).parse()` and read `getFirstObject().getABAPFiles()[0].getStatements()`
-- Expected SAP behaviour: **not claimed, and not needed.** The `!` is a preferred-parameter marker, an editor concern that escapes a name which would otherwise collide with a keyword; it carries no meaning for the interface. What makes this an anomaly does not need a system: abaplint parses `!iv_x` and parses `VALUE(iv_x)`, and does not parse the two **together**. Three forms measured, one fails, and the failing one is the combination
-- Actual open-abap behaviour: the statement comes back as `Unknown`, so `getClassDefinition().methods` is **empty** — not the one method mis-read, the whole class silently parameterless
-- Impact on open-steamgate: SE24 generates exactly this combination, so it is ordinary rather than exotic. In the AMDP corpus it costs the signature of every method in such a class, and a body then looks as though it read an **undeclared table variable** — the refusal names `:it_ddls`, which is declared three lines above it in the ABAP. Measured: 171 of 364 corpus bodies had a signature carrying parameters; with the workaround, **188**
+- Expected SAP behaviour: **not claimed, and not needed.** The `!` is the **identifier escape** — it stops the name being read as a keyword — and it carries no meaning for the interface. (It is not `PREFERRED PARAMETER`, which is a separate `METHODS` addition; abaplint's own rule for the escape is `no_exclamation_escape`. The first version of this entry got that name wrong, and a critic caught it before it went to the people who wrote that rule.) What makes this an anomaly does not need a system: abaplint parses `!iv_x` and parses `VALUE(iv_x)`, and does not parse the two **together**. `!REFERENCE(x)` fails the same way
+- Actual open-abap behaviour: the `METHODS` / `CLASS-METHODS` statement comes back as `Unknown`, so **that method** is missing from `getClassDefinition().methods`. Other methods of the class are unaffected — the first version of this entry said "the whole class", which is an artefact of a reproducer with one method in it. Nor is it silent: `findIssues()` reports a `parser_error`, but it points at the `CLASS` token rather than at the parameter, and a caller using `getClassDefinition()` sees only a missing method
+- Impact on open-steamgate: rare by file count and total where it occurs — 6 of 3052 classes read off a system contain the form at all, and in those it is generated for every parameter of every method, so abaplint parses 2 of 15 methods in one class and 1 of 9 in another. (Who generates it is **not** measured: the first version of this entry said SE24, which nobody asked. abaplint#2529 floats the same guess and it is still a guess.) A body then looks as though it read an **undeclared table variable** — the refusal names `:it_ddls`, declared three lines above it in the ABAP. Measured: 171 of 364 corpus bodies had a signature carrying parameters; with the workaround, **188**
 - Smallest safe workaround: `withoutBangValue()` in `tools/amdp-extract.mjs` — `!VALUE(` becomes `VALUE(` for the parser and for nothing else. Deliberately a normalisation of one token for one parser rather than a parameter parser of our own: re-deriving what abaplint does is the failure mode this project is built to avoid, and it would go stale in silence the day upstream fixes this
-- Upstream issue: **needs an issue**, on `abaplint/abaplint`. That repository takes no branch from us and its regression workflow skips forks, so an issue is the whole of what we can offer there — `npm run parked` prints which rule applies to which repository
+- Upstream issue: https://github.com/abaplint/abaplint/issues/4308, opened 2026-09-19. That repository takes no branch from us and its regression workflow skips forks, so an issue is the whole of what we can offer there, and the issue offers a PR if the maintainer names the shape he wants. Related upstream: abaplint#2529, the same escape in front of a builtin function, open since 2022
 - Regression-test location: `test/amdp.mjs`, "a parameter written `!VALUE(x)` is still a parameter" — **and, separately, "the abaplint gap the !VALUE workaround exists for"**, which asserts the upstream defect itself so that the workaround has an expiry. A workaround with no expiry is how a tree collects code nobody dares remove: the reason lives in a commit message, the commit message is read once, and later the normalisation looks load-bearing. When abaplint learns the form, that test fails and says to delete the workaround rather than to adjust the expectation
 - Upstream version containing a fix: `unknown`
