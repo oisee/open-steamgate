@@ -18,7 +18,7 @@
 // the tree is the source of truth, and the registry is derived.
 import {existsSync, readdirSync, readFileSync, statSync} from "node:fs";
 import {inputFoldersOf} from "./osd-packs.mjs";
-import {join} from "node:path";
+import {basename,join} from "node:path";
 
 // Where a service node can live: the layers, which is what the store reads
 // and what the transpiler is handed (tools/osd-packs.mjs, backlog E.1/E.2).
@@ -189,7 +189,7 @@ export function mountServices(app, run, options = {}) {
   return mounted;
 }
 
-if (process.argv[1]?.endsWith("osd-icf.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-icf.mjs") {
   const root = process.argv[2] ?? process.cwd();
   const roots = process.argv[3] === undefined ? undefined : [process.argv[3]];
   const found = services(root, {roots});

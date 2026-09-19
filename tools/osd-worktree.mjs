@@ -16,7 +16,7 @@
 // clone of open-abap-core would cost gigabytes to isolate nothing.
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, symlinkSync, lstatSync} from "node:fs";
-import {join, relative, resolve} from "node:path";
+import {basename,join, relative, resolve} from "node:path";
 
 export const WORKTREES = ".local/worktrees";
 
@@ -137,7 +137,7 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1]?.endsWith("osd-worktree.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-worktree.mjs") {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (error) {

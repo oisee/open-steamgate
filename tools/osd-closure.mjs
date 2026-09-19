@@ -241,6 +241,6 @@ function main(argv) {
   return result.missing.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1]?.endsWith("osd-closure.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-closure.mjs") {
   process.exit(main(process.argv.slice(2)));
 }

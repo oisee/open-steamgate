@@ -17,7 +17,7 @@
 //   node tools/sqlscript/check-corpus.mjs [.local/a4h-export]
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
 import {execFileSync} from "node:child_process";
-import {join} from "node:path";
+import {basename,join} from "node:path";
 import {lex} from "./lexer.mjs";
 import {parse} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
@@ -80,7 +80,7 @@ export function candidates(root = ".local/a4h-export", scratch = "/tmp/sqlscript
   return found;
 }
 
-if (process.argv[1]?.endsWith("check-corpus.mjs")) {
+if (basename(process.argv[1] ?? "") === "check-corpus.mjs") {
   const list = candidates(process.argv[2]);
   console.log(`${list.length} corpus bodies read nothing but their own IN table parameters`);
   for (const one of list.slice(0, 20)) {

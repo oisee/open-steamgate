@@ -12,7 +12,7 @@
 // laboratory is kept and which is not tracked.
 import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
-import {join} from "node:path";
+import {basename,join} from "node:path";
 import {extract, procedure, parameterType} from "./amdp-extract.mjs";
 
 const SCHEMA = process.env.HXE_SCHEMA ?? "OSD";
@@ -171,7 +171,7 @@ export async function call(client, name, method, inputs, types) {
   }
 }
 
-if (process.argv[1]?.endsWith("amdp-run.mjs")) {
+if (basename(process.argv[1] ?? "") === "amdp-run.mjs") {
   const args = process.argv.slice(2);
   const [path, wanted] = args.filter((a) => !a.startsWith("--") &&
     args[args.indexOf(a) - 1] !== "--types" && args[args.indexOf(a) - 1] !== "--in");

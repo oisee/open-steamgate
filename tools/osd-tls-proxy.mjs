@@ -19,6 +19,7 @@ import {createServer as createHttpServer, request as httpRequest} from "node:htt
 import {createWriteStream} from "node:fs";
 import {request as httpsRequest} from "node:https";
 import {credentials, exists, generate, fingerprint} from "./osd-tls.mjs";
+import {basename} from "node:path";
 
 // What went over this wire, one JSON line per exchange.
 //
@@ -37,6 +38,7 @@ function recorder(path, dumpMax) {
   }
   const file = createWriteStream(path, {flags: "a"});
   let seen = 0;
+  let issued = 0;
   const keep = (chunks, total) => {
     const body = Buffer.concat(chunks);
     return {
@@ -51,9 +53,33 @@ function recorder(path, dumpMax) {
     get count() {
       return seen;
     },
-    write(entry) {
+    // A number taken when the request arrives, not when the answer finishes.
+    //
+    // The line is written at the end of the response, so the order of lines
+    // is the order things *finished*. With a client that has several requests
+    // in flight — a long poll beside a tree expansion — that is not the order
+    // it sent them, and a replay built from the file would reorder the
+    // session without saying so. The sequence is the send order; the file
+    // stays append-ordered.
+    begin() {
+      issued += 1;
+      return {seq: issued, startedAt: new Date().toISOString(), started: process.hrtime.bigint()};
+    },
+    write(entry, opened) {
       seen += 1;
-      file.write(JSON.stringify({at: new Date().toISOString(), ...entry}) + "\n");
+      const finished = new Date().toISOString();
+      file.write(JSON.stringify({
+        at: finished,
+        seq: opened?.seq,
+        startedAt: opened?.startedAt,
+        endedAt: finished,
+        ms: opened?.started === undefined
+          ? undefined
+          : Number((process.hrtime.bigint() - opened.started) / 1000000n),
+        conn: opened?.conn,
+        backend: this.backend,
+        ...entry,
+      }) + "\n");
     },
     keep,
     limit: dumpMax,
@@ -65,7 +91,53 @@ export function startProxy(options = {}) {
   const forward = target.protocol === "https:" ? httpsRequest : httpRequest;
   const log = options.recorder ?? recorder(options.dump, options.dumpMax ?? 65536);
 
+  // Which build of the far end this capture is of.
+  //
+  // A capture without it is a record of some version of something, and the
+  // question "does the deployed system still do this" cannot be answered from
+  // it — which is exactly the question an audit of an old corpus runs into.
+  // Asked once, at startup, on the one resource that answers it; a far end
+  // that has no such resource records nothing rather than a guess.
+  if (log !== undefined) {
+    const probe = target.protocol === "https:" ? httpsRequest : httpRequest;
+    const ask = probe({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      method: "GET",
+      path: "/sap/bc/adt/core/http/build",
+      headers: {host: target.host, accept: "application/json"},
+      rejectUnauthorized: options.verify === true,
+      timeout: 5000,
+    }, (answer) => {
+      const chunks = [];
+      answer.on("data", (chunk) => chunks.push(chunk));
+      answer.on("end", () => {
+        if (answer.statusCode !== 200) {
+          return;
+        }
+        try {
+          log.backend = JSON.parse(Buffer.concat(chunks).toString("utf8")).build;
+        } catch {
+          // an answer that is not the stamp is not a stamp
+        }
+      });
+      answer.on("error", () => {});
+    });
+    ask.on("error", () => {});
+    ask.on("timeout", () => ask.destroy());
+    ask.end();
+  }
+
   const handle = (req, res) => {
+    // Taken first, before anything can await: this is the moment the request
+    // arrived.
+    const opened = log === undefined ? undefined : log.begin();
+    if (opened !== undefined) {
+      // Which connection it came in on, so that requests in flight together
+      // can be told from requests that merely overlap in the file.
+      opened.conn = req.socket?.osdConnectionId;
+    }
     const headers = {...req.headers, host: target.host};
     const inBody = [];
     let inBytes = 0;
@@ -108,7 +180,7 @@ export function startProxy(options = {}) {
         url: req.url,
         request: {headers: req.headers, body: log.keep(inBody, inBytes)},
         response: {status: answer.statusCode, headers: answer.headers, body: log.keep(out, outBytes)},
-      }));
+      }, opened));
       // A reset partway through an answer has no 502 to give: the status is
       // already sent. Ending the response is all that is left, and the point
       // is that the process survives to serve the next request.
@@ -116,6 +188,17 @@ export function startProxy(options = {}) {
       answer.pipe(res);
     });
     upstream.on("error", (e) => {
+      // An exchange that failed is still an exchange, and it used to leave no
+      // line at all — so a capture showed a gap where a client had seen an
+      // error, and a replay would have no reason to expect one.
+      if (log !== undefined) {
+        log.write({
+          method: req.method,
+          url: req.url,
+          request: {headers: req.headers, body: log.keep(inBody, inBytes)},
+          error: String(e?.message ?? e),
+        }, opened);
+      }
       if (res.headersSent === false) {
         res.writeHead(502, {"content-type": "text/plain"});
       }
@@ -150,8 +233,16 @@ export function startProxy(options = {}) {
     socket.destroy();
   });
   server.on("tlsClientError", (error, socket) => socket.destroy());
-  server.on("connection", (socket) => socket.on("error", () => socket.destroy()));
-  server.on("secureConnection", (socket) => socket.on("error", () => socket.destroy()));
+  // One id per connection, so that "these two requests were in flight at the
+  // same time" can be told from "these two lines are next to each other".
+  let connections = 0;
+  const mark = (socket) => {
+    connections += 1;
+    socket.osdConnectionId = connections;
+    socket.on("error", () => socket.destroy());
+  };
+  server.on("connection", mark);
+  server.on("secureConnection", mark);
 
   server.on("upgrade", (req, socket, head) => {
     const headers = {...req.headers, host: target.host};
@@ -191,7 +282,7 @@ function tlsOrThrow(options) {
   return tls;
 }
 
-if (process.argv[1]?.endsWith("osd-tls-proxy.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-tls-proxy.mjs") {
   const arg = (name, fallback) => {
     const at = process.argv.indexOf("--" + name);
     return at === -1 ? fallback : process.argv[at + 1];

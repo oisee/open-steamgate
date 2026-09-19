@@ -11,7 +11,7 @@
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync} from "node:fs";
 import {networkInterfaces} from "node:os";
-import {join} from "node:path";
+import {basename,join} from "node:path";
 
 export const TLS_DIR = ".local/tls";
 export const KEY = "osd.key";
@@ -97,7 +97,7 @@ export function fingerprint(root = process.cwd()) {
     .replace(/^.*=/, "");
 }
 
-if (process.argv[1]?.endsWith("osd-tls.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-tls.mjs") {
   const force = process.argv.includes("--force");
   const result = generate(process.cwd(), {force});
   console.log(`${result.created ? "written" : "already there"}: ${result.key}, ${result.cert}`);

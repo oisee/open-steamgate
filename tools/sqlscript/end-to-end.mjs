@@ -16,6 +16,7 @@ import {parse} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
+import {basename} from "node:path";
 
 /** the fixture, in our own DDIC shapes, written once for every engine */
 export const CATALOGUE = {SRC: {K: {abap: "C", len: 4}, N: {abap: "I"}}};
@@ -83,7 +84,7 @@ export async function run({hana = false, body = BODY, catalogue = CATALOGUE} = {
   return results;
 }
 
-if (process.argv[1]?.endsWith("end-to-end.mjs")) {
+if (basename(process.argv[1] ?? "") === "end-to-end.mjs") {
   const results = await run({hana: process.argv.includes("--hana")});
   for (const r of results) {
     console.log(`\n${r.engine}`);

@@ -8,7 +8,7 @@
 //
 //   node tools/amdp-tablefunc.mjs [--check]
 import {readFileSync, readdirSync, existsSync} from "node:fs";
-import {join} from "node:path";
+import {basename,join} from "node:path";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 
@@ -112,7 +112,7 @@ export function check(tf, procedure) {
   return problems;
 }
 
-if (process.argv[1]?.endsWith("amdp-tablefunc.mjs")) {
+if (basename(process.argv[1] ?? "") === "amdp-tablefunc.mjs") {
   const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
   const folders = config.input_folder.filter((f) => f === "src" || f.startsWith("packs/"));
   const functions = tableFunctions(folders);

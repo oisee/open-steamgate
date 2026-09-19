@@ -17,6 +17,7 @@
 // repository is public and the systems we talk to are not.
 import {createServer, connect} from "node:net";
 import {createWriteStream} from "node:fs";
+import {basename} from "node:path";
 
 export function forwardPorts({host, ports, dump, onEvent}) {
   const file = dump === undefined ? undefined : createWriteStream(dump, {flags: "a"});
@@ -60,7 +61,7 @@ export function forwardPorts({host, ports, dump, onEvent}) {
   return {servers, seen};
 }
 
-if (process.argv[1]?.endsWith("osd-tcp-forward.mjs")) {
+if (basename(process.argv[1] ?? "") === "osd-tcp-forward.mjs") {
   const arg = (name, fallback) => {
     const at = process.argv.indexOf("--" + name);
     return at === -1 ? fallback : process.argv[at + 1];

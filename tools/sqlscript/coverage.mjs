@@ -14,7 +14,7 @@
 //   node tools/sqlscript/coverage.mjs [.local/a4h-export]
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
 import {execFileSync} from "node:child_process";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 import {lex, LexError} from "./lexer.mjs";
 import {parse, ParseError} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
@@ -144,7 +144,12 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   return report;
 }
 
-if (process.argv[1]?.endsWith("coverage.mjs")) {
+// The check is the **file name**, not a suffix of it. A suffix matched more
+// than it meant: fable-osd's `sqlscript-force-coverage.mjs` imported this
+// module and this line ran her command line as ours, because her name also
+// ends in "coverage.mjs". Same family as everything else caught today -- a
+// test that is wider than the thing it has in mind.
+if (basename(process.argv[1] ?? "") === "coverage.mjs") {
   const report = measure(process.argv[2]);
   for (const [which, r] of Object.entries(report)) {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +

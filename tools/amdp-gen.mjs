@@ -203,7 +203,7 @@ export function generate(folders, out = DEFAULT_OUT) {
   return {classes: written, procedures};
 }
 
-if (process.argv[1]?.endsWith("amdp-gen.mjs")) {
+if (basename(process.argv[1] ?? "") === "amdp-gen.mjs") {
   const args = process.argv.slice(2);
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : DEFAULT_OUT;
   // Content, not the layer list. A generator that reads every input folder
