@@ -40,6 +40,7 @@
     "test/segw.mjs",
     "test/sqlscript-canary.mjs",
     "test/sqlscript-check.mjs",
+    "test/sqlscript-divergences.mjs",
     "test/sqlscript-eager.mjs",
     "test/sqlscript-end-to-end.mjs",
     "test/sqlscript-ir.mjs",
