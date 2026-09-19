@@ -392,7 +392,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
   METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
 * Travel with bookings in one request. The deep structure is read from the
 * provider, the header inserted, the items inserted with the header key.
-    DATA ls_deep    TYPE zcl_zstg_demo_mpc=>ts_travel_deep.
+    DATA ls_deep    TYPE zcl_zstg_demo_mpc_ext=>ts_travel_deep.
     DATA ls_travel  TYPE zstg_demo.
     DATA ls_booking TYPE zstg_demo_bk.
     FIELD-SYMBOLS <ls_item> TYPE zcl_zstg_demo_mpc=>ts_booking.
@@ -444,8 +444,8 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     DATA lt_children TYPE /iwbep/if_mgw_odata_expand=>ty_t_node_children.
     DATA ls_child    LIKE LINE OF lt_children.
     DATA lt_travel   TYPE zcl_zstg_demo_mpc=>tt_travel.
-    DATA lt_deep     TYPE STANDARD TABLE OF zcl_zstg_demo_mpc=>ts_travel_deep WITH DEFAULT KEY.
-    DATA ls_deep     TYPE zcl_zstg_demo_mpc=>ts_travel_deep.
+    DATA lt_deep     TYPE STANDARD TABLE OF zcl_zstg_demo_mpc_ext=>ts_travel_deep WITH DEFAULT KEY.
+    DATA ls_deep     TYPE zcl_zstg_demo_mpc_ext=>ts_travel_deep.
     DATA lt_booking  TYPE STANDARD TABLE OF zcl_zstg_demo_mpc=>ts_booking WITH DEFAULT KEY.
     DATA ls_travel   TYPE zcl_zstg_demo_mpc=>ts_travel.
     DATA ls_booking  TYPE zcl_zstg_demo_mpc=>ts_booking.
@@ -640,7 +640,7 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD fill_status_text.
-    DATA lt_status TYPE zcl_zstg_demo_mpc=>tt_status_vh.
+    DATA lt_status TYPE zcl_zstg_demo_mpc=>tt_statusvh.
     DATA ls_status LIKE LINE OF lt_status.
     FIELD-SYMBOLS <ls_travel> LIKE LINE OF ct_travel.
 

@@ -67,7 +67,11 @@ entities:
     operations: [R, Q]
     properties:
       Status: {type: String(1), readonly: true, label: Status}
-      Text: {type: String(40), readonly: true, label: Status text}
+      # the DDIC column is STATUS_TEXT; the OData property stays Text. The
+      # model used to leave `field:` out, so it said TEXT while the
+      # hand-written class said status_text, and nothing compared them
+      # (2026-09-19).
+      Text: {type: String(40), field: STATUS_TEXT, readonly: true, label: Status text}
 
 associations:
   TravelToBookings:

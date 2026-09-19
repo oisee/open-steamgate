@@ -35,11 +35,11 @@ const KNOWN = {
     tt_text_elements: "generated: the text pool types",
     ts_canceltravel: "generated: the function import's input structure",
     ts_travelcount: "generated: the function import's input structure",
-    ts_status_vh: "TO FIX: the model says StatusVH/Text, the class says status_text",
-    tt_status_vh: "TO FIX: the same, as a table type",
-    ts_statusvh: "the generated pair of ts_status_vh",
-    tt_statusvh: "the generated pair of tt_status_vh",
-    ts_travel_deep: "TO FIX: a deep-insert structure in a class SEGW regenerates -- it belongs in _MPC_EXT",
+    // ts_status_vh, tt_status_vh and ts_travel_deep were here and are closed:
+    // the class uses the model's names now, the YAML says which ABAP field
+    // the property Text is (STATUS_TEXT, the DDIC column that was always
+    // there), and the deep-insert structure moved to _MPC_EXT with
+    // INCLUDE TYPE from the base -- which is what both corpus projects do.
   },
 };
 

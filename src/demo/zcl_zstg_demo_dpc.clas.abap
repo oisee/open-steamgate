@@ -24,7 +24,7 @@ CLASS zcl_zstg_demo_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
         iv_search_string         TYPE string
         io_tech_request_context  TYPE REF TO /iwbep/if_mgw_req_entityset OPTIONAL
       EXPORTING
-        et_entityset             TYPE zcl_zstg_demo_mpc=>tt_status_vh
+        et_entityset             TYPE zcl_zstg_demo_mpc=>tt_statusvh
         es_response_context      TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_context
       RAISING
         /iwbep/cx_mgw_busi_exception
@@ -228,7 +228,7 @@ CLASS zcl_zstg_demo_dpc IMPLEMENTATION.
   METHOD /iwbep/if_mgw_appl_srv_runtime~get_entityset.
     DATA lt_travel         TYPE zcl_zstg_demo_mpc=>tt_travel.
     DATA lt_booking        TYPE zcl_zstg_demo_mpc=>tt_booking.
-    DATA lt_status_vh      TYPE zcl_zstg_demo_mpc=>tt_status_vh.
+    DATA lt_status_vh      TYPE zcl_zstg_demo_mpc=>tt_statusvh.
     DATA lt_photo          TYPE zcl_zstg_demo_mpc=>tt_photo.
     DATA lv_entityset_name TYPE string.
 

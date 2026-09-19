@@ -91,7 +91,7 @@ CLASS ltcl_shlp IMPLEMENTATION.
     DATA lt_nav      TYPE /iwbep/t_mgw_navigation_path.
     DATA lt_order    TYPE /iwbep/t_mgw_sorting_order.
     DATA lr_data     TYPE REF TO data.
-    FIELD-SYMBOLS <lt_rows> TYPE zcl_zstg_demo_mpc=>tt_status_vh.
+    FIELD-SYMBOLS <lt_rows> TYPE zcl_zstg_demo_mpc=>tt_statusvh.
 
     CREATE OBJECT lo_dpc.
     lo_runtime = lo_dpc.

@@ -12,11 +12,11 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
     TYPES tt_travel TYPE STANDARD TABLE OF ts_travel WITH DEFAULT KEY.
 
 * value help for Status: the code and its text
-    TYPES: BEGIN OF ts_status_vh,
+    TYPES: BEGIN OF ts_statusvh,
              status      TYPE c LENGTH 1,
              status_text TYPE c LENGTH 40,
-           END OF ts_status_vh.
-    TYPES tt_status_vh TYPE STANDARD TABLE OF ts_status_vh WITH DEFAULT KEY.
+           END OF ts_statusvh.
+    TYPES tt_statusvh TYPE STANDARD TABLE OF ts_statusvh WITH DEFAULT KEY.
 
 * the picture of a travel: a media entity, its content read and written as
 * a stream at PhotoSet('T0001')/$value; the properties are what is known
@@ -37,11 +37,6 @@ CLASS zcl_zstg_demo_mpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs
     TYPES tt_booking TYPE STANDARD TABLE OF ts_booking WITH DEFAULT KEY.
 
 * deep structure for a Travel with its bookings, the SEGW convention:
-* one component per navigation property, named like it
-    TYPES: BEGIN OF ts_travel_deep.
-        INCLUDE TYPE ts_travel.
-    TYPES: to_bookings TYPE tt_booking,
-           END OF ts_travel_deep.
 
     CONSTANTS gc_travel TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'Travel' ##NO_TEXT.
     CONSTANTS gc_travel_set TYPE /iwbep/if_mgw_med_odata_types=>ty_e_med_entity_name VALUE 'TravelSet' ##NO_TEXT.
