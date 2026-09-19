@@ -25,7 +25,7 @@ describe("tools/segw-registry: IWSV/IWMO -> service registry", () => {
     const iwmo = (mdl, mpc) => `<?xml version="1.0" encoding="utf-8"?><abapGit><asx:abap><asx:values>
 <_-IWBEP_-I_MGW_OHD><_-IWBEP_-I_MGW_OHD><TECHNICAL_NAME>${mdl}</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>${mpc}</CLASS_NAME></_-IWBEP_-I_MGW_OHD></_-IWBEP_-I_MGW_OHD>
 </asx:values></asx:abap></abapGit>`;
-    writeFileSync(join(dir, "zui5_code_search_srv            0001.iwsv.xml"), iwsv("ZUI5_CODE_SEARCH_SRV", "ZUI5_CODE_SEARCH_MDL", "ZCL_ZUI5_CODE_SEARCH_DPC_EXT"));
+    writeFileSync(join(dir, "zui5_code_search_srv               0001.iwsv.xml"), iwsv("ZUI5_CODE_SEARCH_SRV", "ZUI5_CODE_SEARCH_MDL", "ZCL_ZUI5_CODE_SEARCH_DPC_EXT"));
     writeFileSync(join(dir, "zui5_code_search_mdl            0001.iwmo.xml"), iwmo("ZUI5_CODE_SEARCH_MDL", "ZCL_ZUI5_CODE_SEARCH_MPC_EXT"));
     writeFileSync(join(dir, "zorphan_srv 0001.iwsv.xml"), iwsv("ZORPHAN_SRV", "ZORPHAN_MDL", "ZCL_ZORPHAN_DPC_EXT"));
     try {

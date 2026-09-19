@@ -54,7 +54,7 @@ describe("tools/osd-status: the system as one JSON object", () => {
     write("src/zchan.sapc.xml", "<abapGit><PATH>/sap/bc/apc/sap/zchan</PATH><CLASS_NAME>ZCL_CHAN</CLASS_NAME></abapGit>");
     write("src/zdemo_mdl                       0001.iwmo.xml",
       "<abapGit><_-IWBEP_-I_MGW_OHD><TECHNICAL_NAME>ZDEMO_MDL</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>ZCL_ZDEMO_MPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_OHD></abapGit>");
-    write("src/zdemo_srv                       0001.iwsv.xml",
+    write("src/zdemo_srv                          0001.iwsv.xml",
       "<abapGit><_-IWBEP_-I_MGW_SRG><MODEL_TECH_NAME>ZDEMO_MDL</MODEL_TECH_NAME><MODEL_VERSION>0001</MODEL_VERSION></_-IWBEP_-I_MGW_SRG>" +
       "<_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>ZDEMO_SRV</TECHNICAL_NAME><VERSION>0001</VERSION><EXTERNAL_NAME>ZDEMO_SRV</EXTERNAL_NAME>" +
       "<CLASS_NAME>ZCL_ZDEMO_DPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_SRH><DESCRIPTION>a demo</DESCRIPTION></abapGit>");

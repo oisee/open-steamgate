@@ -32,11 +32,11 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
   });
 
   it("writes the tree, the service and the model objects under their abapGit names", () => {
-    expect(Object.keys(result.files)).to.deep.equal(["zstg_demo.iwpr.xml", "zstg_demo_srv                   0001.iwsv.xml", "zstg_demo_mdl                   0001.iwmo.xml"]);
-    expect(result.files["zstg_demo_srv                   0001.iwsv.xml"]).to.contain("<CLASS_NAME>ZCL_ZSTG_DEMO_DPC_EXT</CLASS_NAME>");
+    expect(Object.keys(result.files)).to.deep.equal(["zstg_demo.iwpr.xml", "zstg_demo_srv                      0001.iwsv.xml", "zstg_demo_mdl                   0001.iwmo.xml"]);
+    expect(result.files["zstg_demo_srv                      0001.iwsv.xml"]).to.contain("<CLASS_NAME>ZCL_ZSTG_DEMO_DPC_EXT</CLASS_NAME>");
     expect(result.files["zstg_demo_mdl                   0001.iwmo.xml"]).to.contain("<CLASS_NAME>ZCL_ZSTG_DEMO_MPC_EXT</CLASS_NAME>");
     // the registration objects match the hand-made ones of the demo
-    expect(result.files["zstg_demo_srv                   0001.iwsv.xml"]).to.equal(readFileSync("src/demo/zstg_demo_srv                   0001.iwsv.xml", "utf8"));
+    expect(result.files["zstg_demo_srv                      0001.iwsv.xml"]).to.equal(readFileSync("src/demo/zstg_demo_srv                      0001.iwsv.xml", "utf8"));
     expect(result.files["zstg_demo_mdl                   0001.iwmo.xml"]).to.equal(readFileSync("src/demo/zstg_demo_mdl                   0001.iwmo.xml", "utf8"));
   });
 

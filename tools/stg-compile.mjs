@@ -906,24 +906,37 @@ export function iwmoXml(m) {
 `;
 }
 
-// abapGit names: /NS/X -> #ns#x; an IWSV/IWMO key is the technical name
-// padded to **32** plus a four-character version, 36 in all.
+// abapGit names: /NS/X -> #ns#x; a versioned key is the technical name
+// padded, then a four-character version.
 //
-// It was 34 here and in zcl_stg_segw_repo, and both agreed, so the test that
-// holds the two implementations byte-identical passed for months: they were
-// compared with each other and never with a system. Measured on A4H
-// 2026-09-19, from the percent-encoded ADT URIs so the spaces are exact:
+// **The padding is per object type, and this cost two wrong answers before a
+// real export settled it.** It was 34 for both here and in
+// zcl_stg_segw_repo, and the two agreed, so the test holding them
+// byte-identical passed for months: it compares the implementations with
+// each other and never with a system. Then abapGit refused the import --
+// "This syntax cannot be used for an object name" -- and the first fix made
+// both 32, from three IWMO objects read off A4H's ADT URIs. That fixed the
+// IWMO and broke the IWSV, which is not 32.
 //
-//   /DMO/UI_TRAVEL_A_D_O2      name 21 -> key 36
-//   /DMO/UI_TRAVEL_A_D_O2_VAN  name 25 -> key 36
-//   /DMO/API_TRAVEL_U_V2       name 20 -> key 36
+// Measured properly by exporting a real SEGW package from A4H with abapGit
+// (S_APS_ODATA_GBT_NTE, 31 objects) and reading the file names it wrote:
 //
-// abapGit refused the import with "This syntax cannot be used for an object
-// name": two characters too long is not a near miss, it is a different name.
-const IWSV_NAME_WIDTH = 32;
+//   IWMO  sgbt_nte_demo_mdl               0001   padded to 32, key 36
+//   IWVB  sgbt_nte_demo_anno_mdl          0001   padded to 32, key 36
+//   IWSV  sgbt_nte_demo_srv                  0001   padded to 35, key 39
+//
+// Three of each, all agreeing. The tree had both answers already and they
+// were both right: test/segw.mjs held `zui5_code_search_mdl` at 36 and
+// `zui5_code_search_srv` at 39, and the first "fix" made the second wrong.
+// Taking one measurement and generalising it over a second object type is
+// how a correct fixture gets edited to match a broken generator.
+const KEY_WIDTH = {".iwsv.xml": 35, ".iwmo.xml": 32, ".iwvb.xml": 32};
 const objectFile = (name, ext) => name.toLowerCase().replaceAll("/", "#") + ext;
-const versionedFile = (name, ext) =>
-  name.toLowerCase().padEnd(IWSV_NAME_WIDTH, " ") + "0001" + ext;
+const versionedFile = (name, ext) => {
+  const width = KEY_WIDTH[ext];
+  if (width === undefined) throw new Error(`no key width known for ${ext}`);
+  return name.toLowerCase().padEnd(width, " ") + "0001" + ext;
+};
 
 // everything the folder gets: the tree, the registration objects, the
 // classes (generated from the tree by segw-gen, so what SEGW would write)
