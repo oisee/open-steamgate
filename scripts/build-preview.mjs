@@ -8,7 +8,7 @@ import {copyFile, mkdir, readFile, readdir, writeFile, stat} from "node:fs/promi
 import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
-import {join, resolve} from "node:path";
+import {join, resolve, dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {seedStatements} from "../test/seed.mjs";
 import {services as icfServices, channels as apcChannels} from "../tools/osd-icf.mjs";
@@ -16,6 +16,7 @@ import {folderOf, packsOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {describeUnfetched, unfetched} from "../tools/osd-fetch.mjs";
 import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
 import {identity} from "../tools/osd-identity.mjs";
+import {SANDBOX_CONFIG_PATH, SANDBOX_CONFIG_BODY} from "../tools/osd-sandbox-config.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const generated = resolve(root, "web/generated");
@@ -198,6 +199,11 @@ async function copyTree(from, to) {
   }
 }
 await copyTree(resolve(root, "webapp"), resolve(build, "app"));
+// the launchpad sandbox asks for this at an absolute path, so it is a file in
+// the build root rather than a route; the two express hosts serve the same
+// body from the same module (tools/osd-sandbox-config.mjs)
+await mkdir(resolve(build, dirname(SANDBOX_CONFIG_PATH).slice(1)), {recursive: true});
+await writeFile(resolve(build, SANDBOX_CONFIG_PATH.slice(1)), SANDBOX_CONFIG_BODY);
 // a pack's page under app/<name>/, and the tiles the packs ask for as the
 // file the launchpad fetches (test/start.mjs answers the same JSON live)
 for (const pack of webappsOf(root)) {

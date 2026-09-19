@@ -844,21 +844,11 @@ test("the launchpad's console and network, characterised", async () => {
     // that allows the known debt by name goes red the moment a THIRD thing
     // appears, which is what it is for. Same shape as `.leak-allow.json`:
     // the reason is what tells an allowance from a way of going green.
-    const known = [
-      {match: "/appconfig/fioriSandboxConfig.json",
-       reason: "E.5: the UShell sandbox fetches an optional external config on top of the inline " +
-         "`sap-ushell-config`. The launchpad works without it — this is a 404 in a stranger's " +
-         "network tab, not a broken page. Fix is to answer it; the path is absolute, so it needs a " +
-         "route in all three hosts or a file in the preview root, written once."},
-    ];
-    const unexplained = refused.filter((r) => !known.some((k) => r.includes(k.match)));
-    expect(unexplained, `the page asked for something it did not get:\n${unexplained.join("\n")}`).toHaveLength(0);
-    // and the known two must still be exactly two: if one is fixed, this says
-    // so rather than letting the allowance quietly outlive the defect
-    for (const k of known) {
-      expect(refused.some((r) => r.includes(k.match)),
-        `${k.match} no longer fails — remove it from the allowance and from backlog E.5`).toBe(true);
-    }
+    // Nothing is allowed any more. All three of E.5's items are fixed, so
+    // the allowance list is empty rather than kept "just in case" — an
+    // allowance that outlives its defect is the failure this shape exists to
+    // prevent, and the emptiest version of it is no list at all.
+    expect(refused, `the page asked for something it did not get:\n${refused.join("\n")}`).toHaveLength(0);
     // and the one that was fixed: the tile's question now has an answer
     const engine = await page.evaluate(async () => {
       const res = await fetch("/sap/bc/osd/amdp/engine");

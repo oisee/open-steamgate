@@ -20,6 +20,7 @@ import {mountServices, channels} from "./osd-icf.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
+import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 
 const started = Date.now();
 
@@ -55,6 +56,7 @@ app.use((req, res, next) => {
   res.set("X-OSD-Generation", process.env.OSD_GENERATION ?? "0");
   next();
 });
+serveSandboxConfig(app);
 
 // how a supervisor knows this runtime is alive and which generation of the
 // code it carries; not part of any ADT or OData surface

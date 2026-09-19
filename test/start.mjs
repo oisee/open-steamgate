@@ -17,6 +17,7 @@ import {mountServices, services as icfServices, channels as pushChannels} from "
 import {mountChannels} from "../tools/osd-apc.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
+import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
 
 // Two shapes of one listener, and the difference is whether this process
 // contains an ABAP system.
@@ -81,6 +82,7 @@ export function startServer(quiet) {
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   // the tree's webapp, not the module's: in a binary the module has no folder
   app.use("/app", express.static(join(process.cwd(), "webapp")));
+  serveSandboxConfig(app);
   // what the launchpad asks for at start: the tiles the packs declare, so a
   // pack appears on it without anybody editing webapp/flp.html (backlog E.2)
   app.get("/app/packs.json", function (req, res) {

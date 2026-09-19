@@ -726,12 +726,17 @@ files:
   compared automatically".
 
 **this session** — what it has already shipped and owns:
-- **E.5**, the launchpad asking for a config we do not serve — **confirmed
-  2026-09-19, and it is three things rather than one**:
-  - `404 /appconfig/fioriSandboxConfig.json` — the UShell sandbox fetches an
-    optional external config on top of our inline `sap-ushell-config`. The
-    page works without it. The path is absolute, so answering it needs a
-    route in all three hosts or a file in the preview root, written once.
+- **E.5**, the launchpad asking for a config we do not serve — **done
+  2026-09-19.** It was three things rather than one, and the guard that
+  settled it now allows none of them:
+  - `404 /appconfig/fioriSandboxConfig.json` — **fixed.** The UShell sandbox
+    fetches an optional external config on top of our inline
+    `sap-ushell-config` and merges it. We have nothing to add, so the honest
+    answer is an empty merge. Written once in
+    `tools/osd-sandbox-config.mjs`: the two express hosts take a route from
+    it, the preview build writes a file from the same body, because the path
+    is absolute and a rule about what every host must answer belongs in a
+    module they all import.
   - `500 /sap/bc/osd/amdp/engine` — **fixed 2026-09-19**, and it was three
     layers, each hiding the next:
     1. the destination raised a plain JavaScript `Error`, which the ABAP
