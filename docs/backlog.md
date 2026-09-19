@@ -1072,11 +1072,23 @@ A.8  CTS                                                                 [S]
 *Deepen what the answers are made of: OData, SADL, RFC, and the database seam.*
 
 ```
-B.1  SADL beyond read-only                                               [S]
+B.1  SADL beyond read-only                           [S]  reads DONE 09-19
      ├─ today: CDS projections, an analytics cube, $select -> GROUP BY,
      │  and writes only on a projection of exactly one table
-     └─ next: associations in a projection, and a write path that is not
-        the single-table special case
+     ├─ **associations in a projection — done 2026-09-19.** `parseDDLS`
+     │  reads one view at a time and a view's associations are the clauses it
+     │  declares; a projection declares none, it re-exposes an element the
+     │  view underneath declared. So `_Child` was collected as "exposed" and
+     │  had nothing to be exposed **of**. Measured before the fix on a
+     │  projection of a view with one association: the base came back with
+     │  its association and the projection with none, silently
+     ├─ it is a pass over all the views (`inheritAssociations`) rather than a
+     │  line inside one, because the answer is in a different file and
+     │  `parseDDLS` never has two. The inherited association names the view
+     │  it came from, and one whose ON column the projection **renamed** is
+     │  refused by name rather than emitted with pairs that name a column the
+     │  target does not have
+     └─ next: a write path that is not the single-table special case
 
 B.19 HANA, AMDP and where each machine stands                            [S]
      Decided 2026-09-18 by arithmetic rather than preference.

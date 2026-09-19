@@ -222,7 +222,8 @@ export function parseDDLS(obj, reg) {
     keyColumns: keyColumns.filter((k) => k !== "MANDT"),
     mandt,
   };
-  return {name, sqlView, source, fields, associations, viewAnnotations, label, write};
+  return {name, sqlView, source, fields, associations, exposedAssociations,
+    viewAnnotations, label, write};
 }
 
 function viewXml(e) {
@@ -268,6 +269,57 @@ ${dd27}
 // cast -- which is why this is a second interface and not more methods on
 // ZIF_STG_CDS_SOURCE (five hand-written classes in src/segw implement that
 // one).
+/** **An association a projection re-exposes belongs to the projection.**
+ *
+ *  `parseDDLS` reads one view at a time, and a view's associations are the
+ *  `association [0..*] to X on ...` clauses it declares itself. A projection
+ *  declares none -- it names an element, `_Child`, that the view underneath
+ *  declared -- so the element was collected as "exposed" and then had
+ *  nothing to be exposed **of**. Measured on a projection of a view with one
+ *  association: the base came back with its association and the projection
+ *  with none, silently (backlog B.1, the read half).
+ *
+ *  So it is a pass over all the views rather than a line inside one: the
+ *  answer is in a different file, and `parseDDLS` never has two files.
+ *
+ *  Inherited rather than copied blindly: the source's association keeps its
+ *  own `pairs`, because the ON condition is written in the source's column
+ *  names and the projection renames nothing it does not select. A projection
+ *  that renames a column used in an ON condition is **not** handled, and
+ *  says so rather than producing pairs that name a column the target does
+ *  not have. */
+export function inheritAssociations(views, byName) {
+  for (const view of views) {
+    const source = byName.get(String(view.source ?? "").toUpperCase());
+    if (source === undefined) continue;                 // it selects from a table
+    for (const name of view.exposedAssociations ?? []) {
+      if ((view.associations ?? []).some((a) => a.alias === name)) continue;
+      const inherited = (source.associations ?? []).find((a) => a.alias === name);
+      if (inherited === undefined) {
+        view.unresolvedAssociations = [...(view.unresolvedAssociations ?? []), name];
+        continue;
+      }
+      // A pair's `source` is a column **of the source view**, so the test is
+      // on the projection's `base`, not on its `name`: `key TravelId as
+      // Journey` gives `base: TRAVELID, name: JOURNEY`, and looking at the
+      // name finds nothing. The first version of this check did exactly
+      // that and therefore never fired -- a refusal that cannot happen is
+      // not a refusal, and its own test said so.
+      const renamed = inherited.pairs?.some((pair) => {
+        const column = String(pair.source ?? "").toUpperCase();
+        const field = (view.fields ?? []).find((f) => String(f.base ?? "").toUpperCase() === column);
+        return field !== undefined && String(field.name).toUpperCase() !== column;
+      });
+      if (renamed === true) {
+        view.unresolvedAssociations = [...(view.unresolvedAssociations ?? []), name];
+        continue;
+      }
+      view.associations = [...(view.associations ?? []), {...inherited, inheritedFrom: source.name}];
+    }
+  }
+  return views;
+}
+
 function childrenMethod(e, byName) {
   const children = compositionChildren(e, byName);
   if (children.length === 0) return {declare: "", implement: ""};
@@ -832,6 +884,7 @@ function main() {
     views.push(e);
   }
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
+  inheritAssociations(views, byName);
   for (const e of views) {
     entities.push(e);
     write(e.sqlView.toLowerCase() + ".view.xml", viewXml(e));
