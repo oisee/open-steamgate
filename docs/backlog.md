@@ -886,6 +886,59 @@ the relational remainder is worth more than eleven bodies.** What follows is
 a tail, and each step of it costs what the last one did and buys a third as
 much.
 
+## Status, 2026-09-19 — what closed, and what the day cost
+
+150 commits between two sessions. The list below is what moved; the reasons
+live in the entries further down and in
+[`docs/retro-2026-09-19.md`](retro-2026-09-19.md).
+
+**Closed today**
+
+| item | what it means now |
+| --- | --- |
+| **E.4, E.5** | the public preview has an empty complaint list; the console was measured, not guessed, and the launchpad lands on an intent |
+| **G.9** | sort by clicking a column, open a row by key — read through the same filter the list uses |
+| **G.10** | the SQL trace: a bounded ring in the host, an analysis (`npm run sql:summary`) and a screen at `/sap/bc/osd/st05/` |
+| **G.8 wave 2** | an object is edited, checked and activated from a screen, through the same store the ADT façade writes through |
+| **B.9** | a forced build compares and reports; the build is byte-for-byte reproducible, 2249 of 2249 files |
+| **B.14, B.15** | a cast over a real column is a column; a view entity goes through, and every build now proves it |
+| **B.1** | associations survive a projection (read); a projection of a writable view writes through to the table (write) |
+| **D.3, first half** | the channel says what a DDIC type *is*, resolved through the domain |
+| **W.1** | all three parts: the journal, the branch plumbing, and the SQL sieve |
+
+**Numbers worth keeping**
+
+- the unit run's database work: **6793 → 1711 statements, 1563 → 446 ms**
+- a generation is now a function of the tree, not of its build history:
+  a fresh tree builds once (9.5 s) and the **second build hits the cache**
+  (0.16 s). It never did before.
+- SQLScript: **78 of 364** corpus bodies reach an engine; **21 constructs**
+  agree with SAP's own compiler on one HANA
+- a clean worktree, empty `$HOME`: **0 failures** across unit, integration
+  and the browser suites
+
+**Five silent corruptions found and refused in one day** — GROUP BY, HAVING,
+DISTINCT, EXCEPT/INTERSECT and qualified columns in the SQLScript front end,
+a `WHERE` dropped from a CDS view, and a CDS view checked by nobody. Every
+one of them parsed, lowered or passed, and computed something else.
+
+**Still open, in the order we would take them**
+
+- **G.8 wave 3**, the CDS half of the editor: activation for a view means
+  running `cds2ddic`, not only transpiling — a class edit changes one object,
+  a view edit changes three generated ones, and "what counts as activated"
+  is a different question there
+- **D.3 second half**, the type graph on `/sap/bc/osd/rfc/functions/<NAME>`
+- **B.18**, the release bundle 3.5× slower than the same build — deliberately
+  not hurried: the rule "no performance number is taken through a release
+  bundle" already closes the harm
+- **B.3** (OData V4), **A.12** (SRVD + SRVB), **D.3/D.4** (the RFC server
+  whole), **G.6** (a screen out of a class interface)
+- **incremental transpilation** — the only lever that moves the editor's
+  ~12 s save, and not part of any wave
+
+---
+
 ## The order of work, settled 2026-09-18
 
 Alice asked for the queue to be sorted into three, and it was agreed between
