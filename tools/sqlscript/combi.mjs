@@ -21,8 +21,22 @@
 
 import {TokenKind} from "./lexer.mjs";
 
+/** How far anything got, across every alternative tried.
+ *
+ *  Without this the position a failure reports is where the **outermost**
+ *  alternative gave up, which for a body that is one big block is character
+ *  one. That made the coverage histogram say "115 bodies stop at BEGIN" when
+ *  what they really stop at is something inside the block -- a ranking of
+ *  constructs that was an artefact of error reporting rather than a
+ *  measurement. The furthest reach is the honest place to point.
+ */
+export const furthest = {index: 0};
+
 /** what a matcher returns: the positions it could reach, with what it built */
-const reach = (index, nodes) => ({index, nodes});
+const reach = (index, nodes) => {
+  if (index > furthest.index) furthest.index = index;
+  return {index, nodes};
+};
 
 /** the base every construct extends */
 export class Expression {
@@ -196,12 +210,12 @@ export class ParseError extends Error {
  *  engine does.
  */
 export function parse(expression, tokens) {
+  furthest.index = 0;
   const results = expression.match(tokens, 0).filter((r) => r.index === tokens.length);
   if (results.length === 0) {
-    // the furthest any alternative reached is the most useful place to point
-    const all = expression.match(tokens, 0);
-    const furthest = all.reduce((best, r) => (r.index > best ? r.index : best), 0);
-    throw new ParseError(`cannot parse ${expression.name ?? "input"}`, tokens[furthest]);
+    // not where the outermost alternative gave up -- where the input stopped
+    // making sense to anything, which is the token a person has to look at
+    throw new ParseError(`cannot parse ${expression.name ?? "input"}`, tokens[furthest.index]);
   }
   return results[0].nodes[0];
 }

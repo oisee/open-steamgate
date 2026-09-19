@@ -365,3 +365,41 @@ from today's silence would be reassurance about four projections.
 The order that follows is therefore unchanged and now has a second reason:
 grammar first, because it is what puts anything interesting in front of every
 other instrument we built.
+
+### The histogram that decided the order was an artefact
+
+*Found by going to look at a body rather than at a number.*
+
+`BEGIN` topped the blocker list with 115 bodies, and `DECLARE` followed with
+58. Neither was true. A parse failure reported the position where the
+**outermost alternative** gave up -- for a body that is one large
+`BEGIN … END`, that is character one -- so every body whose block failed
+anywhere inside it was recorded as "stopped at BEGIN". The ranking we were
+choosing work from was a property of the error reporting.
+
+The combinators now track the furthest position **anything** reached, across
+every alternative tried, and a failure points there: the token where the
+input stopped making sense to any rule, which is the one a person has to look
+at. The same corpus, the same parser, the honest histogram:
+
+| stopped at | bodies |
+| --- | ---: |
+| `(` | 45 |
+| `*` | 33 |
+| `EXECUTION` (`BEGIN SEQUENTIAL/PARALLEL EXECUTION`) | 33 |
+| `:=` | 27 |
+| `AS` | 11 |
+| `$ABAP.TYPE( … )` | 11 |
+| `=` / `IN` / `LIKE` / `WITH` | 35 |
+
+Not one of those is `BEGIN` or `DECLARE`. `:=` is SQLScript's assignment
+operator, which the grammar never had; `BEGIN SEQUENTIAL EXECUTION` is a real
+construct we had not heard of; `$ABAP.TYPE( )` is AMDP's own typing syntax,
+which exists in no SQL dialect at all.
+
+**The lesson is not about parsers.** A measurement can be wrong in a way that
+still produces a plausible, stable, well-ordered table -- the same number came
+out every run, and it named constructs that really do occur. What made it
+false was that it measured our diagnostics rather than the corpus. The check
+that found it was cheap and is the one we keep having to relearn: **open one
+of the things the number is about and look at it.**
