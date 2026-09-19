@@ -242,3 +242,25 @@ cannot be fixed in advance from a frequency table.
   statements in the imperative half.
 - And it is one sandbox of SAP-authored code; a customer corpus would answer
   its own question, as ever.
+
+### After the first four constructs: 0 → 34
+
+`DECLARE`, `BEGIN … END`, `RETURN` and `*` as a function argument, chosen by
+the table above rather than by frequency:
+
+| | before | after |
+| --- | ---: | ---: |
+| working | 0 of 405 | **34 (8%)** |
+| teaching | 11 of 104 | **40 (38%)** |
+
+And the loop immediately earned its keep by contradicting itself. `BEGIN`
+blocked 91 bodies before the block grammar existed and blocks **115** after
+it -- which can only mean the grammar written for it does not match the shape
+real bodies use, and that more bodies now get far enough to reach a `BEGIN`
+at all. A frequency table could not have told us that; only re-running
+against the corpus could.
+
+The list to work from now, by bodies blocked: `BEGIN` 115, `DECLARE` 58,
+`*` 31, `RETURN` 29, `IF` 11, `CALL` 6, `UPSERT`/`DELETE` 10. The first four
+are the same names as before, which means each was **partly** implemented --
+the grammar accepts a form and the corpus writes another.

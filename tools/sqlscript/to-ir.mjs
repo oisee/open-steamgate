@@ -245,15 +245,41 @@ export function toIr(tree, options = {}) {
     return union(selects.map(select), all);
   }
 
-  // the body: assignments bind, the last statement is the plan asked for
-  const statements = [];
-  for (const assignment of kids(tree, "Assignment")) {
-    const name = nameOf(kid(assignment, "Name"));
-    const rel = relation(kid(assignment, "SetOperation"));
-    bound.set(name, {rel});
-    statements.push({stmt: "assign", name, rel});
+  // The body, statement by statement and **in order**, because an assignment
+  // binds a name the statements after it may use. The grammar wraps each one
+  // in a `Statement`, so the list is flattened one level -- and not deeper:
+  // an assignment inside a subquery is not a statement of this body.
+  const flat = [];
+  for (const child of tree.children ?? []) {
+    if (child.node === "Statement") flat.push(...(child.children ?? []));
+    else flat.push(child);
   }
-  const last = kids(tree, "SetOperation").pop();
-  if (last === undefined) throw new BindError("a body has to end in a statement", tree);
+
+  const statements = [];
+  let last;
+  for (const node of flat) {
+    switch (node.node) {
+      case "Assignment": {
+        const name = nameOf(kid(node, "Name"));
+        const rel = relation(kid(node, "SetOperation"));
+        bound.set(name, {rel});
+        statements.push({stmt: "assign", name, rel});
+        break;
+      }
+      case "SetOperation":
+        last = node;
+        break;
+      case "word":
+      case "operator":
+        break;
+      default:
+        // Declare, Return, Block and the rest of the imperative shell are
+        // parsed but not yet lowered. Refused by name: a body whose
+        // declarations were silently dropped would run and answer something
+        // plausible, which is the one outcome worse than a refusal.
+        throw new BindError(`${node.node} is parsed but not lowered yet`, node);
+    }
+  }
+  if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
   return {statements, rel: relation(last)};
 }

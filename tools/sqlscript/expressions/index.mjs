@@ -2,7 +2,7 @@
 // (docs/sqlscript-parser-style.md). The order these arrive in is the order
 // docs/sqlscript-corpus.md measured: the 25 constructs that cover 80% of the
 // bodies on the sandbox, starting with the two that cover the most.
-import {Expression, seq, alt, altPrio, opt, star, str, tok} from "../combi.mjs";
+import {Expression, seq, alt, altPrio, opt, star, plus, str, tok} from "../combi.mjs";
 import {TokenKind} from "../lexer.mjs";
 
 /** a name: unquoted, or quoted and therefore exact */
@@ -34,8 +34,11 @@ export class Value extends Expression {
 /** FN(a, b) -- the call shape, which the corpus says is most of the work */
 export class FunctionCall extends Expression {
   getRunnable() {
+    // `*` is an argument as well as a select item: COUNT(*) stopped 24
+    // working bodies and 14 teaching ones, and the grammar accepted `*` in
+    // only one of the two places it appears (tools/sqlscript/coverage.mjs)
     return seq(tok(TokenKind.identifier), "(",
-      opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
+      opt(altPrio("*", seq(new Expr(), star(seq(",", new Expr()))))), ")");
   }
 }
 
@@ -148,9 +151,67 @@ export class Assignment extends Expression {
   }
 }
 
-/** a body: assignments and a final statement */
+/** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
+export class TypeName extends Expression {
+  getRunnable() {
+    return seq(tok(TokenKind.identifier),
+      opt(seq("(", tok(TokenKind.number), star(seq(",", tok(TokenKind.number))), ")")));
+  }
+}
+
+/** `DECLARE lv_x INTEGER;` and `DECLARE lt_x TABLE (a INT, b NVARCHAR(3));`
+ *
+ *  First on the measured list: 132 of 405 working bodies stop here, which is
+ *  more than any other single construct and was invisible in the frequency
+ *  table -- that counted how often DECLARE appears, not how often it is the
+ *  thing in the way. */
+export class Declare extends Expression {
+  getRunnable() {
+    return seq(str("DECLARE"),
+      altPrio(
+        seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
+        seq(new Name(), str("CURSOR"), str("FOR"), new SetOperation()),
+        seq(new Name(), new TypeName(), opt(seq("=", new Expr())))),
+      ";");
+  }
+}
+
+export class ColumnDef extends Expression {
+  getRunnable() {
+    return seq(new Name(), new TypeName());
+  }
+}
+
+/** `RETURN :lt;` and `RETURN SELECT ...;` -- third on the list, 47 bodies */
+export class Return extends Expression {
+  getRunnable() {
+    return seq(str("RETURN"), opt(altPrio(new SetOperation(), new Expr())), ";");
+  }
+}
+
+/** one thing a body may contain */
+export class Statement extends Expression {
+  getRunnable() {
+    return altPrio(new Declare(), new Return(), new Block(), new Assignment(),
+      seq(new SetOperation(), ";"));
+  }
+}
+
+/** `BEGIN ... END` -- second on the list, 91 bodies */
+export class Block extends Expression {
+  getRunnable() {
+    return seq(str("BEGIN"), star(new Statement()), str("END"), opt(";"));
+  }
+}
+
+/** A body: statements, and the value of the body is the last statement that
+ *  produces one. Written as statements rather than as "assignments then a
+ *  select" because the measurement said the bodies are not shaped that way
+ *  (docs/sqlscript-corpus.md, 0 of 405). */
 export class Body extends Expression {
   getRunnable() {
-    return seq(star(new Assignment()), new SetOperation(), opt(";"));
+    return altPrio(
+      seq(star(new Statement()), new SetOperation(), opt(";")),
+      plus(new Statement()));
   }
 }
