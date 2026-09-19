@@ -26,6 +26,7 @@ import {Body} from "./sqlscript/expressions/index.mjs";
 import {toIr} from "./sqlscript/to-ir.mjs";
 import {CATALOGUE} from "./sqlscript/end-to-end.mjs";
 import {runBothWays} from "./sqlscript-eager.mjs";
+import {adversarialRows, seamType} from "./sqlscript-ir.mjs";
 
 /** text in, relational IR out - the front end, with nothing lowered yet */
 export function planOf(body, catalogue = CATALOGUE) {
@@ -41,6 +42,57 @@ export function planOf(body, catalogue = CATALOGUE) {
 export async function checkBody(client, body, dialect, catalogue = CATALOGUE) {
   const rel = planOf(body, catalogue);
   return {rel, ...await runBothWays(client, rel, dialect)};
+}
+
+/** a benign value of the right shape, for the columns a hazard row does not care about */
+function benign(type) {
+  const letter = (typeof type === "string" ? type : type?.abap ?? "C").charAt(0).toUpperCase();
+  return ["I", "P", "F", "B", "S"].includes(letter) ? 1 : "x";
+}
+
+/**
+ * Put the rows the plan asks for into a table, and say what went in.
+ *
+ * Without this the comparison is pointed at data somebody invented to look
+ * plausible, and plausible data does not contain the row a cast fails on.
+ * With it, "no difference" becomes a statement about the body rather than
+ * about our imagination.
+ *
+ * Only suggestions whose column exists in the schema are inserted; the rest
+ * are returned unplanted, because a column we would have to invent is a
+ * fixture we would be writing on the plan's behalf.
+ */
+export async function plantHazards(client, rel, {table, schema, fill = {}, quote = (id) => `"${id}"`}) {
+  const wanted = adversarialRows(rel, schema);
+  const columns = Object.keys(schema);
+  const planted = [];
+  const unplanted = [];
+  for (const one of wanted) {
+    if (one.known !== true) {
+      unplanted.push(one);
+      continue;
+    }
+    // The plan names the hazardous column and its value. Every OTHER column
+    // is the caller's business, and `fill` is where the caller's knowledge of
+    // the body goes: if the body filters on a column, the hazard row has to
+    // carry a value that the filter removes, or the two runs will both raise
+    // and the comparison will say nothing.
+    const values = columns.map((name) => (name === one.column
+      ? one.value
+      : Object.prototype.hasOwnProperty.call(fill, name) ? fill[name] : benign(schema[name])));
+    await client.native({
+      sql: `INSERT INTO ${quote(table)} (${columns.map(quote).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      expect: "none",
+      // seamType, not the raw type object: the seam speaks an ABAP type
+      // letter with length, and handing it our node type is the same
+      // boundary mistake the value suite caught once already
+      params: columns.map((name, index) => ({
+        name, value: values[index], type: seamType(schema[name]), isNull: values[index] === null,
+      })),
+    });
+    planted.push(one);
+  }
+  return {planted, unplanted};
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -66,6 +118,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   try {
+    if (rest.includes("--adversarial")) {
+      const rel = planOf(body);
+      const {planted, unplanted} = await plantHazards(client, rel, {table: "SRC", schema: CATALOGUE.SRC});
+      for (const one of planted) console.log(`planted ${one.column} = ${JSON.stringify(one.value)} - ${one.why}`);
+      for (const one of unplanted) console.log(`NOT planted: ${one.column} is not in the schema - ${one.why}`);
+      if (planted.length === 0) console.log("the plan asks for no hazardous row: nothing in it can behave differently");
+      console.log("");
+    }
     const result = await checkBody(client, body, "duckdb");
     console.log(`fused:  ${result.fused.raised ?? `${result.fused.rows.length} rows in ${result.fused.statements} statement`}`);
     console.log(`forced: ${result.eager.raised ?? `${result.eager.rows.length} rows in ${result.eager.statements} statements`}`);

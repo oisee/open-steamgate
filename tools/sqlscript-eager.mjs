@@ -46,6 +46,8 @@ export async function runEager(client, rel, dialect) {
   let statements = 0;
   const refOf = (handle) => client.relationRef(handle);
 
+  const notForced = [];
+
   const materialise = async (node) => {
     // leaves stay as they are: a scan is already a name
     if (node.rel === "scan" || node.rel === "ref") return node;
@@ -59,8 +61,19 @@ export async function runEager(client, rel, dialect) {
       copy.inputs = done;
     }
     const {sql, params} = lower(copy, dialect, {relationRef: refOf});
+    if (params.length > 0) {
+      // A definition is a view, and a view with an unbound value has no
+      // meaning until somebody supplies one - the seam says so in as many
+      // words ("bind at use"). So this step CANNOT be forced, and the honest
+      // thing is to leave it fused and say which one, rather than to
+      // interpolate the value into the text (the one thing this whole
+      // contract exists to prevent) or to report a comparison that quietly
+      // forced less than it claimed.
+      notForced.push({rel: copy.rel, params: params.length});
+      return copy;
+    }
     statements++;
-    const handle = await client.defineRelation({name: "step", sql, params, materialise: "lowering-declined"});
+    const handle = await client.defineRelation({name: "step", sql, materialise: "lowering-declined"});
     handles.push(handle);
     return ref(handle);
   };
@@ -70,9 +83,9 @@ export async function runEager(client, rel, dialect) {
     const {sql, params} = lower(last, dialect, {relationRef: refOf});
     statements++;
     const answer = await client.native({sql, params, expect: "rows"});
-    return {rows: answer.rows, statements, handles};
+    return {rows: answer.rows, statements, handles, notForced};
   } catch (error) {
-    return {raised: String(error.message ?? error), statements, handles};
+    return {raised: String(error.message ?? error), statements, handles, notForced};
   } finally {
     for (const handle of handles.reverse()) {
       try {
@@ -108,5 +121,10 @@ export function compare(fused, eager) {
 export async function runBothWays(client, rel, dialect) {
   const fused = await runFused(client, rel, dialect);
   const eager = await runEager(client, rel, dialect);
-  return {fused, eager, ...compare(fused, eager)};
+  const verdict = compare(fused, eager);
+  // "they agree" means less when some steps could not be forced at all, so
+  // the count travels with the verdict instead of being lost in the eager
+  // half where nobody would look for it
+  if ((eager.notForced ?? []).length > 0) verdict.notForced = eager.notForced;
+  return {fused, eager, ...verdict};
 }

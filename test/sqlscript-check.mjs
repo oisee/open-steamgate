@@ -5,7 +5,8 @@
 // already knew. These are bodies as a person would type them, so the
 // comparison is doing the thing it was built for.
 import {expect} from "chai";
-import {checkBody, planOf} from "../tools/sqlscript-check.mjs";
+import {checkBody, planOf, plantHazards} from "../tools/sqlscript-check.mjs";
+import {CATALOGUE} from "../tools/sqlscript/end-to-end.mjs";
 
 const FIXTURE = [
   `CREATE TABLE "SRC" ("K" VARCHAR, "N" INTEGER)`,
@@ -59,5 +60,69 @@ describe("fused against forced, on bodies rather than plans", function () {
     walk(rel);
     expect(seen, "an unresolved variable would mean the binder did not run").to.not.contain("var");
     expect(seen.filter((one) => one === "scan"), "one table, read once").to.have.length(1);
+  });
+});
+
+describe("the data the plan asks for, and what it finds", function () {
+  this.timeout(30000);
+  let client;
+
+  beforeEach(async () => {
+    const {DuckDBDatabaseClient} = await import("../tools/duckdb-client.mjs");
+    client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    for (const statement of FIXTURE) await client.native({sql: statement, expect: "none"});
+  });
+
+  afterEach(async () => {
+    await client?.disconnect?.();
+  });
+
+  it("a body with nothing hazardous in it asks for no rows, so the instrument stays quiet", async () => {
+    const rel = planOf(`SELECT k FROM src;`);
+    const {planted} = await plantHazards(client, rel, {table: "SRC", schema: CATALOGUE.SRC});
+    expect(planted).to.be.empty;
+  });
+
+  // The whole point, in one test: representative data hides the divergence,
+  // and data derived from the plan exposes it. Same body, same engine, same
+  // instrument - only the rows differ.
+  //
+  // The table is the test's own, because the shared fixture has no column
+  // whose plausible values convert and whose hazard value does not, and
+  // writing the test against a body that already raises on ordinary rows
+  // would have proved nothing. The first attempt did exactly that and the
+  // "quiet" run was already raising - which is how it was noticed.
+  it("a conversion behind a filter agrees on plausible data and DIFFERS on the row the plan asked for", async () => {
+    const schema = {N: {abap: "I"}, TXT: {abap: "STRING"}};
+    const catalogue = {SRC2: schema};
+    await client.native({sql: `CREATE TABLE "SRC2" ("N" INTEGER, "TXT" VARCHAR)`, expect: "none"});
+    for (const [n, txt] of [[1, "1"], [2, "2"], [3, "3"]]) {
+      await client.native({sql: `INSERT INTO "SRC2" VALUES (?, ?)`, expect: "none",
+        params: [{name: "n", value: n, type: "I"}, {name: "t", value: txt, type: "STRING"}]});
+    }
+
+    // numeric comparison on purpose: a string literal would be bound, and a
+    // step carrying a bound value cannot be forced into a definition at all
+    // (the seam says "bind at use"), so the comparison would have nothing to
+    // force and would agree for the wrong reason
+    const body = `lt = SELECT n, TO_INTEGER(txt) AS num FROM src2;
+                  SELECT num FROM :lt WHERE n <> 9;`;
+    const rel = planOf(body, catalogue);
+
+    const quiet = await checkBody(client, body, "duckdb", catalogue);
+    expect(quiet.agree, "plausible rows all convert: the comfortable, useless answer").to.equal(true);
+    expect(quiet.notForced, "and every step really was forced").to.equal(undefined);
+
+    // the plan names the hazardous column itself; N = 9 is the caller's
+    // knowledge of the body, which is what `fill` is for - the row has to be
+    // one the filter removes, or both runs raise and nothing is learnt
+    const {planted} = await plantHazards(client, rel, {table: "SRC2", schema, fill: {N: 9}});
+    expect(planted.map((one) => one.column)).to.deep.equal(["TXT"]);
+
+    const loud = await checkBody(client, body, "duckdb", catalogue);
+    expect(loud.agree, JSON.stringify({fused: loud.fused, eager: loud.eager}, null, 1)).to.equal(false);
+    expect(loud.kind).to.equal("fused-answers-eager-raises");
+    expect(loud.fused.rows, "fused never evaluates the conversion on the removed row").to.have.length(3);
   });
 });
