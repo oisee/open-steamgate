@@ -36,6 +36,7 @@
     "test/rfc-replay.mjs",
     "test/sapevent.mjs",
     "test/se16.mjs",
+    "test/seed-batching.mjs",
     "test/segw-gen.mjs",
     "test/segw-shlp.mjs",
     "test/segw-tree.mjs",

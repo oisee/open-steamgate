@@ -71,11 +71,41 @@ function seedFrom(dataDir, ddicDirs) {
         // table defined elsewhere or in a lib: insert unpadded, the runtime pads on read
       }
     }
+    // **One statement per batch of rows, not per row.**
+    //
+    // Measured by fable-osd's SQL trace over `npm run unit`: 4706 of 6793
+    // statements and 553 ms of 1563 went into three tables seeded a row at a
+    // time, and 2263 of the seeder's own 2521 statements were one table.
+    // A multi-row `VALUES` is the same insert on all three engines, and the
+    // cost of a statement here is its parse, not its rows.
+    //
+    // Batched by **the column list**, not by the table: two rows of one table
+    // can carry different columns (a TABU JSON row omits what it has no value
+    // for), and merging those would put a value under the wrong name. So a
+    // batch ends when the shape changes, which also keeps the order the file
+    // had -- rows of one table are inserted in the order they are written,
+    // and a pack's rows still land after the ones they layer over.
+    let batch = [];
+    let shape;
+    const flush = () => {
+      if (batch.length === 0) return;
+      statements.push(`INSERT INTO "${table}" (${shape.map((c) => `"${c}"`).join(", ")}) VALUES ` +
+        `${batch.map((v) => `(${v.join(", ")})`).join(", ")};`);
+      batch = [];
+    };
     for (const row of rows) {
       const cols = Object.keys(row);
-      const vals = cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0));
-      statements.push(`INSERT INTO "${table}" (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${vals.join(", ")});`);
+      if (shape === undefined || cols.length !== shape.length || cols.some((c, i) => c !== shape[i])) {
+        flush();
+        shape = cols;
+      }
+      batch.push(cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0)));
+      // a bound on the statement rather than on the row count: engines differ
+      // on how long a statement may be, and none of them differ on this being
+      // far inside it
+      if (batch.length >= 500) flush();
     }
+    flush();
   }
   return statements;
 }
