@@ -121,9 +121,29 @@ export class AmdpDestination {
       await refuse("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a " +
         "database that speaks SQLScript");
     }
+    // **Configured, before dialled.** With a driver present and no HANA
+    // configured, this used to dial `localhost:39017` and hand the driver's
+    // rejection straight out -- a plain JavaScript Error, which is the one
+    // thing the ABAP `CATCH cx_root` around the CALL FUNCTION cannot catch.
+    // The page came back 500 "Connection closed", and `test/amdp-sandbox.mjs`
+    // was red for everybody who did not have `~/.osd/hxe-password`. It was
+    // green here, which is the whole shape of the defect: the suite was
+    // passing on the author's machine and on no other.
+    const settings = connection();
+    if (settings.password === undefined || settings.password === "") {
+      await refuse("AMDP: no HANA is configured here -- set HXE_HOST / HXE_PASSWORD, or put the " +
+        "password in ~/.osd/hxe-password. An AMDP method needs a database that speaks SQLScript");
+    }
     const hdb = (await import("hdb")).default;
-    this.client = hdb.createClient(connection());
-    await new Promise((resolve, reject) => this.client.connect((e) => (e ? reject(e) : resolve())));
+    this.client = hdb.createClient(settings);
+    try {
+      await new Promise((resolve, reject) => this.client.connect((e) => (e ? reject(e) : resolve())));
+    } catch (reason) {
+      // the driver's own words, through the same door, so that a HANA that is
+      // configured and unreachable is catchable too and not only a missing one
+      this.client = undefined;
+      await refuse(`AMDP: the configured HANA did not answer: ${String(reason?.message ?? reason).slice(0, 120)}`);
+    }
     return this.client;
   }
 

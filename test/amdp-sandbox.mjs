@@ -75,7 +75,13 @@ describe("the AMDP sandbox", function () {
     expect(answer.system_db, "and the system database, which is a different thing").to.be.a("string");
   });
 
-  it("says where the body ran, because the two databases are not the same one", async () => {
+  // **Gated like the other two, and for the same reason.** It asserts where a
+  // body *ran*, which is only a question when one did: without a HANA the
+  // page carries the refusal instead, and quite right. Ungated it was red for
+  // everybody without `~/.osd/hxe-password` — a file that is gitignored and
+  // machine-local, so the suite passed on the author's machine and on no
+  // other. fable-osd found it on hers; here it was green.
+  (hasHana ? it : it.skip)("says where the body ran, because the two databases are not the same one", async () => {
     // Alice, looking at the deployment: the sandbox computes on HANA Express
     // through DESTINATION 'AMDP', while the system database of that same
     // deployment is SQLite. Correct, and indistinguishable from the screen --

@@ -309,6 +309,24 @@
         }
       }
     };
+
+    // Land on the home intent rather than on no intent at all.
+    //
+    // Measured, not guessed (backlog E.5): opening this page with an empty
+    // hash throws one uncaught TypeError inside
+    // `sap/ushell/library-preload.js` — "Cannot read properties of undefined
+    // (reading 'appSpecificRoute')" — while `#Shell-home` throws none and
+    // renders the same 96 tiles. The shell resolves an empty hash down a path
+    // that does not survive; the same throw appears for an intent that does
+    // not exist, which is the shape of the underlying fault and is theirs.
+    //
+    // Setting it before the bootstrap script runs costs nothing and takes the
+    // page off that path. It is not a workaround for our own defect — there
+    // is nothing of ours between the page loading and this throw — it is
+    // choosing the entry that works out of two the shell offers.
+    if (window.location.hash === "") {
+      window.location.hash = "#Shell-home";
+    }
   </script>
   <script src="https://ui5.sap.com/1.120.50/test-resources/sap/ushell/bootstrap/sandbox.js"
     id="sap-ushell-bootstrap"></script>
