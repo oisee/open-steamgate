@@ -1059,7 +1059,14 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   // by object, not by file: a hand-written zcl_x.clas.abap keeps the
   // generated zcl_x.clas.xml out as well
   const objectOf = (name) => basename(name).toLowerCase().replace(/\.(abap|xml)$/, "");
-  const existing = new Set(walk(root).map(objectOf));
+  // **Where the file is, not only that it exists.** "kept from src/" reads
+  // like a convenience and is in fact a list of places where two versions of
+  // one object live and nothing compares them: 18 objects across three
+  // services on 2026-09-19, of which `Text` against `status_text` was one.
+  // Carrying the path lets a test read both sides off disk instead of
+  // trusting a literal somebody transcribed.
+  const existingPaths = new Map(walk(root).map((f) => [objectOf(f), f]));
+  const existing = new Set(existingPaths.keys());
   const functionModules = loadFunctionGroups([root, ...libs]);
   const report = [];
   // src/ first, then the models another generator wrote (a CDS view published
@@ -1070,6 +1077,7 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
     const target = join(out, result.model.project.toLowerCase().replaceAll("/", "#"));
     const written = [];
     const kept = [];
+    const shadowed = [];
     for (const [name, content] of Object.entries({...result.files, ...result.classes, ...result.ext})) {
       if (name.endsWith(".iwpr.xml")) {
         continue; // the tree itself is not ABAP; --out writes it
@@ -1081,6 +1089,7 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
           rmSync(join(target, name));
         }
         kept.push(name);
+        shadowed.push({name, generated: content, path: existingPaths.get(objectOf(name))});
         continue;
       }
       mkdirSync(target, {recursive: true});
@@ -1097,7 +1106,7 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
         }
       }
     }
-    report.push({file, project: result.model.project, service: result.model.service, written, kept, warnings: result.warnings});
+    report.push({file, project: result.model.project, service: result.model.service, written, kept, shadowed, warnings: result.warnings});
   }
   // A project whose YAML is gone leaves its folder behind otherwise, and the
   // registry keeps serving a service nobody declares any more; measured on
@@ -1131,7 +1140,7 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
         console.log(`stg-compile: gen/stg/${r.project.toLowerCase()}: removed, no YAML declares it any more`);
         continue;
       }
-      console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} kept from src/)` : ""}`);
+      console.log(`stg-compile: ${r.file}: ${r.service}${r.written.length > 0 ? ` -> gen/stg: ${r.written.length} files` : ""}${r.kept.length > 0 ? ` (${r.kept.length} held by src/, not compared)` : ""}`);
       for (const w of r.warnings) {
         console.log(`  warning: ${w}`);
       }
