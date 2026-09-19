@@ -204,6 +204,84 @@ export class FileSqliteClient {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // The native channel (docs/db-seam-native.md), for one caller: the
+  // SQLScript splitter's lowering. **Nothing transpiled from ABAP may reach
+  // these** -- Open SQL goes through select()/insert()/update()/delete(),
+  // which rewrite and trim; a statement arriving here is sent untouched.
+  // ---------------------------------------------------------------------
+
+  get supportsNative() {
+    return true;
+  }
+
+  #bind(params = []) {
+    return params.map((p) => {
+      if (p.isNull === true) {
+        return null;
+      }
+      switch ((p.type ?? "").charAt(0).toUpperCase()) {
+        case "I": case "B": case "S": case "P": case "F": return Number(p.value);
+        default: return p.value === undefined ? null : String(p.value);
+      }
+    });
+  }
+
+  async native({sql, params = [], expect = "rows"}) {
+    if (this.trace) {
+      console.log("native:", sql, params.length ? JSON.stringify(params) : "");
+    }
+    const stmt = this.db.prepare(sql);
+    const bound = this.#bind(params);
+    if (expect === "none") {
+      const info = stmt.run(...bound);
+      return {rowCount: Number(info?.changes ?? 0)};
+    }
+    const rows = stmt.all(...bound).map(plain);
+    // SQLite has no declared type for an expression, and node:sqlite does not
+    // report one for a column either, so `columns` carries names with an
+    // undefined type rather than a guess. A caller that needs the type has to
+    // get it from the lowering, which knows it -- this engine cannot say.
+    const columns = rows.length === 0 ? [] : Object.keys(rows[0]).map((name) => ({name, type: undefined}));
+    if (expect === "scalar") {
+      const first = rows[0];
+      return {value: first === undefined ? undefined : first[Object.keys(first)[0]], columns};
+    }
+    return {rows, columns, rowCount: rows.length};
+  }
+
+  async defineRelation({name = "rel", sql, params = [], materialise}) {
+    if (params.length > 0) {
+      throw new Error("defineRelation: params are not supported on a definition; bind at use");
+    }
+    this.relationCount = (this.relationCount ?? 0) + 1;
+    const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
+    const handle = {ident, ref: `"${ident}"`,
+      kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
+    // an ordinary table, not a temporary one: the reference has to be
+    // spliceable anywhere, and the client drops it itself
+    this.db.exec(materialise === undefined
+      ? `CREATE VIEW ${handle.ref} AS ${sql}`
+      : `CREATE TABLE ${handle.ref} AS ${sql}`);
+    return handle;
+  }
+
+  relationRef(handle) {
+    return handle.ref;
+  }
+
+  relationKind(handle) {
+    return {kind: handle.kind, reason: handle.reason};
+  }
+
+  async dropRelation(handle) {
+    try {
+      this.db.exec(`DROP ${handle.kind === "definition" ? "VIEW" : "TABLE"} ${handle.ref}`);
+    } catch {
+      // already gone
+    }
+  }
+
   async select(options) {
     options.select = rewriteSelect(options.select, options.primaryKey);
     return {rows: await this.query(options.select)};

@@ -173,6 +173,84 @@ export class DuckDBDatabaseClient {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // The native channel (docs/db-seam-native.md), for one caller: the
+  // SQLScript splitter's lowering. **Nothing transpiled from ABAP may reach
+  // these** -- Open SQL goes through select()/insert()/update()/delete(),
+  // which rewrite and trim; a statement arriving here is sent untouched.
+  // ---------------------------------------------------------------------
+
+  get supportsNative() {
+    return true;
+  }
+
+  /** ABAP's type letters into values DuckDB will bind */
+  #bind(params = []) {
+    return params.map((p) => {
+      if (p.isNull === true) return null;
+      switch ((p.type ?? "").charAt(0).toUpperCase()) {
+        case "I": case "B": case "S": case "P": case "F": return Number(p.value);
+        default: return p.value === undefined ? null : String(p.value);
+      }
+    });
+  }
+
+  async native({sql, params = [], expect = "rows"}) {
+    if (this.trace) console.log("native:", sql, params.length ? JSON.stringify(params) : "");
+    const prepared = await this.connection.prepare(sql);
+    const bound = this.#bind(params);
+    bound.forEach((v, i) => prepared.bind({[String(i + 1)]: v}));
+    const result = await prepared.runAndReadAll();
+    if (expect === "none") {
+      return {rowCount: undefined};
+    }
+    // the engine's declared column types, not a guess from the JavaScript
+    // value: blank padding, decimals and dates are where guessing hurts
+    const columns = result.columnNames().map((name, i) => ({name, type: result.columnTypes()[i]?.typeId}));
+    const rows = result.getRowObjects().map((r) => {
+      const row = {};
+      for (const k of Object.keys(r)) row[k] = plain(r[k]);
+      return row;
+    });
+    if (expect === "scalar") {
+      const first = rows[0];
+      return {value: first === undefined ? undefined : first[Object.keys(first)[0]], columns};
+    }
+    return {rows, columns, rowCount: rows.length};
+  }
+
+  /** A named relation later statements may refer to. The name is ours: the
+   *  caller may not invent one, because quoting is the engine's business. */
+  async defineRelation({name = "rel", sql, params = [], materialise}) {
+    if (params.length > 0) {
+      // a definition carrying bind values would have to keep them alive for
+      // the life of the relation; the splitter can bind at use instead
+      throw new Error("defineRelation: params are not supported on a definition; bind at use");
+    }
+    this.relationCount = (this.relationCount ?? 0) + 1;
+    const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
+    const handle = {ident, ref: `"${ident}"`, kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
+    // an ordinary table rather than a temporary one, for the same reason as
+    // in the HANA client: the reference must be spliceable anywhere. The
+    // client drops it, so a conformance run leaves nothing behind.
+    await this.execute(materialise === undefined
+      ? `CREATE VIEW ${handle.ref} AS ${sql}`
+      : `CREATE TABLE ${handle.ref} AS ${sql}`);
+    return handle;
+  }
+
+  relationRef(handle) {
+    return handle.ref;
+  }
+
+  relationKind(handle) {
+    return {kind: handle.kind, reason: handle.reason};
+  }
+
+  async dropRelation(handle) {
+    await this.execute(`DROP ${handle.kind === "definition" ? "VIEW" : "TABLE"} ${handle.ref}`).catch(() => undefined);
+  }
+
   async select(options) {
     options.select = this.rewrite(options.select, options.primaryKey);
     return {rows: await this.query(options.select)};

@@ -116,3 +116,47 @@ and should not try. The conformance table compares **values**.
   with the code, not as a request.
 - **Not a licence to send native SQL from ABAP.** Nothing transpiled reaches
   this channel. Its only caller is the splitter's lowering.
+
+## Implemented, and what each engine could actually promise
+
+| | HANA | DuckDB | SQLite |
+| --- | --- | --- | --- |
+| `supportsNative` | yes | yes | yes |
+| values bound, not interpolated | yes | yes | yes |
+| `isNull` distinct from an initial value | yes | yes | yes |
+| blank padding preserved (`"a "` comes back `"a "`) | yes | yes | yes |
+| `columns` carry a **declared** type | yes | yes | **no** |
+| a definition stays a definition | yes | yes | yes |
+
+The one row that differs is the honest one. SQLite has no declared type for a
+column of an expression and `node:sqlite` does not report one, so the client
+returns the names with an undefined type rather than inventing it from the
+JavaScript value. A caller that needs the type must take it from the lowering,
+which knows it. Saying "no" here is the whole reason the field exists.
+
+The cross-join idiom of 60 corpus bodies -- a scalar carried into a set
+through a one-row projection -- works on all three with the scalar as a
+**bound value** rather than as text, which is what the parameters were for.
+
+## Measured: a chain of definitions is one statement
+
+Three `defineRelation` calls, each built on the last, none materialised, then
+one `native()` over the final reference. `EXPLAIN PLAN` is unreachable through
+`hdb` (the driver answers "Invalid or unsupported FunctionCode" on both the
+prepared and the unprepared path), so the question was put to the plan cache,
+which records what actually ran:
+
+```
+plan cache entries mentioning the chain: 1
+  x1 SELECT * FROM "OSD_NATIVE"."OSD_D_..." ORDER BY "K"
+```
+
+**One entry, for the final statement only.** The three views never ran as
+statements of their own: HANA spliced them. That confirms three things at
+once -- definitions are not materialised behind our back, the splicing happens
+at the engine, and a lowering that reports one statement is telling the truth.
+
+(A trap met on the way, of a family this repository keeps: `_` is a
+single-character wildcard in SQL `LIKE`, so `'%OSD_A_%'` matched unrelated
+statements until the names were escaped. The first answer looked like eleven
+plan entries and was eleven false positives.)
