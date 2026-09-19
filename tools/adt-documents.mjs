@@ -897,6 +897,10 @@ ${label("short", dd("SCRTEXT_S"), int("SCRLEN1") || 10, 10)}${label("medium", dd
 </blue:wbobj>
 `;
 }
+// the letter lives with the type resolver now: it is decided together with
+// the type, and two tables of it would be a pair obliged to agree
+import {ABAP_TYPE_LETTER, resolveType} from "./osd-type-graph.mjs";
+
 const xmlUnescape = (t) => String(t).replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
 // The fields of a table, out of abapGit's DD02V/DD03P. A field names its
@@ -904,11 +908,6 @@ const xmlUnescape = (t) => String(t).replaceAll("&lt;", "<").replaceAll("&gt;", 
 // DATATYPE/LENG/DECIMALS and text) or inline (DATATYPE/LENG). The ABAP type
 // letter is the dictionary's own convention for its built-in types; the
 // data preview shows it as dataPreview:type.
-export const ABAP_TYPE_LETTER = {
-  CHAR: "C", CLNT: "C", CUKY: "C", LANG: "C", UNIT: "C", ACCP: "C", NUMC: "N", DATS: "D", TIMS: "T",
-  INT1: "b", INT2: "s", INT4: "X", INT8: "8", DEC: "P", CURR: "P", QUAN: "P", FLTP: "F",
-  RAW: "X", RSTR: "y", STRG: "g", SSTR: "g", LRAW: "X", LCHR: "C", DF16_DEC: "a", DF34_DEC: "e",
-};
 export function tableFieldsOf(store, entry) {
   const xml = String(entry.source ?? "");
   const tag = (block, name) => {
@@ -939,18 +938,23 @@ export function tableFieldsOf(store, entry) {
       continue;
     }
     if (field.element !== "" && field.dataType === "") {
-      try {
-        const dtel = String(store.read("DTEL", field.element).source ?? "");
-        field.dataType = tag(dtel, "DATATYPE");
-        field.length = Number.parseInt(tag(dtel, "LENG") || "0", 10);
-        field.decimals = Number.parseInt(tag(dtel, "DECIMALS") || "0", 10);
-        field.description = field.description || tag(dtel, "DDTEXT") || tag(dtel, "SCRTEXT_M");
-      } catch {
-        // an element this tree does not hold: the field keeps its name and
-        // the preview shows it as text, which is what it is on the wire
+      // **Through the resolver, which follows the element to its domain.**
+      // This used to read the element's own `<DATATYPE>` and stop, and a
+      // data element usually has none -- it names a domain, and the domain
+      // carries the type. Measured on this tree: six table fields of 1041
+      // came back with **no type and no letter at all**, among them
+      // `ZOSD_TEST_ITEM-STATUS`, which is CHAR(1).
+      const resolved = resolveType(store, field.element);
+      if (resolved.KIND === "DTEL" && resolved.DATATYPE !== "") {
+        field.dataType = resolved.DATATYPE;
+        field.length = resolved.LENG;
+        field.decimals = resolved.DECIMALS;
+        field.description = field.description || resolved.TEXT;
       }
     }
-    field.letter = ABAP_TYPE_LETTER[field.dataType] ?? tag(f, "INTTYPE") ?? "C";
+    // an empty letter is what a consumer got before, and it is not a type;
+    // `C` is the dictionary's own default for a field whose kind is unknown
+    field.letter = ABAP_TYPE_LETTER[field.dataType] || tag(f, "INTTYPE") || "C";
     table.fields.push(field);
   }
   return table;

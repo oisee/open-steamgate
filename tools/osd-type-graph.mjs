@@ -20,7 +20,16 @@
 // **A type this tree does not hold is reported as unresolved, by name.** The
 // alternative -- defaulting to CHAR -- is what a caller would encode with,
 // and encoding a packed number as characters is the silent kind of wrong.
-import {ABAP_TYPE_LETTER} from "./adt-documents.mjs";
+// The ABAP type letter of a dictionary type. It lives here because it is
+// decided together with the type, and a second copy of it somewhere else
+// would be a pair obliged to agree -- `tools/adt-documents.mjs` imports it
+// from here for the data preview, so the letter a codec encodes with is the
+// letter the preview shows.
+export const ABAP_TYPE_LETTER = {
+  CHAR: "C", CLNT: "C", CUKY: "C", LANG: "C", UNIT: "C", ACCP: "C", NUMC: "N", DATS: "D", TIMS: "T",
+  INT1: "b", INT2: "s", INT4: "X", INT8: "8", DEC: "P", CURR: "P", QUAN: "P", FLTP: "F",
+  RAW: "X", RSTR: "y", STRG: "g", SSTR: "g", LRAW: "X", LCHR: "C", DF16_DEC: "a", DF34_DEC: "e",
+};
 
 const tag = (xml, name) => {
   const m = new RegExp(`<${name}>([^<]*)</${name}>`).exec(String(xml));
