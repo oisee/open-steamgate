@@ -82,8 +82,12 @@ describe("tools/stg-compile: <service>.stg.yaml -> IWPR, IWSV, IWMO, _MPC/_DPC",
 
   it("generates the classes SEGW would write for that tree", () => {
     const mpc = result.classes["zcl_zstg_demo_mpc.clas.abap"];
-    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'TravelId' iv_abap_fieldname = 'TRAVEL_ID' ). \"#EC NOTEXT\nlo_property->set_is_key( ).\nlo_property->set_type_edm_string( ).\nlo_property->set_maxlength( iv_max_length = 8 ). \"#EC NOTEXT");
-    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'FlightDate' iv_abap_fieldname = 'FLIGHT_DATE' ). \"#EC NOTEXT\nlo_property->set_type_edm_datetime( ).\nlo_property->set_precison( iv_precision = 0 ). \"#EC NOTEXT");
+    // the label comes first now, as a text symbol, which is what a real SEGW
+    // generator writes -- see assignTextElements in tools/segw-gen.mjs
+    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'TravelId' iv_abap_fieldname = 'TRAVEL_ID' ). \"#EC NOTEXT\nlo_property->set_is_key( ).\nlo_property->set_label_from_text_element(");
+    expect(mpc).to.contain("lo_property->set_type_edm_string( ).\nlo_property->set_maxlength( iv_max_length = 8 ). \"#EC NOTEXT");
+    expect(mpc).to.contain("lo_property = lo_entity_type->create_property( iv_property_name = 'FlightDate' iv_abap_fieldname = 'FLIGHT_DATE' ). \"#EC NOTEXT\nlo_property->set_label_from_text_element(");
+    expect(mpc).to.contain("lo_property->set_type_edm_datetime( ).\nlo_property->set_precison( iv_precision = 0 ). \"#EC NOTEXT");
     expect(mpc).to.contain("lo_entity_set->set_has_ftxt_search( abap_true ).");
     expect(mpc).to.contain("lo_association = model->create_association(\n                            iv_association_name = 'TravelToBookings' \"#EC NOTEXT\n                            iv_left_type        = 'Travel' \"#EC NOTEXT\n                            iv_right_type       = 'Booking' \"#EC NOTEXT\n                            iv_right_card       = 'N' \"#EC NOTEXT\n                            iv_left_card        = '1'  \"#EC NOTEXT");
     expect(mpc).to.contain("lo_ref_constraint->add_property( iv_principal_property = 'TravelId'   iv_dependent_property = 'TravelId' ). \"#EC NOTEXT");
@@ -207,9 +211,17 @@ describe("tools/stg-compile: Fiori annotations in the model", () => {
     expect(ann).to.contain("  iv_term      = 'com.sap.vocabularies.UI.v1.FieldGroup'\n      iv_qualifier = 'General' ).");
   });
 
-  it("gives the _MPC_EXT a DEFINE that calls it, and the base class sap:label from the tree", () => {
+  it("gives the _MPC_EXT a DEFINE that calls it, and the base class its labels as text symbols", () => {
     expect(r.ext["zcl_zstg_demo_mpc_ext.clas.abap"]).to.contain("    super->define( ).\n    ZCL_ZSTG_DEMO_MPC_ANN=>define( vocab_anno_model ).");
-    expect(r.classes["zcl_zstg_demo_mpc.clas.abap"]).to.contain("iv_key      = 'label'\n        iv_value    = 'Travel' ).");
+    // **Not** a sap:label annotation. Gateway adds its own from the DDIC
+    // element when the type is bound to a structure, so ours landed beside it
+    // and the property carried the attribute twice -- invalid XML, and a
+    // browser stopped rendering our $metadata at it (A4H, 2026-09-19). The
+    // corpus says so too: set_label_from_text_element 1014 times, this
+    // annotation never.
+    expect(r.classes["zcl_zstg_demo_mpc.clas.abap"]).to.contain("set_label_from_text_element( iv_text_element_symbol = '");
+    expect(r.classes["zcl_zstg_demo_mpc.clas.abap"]).to.not.contain("iv_key      = 'label'");
+    expect(r.classes["zcl_zstg_demo_mpc.clas.xml"] ?? r.files?.["zcl_zstg_demo_mpc.clas.xml"] ?? "").to.be.a("string");
   });
 
   it("writes the media entity and the picture annotations", () => {

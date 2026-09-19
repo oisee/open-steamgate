@@ -1475,7 +1475,7 @@ ${comment}  RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
 // ------------------------------------------------------------------ XML
 
 const BOM = "\ufeff";
-function clasXml(name, description, components = [], subs = []) {
+function clasXml(name, description, components = [], subs = [], tpool = []) {
   let s = `${BOM}<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
@@ -1507,6 +1507,18 @@ function clasXml(name, description, components = [], subs = []) {
     </SEOSUBCOTX>
 `).join("") + "   </DESCRIPTIONS_SUB>\n";
   }
+  if (tpool.length > 0) {
+    // The shape abapGit serialises a text pool in, read off a real export
+    // (cl_esh_search_mpc.clas.xml): ID I for a text symbol, the three-digit
+    // key, the text, and the field length the symbol was defined with.
+    s += "   <TPOOL>\n" + tpool.map(([key, entry]) => `    <item>
+     <ID>I</ID>
+     <KEY>${key}</KEY>
+     <ENTRY>${String(entry).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}</ENTRY>
+     <LENGTH>132</LENGTH>
+    </item>
+`).join("") + "   </TPOOL>\n";
+  }
   s += `  </asx:values>
  </asx:abap>
 </abapGit>
@@ -1522,9 +1534,51 @@ const OP_SUBS = {
   U: [["/IWBEP/CX_MGW_BUSI_EXCEPTION", "business exception in mgw"], ["/IWBEP/CX_MGW_TECH_EXCEPTION", "mgw technical exception"], ["ER_ENTITY", "Returning data"], ["IO_DATA_PROVIDER", "MGW Entry Data Provider"], ["IT_KEY_TAB", "table for name value pairs"], ["IT_NAVIGATION_PATH", "table of navigation paths"]],
 };
 
+/** Give every labelled property a text symbol, and hand back the pool.
+ *
+ *  **A label belongs in the class's text pool, not in a `sap:label`
+ *  annotation**, and this was measured rather than reasoned: across the
+ *  corpus, `set_label_from_text_element(` occurs 1014 times and
+ *  `iv_key = 'label'` not once. A real SEGW generator never writes the
+ *  annotation.
+ *
+ *  It matters because the two are not equivalent on a system. Gateway adds
+ *  its own `sap:label` from the DDIC data element when the entity type is
+ *  bound to a structure, so ours lands beside it and the property carries
+ *  the attribute **twice** -- which is not valid XML. A browser stopped
+ *  rendering our $metadata at the second one; the shape comparison did not
+ *  notice, because a lenient reader takes the first match. Found 2026-09-19
+ *  on A4H, and it cannot be found here: our own $metadata is valid, because
+ *  nothing adds the DDIC half.
+ *
+ *  Numbering starts above whatever the model already carries, because a
+ *  model read from a real IWPR brings SEGW's own symbols and renumbering
+ *  them would point the calls at somebody else's text. */
+export function assignTextElements(m) {
+  const existing = m.entityTypes.flatMap((et) => et.properties)
+    .map((p) => Number(p.textElement)).filter((n) => Number.isFinite(n));
+  let next = existing.length === 0 ? 1 : Math.max(...existing) + 1;
+  const pool = [];
+  for (const et of m.entityTypes) {
+    for (const pr of et.properties) {
+      if (pr.textElement) {
+        pool.push([String(pr.textElement), pr.label ?? pr.name]);
+        continue;
+      }
+      if (!pr.label) continue;
+      pr.textElement = String(next++).padStart(3, "0");
+      pool.push([pr.textElement, pr.label]);
+    }
+  }
+  return pool;
+}
+
 export function mpcXml(m) {
   const names = [...(m.complexTypes.length > 0 ? ["DEFINE_COMPLEXTYPES"] : []), ...m.entityTypes.map((et) => `DEFINE_${et.defineStem}`), ...(m.associations.length > 0 || m.navigation.length > 0 ? ["DEFINE_ASSOCIATIONS"] : []), ...(m.functionImports.length > 0 ? ["DEFINE_ACTIONS"] : []), "LOAD_TEXT_ELEMENTS"].sort();
-  return clasXml(m.classes.mpc, m.classes.mpc, names.map((n) => [n, n]));
+  return clasXml(m.classes.mpc, m.classes.mpc, names.map((n) => [n, n]), [],
+    m.entityTypes.flatMap((et) => et.properties)
+      .filter((p) => p.textElement && p.label)
+      .map((p) => [String(p.textElement), p.label]));
 }
 
 export function dpcXml(m) {
@@ -1597,6 +1651,11 @@ export function generate(iwprXml, opts = {}) {
     client: "001",
     ...opts,
   };
+  // Labels become text symbols before anything is written, so the source and
+  // the class XML agree about the numbers: mpcSource emits the
+  // set_label_from_text_element calls and LOAD_TEXT_ELEMENTS, mpcXml emits
+  // the pool they resolve against. Two writers, one assignment.
+  assignTextElements(m);
   const files = {
     [fileName(m.classes.mpc, ".clas.abap")]: mpcSource(m, o),
     [fileName(m.classes.mpc, ".clas.xml")]: mpcXml(m),
