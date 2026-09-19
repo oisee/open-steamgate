@@ -98,8 +98,29 @@ export async function runEager(client, rel, dialect) {
   }
 }
 
+/**
+ * Was the statement refused, rather than the data rejected?
+ *
+ * A syntax error, an unknown column or an unknown function is not a
+ * divergence between two ways of running a body - it is a defect in the
+ * lowering, and counting it as "both raised, therefore they agree" is how an
+ * instrument comes to report its own brokenness as a clean result. The
+ * blocker histogram next door was exactly this shape: a number that measured
+ * the diagnostics instead of the thing.
+ */
+export function isInvalid(message = "") {
+  return /syntax|parse|not exist|unknown|no such|Binder Error|Catalog Error/i.test(message);
+}
+
 /** the same rows, or the same raise? and if not, which way round */
 export function compare(fused, eager) {
+  // said before anything else: a refused statement is our defect, and it must
+  // not be able to leave here as agreement
+  for (const [side, run] of [["fused", fused], ["eager", eager]]) {
+    if (run.raised !== undefined && isInvalid(run.raised)) {
+      return {agree: false, kind: "statement-refused", side, raised: run.raised};
+    }
+  }
   if (fused.raised !== undefined || eager.raised !== undefined) {
     if (fused.raised !== undefined && eager.raised !== undefined) {
       return {agree: true, both: "raised"};

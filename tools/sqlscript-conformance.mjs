@@ -191,7 +191,16 @@ async function runSqlJs() {
 // what it collapsed is printed rather than assumed.
 export function normalise(cell) {
   if (cell === undefined) return {kind: "missing"};
-  if (cell.error !== undefined) return {kind: "raised"};
+  if (cell.error !== undefined) {
+    // "both raised, therefore they agree" hides the case that matters most:
+    // one engine rejecting the STATEMENT rather than the data. A syntax or
+    // binder error is a defect in what we sent, not a difference between
+    // engines, and letting it pass as agreement is an instrument reporting
+    // its own brokenness as a clean result.
+    return /syntax|parse|not exist|unknown|no such|Binder Error|Catalog Error/i.test(cell.error)
+      ? {kind: "refused", value: cell.error}
+      : {kind: "raised"};
+  }
   if (cell.value === null) return {kind: "null"};
   const asNumber = Number(cell.value);
   if (cell.value.trim() !== "" && Number.isFinite(asNumber)) return {kind: "number", value: asNumber};

@@ -9,7 +9,7 @@
 // engines - which is the precondition for trusting it anywhere else.
 import {expect} from "chai";
 import {T, col, lit, bin, cast, scan, filter, project, order} from "../tools/sqlscript-ir.mjs";
-import {runBothWays, runFused, runEager} from "../tools/sqlscript-eager.mjs";
+import {runBothWays, runFused, runEager, compare, isInvalid} from "../tools/sqlscript-eager.mjs";
 
 const FIXTURE = [
   `CREATE TABLE src (k VARCHAR, txt VARCHAR, a INTEGER)`,
@@ -85,5 +85,33 @@ describe("fused against forced: the instrument, on the case that differs", funct
     expect(effects(dangerous).mayThrow).to.equal(true);
     const eager = await runEager(client, dangerous, "duckdb");
     expect(eager.raised, "the IR promised this could raise").to.be.a("string");
+  });
+});
+
+// The failure mode next door, applied to this instrument: a number that
+// measures its own brokenness. If both halves raise, the comparison says
+// they agree - which is right when the DATA was rejected and badly wrong
+// when the STATEMENT was, because a statement one engine will not parse is
+// a defect in the lowering, not a difference between two ways of running.
+describe("a refused statement is never agreement", () => {
+  it("both raising on the data is agreement, as HANA's own behaviour requires", () => {
+    const verdict = compare({raised: "invalid number"}, {raised: "invalid number"});
+    expect(verdict.agree).to.equal(true);
+    expect(verdict.both).to.equal("raised");
+  });
+
+  it("but a syntax or binder error is our defect and must not pass as agreement", () => {
+    for (const message of ["Parser Error: syntax error at or near", "Binder Error: column K does not exist",
+                           "no such function: TO_INTEGER", "Catalog Error: Table with name SRC does not exist"]) {
+      expect(isInvalid(message), message).to.equal(true);
+      const verdict = compare({raised: message}, {raised: message});
+      expect(verdict.agree, message).to.equal(false);
+      expect(verdict.kind).to.equal("statement-refused");
+    }
+  });
+
+  it("and a real data error is not mistaken for one", () => {
+    expect(isInvalid("Conversion Error: Could not convert string 'oops' to INT32")).to.equal(false);
+    expect(isInvalid("division by zero undefined")).to.equal(false);
   });
 });
