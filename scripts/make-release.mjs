@@ -106,26 +106,34 @@ const newestSource = () => {
 };
 
 const source = newestSource();
-for (const artefact of ["osd", "osd-sea"]) {
-  const from = join(root, "build", artefact);
-  if (existsSync(from) === false) continue;
+
+/** Copy one built host, and refuse it if it is older than the code.
+ *
+ *  **Every host goes through here**, which is the point. The first version of
+ *  this guard covered `osd` and `osd-sea` and left `osd-node/osd.mjs`, copied
+ *  fifteen lines further down -- the same defect, in the same file, fixed for
+ *  the case and not for the class, on the same day we caught that shape three
+ *  times in each other's work. */
+const host = (relativePath, name, how) => {
+  const from = join(root, relativePath);
+  if (existsSync(from) === false) return;
   const built = statSync(from).mtimeMs;
   if (built < source.at) {
     throw new Error(
-      `build/${artefact} is older than the code it is built from: it was made ` +
+      `${relativePath} is older than the code it is built from: it was made ` +
       `${new Date(built).toISOString()} and ${source.name} changed ` +
       `${new Date(source.at).toISOString()}. Copying it would put a release ` +
-      `together whose release.json names this commit and whose binary does not ` +
+      `together whose release.json names this commit and whose host does not ` +
       `contain it -- which is how an evening was spent testing code that was ` +
-      `not running. Build it first: npm run binary`);
+      `not running. Build it first: ${how}`);
   }
-  cpSync(from, join(out, artefact));
-  say(`host: ${artefact}, built ${new Date(built).toISOString()}`);
-}
-if (existsSync(join(root, "build", "osd-node", "osd.mjs"))) {
-  cpSync(join(root, "build", "osd-node", "osd.mjs"), join(out, "osd.mjs"));
-  say("host: osd.mjs (the bundle)");
-}
+  cpSync(from, join(out, name));
+  say(`host: ${name}, built ${new Date(built).toISOString()}`);
+};
+
+host("build/osd", "osd", "npm run binary");
+host("build/osd-sea", "osd-sea", "npm run binary:sea");
+host("build/osd-node/osd.mjs", "osd.mjs", "npm run binary:bundle");
 const node = process.env.OSD_NODE_DIR ?? join(root, ".local", "node", "node-v26.9.0-linux-x64");
 if (existsSync(node)) {
   cpSync(node, join(out, "node"), {recursive: true, dereference: true});

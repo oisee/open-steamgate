@@ -971,6 +971,40 @@ one of them parsed, lowered or passed, and computed something else.
 
 ---
 
+## The guard is a patch; a content-addressed name is the fix (2026-09-19)
+
+`make-release` copied `build/osd` and never built it, so a release whose
+`release.json` named the current commit shipped a four-hour-old binary, and
+an evening went into conclusions about code that was not running. The
+checksum said so in one line and nothing else did.
+
+The guard now refuses a host older than `bin/`, `tools/` or `scripts/`, and
+it covers **every** copied host after the first version covered two of three
+-- the same "fixed the case, not the class" we caught three times in each
+other's work that day.
+
+**But it is a patch, and the tree already holds the fix next to it.**
+`build/live` points at `by-input/<hash>`, and **a name that is a function of
+the content cannot go stale silently**: change the code and a different
+directory is copied. Nothing compares times; there is simply no way for the
+name to lie. The binaries have no such property, so they need a watchman,
+and a watchman needs a list, and a list needs maintaining -- exactly the
+shape of `databaseFile()`'s engine list and of `make-release`'s old package
+list, both of which were wrong when somebody finally looked.
+
+So the real repair is to name the built hosts by their content, the way
+generations are named. Then `release.json` can answer "which binary is
+inside" instead of only "when was this release assembled", and the guard
+disappears rather than being maintained.
+
+**And mtime has a known hole**, worth writing down before it bites: it does
+not survive `git checkout`. A checkout stamps the working time on files it
+restores, so a file nobody edited becomes newer than the binary, and the
+refusal is correct about the dates and misleading about the cause. A hash
+does not have this failure.
+
+---
+
 ## The container, 2026-09-19: five fixed, two open, and both open ones named
 
 Written down because the session that measured it will not be the one that
