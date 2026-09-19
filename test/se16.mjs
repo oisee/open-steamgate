@@ -46,6 +46,56 @@ describe("the data browser", function () {
     expect(shown, "no limit, so it showed all of them").to.equal(total);
   });
 
+  // Wave 2: the two things that make it SE16 rather than a listing.
+  it("offers a selection per field, and says what a value means", async () => {
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL`)).text();
+    expect(page, "an input per field").to.contain('name="f_travelid"');
+    expect(page, "and a column checkbox per field").to.contain('name="c" value="TRAVELID"');
+    expect(page, "SE16's own conventions, named on the screen").to.contain("is a range");
+  });
+
+  it("filters through the same clause builder an OData $filter goes through", async () => {
+    // not a WHERE assembled here: the value becomes a select-option and goes
+    // to zcl_stg_request_context=>where_for_option, so `*` means here what it
+    // means over the service and the escaping is the one escaper in the system
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_status=B*`)).text();
+    expect(page, "the pattern became a LIKE").to.match(/WHERE <code>STATUS LIKE &#39;B%&#39;<\/code>/);
+    const [, , shown] = /(\d+) row\(s\), showing (\d+)/.exec(page) ?? [];
+    const all = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL`)).text();
+    const [, , every] = /(\d+) row\(s\), showing (\d+)/.exec(all) ?? [];
+    expect(Number(shown), "the filter removed rows").to.be.lessThan(Number(every));
+  });
+
+  it("a range and an exclusion are the ones SE16 writes", async () => {
+    const range = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_travelid=1..2`)).text();
+    expect(range).to.match(/WHERE <code>TRAVELID BETWEEN &#39;1&#39; AND &#39;2&#39;<\/code>/);
+    const not = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_status=!B`)).text();
+    expect(not).to.match(/WHERE <code>NOT \( STATUS = &#39;B&#39; \)<\/code>/);
+  });
+
+  it("a quote in a value is escaped by that one escaper, not quoted into the statement", async () => {
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_status=${encodeURIComponent("a'b")}`)).text();
+    expect(page, "doubled, which is what Open SQL wants").to.contain("&#39;&#39;");
+    expect(page, "and the page still answered").to.contain("All entities");
+  });
+
+  it("shows only the columns asked for, and drops a name the entity does not have", async () => {
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&c=TRAVELID,STATUS`)).text();
+    expect(page).to.contain("<th>TRAVELID");
+    expect(page).to.contain("<th>STATUS");
+    expect(page, "a column not asked for is gone").to.not.contain("<th>DESCRIPTION");
+    // the form fields are read against the entity's own field list, so a
+    // name that is not a field is never looked for and cannot reach anything
+    const junk = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&c=TRAVELID,NOT_A_FIELD`)).text();
+    expect(junk).to.contain("<th>TRAVELID");
+    expect(junk).to.not.contain("NOT_A_FIELD");
+  });
+
+  it("a criterion on a field the entity does not have cannot reach the WHERE", async () => {
+    const page = await (await fetch(`${BASE}?t=ZC_STG_TRAVEL&f_not_a_field=${encodeURIComponent("x' OR '1'='1")}`)).text();
+    expect(page, "nothing was built from it").to.contain("WHERE <code>(none)</code>");
+  });
+
   it("says a name it does not have is not there, rather than showing nothing", async () => {
     const page = await (await fetch(`${BASE}?t=NOPE_NOT_HERE`)).text();
     expect(page, "named, not silent").to.contain("No entity called");

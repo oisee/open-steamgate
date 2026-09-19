@@ -947,3 +947,19 @@ ENDLOOP.
 - Upstream issue: none. Arguably the runtime could give exception instances a `message`; T is separately fixing `get_source_position( )`, which throws on anything the runtime raised itself
 - Regression-test location: `test/osd-apc.mjs`
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-19-form-field-name-case — `get_form_field` lower-cases the question and not the answer
+
+- Status: `workaround`
+- Discovery date: `2026-09-19`
+- Affected versions: `open-abap-core` as cloned 2026-09-19
+- Affected ABAP statement, runtime API or adapter: `if_http_entity~get_form_field` / `~set_form_fields`
+- Minimal ABAP reproducer: set a form field named `f_STATUS`, then ask for it by that exact name — nothing comes back. It is reachable by no spelling at all: `get_form_field` lower-cases what it is asked for, so the only name it can ever match is one already lower case
+- Exact command used to run it: `STG_PORT=3131 npx mocha test/se16.mjs`, the data browser's per-field selection (`?t=ZC_STG_TRAVEL&f_STATUS=B*`), which silently filtered nothing
+- Expected SAP behaviour: **not measured, and deliberately not claimed.** No system was asked, so this entry does not assert what SAP does. It does not need to: the inconsistency is *inside* open-abap-core and visible without any oracle — `cl_http_entity=>get_form_field` reads `READ TABLE mt_form_fields WITH KEY name = to_lower( name )`, while `set_form_fields` stores `mt_form_fields = fields` unchanged. One side normalises and the other does not, so a name that can be **set** can never be **got**. Whichever behaviour SAP has, it is not this one, because this one is not a behaviour — it is two halves disagreeing
+- Actual open-abap behaviour: as above. `get_form_fields` (plural) lower-cases on the way out, which is a third spelling of the same decision and the reason the single getter's asymmetry is easy to miss
+- Impact on open-steamgate: any page whose form field names are not already lower case reads them as empty. Found in the data browser (G.9 wave 2), where the field names come from DDIC and DDIC names are upper case. The failure is silent: the filter simply selected everything, which looks like a working screen with no filter typed
+- Smallest safe workaround: name the form fields in lower case and ask for them that way — `f_{ to_lower( ls_field-name ) }` in `src/webgui/zcl_osd_se16.clas.abap`, both where the input is rendered and where it is read. One line each, no dependency on which half upstream fixes
+- Upstream issue: **needs an issue.** The fix is one line either way (compare case-insensitively, or normalise on set), but which one is right depends on what the interface promises, and that is Lars's call rather than ours
+- Regression-test location: `test/se16.mjs`, "filters through the same clause builder an OData $filter goes through"
+- Upstream version containing a fix: `unknown`

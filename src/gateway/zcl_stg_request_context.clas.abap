@@ -35,23 +35,30 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
     METHODS get_paging
       RETURNING
         VALUE(rs_paging) TYPE /iwbep/s_mgw_paging.
-  PRIVATE SECTION.
-    METHODS keys_to_structure
-      EXPORTING
-        es_key_values TYPE data.
 
-    METHODS where_for_option
+* One select-option into one Open SQL clause, and one value into one escaped
+* literal. Public and static because they are pure functions of their
+* arguments and because there must be exactly **one** of each in the system:
+* a second escaper is how two places end up quoting differently, and the one
+* that is wrong is always the one nobody reads. The data browser (G.9) builds
+* its selection screen into select-options and comes here, so its filter and
+* an OData `$filter` mean the same thing by the same text.
+    CLASS-METHODS where_for_option
       IMPORTING
         iv_field         TYPE string
         is_option        TYPE /iwbep/s_cod_select_option
       RETURNING
         VALUE(rv_clause) TYPE string.
 
-    METHODS sql_literal
+    CLASS-METHODS sql_literal
       IMPORTING
         iv_value         TYPE string
       RETURNING
         VALUE(rv_literal) TYPE string.
+  PRIVATE SECTION.
+    METHODS keys_to_structure
+      EXPORTING
+        es_key_values TYPE data.
 ENDCLASS.
 
 CLASS zcl_stg_request_context IMPLEMENTATION.
