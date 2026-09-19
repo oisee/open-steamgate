@@ -1,0 +1,97 @@
+# Bringing open-steamgate up, in the configurations that exist.
+#
+# Profiles rather than separate files, because the difference between them is
+# one environment variable at the database seam (docs/db-backends.md):
+#
+#   docker compose --profile sqlite up        the default: nothing else to run
+#   docker compose --profile hana up          HANA Express beside it
+#
+# There is deliberately no `postgres` profile. @abaplint/database-pg exists
+# and open-abap-core already uses it, so it is a small piece of wiring -- but
+# a profile in a compose file is a promise, not an intention, and this one
+# will appear when `STG_DB=pg` passes the suite and not before.
+services:
+
+  osd:
+    profiles: ["sqlite"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: osd:local
+    # 3130 on the host, because 3030 is where a deployment of this thing
+    # usually already runs -- and a health check that reads THAT is a green
+    # light for a container which never started. Found exactly that way.
+    ports: ["3130:3030"]
+    volumes: ["osd-data:/osd/data-run"]
+    healthcheck:
+      # by content, not by "the port is open": an unbuilt or half-started
+      # system listens and answers 503 to everything
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -q commit"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  hxe:
+    profiles: ["hana"]
+    image: saplabs/hanaexpress:latest
+    hostname: hxe
+    # HANA Express wants the licence accepted and a master password given by
+    # the person running it. Neither is shipped here: put the password in
+    # ./hxe/password.json as {"master_password":"..."} before starting.
+    command: ["--passwords-url", "file:///hana/mounts/password.json", "--agree-to-sap-license"]
+    volumes: ["./hxe:/hana/mounts"]
+    ports: ["39013:39013", "39017:39017"]
+    ulimits:
+      nofile: {soft: 1048576, hard: 1048576}
+    sysctls:
+      # measured 2026-09-18 (docs/amdp-in-hana.md): kernel.shmmni cannot be set
+      # per container -- it is not namespaced and docker refuses the flag --
+      # and shmmax/shmall should be INHERITED, because the published recipe
+      # passes values lower than a modern host already has.
+      net.ipv4.ip_local_port_range: "40000 60999"
+    healthcheck:
+      # a condition, not a timeout: a cold start was measured once at 169 s and
+      # a slower machine should wait, not fail
+      test: ["CMD-SHELL", "/usr/sap/HXE/HDB90/exe/hdbsql -n localhost:39017 -u SYSTEM -p \"$$(cat /hana/mounts/password.json | sed 's/.*\"master_password\"[^\"]*\"\\([^\"]*\\)\".*/\\1/')\" \"SELECT 1 FROM DUMMY\" >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # **Not verified in a container.** `STG_DB=hana` serves, and `npm run unit`
+  # against HANA is 19.1 s green -- both measured on a HANA Express beside the
+  # host, not through this file. What is measured and negative: the WIRE suite
+  # against HANA hangs rather than runs slowly -- 21 minutes, no output, two
+  # seconds of process CPU, which is a process waiting on the database and not
+  # one computing. So do not build an `e2e-hana` profile on a longer timeout;
+  # there is nothing to wait for yet (fable-osd, 2026-09-19).
+  osd-hana:
+    profiles: ["hana"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: osd:local
+    depends_on:
+      hxe: {condition: service_healthy}
+    ports: ["3130:3030"]
+    environment:
+      STG_DB: hana
+      HANA_HOST: hxe
+      HANA_PORT: "39017"
+      HANA_USER: SYSTEM
+      # The password reaches the client through the environment; the file
+      # beside the compose is the container's, not ours.
+      #
+      # NOT `${HANA_PASSWORD:?...}`: compose interpolates EVERY service
+      # before it applies profiles, so a required variable here refused to
+      # start the `sqlite` profile too -- "docker compose --profile sqlite up"
+      # answered about a HANA password. The client says what is missing when
+      # it is asked to connect, which is the right place for it.
+      HANA_PASSWORD: ${HANA_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -q commit"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  osd-data:
