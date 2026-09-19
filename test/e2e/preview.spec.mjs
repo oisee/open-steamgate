@@ -3,6 +3,25 @@ import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
+// The origin the preview is served on. STG_PREVIEW_PORT, the variable both
+// scripts/serve-build.mjs and playwright.preview.config.mjs read, so two
+// sessions on one machine do not collide -- it used to be the literal
+// `http://localhost:3031`, twenty-five times over, and a config that can be
+// told a port while the spec cannot is a suite where every assertion fails
+// with ERR_CONNECTION_REFUSED against a server that is up and healthy on the
+// port it was asked for.
+//
+// It stays an ORIGIN rather than becoming baseURL-relative paths, because
+// several of these assertions are about absolute URLs the system itself
+// produces -- an OData `__metadata.uri`, a WebSocket address -- and those are
+// compared, not navigated to.
+const ORIGIN = `http://localhost:${process.env.STG_PREVIEW_PORT ?? 3031}`;
+// The WebSocket addresses are built INSIDE the page, from `location.origin`,
+// not from this constant: those lines run in the browser, where a Node-side
+// constant does not exist -- four tests failed with "WS_ORIGIN is not
+// defined" when it did. Taking the origin from the page is also the better
+// answer, because the page cannot then disagree with where it was served.
+
 // Wait for the worker to take control, and say what happened when it does not.
 //
 // The bare wait was `waitForFunction(() => controller !== null)` with a
@@ -54,14 +73,14 @@ test("the worker answering is the worker that was just built", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
     // land somewhere stable first. index.html is the installer and navigates
     // to the app the moment the worker is in control, so anything evaluated
     // on it races that navigation and dies as "execution context was
     // destroyed" — which reads like a worker fault and is not one. This is
     // the same race that made the suite flake.
-    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/stamp", {waitUntil: "domcontentloaded"});
+    await page.goto(`${ORIGIN}/sap/bc/zstg_icf_demo/stamp`, {waitUntil: "domcontentloaded"});
     const answered = await page.evaluate(async () => {
       const res = await fetch("/__preview/build", {cache: "no-store"});
       return {status: res.status, body: await res.json(), sw: true};
@@ -89,12 +108,12 @@ test("the list report runs against the gateway in the service worker", async () 
     const answered = [];
     page.on("response", (res) => {
       if (res.url().includes("/sap/opu/odata/sap/")) {
-        answered.push(res.status() + " " + res.url().replace("http://localhost:3031", "") + (res.fromServiceWorker() ? " (sw)" : ""));
+        answered.push(res.status() + " " + res.url().replace(`${ORIGIN}`, "") + (res.fromServiceWorker() ? " (sw)" : ""));
       }
     });
 
     // a deep link into the app, without the installer page first
-    await page.goto("http://localhost:3031/app/index.html");
+    await page.goto(`${ORIGIN}/app/index.html`);
 
     const rows = page.locator("table tbody tr.sapMListTblRow, .sapUiTableRow:has(.sapUiTableCell)");
     await expect(rows.first()).toBeVisible();
@@ -116,7 +135,8 @@ test("the list report runs against the gateway in the service worker", async () 
 
     // the absolute URLs the gateway hands out point at the mount, not at a Node server
     const travels = await page.evaluate(async () => (await fetch("../sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$top=1&$format=json")).json());
-    expect(travels.d.results[0].__metadata.uri).toMatch(/^http:\/\/localhost:3031\/sap\/opu\/odata\/sap\/ZSTG_DEMO_SRV\/TravelSet\(/);
+    expect(travels.d.results[0].__metadata.uri)
+      .toMatch(new RegExp("^" + ORIGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet\\("));
 
     // a write goes through the DPC in the worker and survives a reload
     const created = await page.evaluate(async () => {
@@ -153,9 +173,9 @@ test("an ICF service is served by the worker too, page and all", async () => {
     // so land somewhere stable before asking anything of the page: an
     // evaluate that runs mid-navigation dies with "execution context was
     // destroyed" and reads like a worker fault rather than a race
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
-    await page.goto("http://localhost:3031/sap/bc/zork");
+    await page.goto(`${ORIGIN}/sap/bc/zork`);
     await page.waitForLoadState("domcontentloaded");
 
     const answer = await page.evaluate(async () => {
@@ -186,7 +206,7 @@ test("a transaction keeps its session in the service worker, where there is no p
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
 
     const step = async (query, body) => page.evaluate(async ({query, body}) => {
@@ -234,7 +254,7 @@ test("the demo pack is served: its page by the handler, a picture out of SMW0", 
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
     const answer = await page.evaluate(async () => {
       const res = await fetch("/sap/bc/zo4d_demo/");
@@ -271,11 +291,11 @@ test("the demo answers a frame over its channel and the socket stays open", asyn
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
-    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.goto(`${ORIGIN}/sap/bc/zork`, {waitUntil: "domcontentloaded", timeout: 60000});
     const answer = await page.evaluate(() => new Promise((resolve) => {
-      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zo4d_demo");
+      const socket = new WebSocket(`${location.origin.replace("http", "ws")}/sap/bc/apc/sap/zo4d_demo`);
       const seen = [];
       const done = (why) => resolve({why, state: socket.readyState, seen});
       socket.addEventListener("close", (e) => done(`closed ${e.code} ${e.reason}`));
@@ -320,11 +340,11 @@ test("the LSD channel hands out the recorded show as compressed bytes", async ()
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
-    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.goto(`${ORIGIN}/sap/bc/zork`, {waitUntil: "domcontentloaded", timeout: 60000});
     const answer = await page.evaluate(() => new Promise((resolve) => {
-      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zapc_lsd");
+      const socket = new WebSocket(`${location.origin.replace("http", "ws")}/sap/bc/apc/sap/zapc_lsd`);
       let bytes = 0;
       const done = (why, extra) => resolve(Object.assign({why, bytes, state: socket.readyState}, extra));
       socket.addEventListener("close", (e) => done(`closed ${e.code} ${e.reason}`));
@@ -380,9 +400,9 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     const page = await context.newPage();
     // the installer page navigates away once the worker is registered, so
     // land on a page the worker serves and stay there
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
-    await page.goto("http://localhost:3031/sap/bc/zork");
+    await page.goto(`${ORIGIN}/sap/bc/zork`);
     await page.waitForLoadState("domcontentloaded");
 
     // the worker put the shim into the ABAP-generated page ahead of its own
@@ -397,7 +417,7 @@ test("an APC channel answers in the bundle, with the handler in the worker", asy
     const frames = await page.evaluate(async () => {
       return await new Promise((done, fail) => {
         const got = [];
-        const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zstg_apc_demo");
+        const socket = new WebSocket(`${location.origin.replace("http", "ws")}/sap/bc/apc/sap/zstg_apc_demo`);
         // sending from onopen is what a page does, and it is what caught the
         // ordering defect: the handler speaks from on_start, so draining
         // before signalling open delivered a message while the socket was
@@ -444,13 +464,13 @@ test("SMW0 objects are served from the bundle, byte for byte", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
     // somewhere the worker serves and nothing else happens: the Zork page
     // opens its channel on load, and a handler that boots a Z-machine in the
     // worker holds the only thread there is, so waiting for that page's load
     // event is waiting for the game to start
-    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/media", {waitUntil: "domcontentloaded"});
+    await page.goto(`${ORIGIN}/sap/bc/zstg_icf_demo/media`, {waitUntil: "domcontentloaded"});
 
     const fetched = await page.evaluate(async () => {
       const one = async (query) => {
@@ -507,12 +527,12 @@ test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
     // domcontentloaded, not load: the page connects as it loads and the
     // handler boots a Z-machine in the worker, which is the only thread
     // there is, so waiting for the load event is waiting for the game
-    await page.goto("http://localhost:3031/sap/bc/zork", {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.goto(`${ORIGIN}/sap/bc/zork`, {waitUntil: "domcontentloaded", timeout: 60000});
 
     // the handler accepted the connection
     await expect(page.locator("#statusText")).toHaveText("Connected - Playing ZORK", {timeout: 60000});
@@ -602,14 +622,14 @@ test("the MiniZork walkthrough plays the same in the bundle", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
-    await page.goto("http://localhost:3031/sap/bc/zstg_icf_demo/walkthrough", {waitUntil: "domcontentloaded"});
+    await page.goto(`${ORIGIN}/sap/bc/zstg_icf_demo/walkthrough`, {waitUntil: "domcontentloaded"});
 
     const answers = await page.evaluate(async (script) => {
       const {install} = await import("/preview-socket.mjs");
       install({paths: ["/sap/bc/apc/sap"]});
-      const socket = new WebSocket("ws://localhost:3031/sap/bc/apc/sap/zapc_zork");
+      const socket = new WebSocket(`${location.origin.replace("http", "ws")}/sap/bc/apc/sap/zapc_zork`);
       let buffer = "";
       // a channel that dies mid-walkthrough must name the command that
       // killed it; without this the next send throws "the socket is not
@@ -714,10 +734,10 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
 
-    await page.goto("http://localhost:3031/app/flp.html", {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.goto(`${ORIGIN}/app/flp.html`, {waitUntil: "domcontentloaded", timeout: 60000});
     await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
     await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
 
@@ -763,10 +783,10 @@ test("the status app says what the deployment in the browser is", async () => {
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
   try {
     const page = await context.newPage();
-    await page.goto("http://localhost:3031/index.html?stay=1");
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
     await controlled(page);
 
-    await page.goto("http://localhost:3031/app/status/index.html", {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.goto(`${ORIGIN}/app/status/index.html`, {waitUntil: "domcontentloaded", timeout: 60000});
     const row = page.locator(".sapMListTblRow", {hasText: "browser"}).first();
     await expect(row).toBeVisible({timeout: 60000});
     await row.click();
@@ -831,7 +851,7 @@ test("the launchpad's console and network, characterised", async () => {
       if (r.status() >= 400) refused.push(`${r.status()} ${r.url()}`);
     });
 
-    await page.goto("http://localhost:3031/app/flp.html");
+    await page.goto(`${ORIGIN}/app/flp.html`);
     await controlled(page);
     // the tiles are the proof the page actually ran, so that a silent page
     // cannot pass this test by complaining about nothing
