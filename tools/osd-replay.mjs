@@ -25,8 +25,8 @@
 //   node tools/osd-replay.mjs compare <baseA> <baseB> [--log f]
 //
 // Exit 0 when the two agree, 1 when they differ, 2 when it could not ask.
-import {readFileSync, writeFileSync, existsSync} from "node:fs";
-import {basename} from "node:path";
+import {mkdirSync, readFileSync, writeFileSync, existsSync} from "node:fs";
+import {basename, join} from "node:path";
 
 export const DEFAULT_LOG = new URL("../test/request-log.json", import.meta.url).pathname;
 
@@ -172,8 +172,16 @@ if (basename(process.argv[1] ?? "") === "osd-replay.mjs") {
     }
     const answers = await replay(bases[0], calls);
     const unasked = answers.filter((a) => a.failed).length;
-    writeFileSync("replay.json", `${JSON.stringify(answers, undefined, 1)}\n`);
-    console.log(`${answers.length} calls, ${unasked} could not be asked -> replay.json`);
+    // **Under .local/, not in the repository root.** This wrote `replay.json`
+    // beside package.json, so a recording appeared in the working tree of a
+    // public repository and waited to be committed by whoever ran `git add`
+    // next. Same shape as an export tool dropping a SAP package zip there
+    // (2026-09-19, both on the same evening): a tool that produces an
+    // artefact puts it where artefacts live, and `.local/` is that place.
+    mkdirSync(".local", {recursive: true});
+    const out = join(".local", "replay.json");
+    writeFileSync(out, `${JSON.stringify(answers, undefined, 1)}\n`);
+    console.log(`${answers.length} calls, ${unasked} could not be asked -> ${out}`);
     // **"Asked nothing" is not "recorded a run".** This printed the line
     // above and exited 0 against a port with no server on it, minutes after
     // the module was written to stop exactly that -- the third value of a
