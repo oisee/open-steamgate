@@ -4,6 +4,7 @@
 // for the ABAP LUW, subrc/dbcnt from the affected-row count, rows as plain
 // objects with the runtime's lowercase column names.
 import {DuckDBInstance} from "@duckdb/node-api";
+import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
 
 
@@ -183,10 +184,7 @@ export class DuckDBDatabaseClient {
   #bind(params = []) {
     return params.map((p) => {
       if (p.isNull === true) return null;
-      switch ((p.type ?? "").charAt(0).toUpperCase()) {
-        case "I": case "B": case "S": case "P": case "F": return Number(p.value);
-        default: return p.value === undefined ? null : String(p.value);
-      }
+      return bindValue(p);
     });
   }
 

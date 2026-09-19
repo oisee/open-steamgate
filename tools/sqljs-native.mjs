@@ -17,16 +17,15 @@
 // through select()/insert()/update()/delete(); a statement arriving here is
 // sent to the engine untouched, which is the point and also the reason.
 
+import {bindValue} from "./abap-types.mjs";
+
 /** ABAP's type letters into values sql.js will bind */
 function bind(params = []) {
   return params.map((p) => {
     if (p.isNull === true) {
       return null;
     }
-    switch ((p.type ?? "").charAt(0).toUpperCase()) {
-      case "I": case "B": case "S": case "P": case "F": return Number(p.value);
-      default: return p.value === undefined ? null : String(p.value);
-    }
+    return bindValue(p);
   });
 }
 

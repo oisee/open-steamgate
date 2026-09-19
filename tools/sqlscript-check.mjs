@@ -236,7 +236,7 @@ export async function withInventedTables(client, rel, dialect, {rows = 3} = {}, 
         sql: `INSERT INTO ${quote(table)} (${columns.map(([name]) => quote(name)).join(", ")}) ` +
              `VALUES (${columns.map(() => "?").join(", ")})`,
         expect: "none",
-        params: columns.map(([name, one]) => ({name, value: benignFor(one.type, i), type: seamType(one.type)})),
+        params: columns.map(([name, one]) => ({name, value: benignFor(one.type, i, one.hint), type: seamType(one.type)})),
       });
     }
     // The fixture is committed before anything is run against it. A failure
@@ -281,8 +281,15 @@ export async function runOnInventedTables(client, rel, dialect, options = {}) {
   });
 }
 
-/** ordinary values, varied a little so a filter has something to remove */
-function benignFor(type, i) {
+/** ordinary values, varied a little so a filter has something to remove.
+ *
+ *  `hint` is what the plan knows about the SHAPE of a plausible value, which
+ *  is a different question from the type: a column held as text and cast to
+ *  a number has to be filled with text that converts, or the body raises on
+ *  both halves of every comparison and the verdict is about our fixture.
+ *  Measured: `CAST(a AS INTEGER)` reported "both raised" until this line. */
+function benignFor(type, i, hint) {
+  if (hint === "digits") return String(i + 1);
   const abap = (type?.abap ?? "C").toUpperCase();
   if (abap === "STRING") return String.fromCharCode(97 + i).repeat(2);
   const letter = abap.charAt(0);

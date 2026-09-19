@@ -265,3 +265,73 @@ describe("forceability, decided without a database", () => {
     }
   });
 });
+
+// The same comparison on the engine the design was taken from.
+//
+// Everything above runs on DuckDB, which is an analogy: the behaviour being
+// modelled is HANA's, measured with `WITH HINT(NO_INLINE)`
+// (docs/sqlscript-hana-observed.md), and an instrument that has only ever
+// been exercised on the analogy is an instrument nobody has checked.
+//
+// Measured on HANA Express 2.00.088, 2026-09-19, and it reproduces exactly:
+// the dangerous plan answers two rows fused and raises `invalid number` when
+// every step is materialised; the safe plan agrees both ways.
+//
+// It needs a HANA, so it says so and measures nothing when there is none --
+// a suite that quietly passes without its engine is the failure this tree
+// keeps paying for, and a pending test is at least visible in the output.
+describe("fused against forced, on HANA itself", function () {
+  this.timeout(60000);
+  let client;
+
+  before(async function () {
+    try {
+      const {HanaDatabaseClient} = await import("../tools/hana-client.mjs");
+      client = new HanaDatabaseClient({schema: process.env.HANA_SCHEMA ?? "OSD_EAGER"});
+      await client.connect();
+    } catch (error) {
+      console.log(`      (no HANA reachable, so this measured nothing: ${String(error.message).slice(0, 60)})`);
+      this.skip();
+    }
+    await client.native({sql: 'DROP TABLE "SRC_EAGER"', expect: "none"}).catch(() => {});
+    await client.native({sql: 'CREATE TABLE "SRC_EAGER" ("K" NVARCHAR(10), "TXT" NVARCHAR(20), "A" INTEGER)',
+      expect: "none"});
+    for (const [k, txt, a] of [["a", "1", 1], ["b", "oops", 2], ["c", "3", 3]]) {
+      await client.native({sql: `INSERT INTO "SRC_EAGER" VALUES ('${k}', '${txt}', ${a})`, expect: "none"});
+    }
+    await client.commit?.();
+  });
+
+  after(async () => {
+    await client?.native?.({sql: 'DROP TABLE "SRC_EAGER"', expect: "none"}).catch(() => {});
+    await client?.disconnect?.();
+  });
+
+  const dangerous = filter(
+    project(scan("SRC_EAGER"), [{as: "N", expr: cast(col("TXT"), T.int)}, {as: "K", expr: col("K")}]),
+    bin("<>", col("K"), lit("b", T.char(1)), T.bool));
+
+  it("fused answers and forced raises, which is what NO_INLINE showed", async () => {
+    const result = await runBothWays(client, dangerous, "hana");
+    expect(result.agree, JSON.stringify(result).slice(0, 300)).to.equal(false);
+    expect(result.kind).to.equal("fused-answers-eager-raises");
+    expect(result.fused.rows.map((r) => r.K ?? r.k).sort()).to.deep.equal(["a", "c"]);
+  });
+
+  it("and a plan with nothing that can raise agrees both ways here too", async () => {
+    const safe = order(project(filter(scan("SRC_EAGER"), bin(">", col("A"), lit(0, T.int), T.bool)),
+                               [{as: "K", expr: col("K")}]), [{col: "K"}]);
+    const result = await runBothWays(client, safe, "hana");
+    expect(result.agree, JSON.stringify(result).slice(0, 300)).to.equal(true);
+    expect(result.both).to.equal("rows");
+  });
+
+  // the boundary the refusal predicate sits on, pinned with HANA's own words
+  it("HANA's `invalid number` is the DATA being rejected, not the statement", async () => {
+    const {isInvalid} = await import("../tools/sqlscript-eager.mjs");
+    expect(isInvalid("invalid number: TrexColumnUpdate failed"),
+      "a predicate matching `invalid \\w+` would call this a refusal and the comparison would " +
+      "report two raises as agreement").to.equal(false);
+    expect(isInvalid("invalid table name: Could not find table/view X")).to.equal(true);
+  });
+});

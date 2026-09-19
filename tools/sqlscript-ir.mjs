@@ -392,12 +392,17 @@ export function adversarialRows(rel, schema = {}) {
 export function tableShapesFor(rel) {
   const tables = new Map();
   const seen = new Map();
-  const note = (name, type, why, guessed = false) => {
+  const note = (name, type, why, guessed = false, hint = undefined) => {
     if (name === undefined) return;
     const already = seen.get(name);
     // a use that determines the type beats one that guesses at it
     if (already !== undefined && already.guessed === false) return;
-    seen.set(name, {type, why, guessed});
+    // `hint` says what a PLAUSIBLE value looks like, which is not the same
+    // question as the type. A column cast to a number is held as text and
+    // must be filled with text that CONVERTS, or every body that casts it
+    // raises on both sides of a comparison and the measurement is about the
+    // fixture. The plan knows this; it was simply not being carried.
+    seen.set(name, hint === undefined ? {type, why, guessed} : {type, why, guessed, hint});
   };
   const colOf = (e) => (e?.node === "col" ? e.name : undefined);
 
@@ -405,7 +410,18 @@ export function tableShapesFor(rel) {
     if (e === undefined || e === null) return;
     if (e.node === "col") note(e.name, T.char(20), "only ever read, so nothing says what it is", true);
     if (e.node === "cast" || (e.node === "call" && /^TO_(INTEGER|DECIMAL)$/.test(e.fn ?? ""))) {
-      note(colOf(e.expr ?? e.args?.[0]), T.str, "cast to a number, so it is written as text");
+      note(colOf(e.expr ?? e.args?.[0]), T.str, "cast to a number, so it is written as text", false, "digits");
+    }
+    // A function that only takes numbers says as much about its argument as
+    // arithmetic does. Without this, `ABS(a)` left the column GUESSED as
+    // CHAR(20), the invented table held text, and both halves of the
+    // HANA-against-HANA comparison raised -- which the verdict then read as
+    // AGREEMENT. Three constructs measured nothing that way and said they
+    // agreed (2026-09-19). Only functions whose argument cannot be anything
+    // else are listed: `MIN`, `MAX` and `COALESCE` take either kind and
+    // would be a guess dressed as evidence.
+    if (e.node === "call" && ["ABS", "ROUND", "SUM", "AVG", "CEIL", "FLOOR", "TRUNC", "SIGN"].includes(e.fn ?? "")) {
+      note(colOf(e.args?.[0]), T.int, `argument of ${e.fn}, which takes a number`);
     }
     if (e.node === "bin" && ["+", "-", "*", "/"].includes(e.op)) {
       note(colOf(e.left), T.int, "arithmetic");

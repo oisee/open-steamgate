@@ -211,12 +211,19 @@ describe("a body that reads a table, run against a table invented from it", func
     expect(result.planted.map((one) => one.column)).to.deep.equal(["TXT"]);
     // and both halves ran: a verdict, not a scaffolding failure
     expect(result.agree, JSON.stringify(result, null, 1)).to.be.a("boolean");
-    // on this body DuckDB evaluates the cast in both halves, so they agree by
-    // both raising - a real answer about this body, not a divergence. The
-    // shape that DOES diverge is the one above, where the filter sits in an
-    // outer select: the engine can push it under the projection there and
-    // cannot here, and that difference is the whole subject.
-    expect(result.both ?? result.kind).to.equal("raised");
+    // The hazard is planted and then HIDDEN: `fillThatIsFilteredOut` gives
+    // the hazard row the value the body's own `n <> 9` removes, so neither
+    // half ever evaluates the cast on it and both answer rows.
+    //
+    // This line used to expect "raised", and it was green for the wrong
+    // reason: the benign rows were filled with letters, so the cast raised on
+    // *them* and the planted hazard did nothing at all. The fixture was the
+    // thing being measured. Once a column known to be cast to a number was
+    // filled with text that converts (2026-09-19), the body answered rows and
+    // this assertion went red -- which is the assertion doing its job, one
+    // day late.
+    expect(result.planted[0].value, "the hazard row is the one that would raise").to.equal("not-a-number");
+    expect(result.both ?? result.kind, JSON.stringify(result).slice(0, 200)).to.equal("rows");
   });
 
   it("refuses rather than inventing when a column cannot be attributed to a table", async () => {

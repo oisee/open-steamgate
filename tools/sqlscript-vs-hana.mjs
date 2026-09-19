@@ -198,7 +198,7 @@ export async function compareOnHana(client, body, {catalogue = {}, rows = 3, nam
     return {skipped: `the front end does not read this body: ${String(error.message ?? error).slice(0, 100)}`};
   }
 
-  return withInventedTables(client, rel, "hana", {rows}, async ({table, schema}) => {
+  return withInventedTables(client, rel, "hana", {rows}, async ({table, schema, shapes}) => {
     const invented = {...catalogue, [table]: schema};
     const quoted = `"${name}"`;
     let returns;
@@ -235,7 +235,23 @@ export async function compareOnHana(client, body, {catalogue = {}, rows = 3, nam
       ours.raised = String(error.message ?? error).split("\n")[0].slice(0, 140);
     }
     await client.native({sql: `${drop} ${quoted}`, expect: "none"}).catch(() => undefined);
-    return {...verdictOf(sqlscript, ours), shape: wrapper.kind, sql: ours.sql};
+    const verdict = verdictOf(sqlscript, ours);
+    // **Both halves raising is agreement only when the DATA was the reason.**
+    //
+    // Here the data is ours: the table is invented, and a column the plan
+    // says nothing about is GUESSED as characters. `ABS(a)` over an invented
+    // text column raises on both sides, and the verdict read that as the two
+    // halves agreeing -- three constructs in the first sweep reported
+    // agreement while measuring nothing (2026-09-19). A guessed type is not
+    // evidence, so a raise that a guess can explain is neither agreement nor
+    // a divergence. It is the third value, with the columns named so it can
+    // be fixed by typing them rather than by arguing about it.
+    if (verdict.kind === "both-raised" && (shapes.guessed ?? []).length > 0) {
+      return {kind: "both-raised-on-a-guessed-type", shape: wrapper.kind, guessed: shapes.guessed,
+        why: `both halves raised, and ${shapes.guessed.join(", ")} was typed by guesswork rather than by the ` +
+          "plan, so the raise may be the fixture's and not the body's", sql: ours.sql};
+    }
+    return {...verdict, shape: wrapper.kind, sql: ours.sql};
   });
 }
 

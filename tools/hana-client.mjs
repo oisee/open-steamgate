@@ -28,6 +28,7 @@
 // One prerequisite that is easy to miss: the session must have autocommit off,
 // or COMMIT and ROLLBACK mean nothing.
 import {createRequire} from "node:module";
+import {bindValue} from "./abap-types.mjs";
 import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
@@ -316,12 +317,7 @@ export class HanaDatabaseClient {
   #bind(params = []) {
     return params.map((p) => {
       if (p.isNull === true) return null;
-      switch ((p.type ?? "").charAt(0).toUpperCase()) {
-        case "I": case "B": case "S": return Number(p.value);
-        case "P": case "F": return Number(p.value);
-        case "X": return Buffer.from(String(p.value), "hex");
-        default: return p.value === undefined ? null : String(p.value);
-      }
+      return bindValue(p, {hex: (s) => Buffer.from(s, "hex")});
     });
   }
 

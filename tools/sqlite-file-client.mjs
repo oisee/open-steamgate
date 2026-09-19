@@ -14,6 +14,7 @@
 // and the browser; DuckDB stays where it is. Same eleven methods, so
 // nothing above the seam knows which of the three it is talking to.
 import {DatabaseSync} from "node:sqlite";
+import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
 import {mkdirSync, renameSync} from "node:fs";
 import {dirname} from "node:path";
@@ -233,10 +234,7 @@ export class FileSqliteClient {
       if (p.isNull === true) {
         return null;
       }
-      switch ((p.type ?? "").charAt(0).toUpperCase()) {
-        case "I": case "B": case "S": case "P": case "F": return Number(p.value);
-        default: return p.value === undefined ? null : String(p.value);
-      }
+      return bindValue(p);
     });
   }
 

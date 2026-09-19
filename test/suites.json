@@ -1,6 +1,7 @@
 {
   "note": "The integration suites, one per line, so two people adding a suite do not conflict on one line of package.json. npm run integration reads this.",
   "files": [
+    "test/abap-types.mjs",
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",

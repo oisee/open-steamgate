@@ -156,3 +156,80 @@ describe("the returned shape comes from our own binder, so a wrong shape is a fi
     expect(() => returnsTable(project(scan("T"), []), {T: {A: T.int}})).to.throw(/projects no column/);
   });
 });
+
+// The sweep: one body per construct the lowering claims to support, each
+// asked of HANA twice -- its own SQLScript, and our lowering of it.
+//
+// A difference here cannot be blamed on an engine, so this is the only test
+// in the tree that can convict the front end of MEANING something else. It
+// found three on its first run (GROUP BY, HAVING and DISTINCT, all now
+// refused by name) and it is kept as a sweep rather than a handful of probes
+// because that is what found them: asking every construct, not the ones
+// somebody suspected.
+//
+// It needs a HANA and says so when there is none, rather than passing.
+describe("the lowering means what SQLScript means, construct by construct", function () {
+  this.timeout(120000);
+  let client;
+  let compare;
+
+  const BODIES = {
+    projection: "RETURN SELECT k, a FROM src;",
+    filter: "RETURN SELECT k FROM src WHERE a > 1;",
+    filter_and: "RETURN SELECT k FROM src WHERE a > 0 AND a < 9;",
+    filter_or: "RETURN SELECT k FROM src WHERE a = 1 OR a = 3;",
+    order_asc: "lt = SELECT k FROM src;\n  RETURN SELECT k FROM :lt ORDER BY k;",
+    order_desc: "lt = SELECT k FROM src;\n  RETURN SELECT k FROM :lt ORDER BY k DESC;",
+    chain: "lt = SELECT k, a FROM src WHERE a > 0;\n  lu = SELECT k FROM :lt WHERE a < 9;\n  RETURN SELECT k FROM :lu;",
+    arith_plus: "RETURN SELECT k, a + 1 AS v FROM src;",
+    arith_times: "RETURN SELECT k, a * 2 AS v FROM src;",
+    fn_upper: "RETURN SELECT UPPER(k) AS v FROM src;",
+    fn_length: "RETURN SELECT LENGTH(k) AS v FROM src;",
+    fn_trim: "RETURN SELECT TRIM(k) AS v FROM src;",
+    fn_abs: "RETURN SELECT ABS(a) AS v FROM src;",
+    fn_round: "RETURN SELECT ROUND(a) AS v FROM src;",
+    like: "RETURN SELECT k FROM src WHERE k LIKE 'a%';",
+    not_equal: "RETURN SELECT k FROM src WHERE k <> 'a';",
+    cast_int: "RETURN SELECT CAST(a AS INTEGER) AS v FROM src;",
+    literal: "RETURN SELECT k, 7 AS v FROM src;",
+  };
+
+  before(async function () {
+    try {
+      const {HanaDatabaseClient} = await import("../tools/hana-client.mjs");
+      client = new HanaDatabaseClient({schema: process.env.HANA_SCHEMA ?? "OSD_SWEEP"});
+      await client.connect();
+      ({compareOnHana: compare} = await import("../tools/sqlscript-vs-hana.mjs"));
+    } catch (error) {
+      console.log(`      (no HANA reachable, so this measured nothing: ${String(error.message).slice(0, 60)})`);
+      this.skip();
+    }
+  });
+
+  after(async () => {
+    await client?.disconnect?.();
+  });
+
+  it("every construct answers the same both ways, or is named", async () => {
+    const ours = [];
+    const notMeasured = [];
+    let i = 0;
+    for (const [label, body] of Object.entries(BODIES)) {
+      const verdict = await compare(client, body, {name: `OSD_SWEEP_T${i++}`});
+      if (verdict.skipped !== undefined || verdict.kind === "scaffolding"
+          || verdict.kind === "both-raised-on-a-guessed-type") {
+        // the third value, kept out of both others: a body the scaffolding
+        // could not set up says nothing about the lowering either way
+        notMeasured.push(`${label}: ${verdict.skipped ?? verdict.why}`);
+        continue;
+      }
+      if (verdict.agree !== true) ours.push(`${label}: ${verdict.kind} ${JSON.stringify(verdict).slice(0, 160)}`);
+    }
+    // printed rather than swallowed: a green run that measured four of
+    // eighteen is not the same result as one that measured eighteen
+    if (notMeasured.length > 0) console.log(`      (not measured: ${notMeasured.join("; ")})`);
+    expect(ours, "a difference here is OURS: same engine, same rows, same session").to.deep.equal([]);
+    expect(Object.keys(BODIES).length - notMeasured.length,
+      "too few constructs reached the engine for this to mean anything").to.be.greaterThan(12);
+  });
+});
