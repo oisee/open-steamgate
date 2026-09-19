@@ -160,3 +160,45 @@ at the engine, and a lowering that reports one statement is telling the truth.
 single-character wildcard in SQL `LIKE`, so `'%OSD_A_%'` matched unrelated
 statements until the names were escaped. The first answer looked like eleven
 plan entries and was eleven false positives.)
+
+## A materialised relation may carry its values (2026-09-19)
+
+`defineRelation` refused bind values outright, with a reason that was right
+about half of what it covered: **a definition** carrying them would have to
+keep them alive for as long as the view exists. A **materialised** relation
+would not — `CREATE TABLE ... AS <select>` consumes the values once, at
+creation, and what remains is rows.
+
+The refusal was therefore wider than its own argument by exactly the case the
+divergence instrument needs (fable-osd's finding). Almost every real AMDP body
+carries a literal, and a literal reaches the seam as a bound value, so the
+forced half of the fused-against-forced comparison could force almost nothing
+it claimed to — and "no divergences found" would have been a statement about
+how little was forced rather than about the engines.
+
+So: **values are allowed when `materialise` is given, and still refused for a
+definition**, on all four channels. Interpolating a value into the statement
+text to get further remains out of the question; that contract is the whole
+reason the channel exists, and a comparison that broke it would be measuring a
+different program.
+
+### HANA needs two statements where the others need one
+
+Measured: `CREATE COLUMN TABLE t AS (SELECT ... ?) WITH DATA` answers
+
+```
+feature not supported: param is not allowed in DDL statement
+```
+
+DuckDB and sql.js take the parameter in the one statement. HANA does it in
+two, which DML makes legal:
+
+1. `CREATE COLUMN TABLE t AS (<the select, every placeholder replaced by a
+   typed NULL>) WITH NO DATA` — the columns and their types, nothing executed;
+2. `INSERT INTO t (<the real select>)` with the values bound.
+
+The substitution is `shapeWithoutParameters()` in `tools/hana-client.mjs`. It
+scans rather than replaces blindly: a `?` inside a string literal, a quoted
+identifier or a comment is content and is left alone. Getting that wrong would
+change the program instead of its shape, which is why it has its own tests and
+why they run without a database.

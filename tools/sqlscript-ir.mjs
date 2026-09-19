@@ -47,6 +47,20 @@ export const bin = (op, left, right, type) => ({node: "bin", op, left, right, ty
 export const call = (fn, args, type) => ({node: "call", fn, args, type});
 export const cast = (expr, type) => ({node: "cast", expr, type});
 export const isNull = (expr) => ({node: "isnull", expr, type: T.bool});
+/** NOT, as its own node rather than a `bin` with one side missing */
+export const not = (expr) => ({node: "not", expr, type: T.bool});
+/** `x [NOT] LIKE p [ESCAPE e]` -- three operands, so it is not a `bin` */
+export const like = (expr, pattern, escape, negated = false) =>
+  ({node: "like", expr, pattern, escape, negated, type: T.bool});
+/** `x [NOT] IN (a, b, c)` -- the list form only; a subquery is a relation and
+ *  belongs in the relational half, which this IR keeps separate on purpose */
+export const inList = (expr, values, negated = false) =>
+  ({node: "in", expr, values, negated, type: T.bool});
+/** `CASE WHEN p THEN a ... ELSE b END`, the searched form; the simple form
+ *  `CASE x WHEN v THEN ...` is rewritten into it by the binder, because one
+ *  shape downstream is one shape to lower and one shape to type */
+export const caseWhen = (whens, otherwise, type) =>
+  ({node: "case", whens, otherwise, type});
 
 // ------------------------------------------------------------------ relations
 
@@ -106,8 +120,10 @@ export function effects(rel) {
     if (e.node === "bin" && e.op === "/") out.mayThrow = true;
     if (e.node === "call" && ["TO_INTEGER", "TO_DECIMAL", "TO_TIMESTAMP", "TO_DATE"].includes(e.fn)) out.mayThrow = true;
     if (e.node === "call" && ["RAND", "CURRENT_TIMESTAMP", "CURRENT_DATE"].includes(e.fn)) out.nonDeterministic = true;
-    for (const key of ["left", "right", "expr"]) walkExpr(e[key]);
+    for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) walkExpr(e[key]);
     for (const one of e.args ?? []) walkExpr(one);
+    for (const one of e.values ?? []) walkExpr(one);
+    for (const one of e.whens ?? []) { walkExpr(one.when); walkExpr(one.then); }
   };
   const walk = (r) => {
     if (r === undefined) return;
@@ -228,7 +244,14 @@ export function typeOfExpr(expr, schema = {}) {
     case "param":
       return expr.type;
     case "isnull":
+    case "not":
+    case "like":
+    case "in":
       return T.bool;
+    case "case":
+      if (expr.type !== undefined) return expr.type;
+      // every branch has to agree, and saying so is cheaper than guessing
+      return typeOfExpr(expr.whens[0].then, schema);
     case "cast":
       return expr.type;
     case "bin":
@@ -281,8 +304,10 @@ export function adversarialRows(rel, schema = {}) {
     if (e.node === "bin" && ["+", "-", "*"].includes(e.op)) {
       note(colOf(e.right) ?? colOf(e.left), null, "NULL in arithmetic propagates, and a filter may remove the row before or after");
     }
-    for (const key of ["left", "right", "expr"]) walkExpr(e[key]);
+    for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) walkExpr(e[key]);
     for (const one of e.args ?? []) walkExpr(one);
+    for (const one of e.values ?? []) walkExpr(one);
+    for (const one of e.whens ?? []) { walkExpr(one.when); walkExpr(one.then); }
   };
   const walk = (r) => {
     if (r === undefined) return;

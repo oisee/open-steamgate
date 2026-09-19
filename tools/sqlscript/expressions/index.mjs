@@ -58,6 +58,8 @@ export class Term extends Expression {
 export class Factor extends Expression {
   getRunnable() {
     return altPrio(
+      new Cast(),
+      new Case(),
       new FunctionCall(),
       new Value(),
       seq("(", new Expr(), ")"),
@@ -65,19 +67,74 @@ export class Factor extends Expression {
   }
 }
 
+/** `CAST(x AS NVARCHAR(36))`, and the AMDP spelling
+ *  `CAST(x AS "$ABAP.type( cds_get_rsau_log-sal_data )")`.
+ *
+ *  It is not a FunctionCall with a funny argument: `AS` is a keyword in the
+ *  middle, so the ordinary call shape fails at it -- which is precisely what
+ *  the histogram was saying with "at AS", 12 bodies. And it earns its own
+ *  node downstream, because a cast is one of the two places the three engines
+ *  measurably disagree (tools/sqlscript-lower.mjs). */
+export class Cast extends Expression {
+  getRunnable() {
+    return seq(str("CAST"), "(", new Expr(), str("AS"), new TypeName(), ")");
+  }
+}
+
+/** `CASE x WHEN a THEN b ELSE c END` and `CASE WHEN p THEN b ... END`.
+ *
+ *  The searched form is tried first, and the order is load-bearing rather
+ *  than tidy: a keyword is an identifier to the lexer, so `opt(Expr)` in
+ *  front would happily swallow the `WHEN` of the searched form and then fail
+ *  looking for one. Writing the alternative that cannot mis-start first is
+ *  the cheap fix; the same trap has cost this grammar three defects. */
+export class Case extends Expression {
+  getRunnable() {
+    return seq(str("CASE"),
+      altPrio(
+        plus(seq(str("WHEN"), new Condition(), str("THEN"), new Expr())),
+        seq(new Expr(), plus(seq(str("WHEN"), new Expr(), str("THEN"), new Expr())))),
+      opt(seq(str("ELSE"), new Expr())), str("END"));
+  }
+}
+
 /** a comparison, which is what a WHERE is made of */
 export class Predicate extends Expression {
   getRunnable() {
-    return seq(new Expr(),
-      opt(altPrio(
-        seq(str("IS"), opt(str("NOT")), str("NULL")),
-        seq(alt("=", "<>", "!=", "<", ">", "<=", ">="), new Expr()))));
+    return altPrio(
+      seq(str("EXISTS"), "(", new SetOperation(), ")"),
+      seq(new Expr(),
+        opt(altPrio(
+          seq(str("IS"), opt(str("NOT")), str("NULL")),
+          // `... LIKE :pattern ESCAPE '_'` -- the escape clause is not
+          // decoration in this corpus: every LIKE that stopped a body had one,
+          // because the patterns are built from names that contain underscores
+          seq(opt(str("NOT")), str("LIKE"), new Expr(), opt(seq(str("ESCAPE"), new Expr()))),
+          seq(opt(str("NOT")), str("IN"), "(",
+            altPrio(new SetOperation(), seq(new Expr(), star(seq(",", new Expr())))), ")"),
+          // BETWEEN eats its own AND before the enclosing Condition sees one
+          seq(opt(str("NOT")), str("BETWEEN"), new Expr(), str("AND"), new Expr()),
+          seq(alt("=", "<>", "!=", "<", ">", "<=", ">="),
+            altPrio(seq("(", new SetOperation(), ")"), new Expr()))))));
+  }
+}
+
+/** One side of an AND/OR: a predicate, or a parenthesised condition.
+ *
+ *  Twelve working bodies stopped at an `=` that was inside `and ( a = b or
+ *  c = d )` -- the grammar could read the comparison and had nowhere to put
+ *  the brackets around a group of them. The histogram said "at =", which read
+ *  as though equality itself were missing; it was not. */
+export class ConditionTerm extends Expression {
+  getRunnable() {
+    return altPrio(seq("(", new Condition(), ")"), new Predicate());
   }
 }
 
 export class Condition extends Expression {
   getRunnable() {
-    return seq(new Predicate(), star(seq(alt(str("AND"), str("OR")), new Predicate())));
+    return seq(opt(str("NOT")), new ConditionTerm(),
+      star(seq(alt(str("AND"), str("OR")), opt(str("NOT")), new ConditionTerm())));
   }
 }
 
@@ -113,7 +170,9 @@ export class Source extends Expression {
  *  function call: 45 bodies stopped at the bracket after it. */
 export class TableFunctionCall extends Expression {
   getRunnable() {
-    return seq(new Name(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
+    // `sys.series_generate_date( ... )` -- a built-in table function is
+    // reached through its schema, so the name is a ColumnRef and not a Name
+    return seq(new ColumnRef(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
   }
 }
 
@@ -135,7 +194,8 @@ export class Select extends Expression {
       opt(seq(str("WHERE"), new Condition())),
       opt(seq(str("GROUP"), str("BY"), new Expr(), star(seq(",", new Expr())))),
       opt(seq(str("HAVING"), new Condition())),
-      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))));
+      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
+      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));
   }
 }
 
@@ -149,7 +209,9 @@ export class OrderKey extends Expression {
 export class SetOperation extends Expression {
   getRunnable() {
     return seq(new Select(),
-      star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())));
+      star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())),
+      opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
+      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));
   }
 }
 
@@ -169,7 +231,10 @@ export class Assignment extends Expression {
 /** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
 export class TypeName extends Expression {
   getRunnable() {
-    return altPrio(new AbapType(), seq(tok(TokenKind.identifier),
+    // `"$ABAP.type( cds_get_rsau_log-sal_data )"` is ONE quoted token: inside
+    // a CAST the whole thing is written between double quotes, so it never
+    // reaches AbapType below and has to be accepted as the quoted name it is
+    return altPrio(new AbapType(), tok(TokenKind.quoted), seq(tok(TokenKind.identifier),
       opt(seq("(", tok(TokenKind.number), star(seq(",", tok(TokenKind.number))), ")"))));
   }
 }
@@ -247,7 +312,7 @@ export class AbapType extends Expression {
   getRunnable() {
     // `$ABAP` lexes as one identifier, because `$` is a name character
     return seq(str("$ABAP"), ".", str("TYPE"),
-      "(", star(altPrio(tok(TokenKind.identifier), tok(TokenKind.number), ",")), ")");
+      "(", star(altPrio(tok(TokenKind.identifier), tok(TokenKind.number), ",", "-")), ")");
   }
 }
 

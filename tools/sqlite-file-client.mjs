@@ -93,6 +93,10 @@ export class FileSqliteClient {
       this.db.exec("PRAGMA synchronous = NORMAL");
     }
     this.db.exec("PRAGMA busy_timeout = 5000");
+    // HANA's LIKE is case-sensitive and SQLite's is not, for ASCII, unless
+    // this is on (measured 2026-09-19). The native channel's lowering passes
+    // a LIKE through on the strength of this line.
+    this.db.exec("PRAGMA case_sensitive_like = ON");
     if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) {
       globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
     }
@@ -251,8 +255,17 @@ export class FileSqliteClient {
   }
 
   async defineRelation({name = "rel", sql, params = [], materialise}) {
-    if (params.length > 0) {
-      throw new Error("defineRelation: params are not supported on a definition; bind at use");
+    // A **definition** carrying bind values would have to keep them alive for
+    // the life of the relation, which is why this refuses. A **materialised**
+    // relation would not: `CREATE TABLE ... AS <select>` consumes the values
+    // once, at creation, and the table that remains carries rows and no
+    // parameters. The refusal used to cover both, and so was wider than its
+    // own reason by exactly the case the divergence instrument needs -- a
+    // literal is in almost every real body, so forcing a step that carried one
+    // was impossible and "no divergences found" would have been a statement
+    // about how little we forced (fable-osd, 2026-09-19).
+    if (params.length > 0 && materialise === undefined) {
+      throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
     }
     this.relationCount = (this.relationCount ?? 0) + 1;
     const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
@@ -260,9 +273,11 @@ export class FileSqliteClient {
       kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
     // an ordinary table, not a temporary one: the reference has to be
     // spliceable anywhere, and the client drops it itself
-    this.db.exec(materialise === undefined
-      ? `CREATE VIEW ${handle.ref} AS ${sql}`
-      : `CREATE TABLE ${handle.ref} AS ${sql}`);
+    if (materialise === undefined) {
+      this.db.exec(`CREATE VIEW ${handle.ref} AS ${sql}`);
+    } else {
+      await this.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
+    }
     return handle;
   }
 

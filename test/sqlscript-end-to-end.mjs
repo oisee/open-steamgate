@@ -37,6 +37,16 @@ describe("a SQLScript body, all the way to rows", function () {
     expect(answered[0].rows.map((row) => row.K ?? row.k)).to.deep.equal(["b", "c"]);
   });
 
+  it("keeps the ORDER BY that belongs to a whole UNION, rather than dropping it", () => {
+    // The grammar learned to read a trailing ORDER BY on a set operation
+    // before the binder did, and for one commit the clause parsed and then
+    // vanished: the statement came out unordered and nothing raised. A clause
+    // one half can read and the other cannot is worse than one neither has.
+    const {sql} = compile("SELECT k FROM src UNION ALL SELECT k FROM src ORDER BY k;", "duckdb", CATALOGUE);
+    expect(sql).to.contain("ORDER BY");
+    expect(sql).to.match(/UNION ALL/);
+  });
+
   it("refuses what it cannot lower rather than lowering something close", () => {
     // ORDER BY over an expression is not lowered yet, and says so by name
     expect(() => compile("SELECT k FROM src ORDER BY n + 1;", "duckdb", CATALOGUE))

@@ -184,3 +184,53 @@ two-line test:
 If the second row is green the change is safe. Without that row we would
 learn about it from the first person who has a significant blank in a string
 field.
+
+---
+
+## Three more divergences, measured when CAST and LIKE were added (2026-09-19)
+
+Adding two constructs to the grammar meant deciding how to render them on the
+three engines. The decision was measured rather than argued, and all three
+answers were surprising -- every one of them a **silent wrong answer** rather
+than an error, which is the only kind that survives a test suite.
+
+| probe | HANA | DuckDB | sql.js |
+| --- | --- | --- | --- |
+| `'ABC' LIKE 'abc'` | no match | no match | **match** |
+| `CAST('abcdef' AS NVARCHAR(3))` | `abc` | **`abcdef`** | **`abcdef`** |
+| `CAST(1.7 AS INTEGER)` | `1` | **`2`** | `1` |
+| `CAST(-1.5 AS INTEGER)` | `-1` | **`-2`** | `-1` |
+| `x LIKE 'A#_B' ESCAPE '#'` | as HANA | same | same |
+
+The third row is the uncomfortable one. `tools/sqlscript-lower.mjs` had passed
+casts through to DuckDB since the day the dialect was written, on the stated
+grounds that "it raises like HANA, so it passes through". It does raise like
+HANA. It also **rounds** where HANA **truncates**, and nothing had ever asked.
+The test that covered that line asserted the text of the pass-through, so it
+was green for exactly as long as the divergence existed -- a test can hold a
+defect in place as easily as it can catch one, when it asserts what the code
+does instead of what the engine does.
+
+### What was written, after measuring the fix back against HANA
+
+| | HANA | DuckDB | sql.js |
+| --- | --- | --- | --- |
+| cast to `INTEGER` | `CAST(x AS INTEGER)` | `CAST(TRUNC(CAST(x AS DOUBLE)) AS INTEGER)` | refused: cannot raise |
+| cast to `CHAR(n)` | `CAST(x AS NVARCHAR(n))` | `SUBSTR(CAST(x AS VARCHAR), 1, n)` | same as DuckDB |
+| `LIKE` | pass through | pass through | pass through, **and the connection sets a pragma** |
+
+The DuckDB integer cast still raises on a value that will not convert, which
+was checked and not assumed: `CAST('x' AS DOUBLE)` raises before `TRUNC` ever
+sees it. Six probes, all six agreeing with HANA, before the renderings were
+written down.
+
+`LIKE` is the one where the fix does not live in the dialect. SQLite's `LIKE`
+is case-insensitive for ASCII unless `PRAGMA case_sensitive_like = ON`, which
+is connection-scoped and survives transactions (measured). So the two SQLite
+native channels -- `tools/sqljs-native.mjs` and `tools/sqlite-file-client.mjs`
+-- set it when they open, and the dialect passes a `LIKE` straight through on
+the strength of that. A per-statement workaround was the alternative and it
+would have had to be right in every future statement; a connection that means
+the same thing by `LIKE` as HANA does has to be right once. It also makes the
+emulation more faithful everywhere else, because Open SQL's `LIKE` on a real
+system is case-sensitive too.

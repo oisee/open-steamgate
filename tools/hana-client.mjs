@@ -367,6 +367,18 @@ export class HanaDatabaseClient {
    *  the caller may not invent one, because quoting and escaping are the
    *  engine's business and this is the only place that knows them. */
   async defineRelation({name = "rel", sql, params = [], materialise}) {
+    // A **definition** carrying bind values would have to keep them alive for
+    // the life of the relation, which is why this refuses. A **materialised**
+    // relation would not: `CREATE TABLE ... AS <select>` consumes the values
+    // once, at creation, and the table that remains carries rows and no
+    // parameters. The refusal used to cover both, and so was wider than its
+    // own reason by exactly the case the divergence instrument needs -- a
+    // literal is in almost every real body, so forcing a step that carried one
+    // was impossible and "no divergences found" would have been a statement
+    // about how little we forced (fable-osd, 2026-09-19).
+    if (params.length > 0 && materialise === undefined) {
+      throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
+    }
     this.relationCount = (this.relationCount ?? 0) + 1;
     const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
     const handle = {
@@ -385,7 +397,17 @@ export class HanaDatabaseClient {
       // not a name a schema-qualified reference can carry, and the splitter
       // needs a reference it can splice anywhere. The client drops it.
       handle.ref = `"${this.schema}"."${ident}"`;
-      await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${sql}) WITH DATA`);
+      if (params.length === 0) {
+        await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${sql}) WITH DATA`);
+      } else {
+        // HANA takes no parameter in a DDL statement -- measured, it answers
+        // `param is not allowed in DDL statement` -- so the one statement the
+        // other two engines manage becomes two here: the shape, with every
+        // placeholder standing in as a typed NULL and no data behind it, and
+        // then a bound INSERT, which is DML and may carry values.
+        await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${shapeWithoutParameters(sql, params)}) WITH NO DATA`);
+        await this.native({sql: `INSERT INTO ${handle.ref} (${sql})`, params, expect: "none"});
+      }
     }
     return handle;
   }
@@ -461,4 +483,81 @@ export function hanaInserts(inserts) {
     return foldIdentifiers(withColumns)
       .replace(/^INSERT INTO ([A-Za-z_][A-Za-z_0-9]*) /i, (m, t) => `INSERT INTO "${t.toUpperCase()}" `);
   });
+}
+
+/** A seam parameter type (`I`, `C(3)`, `P(15,2)`, `STRING`) as HANA spells it.
+ *
+ *  Used only to give a column its type in a shape query -- see
+ *  `shapeWithoutParameters` below -- so it has to be a type HANA accepts and
+ *  wide enough not to truncate, never a value. */
+function hanaTypeOf(seam) {
+  const text = String(seam ?? "STRING").toUpperCase();
+  const size = /\((\d+)(?:,(\d+))?\)/.exec(text);
+  const letter = text.charAt(0);
+  if (letter === "I" || letter === "B" || letter === "S") return "INTEGER";
+  if (letter === "F") return "DOUBLE";
+  if (letter === "P") return `DECIMAL(${size?.[1] ?? 15},${size?.[2] ?? 2})`;
+  if (letter === "D" && text === "D") return "DATE";
+  if (letter === "T" && text === "T") return "TIME";
+  if (letter === "C" || letter === "N") return `NVARCHAR(${size?.[1] ?? 5000})`;
+  return "NVARCHAR(5000)";
+}
+/** The same statement with every placeholder replaced by a typed NULL.
+ *
+ *  HANA answers `param is not allowed in DDL statement` to a
+ *  `CREATE TABLE ... AS (SELECT ... ?)`, measured -- so a materialised
+ *  relation that carries values cannot be made in one statement here, the way
+ *  it can on DuckDB and sql.js. It can be made in two: this shape gives the
+ *  table its columns with `WITH NO DATA`, and a bound `INSERT INTO t (<the
+ *  real select>)` then fills it, because DML **does** take parameters.
+ *
+ *  The scan skips string literals, quoted identifiers and comments, so a `?`
+ *  that is content rather than a placeholder is left alone. That is the one
+ *  thing this function must not get wrong: substituting inside a literal
+ *  would change the program rather than its shape. */
+export function shapeWithoutParameters(sql, params) {
+  let out = "";
+  let i = 0;
+  let seen = 0;
+  while (i < sql.length) {
+    const c = sql[i];
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] === c) {
+          if (sql[j + 1] === c) j += 2;
+          else { j += 1; break; }
+        } else j += 1;
+      }
+      out += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "-" && sql[i + 1] === "-") {
+      const end = sql.indexOf("\n", i);
+      const j = end === -1 ? sql.length : end;
+      out += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      const j = end === -1 ? sql.length : end + 2;
+      out += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "?") {
+      out += `CAST(NULL AS ${hanaTypeOf(params[seen]?.type)})`;
+      seen += 1;
+      i += 1;
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  if (seen !== params.length) {
+    throw new Error(`shapeWithoutParameters: ${seen} placeholders for ${params.length} values`);
+  }
+  return out;
 }

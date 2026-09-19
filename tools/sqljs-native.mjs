@@ -38,6 +38,13 @@ export function installNative(client) {
   }
   let relations = 0;
 
+  // SQLite's LIKE is case-INSENSITIVE for ASCII by default and HANA's is not
+  // ('ABC' LIKE 'abc' matches here and does not there, measured 2026-09-19).
+  // The pragma is connection-scoped and survives transactions, so setting it
+  // once at the connection is what makes tools/sqlscript-lower.mjs able to
+  // pass a LIKE straight through instead of refusing it.
+  db.exec("PRAGMA case_sensitive_like = ON");
+
   Object.defineProperty(client, "supportsNative", {value: true, configurable: true});
 
   client.native = async function native({sql, params = [], expect = "rows"}) {
@@ -71,8 +78,17 @@ export function installNative(client) {
   };
 
   client.defineRelation = async function defineRelation({name = "rel", sql, params = [], materialise}) {
-    if (params.length > 0) {
-      throw new Error("defineRelation: params are not supported on a definition; bind at use");
+    // A **definition** carrying bind values would have to keep them alive for
+    // the life of the relation, which is why this refuses. A **materialised**
+    // relation would not: `CREATE TABLE ... AS <select>` consumes the values
+    // once, at creation, and the table that remains carries rows and no
+    // parameters. The refusal used to cover both, and so was wider than its
+    // own reason by exactly the case the divergence instrument needs -- a
+    // literal is in almost every real body, so forcing a step that carried one
+    // was impossible and "no divergences found" would have been a statement
+    // about how little we forced (fable-osd, 2026-09-19).
+    if (params.length > 0 && materialise === undefined) {
+      throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
     }
     relations += 1;
     const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${relations}`;
@@ -80,9 +96,12 @@ export function installNative(client) {
       kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
     // an ordinary table rather than a temporary one, matching the other two
     // clients: the reference has to be spliceable anywhere
-    db.run(materialise === undefined
-      ? `CREATE VIEW ${handle.ref} AS ${sql}`
-      : `CREATE TABLE ${handle.ref} AS ${sql}`);
+    if (materialise === undefined) {
+      db.run(`CREATE VIEW ${handle.ref} AS ${sql}`);
+    } else {
+      // through the bound path, so the values travel as values here too
+      await client.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
+    }
     return handle;
   };
 

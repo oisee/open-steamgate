@@ -115,3 +115,81 @@ describe("a refused statement is never agreement", () => {
     expect(isInvalid("division by zero undefined")).to.equal(false);
   });
 });
+
+// A relation the instrument has to be able to force, and could not.
+//
+// The refusal on `defineRelation` was written for a **definition**: a view
+// carrying bind values would have to keep them alive for as long as the view
+// exists. That reason is right, and it does not reach the materialised case,
+// where `CREATE TABLE ... AS <select>` consumes the values once at creation
+// and what remains is rows. The refusal covered both anyway -- and a literal
+// is in almost every real body, so the forced half of the comparison could
+// not force nearly anything it claimed to. "No divergences found" would have
+// been a statement about how little was forced (fable-osd, 2026-09-19).
+describe("a materialised relation may carry its values, and a definition may not", function () {
+  this.timeout(30000);
+  let client;
+
+  before(async () => {
+    client = await duckdb();
+  });
+
+  after(async () => {
+    await client?.disconnect?.();
+  });
+
+  it("materialising with a bound value keeps the value out of the text and the rows right", async () => {
+    const handle = await client.defineRelation({
+      name: "forced",
+      sql: "SELECT k, a FROM src WHERE a >= ?",
+      params: [{name: "p0", value: 2, type: "I"}],
+      materialise: "forced for the comparison",
+    });
+    try {
+      const {rows} = await client.native({sql: `SELECT k FROM ${client.relationRef(handle)} ORDER BY k`});
+      expect(rows.map((r) => r.k)).to.deep.equal(["b", "c"]);
+    } finally {
+      await client.dropRelation(handle);
+    }
+  });
+
+  it("but a definition still refuses them, with the reason it refuses for", async () => {
+    let failed;
+    try {
+      await client.defineRelation({name: "def", sql: "SELECT k FROM src WHERE a >= ?", params: [{value: 2, type: "I"}]});
+    } catch (error) {
+      failed = error;
+    }
+    expect(failed, "a view carrying bind values must still be refused").to.not.equal(undefined);
+    expect(String(failed.message)).to.match(/materialise it, or bind at use/);
+  });
+});
+
+// The one function in the two-step HANA path that can silently change a
+// program rather than its shape, tested without a database.
+describe("HANA takes no parameter in DDL, so the shape query stands one in", () => {
+  it("replaces a placeholder with a typed NULL, per the value's own type", async () => {
+    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
+    const shape = shapeWithoutParameters("SELECT K FROM T WHERE A >= ? AND N = ? AND P > ?",
+      [{type: "I"}, {type: "C(3)"}, {type: "P(15,2)"}]);
+    expect(shape).to.equal(
+      "SELECT K FROM T WHERE A >= CAST(NULL AS INTEGER) AND N = CAST(NULL AS NVARCHAR(3)) AND P > CAST(NULL AS DECIMAL(15,2))");
+  });
+
+  it("leaves a question mark that is content alone, in a literal, a name or a comment", async () => {
+    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
+    const sql = `SELECT '?' AS "WHY?" FROM T -- ? really\n WHERE A = ? /* ? */`;
+    const shape = shapeWithoutParameters(sql, [{type: "I"}]);
+    expect(shape).to.contain(`'?'`);
+    expect(shape).to.contain(`"WHY?"`);
+    expect(shape).to.contain("-- ? really");
+    expect(shape).to.contain("/* ? */");
+    expect(shape).to.contain("A = CAST(NULL AS INTEGER)");
+  });
+
+  it("refuses when the placeholders and the values do not match, rather than guessing", async () => {
+    const {shapeWithoutParameters} = await import("../tools/hana-client.mjs");
+    expect(() => shapeWithoutParameters("SELECT ? FROM T", [{type: "I"}, {type: "I"}]))
+      .to.throw(/1 placeholders for 2 values/);
+  });
+});

@@ -11,7 +11,7 @@
 // bodies), IFNULL, CONCAT, SUBSTR and TO_INTEGER - plus the two divergences
 // that were measured on the engines themselves, integer division and CAST.
 import {expect} from "chai";
-import {T, col, lit, param, bin, call, cast, scan, ref, filter, project, join, union, aggregate, order, limit, effects} from "../tools/sqlscript-ir.mjs";
+import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, aggregate, order, limit, effects} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
@@ -71,8 +71,32 @@ describe("SQLScript IR: the divergences that were measured, not assumed", () => 
   it("SQLite refuses a cast it cannot make raise, instead of answering differently", () => {
     const c = project(scan("SRC"), [{as: "N", expr: cast(col("TXT"), T.int)}]);
     expect(() => lower(c, "sqlite")).to.throw(Refused, /returns 0 where HANA and DuckDB raise/);
-    expect(sqlOf(c, "duckdb")).to.contain('CAST("TXT" AS INTEGER)');
     expect(sqlOf(c, "hana")).to.contain('CAST("TXT" AS INTEGER)');
+    // DuckDB's own CAST raises like HANA's and **rounds** where HANA
+    // truncates -- CAST(1.7 AS INTEGER) is 2 there and 1 on HANA, measured
+    // 2026-09-19. This line used to assert the pass-through, which is how a
+    // test can keep a divergence green for as long as it exists.
+    expect(sqlOf(c, "duckdb")).to.contain('TRUNC(CAST("TXT" AS DOUBLE))');
+  });
+
+  it("a cast to a character type truncates, because HANA truncates and neither other engine does", () => {
+    const c = project(scan("SRC"), [{as: "S", expr: cast(col("TXT"), T.char(3))}]);
+    // CAST('abcdef' AS NVARCHAR(3)) is 'abc' on HANA and 'abcdef' on both
+    // others, measured; SUBSTR of the cast agrees with HANA on both
+    expect(sqlOf(c, "hana")).to.contain('CAST("TXT" AS NVARCHAR(3))');
+    expect(sqlOf(c, "duckdb")).to.contain('SUBSTR(CAST("TXT" AS VARCHAR), 1, 3)');
+    expect(sqlOf(c, "sqlite")).to.contain('SUBSTR(CAST("TXT" AS VARCHAR), 1, 3)');
+  });
+
+  it("LIKE carries its ESCAPE, and case sensitivity is a promise the connection keeps", () => {
+    const rel = filter(scan("SRC"), like(col("N"), param("p", T.str), lit("#", T.char(1))));
+    // all three render the same text; what differs is that SQLite only means
+    // the same thing by it because the connection sets case_sensitive_like
+    for (const engine of ["hana", "duckdb", "sqlite"]) {
+      expect(sqlOf(rel, engine)).to.contain("LIKE ? ESCAPE ?");
+    }
+    expect(sqlOf(filter(scan("SRC"), like(col("N"), lit("a%", T.char(2)), undefined, true)), "hana"))
+      .to.contain("NOT LIKE");
   });
 
   it("a cast marks the subtree as able to raise, which is what a barrier decision reads", () => {

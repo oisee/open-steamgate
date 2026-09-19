@@ -22,8 +22,8 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, bin, call, cast, scan, refTo, filter, project, join, union, order,
-  schemaOf} from "../sqlscript-ir.mjs";
+import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
+  scan, refTo, filter, project, join, union, order, limit, schemaOf} from "../sqlscript-ir.mjs";
 
 export class BindError extends Error {
   constructor(message, node) {
@@ -116,6 +116,34 @@ export function toIr(tree, options = {}) {
         if (inner.length === 1) return expression(inner[0]);
         break;
       }
+      case "Cast": {
+        const inner = (node.children ?? []).filter((c) => c.node === "Expr");
+        const named = (node.children ?? []).find((c) => c.node === "TypeName");
+        return cast(expression(inner[0]), typeFromName(named));
+      }
+      case "Case": {
+        // The parser keeps the two CASE forms apart; the IR has one, the
+        // searched form, because one shape downstream is one shape to lower.
+        // The simple form is rewritten here: `CASE x WHEN v` becomes
+        // `WHEN x = v`, which is what it means.
+        const parts = (node.children ?? []).filter((c) => c.node !== "word");
+        const words = (node.children ?? []).filter((c) => c.node === "word")
+          .map((w) => String(w.value).toUpperCase());
+        const searched = words[1] === "WHEN";
+        const subject = searched ? undefined : expression(parts[0]);
+        const rest = searched ? parts : parts.slice(1);
+        // WHEN/THEN come in pairs; an odd tail is the ELSE
+        const hasElse = words.includes("ELSE");
+        const pairs = hasElse ? rest.slice(0, -1) : rest;
+        const otherwise = hasElse ? expression(rest[rest.length - 1]) : undefined;
+        const whens = [];
+        for (let i = 0; i + 1 < pairs.length; i += 2) {
+          const left = subject === undefined ? condition(pairs[i]) : bin("=", subject, expression(pairs[i]), T.bool);
+          whens.push({when: left, then: expression(pairs[i + 1])});
+        }
+        if (whens.length === 0) throw new BindError("a CASE with no WHEN", node);
+        return caseWhen(whens, otherwise, whens[0].then.type);
+      }
       case "FunctionCall": {
         const fn = String(leaf(node).value).toUpperCase();
         const args = (node.children ?? []).filter((c) => c.node === "Expr").map(expression);
@@ -154,21 +182,95 @@ export function toIr(tree, options = {}) {
     throw new BindError(`cannot type ${node.node}`, node);
   }
 
-  function condition(node) {
-    const parts = (node.children ?? []).filter((c) => c.node === "Predicate");
-    const joiners = (node.children ?? []).filter((c) => c.node === "word")
-      .map((w) => String(w.value).toUpperCase()).filter((w) => w === "AND" || w === "OR");
-    let left = predicate(parts[0]);
-    for (let i = 1; i < parts.length; i += 1) {
-      left = bin(joiners[i - 1] ?? "AND", left, predicate(parts[i]), T.bool);
+  /** the type a `CAST(x AS <here>)` names, as the IR spells types */
+  function typeFromName(node) {
+    if (node === undefined) throw new BindError("a CAST without a type");
+    const words = (node.children ?? []);
+    const name = String(words.find((c) => c.node === "identifier" || c.node === "quoted")?.value ?? "").toUpperCase();
+    const sizes = words.filter((c) => c.node === "number").map((c) => Number(c.value));
+    if (/^(INT|INTEGER|BIGINT|SMALLINT|TINYINT)$/.test(name)) return T.int;
+    if (/^(N?VARCHAR|N?CHAR|ALPHANUM|SHORTTEXT)$/.test(name)) {
+      if (sizes[0] === undefined) throw new BindError(`CAST to ${name} without a length`, node);
+      return T.char(sizes[0]);
     }
+    if (/^(DECIMAL|DEC|SMALLDECIMAL)$/.test(name)) return T.dec(sizes[0] ?? 15, sizes[1] ?? 2);
+    // `"$ABAP.type( ... )"` and the rest: named, not guessed. A cast whose
+    // target we cannot name is exactly the node the three engines disagree
+    // on, so inventing one here would be the worst possible place to guess.
+    throw new BindError(`CAST to ${name || "an unnamed type"} has no measured rendering`, node);
+  }
+
+  /** One side of an AND/OR. The brackets are a `ConditionTerm` and the thing
+   *  inside them is a whole Condition again, so this recurses rather than
+   *  looking for Predicate children -- which is what it used to do, and what
+   *  made every parenthesised WHERE stop lowering the moment the grammar
+   *  learned to read one. */
+  function conditionTerm(node) {
+    if (node.node === "Condition") return condition(node);
+    if (node.node === "ConditionTerm") {
+      const inner = (node.children ?? []).filter((c) => c.node !== "word");
+      if (inner.length !== 1) throw new BindError("a bracketed condition this stage does not recognise", node);
+      return conditionTerm(inner[0]);
+    }
+    return predicate(node);
+  }
+
+  function condition(node) {
+    // Read in order, because NOT binds to the term that FOLLOWS it and a
+    // filtered list of children loses which one that was.
+    let left;
+    let joiner = "AND";
+    let negate = false;
+    for (const child of node.children ?? []) {
+      if (child.node === "word") {
+        const word = String(child.value).toUpperCase();
+        if (word === "AND" || word === "OR") joiner = word;
+        else if (word === "NOT") negate = true;
+        continue;
+      }
+      let next = conditionTerm(child);
+      if (negate) {
+        next = not(next);
+        negate = false;
+      }
+      left = left === undefined ? next : bin(joiner, left, next, T.bool);
+    }
+    if (left === undefined) throw new BindError("a condition with nothing in it", node);
     return left;
   }
 
   const COMPARISONS = new Set(["=", "<>", "!=", "<", ">", "<=", ">="]);
 
   function predicate(node) {
+    const words = (node.children ?? []).filter((c) => c.node === "word")
+      .map((w) => String(w.value).toUpperCase());
+    const negated = words.includes("NOT");
+    if (words.includes("EXISTS") || words.includes("IN") && (node.children ?? []).some((c) => c.node === "SetOperation")) {
+      // A subquery is a RELATION, and this IR keeps relations out of
+      // expressions on purpose. Naming the refusal is the point: it says what
+      // is missing rather than typing something that is not there.
+      throw new BindError("a subquery inside a condition is not in the IR yet", node);
+    }
     const sides = (node.children ?? []).filter((c) => c.node === "Expr");
+    if (words.includes("LIKE")) {
+      const escape = words.includes("ESCAPE") ? expression(sides[2]) : undefined;
+      return like(expression(sides[0]), expression(sides[1]), escape, negated);
+    }
+    if (words.includes("IN")) {
+      return inList(expression(sides[0]), sides.slice(1).map(expression), negated);
+    }
+    if (words.includes("BETWEEN")) {
+      // two comparisons, which is what it means and what all three engines do
+      const value = expression(sides[0]);
+      const both = bin("AND",
+        bin(">=", value, expression(sides[1]), T.bool),
+        bin("<=", value, expression(sides[2]), T.bool), T.bool);
+      return negated ? not(both) : both;
+    }
+    if (words.includes("IS") && words.includes("NULL")) {
+      const test = {node: "isnull", expr: expression(sides[0]), type: T.bool};
+      return negated ? not(test) : test;
+    }
     // The comparison arrives as a `word`, not as an `operator`: the grammar
     // matches it with str(), which produces a word node whatever the token
     // was. Reading only `operator` children left every comparison defaulting
@@ -248,6 +350,21 @@ export function toIr(tree, options = {}) {
       return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};
     });
     rel = project(rel, items);
+    return orderAndLimit(node, rel);
+  }
+
+  /** the ORDER BY and LIMIT that sit at the end of a SELECT -- and at the end
+   *  of a whole UNION, which is where they belong to the set and not to its
+   *  last branch.
+   *
+   *  Pulled out of select() the moment the grammar learned the second place:
+   *  a trailing ORDER BY that only ONE of the two readers knew about was
+   *  silently dropped, and the statement came out sorted by nothing. The
+   *  end-to-end test caught it, which is the only reason this paragraph is
+   *  not a bug report. A clause the parser can read and the binder cannot is
+   *  worse than one neither of them has. */
+  function orderAndLimit(node, input) {
+    let rel = input;
     const keys = kids(node, "OrderKey");
     if (keys.length > 0) {
       // the shape the lowering reads is {col, desc}, not {expr, dir}: the IR
@@ -263,14 +380,29 @@ export function toIr(tree, options = {}) {
         return {col: e.name, desc: hasWord(k, "DESC")};
       }));
     }
+    if (hasWord(node, "LIMIT")) {
+      const after = (node.children ?? []);
+      const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
+      const count = after.slice(at + 1).find((c) => c.node === "Expr");
+      const value = count === undefined ? undefined : expression(count);
+      if (value?.node !== "lit" || typeof value.value !== "number") {
+        throw new BindError("LIMIT over anything but a literal count is not lowered yet", node);
+      }
+      if (hasWord(node, "OFFSET")) {
+        throw new BindError("LIMIT with an OFFSET is not lowered yet", node);
+      }
+      rel = limit(rel, value.value);
+    }
     return rel;
   }
 
   function relation(node) {
     const selects = kids(node, "Select");
-    if (selects.length === 1) return select(selects[0]);
+    // the trailing ORDER BY / LIMIT belong to the set operation, not to its
+    // last branch, so they are applied here and over the whole thing
+    if (selects.length === 1) return orderAndLimit(node, select(selects[0]));
     const all = hasWord(node, "ALL");
-    return union(selects.map(select), all);
+    return orderAndLimit(node, union(selects.map(select), all));
   }
 
   // The body, statement by statement and **in order**, because an assignment

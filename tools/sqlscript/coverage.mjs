@@ -25,23 +25,29 @@ import * as extractor from "../amdp-extract.mjs";
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
 /** the bodies of a class, each with the signature its method declares --
- *  because fifteen of the refusals were the signature and not the body */
-function bodiesOf(source, filename) {
+ *  because fifteen of the refusals were the signature and not the body --
+ *  and each with the language it is written in, because not all of them are
+ *  SQLScript and a denominator that does not say so is a lie by omission. */
+export function bodiesOf(source, filename) {
   try {
     const {extract} = extractor;
     const cls = extract(source, filename);
     const methods = cls?.methods ?? [];
-    if (methods.length > 0) return methods.map((m) => ({body: m.body, signature: m}));
+    if (methods.length > 0) {
+      return methods.map((m) => ({body: m.body, signature: m, language: (m.language || "SQLSCRIPT").toUpperCase()}));
+    }
   } catch {
     // a class the extractor cannot read still has bodies worth counting
   }
   const out = [];
-  const re = /METHOD\s+[\w~]+\s+BY\s+DATABASE\s+(PROCEDURE|FUNCTION)\b[\s\S]*?\.\s*([\s\S]*?)ENDMETHOD\s*\./gi;
-  for (const m of source.matchAll(re)) out.push({body: m[2], signature: undefined});
+  const re = /METHOD\s+[\w~]+\s+BY\s+DATABASE\s+(?:PROCEDURE|FUNCTION|GRAPH\s+WORKSPACE)\b([\s\S]*?)\.\s*([\s\S]*?)ENDMETHOD\s*\./gi;
+  for (const m of source.matchAll(re)) {
+    out.push({body: m[2], signature: undefined, language: (/LANGUAGE\s+(\w+)/i.exec(m[1])?.[1] ?? "SQLSCRIPT").toUpperCase()});
+  }
   return out;
 }
 
-function classesIn(zip, dir) {
+export function classesIn(zip, dir) {
   mkdirSync(dir, {recursive: true});
   execFileSync("unzip", ["-o", "-q", zip, "-d", dir]);
   const found = [];
@@ -56,7 +62,7 @@ function classesIn(zip, dir) {
 }
 
 /** what stopped this body, in a form that can be counted */
-function reasonOf(error, tokens) {
+export function reasonOf(error, tokens) {
   if (error instanceof LexError) return `lex: ${error.message.replace(/: line.*/, "")}`;
   if (!(error instanceof ParseError)) return `internal: ${error.message.slice(0, 40)}`;
   // the token it stopped at is the useful thing: it names the construct the
@@ -78,7 +84,20 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   }
 
   const report = {};
-  for (const [which, bodies] of Object.entries(corpora)) {
+  for (const [which, all] of Object.entries(corpora)) {
+    // **What the denominator was counted with** (fable-osd asked for this line
+    // and the corpus then showed why it is not a formality). `BY DATABASE
+    // PROCEDURE` does not mean SQLScript: the same syntax carries LANGUAGE
+    // GRAPH, LANGUAGE SQL and LANGUAGE LLANG, and the GRAPH bodies are a
+    // different language outright -- C-style `{ }` blocks, `==`, `N''`
+    // literals. They were sitting in the denominator and, worse, at the TOP
+    // of the blocker histogram, where "at =" read as though SQLScript
+    // equality were unimplemented. It is not; those bodies are not SQLScript.
+    // A front end for SQLScript is measured against the SQLScript bodies, and
+    // the rest are named rather than silently dropped.
+    const byLanguage = new Map();
+    for (const one of all) byLanguage.set(one.language, (byLanguage.get(one.language) ?? 0) + 1);
+    const bodies = all.filter((one) => one.language === "SQLSCRIPT");
     // Three numbers, not one (fable-osd). "Parses" is not "runs": stage 3
     // refuses Declare, Return and Block by name, so a body can go through
     // the grammar whole and still never reach an engine. One number called
@@ -112,6 +131,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       }
     }
     report[which] = {
+      counted: all.length,
+      byLanguage: [...byLanguage.entries()].sort((a, b) => b[1] - a[1]),
       bodies: bodies.length,
       parsed,
       lowered: loweredCount,
@@ -126,7 +147,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
 if (process.argv[1]?.endsWith("coverage.mjs")) {
   const report = measure(process.argv[2]);
   for (const [which, r] of Object.entries(report)) {
-    console.log(`\n${which}: ${r.bodies} bodies`);
+    console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
+      ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
     console.log(`  lowered  ${r.lowered}  (${r.share}% -- the only one worth quoting)`);
     console.log("  stopped in the grammar:");

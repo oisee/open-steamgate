@@ -16,6 +16,22 @@
 //   -7 / 2        HANA -3.500000, DuckDB -3.5, sql.js -3
 //   CAST('x' AS INTEGER)  HANA raises, DuckDB raises, sql.js returns 0
 //
+// Three more, measured 2026-09-19 against HANA Express when CAST and LIKE
+// were added, and every one of them a silent wrong answer rather than an
+// error:
+//
+//   'ABC' LIKE 'abc'          HANA no, DuckDB no, sql.js MATCH
+//   CAST('abcdef' AS NVARCHAR(3))   HANA 'abc', DuckDB 'abcdef', sql.js 'abcdef'
+//   CAST(1.7 AS INTEGER)      HANA 1, DuckDB 2, sql.js 1
+//
+// The last one is the uncomfortable one: DuckDB was the engine this file
+// trusted to pass casts through, and it ROUNDS where HANA truncates. It had
+// been passing casts through since the day the dialect was written. The
+// renderings below were then measured back against HANA before being
+// written, not reasoned about -- `SUBSTR(CAST(x AS VARCHAR), 1, n)` and
+// `CAST(TRUNC(CAST(x AS DOUBLE)) AS INTEGER)` agree with HANA on all six
+// probes, including raising on a value that will not convert.
+//
 // The first line was written the other way round here until the oracle
 // answered: this file assumed HANA truncated integer division, and it does
 // not - `/` over two INTEGERs yields a decimal. So DuckDB was the engine
@@ -40,6 +56,9 @@ const DIALECTS = {
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
+    castChar: (e, n) => `CAST(${e} AS NVARCHAR(${n}))`,
+    // case-sensitive, which is the reference the other two are measured against
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "DUMMY",
   },
   duckdb: {
@@ -52,8 +71,13 @@ const DIALECTS = {
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
-    // raises like HANA, so it passes through
-    castInt: (e) => `CAST(${e} AS INTEGER)`,
+    // It raises like HANA on a value that will not convert -- and ROUNDS
+    // where HANA truncates, which is the divergence this dialect shipped
+    // with. TRUNC through DOUBLE truncates toward zero and still raises.
+    castInt: (e) => `CAST(TRUNC(CAST(${e} AS DOUBLE)) AS INTEGER)`,
+    // CAST to a character type does not truncate here and does on HANA
+    castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "(SELECT 1) AS dummy",
   },
   sqlite: {
@@ -73,6 +97,16 @@ const DIALECTS = {
     castInt: () => {
       throw new Refused("CAST to INTEGER cannot raise in SQLite: it returns 0 where HANA and DuckDB raise");
     },
+    // no truncation here either, and SQLite has no TRUNC to borrow
+    castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    // SQLite's LIKE is case-INSENSITIVE for ASCII unless the connection says
+    // otherwise, and HANA's is not. `PRAGMA case_sensitive_like = ON` fixes
+    // it, is connection-scoped and survives transactions (measured), so the
+    // two SQLite native channels set it when they open rather than every
+    // statement carrying a workaround. A dialect cannot check a pragma from
+    // here, which is why this reads as a pass-through and the guarantee lives
+    // at the connection: tools/sqljs-native.mjs and tools/sqlite-file-client.mjs.
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "(SELECT 1) AS dummy",
   },
 };
@@ -113,8 +147,19 @@ export function lower(rel, dialectName, options = {}) {
       }
       case "cast":
         if (e.type?.abap === "I") return d.castInt(expr(e.expr));
+        if (e.type?.abap === "C" && e.type.len !== undefined) return d.castChar(expr(e.expr), Number(e.type.len));
         throw new Refused(`cast to ${JSON.stringify(e.type)} not lowered yet`);
       case "isnull": return `(${expr(e.expr)} IS NULL)`;
+      case "not": return `(NOT ${expr(e.expr)})`;
+      case "like":
+        return d.like(expr(e.expr), expr(e.pattern), e.escape === undefined ? undefined : expr(e.escape), e.negated);
+      case "in":
+        return `(${expr(e.expr)}${e.negated ? " NOT" : ""} IN (${e.values.map(expr).join(", ")}))`;
+      case "case": {
+        const whens = e.whens.map((w) => `WHEN ${expr(w.when)} THEN ${expr(w.then)}`).join(" ");
+        const other = e.otherwise === undefined ? "" : ` ELSE ${expr(e.otherwise)}`;
+        return `(CASE ${whens}${other} END)`;
+      }
       case "call": {
         const args = e.args.map(expr);
         if (e.fn === "CONCAT") return `(${d.concat(args)})`;

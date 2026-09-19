@@ -222,10 +222,17 @@ export class DuckDBDatabaseClient {
   /** A named relation later statements may refer to. The name is ours: the
    *  caller may not invent one, because quoting is the engine's business. */
   async defineRelation({name = "rel", sql, params = [], materialise}) {
-    if (params.length > 0) {
-      // a definition carrying bind values would have to keep them alive for
-      // the life of the relation; the splitter can bind at use instead
-      throw new Error("defineRelation: params are not supported on a definition; bind at use");
+    // A **definition** carrying bind values would have to keep them alive for
+    // the life of the relation, which is why this refuses. A **materialised**
+    // relation would not: `CREATE TABLE ... AS <select>` consumes the values
+    // once, at creation, and the table that remains carries rows and no
+    // parameters. The refusal used to cover both, and so was wider than its
+    // own reason by exactly the case the divergence instrument needs -- a
+    // literal is in almost every real body, so forcing a step that carried one
+    // was impossible and "no divergences found" would have been a statement
+    // about how little we forced (fable-osd, 2026-09-19).
+    if (params.length > 0 && materialise === undefined) {
+      throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
     }
     this.relationCount = (this.relationCount ?? 0) + 1;
     const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
@@ -233,9 +240,11 @@ export class DuckDBDatabaseClient {
     // an ordinary table rather than a temporary one, for the same reason as
     // in the HANA client: the reference must be spliceable anywhere. The
     // client drops it, so a conformance run leaves nothing behind.
-    await this.execute(materialise === undefined
-      ? `CREATE VIEW ${handle.ref} AS ${sql}`
-      : `CREATE TABLE ${handle.ref} AS ${sql}`);
+    if (materialise === undefined) {
+      await this.execute(`CREATE VIEW ${handle.ref} AS ${sql}`);
+    } else {
+      await this.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
+    }
     return handle;
   }
 
