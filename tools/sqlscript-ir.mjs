@@ -244,3 +244,55 @@ export function typeOfExpr(expr, schema = {}) {
       throw new Error(`typeOfExpr: no type rule for ${expr.node}`);
   }
 }
+
+/**
+ * Rows chosen to make a plan misbehave, derived from the plan itself.
+ *
+ * The fused-against-forced comparison only says something when the data can
+ * reach the expression that behaves differently. Representative data almost
+ * never does: a cast diverges on the one row that is not a number, a division
+ * on the one row that is zero, arithmetic on the one row that is NULL, and a
+ * fixture invented to look plausible contains none of them. So the rows are
+ * derived from the expressions in the plan rather than from imagination -
+ * which is also the only way to do it automatically for a corpus nobody has
+ * read.
+ *
+ * Returns {column: value} suggestions, one per hazard found, plus the reason,
+ * so a caller can build its fixture and a reader can see why each row is
+ * there. It does not invent a schema: a column it cannot see in `schema` is
+ * reported and left to the caller.
+ */
+export function adversarialRows(rel, schema = {}) {
+  const out = [];
+  const note = (column, value, why) => {
+    if (column === undefined) return;
+    out.push({column, value, why, known: Object.prototype.hasOwnProperty.call(schema, column)});
+  };
+  const colOf = (e) => (e?.node === "col" ? e.name : undefined);
+
+  const walkExpr = (e) => {
+    if (e === undefined || e === null) return;
+    if (e.node === "cast" || (e.node === "call" && /^TO_(INTEGER|DECIMAL|DATE|TIMESTAMP)$/.test(e.fn ?? ""))) {
+      note(colOf(e.expr ?? e.args?.[0]), "not-a-number", "a cast raises on a value that will not convert, and only on that row");
+    }
+    if (e.node === "bin" && e.op === "/") {
+      note(colOf(e.right), 0, "division by zero raises on HANA, is Infinity in DuckDB and NULL in sql.js");
+    }
+    if (e.node === "bin" && ["+", "-", "*"].includes(e.op)) {
+      note(colOf(e.right) ?? colOf(e.left), null, "NULL in arithmetic propagates, and a filter may remove the row before or after");
+    }
+    for (const key of ["left", "right", "expr"]) walkExpr(e[key]);
+    for (const one of e.args ?? []) walkExpr(one);
+  };
+  const walk = (r) => {
+    if (r === undefined) return;
+    walkExpr(r.pred);
+    for (const item of r.items ?? []) walkExpr(item.expr);
+    for (const agg of r.aggs ?? []) walkExpr(agg.expr);
+    walkExpr(r.on);
+    for (const key of ["input", "left", "right"]) walk(r[key]);
+    for (const one of r.inputs ?? []) walk(one);
+  };
+  walk(rel);
+  return out;
+}

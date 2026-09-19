@@ -233,3 +233,32 @@ describe("SQLScript IR: the schema a typer reads, and where it comes from", () =
       .to.throw(/no rule has been measured/);
   });
 });
+
+describe("SQLScript IR: data chosen to break a plan, derived from the plan", () => {
+  it("names the column a cast will fail on, because representative data never contains it", async () => {
+    const {adversarialRows} = await import("../tools/sqlscript-ir.mjs");
+    const rel = project(scan("SRC"), [{as: "N", expr: cast(col("TXT"), T.int)}]);
+    const rows = adversarialRows(rel, {TXT: T.str});
+    expect(rows).to.have.length(1);
+    expect(rows[0].column).to.equal("TXT");
+    expect(rows[0].known, "the column is in the schema we were given").to.equal(true);
+  });
+
+  it("names the divisor, which is the row the three engines disagree about", async () => {
+    const {adversarialRows} = await import("../tools/sqlscript-ir.mjs");
+    const rel = project(scan("SRC"), [{as: "R", expr: bin("/", col("A"), col("B"), T.dec(15, 2))}]);
+    const rows = adversarialRows(rel, {A: T.int, B: T.int});
+    expect(rows.map((r) => [r.column, r.value])).to.deep.equal([["B", 0]]);
+  });
+
+  it("says when the column it wants is not in the schema, rather than inventing one", async () => {
+    const {adversarialRows} = await import("../tools/sqlscript-ir.mjs");
+    const rel = project(scan("SRC"), [{as: "N", expr: cast(col("MISSING"), T.int)}]);
+    expect(adversarialRows(rel, {A: T.int})[0].known).to.equal(false);
+  });
+
+  it("a plan with no hazard asks for nothing, so the instrument stays quiet", async () => {
+    const {adversarialRows} = await import("../tools/sqlscript-ir.mjs");
+    expect(adversarialRows(project(scan("SRC"), [{as: "K", expr: col("K")}]), {K: T.char(3)})).to.be.empty;
+  });
+});
