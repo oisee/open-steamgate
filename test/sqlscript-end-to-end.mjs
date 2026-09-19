@@ -195,3 +195,89 @@ describe("both forms of CASE, and the simple one becoming the searched one", () 
     expect(answered[0].rows.map((r) => r.LABEL ?? r.label)).to.deep.equal(["one", "other", "other"]);
   });
 });
+
+// HANA's own string functions, and the one rule that made them renderable:
+// every edge was measured on HANA Express first, and every rendering was
+// measured back against those answers before it was written down. Sixteen
+// probes, all sixteen agreeing on both local engines.
+describe("HANA's own functions, rendered where they were measured", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 8}, N: {abap: "I"}}};
+  const rows = async (body) => {
+    const results = await run({body, catalogue: CAT, hana: false});
+    const answered = results.filter((r) => r.rows !== undefined);
+    expect(answered.length, JSON.stringify(results.map((r) => [r.engine, r.error]))).to.be.greaterThan(1);
+    const shapes = new Set(answered.map((r) => JSON.stringify(r.rows.map((x) => Object.values(x)))));
+    expect(shapes.size, [...shapes].join(" vs ")).to.equal(1);
+    return answered[0].rows.map((r) => r.V ?? r.v);
+  };
+
+  // the fixture rows are the single letters a, b, c, so the interesting
+  // strings are built from them — an assertion that is all empty strings
+  // would pass against a rendering that answered nothing at all
+  it("SUBSTR_BEFORE takes what is before the first separator", async () => {
+    expect(await rows("SELECT SUBSTR_BEFORE(CONCAT(k, '-z'), '-') AS V FROM src ORDER BY k;"))
+      .to.deep.equal(["a", "b", "c"]);
+  });
+
+  it("and answers the empty string on a miss, as HANA does rather than NULL", async () => {
+    expect(await rows("SELECT SUBSTR_BEFORE(k, '-') AS V FROM src ORDER BY k;"))
+      .to.deep.equal(["", "", ""]);
+  });
+
+  it("SUBSTR_AFTER takes what is after it, and '' when the separator ends the string", async () => {
+    expect(await rows("SELECT SUBSTR_AFTER(CONCAT('z-', k), '-') AS V FROM src ORDER BY k;"))
+      .to.deep.equal(["a", "b", "c"]);
+    expect(await rows("SELECT SUBSTR_AFTER(CONCAT(k, '-'), '-') AS V FROM src ORDER BY k;"))
+      .to.deep.equal(["", "", ""]);
+  });
+
+  it("LOCATE is one-based and answers zero on a miss", async () => {
+    expect(await rows("SELECT LOCATE(CONCAT('x', k), k) AS V FROM src ORDER BY k;"))
+      .to.deep.equal([2, 2, 2]);
+    expect(await rows("SELECT LOCATE(k, 'zz') AS V FROM src ORDER BY k;"))
+      .to.deep.equal([0, 0, 0]);
+  });
+
+  it("MAP is a CASE and nothing else, and a missing default is NULL", () => {
+    // measured on HANA: a hit answers its value, a miss the default, no
+    // default NULL, and MAP(NULL, …) the default — which is what
+    // `CASE WHEN x = a` already does, because NULL = a is NULL
+    const {sql} = compile("SELECT MAP(n, 1, 'one', 2, 'two', 'many') AS V FROM src;", "duckdb", CAT);
+    expect(sql).to.contain('CASE WHEN ("N" = 1)');
+    expect(sql).to.contain("ELSE");
+    expect(compile("SELECT MAP(n, 1, 'one') AS V FROM src;", "duckdb", CAT).sql).to.not.contain("ELSE");
+  });
+
+  it("an argument used twice in a rendering carries two values, not one", () => {
+    // the subtle one: rendering an argument pushes its bound values, so a
+    // rendering that repeats an argument must render it again. Re-using the
+    // string would leave two `?` behind one value, which no engine catches
+    for (const dialect of ["hana", "duckdb", "sqlite"]) {
+      const {sql, params} = compile("SELECT SUBSTR_AFTER(k, '-') AS V FROM src;", dialect, CAT);
+      expect((sql.match(/\?/g) ?? []).length, `${dialect}: placeholders against values`)
+        .to.equal(params.length);
+    }
+  });
+});
+
+describe("ORDER BY is a clause of its SELECT, not a wrapper around it", () => {
+  const CAT = {SRC: {K: {abap: "C", len: 8}, N: {abap: "I"}}};
+
+  it("orders by a column the projection does not carry", async () => {
+    // `SELECT f(k) AS v FROM t ORDER BY k` is ordinary SQL: the ordering is
+    // evaluated over the INPUT of the select. Wrapped, it became
+    // `SELECT * FROM (SELECT f(k) AS v FROM t) ORDER BY k`, where k is not a
+    // column of the subquery and the engine refuses the statement — a body
+    // that "lowered" and could never run
+    const {sql} = compile("SELECT LOCATE(k, 'b') AS V FROM src ORDER BY k;", "duckdb", CAT);
+    expect(sql).to.not.contain("SELECT * FROM (");
+    const results = await run({body: "SELECT LOCATE(k, 'b') AS V FROM src ORDER BY k;", catalogue: CAT, hana: false});
+    for (const r of results) expect(r.error, `${r.engine} ran it`).to.equal(undefined);
+  });
+
+  it("and LIMIT belongs to the select it limits, ordering included", () => {
+    const {sql} = compile("SELECT k FROM src ORDER BY k LIMIT 2;", "duckdb", CAT);
+    expect(sql).to.match(/ORDER BY .* LIMIT 2$/);
+    expect(sql).to.not.contain("SELECT * FROM (");
+  });
+});

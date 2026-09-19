@@ -29,14 +29,18 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
 
   it("lowers to a single statement, because HANA says an assignment is not a barrier", () => {
     const {sql} = lower(chain, "duckdb");
-    expect(sql.match(/SELECT/g), sql).to.have.length(3); // nested, not sequential
+    // two SELECTs, not three: ORDER BY is a clause of the projection's own
+    // select rather than a wrapper around it (a wrapper made `ORDER BY k`
+    // illegal whenever the projection did not carry `k`). One statement
+    // either way, which is what this test is actually about.
+    expect(sql.match(/SELECT/g), sql).to.have.length(2);
     expect(sql).to.not.contain(";");
     expect(statementCount(chain)).to.equal(1);
   });
 
   it("nests rather than sequences, on every dialect we ship", () => {
     for (const dialect of ["hana", "duckdb", "sqlite"]) {
-      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT \* FROM \(SELECT .* FROM \(SELECT \* FROM "SRC" WHERE/);
+      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM \(SELECT \* FROM "SRC" WHERE .*\) AS "t0" ORDER BY/);
     }
   });
 
@@ -346,15 +350,20 @@ describe("SQLScript IR: a function is rendered only where it has been measured",
     }
   });
 
-  it("refuses one of HANA's own by name, rather than sending it somewhere it does not exist", () => {
+  it("builds HANA's own out of what the other engines have, once measured", () => {
+    // SUBSTR_BEFORE exists nowhere else and was refused until its edges were
+    // measured on HANA Express: a miss answers the empty string, not NULL
     const rel = project(scan("SRC"), [{as: "V", expr: call("SUBSTR_BEFORE", [col("A"), lit("-", T.char(1))], T.str)}]);
-    expect(() => lower(rel, "duckdb")).to.throw(Refused, /SUBSTR_BEFORE has no measured rendering/);
+    expect(sqlOf(rel, "hana")).to.contain("SUBSTR_BEFORE(");
+    expect(sqlOf(rel, "duckdb")).to.contain("instr(");
+    expect(sqlOf(rel, "duckdb")).to.contain("ELSE ''");
   });
 
-  it("refuses ROUND and LOCATE too, which exist everywhere and have not been measured", () => {
-    // the dangerous kind: present on all three, and the tie rule and the
-    // argument order are not the same thing as the name being the same
-    for (const fn of ["ROUND", "LOCATE"]) {
+  it("but still refuses a name nobody has measured", () => {
+    // the list is of functions whose MEANING was measured, not of functions
+    // that exist; ROUND and LOCATE left it by being measured, not by being
+    // common
+    for (const fn of ["SESSION_CONTEXT", "TO_DATE", "ESCAPE_SINGLE_QUOTES"]) {
       const rel = project(scan("SRC"), [{as: "V", expr: call(fn, [col("A")], T.str)}]);
       expect(() => lower(rel, "duckdb"), fn).to.throw(Refused, /has no measured rendering/);
     }

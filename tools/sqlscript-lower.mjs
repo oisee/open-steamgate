@@ -57,6 +57,12 @@ const DIALECTS = {
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
     castChar: (e, n) => `CAST(${e} AS NVARCHAR(${n}))`,
+    // HANA's own, so they pass through -- they are the reference the two
+    // renderings below were measured against
+    substrBefore: (s, x) => `SUBSTR_BEFORE(${s()}, ${x()})`,
+    substrAfter: (s, x) => `SUBSTR_AFTER(${s()}, ${x()})`,
+    toChar: (x) => `TO_NVARCHAR(${x()})`,
+    locate: (s, x) => `LOCATE(${s()}, ${x()})`,
     // case-sensitive, which is the reference the other two are measured against
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "DUMMY",
@@ -77,6 +83,24 @@ const DIALECTS = {
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS DOUBLE)) AS INTEGER)`,
     // CAST to a character type does not truncate here and does on HANA
     castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    // `SUBSTR_BEFORE` / `SUBSTR_AFTER` are HANA's and exist nowhere else, so
+    // they are built out of `instr` and `substr`, which both engines have.
+    // The edges were measured rather than assumed: on HANA a miss answers
+    // the **empty string** and not NULL, and so does a separator at the very
+    // start or the very end. All six probes agree.
+    //
+    // Note the thunks. Each argument appears three or four times in the text
+    // and a rendered argument may be a `?`, so re-using one rendered string
+    // would put N placeholders in the statement against one bound value --
+    // a statement whose values are out of step with its `?`s, which no
+    // engine catches. Calling the thunk once per occurrence pushes one value
+    // per placeholder, in the order the text has them.
+    substrBefore: (s, x) =>
+      `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, instr(${s()}, ${x()}) - 1) ELSE '' END`,
+    substrAfter: (s, x) =>
+      `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, instr(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
+    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "(SELECT 1) AS dummy",
   },
@@ -106,6 +130,24 @@ const DIALECTS = {
     // statement carrying a workaround. A dialect cannot check a pragma from
     // here, which is why this reads as a pass-through and the guarantee lives
     // at the connection: tools/sqljs-native.mjs and tools/sqlite-file-client.mjs.
+    // `SUBSTR_BEFORE` / `SUBSTR_AFTER` are HANA's and exist nowhere else, so
+    // they are built out of `instr` and `substr`, which both engines have.
+    // The edges were measured rather than assumed: on HANA a miss answers
+    // the **empty string** and not NULL, and so does a separator at the very
+    // start or the very end. All six probes agree.
+    //
+    // Note the thunks. Each argument appears three or four times in the text
+    // and a rendered argument may be a `?`, so re-using one rendered string
+    // would put N placeholders in the statement against one bound value --
+    // a statement whose values are out of step with its `?`s, which no
+    // engine catches. Calling the thunk once per occurrence pushes one value
+    // per placeholder, in the order the text has them.
+    substrBefore: (s, x) =>
+      `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, instr(${s()}, ${x()}) - 1) ELSE '' END`,
+    substrAfter: (s, x) =>
+      `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, instr(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
+    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     dummy: "(SELECT 1) AS dummy",
   },
@@ -124,6 +166,10 @@ import {seamType} from "./sqlscript-ir.mjs";
 const PORTABLE = new Set([
   "LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "TRIM", "LTRIM", "RTRIM",
   "SUM", "MIN", "MAX", "COUNT", "AVG",
+  // measured 2026-09-19: ROUND(2.5) is 3 and ROUND(-2.5) is -3 on all three,
+  // and the two-argument form agrees too. It was kept out of this list until
+  // it had been asked, which is the rule the list exists for.
+  "ROUND",
 ]);
 
 export class Refused extends Error {}
@@ -194,6 +240,21 @@ export function lower(rel, dialectName, options = {}) {
         return `(CASE ${whens}${other} END)`;
       }
       case "call": {
+        // **Rendering an argument is not free: it pushes that argument's
+        // bound values.** So the arguments are rendered exactly as many
+        // times as they appear in the text, and never before it is known how
+        // many that will be. Mapping them up front (which is what this did)
+        // put two values behind one `?` the moment a rendering used an
+        // argument twice -- a statement whose values are out of step with
+        // its placeholders, which no engine catches and no assertion about
+        // the text would either.
+        const arg = (i) => () => expr(e.args[i]);
+        // the ones whose rendering repeats an argument take thunks
+        if (e.fn === "SUBSTR_BEFORE") return d.substrBefore(arg(0), arg(1));
+        if (e.fn === "SUBSTR_AFTER") return d.substrAfter(arg(0), arg(1));
+        if (e.fn === "TO_NVARCHAR" || e.fn === "TO_VARCHAR") return d.toChar(arg(0));
+        if (e.fn === "LOCATE") return d.locate(arg(0), arg(1));
+        // and the rest use each argument once, so one rendering is right
         const args = e.args.map(expr);
         if (e.fn === "CONCAT") return `(${d.concat(args)})`;
         if (e.fn === "IFNULL") return d.ifnull(args[0], args[1]);
@@ -284,9 +345,35 @@ export function lower(rel, dialectName, options = {}) {
         const group = keys.length === 0 ? "" : ` GROUP BY ${keys.join(", ")}`;
         return `SELECT ${[...keys, ...aggs].join(", ")} FROM ${from(r.input)}${group}`;
       }
-      case "order":
-        return `SELECT * FROM ${from(r.input)} ORDER BY ${r.keys.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`;
+      case "order": {
+        // **ORDER BY is a clause of the SELECT, not a wrapper around it.**
+        //
+        // Wrapping produced `SELECT * FROM (SELECT f(k) AS v FROM t) ORDER BY
+        // k` -- and `k` is not a column of that subquery, so the engine
+        // refuses it. In SQL the ordering is evaluated over the **input** of
+        // the select, which is why `SELECT f(k) AS v FROM t ORDER BY k` is
+        // ordinary and legal. So a projection underneath is folded in rather
+        // than nested, which is what the source said in the first place.
+        //
+        // The alternative -- ordering first and projecting after -- would
+        // rest on row order surviving a projection, which no standard
+        // promises and which is exactly the kind of assumption this file
+        // exists to avoid.
+        const keys = r.keys.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ");
+        const inner = r.input;
+        if (inner?.rel === "project") {
+          const items = inner.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ");
+          return `SELECT ${items} FROM ${from(inner.input)} ORDER BY ${keys}`;
+        }
+        return `SELECT * FROM ${from(inner)} ORDER BY ${keys}`;
+      }
       case "limit":
+        // the same reason: LIMIT belongs to the select it limits, and
+        // wrapping an ordered select in an unordered one is a second defect
+        // of the same family waiting to be found
+        if (r.input?.rel === "order" || r.input?.rel === "project") {
+          return `${select(r.input)} LIMIT ${Number(r.n)}`;
+        }
         return `SELECT * FROM ${from(r.input)} LIMIT ${Number(r.n)}`;
       default: throw new Refused(`relation ${r.rel} not lowered`);
     }

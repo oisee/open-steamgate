@@ -160,6 +160,24 @@ export function toIr(tree, options = {}) {
         const args = (node.children ?? []).filter((c) => c.node === "Expr").map(expression);
         // CAST is its own node in the IR, because the lowering has to decide
         // per engine whether a failing cast can even raise
+        // **`MAP(x, a, b, c, d, …, default)` is a CASE and nothing else.**
+        // Measured on HANA: a hit answers its value, a miss answers the
+        // default, **no default answers NULL**, and `MAP(NULL, …)` answers
+        // the default -- which is exactly what `CASE WHEN x = a …` does,
+        // because `NULL = a` is NULL and NULL is not true. So it is rewritten
+        // here rather than rendered per dialect: one shape downstream, and
+        // no engine needs a function it does not have.
+        if (fn === "MAP") {
+          if (args.length < 3) throw new BindError("MAP needs a value and at least one pair", node);
+          const whens = [];
+          let i = 1;
+          for (; i + 1 < args.length; i += 2) {
+            whens.push({when: bin("=", args[0], args[i], T.bool), then: args[i + 1]});
+          }
+          // an odd argument left over is the default; none means NULL
+          const otherwise = i < args.length ? args[i] : undefined;
+          return caseWhen(whens, otherwise, whens[0].then.type);
+        }
         if (fn === "CAST" || fn === "TO_INTEGER") {
           return cast(args[0] ?? lit(null, T.str), fn === "TO_INTEGER" ? T.int : T.str);
         }

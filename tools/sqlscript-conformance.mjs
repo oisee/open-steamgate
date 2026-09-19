@@ -90,6 +90,20 @@ const CASES = [
   {id: "fn_min", sql: "SELECT MIN(ch) AS v FROM t", why: "MIN over characters, which is collation as much as function"},
   {id: "fn_max", sql: "SELECT MAX(c) AS v FROM t", why: "MAX over negative integers"},
   {id: "fn_count", sql: "SELECT COUNT(nullable) AS v FROM t", why: "COUNT of a column with a NULL in it, which is the interesting half of COUNT"},
+  // ROUND joined the portable list on 2026-09-19 and has to be measured
+  // here rather than in somebody's scratch directory: a measurement nobody
+  // else can re-run is not one (fable-osd's suite enforces exactly this, and
+  // it caught this entry missing).
+  //
+  // Measured on HANA Express: ROUND(2.5) is 3.0 and ROUND(-2.5) is -3.0 --
+  // half **away from zero**, not banker's rounding -- and the two-argument
+  // form ROUND(2.345, 2) is 2.350. DuckDB and sql.js agreed on all three.
+  {id: "fn_round_half", sql: "SELECT ROUND(2.5) AS v FROM t WHERE k = 'r1'",
+   why: "the tie rule: half away from zero, or to even"},
+  {id: "fn_round_half_negative", sql: "SELECT ROUND(-2.5) AS v FROM t WHERE k = 'r1'",
+   why: "the tie rule below zero, which is where away-from-zero and toward-zero part"},
+  {id: "fn_round_scale", sql: "SELECT ROUND(2.345, 2) AS v FROM t WHERE k = 'r1'",
+   why: "ROUND to a scale, which is a different function from ROUND to an integer on some engines"},
   {id: "fn_avg", sql: "SELECT AVG(a) AS v FROM t", why: "AVG over integers: an integer average, or a decimal one - the likeliest of these to differ"},
 ];
 
