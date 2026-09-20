@@ -1,6 +1,7 @@
 // The ICF registry as rows, which is what a system keeps it as.
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
+import {readFileSync, readdirSync} from "node:fs";
+import {join} from "node:path";
 import {guidOf, icfRows, parentUrl, rowsOf} from "../tools/osd-icf-rows.mjs";
 import {services} from "../tools/osd-icf.mjs";
 
@@ -8,16 +9,40 @@ describe("tools/osd-icf-rows: the objects are the transport, the rows are the re
   const rows = icfRows(".");
 
   it("every node of the tree is a row, and every handler of it a row of its own", () => {
-    const nodes = services(".");
-    for (const node of nodes) {
-      const row = rows.ICFSERVICE.find((s) => s.URL === `${node.path}/`);
-      expect(row, `${node.path} is a row`).to.not.equal(undefined);
-      expect(row.ICF_NAME).to.equal((node.name ?? "").toUpperCase());
+    // **Read from the objects, not from `rowsOf`'s own inputs.** The first
+    // version of this compared `icfRows(".")` with `services(".")` and
+    // `node.name.toUpperCase()` -- both sides of the comparison came out of
+    // the same call, so it was a change detector wearing a test's clothes.
+    // Found by an adversarial review. What it asserts now is that the rows
+    // say what the FILES say, parsed independently of the tool under test.
+    const files = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, {withFileTypes: true})) {
+        if (entry.name === "node_modules" || entry.name === ".git") continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith(".sicf.xml")) files.push(full);
+      }
+    };
+    walk("src");
+    expect(files.length, "the tree carries nodes").to.be.greaterThan(5);
+
+    for (const file of files) {
+      const xml = readFileSync(file, "utf8");
+      const url = /<URL>([^<]*)/.exec(xml)?.[1];
+      const name = /<ICF_NAME>([^<]*)/.exec(xml)?.[1];
+      const row = rows.ICFSERVICE.find((s) => s.URL === url);
+      expect(row, `${file} is a row`).to.not.equal(undefined);
+      expect(row.ICF_NAME, file).to.equal(name.toUpperCase());
+      // and the handlers of that file, in the order the file has them
+      const inFile = [...xml.matchAll(/<ICFHANDLER>([A-Za-z0-9_/]+)<\/ICFHANDLER>/g)].map((m) => m[1]);
+      const inRows = rows.ICFHANDLER
+        .filter((h) => h.ICF_NAME === row.ICF_NAME && h.ICFPARGUID === row.ICFPARGUID)
+        .map((h) => h.ICFHANDLER);
+      expect(inRows, `${file} handler chain`).to.deep.equal(inFile);
     }
-    // the chain, not the last of it: `serviceOf` reduces a node to the
-    // handler that answers, and the table holds every row of the chain
+
     const status = rows.ICFHANDLER.filter((h) => h.ICF_NAME === "ZOSD_STATUS");
-    expect(status.map((h) => h.ICFHANDLER)).to.deep.equal(["ZCL_OSD_STATUS_HTTP"]);
     expect(status[0].ICFTYP, "the type is read, not assumed").to.equal("A");
     expect(status[0].ICFORDER).to.equal("01");
   });
