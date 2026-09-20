@@ -10,14 +10,14 @@ copy one block and deploy. The image is currently built for **Linux amd64**.
 In a Docker Standalone environment, choose **Stacks → Add stack → Web editor**.
 Give the stack a new name, paste **one entire YAML block below**, and click
 **Deploy the stack**. The defaults are deliberately distinct: SQLite **11**,
-DuckDB **15**, and HANA Express **17**. No instance variable is required.
+DuckDB **15**, HANA Express **17** and PostgreSQL **19**. No instance variable is required.
 To override one, set a two-digit `INSTANCE` in Portainer's Stack variables;
 putting it under a service's `environment:` does not set Compose's port
 interpolation.
 
 For instance `11`, open `http://DOCKER-HOST:8011/app/flp.html`. HTTPS is on
 `44311`, the DIAG stub on `3211`, and the RFC stub on `3311`. Substitute
-`15` or `17` for the other stacks. The container
+`15`, `17` or `19` for the other stacks. The container
 creates a self-signed certificate; set `TLS_SAN=DNS:your-host.example` before
 the first start if clients use that hostname. The certificate and, for SQLite
 or DuckDB, the database persist in named volumes. Keep each database variant
@@ -45,6 +45,9 @@ The one-shot `hana-init` service uses the same OSD image and should show
 **Exited (0)**; it prepares HXE's password file before the database starts.
 Automated protocol checks and SAP-TUI screen artifacts are described in
 [image acceptance](docker-image.md#build-and-automation).
+The PostgreSQL block starts a fresh PostgreSQL server in the same Stack. Its
+demo password should be changed before first start outside an isolated network;
+its SQL port is private to the Stack.
 
 <!-- BEGIN GENERATED IMAGE STACKS -->
 
@@ -192,6 +195,64 @@ volumes:
   osd-tls:
 ```
 
+### Ready image: New PostgreSQL + OSD
+
+Source: [docker/compose.postgres.yml](../docker/compose.postgres.yml).
+
+```yaml
+# Portainer: new PostgreSQL + OSD, default instance 19 (8019/44319/3219/3319).
+# Demo password is public; change POSTGRES_PASSWORD before first start outside
+# an isolated test network. PostgreSQL's SQL port is not published to host.
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: osd
+      POSTGRES_DB: osd
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-OSD19_Demo!ChangeMe}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osd -d osd"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-19}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: osd
+      PGPASSWORD: "${POSTGRES_PASSWORD:-OSD19_Demo!ChangeMe}"
+      PGDATABASE: osd
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-19}:3030"
+      - "443${INSTANCE:-19}:44300"
+      - "32${INSTANCE:-19}:32${INSTANCE:-19}"
+      - "33${INSTANCE:-19}:33${INSTANCE:-19}"
+    volumes:
+      - osd-tls:/opt/osd/.local/tls
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+volumes:
+  pg-data:
+  osd-tls:
+```
+
 <!-- END GENERATED IMAGE STACKS -->
 
 After deployment, wait until `osd` is healthy; its healthcheck covers HTTP,
@@ -241,10 +302,34 @@ set `STG_DB=duckdb`, `STG_DB_PATH="$PWD/.local/db/osd.duckdb"` and
 `STG_DB=hana` plus `HANA_HOST`, `HANA_PORT` (tenant SQL port), `HANA_USER`,
 `HANA_PASSWORD` and optionally `HANA_SCHEMA=OSD`, then run the same last
 command. Use a dedicated schema and keep the password out of shell history.
+For an existing PostgreSQL database, set `STG_DB=postgres`, `PGHOST`, `PGPORT`,
+`PGUSER`, `PGPASSWORD` and `PGDATABASE`; use a dedicated database. The public
+Docker image must be rebuilt before using the new PostgreSQL Compose block:
+older `docker-draft` tags reject `STG_DB=postgres`.
 See [database backends](db-backends.md) for details.
 
+To add the DIAG and ADT-over-RFC ports to this **local** Node server, install
+Go 1.26 and run this once from the checkout root:
+
+```sh
+sh docker/portainer/setup-protocols-local.sh
+```
+
+Leave `STG_PORT=8000 STG_TLS_PORT=44300 node test/run.mjs` running in the first
+terminal. In a second terminal, from the same directory, start the bridge:
+
+```sh
+.local/bin/osd-up -instance 11 -attach http://127.0.0.1:8000 -stub tape
+```
+
+This listens on DIAG `3211` and RFC `3311`. The RFC bridge carries ADT
+requests such as `SADT_REST_RFC_ENDPOINT` to the Node server's HTTP endpoint;
+the DIAG port serves the tape stub. Stop the bridge with Ctrl-C, then stop
+Node. To use another instance, change `-instance 11` (and check both ports are
+free). The local HTTP port remains the one passed to `-attach`.
+
 The files under [`docker/portainer/`](../docker/portainer/README.md) are
-generated copies of the same three ready-image stacks. The older source-build
+generated copies of the same four ready-image stacks. The older source-build
 Compose recipes are retained in Git history.
 
 The YAML blocks above are embedded verbatim from `docker/compose.*.yml` by

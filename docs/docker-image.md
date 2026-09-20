@@ -1,15 +1,16 @@
 # OSD image draft
 
-One Node 24 image supports native SQLite (`STG_DB=file`), DuckDB and
-HANA/HANA Express, and includes the DIAG/RFC stub binary. The HANA Stack
+One Node 24 image supports native SQLite (`STG_DB=file`), DuckDB,
+HANA/HANA Express and PostgreSQL, and includes the DIAG/RFC stub binary. The HANA Stack
 starts a separate SAP HANA Express container under SAP's terms. First target:
 `linux/amd64`; ARM64 needs separate native DuckDB and protocol validation.
 
 Short, complete Portainer stacks: [SQLite](../docker/compose.sqlite.yml),
-[DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml).
+[DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml),
+[PostgreSQL](../docker/compose.postgres.yml).
 Their full contents are generated into [spin.md](spin.md). The older
 `docker/Dockerfile` and `docker/compose.yml` remain the Bun release experiments;
-the ready image uses `docker/image/Dockerfile` and the three named stacks.
+the ready image uses `docker/image/Dockerfile` and the four named stacks.
 
 ## Build and automation
 
@@ -19,7 +20,7 @@ docker buildx build --platform linux/amd64 --load -f docker/image/Dockerfile.pro
 sh docker/image/smoke.sh
 ```
 
-The smoke suite deploys the actual SQLite and DuckDB Compose files in
+The smoke suite deploys the actual SQLite, DuckDB and PostgreSQL Compose files in
 disposable projects, creates an OData record and reads it after stopping and
 starting the whole stack with its volumes retained (including HXE when enabled).
 From a separate client container it checks the published HTTP/HTTPS ADT and
@@ -36,14 +37,14 @@ failure. Test-client binaries are not added to the runtime image.
 On a sufficiently sized **Linux amd64** test host, after accepting SAP's license:
 
 ```sh
-OSD_TEST_DATABASES='sqlite duckdb hana' ACCEPT_SAP_LICENSE=YES sh docker/image/smoke.sh
+OSD_TEST_DATABASES='sqlite duckdb postgres hana' ACCEPT_SAP_LICENSE=YES sh docker/image/smoke.sh
 ```
 
 This also boots a fresh HXE and deletes only the suite's disposable projects
 and volumes afterwards. Each test selects a random starting point in instance
 range **50–89**, then finds a free set of `30nn/32nn/33nn/80nn/443nn` ports.
 `30nn` is reserved conservatively; the image currently uses internal HTTP 3030.
-The Portainer defaults remain 11/15/17. Selection is advisory, not an atomic
+The Portainer defaults remain 11/15/17/19. Selection is advisory, not an atomic
 reservation: if another process claims a port before Compose binds it, startup
 fails without stopping the other process. Do not run against real data.
 
@@ -115,6 +116,23 @@ As an alternative to environment passwords, mount a secret file and set
 The HXE image is pulled separately under SAP's terms; CI does not redistribute
 or boot it. Test the full HXE Stack on a host with enough memory.
 
+## PostgreSQL configuration
+
+The PostgreSQL Stack starts a new PostgreSQL 17 server beside OSD. No SQL port
+is published to the host. Instance `19` exposes HTTP 8019, HTTPS 44319,
+DIAG 3219 and ADT-over-RFC 3319. The only optional setting is
+`POSTGRES_PASSWORD`; its public demo default is for disposable, isolated
+tests only. Set a private password before first start elsewhere. PostgreSQL
+initializes credentials only on an empty data volume; changing the Stack
+variable later does not change the server password. OSD uses a dedicated
+database named `osd` and its `public` schema. It refuses to seed a nonempty,
+unstamped database and refuses a mismatched schema fingerprint without
+dropping data. `STG_DB_FRESH=1` is disabled in the image.
+
+Older `docker-draft` images reject `STG_DB=postgres`. Deploy this Stack only
+with a newly tested publication of the image; set `OSD_TAG` in Portainer to
+the immutable `sha-…-run-…` tag from its successful Actions summary.
+
 ## Portainer acceptance
 
 1. Select Docker Standalone on an amd64 host. Add a fresh `osd11` stack and
@@ -132,6 +150,9 @@ or boot it. Test the full HXE Stack on a host with enough memory.
    These are DIAG/RFC stub entry points, not full SAP GUI/RFC implementations.
 6. Use the HANA Stack (default instance `17`) after license acceptance, and
    verify `HDB` / `server` and a new HXE container.
+7. Use the PostgreSQL Stack (default instance `19`) with the newly tested
+   image; expect `postgres` / `server`, an OData write surviving a full Stack
+   restart, and DIAG/RFC on 3219/3319.
 
 Do not delete existing volumes or use `down -v` to upgrade a real stack.
 Existing-volume schema upgrades are a separate release gate. For this draft,

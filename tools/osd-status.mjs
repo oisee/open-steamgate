@@ -234,12 +234,12 @@ export function databaseFacts({client, env = process.env} = {}) {
   const liveClient = client ?? globalThis.abap?.context?.databaseConnections?.DEFAULT;
   const configured = String(env.STG_DB ?? "file").toLowerCase();
   const rawEngine = String(liveClient?.name ?? (configured === "file" ? "sqlite" : configured)).toLowerCase();
-  const engines = {file: "sqlite", sqlite: "sqlite", duckdb: "duckdb", hana: "HDB", hdb: "HDB"};
+  const engines = {file: "sqlite", sqlite: "sqlite", duckdb: "duckdb", hana: "HDB", hdb: "HDB", postgres: "postgres"};
   const engine = Object.hasOwn(engines, rawEngine) ? engines[rawEngine] : "unknown";
   const path = liveClient === undefined
     ? env.STG_DB_PATH ?? (configured === "file" ? DEFAULT_DATABASE : undefined)
     : liveClient.path;
-  const storage = engine === "HDB"
+  const storage = engine === "HDB" || engine === "postgres"
     ? "server"
     : path === undefined || path === "" || path === ":memory:"
       ? "memory"
@@ -270,8 +270,8 @@ export async function childDatabaseFacts(runtime, {fetcher = fetch, timeoutMs = 
     const body = await res.json();
     const d = body.databaseIdentity;
     if (body.ready !== true || body.generation !== runtime.generation || d?.connected !== true ||
-        !["sqlite", "duckdb", "HDB"].includes(d.engine) ||
-        !(d.engine === "HDB" ? d.storage === "server" : ["file", "memory"].includes(d.storage))) return undefined;
+        !["sqlite", "duckdb", "HDB", "postgres"].includes(d.engine) ||
+        !(["HDB", "postgres"].includes(d.engine) ? d.storage === "server" : ["file", "memory"].includes(d.storage))) return undefined;
     return databaseRows(d.engine, d.storage, true);
   } catch {
     return undefined;

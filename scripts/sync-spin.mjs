@@ -1,5 +1,5 @@
 // Compose files are the source of truth; generated Markdown is committed.
-import {readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const doc = new URL('docs/spin.md', root);
@@ -9,11 +9,11 @@ const imageEnd = '<!-- END GENERATED IMAGE STACKS -->';
 if (original.split(imageStart).length !== 2 || original.split(imageEnd).length !== 2 || original.indexOf(imageEnd) < original.indexOf(imageStart)) {
   throw new Error('Expected one ordered pair of generated image stack markers');
 }
-const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'New HANA Express + OSD']].map(([id, title]) => {
+const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'New HANA Express + OSD'], ['postgres', 'New PostgreSQL + OSD']].map(([id, title]) => {
   const path = `docker/compose.${id}.yml`;
   const yaml = readFileSync(new URL(path, root), 'utf8');
   const mirror = new URL(`docker/portainer/compose.${id}.yml`, root);
-  if (readFileSync(mirror, 'utf8') !== yaml) {
+  if (!existsSync(mirror) || readFileSync(mirror, 'utf8') !== yaml) {
     if (process.argv.includes('--check')) {
       console.error(`docker/portainer/compose.${id}.yml is stale. Run: node scripts/sync-spin.mjs`);
       process.exitCode = 1;

@@ -5,7 +5,7 @@ import {setTimeout as delay} from "node:timers/promises";
 const env = process.env;
 if (!/^\d{2}$/.test(env.INSTANCE ?? "00")) throw new Error("INSTANCE must be two digits, e.g. 06");
 env.STG_DB ??= "file";
-if (!["file", "duckdb", "hana"].includes(env.STG_DB)) throw new Error("STG_DB must be file, duckdb or hana");
+if (!["file", "duckdb", "hana", "postgres"].includes(env.STG_DB)) throw new Error("STG_DB must be file, duckdb, hana or postgres");
 if (env.STG_DB === "duckdb" && Number(env.OSD_WORKERS ?? 1) !== 1) throw new Error("DuckDB requires OSD_WORKERS=1");
 if (env.STG_DB === "hana") {
   for (const key of ["HANA_HOST", "HANA_PORT", "HANA_USER", "HANA_SCHEMA"]) {
@@ -13,6 +13,11 @@ if (env.STG_DB === "hana") {
   }
   if (!env.HANA_PASSWORD && !env.OSD_HANA_PASSWORD_FILE) throw new Error("Set HANA_PASSWORD or OSD_HANA_PASSWORD_FILE");
   if (!/^[A-Z][A-Z0-9_]{0,126}$/.test(env.HANA_SCHEMA)) throw new Error("HANA_SCHEMA must be an uppercase SQL identifier");
+  if (env.STG_DB_FRESH === "1") throw new Error("Destructive STG_DB_FRESH is disabled in this container entrypoint");
+} else if (env.STG_DB === "postgres") {
+  for (const key of ["PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"]) {
+    if (!env[key]) throw new Error(`${key} is required for PostgreSQL`);
+  }
   if (env.STG_DB_FRESH === "1") throw new Error("Destructive STG_DB_FRESH is disabled in this container entrypoint");
 } else {
   env.STG_DB_PATH ??= `/data/osd.${env.STG_DB === "duckdb" ? "duckdb" : "sqlite"}`;

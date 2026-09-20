@@ -6,8 +6,26 @@ import {createRequire} from "node:module";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
+import {OsdPostgresClient, postgresInserts} from "../tools/postgres-client.mjs";
 
 describe("database identity", () => {
+  it("rewrites only PostgreSQL seed column identifiers, not string values", () => {
+    expect(postgresInserts(["INSERT INTO tadir ('OBJECT', 'OBJ_NAME') VALUES ('PROG', 'demo')", "SELECT 'OBJECT'"]))
+      .to.deep.equal(["INSERT INTO tadir (\"object\", \"obj_name\") VALUES ('PROG', 'demo')", "SELECT 'OBJECT'"]);
+  });
+  it("does not claim PostgreSQL connected until a query succeeds", async () => {
+    const client = new OsdPostgresClient({host: "127.0.0.1", port: 1, user: "osd", password: "test", database: "osd"});
+    client.select = async () => { throw new Error("connection refused"); };
+    try {
+      await client.connect();
+      throw new Error("expected a failed connection");
+    } catch (error) {
+      expect(error.message).to.equal("connection refused");
+      expect(client.connected).to.equal(false);
+    } finally {
+      await client.disconnect();
+    }
+  });
   it("preserves the HDB identifier after a mocked HANA connection (no network)", async () => {
     const hdb = createRequire(import.meta.url)("hdb");
     const originalCreate = hdb.createClient;

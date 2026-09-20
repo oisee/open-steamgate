@@ -1,4 +1,4 @@
-# Portainer: three ready stacks
+# Portainer: four ready stacks
 
 Paste one complete file into **Stacks → Add stack → Web editor** on Docker
 Standalone (Linux amd64):
@@ -8,8 +8,10 @@ Standalone (Linux amd64):
 - [New HANA Express + OSD](compose.hana.yml): instance 17, open
   `http://DOCKER-HOST:8017/app/flp.html`. Set `ACCEPT_SAP_LICENSE=YES` after
   accepting SAP's license; allow several minutes for HXE's first start.
+- [New PostgreSQL + OSD](compose.postgres.yml): instance 19, open
+  `http://DOCKER-HOST:8019/app/flp.html`. The SQL port stays private.
 
-All three use the same ready OSD image, including DIAG/RFC. HANA's short-lived
+All four use the same ready OSD image, including DIAG/RFC. HANA's short-lived
 `hana-init` service uses that image too; `Exited (0)` is its successful state.
 The SQL server is a separate SAP image. No source compilation happens on start.
 
@@ -19,3 +21,5 @@ full YAML blocks in [spin.md](../../docs/spin.md).
 
 The old source-building Compose files are retained in Git history. The local
 source installation helper [setup-local.sh](setup-local.sh) remains available.
+For local DIAG/RFC ports, see [setup-protocols-local.sh](setup-protocols-local.sh)
+and the [local instructions](../../docs/spin.md#locally-without-docker).

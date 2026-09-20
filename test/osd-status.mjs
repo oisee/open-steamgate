@@ -16,6 +16,8 @@ describe("tools/osd-status: the system as one JSON object", () => {
       .to.deep.equal({engine: "HDB", storage: "server", connected: true});
     expect(databaseDescriptor({name: "sqlite", sqlite: {}}).connected).to.equal(true);
     expect(databaseDescriptor({name: "sqlite"}).connected).to.equal(false);
+    expect(databaseDescriptor({name: "postgres", connected: true, host: "private", password: "secret"}))
+      .to.deep.equal({engine: "postgres", storage: "server", connected: true});
   });
 
   it("reads child facts and rejects unavailable, stale or invalid descriptors", async () => {
@@ -28,6 +30,8 @@ describe("tools/osd-status: the system as one JSON object", () => {
       return {ok: true, json: async () => body};
     }});
     expect((await read(good))[0]).to.include({value: "duckdb", note: "connected backend"});
+    const pg = {...good, databaseIdentity: {engine: "postgres", storage: "server", connected: true}};
+    expect((await read(pg))[0]).to.include({value: "postgres", note: "connected backend"});
     expect(JSON.stringify(await read(good))).not.to.include("secret");
     for (const body of [{}, {...good, generation: "old"}, {...good, ready: false},
       {...good, databaseIdentity: {...good.databaseIdentity, connected: false}},

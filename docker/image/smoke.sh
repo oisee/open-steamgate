@@ -1,6 +1,6 @@
 #!/bin/sh
 # Disposable Compose projects only; choose a free test instance in 50–89.
-# HXE is opt-in: OSD_TEST_DATABASES='sqlite duckdb hana' ACCEPT_SAP_LICENSE=YES.
+# HXE is opt-in: OSD_TEST_DATABASES='sqlite duckdb postgres hana' ACCEPT_SAP_LICENSE=YES.
 set -eu
 osd_image=${1:-osd:ci}
 client_image=${2:-osd-probes:ci}
@@ -24,9 +24,10 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 docker tag "$osd_image" "$test_tag"
-for db in ${OSD_TEST_DATABASES:-sqlite duckdb}; do
+for db in ${OSD_TEST_DATABASES:-sqlite duckdb postgres}; do
   case "$db" in
     sqlite|duckdb) ;;
+    postgres) docker pull postgres:17-bookworm ;;
     hana)
       [ "${ACCEPT_SAP_LICENSE:-}" = YES ] || { echo 'Set ACCEPT_SAP_LICENSE=YES after accepting the SAP HANA Express license' >&2; exit 2; }
       docker pull saplabs/hanaexpress:latest

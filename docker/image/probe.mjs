@@ -8,8 +8,9 @@ await import('./healthcheck.mjs');
 const response = await request(`${base}/sap/opu/odata/sap/ZOSD_STATUS_SRV/DatabaseSet?$format=json`);
 assert.equal(response.status, 200);
 const facts = (await response.json()).d.results;
-const engine = process.env.STG_DB === 'hana' ? 'HDB' : process.env.STG_DB === 'duckdb' ? 'duckdb' : 'sqlite';
+const engine = process.env.STG_DB === 'hana' ? 'HDB' : process.env.STG_DB === 'duckdb' ? 'duckdb' : process.env.STG_DB === 'postgres' ? 'postgres' : 'sqlite';
 assert.ok(facts.some(row => row.Name === 'Engine' && row.Value === engine && row.Note === 'connected backend'));
+assert.ok(facts.some(row => row.Name === 'Storage' && row.Value === (['HDB', 'postgres'].includes(engine) ? 'server' : 'file')));
 const mode = process.argv[2] ?? 'create';
 if (mode === 'create') {
   const res = await request(`${service}/TravelSet`, {method: 'POST',

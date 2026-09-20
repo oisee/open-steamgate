@@ -35,7 +35,7 @@ jobs:
         run: |
           node scripts/sync-spin.mjs --check
           node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs
-          for db in sqlite duckdb hana; do
+          for db in sqlite duckdb hana postgres; do
             docker compose -f "docker/compose.$db.yml" config --quiet
           done
       - name: Build the combined OSD image
