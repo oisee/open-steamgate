@@ -100,10 +100,24 @@ jobs:
       - name: Fetch the pack sources
         run: node tools/osd-fetch.mjs
 
-      - run: npm run lint
-
+      # **Transpile first, and the order is load-bearing.** `npm run lint`
+      # analyses `src/` **and `gen/`**, and `gen/` is written by the
+      # transpile step: the SEGW registry, the search-help registry, the RFC
+      # dispatcher, the transaction registry, the BSP registry. On a
+      # workstation that directory is left over from the last run, so lint is
+      # green there; on a clean runner it does not exist and lint reports 46
+      # errors of the form "Class zcl_stg_bsp_registry not found".
+      #
+      # This workflow was written on 2026-09-19 to close the hole that
+      # nothing read the suites, and it then failed on this step **six runs
+      # in a row** without anybody looking at why -- including the run of the
+      # commit that announced it. A check that has never been green is not
+      # yet an instrument, and "CI reads the tests now" was a claim about a
+      # file rather than about a result.
       - name: Transpile
         run: npm run transpile
+
+      - run: npm run lint
 
       - name: ABAP Unit
         run: node tools/osd-unit-run.mjs
