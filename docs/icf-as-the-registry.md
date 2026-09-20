@@ -1,7 +1,9 @@
 # One registry for "who answers this path"
 
 *A design note, 2026-09-19, written to be argued with rather than followed.
-Nothing here is built; the counts are measured and the rest is a proposal.*
+**Built since, 2026-09-20** — so the proposal is kept for what it claimed and
+the outcome is recorded under it, including where the claim was wrong. The
+working plan is [`icf-registry-plan.md`](icf-registry-plan.md).*
 
 ## The measurement that starts it
 
@@ -30,13 +32,22 @@ handler classes, and nodes have kinds — a service, an external alias, a
 redirect. So the proposal is to reproduce what a system already does, not to
 design something better than it.
 
-| kind | who answers | what it removes |
+| kind | who answers | works in |
 | --- | --- | --- |
-| **ABAP** | a class implementing `if_http_extension` | nothing — this is what exists |
-| **BSP / WAPA** | a handler reading the object store | the one place where a request path is *not* ABAP |
-| **PROXY** | a destination, to another system | the destinations registry |
-| **RFC** | a system reached over RFC (Track R) | a separate track for reaching what is not published |
-| **JS** | a Node function, for what transpiled ABAP cannot do | nothing, and that is the point — see below |
+| **ABAP** | a class implementing `if_http_extension` | server, binary, preview |
+| **HOST** | a function of the JavaScript host | server, binary — **not** the preview |
+| **PROXY** | a destination, to another system | server, binary |
+| **CONTENT** | bytes out of the object store | everywhere |
+| **NODE** | nothing: a node that exists and carries no handler | — |
+
+*The kinds as first drafted had a **JS** row and a **BSP/WAPA** row. Both were
+wrong in the same way: they named an implementation where the question is
+where the node is **declared**. A path answered by JavaScript is a `HOST`
+node and the distinction that matters about it — does it transport — follows
+from the file it is declared in, not from a field somebody keeps true. `NODE`
+was missing entirely and is the commonest kind on a real system: a UI5
+application's node carries no handler and inherits one from the branch above
+(measured on A4H, 2026-09-19).*
 
 ## What it unblocks, concretely
 
@@ -72,159 +83,62 @@ design something better than it.
 
 ## What would prove it rather than assert it
 
-One path, served today by express, moved to a node — and the count of
-registries goes from four to three without anything else changing. If that
-move is awkward, the design is wrong and this note should be edited rather
-than defended.
+*As drafted:* one path, served today by express, moved to a node — and the
+count of registries goes from four to three without anything else changing.
+
+**That test was replaced by a stronger one, and the replacement should be
+read as a correction rather than a refinement.** Counting registries answers
+the wrong question: a place that *declares* a node and a place that *decides*
+what answers are not the same thing, and the count conflated them. The test
+that was actually run:
+
+- a row edited to inactive (`UPDATE icfservice SET icfactive = ' '` on
+  `/sap/bc/zork/`, marked `EDITED`) makes that path answer **404**, and an
+  untouched path still answers 200;
+- a node that exists **only as a row** — `/sap/bc/osd/onlyrow/`, named by no
+  file anywhere — answers **200** and appears on the screen.
+
+The second is the decisive one: under the old shape it would have been
+unreachable however correctly the registry described it.
+
+## What it measures now, and what it did not fix
+
+Measured 2026-09-20, `node tools/osd-nodes.mjs` and `node tools/osd-routes.mjs`:
+
+```
+30 nodes: 19 ABAP, 10 HOST, 1 NODE
+ 0 express registrations nobody declared
+ 0 declared HOST nodes no registration serves
+ 3 answer on a path a real system delivers, so they must not travel
+```
+
+Places that **decide** what answers: one. Places that **declare** a node:
+five — `*.sicf.xml`, `<layer>/icf/nodes.json`, the `ICFSERVICE` /
+`ICFHANDLER` rows, a destination, a pack. So the drafted promise, "it deletes
+three of the four places that decide", came true of deciding and is false of
+declaring, where the number went up. That is the better trade and the note
+should not be read as having predicted it.
+
+The finding that justifies the track on its own is one nobody was looking
+for: **three of our nodes would replace SAP's own handlers on an abapGit
+import** — `/sap/bc/gui/sap/its/webgui`, its `sapevent` child, and
+`/sap/bc/ui5_ui5/sap`. A system importing this repository would lose its
+Easy Access and its UI5 repository. It fell out of separating *what
+implements a node* from *whether the node travels*, which is a distinction
+this note did not have.
+
+**One defect is open and it is in the load-bearing claim.**
+`tools/osd-serve.mjs` mounts ABAP nodes from the rows
+(`from: servicesFromRows(icfRowsNow)`); `test/start.mjs` mounts them from the
+files, and `MODE` defaults to `inline`. `servicesFromRows` has exactly one
+caller in the tree. So "changing a row changes what answers" is true of the
+serving host and **not** of the default one, and no test asks: the registry
+suite exercises `applyAtStartup` and the rows directly, never the inline
+host's routing. It is the shape `docs/luw-buffer.md` already records — a rule
+written next to one caller does not survive the second — arriving a third
+time, in the sentence the whole track exists to make true.
 
 See also: [`rfc-channel.md`](rfc-channel.md) for what D.4 and D.5 already
 are, [`a4h-deploy.md`](a4h-deploy.md) for what a node does and does not fix
-on a real system, and backlog Track R for the RFC kind.
-
----
-
-## Correction, 2026-09-20: the only **registry**, not the only **router**
-
-*Alice read the note and the night's work and said the thing neither session
-had: a JS node can be served by the JS part of the system, and what matters
-is that everything shows up in one place that can be inspected and changed
-from ABAP. She asked to be criticised. She is right, and the evidence is in
-SAP's own dictionary.*
-
-`ICFHANDLER` is a transparent table:
-
-```abap
-key icf_name   : icfname      the node
-key icfparguid : icfparguid   its parent
-key icforder   : icforder     the order
-key icftyp     : char1        the TYPE of handler
-    icfhandler : icf_hand     a NAME
-```
-
-So in the thing we are imitating: the registry is a **table**, a node has an
-**ordered list** of handlers, each row carries a **type**, and the handler
-itself is a **name**. The tree does not care what is behind the name.
-
-**The note above invented a rule the original has a column for.** It said a
-JS handler must be an ABAP class delegating to the host -- the shape
-`W3MI_LOADER` and the RFC `live` destination already use. That is a good
-pattern for *content*; it is the wrong answer to *who executes a node*,
-because the tree already has `ICFTYP` and does not need us to disguise one
-kind as another.
-
-**The error has a name: the claim conflated the registry with execution.**
-Routing is execution; a registry is data. "ICF is the only router" forces
-one execution model on everything. "ICF is the only registry" does not, and
-it is the claim that is actually true of a system.
-
-### What the conflation cost, measured
-
-Serving five Fiori applications through ABAP on 2026-09-19/20 proved a node
-can decide, and charged for it:
-
-```
-gen/bsp/zcl_stg_bsp_registry.clas.abap   137.9 KB of base64 in generated source
-a page through the node                  ~0.003 s
-the same page through express.static     ~0.001 s
-```
-
-Three times slower and a class that grows with every byte of every asset.
-Those costs bought **unity of the registry** -- and under the corrected
-model the same unity is free: the node says which application a path is,
-the handler type says who serves it, and ABAP-for-portability against
-host-for-speed becomes a setting rather than an architecture.
-
-### The two risks in the corrected model, and neither is small
-
-**A unified registry makes the inventory honest and says nothing about
-portability.** If a node may be served from JS, then "the same thing runs in
-a system's ICF" can quietly stop being true for more and more nodes while
-the registry reports that all is well. So a handler type must carry whether
-that kind exists on a system. That is fable-osd's requirement -- a node must
-say whether it can travel, in the object rather than in somebody's memory --
-arriving from the other side, and it is better here: not a flag of ours to
-maintain, but a property of the type.
-
-**"Changeable" is the expensive half.** Today a node is a file read at build
-time. Inspectable and changeable at runtime means the registry is a **table
-seeded from the objects**, which is exactly how SICF works -- objects
-transport, the tree lives in a table. This tree already has that pattern
-(`data/*.tabu.json` seeds tables from abapGit objects) and it carries an
-obligation with it: two representations, one authoritative at runtime, and a
-written rule for what happens when they disagree. There is such a rule for
-the database (schema drift: move aside and say so). There is none for this
-yet, and inventing it late is how a table and its objects come to disagree
-in silence.
-
-### It also fixes something made the same night
-
-Destinations are SM59, and SM59 is a table too. If the registry is
-inspectable from ABAP then so are destinations, `.local/destinations.json`
-becomes a **seed rather than a source**, and the preflight asks the system
-instead of a file.
-
-### What survives from the original note
-
-The falsification -- a registry is migrated when its **code is deleted**,
-not when a path moves. The scoreboard. And the central claim, which gets
-*stronger*: it stops requiring that everything execute the same way, which
-was the part that could not be true.
-
-### The order this implies
-
-1. **The registry becomes a table**, seeded from `*.sicf.xml`, read and
-   written from ABAP. This is G.5 -- not a screen over files.
-2. **A handler carries a type** -- ABAP / HOST / PROXY / CONTENT -- and each
-   type records whether it travels.
-3. **Pages move out of the generated class and into a table**, which removes
-   both the growth and the rebuild on every image, and lets `CONTENT` be
-   served from ABAP or from the host by configuration.
-
-The first is the one to take, because without the table "inspect and change"
-is a word, and with it the other two are rows in it.
-
----
-
-## What was actually done, 2026-09-20 — and where this note was wrong
-
-*Amended after the work, because a plan left standing beside its outcome is
-read as the outcome. The reasoning above holds; two of the three steps were
-taken in the other order and the third was taken differently.*
-
-**2 was taken first, not 1**, on Alice's third correction: what the host
-serves may stay served by the host, it only has to be **declared**. That
-turns "12 rivals to migrate" into an inventory without moving a file, and it
-had to come first because it decides what the table would hold.
-
-**The type is not a field we invent in somebody else's format.** `ICFTYP` is
-already in every `*.sicf.xml` -- it had been serialised since the first node
-and read by nothing. But a path this host answers from JavaScript **cannot**
-be a `*.sicf.xml` at all: on a real system that object does not exist, and
-writing one would claim it transports. So the type follows from **where the
-node is declared** -- a SAP object, or `src/icf/nodes.json` -- and "does it
-travel" follows from that rather than from a flag somebody keeps true.
-`tools/osd-nodes.mjs` reads both; `tools/osd-routes.mjs` is the drift check
-over them, in both directions.
-
-**3 was taken, and not into a table.** Alice, on the proposal to move the
-pages into a DDIC table: "Страницы могут по прежнему лкжать в файлах в
-каталоге!" She is right, and the correction generalises -- *imitate the
-interface, not the storage*. A system keeps pages in `O2PAGELINE`; that is
-its business. Ours are files, and each one is now a Web Repository object
-beside the generated class, which is the mechanism this tree already carries
-33 media objects and 16 MB on.
-
-**The numbers above are historical.** As of `ef8101a`:
-
-```
-gen/bsp/zcl_stg_bsp_registry.clas.abap   8.8 KB -- a list (was 137.9 KB of base64)
-reserved = ["/sap/opu/odata", "/sap/bc/adt"]   deleted from both hosts
-the hosts' own route lists                     deleted; mountHost attaches what the registry declares
-30 nodes: 18 ABAP, 10 HOST, 1 PROXY, 1 with no handler
-0 express registrations nobody declared, 0 declared nodes nothing serves
-```
-
-**1 is still the one to take**, for the reason given -- and the rule it
-still lacks is the one named further up: what happens when the table and the
-objects disagree. There is one for the database (schema drift: move aside,
-say so, never silently) and none for this. Write it before the table.
+on a real system, [`registry-drift.md`](registry-drift.md) for what happens
+when the objects and the rows disagree, and backlog Track R for the RFC kind.
