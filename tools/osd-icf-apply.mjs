@@ -232,9 +232,15 @@ export async function applyAtStartup(client, options = {}) {
     const {icfRows} = await import("./osd-icf-rows.mjs");
     const {actions, report: lines} = await applyTo(client, icfRows(options.root ?? process.cwd()));
     for (const line of lines) say(line);
-    const changed = actions.filter((a) => a.action !== "KEEP").length;
-    if (changed > 0) {
-      say(`ICF registry: ${changed} of ${actions.length} nodes applied from their objects`);
+    // **What was applied, not what was looked at.** `!== "KEEP"` counted an
+    // ORPHAN as applied, so a start that wrote nothing and kept one row it
+    // could not explain said "1 of 19 nodes applied from their objects" --
+    // a true number answering a question nobody asked, which is a shape this
+    // tree has paid for four times. An orphan is reported on its own line
+    // above and is not an application of anything.
+    const applied = actions.filter((a) => ["INSERT", "REPLACE", "ASIDE", "REMOVE"].includes(a.action)).length;
+    if (applied > 0) {
+      say(`ICF registry: ${applied} of ${actions.length} nodes applied from their objects`);
     }
     return actions;
   } catch (e) {

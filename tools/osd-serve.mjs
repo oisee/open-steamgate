@@ -54,7 +54,17 @@ await initializeABAP();
 // statement with a shelf life" one commit ago: the ICF paths below are
 // mounted from these rows now, so a registry that could not be applied is a
 // runtime that would answer nothing on them and say it was fine.
-const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root});
+// A line this process says must be seen: `console.log` here reaches the
+// parent's rolling tail and no further (tools/osd-runtime.mjs), so anything
+// that must not be silent goes over the IPC channel as well. Standing on
+// its own rather than inlined, because the next thing that must be seen
+// will be written by somebody who did not read this comment.
+const announce = (line) => {
+  console.log(line);
+  process.send?.({type: "say", line});
+};
+
+const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 if (registry === undefined) {
   throw new Error("the ICF registry could not be applied, and the routes below come from it");
 }
@@ -110,7 +120,9 @@ function dump(error, request) {
   if (dumps.length > 100) {
     dumps.shift();
   }
-  console.error(`runtime error: ${d.where}${request ? `  (${request})` : ""}`);
+  // a dump is the thing a person is most likely to be waiting to see, and
+  // it was going into the tail with everything else
+  announce(`runtime error: ${d.where}${request ? `  (${request})` : ""}`);
   for (const f of d.frames.slice(1, 6)) {
     console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
   }

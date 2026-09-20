@@ -208,15 +208,50 @@ export class ServingRuntime {
       child.stdout.on("data", say);
       child.stderr.on("data", say);
 
+      // **What the child asks to have said, said.**
+      //
+      // Its stdout is captured into the tail above and printed nowhere: the
+      // tail exists to explain a failure to start, and it is capped because
+      // a work process serving the demo writes a line a frame
+      // (docs/demo-profile.md). So everything the runtime said in a healthy
+      // process -- the ICF registry's "kept aside" and "no object explains
+      // it", every `runtime error:` line -- was produced, returned and seen
+      // by nobody. "Never silently" is half the drift rule and it did not
+      // hold in the configuration that actually serves.
+      //
+      // Forwarding the stream would reopen the cost the cap was measured
+      // against, so the child **chooses**: a line it sends over the IPC
+      // channel it already has is a line it says must be seen. That is not
+      // a filter guessing which lines matter -- the writer decides, which is
+      // the only party that can.
+      child.on("message", (message) => {
+        if (message?.type === "say" && typeof message.line === "string") {
+          console.log(`[runtime] ${message.line}`);
+        }
+      });
+
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
         reject(new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`));
       }, this.timeout);
 
-      child.once("message", (message) => {
+      // **`on`, not `once`, and that distinction cost every test in this
+      // file.** The channel carried one kind of message for as long as it
+      // existed, so `once` was the same thing as `on` with a guard -- until
+      // the child started sending `{type: "say"}` before it is ready. The
+      // first message then consumed the listener, the guard returned early,
+      // and `ready` was never heard: ten tests failed with "the serving
+      // runtime did not answer within 60000 ms", quoting the very line that
+      // had eaten the listener.
+      //
+      // A handler removed by arrival rather than by content is a handler
+      // that assumes the channel has one subject. This one takes itself off
+      // when it has what it waited for.
+      const onMessage = (message) => {
         if (message?.type !== "ready") {
           return;
         }
+        child.off("message", onMessage);
         clearTimeout(timer);
         this.died = undefined;
         this.child = child;
@@ -230,7 +265,8 @@ export class ServingRuntime {
         this.ready = Promise.resolve(answer);
         options.announce?.resolve(answer);
         resolve(answer);
-      });
+      };
+      child.on("message", onMessage);
 
       child.once("exit", (code, signal) => {
         clearTimeout(timer);
