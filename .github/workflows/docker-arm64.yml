@@ -1,0 +1,72 @@
+name: OSD ARM64 draft
+on:
+  pull_request:
+    paths: ['docker/**', 'src/**', 'tools/**', 'test/**', 'package*.json', 'abap_transpile.json', '.github/workflows/docker-arm64.yml']
+  push:
+    branches: [feat/docker-arm64]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the smoke-tested ARM64 draft
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: docker-arm64-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Stack copies
+        run: node scripts/sync-spin.mjs --check
+      - name: Build native ARM64 OSD image
+        run: |
+          docker buildx create --use
+          docker buildx build --platform linux/arm64 --load --tag osd:arm64-ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" -f docker/image/Dockerfile .
+          test "$(docker image inspect --format '{{.Architecture}}' osd:arm64-ci)" = arm64
+          docker run --rm --entrypoint node osd:arm64-ci -p 'if (process.arch !== "arm64") process.exit(1)'
+      - name: Check runtime and protocol license inventories
+        run: |
+          docker run --rm --entrypoint node osd:arm64-ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
+          docker run --rm --entrypoint cat osd:arm64-ci /opt/protocols/licenses.json > protocol-licenses.json
+          node -e 'const r=require("./protocol-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
+      - name: Build native ARM64 SAP-TUI and RFC acceptance clients
+        run: docker buildx build --platform linux/arm64 --load --tag osd-probes:arm64-ci -f docker/image/Dockerfile.probes .
+      - name: SQLite and DuckDB persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
+        env:
+          OSD_TEST_DATABASES: sqlite duckdb
+          OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance-arm64
+        run: sh docker/image/smoke.sh osd:arm64-ci osd-probes:arm64-ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-acceptance-arm64
+          retention-days: 14
+          if-no-files-found: warn
+          path: image-acceptance-arm64/
+      - name: Publish exactly the tested ARM64 image
+        if: >-
+          (github.event_name == 'push' && github.ref == 'refs/heads/feat/docker-arm64')
+          || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-arm64"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker tag osd:arm64-ci "$registry:$tag"
+          docker push "$registry:$tag"
+          docker tag osd:arm64-ci "$registry:arm64-draft"
+          docker push "$registry:arm64-draft"
+          printf 'OSD_ARM64_TAG=%s\n' "$tag" >> "$GITHUB_STEP_SUMMARY"

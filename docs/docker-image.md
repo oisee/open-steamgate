@@ -2,8 +2,23 @@
 
 One Node 24 image supports native SQLite (`STG_DB=file`), DuckDB,
 HANA/HANA Express and PostgreSQL, and includes the DIAG/RFC stub binary. The HANA Stack
-starts a separate SAP HANA Express container under SAP's terms. First target:
-`linux/amd64`; ARM64 needs separate native DuckDB and protocol validation.
+starts a separate SAP HANA Express container under SAP's terms. The
+`docker-draft` tag currently targets `linux/amd64`.
+
+An experimental ARM64 build runs in the separate **OSD ARM64 draft** workflow
+on a native `ubuntu-24.04-arm` runner. It builds the same Dockerfile for
+`linux/arm64`, checks its installed architecture and license inventories, then
+uses the existing Compose acceptance suite for SQLite and DuckDB, including
+OData persistence across a whole-stack restart, HTTPS, SAP-TUI on 32nn and
+ADT-over-RFC on 33nn. Only after these pass does it publish `arm64-draft`
+and an immutable `sha-…-arm64` tag. To try it on a 64-bit Raspberry Pi OS
+host, set `OSD_TAG=arm64-draft` in the SQLite or DuckDB Portainer Stack.
+The CI acceptance run is on an ARM64 GitHub runner, not a Raspberry Pi;
+hardware-specific compatibility is still to be verified. HXE is not part
+of this ARM64 test or Stack; its published Docker image is AMD64-only.
+The existing `docker-draft` tag remains AMD64-only until both variants are
+tested at the same source revision and published as one multi-platform
+manifest. Do not assume an ARM64 run by itself makes `docker-draft` portable.
 
 Short, complete Portainer stacks: [SQLite](../docker/compose.sqlite.yml),
 [DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml),
