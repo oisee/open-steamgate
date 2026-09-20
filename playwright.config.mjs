@@ -21,6 +21,10 @@ export default defineConfig({
   },
   webServer: {
     command: "node test/run.mjs",
+    // CRUD suites must not reuse the developer's persistent default DB.
+    // Explicit adapter selection is retained for targeted backend checks.
+    env: {STG_DB: process.env.STG_DB ?? "sqlite",
+      STG_DB_PATH: process.env.STG_DB ? process.env.STG_DB_PATH ?? "" : ""},
     url: `http://localhost:${PORT}/`,
     reuseExistingServer: false,
     timeout: 60_000,

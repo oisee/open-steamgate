@@ -70,7 +70,7 @@ export function rowsOf(node) {
   const handlers = (node.handlers ?? []).map((h, i) => ({
     ICF_NAME: name,
     ICFPARGUID: service.ICFPARGUID,
-    ICFORDER: String(i + 1).padStart(2, "0"),
+    ICFORDER: h.order ?? String(i + 1).padStart(2, "0"),
     ICFTYP: h.icftyp ?? "A",
     ICFHANDLER: h.handler,
   }));
@@ -84,11 +84,12 @@ export function icfRows(root = ".", options = {}) {
   // a real system keeps it: every *.sicf.xml in the corpus carries it in an
   // <ICFDOCU> block rather than inside <ICFSERVICE>
   const icfdocu = [];
+  const apc = [];
   for (const node of services(root, options)) {
     // the whole chain, not the last of it: a row per handler is what the
     // table holds, and `serviceOf` reduces the chain to the one that answers
     const chain = handlerRows(readFileSync(node.source, "utf8"))
-      .map((r) => ({handler: r.handler, icftyp: r.icftyp}));
+      .map((r) => ({handler: r.handler, icftyp: r.icftyp, order: r.order}));
     const {service, handlers} = rowsOf({...node, handlers: chain});
     icfservice.push(service);
     icfhandler.push(...handlers);
@@ -104,12 +105,23 @@ export function icfRows(root = ".", options = {}) {
   // one that reports a path nobody serves
   for (const channel of channels(root, options)) {
     const {service} = rowsOf({...channel, handlers: []});
-    if (icfservice.some((s) => s.URL === service.URL) === false) {
+    let node = icfservice.find((s) => s.URL === service.URL);
+    if (node === undefined) {
       icfservice.push(service);
+      node = service;
+    }
+    // SAPC owns the WebSocket implementation, not the HTTP handler chain.
+    // Link by URL to the existing SICF node, whose name need not be the
+    // SAPC application ID. Keep this read-only inventory in our own table.
+    apc.push({ICF_NAME: node.ICF_NAME, ICFPARGUID: node.ICFPARGUID,
+      APPLICATION_ID: channel.name, HANDLER: channel.handler, STATEFUL: channel.stateful ? "X" : ""});
+    if (channel.description && !icfdocu.some((d) => d.ICF_NAME === node.ICF_NAME && d.ICFPARGUID === node.ICFPARGUID)) {
+      icfdocu.push({ICF_NAME: node.ICF_NAME, ICFPARGUID: node.ICFPARGUID,
+        ICF_LANGU: "E", ICF_DOCU: channel.description.slice(0, 100)});
     }
   }
   const by = (a, b) => (a.URL ?? a.ICF_NAME) < (b.URL ?? b.ICF_NAME) ? -1 : 1;
-  return {ICFSERVICE: icfservice.sort(by), ICFHANDLER: icfhandler.sort(by), ICFDOCU: icfdocu.sort(by)};
+  return {ICFSERVICE: icfservice.sort(by), ICFHANDLER: icfhandler.sort(by), ICFDOCU: icfdocu.sort(by), ZOSD_ICF_APC: apc.sort(by)};
 }
 
 if (runsAs("osd-icf-rows.mjs")) {

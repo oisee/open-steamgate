@@ -2,6 +2,7 @@ import {expect} from "chai";
 import express from "express";
 import {existsSync, readFileSync} from "node:fs";
 import {adtRouter} from "../tools/adt-facade.mjs";
+import {Data} from "../tools/osd-data.mjs";
 import {TREE_CATEGORY, TREE_TYPE_LABEL, TREE_FOLDER, ADT_TYPE} from "../tools/adt-documents.mjs";
 import {startServer} from "./start.mjs";
 
@@ -80,7 +81,13 @@ describe("src/zosd_test: the reference package of every type the façade shows",
     app.use(express.raw({type: "*/*", limit: "16mb"}));
     // the transpile after an activation rewrites output/ underneath the rest
     // of the suite, so this asks for the verdict and not for the modules
-    const facade = adtRouter({transpileOnActivate: false});
+    // This façade and the inline gateway are one test system. Rebooting a
+    // second database connection after earlier suites have opened a write
+    // transaction can lock a file-backed SQLite database; Data Preview must
+    // read through the already connected client that serves OData.
+    const client = globalThis.abap?.context?.databaseConnections?.DEFAULT;
+    if (client === undefined) throw new Error("the inline test system has no connected database");
+    const facade = adtRouter({transpileOnActivate: false, data: new Data({client})});
     store = facade.store;
     app.use(facade.router);
     await new Promise((resolve) => {
@@ -392,14 +399,15 @@ describe("src/zosd_test: the reference package of every type the façade shows",
     });
   });
 
-  describe("the table answers with its rows", () => {
+  describe("the table answers with its rows", function () {
+    this.timeout(15000);
     it("Data Preview reads the seeded items", async () => {
       const res = await call("/datapreview/freestyle?rowNumber=100", {
         method: "POST",
         body: "SELECT item_id, name, status, quantity FROM zosd_test_item",
       });
-      expect(res.status).to.equal(200);
       const xml = await res.text();
+      expect(res.status, xml).to.equal(200);
       expect(xml).to.contain("<dataPreview:tableData");
       for (const column of ["ITEM_ID", "NAME", "STATUS", "QUANTITY"]) {
         expect(xml, column).to.contain(`dataPreview:name="${column}"`);
@@ -413,8 +421,9 @@ describe("src/zosd_test: the reference package of every type the façade shows",
         method: "POST",
         body: "SELECT * FROM zvosdtestitem",
       });
-      expect(res.status).to.equal(200);
-      expect(await res.text()).to.contain("<dataPreview:totalRows>6</dataPreview:totalRows>");
+      const xml = await res.text();
+      expect(res.status, xml).to.equal(200);
+      expect(xml).to.contain("<dataPreview:totalRows>6</dataPreview:totalRows>");
     });
 
     it("the projection view over the table answers too", async () => {
@@ -422,8 +431,9 @@ describe("src/zosd_test: the reference package of every type the façade shows",
         method: "POST",
         body: "SELECT * FROM zosd_test_item_v",
       });
-      expect(res.status).to.equal(200);
-      expect(await res.text()).to.contain("<dataPreview:totalRows>6</dataPreview:totalRows>");
+      const xml = await res.text();
+      expect(res.status, xml).to.equal(200);
+      expect(xml).to.contain("<dataPreview:totalRows>6</dataPreview:totalRows>");
     });
   });
 

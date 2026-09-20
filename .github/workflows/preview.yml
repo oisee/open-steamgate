@@ -132,6 +132,11 @@ jobs:
       - name: Screenshots
         run: node scripts/capture-screenshots.mjs
       - name: Publish to gh-pages
+        # This is deliberately after the browser check and screenshots.  The
+        # explicit success guard documents the safety property: a failed
+        # build, test, or screenshot step never replaces the last published
+        # preview.
+        if: ${{ success() }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

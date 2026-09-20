@@ -1,7 +1,9 @@
 // The registry as rows in a real database, applied by the rule.
 import {expect} from "chai";
-import {EDITED, applyTo, currentOrigins, currentRows, keyOf, markEdited} from "../tools/osd-icf-apply.mjs";
+import {EDITED, applyTo, contentHash, currentOrigins, currentRows, keyOf, markEdited} from "../tools/osd-icf-apply.mjs";
 import {icfRows} from "../tools/osd-icf-rows.mjs";
+import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
+import {readFileSync} from "node:fs";
 
 // The four falsifications `docs/registry-drift.md` ends with, run against
 // the database rather than over a plan. The plan is checked separately in
@@ -10,25 +12,29 @@ import {icfRows} from "../tools/osd-icf-rows.mjs";
 // you.
 describe("the ICF registry, applied to a database", function () {
   this.timeout(60000);
-  const client = () => globalThis.abap.context.databaseConnections.DEFAULT;
+  const database = new FileSqliteClient({path: ":memory:"});
+  const client = () => database;
   const objects = () => icfRows(".");
 
-  // the runtime, because the rows are the point: a registry checked against
-  // a fake client is a plan checked twice
+  // A real private database with the generated DDIC schema. Never clear the
+  // runtime's DEFAULT connection: environment variables may point it at a
+  // persistent database or another backend used by the developer.
   before(async () => {
-    if (globalThis.abap === undefined) {
-      const {initializeABAP} = await import("../output/init.mjs");
-      await initializeABAP();
-    }
+    const source = readFileSync(new URL("../output/init.mjs", import.meta.url), "utf8");
+    const schema = [...source.matchAll(/sqlite\.push\(`(CREATE TABLE '(?:icfservice|icfhandler|icfdocu|zosd_icf_origin|zosd_icf_aside|zosd_icf_apc)'[^`]+)`\);/g)]
+      .map((m) => m[1]);
+    expect(schema, "all six generated ICF tables are present").to.have.length(6);
+    await database.connect();
+    await database.execute(schema);
   });
 
   const clear = async () => {
-    for (const t of ["icfservice", "icfhandler", "zosd_icf_origin", "zosd_icf_aside"]) {
+    for (const t of ["icfservice", "icfhandler", "icfdocu", "zosd_icf_origin", "zosd_icf_aside", "zosd_icf_apc"]) {
       await client().execute(`DELETE FROM "${t}";`);
     }
   };
   beforeEach(clear);
-  after(clear);
+  after(() => database.disconnect());
 
   it("a first apply puts every node of the tree in the table", async () => {
     const said = [];
@@ -45,6 +51,97 @@ describe("the ICF registry, applied to a database", function () {
     await applyTo(client(), objects());
     const {actions} = await applyTo(client(), objects());
     expect(actions.every((a) => a.action === "KEEP"), actions.map((a) => a.action).join(",")).to.equal(true);
+  });
+
+  it("refreshes the APC implementation when only SAPC changes and removes stale applications", async () => {
+    const original = objects();
+    await applyTo(client(), original);
+    const changed = {...original, ZOSD_ICF_APC: original.ZOSD_ICF_APC.map((a) => ({...a, HANDLER: "ZCL_CHANGED_APC"}))};
+    const result = await applyTo(client(), changed);
+    expect(result.actions.every((a) => a.action === "KEEP")).to.equal(true);
+    const saved = (await client().select({select: "SELECT handler FROM zosd_icf_apc"})).rows;
+    expect(saved.length).to.equal(changed.ZOSD_ICF_APC.length);
+    expect(saved.every((r) => String(r.handler ?? r.HANDLER).trim() === "ZCL_CHANGED_APC")).to.equal(true);
+    await applyTo(client(), {...original, ZOSD_ICF_APC: []});
+    expect((await client().select({select: "SELECT * FROM zosd_icf_apc"})).rows).to.deep.equal([]);
+  });
+
+  it("applies a description-only change, removal, and addition to ICFDOCU", async () => {
+    const initial = objects();
+    const original = initial.ICFDOCU[0];
+    expect(original, "the fixture has a described node").to.exist;
+    const target = initial.ICFSERVICE.find((s) => keyOf(s) === keyOf(original));
+    await applyTo(client(), initial);
+
+    const changed = {...initial, ICFDOCU: initial.ICFDOCU.map((d) =>
+      d === original ? {...d, ICF_DOCU: "A new description"} : d)};
+    const change = await applyTo(client(), changed);
+    expect(change.actions.find((a) => a.key === keyOf(target)).action).to.equal("REPLACE");
+    expect((await currentRows(client())).ICFDOCU.find((d) => keyOf(d) === keyOf(target)).ICF_DOCU)
+      .to.equal("A new description");
+
+    const removed = {...initial, ICFDOCU: initial.ICFDOCU.filter((d) => keyOf(d) !== keyOf(target))};
+    const removal = await applyTo(client(), removed);
+    expect(removal.actions.find((a) => a.key === keyOf(target)).action).to.equal("REPLACE");
+    expect((await currentRows(client())).ICFDOCU.filter((d) => keyOf(d) === keyOf(target))).to.deep.equal([]);
+
+    const addition = await applyTo(client(), initial);
+    expect(addition.actions.find((a) => a.key === keyOf(target)).action).to.equal("REPLACE");
+    expect((await currentRows(client())).ICFDOCU.find((d) => keyOf(d) === keyOf(target)).ICF_DOCU)
+      .to.equal(original.ICF_DOCU);
+  });
+
+  it("upgrades a legacy hash while retaining EDITED activity and local description, then stays quiet", async () => {
+    const original = objects();
+    const docu = original.ICFDOCU[0];
+    expect(docu, "the fixture has a described node").to.exist;
+    const target = original.ICFSERVICE.find((s) => keyOf(s) === keyOf(docu));
+    const handlers = original.ICFHANDLER.filter((h) => keyOf(h) === keyOf(target));
+    const legacyHash = contentHash(target, handlers);
+    const newHash = contentHash(target, handlers,
+      original.ICFDOCU.filter((d) => keyOf(d) === keyOf(target)));
+    expect(newHash).to.not.equal(legacyHash);
+    await applyTo(client(), original);
+    await client().execute(`UPDATE "icfservice" SET "icfactive" = '' WHERE "icf_name" = '${target.ICF_NAME}' AND "icfparguid" = '${target.ICFPARGUID}';`);
+    await client().execute(`UPDATE "icfdocu" SET "icf_docu" = 'Edited locally' WHERE "icf_name" = '${target.ICF_NAME}' AND "icfparguid" = '${target.ICFPARGUID}';`);
+    await markEdited(client(), target.ICF_NAME, target.ICFPARGUID);
+    await client().execute(`UPDATE "zosd_icf_origin" SET "objhash" = '${legacyHash}' WHERE "icf_name" = '${target.ICF_NAME}' AND "icfparguid" = '${target.ICFPARGUID}';`);
+
+    const upgraded = await applyTo(client(), original);
+    const action = upgraded.actions.find((a) => a.key === keyOf(target));
+    expect(action.action).to.equal("KEEP");
+    expect(action.upgradeHash).to.equal(true);
+    expect((await currentOrigins(client())).get(keyOf(target))).to.include({origin: EDITED, hash: newHash});
+    expect((await currentRows(client())).ICFSERVICE.find((s) => keyOf(s) === keyOf(target)).ICFACTIVE)
+      .to.equal("");
+    expect((await currentRows(client())).ICFDOCU.find((d) => keyOf(d) === keyOf(target)).ICF_DOCU)
+      .to.equal("Edited locally");
+    expect((await client().select({select: `SELECT * FROM zosd_icf_aside`})).rows).to.have.length(0);
+
+    const again = await applyTo(client(), original);
+    expect(again.actions.find((a) => a.key === keyOf(target))).to.include({action: "KEEP", hash: newHash});
+    expect(again.actions.find((a) => a.key === keyOf(target)).upgradeHash).to.equal(undefined);
+    expect(again.report).to.deep.equal([]);
+    expect((await currentOrigins(client())).get(keyOf(target)).origin).to.equal(EDITED);
+    expect((await currentRows(client())).ICFSERVICE.find((s) => keyOf(s) === keyOf(target)).ICFACTIVE)
+      .to.equal("");
+    expect((await currentRows(client())).ICFDOCU.find((d) => keyOf(d) === keyOf(target)).ICF_DOCU)
+      .to.equal("Edited locally");
+  });
+
+  it("deletes descriptions removed from a legacy SEEDED object and then stays quiet", async () => {
+    const initial = objects();
+    const docu = initial.ICFDOCU[0];
+    const target = initial.ICFSERVICE.find((s) => keyOf(s) === keyOf(docu));
+    const hash = contentHash(target, initial.ICFHANDLER.filter((h) => keyOf(h) === keyOf(target)));
+    await applyTo(client(), initial);
+    await client().execute(`UPDATE "zosd_icf_origin" SET "objhash" = '${hash}' WHERE "icf_name" = '${target.ICF_NAME}' AND "icfparguid" = '${target.ICFPARGUID}';`);
+    const removed = {...initial, ICFDOCU: initial.ICFDOCU.filter((d) => keyOf(d) !== keyOf(target))};
+    const result = await applyTo(client(), removed);
+    expect(result.actions.find((a) => a.key === keyOf(target)).action).to.equal("REPLACE");
+    expect((await currentRows(client())).ICFDOCU.filter((d) => keyOf(d) === keyOf(target))).to.deep.equal([]);
+    const again = await applyTo(client(), removed);
+    expect(again.actions.find((a) => a.key === keyOf(target)).action).to.equal("KEEP");
   });
 
   it("an edit survives a second apply of the same objects", async () => {

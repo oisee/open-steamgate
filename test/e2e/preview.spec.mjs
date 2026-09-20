@@ -1002,6 +1002,37 @@ test("the registry screen counts the nodes this deployment actually serves", asy
 // this morning -- an absolute component URL, an absolute data source, a
 // file name that does not survive a URL -- would break this one too, and
 // each of those passed every check that existed at the time.
+test("preview restart routes from the saved ICF activity", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "osd-preview-icf-"));
+  let context;
+  const open = async () => {
+    context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    return page;
+  };
+  try {
+    let page = await test.step("start the initial browser", open);
+    await page.goto(`${ORIGIN}/sap/bc/osd/sicf/`);
+    const row = page.locator("tr").filter({has: page.locator("td.u", {hasText: "/sap/bc/zstg_icf_demo/"})});
+    await row.getByRole("button", {name: "switch off", exact: true}).click();
+    await expect(page.locator("body")).toContainText("switched off");
+    await test.step("stop the initial browser", () => context.close());
+    context = undefined;
+    page = await test.step("restart with the saved database", open);
+    const probe = () => page.evaluate(async () => {
+      const off = await fetch("sap/bc/zstg_icf_demo/", {signal: AbortSignal.timeout(15000)});
+      const on = await fetch("sap/bc/osd/sicf/", {signal: AbortSignal.timeout(15000)});
+      return {off: off.status, on: on.status};
+    });
+    expect(await test.step("probe after restart", probe)).toEqual({off: 404, on: 200});
+  } finally {
+    await context?.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 test("the ICF registry application lists the nodes it is a registry of", async () => {
   const profile = await mkdtemp(join(tmpdir(), "osd-preview-"));
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
@@ -1036,6 +1067,3 @@ test("the ICF registry application lists the nodes it is a registry of", async (
     await rm(profile, {recursive: true, force: true});
   }
 });
-
-
-

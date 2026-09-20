@@ -1,0 +1,17 @@
+{
+  "sap.ui5": {
+    "dependencies": {
+      "libs": {
+        "sap.f": {}
+      }
+    }
+  },
+  "sap.ui.generic.app": {
+    "settings": {
+      "flexibleColumnLayout": {
+        "defaultTwoColumnLayoutType": "TwoColumnsMidExpanded",
+        "defaultThreeColumnLayoutType": "ThreeColumnsEndExpanded"
+      }
+    }
+  }
+}

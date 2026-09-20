@@ -12,6 +12,8 @@ import {Buffer} from "buffer";
 import {seed, buildId} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 import {registry as icfRegistry} from "./generated/icf.mjs";
+import {servicesFromRows, serviceForPath} from "../tools/osd-icf-routing.mjs";
+import {currentRows} from "../tools/osd-icf-apply.mjs";
 
 // test/setup.mjs looks for this before it touches the file system: the seed
 // rows come from the bundle, the database from cache storage (or fresh).
@@ -104,13 +106,11 @@ globalThis.abap.W3MI_LOADER = async (objid, filename) => {
 // which service answers a path: the longest prefix that matches, so a service
 // mounted below another is found before its parent. Nothing here knows what
 // any of them do.
-const byLength = [...services].sort((a, b) => b.path.length - a.path.length);
+const odataFront = services.filter((s) => s.path === "/sap/opu/odata/sap")
+  .map((s) => ({...s, type: "ABAP"}));
+let registryServices = [];
 function serviceFor(path) {
-  const found = byLength.find((s) => path === s.path || path.startsWith(s.path + "/"));
-  if (found === undefined) {
-    throw new Error(`no service is mounted on ${path}`);
-  }
-  return found;
+  return serviceForPath([...registryServices, ...odataFront], path);
 }
 const {zcl_osd_status} = await import("../output/zcl_osd_status.clas.mjs");
 const {zcl_stg_segw_registry} = await import("../output/zcl_stg_segw_registry.clas.mjs");
@@ -160,6 +160,7 @@ async function invoke({method, path, search = "", headers = {}, body}) {
     },
   };
   const service = serviceFor(path);
+  if (service === undefined) return {status: 404, headers: responseHeaders, body: data};
   // a read of the status service takes the snapshot that answers it, which is
   // what keeps snap_at honest; it costs a few object reads and nothing else
   // pays for it
@@ -369,12 +370,9 @@ export async function startBackend(stored, options = {}) {
   // paths. The rows are data, so the build writes them into the bundle
   // (scripts/build-preview.mjs) and this applies them by the same rule --
   // an inventory that contradicts what it inventories is worse than none.
-  try {
-    const {applyTo} = await import("../tools/osd-icf-apply.mjs");
-    await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
-  } catch (e) {
-    console.log(`ICF registry not applied: ${e?.message ?? e}`);
-  }
+  const {applyTo} = await import("../tools/osd-icf-apply.mjs");
+  await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry, {say: console.log});
+  registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
   await registerServices();
   await refreshStatus();
 }
@@ -390,6 +388,9 @@ export function resetBackend() {
     preview.stored = undefined;
     const setup = await import("../test/setup.mjs");
     await setup.setup(globalThis.abap, preview.schemas, preview.insert);
+    const {applyTo} = await import("../tools/osd-icf-apply.mjs");
+    await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
+    registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
     // the status tables went with the database; fill them again rather than
     // leaving the app empty until somebody opens it
     await refreshStatus();
