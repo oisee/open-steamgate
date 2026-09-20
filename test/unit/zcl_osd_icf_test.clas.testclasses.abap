@@ -10,6 +10,7 @@ CLASS ltcl_lookup DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINA
     METHODS setup.
     METHODS teardown.
     METHODS a_node_is_read_from_the_table FOR TESTING RAISING cx_static_check.
+    METHODS handler_order_not_insert_order FOR TESTING RAISING cx_static_check.
     METHODS the_deepest_node_wins FOR TESTING RAISING cx_static_check.
     METHODS a_child_inherits_the_handler FOR TESTING RAISING cx_static_check.
     METHODS an_inactive_node_answers_none FOR TESTING RAISING cx_static_check.
@@ -66,6 +67,22 @@ CLASS ltcl_lookup IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( lt_nodes ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = lt_nodes[ 1 ]-handler exp = 'ZCL_OSD_RFC_HTTP' ).
     cl_abap_unit_assert=>assert_equals( act = lt_nodes[ 1 ]-icftyp exp = 'A' ).
+  ENDMETHOD.
+
+  METHOD handler_order_not_insert_order.
+    DATA ls_handler TYPE icfhandler.
+    add( iv_name = 'ORDERED' iv_url = '/ordered/' ).
+    ls_handler-icf_name = 'ORDERED'.
+    ls_handler-icfparguid = 'ORDERED'.
+    ls_handler-icforder = '02'.
+    ls_handler-icftyp = 'A'.
+    ls_handler-icfhandler = 'ZCL_LAST'.
+    INSERT icfhandler FROM ls_handler.
+    ls_handler-icforder = '01'.
+    ls_handler-icfhandler = 'ZCL_FIRST'.
+    INSERT icfhandler FROM ls_handler.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_osd_icf=>handler_of( '/ordered/' ) exp = 'ZCL_LAST' ).
   ENDMETHOD.
 
   METHOD the_deepest_node_wins.

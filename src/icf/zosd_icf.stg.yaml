@@ -8,7 +8,7 @@
 # (docs/registry-drift.md, docs/icf-registry-plan.md).
 #
 # The storage is ICF-shaped tables in src/osd/ddic/ -- ICFSERVICE,
-# ICFHANDLER, ICFDOCU -- plus ZOSD_ICF_ORIGIN, which is ours and says so.
+# ICFHANDLER, ICFDOCU -- plus OSD-owned origin and APC-assignment tables.
 # The data model is CDS over them (src/cds/zc_osd_icf_*.ddls.asddls), and
 # this file is the shell, built exactly the way src/status/ is.
 #
@@ -63,6 +63,22 @@ entities:
       IcfTyp: {type: String(1), field: ICFTYP, readonly: true, label: Type}
       Handler: {type: String(30), field: HANDLER, readonly: true, label: Handler}
 
+  Apc:
+    set: ApcSet
+    description: "a WebSocket APC application assigned to an ICF node"
+    source: {cds: ZC_OSD_ICF_APC, struct: "ZCL_STG_CDS_ZVOSDICFA=>TY_ROW"}
+    keys: [IcfName, IcfParGuid, ApplicationId]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
+      IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
+      ApplicationId: {type: String(30), field: APPLICATIONID, readonly: true, label: Application ID}
+      Handler: {type: String(30), field: HANDLER, readonly: true, label: Implementation class}
+      Stateful: {type: String(1), field: STATEFUL, readonly: true, label: Stateful}
+
   Docu:
     set: DocuSet
     description: "a node's description, per language"
@@ -100,6 +116,11 @@ associations:
     to: Handler
     cardinality: 1:N
     navigation: {Node: to_Handlers}
+  NodeToApc:
+    from: Node
+    to: Apc
+    cardinality: 1:N
+    navigation: {Node: to_Apc}
   NodeToDocu:
     from: Node
     to: Docu
@@ -127,7 +148,8 @@ annotations:
       - {value: OrigName, label: Original name}
     facets:
       - {id: General, label: General, fieldGroup: General}
-      - {id: Handlers, label: Handlers, lineItem: to_Handlers}
+      - {id: Handlers, label: HTTP handlers, lineItem: to_Handlers}
+      - {id: Apc, label: WebSocket (APC), lineItem: to_Apc}
       - {id: Descriptions, label: Descriptions, lineItem: to_Docu}
       - {id: Origin, label: Origin, lineItem: to_Origin}
     fieldGroups:
@@ -152,6 +174,16 @@ annotations:
   Handler/IcfOrder: {label: Order}
   Handler/Handler: {label: Handler}
   Handler/IcfTyp: {label: Type}
+
+  Apc:
+    header: {typeName: WebSocket application, typeNamePlural: WebSocket applications, title: ApplicationId, description: Handler}
+    lineItem:
+      - {value: ApplicationId, label: Application ID}
+      - {value: Handler, label: Implementation class}
+      - {value: Stateful, label: Stateful}
+  Apc/ApplicationId: {label: Application ID}
+  Apc/Handler: {label: Implementation class}
+  Apc/Stateful: {label: Stateful}
 
   Docu:
     header: {typeName: Description, typeNamePlural: Descriptions, title: IcfDocu, description: IcfLangu}

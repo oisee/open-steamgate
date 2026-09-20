@@ -89,6 +89,57 @@ describe("docs/registry-drift: what happens when the table and the objects disag
     only(plan(after, before, origins), "REPLACE");
   });
 
+  it("description changes, additions, and removals change the object hash", () => {
+    const base = rows("ZA", "/sap/bc/a/", "ZCL_A");
+    const english = {ICF_NAME: "ZA", ICFPARGUID: "P", ICF_LANGU: "E", ICF_DOCU: "English"};
+    const german = {...english, ICF_LANGU: "D", ICF_DOCU: "Deutsch"};
+    const withDocu = (docu) => ({...base, ICFDOCU: docu});
+    const actionsFor = (before, after) => plan(after, before,
+      new Map([[key, {origin: SEEDED,
+        hash: contentHash(base.ICFSERVICE[0], base.ICFHANDLER, before.ICFDOCU)}]]));
+
+    expect(contentHash(base.ICFSERVICE[0], base.ICFHANDLER, [english, german]))
+      .to.equal(contentHash(base.ICFSERVICE[0], base.ICFHANDLER, [german, english]));
+    expect(contentHash(base.ICFSERVICE[0], base.ICFHANDLER))
+      .to.equal(contentHash(base.ICFSERVICE[0], base.ICFHANDLER, []));
+    only(actionsFor(withDocu([english]), withDocu([{...english, ICF_DOCU: "Revised"}])), "REPLACE");
+    only(actionsFor(withDocu([]), withDocu([english])), "REPLACE");
+    only(actionsFor(withDocu([english]), withDocu([])), "REPLACE");
+  });
+
+  it("upgrades a legacy hash without losing an edited row or its local description", () => {
+    const objects = {...rows("ZA", "/sap/bc/a/", "ZCL_A"), ICFDOCU: [
+      {ICF_NAME: "ZA", ICFPARGUID: "P", ICF_LANGU: "E", ICF_DOCU: "English"},
+    ]};
+    const table = {...objects, ICFSERVICE: [{...objects.ICFSERVICE[0], ICFACTIVE: ""}]};
+    const legacyHash = contentHash(objects.ICFSERVICE[0], objects.ICFHANDLER);
+    const kept = only(plan(objects, table,
+      new Map([[key, {origin: EDITED, hash: legacyHash}]])), "KEEP");
+    expect(kept.upgradeHash).to.equal(true);
+    expect(kept.hash).to.not.equal(legacyHash);
+    expect(kept.hash).to.equal(contentHash(objects.ICFSERVICE[0], objects.ICFHANDLER, objects.ICFDOCU));
+    const disagreeing = {...table, ICFDOCU: [{...objects.ICFDOCU[0], ICF_DOCU: "Edited locally"}]};
+    // The old hash did not record descriptions, so this first upgrade cannot
+    // tell a local edit from an incoming description change. Preserve EDITED.
+    const local = only(plan(objects, disagreeing,
+      new Map([[key, {origin: EDITED, hash: legacyHash}]])), "KEEP");
+    expect(local.upgradeHash).to.equal(true);
+    expect(local.hash).to.equal(kept.hash);
+    only(plan(objects, disagreeing,
+      new Map([[key, {origin: SEEDED, hash: legacyHash}]])), "REPLACE");
+  });
+
+  it("removes a SEEDED legacy description even when the incoming empty digest matches", () => {
+    const incoming = {...rows("ZA", "/sap/bc/a/", "ZCL_A"), ICFDOCU: []};
+    const previous = {...incoming, ICFDOCU: [
+      {ICF_NAME: "ZA", ICFPARGUID: "P", ICF_LANGU: "E", ICF_DOCU: "Before"},
+    ]};
+    const hash = contentHash(incoming.ICFSERVICE[0], incoming.ICFHANDLER);
+    only(plan(incoming, previous, new Map([[key, {origin: SEEDED, hash}]])), "REPLACE");
+    only(plan(incoming, previous, new Map([[key, {origin: EDITED, hash}]])), "KEEP");
+    only(plan(incoming, incoming, new Map([[key, {origin: SEEDED, hash}]])), "KEEP");
+  });
+
   it("the report is empty when nothing was set aside, and that is not silence", () => {
     // a quiet start is quiet because nothing happened, not because the
     // reporting is optional

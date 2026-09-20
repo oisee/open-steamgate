@@ -2,9 +2,9 @@
 @AbapCatalog.compiler.compareFilter: true
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'OSD ICF registry: the nodes this system answers on'
-// The service tree as a system keeps it, with the three things hanging off
-// a node that SICF shows on tabs: its handler chain, its descriptions and
-// -- ours, not SAP's -- who last wrote the row.
+// The service tree as a system keeps it, with its HTTP handler chain,
+// WebSocket APC assignments, descriptions and -- ours, not SAP's --
+// who last wrote the row.
 //
 // The associations carry their referential constraint, unlike the status
 // service's: a handler belongs to ONE node, so the expand must be filtered
@@ -13,6 +13,8 @@ define view ZC_OSD_ICF_NODE
   as select from icfservice
   association [0..*] to ZC_OSD_ICF_HANDLER as _Handlers on  _Handlers.IcfName    = $projection.IcfName
                                                         and _Handlers.IcfParGuid = $projection.IcfParGuid
+  association [0..*] to ZC_OSD_ICF_APC     as _Apc      on  _Apc.IcfName         = $projection.IcfName
+                                                        and _Apc.IcfParGuid      = $projection.IcfParGuid
   association [0..*] to ZC_OSD_ICF_DOCU    as _Docu     on  _Docu.IcfName        = $projection.IcfName
                                                         and _Docu.IcfParGuid     = $projection.IcfParGuid
   association [0..1] to ZC_OSD_ICF_ORIGIN  as _Origin   on  _Origin.IcfName      = $projection.IcfName
@@ -31,6 +33,7 @@ define view ZC_OSD_ICF_NODE
       @EndUserText.label: 'Alias'
       icfaltnme  as IcfAltNme,
       _Handlers,
+      _Apc,
       _Docu,
       _Origin
 }

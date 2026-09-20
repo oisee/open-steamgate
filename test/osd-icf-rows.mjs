@@ -101,7 +101,8 @@ describe("tools/osd-icf-rows: the objects are the transport, the rows are the re
       return out;
     };
     for (const [file, table] of [["src/osd/ddic/icfservice.tabl.xml", "ICFSERVICE"],
-      ["src/osd/ddic/icfhandler.tabl.xml", "ICFHANDLER"]]) {
+      ["src/osd/ddic/icfhandler.tabl.xml", "ICFHANDLER"],
+      ["src/osd/ddic/zosd_icf_apc.tabl.xml", "ZOSD_ICF_APC"]]) {
       const width = widths(file);
       expect(width.size, `${table} has fields`).to.be.greaterThan(3);
       for (const row of rows[table]) {
