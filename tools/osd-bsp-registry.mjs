@@ -14,15 +14,33 @@
 // on `/sap/bc/ui5_ui5/sap/<app>/<page>`, which is the path a real system
 // answers on.
 //
-// **Content travels as base64 and not as a string literal.** Three reasons,
-// in the order they were hit: a page contains quotes and newlines and
-// escaping them into ABAP literals is a second encoder nobody asked for; a
-// page may be binary (a PNG in a pack) and a text literal cannot hold one;
-// and `zcl_abapgit_convert=>base64_to_xstring` already exists in this tree,
-// so there is no third codec to write or to be wrong. The lines are chunked
-// because a generated source line of six thousand characters is unreadable
-// in every tool that would ever show it.
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
+// **The bytes do not travel in the class.** They used to: 33 pages became
+// 141 KB of chunked base64 inside `zcl_stg_bsp_registry`, which is assets in
+// source, a transpile on every image and linear growth per application.
+// Alice, on seeing it: "чёто диковатый способ".
+//
+// The correction that matters is hers as well -- **imitate the interface,
+// not the storage.** The first answer to this was a DDIC table, because a
+// system keeps pages in `O2PAGELINE`; that is the wrong layer. The pages are
+// files in a directory and they stay files in a directory.
+//
+// So each page becomes a **Web Repository object**, which is the mechanism
+// this tree already carries 33 media objects and 16 MB on: a `*.w3mi.xml`
+// beside a data file, `WWWDATA_IMPORT` + `SCMS_BINARY_TO_XSTRING` to read
+// it, and a host hook (`abap.W3MI_LOADER`) where there is no file system.
+// Nothing new is invented, nothing is encoded twice, and the browser preview
+// and the compiled binary already know how to answer for it.
+//
+// Two things to keep straight about that choice:
+//
+//   - `gen/` is not tracked, so the data files beside the generated objects
+//     are a build artefact and not a second copy of `webapp/` that can
+//     drift. The source of truth is still the folder the app lives in.
+//   - This is how **our** runtime carries the bytes. On a real system the
+//     application travels as a BSP application (WAPA, `docs/a4h-deploy.md`)
+//     and `/UI5/CL_UI5_HTTP_HANDLER` serves it out of `O2PAGELINE`. W3MI is
+//     the local carrier, not a claim about SAP.
+import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
 import {checkAppName, manifestFor} from "./osd-bsp-app.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -179,6 +197,75 @@ export function packApps(root = ".") {
   return apps;
 }
 
+// **The name a system would know the object by**, which is what
+// `wwwparams-objid` holds and what ABAP selects on. The file name is free --
+// abaplint reads the name out of the XML (`w3miObjectName`) and never from
+// the spelling on disk -- so this can stay readable instead of escaped.
+//
+// **40, and it was measured rather than assumed.** The first version of this
+// said 60 from memory; `WWWPARAMS-OBJID` in the DDIC is `LENG 000040`, and
+// three of the 33 pages are longer than that -- the longest,
+// `ZOSD_BOOKING_AP/ANNOTATIONS/ANNOTATIONS.XML`, by three characters. A key
+// this tree writes longer than the column it lives in is the same defect as
+// a versioned file name written narrower than its fixed width
+// (docs/a4h-deploy.md), found the same way: by reading the field.
+export const W3MI_NAME_WIDTH = 40;
+
+export function w3miName(app, page) {
+  // A UI5 application's file layout is not ours to shorten --
+  // `annotations/annotations.xml` and `controller/App.controller.js` are the
+  // framework's spelling -- so a name that does not fit is cut to the column
+  // rather than refused. That is only safe because it cannot collide in
+  // silence: `generate()` compares every name it produced and throws naming
+  // BOTH pages, which is the check the truncation is paid for with.
+  return `${app}/${page}`.toUpperCase().slice(0, W3MI_NAME_WIDTH);
+}
+
+// The file the pair is written as.
+//
+// `/` is spelled `_-`, which is what the tree already does for a BSP page
+// (tools/osd-bsp-app.mjs), and **`.` is spelled `%2e`, which is not
+// cosmetic**: abaplint reads an object's type out of the file name, so
+// `ztravels_a4h_-manifest.json.w3mi.xml` parses as type `json.w3mi` and
+// comes back "Unknown object type, currently not supported". That is why
+// abapGit percent-escapes a name in the first place, and 33 of these
+// failed the lint before the escape was copied.
+export function w3miFile(app, page) {
+  return `${app}_-${page.replaceAll("/", "_-")}`
+    .toLowerCase()
+    .replaceAll(".", "%2e")
+    .replace(/[^a-z0-9_%-]/g, "_");
+}
+
+const extensionOf = (page) => {
+  const at = page.lastIndexOf(".");
+  return at === -1 ? ".bin" : page.slice(at).toLowerCase();
+};
+
+// `filesize` is deliberately **not** a parameter here. The transpiler writes
+// one of its own from the data file's actual length
+// (`populate_tables.ts`), so putting it in <PARAMS> as well is the same key
+// twice and the seed dies on `UNIQUE constraint failed: wwwparams.relid,
+// wwwparams.objid, wwwparams.name`. Leaving it out is also the better
+// answer: a size that comes from the bytes cannot disagree with them.
+export function w3miXml(app, page, mime) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_W3MI" serializer_version="v2.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <NAME>${w3miName(app, page)}</NAME>
+   <TEXT>${app} ${page}</TEXT>
+   <PARAMS>
+    <WWWPARAMS><NAME>fileextension</NAME><VALUE>${extensionOf(page)}</VALUE></WWWPARAMS>
+    <WWWPARAMS><NAME>filename</NAME><VALUE>${page}</VALUE></WWWPARAMS>
+    <WWWPARAMS><NAME>mimetype</NAME><VALUE>${mime}</VALUE></WWWPARAMS>
+   </PARAMS>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+}
+
 export function applications(folders) {
   const apps = [];
   for (const folder of folders) {
@@ -208,26 +295,28 @@ export function applications(folders) {
 const chunk = (s, n) => s.match(new RegExp(`.{1,${n}}`, "g")) ?? [];
 
 export function registryClass(apps) {
-  const rows = apps.flatMap((a) => a.pages.map((p) => {
-    const b64 = chunk(a.pages.length === 0 ? "" : p.content.toString("base64"), 200);
-    const parts = b64.length === 0
-      ? "    ls_page-b64 = ``.\n"
-      : b64.map((c) => `    ls_page-b64 = ls_page-b64 && \`${c}\`.\n`).join("");
-    return `    CLEAR ls_page.\n`
-      + `    ls_page-app  = \`${a.app}\`.\n`
-      + `    ls_page-name = \`${p.page}\`.\n`
-      + `    ls_page-mime = \`${p.mime}\`.\n`
-      + parts
-      + `    APPEND ls_page TO rt_pages.\n`;
-  })).join("\n");
+  const rows = apps.flatMap((a) => a.pages.map((p) => `    CLEAR ls_page.\n`
+    + `    ls_page-app   = \`${a.app}\`.\n`
+    + `    ls_page-name  = \`${p.page}\`.\n`
+    + `    ls_page-mime  = \`${p.mime}\`.\n`
+    + `    ls_page-objid = \`${w3miName(a.app, p.page)}\`.\n`
+    + `    APPEND ls_page TO rt_pages.\n`)).join("\n");
   return `CLASS zcl_stg_bsp_registry DEFINITION PUBLIC CREATE PUBLIC.
-* generated by tools/osd-bsp-registry.mjs from the *.wapa.xml objects - do not edit
+* generated by tools/osd-bsp-registry.mjs from the BSP applications of this
+* tree - do not edit
+*
+* **A list, and no bytes.** The pages used to be chunked base64 in this
+* source: 33 of them, 141 KB, an asset in a class. Each one is a Web
+* Repository object now (the *.w3mi.xml pairs beside this file), which is the
+* mechanism this tree already carries its media on -- so changing an image is
+* not a transpile, and a browser with no file system still gets an answer
+* through abap.W3MI_LOADER.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_page,
-             app  TYPE string,
-             name TYPE string,
-             mime TYPE string,
-             b64  TYPE string,
+             app   TYPE string,
+             name  TYPE string,
+             mime  TYPE string,
+             objid TYPE string,
            END OF ty_page.
     TYPES tt_page TYPE STANDARD TABLE OF ty_page WITH DEFAULT KEY.
     CLASS-METHODS pages
@@ -250,6 +339,43 @@ export function generate(folders, out = "gen/bsp") {
   const apps = [...applications(folders), ...declared(), ...packApps()];
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "zcl_stg_bsp_registry.clas.abap"), registryClass(apps));
+
+  // one Web Repository object per page, and **what this run did not write is
+  // removed**. A generator that only adds leaves the object of a page
+  // somebody deleted behind, and a stale object in an input folder is not
+  // inert: it is transpiled, it fills a wwwparams row, and the next reader
+  // of the tree sees a page that no application has.
+  const kept = new Set();
+  const byFile = new Map();
+  const byName = new Map();
+  for (const a of apps) {
+    for (const p of a.pages) {
+      const base = w3miFile(a.app, p.page);
+      const seen = byFile.get(base);
+      if (seen !== undefined) {
+        throw new Error(`the pages ${seen} and ${a.app}/${p.page} both spell the file ${base}`);
+      }
+      byFile.set(base, `${a.app}/${p.page}`);
+      const objid = w3miName(a.app, p.page);
+      const other = byName.get(objid);
+      if (other !== undefined) {
+        throw new Error(`the pages ${other} and ${a.app}/${p.page} both become the Web Repository `
+          + `name ${objid} at ${W3MI_NAME_WIDTH} characters: rename one of them`);
+      }
+      byName.set(objid, `${a.app}/${p.page}`);
+      const xml = `${base}.w3mi.xml`;
+      const data = `${base}.w3mi.data${extensionOf(p.page)}`;
+      kept.add(xml);
+      kept.add(data);
+      writeFileSync(join(out, xml), w3miXml(a.app, p.page, p.mime));
+      writeFileSync(join(out, data), p.content);
+    }
+  }
+  for (const name of readdirSync(out)) {
+    if (/\.w3mi\.(xml|data\.)/.test(name) && kept.has(name) === false) {
+      rmSync(join(out, name));
+    }
+  }
   return apps;
 }
 

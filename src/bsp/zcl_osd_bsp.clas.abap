@@ -31,6 +31,14 @@ CLASS zcl_osd_bsp DEFINITION PUBLIC CREATE PUBLIC.
       EXPORTING
         ev_app  TYPE string
         ev_page TYPE string.
+*   The bytes of one page. Exposed for the test: a reader checked only
+*   through HTTP is checked once, and the interesting failure -- a registry
+*   row whose object is not in the system -- is not reachable that way.
+    CLASS-METHODS content
+      IMPORTING
+        iv_objid       TYPE string
+      RETURNING
+        VALUE(ev_data) TYPE xstring.
   PROTECTED SECTION.
   PRIVATE SECTION.
 *   The branch, without the namespace: an application may live under any of
@@ -92,6 +100,57 @@ CLASS zcl_osd_bsp IMPLEMENTATION.
     TRANSLATE ev_app TO UPPER CASE.
   ENDMETHOD.
 
+  METHOD content.
+*   The bytes of one page, out of the Web Repository.
+*
+*   **The registry is a list and the content is an object**, which is the
+*   whole of Alice's second correction applied here: a page used to be
+*   chunked base64 inside the generated registry class -- 33 of them, 141 KB
+*   of assets in source. A `*.w3mi` object is how this tree already carries
+*   33 media objects and 16 MB, it works in the browser preview through
+*   abap.W3MI_LOADER where there is no file system, and it needed no codec
+*   of its own.
+    DATA ls_key    TYPE wwwdatatab.
+    DATA lt_params TYPE STANDARD TABLE OF wwwparams.
+    DATA ls_param  LIKE LINE OF lt_params.
+    DATA lt_mime   TYPE STANDARD TABLE OF w3mime.
+    DATA lv_size   TYPE i.
+
+    CLEAR ev_data.
+    ls_key-relid = 'MI'.
+    ls_key-objid = iv_objid.
+    SELECT * FROM wwwparams INTO TABLE lt_params WHERE relid = ls_key-relid AND objid = ls_key-objid.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+*   the length is the object's own, not the table's: the last block is
+*   padded to 255 and a response built from the blocks would carry the
+*   padding into the browser
+    READ TABLE lt_params INTO ls_param WITH KEY name = 'filesize'.
+    IF sy-subrc = 0.
+      lv_size = ls_param-value.
+    ENDIF.
+
+    CALL FUNCTION 'WWWDATA_IMPORT'
+      EXPORTING
+        key    = ls_key
+      TABLES
+        mime   = lt_mime
+      EXCEPTIONS
+        OTHERS = 1.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+      EXPORTING
+        input_length = lv_size
+      IMPORTING
+        buffer       = ev_data
+      TABLES
+        binary_tab   = lt_mime.
+  ENDMETHOD.
+
   METHOD if_http_extension~handle_request.
     DATA lv_path  TYPE string.
     DATA lv_app   TYPE string.
@@ -126,7 +185,18 @@ CLASS zcl_osd_bsp IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    lv_x = zcl_abapgit_convert=>base64_to_xstring( ls_page-b64 ).
+    lv_x = content( ls_page-objid ).
+    IF lv_x IS INITIAL.
+*     The page is in the registry and its object is not in the system. That
+*     is a build that went half way -- the class was generated and the
+*     *.w3mi pair beside it was not read -- and it must not look like a
+*     missing page, because the two are fixed in different places.
+      server->response->set_status( code = 500 reason = 'Internal Server Error' ).
+      server->response->set_content_type( 'text/plain; charset=utf-8' ).
+      server->response->set_cdata( |the page { lv_app }/{ lv_page } is in the registry and the | &&
+                                   |Web Repository object { ls_page-objid } is not in this system| ).
+      RETURN.
+    ENDIF.
     server->response->set_status( code = 200 reason = 'OK' ).
     server->response->set_content_type( ls_page-mime ).
     server->response->set_data( lv_x ).
