@@ -93,6 +93,23 @@ The falsification, so the rule is not judged by the code that implements it:
 
 Each of these is a test before it is a paragraph.
 
+## The rule as something that decides
+
+`tools/osd-icf-apply.mjs` is the five cases above as a **pure function** over
+three inputs -- what the objects say, what the table holds, where each row
+came from -- and `test/osd-icf-apply.mjs` is the four falsifications plus the
+one that makes "writable" mean anything: an object that has not changed since
+it was applied changes nothing, whatever the row says now.
+
+It touches no database on purpose. The interesting part of the rule is which
+action is chosen, and a rule entangled with the writing of rows can only be
+checked by writing rows.
+
+One case the prose above did not name and the code had to: **the handler
+chain is part of "has the object changed".** A node whose class changed and
+whose URL did not has changed, and a hash over the service row alone would
+call it unchanged and never apply it.
+
 ## What is still open
 
 **Where "aside" is.** A moved-aside database is a file with a name. A
