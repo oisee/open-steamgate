@@ -46,8 +46,10 @@ for db in ${OSD_TEST_DATABASES:-sqlite duckdb}; do
   fi
   for phase in create read; do
     if [ "$phase" = read ]; then
-      compose restart osd
-      compose up -d --pull never --wait --wait-timeout 180 osd
+      # Restart the whole stack, including the database server for HXE.
+      # Keep volumes: the record written in the previous phase must survive.
+      compose stop
+      compose up -d --pull never --wait --wait-timeout 900
     fi
     compose exec -T -e PROTOCOL_HOST=127.0.0.1 osd node docker/image/probe.mjs "$phase" > "$report_dir/$db-$phase-persistence.log" 2>&1 || {
       cat "$report_dir/$db-$phase-persistence.log"

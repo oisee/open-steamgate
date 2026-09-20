@@ -20,7 +20,8 @@ sh docker/image/smoke.sh
 ```
 
 The smoke suite deploys the actual SQLite and DuckDB Compose files in
-disposable projects, creates an OData record and reads it after restarting OSD.
+disposable projects, creates an OData record and reads it after stopping and
+starting the whole stack with its volumes retained (including HXE when enabled).
 From a separate client container it checks the published HTTP/HTTPS ADT and
 OData endpoints, renders the DIAG tape screen with pinned SAP-TUI, and calls
 `SADT_REST_RFC_ENDPOINT` over 33nn. The RFC response must carry HTTP status 200
