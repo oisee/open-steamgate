@@ -897,7 +897,14 @@ test("the launchpad's console and network, characterised", async () => {
     // the allowance list is empty rather than kept "just in case" — an
     // allowance that outlives its defect is the failure this shape exists to
     // prevent, and the emptiest version of it is no list at all.
-    expect(refused, `the page asked for something it did not get:\n${refused.join("\n")}`).toHaveLength(0);
+    // The shell briefly requests its built-in logo before our PASS image
+    // replaces the src. The browser cancels only that superseded request;
+    // the replacement itself must load, and every other request must work.
+    const logo = page.locator("#shell-header-icon");
+    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect.poll(() => logo.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+    const missing = refused.filter((entry) => !/^net::ERR_ABORTED https:\/\/ui5\.sap\.com\/[^/]+\/resources\/sap\/ushell\/themes\/base\/img\/SAPLogo\.svg$/.test(entry));
+    expect(missing, `the page asked for something it did not get:\n${missing.join("\n")}`).toHaveLength(0);
     // and the one that was fixed: the tile's question now has an answer
     const engine = await page.evaluate(async () => {
       const res = await fetch("/sap/bc/osd/amdp/engine");
