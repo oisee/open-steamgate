@@ -32,6 +32,20 @@ CLASS zcl_osd_sicf DEFINITION PUBLIC CREATE PUBLIC.
                 iv_active TYPE icfservice-icfactive.
   PROTECTED SECTION.
   PRIVATE SECTION.
+*   One field of a form, from wherever this request carries it.
+*
+*   **`get_form_field` reads the query string and not the body**, so the
+*   moment the toggle became a POST -- which it had to, a GET must not
+*   change state -- every field came back empty and the screen silently did
+*   nothing. Found by pressing the button rather than by reading the
+*   handler: the page answered 200 and the node stayed on.
+    CLASS-METHODS field
+      IMPORTING
+        io_request      TYPE REF TO if_http_request
+        iv_name         TYPE string
+      RETURNING
+        VALUE(rv_value) TYPE string.
+
     CLASS-METHODS esc
       IMPORTING iv_text        TYPE clike
       RETURNING VALUE(rv_text) TYPE string.
@@ -45,6 +59,33 @@ ENDCLASS.
 
 CLASS zcl_osd_sicf IMPLEMENTATION.
 
+  METHOD field.
+    DATA lv_body TYPE string.
+    DATA lv_pair TYPE string.
+    DATA lt_pair TYPE TABLE OF string.
+    DATA lv_key  TYPE string.
+
+    rv_value = io_request->get_form_field( iv_name ).
+    IF rv_value IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+*   the body of an application/x-www-form-urlencoded POST, split by hand:
+*   two tokens per pair, and a value that is missing is not a value
+    lv_body = io_request->get_cdata( ).
+    IF lv_body IS INITIAL.
+      RETURN.
+    ENDIF.
+    SPLIT lv_body AT '&' INTO TABLE lt_pair.
+    LOOP AT lt_pair INTO lv_pair.
+      SPLIT lv_pair AT '=' INTO lv_key rv_value.
+      IF lv_key = iv_name.
+        RETURN.
+      ENDIF.
+      CLEAR rv_value.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD esc.
     rv_text = iv_text.
     REPLACE ALL OCCURRENCES OF `&` IN rv_text WITH `&amp;`.
@@ -53,27 +94,15 @@ CLASS zcl_osd_sicf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD set_active.
-    DATA ls_origin TYPE zosd_icf_origin.
-    DATA lv_hash   TYPE zosd_icf_origin-objhash.
-
-    UPDATE icfservice SET icfactive = iv_active
-      WHERE icf_name = iv_name AND icfparguid = iv_parent.
-
-*   **The object's hash is kept and only the origin changes.** Blanking it
-*   would leave "has the object changed since it was applied" with nothing
-*   to compare, so the next start would read the object as changed, set this
-*   edit aside and put the node back. That exact mistake was made by hand
-*   while proving the mechanism worked, and the mechanism caught it.
-    SELECT SINGLE objhash FROM zosd_icf_origin INTO lv_hash
-      WHERE icf_name = iv_name AND icfparguid = iv_parent.
-    DELETE FROM zosd_icf_origin WHERE icf_name = iv_name AND icfparguid = iv_parent.
-    CLEAR ls_origin.
-    ls_origin-icf_name   = iv_name.
-    ls_origin-icfparguid = iv_parent.
-    ls_origin-origin     = 'E'.
-    ls_origin-objhash    = lv_hash.
-    ls_origin-changed_at = |{ sy-datum }{ sy-uzeit }|.
-    INSERT zosd_icf_origin FROM ls_origin.
+*   **Delegated, not copied.** The bookkeeping this needs -- the row becomes
+*   a person's and the object's hash is kept -- is what EVERY writer of the
+*   registry must do, and the next one is an OData update through the
+*   dispatcher rather than this screen. A rule written beside one caller is
+*   a rule the second caller reimplements, which is what the end of a
+*   dialog step cost this tree in three hosts (docs/luw-buffer.md).
+    zcl_osd_icf=>set_active( iv_name   = iv_name
+                             iv_parent = iv_parent
+                             iv_active = iv_active ).
   ENDMETHOD.
 
   METHOD page.
@@ -111,9 +140,9 @@ CLASS zcl_osd_sicf IMPLEMENTATION.
     DATA lv_method TYPE string.
     DATA lv_aside  TYPE i.
 
-    lv_cmd    = server->request->get_form_field( 'cmd' ).
-    lv_name   = server->request->get_form_field( 'name' ).
-    lv_parent = server->request->get_form_field( 'parent' ).
+    lv_cmd    = field( io_request = server->request iv_name = 'cmd' ).
+    lv_name   = field( io_request = server->request iv_name = 'name' ).
+    lv_parent = field( io_request = server->request iv_name = 'parent' ).
     lv_method = server->request->get_header_field( '~request_method' ).
 
 *   **A GET must not change anything, and this one did.** The first version

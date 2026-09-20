@@ -53,6 +53,28 @@ CLASS zcl_osd_icf DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_handler) TYPE icfhandler-icfhandler.
 
+*   Switch a node on or off, **recording that a person did it**.
+*
+*   Here rather than in the screen, and that move is the whole point: a
+*   rule about what **every writer must do** does not live next to one of
+*   them. `tools/osd-dialog-step.mjs` is this tree's worked example -- the
+*   end of a dialog step was written correctly in one host out of three,
+*   and the two that came later each got it wrong. The next writer of this
+*   registry is an OData update through the dispatcher, and it has to
+*   inherit the bookkeeping rather than reimplement it.
+*
+*   What the bookkeeping is: the row becomes the person's (`ORIGIN = 'E'`)
+*   and **the object's hash is kept**. With nothing to compare, "has the
+*   object changed since it was applied" is always yes, so the next start
+*   sets the edit aside and the node comes back on. That mistake was made
+*   by hand while proving the mechanism worked, and the mechanism caught
+*   it (docs/registry-drift.md).
+    CLASS-METHODS set_active
+      IMPORTING
+        iv_name   TYPE icfservice-icf_name
+        iv_parent TYPE icfservice-icfparguid
+        iv_active TYPE icfservice-icfactive.
+
 *   The node a URL is answered by, handler or not: what SICF shows when you
 *   navigate to a path rather than what runs.
     CLASS-METHODS node_of
@@ -105,6 +127,25 @@ CLASS zcl_osd_icf IMPLEMENTATION.
     ENDLOOP.
 
     SORT rt_nodes BY url DESCENDING.
+  ENDMETHOD.
+
+  METHOD set_active.
+    DATA ls_origin TYPE zosd_icf_origin.
+    DATA lv_hash   TYPE zosd_icf_origin-objhash.
+
+    UPDATE icfservice SET icfactive = iv_active
+      WHERE icf_name = iv_name AND icfparguid = iv_parent.
+
+    SELECT SINGLE objhash FROM zosd_icf_origin INTO lv_hash
+      WHERE icf_name = iv_name AND icfparguid = iv_parent.
+    DELETE FROM zosd_icf_origin WHERE icf_name = iv_name AND icfparguid = iv_parent.
+    CLEAR ls_origin.
+    ls_origin-icf_name   = iv_name.
+    ls_origin-icfparguid = iv_parent.
+    ls_origin-origin     = 'E'.
+    ls_origin-objhash    = lv_hash.
+    ls_origin-changed_at = |{ sy-datum }{ sy-uzeit }|.
+    INSERT zosd_icf_origin FROM ls_origin.
   ENDMETHOD.
 
   METHOD node_of.

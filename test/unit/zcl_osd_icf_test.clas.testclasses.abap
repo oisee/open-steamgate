@@ -147,8 +147,13 @@ CLASS ltcl_lookup IMPLEMENTATION.
 
 ENDCLASS.
 
-* The screen over the registry: the one field it writes, and the bookkeeping
-* without which writing it would be undone at the next start.
+* Writing the registry: the one field a person changes, and the bookkeeping
+* without which the change is undone at the next start.
+*
+* The method is on ZCL_OSD_ICF rather than on the screen, because the next
+* writer is an OData update through the dispatcher and it has to inherit
+* the rule rather than reimplement it -- the shape osd-dialog-step already
+* cost this tree once, in three hosts.
 CLASS ltcl_screen DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS setup.
@@ -188,7 +193,7 @@ CLASS ltcl_screen IMPLEMENTATION.
     DATA lv_active TYPE icfservice-icfactive.
     DATA lv_origin TYPE zosd_icf_origin-origin.
 
-    zcl_osd_sicf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
+    zcl_osd_icf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
 
     SELECT SINGLE icfactive FROM icfservice INTO lv_active WHERE icf_name = 'ZORK'.
     cl_abap_unit_assert=>assert_equals( act = lv_active exp = ' ' ).
@@ -205,7 +210,7 @@ CLASS ltcl_screen IMPLEMENTATION.
 *   start sets the edit aside and the node comes back on.
     DATA lv_hash TYPE zosd_icf_origin-objhash.
 
-    zcl_osd_sicf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
+    zcl_osd_icf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
     SELECT SINGLE objhash FROM zosd_icf_origin INTO lv_hash WHERE icf_name = 'ZORK'.
     cl_abap_unit_assert=>assert_equals( act = lv_hash exp = 'abc123' ).
   ENDMETHOD.
