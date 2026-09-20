@@ -964,3 +964,33 @@ test("a tile opens its application, which is the one thing a launchpad does", as
   }
 });
 
+// **A published inventory that contradicts what it inventories.**
+//
+// `applyAtStartup` reads the `*.sicf.xml` objects off disk; a service worker
+// has none, so the preview applied nothing and the registry screen shipped
+// saying "0 nodes" while eighteen paths answered on that same deployment.
+// Nobody would have found it from here: every other check asks whether a
+// path answers, and this one is about whether the page telling you which
+// paths exist is telling the truth.
+test("the registry screen counts the nodes this deployment actually serves", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "osd-preview-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${ORIGIN}/sap/bc/osd/sicf/`);
+    const body = page.locator("body");
+    await expect(body).toContainText("ICF services", {timeout: 30000});
+    // not a number pulled out of the air: the same nodes the worker mounts,
+    // so the screen and the routing cannot disagree without this failing
+    await expect(body).not.toContainText("0 nodes");
+    await expect(body).toContainText("/sap/bc/osd/sicf/");
+    await expect(body).toContainText("ZCL_OSD_BSP");
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
+

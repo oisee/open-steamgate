@@ -11,6 +11,7 @@ import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
 import {seed, buildId} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
+import {registry as icfRegistry} from "./generated/icf.mjs";
 
 // test/setup.mjs looks for this before it touches the file system: the seed
 // rows come from the bundle, the database from cache storage (or fresh).
@@ -361,6 +362,19 @@ export async function startBackend(stored, options = {}) {
     mount: String(options.mount ?? "").replace(/\/$/, ""),
   };
   await initializeABAP();
+  // **The ICF registry, from rows the build computed.** On a server
+  // `applyAtStartup` reads the `*.sicf.xml` objects off disk; a service
+  // worker has no disk, so nothing was applied here and the screen at
+  // /sap/bc/osd/sicf/ published "0 nodes" about a system serving eighteen
+  // paths. The rows are data, so the build writes them into the bundle
+  // (scripts/build-preview.mjs) and this applies them by the same rule --
+  // an inventory that contradicts what it inventories is worse than none.
+  try {
+    const {applyTo} = await import("../tools/osd-icf-apply.mjs");
+    await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
+  } catch (e) {
+    console.log(`ICF registry not applied: ${e?.message ?? e}`);
+  }
   await registerServices();
   await refreshStatus();
 }
