@@ -60,6 +60,17 @@
                       }
                     },
                     {
+                      id: "taxi-analytics",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "NYC taxi analytics",
+                        subtitle: "NYC TLC trip analytics",
+                        info: "ZSTG_SADL_SRV",
+                        icon: "sap-icon://bar-chart",
+                        targetURL: "#Taxi-analyze"
+                      }
+                    },
+                    {
                       id: "segw",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -248,6 +259,14 @@
           additionalInformation: "SAPUI5.Component=stg.analytics",
           applicationType: "URL",
           url: "../sap/bc/ui5_ui5/sap/zosd_analytics/",
+          navigationMode: "embedded"
+        },
+        "Taxi-analyze": {
+          title: "NYC taxi analytics",
+          description: "real TLC trip records",
+          additionalInformation: "SAPUI5.Component=stg.taxi",
+          applicationType: "URL",
+          url: "../sap/bc/ui5_ui5/sap/zosd_taxi_anal/",
           navigationMode: "embedded"
         },
         "SegwProject-manage": {
