@@ -38,7 +38,17 @@
       // ABAP Push Channels: the SAP-named family a real websocket handler
       // implements (five methods where core has two, the alias chain that
       // carries co_connect_mode_accept) and the host that drives one off
-      // stack. Local only for now, which is why there is no url to clone.
+      // stack.
+      //
+      // **The url is not decoration.** This entry said "local only for now,
+      // which is why there is no url to clone" and the repository had been
+      // public since 2026-09-14, with abap_transpile.json cloning it by url
+      // all along. On a workstation the folder is there and the comment was
+      // never read again; on a clean runner abaplint could not resolve
+      // cl_apc_wsp_ext_stateful_base and the whole lint step failed on one
+      // issue. A dependency that only resolves where somebody already
+      // cloned it is a dependency nobody else can check.
+      "url": "https://github.com/oisee/open-abap-apc",
       "folder": "/.local/lars/open-abap-apc",
       "files": "/src/{apc,host}/**/*.*"
     },
