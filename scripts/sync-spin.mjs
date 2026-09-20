@@ -16,13 +16,23 @@ const blocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'HANA Expre
   return `### ${title}: complete Portainer Stack\n\nSource: [${path}](../${path}). Copy the entire block into the Web editor.\n\n\`\`\`yaml\n${yaml}\n\`\`\``;
 });
 const generated = `${start}\n\n${blocks.join('\n\n')}\n\n${end}`;
-const updated = original.slice(0, original.indexOf(start)) + generated +
+let updated = original.slice(0, original.indexOf(start)) + generated +
   original.slice(original.indexOf(end) + end.length);
+const imageStart = '<!-- BEGIN GENERATED IMAGE STACKS -->';
+const imageEnd = '<!-- END GENERATED IMAGE STACKS -->';
+if (updated.split(imageStart).length !== 2 || updated.split(imageEnd).length !== 2 || updated.indexOf(imageEnd) < updated.indexOf(imageStart)) {
+  throw new Error('Expected one ordered pair of generated image stack markers');
+}
+const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'External HANA / HANA Express']].map(([id, title]) => {
+  const path = `docker/compose.${id}.yml`;
+  return `### Ready image: ${title}\n\nSource: [${path}](../${path}).\n\n\`\`\`yaml\n${readFileSync(new URL(path, root), 'utf8').trimEnd()}\n\`\`\``;
+});
+updated = updated.slice(0, updated.indexOf(imageStart)) + `${imageStart}\n\n${imageBlocks.join('\n\n')}\n\n${imageEnd}` + updated.slice(updated.indexOf(imageEnd) + imageEnd.length);
 if (process.argv.includes('--check')) {
   if (updated !== original) {
     console.error('docs/spin.md is stale. Run: node scripts/sync-spin.mjs');
     process.exitCode = 1;
-  } else console.log('spin.md matches all three Compose files');
+  } else console.log('spin.md matches the image and bootstrap Compose files');
 } else if (updated !== original) {
   writeFileSync(doc, updated);
   console.log('Updated Compose blocks in docs/spin.md');

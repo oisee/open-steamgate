@@ -1,0 +1,38 @@
+# Existing HANA / HANA Express SQL endpoint; no SAP server is redistributed.
+# Required Stack variables: HANA_HOST, HANA_PORT, HANA_USER, HANA_PASSWORD.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: hana
+      HANA_HOST: "${HANA_HOST:?Set the HANA hostname reachable from Docker}"
+      HANA_PORT: "${HANA_PORT:?Set the tenant SQL port}"
+      HANA_USER: "${HANA_USER:?Set the database user}"
+      HANA_PASSWORD: "${HANA_PASSWORD:?Set the database password}"
+      HANA_SCHEMA: "${HANA_SCHEMA:-OSD}"
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    volumes:
+      - osd-tls:/opt/osd/.local/tls
+    restart: unless-stopped
+    stop_grace_period: 60s
+  protocols:
+    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  osd-tls:

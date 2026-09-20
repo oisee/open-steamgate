@@ -58,7 +58,164 @@ This serves DIAG on `3200` and RFC on `3300`. For instance 06 use
 `-instance 6` and the matching OSD HTTP address in `-attach`. Ctrl-C stops
 the sidecar. The sidecar does not change OSD's HTTP port.
 
-## Docker Compose
+## Ready Docker images (draft, linux/amd64)
+
+The short stacks below use the same OSD image for SQLite, DuckDB and an
+external HANA server, plus a DIAG/RFC sidecar. They compile nothing on startup.
+Image availability is established by the **OSD Docker draft** workflow's
+successful publication; until that happens, use the source-bootstrap stacks
+further below. See [image build and acceptance](docker-image.md).
+
+In Portainer's Docker Standalone **Stacks → Add stack → Web editor**, set
+`INSTANCE=06` in the **Stack environment variables**, and paste a full block.
+The stack name or a value under the service's `environment:` cannot set
+Compose interpolation. Defaults are instance `00` and image tag `docker-draft`.
+Set `OSD_TAG` to the immutable tag printed by CI to reproduce a tested image.
+
+For instance 06: HTTP **8006**, HTTPS **44306**, DIAG **3206**, RFC **3306**.
+`TLS_SAN=DNS:your-osd.example.test` names the host your client connects to;
+the generated certificate is self-signed and persisted in its own volume.
+OSD has no production authentication boundary; deploy on your trusted network.
+
+Use a fresh stack name for the first image test. Keep existing bootstrap
+volumes intact; migration of those volumes is not part of this draft.
+The base image includes the OSD applications and demo OData seed; entertainment
+packs and captured media are omitted. See [acceptance steps](docker-image.md).
+
+<!-- BEGIN GENERATED IMAGE STACKS -->
+
+### Ready image: SQLite
+
+Source: [docker/compose.sqlite.yml](../docker/compose.sqlite.yml).
+
+```yaml
+# Portainer: set INSTANCE=06 in Stack environment, then paste this entire file.
+# OSD_TAG can pin both images to one immutable sha-...-run-... tag.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: file
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    volumes:
+      - osd-data:/data
+      - osd-tls:/opt/osd/.local/tls
+    restart: unless-stopped
+    stop_grace_period: 60s
+  protocols:
+    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  osd-data:
+  osd-tls:
+```
+
+### Ready image: DuckDB
+
+Source: [docker/compose.duckdb.yml](../docker/compose.duckdb.yml).
+
+```yaml
+# Portainer: set INSTANCE=06 in Stack environment, then paste this entire file.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: duckdb
+      OSD_WORKERS: "1"
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    volumes:
+      - osd-data:/data
+      - osd-tls:/opt/osd/.local/tls
+    restart: unless-stopped
+    stop_grace_period: 60s
+  protocols:
+    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  osd-data:
+  osd-tls:
+```
+
+### Ready image: External HANA / HANA Express
+
+Source: [docker/compose.hana.yml](../docker/compose.hana.yml).
+
+```yaml
+# Existing HANA / HANA Express SQL endpoint; no SAP server is redistributed.
+# Required Stack variables: HANA_HOST, HANA_PORT, HANA_USER, HANA_PASSWORD.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: hana
+      HANA_HOST: "${HANA_HOST:?Set the HANA hostname reachable from Docker}"
+      HANA_PORT: "${HANA_PORT:?Set the tenant SQL port}"
+      HANA_USER: "${HANA_USER:?Set the database user}"
+      HANA_PASSWORD: "${HANA_PASSWORD:?Set the database password}"
+      HANA_SCHEMA: "${HANA_SCHEMA:-OSD}"
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    volumes:
+      - osd-tls:/opt/osd/.local/tls
+    restart: unless-stopped
+    stop_grace_period: 60s
+  protocols:
+    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  osd-tls:
+```
+
+<!-- END GENERATED IMAGE STACKS -->
+
+## Docker Compose: source-bootstrap alternative
 
 You need Docker Engine, Compose v2 and internet access. The bootstrap stacks
 use public Node and Go images. They build OSD and the sidecar on first start;

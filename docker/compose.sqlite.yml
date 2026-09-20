@@ -1,0 +1,35 @@
+# Portainer: set INSTANCE=06 in Stack environment, then paste this entire file.
+# OSD_TAG can pin both images to one immutable sha-...-run-... tag.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: file
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    volumes:
+      - osd-data:/data
+      - osd-tls:/opt/osd/.local/tls
+    restart: unless-stopped
+    stop_grace_period: 60s
+  protocols:
+    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  osd-data:
+  osd-tls:
