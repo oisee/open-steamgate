@@ -71,6 +71,17 @@
                       }
                     },
                     {
+                      id: "icf",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "ICF services",
+                        subtitle: "the service tree, and who last changed it",
+                        info: "ZOSD_ICF_SRV",
+                        icon: "sap-icon://tree",
+                        targetURL: "#IcfNode-manage"
+                      }
+                    },
+                    {
                       id: "status",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -245,6 +256,14 @@
           additionalInformation: "SAPUI5.Component=stg.segw",
           applicationType: "URL",
           url: "../sap/bc/ui5_ui5/sap/zosd_segw_app/",
+          navigationMode: "embedded"
+        },
+        "IcfNode-manage": {
+          title: "ICF services",
+          description: "what answers which path, and who last said so",
+          additionalInformation: "SAPUI5.Component=stg.icf",
+          applicationType: "URL",
+          url: "../sap/bc/ui5_ui5/sap/zosd_icf_app/",
           navigationMode: "embedded"
         },
         "System-status": {
