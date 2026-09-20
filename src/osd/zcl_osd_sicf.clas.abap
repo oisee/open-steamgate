@@ -108,11 +108,38 @@ CLASS zcl_osd_sicf IMPLEMENTATION.
     DATA lv_origin TYPE string.
     DATA lv_active TYPE string.
     DATA lv_count  TYPE i.
+    DATA lv_method TYPE string.
     DATA lv_aside  TYPE i.
 
     lv_cmd    = server->request->get_form_field( 'cmd' ).
     lv_name   = server->request->get_form_field( 'name' ).
     lv_parent = server->request->get_form_field( 'parent' ).
+    lv_method = server->request->get_header_field( '~request_method' ).
+
+*   **A GET must not change anything, and this one did.** The first version
+*   switched a node on or off from a query string: a link in a page, a
+*   crawler, a prefetch or an <img src> could deactivate a service, and
+*   there was no CSRF token and no authentication in front of it. Found by
+*   an adversarial review of my own work, 2026-09-20, while it was live on
+*   the deployment.
+    IF lv_cmd = 'ON' OR lv_cmd = 'OFF'.
+      IF lv_method <> 'POST'.
+        lv_note = |switching a node is a POST, not a link: a GET that changes state is one a crawler can press|.
+        lv_cmd = ''.
+      ELSE.
+*       **and the node has to exist.** `set_active` used to UPDATE nothing
+*       and then INSERT an origin row regardless, so any name and parent
+*       arriving in a form field became a row in ZOSD_ICF_ORIGIN -- rows
+*       for nodes that were never there, which the next apply would then
+*       have to explain.
+        SELECT SINGLE icf_name FROM icfservice INTO lv_name
+          WHERE icf_name = lv_name AND icfparguid = lv_parent.
+        IF sy-subrc <> 0.
+          lv_note = |no such node|.
+          lv_cmd = ''.
+        ENDIF.
+      ENDIF.
+    ENDIF.
 
     IF lv_cmd = 'ON' OR lv_cmd = 'OFF'.
       IF lv_cmd = 'ON'.
@@ -146,12 +173,16 @@ CLASS zcl_osd_sicf IMPLEMENTATION.
 
       IF ls_node-icfactive = 'X'.
         lv_state  = `active`.
-        lv_active = |<a href="?cmd=OFF&amp;name={ esc( ls_node-icf_name ) }| &&
-                    |&amp;parent={ esc( ls_node-icfparguid ) }">switch off</a>|.
+        lv_active = |<form method="post"><input type="hidden" name="cmd" value="OFF">| &&
+                    |<input type="hidden" name="name" value="{ esc( ls_node-icf_name ) }">| &&
+                    |<input type="hidden" name="parent" value="{ esc( ls_node-icfparguid ) }">| &&
+                    |<button type="submit">switch off</button></form>|.
       ELSE.
         lv_state  = `<span class="off">inactive</span>`.
-        lv_active = |<a href="?cmd=ON&amp;name={ esc( ls_node-icf_name ) }| &&
-                    |&amp;parent={ esc( ls_node-icfparguid ) }">switch on</a>|.
+        lv_active = |<form method="post"><input type="hidden" name="cmd" value="ON">| &&
+                    |<input type="hidden" name="name" value="{ esc( ls_node-icf_name ) }">| &&
+                    |<input type="hidden" name="parent" value="{ esc( ls_node-icfparguid ) }">| &&
+                    |<button type="submit">switch on</button></form>|.
       ENDIF.
 
       lv_rows = lv_rows &&

@@ -108,6 +108,13 @@ export function report(actions) {
   for (const a of orphan) {
     lines.push(`ICF ${a.url}: edited here and no object explains it; kept`);
   }
+  // **A removal was the one action nobody was told about.** It is the only
+  // one that takes a path away, which makes it the one most worth saying:
+  // a node that stops answering after a build should not have to be
+  // discovered by a 404.
+  for (const a of actions.filter((x) => x.action === "REMOVE")) {
+    lines.push(`ICF ${a.url}: its object is gone and nothing had edited the row; removed`);
+  }
   return lines;
 }
 
@@ -162,11 +169,22 @@ export async function applyTo(client, objects, options = {}) {
     if (a.action === "ORPHAN") continue;
 
     if (a.action === "ASIDE") {
-      // kept, with a name and a time, so "aside" is a place and not a log
-      // line the next restart overwrites
+      // Kept, with a name and a time, so "aside" is a place and not a log
+      // line the next restart overwrites.
+      //
+      // **The handler is read from the handler rows, and the first version
+      // read it from the service row.** `previous` is an ICFSERVICE row and
+      // has no ICFHANDLER field, so every record written here said the
+      // handler was empty -- and the handler rows are deleted two lines
+      // below. The one thing the content hash calls part of a node, "kept
+      // aside" was losing. Found by an adversarial review; no test covered
+      // it because the test counted the rows rather than reading one.
+      const had = (await currentRows(client)).ICFHANDLER
+        .filter((h) => keyOf(h) === a.key)
+        .map((h) => h.ICFHANDLER).join(", ");
       await write(row("zosd_icf_aside", {
         ICF_NAME: a.previous.ICF_NAME, ICFPARGUID: a.previous.ICFPARGUID, CHANGED_AT: now,
-        URL: a.previous.URL, HANDLER: a.previous.ICFHANDLER ?? "", WHY: a.why,
+        URL: a.previous.URL, HANDLER: had, WHY: a.why,
       }));
     }
 
@@ -230,7 +248,22 @@ export async function applyAtStartup(client, options = {}) {
   const say = options.say ?? ((line) => console.log(line));
   try {
     const {icfRows} = await import("./osd-icf-rows.mjs");
-    const {actions, report: lines} = await applyTo(client, icfRows(options.root ?? process.cwd()));
+    const objects = icfRows(options.root ?? process.cwd());
+    // **No objects is not an empty registry, it is a root that is not
+    // there.** A compiled binary takes its root from OSD_ROOT or the
+    // working directory (tools/osd-serve.mjs); started outside the tree it
+    // finds no `*.sicf.xml`, and every row a previous run applied then
+    // becomes a REMOVE -- a silent wipe of the registry, reported as
+    // "N of N nodes applied from their objects" over the top of it.
+    //
+    // Refused rather than guarded with a threshold: "0 objects" has exactly
+    // one honest reading here, and a tree with no ICF nodes at all is not a
+    // tree this host can serve anyway.
+    if (objects.ICFSERVICE.length === 0) {
+      throw new Error(`no *.sicf.xml under ${options.root ?? process.cwd()}: refusing to apply an empty registry over `
+        + `what is there. If this really is an empty tree, the root is wrong -- check OSD_ROOT.`);
+    }
+    const {actions, report: lines} = await applyTo(client, objects);
     for (const line of lines) say(line);
     // **What was applied, not what was looked at.** `!== "KEEP"` counted an
     // ORPHAN as applied, so a start that wrote nothing and kept one row it

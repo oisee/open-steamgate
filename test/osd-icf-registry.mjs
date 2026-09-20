@@ -79,9 +79,33 @@ describe("the ICF registry, applied to a database", function () {
     expect(after.ICF_DOCU, "the object wins").to.equal("what the object says now");
     const aside = (await client().select({select: `SELECT * FROM zosd_icf_aside`})).rows;
     expect(aside.length, "and the previous row is somewhere that survives the restart").to.equal(1);
+    // **and it keeps the handler it replaced.** The first version read the
+    // handler off the ICFSERVICE row, which has no such field, so every
+    // record said "" -- and the handler rows are deleted in the same
+    // breath. The one thing the content hash calls part of a node was the
+    // one thing "kept aside" lost, and this test counted rows rather than
+    // reading one, so it passed throughout. Found by an adversarial review.
+    expect(String(aside[0].HANDLER ?? aside[0].handler ?? "").trim(),
+      "the aside record keeps what answered before").to.equal("ZCL_OSD_RFC_HTTP");
     expect(said.join(" "), "said out loud").to.contain("kept aside");
     // an applied row is the object's again, so the next start is quiet
     expect((await currentOrigins(client())).get(keyOf(target)).origin).to.not.equal(EDITED);
+  });
+
+  it("an empty object list is refused, because it is a wrong root and not an empty tree", async () => {
+    // A compiled binary takes its root from OSD_ROOT or the working
+    // directory. Started outside the tree it finds no `*.sicf.xml`, every
+    // applied row becomes a REMOVE, and the registry is wiped and reported
+    // as "N of N nodes applied from their objects". Found by an adversarial
+    // review as the worst of the binary's failure modes.
+    const {applyAtStartup} = await import("../tools/osd-icf-apply.mjs");
+    await applyTo(client(), objects());
+    const before = (await currentRows(client())).ICFSERVICE.length;
+    const said = [];
+    const out = await applyAtStartup(client(), {root: "/tmp", say: (l) => said.push(l)});
+    expect(out, "it refuses rather than applying").to.equal(undefined);
+    expect(said.join(" ")).to.contain("refusing to apply an empty registry");
+    expect((await currentRows(client())).ICFSERVICE.length, "and the rows are still there").to.equal(before);
   });
 
   it("a node whose object is gone is removed if nobody touched it, kept if somebody did", async () => {
@@ -104,5 +128,8 @@ describe("the ICF registry, applied to a database", function () {
     expect(urls, "the untouched one is gone").to.not.include(gone.URL);
     expect(urls, "the edited one is kept").to.include(kept.URL);
     expect(said.join(" ")).to.contain("no object explains it");
+    // and the removal is said out loud too: it is the only action that
+    // takes a path away, so it is the one most worth not discovering by 404
+    expect(said.join(" ")).to.contain("removed");
   });
 });
