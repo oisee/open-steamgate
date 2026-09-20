@@ -41,6 +41,7 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
       | <sadl:dataSource type="CDS" name="ZC_STG_BOOKING" binding="ZC_STG_BOOKING" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_TRAVELCUBE" binding="ZC_STG_TRAVELCUBE" />| &&
       | <sadl:dataSource type="CDS" name="ZC_STG_FLIGHTCUBE" binding="ZC_STG_FLIGHTCUBE" />| &&
+      | <sadl:dataSource type="CDS" name="ZC_OSD_TAXICUBE" binding="ZC_OSD_TAXICUBE" />| &&
       |<sadl:resultSet>| &&
       |<sadl:structure name="Zc_Stg_Travel" dataSource="ZC_STG_TRAVEL" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
@@ -57,6 +58,10 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
       | </sadl:query>| &&
       |</sadl:structure>| &&
       |<sadl:structure name="Zc_Stg_Flightcube" dataSource="ZC_STG_FLIGHTCUBE" maxEditMode="RO" exposure="TRUE" >| &&
+      | <sadl:query name="SADL_QUERY" >| &&
+      | </sadl:query>| &&
+      |</sadl:structure>| &&
+      |<sadl:structure name="Zc_Osd_Taxicube" dataSource="ZC_OSD_TAXICUBE" maxEditMode="RO" exposure="TRUE" >| &&
       | <sadl:query name="SADL_QUERY" >| &&
       | </sadl:query>| &&
       |</sadl:structure>| &&
@@ -83,6 +88,7 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
     DATA lt_booking TYPE zcl_stg_cds_zvstgbooking=>tt_row.
     DATA lt_cube    TYPE zcl_stg_cds_zvstgtravelcube=>tt_row.
     DATA lt_flight  TYPE zcl_stg_cds_zvstgflightcube=>tt_row.
+    DATA lt_taxi    TYPE zcl_stg_cds_zvosdtaxicube=>tt_row.
     DATA lv_entityset_name TYPE string.
 
     lv_entityset_name = io_tech_request_context->get_entity_set_name( ).
@@ -111,6 +117,12 @@ CLASS zcl_zstg_sadl_dpc IMPLEMENTATION.
                                                        IMPORTING et_data                 = lt_flight
                                                                  es_response_context     = es_response_context ).
         copy_data_to_ref( EXPORTING is_data = lt_flight
+                          CHANGING  cr_data = er_entityset ).
+      WHEN 'Zc_Osd_TaxicubeSet'.
+        if_sadl_gw_dpc_util~get_dpc( )->get_entityset( EXPORTING io_tech_request_context = io_tech_request_context
+                                                       IMPORTING et_data                 = lt_taxi
+                                                                 es_response_context     = es_response_context ).
+        copy_data_to_ref( EXPORTING is_data = lt_taxi
                           CHANGING  cr_data = er_entityset ).
       WHEN OTHERS.
         super->/iwbep/if_mgw_appl_srv_runtime~get_entityset(

@@ -19,6 +19,11 @@
     "text": "Flight analytics: the analytical list page",
     "service": "ZSTG_SADL_SRV"
   },
+  "ZOSD_TAXI_ANAL": {
+    "folder": "webapp/taxi",
+    "text": "NYC taxi trips: the analytical list page",
+    "service": "ZSTG_SADL_SRV"
+  },
   "ZOSD_ICF_APP": {
     "folder": "webapp/icf",
     "text": "ICF services: the service tree as an application",

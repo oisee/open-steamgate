@@ -19,6 +19,11 @@ const CORE_APPS = [
     ready: (page) => page.getByText("SQ").first(),
   },
   {
+    title: "NYC taxi analytics",
+    intent: "Taxi-analyze",
+    ready: (page) => page.getByText("Manhattan").first(),
+  },
+  {
     title: "SEGW",
     intent: "SegwProject-manage",
     ready: (page) => page.getByText("Entity Types").first(),
@@ -40,7 +45,7 @@ function quoteRegExp(value) {
 }
 
 /**
- * Register the same six launchpad smoke checks for either hosting shape.
+ * Register the same launchpad smoke checks for either hosting shape.
  *
  * `openLaunchpad` owns the host-specific setup (the Node server can navigate
  * directly, while Pages must first give its service worker control).  A
