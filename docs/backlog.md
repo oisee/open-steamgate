@@ -1225,6 +1225,13 @@ of a day.
 > system expose, and what implements it" instead of "what is left to
 > migrate".
 >
+> **The rule C was blocked on is written**: `docs/registry-drift.md`
+> (2026-09-20), before the table rather than after it. The table is the truth
+> at runtime, an object is a transport applied when it arrives, the tables to
+> implement are `ICFSERVICE` and `ICFHANDLER` rather than a `ZOSD_` invention,
+> and a row somebody edited that an object contradicts is replaced, kept aside
+> and reported.
+>
 > **C. The registry becomes readable and writable from ABAP.** Seeded from
 > `*.sicf.xml`, the way `data/*.tabu.json` seeds tables from abapGit
 > objects. This *is* G.5 -- a screen over files would be a picture of a

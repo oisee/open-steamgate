@@ -203,10 +203,30 @@ rebuild, and every page still answers 200 with the right content type.
 Seeded from `*.sicf.xml`, the way `data/*.tabu.json` seeds tables from
 abapGit objects.
 
-**It needs a rule this tree does not have yet**: what happens when the table
-and the objects disagree. There is one for the database (schema drift: move
-aside, say so, never silently) and none for this. Write it before the table,
-not after.
+**It needed a rule this tree did not have**: what happens when the table and
+the objects disagree. That rule is now written, before the table, in
+[`registry-drift.md`](registry-drift.md). Its three load-bearing claims:
+
+- **on a real system the objects *are* the table** -- `ICFSERVICE` /
+  `ICFHANDLER` are the registry, abapGit writes those rows, and a
+  `*.sicf.xml` is a transport rather than a source. So the table is the truth
+  at runtime and an object is applied **when it arrives**, not on every
+  start;
+- so **do not invent `ZOSD_ICF`** -- implement `ICFSERVICE` and
+  `ICFHANDLER`, and ABAP that reads SICF the way a system does works here
+  unchanged;
+- the disagreement keys off **who last wrote the row**, `SEEDED` or
+  `EDITED`, and an edited row an object contradicts is **replaced, kept
+  aside and reported** -- the shape the schema-drift rule already has.
+
+It also names why this matters at all: `data/*.tabu.json` is re-seeded on
+every generation change, which is right for a fixture and would make the
+registry screen a toy. Configuration and seed data look identical in SQLite
+and are not the same thing.
+
+What is still open in the rule is where "aside" *is*: a moved-aside database
+is a file with a name, and a moved-aside row needs somewhere to be that
+survives the restart which produced it.
 
 **Done when**: changing a node from a screen changes what answers, and a
 disagreement between the table and the objects is reported rather than
