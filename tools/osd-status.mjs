@@ -18,12 +18,13 @@
 //    "packs":[{"name","order","objects","folders","description"}],
 //    "database":[{"section","name","value","note"}]}
 //
-// Counts only. No host names, no user names, no addresses, no absolute
+// Counts and coarse platform labels only. No host names, no user names, no addresses, no absolute
 // paths, no identity of whoever is connected: a status page that leaks the
 // machine it runs on is a status page nobody can publish, and this one is
 // served to anyone who can reach the port. `root_hint` is the tree's
 // basename and nothing above it.
 import {createConnection} from "node:net";
+import {release as kernelRelease} from "node:os";
 import {basename, join, resolve} from "node:path";
 import {readFileSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -256,6 +257,45 @@ function databaseRows(engine, storage, connected) {
   ];
 }
 
+// A container's /etc/os-release describes the image, not the host. The
+// optional host release must be mounted read-only by its operator.
+function osRelease(text) {
+  const fields = new Map();
+  for (const line of String(text).slice(0, 4096).split("\n")) {
+    const match = /^([A-Z_]+)=(.*)$/.exec(line);
+    if (!match) continue;
+    let value = match[2].trim();
+    if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1);
+    fields.set(match[1], value.replace(/\\(["'\\])/g, "$1"));
+  }
+  const name = fields.get("NAME") ?? fields.get("ID") ?? "";
+  const version = fields.get("VERSION_ID") ?? "";
+  const codename = fields.get("VERSION_CODENAME") ?? "";
+  return [name, version, codename ? `(${codename})` : ""].filter(Boolean).join(" ");
+}
+
+function safeLabel(value, max = 120) {
+  return String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/** Only coarse labels; never a hostname, serial number, address or path. */
+export function platformFacts({read = readFileSync, platform = process.platform, arch = process.arch, kernel = kernelRelease()} = {}) {
+  const file = (path) => {
+    try { return read(path, "utf8"); } catch { return ""; }
+  };
+  const facts = [
+    {section: "Platform", name: "Architecture", value: safeLabel(`${platform}/${arch}`), note: "runtime platform"},
+    {section: "Platform", name: "Kernel", value: safeLabel(kernel), note: "host kernel shared with the container"},
+  ];
+  const runtimeOS = safeLabel(osRelease(file("/etc/os-release")));
+  if (runtimeOS) facts.push({section: "Platform", name: "Runtime OS", value: runtimeOS, note: "OS inside the container or local runtime"});
+  const hostOS = safeLabel(osRelease(file("/run/host/os-release")));
+  if (hostOS) facts.push({section: "Platform", name: "Host OS", value: hostOS, note: "operator-provided read-only host release"});
+  const model = safeLabel(file("/run/host/device-model") || file("/proc/device-tree/model") || file("/sys/firmware/devicetree/base/model"));
+  if (model) facts.push({section: "Platform", name: "Device", value: model, note: "board model; no serial number"});
+  return facts;
+}
+
 // Only ask the supervisor's local child, never an environment-supplied URL.
 // Failure is an observation, not permission to label configured data connected.
 export async function childDatabaseFacts(runtime, {fetcher = fetch, timeoutMs = 1000} = {}) {
@@ -392,10 +432,11 @@ export async function snapshot(root = process.cwd(), options = {}) {
       pid: servingPid(runtime, processes),
     },
     processes,
-    ports: await portsOf(options.listeners ?? [], {instance: facadePort}),
+    ports: await portsOf(options.listeners ?? [], {instance: /^\d{2}$/.test(String(env.INSTANCE ?? "")) ? env.INSTANCE : facadePort}),
     services: options.services ?? servicesOf(root, env),
     packs: options.packs ?? packsInfo(root, env),
-    database: options.database ?? await childDatabaseFacts(runtime) ?? databaseFacts({client: options.client, env}),
+    database: [...(options.database ?? await childDatabaseFacts(runtime) ?? databaseFacts({client: options.client, env})),
+      ...(options.platform ?? platformFacts())],
   };
 }
 

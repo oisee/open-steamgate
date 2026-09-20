@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
+import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, platformFacts, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
 import {databaseDescriptor} from "../tools/osd-database-identity.mjs";
 
 // The snapshot the facade posts to ZCL_OSD_STATUS=>REFRESH. The contract is
@@ -87,6 +87,7 @@ describe("tools/osd-status: the system as one JSON object", () => {
     now: new Date("2026-09-17T09:00:30.000Z"),
     rss: 120 * 1048576,
     hostKind: "node",
+    platform: [],
     instances: [{pid: 90001, since: "2026-09-17T09:00:01.000Z"}],
     ...options,
   });
@@ -187,6 +188,35 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(byPort.get(3360).note).to.include("open-rfc-go");
     expect(byPort.get(3260).note).to.include("DIAG");
     expect(s.ports.map((p) => p.port)).to.deep.equal([...s.ports.map((p) => p.port)].sort((a, b) => a - b));
+  });
+
+  it("uses the configured Docker instance for the DIAG and RFC rows", async () => {
+    const s = await take({env: {INSTANCE: "11"}});
+    expect(s.ports.find((p) => p.port === 3211)?.protocol).to.equal("DIAG");
+    expect(s.ports.find((p) => p.port === 3311)?.protocol).to.equal("RFC");
+    expect(s.ports.find((p) => p.port === 3230)).to.equal(undefined);
+  });
+
+  it("distinguishes container OS, optional host OS and Raspberry Pi model without leaking paths", async () => {
+    const files = new Map([
+      ["/etc/os-release", 'NAME="Debian GNU/Linux"\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n'],
+      ["/run/host/os-release", 'NAME="Debian GNU/Linux"\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'],
+      ["/run/host/device-model", "Raspberry Pi 4 Model B Rev 1.5\0"],
+    ]);
+    const facts = platformFacts({read: (path) => {
+      if (!files.has(path)) throw new Error("not mounted");
+      return files.get(path);
+    }, platform: "linux", arch: "arm64", kernel: "6.12.1+rpt-rpi-v8"});
+    expect(facts.map(({name, value}) => [name, value])).to.deep.equal([
+      ["Architecture", "linux/arm64"], ["Kernel", "6.12.1+rpt-rpi-v8"],
+      ["Runtime OS", "Debian GNU/Linux 12 (bookworm)"],
+      ["Host OS", "Debian GNU/Linux 13 (trixie)"],
+      ["Device", "Raspberry Pi 4 Model B Rev 1.5"],
+    ]);
+    expect((await take({platform: facts})).database.slice(2)).to.deep.equal(facts);
+    expect(JSON.stringify(facts)).not.to.include("/run/host");
+    expect(platformFacts({read: () => { throw new Error("absent"); }, platform: "linux", arch: "arm64", kernel: "6.12"})
+      .map((fact) => fact.name)).to.deep.equal(["Architecture", "Kernel"]);
   });
 
   it("lists the OData, ICF and APC services, each with the pack it came from", async () => {

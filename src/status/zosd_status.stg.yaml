@@ -118,7 +118,7 @@ entities:
 
   Database:
     set: DatabaseSet
-    description: "safe facts about the database backend"
+    description: "safe facts about the database and runtime platform"
     source: {cds: ZC_OSD_DATABASE, struct: "ZCL_STG_CDS_ZVOSDDB=>TY_ROW"}
     keys: [Section, Name]
     creatable: false
@@ -180,7 +180,7 @@ annotations:
       - {id: Ports, label: Ports, lineItem: to_Ports}
       - {id: Services, label: Services, lineItem: to_Services}
       - {id: Packs, label: Packs, lineItem: to_Packs}
-      - {id: Database, label: Database, lineItem: to_Database}
+      - {id: Database, label: Environment, lineItem: to_Database}
     fieldGroups:
       General: [Sid, HostKind, GenLive, GenServing, Synced, Workers, StartedAt, SnapAt, RootHint, Pid]
       Runtime: [HostKind, Workers, StartedAt, Pid]
@@ -281,7 +281,7 @@ annotations:
   Pack/Description: {label: Description}
 
   Database:
-    header: {typeName: Database fact, typeNamePlural: Database facts, title: Name, description: Value}
+    header: {typeName: Environment fact, typeNamePlural: Environment facts, title: Name, description: Value}
     selectionFields: [Section, Name]
     lineItem:
       - {value: Section, label: Section}

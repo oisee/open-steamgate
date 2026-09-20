@@ -62,6 +62,32 @@ The refresh happens when a request for the service arrives, so what the app
 shows is what was true when it was asked; a failed refresh is logged and the
 tables are served as they are.
 
+## Platform facts in the Environment facet
+
+The existing `DatabaseSet` also carries coarse `Platform` rows, so adding
+them does not change the DDIC schema or rebuild a persisted SQLite volume.
+`Architecture` comes from the Node runtime (`linux/arm64` on a 64-bit Pi),
+`Runtime OS` from the runtime filesystem's `/etc/os-release` (the **container**
+OS in Docker), and `Kernel` from the host kernel shared with the container.
+If the board model is visible at `/proc/device-tree/model` or
+`/sys/firmware/devicetree/base/model`, or is mounted at
+`/run/host/device-model`, `Device` names the Raspberry Pi model without
+exposing its serial number. Docker on pi48w does not expose the device-tree
+model by default, so it needs the explicit mount below. `Host OS` appears only when an operator
+mounts the host's release file read-only at `/run/host/os-release`; the
+container OS is never presented as the host OS. For example, add this to a
+Pi's `docker run` command when creating a new container:
+
+```sh
+--mount type=bind,source=/etc/os-release,target=/run/host/os-release,readonly
+--mount type=bind,source=/proc/device-tree/model,target=/run/host/device-model,readonly
+```
+
+The browser-preview worker reports only `browser`, without inspecting the
+visitor's device or OS. On Docker hosts, `INSTANCE=11` now makes the port
+rows refer to 3211/3311 rather than inferring 3230/3330 from internal HTTP
+port 3030.
+
 **Nothing identifies a client.** Sockets are counted, never described: no
 addresses, no user names, no session ids. That is the same rule the rest of
 the repository keeps, and a status app is exactly where it would be easiest
