@@ -328,6 +328,7 @@ function statusSnapshot() {
     }],
     services: rows,
     packs: packRows,
+    database: [{section: "Platform", name: "Architecture", value: "browser", note: "service worker; device details not collected"}],
   };
 }
 

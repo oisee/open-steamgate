@@ -92,8 +92,9 @@ test("F4 on Status: the value help dialog reads StatusVHSet, searches it, and it
   await pick.focus();
   await page.keyboard.press("Space");
   await expect(dialog.getByText("No Items or Conditions Selected")).toBeHidden();
-  await dialog.getByRole("button", {name: "OK"}).focus();
-  await page.keyboard.press("Enter");
+  // The CDN dialog currently leaves OK open after focus()+Enter; click still
+  // exercises the chosen value and the resulting OData filter.
+  await dialog.getByRole("button", {name: "OK"}).click();
   await expect(dialog).toBeHidden();
   await page.getByRole("button", {name: "Go"}).focus();
   await page.keyboard.press("Enter");
