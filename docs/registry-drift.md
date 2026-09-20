@@ -55,7 +55,8 @@ guess.
 | `SEEDED`, unchanged since | something different | replaced, quietly. Nothing a person did was lost |
 | `EDITED` | something different | **replaced, and the previous row is kept aside and reported** |
 | `EDITED` | nothing (the object is gone) | kept, and reported as a node no object explains |
-| `SEEDED` | nothing (the object is gone) | removed. It was only ever the object's |
+| `SEEDED` | nothing (the object is gone) | removed, **and reported**. It was only ever the object's, but it is the one action that takes a path away, so it is not quiet |
+| nothing recorded | nothing (the object is gone) | removed. **A row nothing is known about is the seeder's**: nothing else has ever written one, and treating an unrecorded row as edited would keep every stale node forever the first time this table is lost |
 
 The third row is the whole question, and the shape of the answer is taken
 from the rule this tree already has for schema drift: **move aside, say so,
@@ -111,6 +112,21 @@ whose URL did not has changed, and a hash over the service row alone would
 call it unchanged and never apply it.
 
 ## What is still open
+
+**What "aside" keeps.** `ZOSD_ICF_ASIDE` holds the node, the URL, the
+handlers as a comma-joined list, when and why. That is **not the previous
+row** -- the handler order and type are lost, and the descriptions are not
+kept at all. Enough to see what was replaced and by what; not enough to put
+it back. Say so rather than let the word "kept" carry more than the table
+does (codex-sol, 2026-09-20).
+
+**The content hash is not canonical.** `JSON.stringify` over the service
+row depends on property insertion order and drops `undefined`, the handler
+chain is joined with a delimiter that could appear in a value, and the
+digest is truncated to 64 bits. Two objects that differ can collide and one
+object can hash differently across runs if the row is ever built by another
+path. It has one producer today (`rowsOf`), which is why this has not bitten;
+a second producer is what would make it bite.
 
 **Where "aside" is.** A moved-aside database is a file with a name. A
 moved-aside row needs somewhere to be -- a second table, or a report that

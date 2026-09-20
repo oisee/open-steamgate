@@ -135,6 +135,16 @@ CLASS zcl_osd_icf IMPLEMENTATION.
 
     UPDATE icfservice SET icfactive = iv_active
       WHERE icf_name = iv_name AND icfparguid = iv_parent.
+*   **A node that is not there is not switched, and does not get a row of
+*   bookkeeping.** Without this the origin table collects entries for nodes
+*   that never existed, and the next apply has to explain them. The screen
+*   checks existence before calling, which only narrows this to a race;
+*   every other caller -- the OData write this method exists to be
+*   inherited by -- had nothing. Named by an adversarial review
+*   (codex-sol, 2026-09-20).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
 
     SELECT SINGLE objhash FROM zosd_icf_origin INTO lv_hash
       WHERE icf_name = iv_name AND icfparguid = iv_parent.

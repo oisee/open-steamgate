@@ -160,6 +160,7 @@ CLASS ltcl_screen DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINA
     METHODS teardown.
     METHODS switching_off_is_an_edit FOR TESTING RAISING cx_static_check.
     METHODS the_object_hash_is_kept FOR TESTING RAISING cx_static_check.
+    METHODS a_node_that_is_not_there FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_screen IMPLEMENTATION.
@@ -201,6 +202,21 @@ CLASS ltcl_screen IMPLEMENTATION.
 *   next start replacing it from the object
     SELECT SINGLE origin FROM zosd_icf_origin INTO lv_origin WHERE icf_name = 'ZORK'.
     cl_abap_unit_assert=>assert_equals( act = lv_origin exp = 'E' ).
+  ENDMETHOD.
+
+  METHOD a_node_that_is_not_there.
+*   **A write to a node nobody has must not leave bookkeeping behind.**
+*   Without the check, ZOSD_ICF_ORIGIN collected rows for nodes that never
+*   existed and the next apply had to explain them. The screen checks
+*   existence before calling, which only narrows it to a race; the caller
+*   this method exists to be inherited by -- an OData update -- had
+*   nothing. Named by an adversarial review.
+    DATA lv_rows TYPE i.
+
+    zcl_osd_icf=>set_active( iv_name = 'ZNOSUCH' iv_parent = 'P' iv_active = ' ' ).
+
+    SELECT COUNT( * ) FROM zosd_icf_origin INTO lv_rows WHERE icf_name = 'ZNOSUCH'.
+    cl_abap_unit_assert=>assert_equals( act = lv_rows exp = 0 ).
   ENDMETHOD.
 
   METHOD the_object_hash_is_kept.

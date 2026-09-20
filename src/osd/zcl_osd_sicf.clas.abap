@@ -46,6 +46,12 @@ CLASS zcl_osd_sicf DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_value) TYPE string.
 
+    CLASS-METHODS unescape
+      IMPORTING
+        iv_text        TYPE string
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
     CLASS-METHODS esc
       IMPORTING iv_text        TYPE clike
       RETURNING VALUE(rv_text) TYPE string.
@@ -80,17 +86,65 @@ CLASS zcl_osd_sicf IMPLEMENTATION.
     LOOP AT lt_pair INTO lv_pair.
       SPLIT lv_pair AT '=' INTO lv_key rv_value.
       IF lv_key = iv_name.
+*       **It is urlencoded, so it has to be urldecoded.** The first version
+*       returned the raw token: `+` stayed a plus and `%2F` stayed three
+*       characters, so a node name with either in it was looked up under a
+*       name nothing has. Named by an adversarial review before anything
+*       had such a name -- which is the only time to fix it.
+        REPLACE ALL OCCURRENCES OF `+` IN rv_value WITH ` `.
+        rv_value = unescape( rv_value ).
         RETURN.
       ENDIF.
       CLEAR rv_value.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD unescape.
+*   `%xx` -> the byte it names. Written out rather than taken from a
+*   library because the two this runtime has disagree: cl_http_utility's
+*   unescape_url is not in open-abap-core, and escape_url would be the
+*   wrong direction anyway.
+    DATA lv_rest TYPE string.
+    DATA lv_hex  TYPE string.
+    DATA lv_at   TYPE i.
+    DATA lv_byte TYPE x LENGTH 1.
+
+    lv_rest = iv_text.
+    WHILE lv_rest CS '%'.
+      lv_at = sy-fdpos.
+      IF strlen( lv_rest ) < lv_at + 3.
+        EXIT.
+      ENDIF.
+      lv_hex = lv_rest+lv_at(3).
+      lv_hex = lv_hex+1(2).
+      TRY.
+          lv_byte = to_upper( lv_hex ).
+          rv_text = rv_text && lv_rest(lv_at) && cl_abap_conv_in_ce=>uccp( |00{ to_upper( lv_hex ) }| ).
+        CATCH cx_root.
+*         not a hex pair: the per cent is a per cent, and a screen that
+*         threw here would be a screen a stray % takes down
+          rv_text = rv_text && lv_rest(lv_at) && `%`.
+      ENDTRY.
+      lv_at = lv_at + 3.
+      lv_rest = lv_rest+lv_at.
+    ENDWHILE.
+    rv_text = rv_text && lv_rest.
+  ENDMETHOD.
+
   METHOD esc.
+*   **The quotes matter here and did not in the screens this was copied
+*   from.** ST05 and SE16 put escaped text in element content only; this
+*   page also puts a node name and a parent guid inside
+*   `value="..."` of a hidden input, and a `"` there closes the attribute
+*   and opens whatever follows. The rows come from a table an ABAP writer
+*   can put anything in, so "our own data" is not an argument.
+*   Found by an adversarial review (codex-sol, 2026-09-20).
     rv_text = iv_text.
     REPLACE ALL OCCURRENCES OF `&` IN rv_text WITH `&amp;`.
     REPLACE ALL OCCURRENCES OF `<` IN rv_text WITH `&lt;`.
     REPLACE ALL OCCURRENCES OF `>` IN rv_text WITH `&gt;`.
+    REPLACE ALL OCCURRENCES OF `"` IN rv_text WITH `&quot;`.
+    REPLACE ALL OCCURRENCES OF `'` IN rv_text WITH `&#39;`.
   ENDMETHOD.
 
   METHOD set_active.

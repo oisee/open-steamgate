@@ -107,7 +107,12 @@ associations:
   NodeToOrigin:
     from: Node
     to: Origin
-    cardinality: 1:N
+    # 1:1, and it said 1:N. The CDS view declares [0..1] and the key of
+    # ZOSD_ICF_ORIGIN permits at most one row per node, so the service was
+    # promising a list where the model has a row. Caught by an adversarial
+    # review reading the two files against each other, which is the one
+    # thing neither file can do for itself.
+    cardinality: 1:1
     navigation: {Node: to_Origin}
 
 annotations:
