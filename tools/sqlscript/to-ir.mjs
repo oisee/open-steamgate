@@ -380,6 +380,19 @@ export function toIr(tree, options = {}) {
 
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
+    // **A table function call is not a table.** The grammar parses
+    // `FROM my_func(:p)` into a `TableFunctionCall`, and nothing here
+    // mentioned that name, so it fell through to the wrapper-unwrapping
+    // fallback at the end of `expression`: the call vanished, its arguments
+    // with it, and the body lowered to `FROM "MY_FUNC"` -- a read of a table
+    // that may well exist. No refusal, no warning, and an answer that is
+    // plausible. Found 2026-09-20 by comparing the grammar's node names
+    // against the ones this stage mentions, which is what
+    // `tools/sqlscript/grammar-cover.mjs` does now.
+    const call = (node.children ?? []).find((c) => c.node === "TableFunctionCall");
+    if (call !== undefined) {
+      throw new BindError("a table function call in FROM is parsed but not lowered yet", call);
+    }
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
