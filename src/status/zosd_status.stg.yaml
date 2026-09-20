@@ -226,6 +226,12 @@ annotations:
       - {value: Text, label: Name}
       - {value: Handler, label: Handler}
       - {value: Pack, label: Pack}
+      # **Reached from the status app, not only from the launchpad** (Alice,
+      # 2026-09-18, in the G.5 specification). This list is where a person
+      # already is when they are wondering what answers a path; the registry
+      # is the next question, so it is a button here rather than a tile they
+      # have to go back for.
+      - {intent: {semanticObject: IcfNode, action: manage, label: ICF services}}
     facets:
       - {id: ServiceGeneral, label: General, fieldGroup: General}
     fieldGroups:

@@ -1158,3 +1158,37 @@ the next person stops looking.
   deploy. A field that is unreadable while a suite runs is a field whose
   false readings get explained away -- which is exactly what happened three
   times tonight, twice by blaming the deployment and once by blaming a test.
+
+### NOTE-2026-09-20-i18n-not-intercepted — the preview's service worker does not see an app's i18n request
+
+Found while giving the new ICF registry application an end-to-end check,
+and **it is not that application's**: the same request fails the same way
+for `zosd_status_app`, which has been deployed for a day.
+
+- What is measured, in a persistent-context Chromium against a local
+  preview build, watching every response under `/sap/bc/ui5_ui5/`:
+  ```
+  200 sw=true   /sap/bc/ui5_ui5/sap/zosd_status_app/Component.js
+  200 sw=true   /sap/bc/ui5_ui5/sap/zosd_status_app/manifest.json
+  404 sw=false  /sap/bc/ui5_ui5/sap/zosd_status_app/i18n/i18n.properties
+  ```
+  `fromServiceWorker` is **false** for the one that fails. The worker is in
+  control (the two above it prove that), the path matches
+  `SERVICE_PREFIXES` (`/sap/bc/ui5_ui5/sap` is in the generated list), and
+  the page is served correctly when the same URL is fetched by hand from a
+  page the worker controls -- 200, with the right content.
+- So the request is **not reaching the worker at all**, rather than the
+  worker answering 404. Why UI5's resource-bundle load is not intercepted
+  while its module loads are is the open question. A synchronous XHR from
+  `sap.ui.model.resource.ResourceModel` is the first thing to look at.
+- Consequence, and it is small: the bundle falls back and the application
+  renders with its default texts. Both applications list their rows. It is
+  a red line in a network tab and a missing translation, not a broken app.
+- Why it is written down rather than fixed now: the fix is in UI5's loading
+  or in the worker's scope handling, neither of which is guessed at
+  cheaply, and the application it was found on is new -- attaching an old
+  defect to a new test would make the new test carry it forever.
+- Where the check is: `test/e2e/preview.spec.mjs` excludes `/i18n/` from
+  the 404 assertion and names this entry. When this is fixed, delete the
+  exclusion; if the exclusion outlives the defect, the assertion has
+  stopped testing what it says.

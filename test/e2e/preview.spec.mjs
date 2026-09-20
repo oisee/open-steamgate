@@ -993,4 +993,49 @@ test("the registry screen counts the nodes this deployment actually serves", asy
   }
 });
 
+// **The registry as an application, opened the way a person opens it.**
+//
+// The HTML screen at /sap/bc/osd/sicf/ has its own check above. This is the
+// Fiori Elements one (backlog G.5, Alice's specification): a list report
+// over NodeSet with an object page, reached by its intent. It ships as a
+// BSP application like the other five, so everything that broke the tiles
+// this morning -- an absolute component URL, an absolute data source, a
+// file name that does not survive a URL -- would break this one too, and
+// each of those passed every check that existed at the time.
+test("the ICF registry application lists the nodes it is a registry of", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "osd-preview-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    const missing = [];
+    page.on("response", (r) => {
+      // `changes/` is UI5's flexibility layer probing, and `i18n/` is
+      // NOTE-2026-09-20-i18n-not-intercepted: measured the same for the
+      // status app, which predates this one, so it is not this
+      // application's fault and asserting it here would only make a new
+      // test carry an old defect.
+      const ours = /\/sap\/(bc\/ui5_ui5|opu)\//.test(r.url())
+        && r.url().includes("/changes/") === false
+        && r.url().includes("/i18n/") === false;
+      if (r.status() === 404 && ours) {
+        missing.push(r.url());
+      }
+    });
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${ORIGIN}/app/flp.html#IcfNode-manage`);
+
+    const body = page.locator("body");
+    await expect(body).not.toContainText("could not be loaded", {timeout: 60000});
+    // the count in the table header is the service answering, not a shell
+    await expect(body).toContainText("ICF nodes", {timeout: 60000});
+    await expect(body).toContainText("/sap/bc/osd/sicf/");
+    expect(missing, "the application's resources and its data are where it asked").toEqual([]);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
+
 
