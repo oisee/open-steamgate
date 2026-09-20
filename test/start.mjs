@@ -19,6 +19,7 @@ import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
 import {mountHost, nodes} from "../tools/osd-nodes.mjs";
+import {applyAtStartup} from "../tools/osd-icf-apply.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
@@ -52,6 +53,12 @@ async function loadInline() {
   // so the facade writes the tables itself (src/status/)
   const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
   await initializeABAP();
+  // the ICF nodes into ICFSERVICE/ICFHANDLER -- see tools/osd-icf-apply.mjs
+  // and docs/registry-drift.md. Awaited, so a registry that could not be
+  // applied is reported before the listener claims to be up. `quiet` is not
+  // in scope here -- this runs once at module load, not per startServer() --
+  // and a suite that starts a hundred servers still applies once.
+  await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root: process.cwd()});
   // the SEGW registration objects (IWSV/IWMO in src/) say which service is
   // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
   await zcl_stg_segw_registry.register();

@@ -208,6 +208,41 @@ export async function markEdited(client, name, parent) {
   }));
 }
 
+/** What a host does at startup, in one place because all of them must do it.
+ *
+ *  The shape is the lesson of `tools/osd-dialog-step.mjs`: a rule about what
+ *  **every host must do** is not a comment saying so, it is a module they
+ *  import. Three hosts wrote their own end-of-dialog-step once and two of
+ *  them got it wrong.
+ *
+ *  **A failure here is loud and not fatal, and that is a statement with a
+ *  shelf life.** Nothing routes off these rows yet -- the express hosts still
+ *  mount from `tools/osd-nodes.mjs` reading the objects -- so a registry that
+ *  could not be applied must not stop a listener that does not depend on it.
+ *  The day routing asks the table, this becomes fatal, and the comment has to
+ *  change with it rather than quietly stay true-sounding.
+ *
+ *  It needs a file system, because the objects are files. The browser preview
+ *  has neither, so there the registry is simply empty until the rows are
+ *  generated into the bundle -- which is the `CONTENT`/`HOST` distinction
+ *  `tools/osd-nodes.mjs` already draws, showing up one layer down. */
+export async function applyAtStartup(client, options = {}) {
+  const say = options.say ?? ((line) => console.log(line));
+  try {
+    const {icfRows} = await import("./osd-icf-rows.mjs");
+    const {actions, report: lines} = await applyTo(client, icfRows(options.root ?? process.cwd()));
+    for (const line of lines) say(line);
+    const changed = actions.filter((a) => a.action !== "KEEP").length;
+    if (changed > 0) {
+      say(`ICF registry: ${changed} of ${actions.length} nodes applied from their objects`);
+    }
+    return actions;
+  } catch (e) {
+    say(`ICF registry not applied: ${e?.message ?? e}. Nothing routes off it yet, so this is not fatal -- and it will be.`);
+    return undefined;
+  }
+}
+
 if (runsAs("osd-icf-apply.mjs")) {
   // With no table to read yet, the plan against an empty registry is what a
   // first apply would do -- which is the honest thing this can print today.

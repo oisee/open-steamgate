@@ -18,6 +18,7 @@ import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {mountServices, channels} from "./osd-icf.mjs";
 import {mountHost, nodes} from "./osd-nodes.mjs";
+import {applyAtStartup} from "./osd-icf-apply.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
@@ -44,6 +45,11 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
 await initializeABAP();
+// the ICF nodes into the tables a system keeps them in, by the rule in
+// docs/registry-drift.md: applied when an object arrives, never re-applied
+// over an edit. One module for all three hosts, because that is what the
+// end-of-dialog-step rule cost when it was written once in one of them.
+await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root});
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 
