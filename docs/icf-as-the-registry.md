@@ -120,12 +120,25 @@ declaring, where the number went up. That is the better trade and the note
 should not be read as having predicted it.
 
 The finding that justifies the track on its own is one nobody was looking
-for: **three of our nodes would replace SAP's own handlers on an abapGit
-import** — `/sap/bc/gui/sap/its/webgui`, its `sapevent` child, and
-`/sap/bc/ui5_ui5/sap`. A system importing this repository would lose its
-Easy Access and its UI5 repository. It fell out of separating *what
+for: **three of our nodes answer on paths a real system delivers** —
+`/sap/bc/gui/sap/its/webgui`, its `sapevent` child, and
+`/sap/bc/ui5_ui5/sap` — and until the inventory said so, nothing stopped them
+being packed into a zip meant for a system. It fell out of separating *what
 implements a node* from *whether the node travels*, which is a distinction
 this note did not have.
+
+*Corrected 2026-09-20, and the correction is the more useful half.* This
+first said such an import **would replace** SAP's handler, and that is not
+established. Read in the clone rather than assumed:
+`zcl_abapgit_object_sicf` identifies an object by `ms_item-obj_name`, which
+is `icf_name(15)` plus `icfparguid`, and creates the node with
+`insert_node( icf_name = is_icfservice-orig_name, icfparguid =
+find_parent( iv_url ) )`. The key is the **name and the parent GUID**, not
+the URL. So an import may nest a node, collide, or fail — and none of ours
+is even written in abapGit's SICF naming. The conclusion "these must not
+travel" survives; the mechanism given for it was invented, in a sentence
+confident enough that it reached three commit messages before anybody opened
+the file.
 
 **One defect is open and it is in the load-bearing claim.**
 `tools/osd-serve.mjs` mounts ABAP nodes from the rows
