@@ -136,7 +136,9 @@ export async function setup(abap, schemas, insert) {
   installTraceDestination(abap);
   installStoreDestination(abap);
   if (process.env.STG_DB === "postgres") {
-    const {OsdPostgresClient, postgresInserts} = await import("../tools/postgres-client.mjs");
+    // The preview returns above and has no PostgreSQL socket. Keep this
+    // server-only driver out of its service-worker bundle (as rfc-live does).
+    const {OsdPostgresClient, postgresInserts} = await import(/* webpackIgnore: true */ "../tools/postgres-client.mjs");
     db = new OsdPostgresClient({trace: process.env.STG_DB_TRACE === "1"});
     // The upstream client creates a pool before it opens a socket. Verify a
     // real query before publishing the backend's identity to ABAP and status.

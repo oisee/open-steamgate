@@ -741,6 +741,12 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     await page.goto(`${ORIGIN}/app/flp.html`, {waitUntil: "domcontentloaded", timeout: 60000});
     await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
     await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
+    const logo = page.locator("#shell-header-icon");
+    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect(logo).toHaveAttribute("src", /\/app\/pass-logo\.png$/);
+    await expect.poll(() => logo.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+    expect(await logo.evaluate((img) => ({width: img.clientWidth, height: img.clientHeight})))
+      .toEqual({width: 60, height: 30});
 
     // the tile targets, read off the page the shell actually booted from.
     // The shell consumes sap-ushell-config during startup, so only the group

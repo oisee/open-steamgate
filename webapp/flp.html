@@ -7,6 +7,8 @@
   <title>open-steamgate demo: launchpad</title>
   <style>
     html, body { height: 100%; margin: 0; }
+    /* Keep the custom mark inside UI5's existing 60 × 30 header slot. */
+    #shell-header-icon { width: 60px; height: 30px; object-fit: cover; }
   </style>
   <script>
     // The Fiori launchpad sandbox: two apps over the same transpiled service,
@@ -195,11 +197,10 @@
               enableSearch: false,
               enablePersonalization: false,
               rootIntent: "Shell-home",
-              // our own mark in the shell header, drawn here rather than
-              // fetched: a drop over a pastel arc, the same two things the
-              // Easy Success panel is made of
+              // UI5's sandbox does not apply shellLogo in this version;
+              // launchpad.js also updates the rendered header image.
               appState: "lean",
-              shellLogo: "osg.svg",
+              shellLogo: "pass-logo.png",
               rootIntentDisplayName: "open-steamgate"
             }
           }
