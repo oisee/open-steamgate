@@ -15,6 +15,14 @@ into `games/`. `src/` layers over both and is what OSD adds:
 Nothing of upstream is changed. An earlier pack carried five classes from an
 older commit of the same repository; at the pinned commit they need nothing.
 
+## Story-file provenance
+
+The packaged `games/zork-mini-z3.w3mi.data.z3` has SHA-256
+`c74f01a232e8df4b05d7ebcba14870143f49b3c9a25f194f7a7d2c69e31ea4a6`.
+The [Z-Machine Standards Document, Appendix F](https://www.inform-fiction.org/zmachine/standards/z1point1/appf.html)
+describes Mini-Zork as public domain. That statement concerns the Mini-Zork
+story file; the separate MIT release of Zork I–III source is not its license.
+
 ## Browser replay smoke test
 
 **Replay SPEEDRUN** loads the existing `ZORK-MINI-SPEEDRUN-TXT` SMW0 resource

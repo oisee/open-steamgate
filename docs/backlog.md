@@ -4453,3 +4453,34 @@ The class ran with the file and without it — eight methods both times — and
 what differed between the two readings was not the file but **how the log
 was read**. Two things changed between the runs and only one was noticed,
 which is the control an experiment needs and did not have.
+
+### Downloadable SQLite-only Bun releases and protocol consolidation (2026-09-21)
+
+- Ship four independently tested bundles: Linux x64, Linux arm64, Windows x64,
+  macOS arm64. Each contains the matching Bun `osd` executable, a matching
+  `osd-up` DIAG/RFC bridge, the same prebuilt SQLite generation, and only
+  redistributable packs (LSD, vivid-vibes/ZO4D, Zork-mini after checking its
+  story/media rights). No HANA, DuckDB, PostgreSQL, or private SAP payloads.
+- Package each target as one downloadable archive. Its launcher may extract
+  the immutable content on first run into a versioned local cache, but must
+  verify checksums, avoid overwriting user data, and work offline after
+  download. SQLite data belongs outside the unpacked content and survives
+  an archive replacement. A plain extracted archive is an acceptable first
+  milestone if automatic extraction would weaken those guarantees.
+- Gate each published archive on a native-runner smoke test: unpack, start
+  OSD, read and write OData, restart and read the same record, query ADT,
+  exercise 32nn with SAP-TUI and 33nn with ADT-over-RFC. If a native runner
+  or client is missing, label that target unverified and do not call it a
+  release. Publish hashes and exact source/pack revisions.
+- Explore moving the DIAG and RFC front doors from `open-diag-go`/`open-rfc-go`
+  into JavaScript, not as a prerequisite for the first release. Start by
+  inventorying the actual wire surface, NI framing, DIAG tape/APC behaviour,
+  RFC metadata and `SADT_REST_RFC_ENDPOINT` codecs; capture protocol fixtures
+  and licence boundaries. A JS replacement earns removal of the Go sidecar
+  only after the same 32nn/33nn conformance tests pass on all four targets.
+- Before a public release, generate and audit transitive dependency notices
+  for the compiled Bun and Go binaries, attest binary inputs to exact commits,
+  and make Windows extracted generations retain their real hash rather than
+  the fallback epoch `1`. Reduce the roughly 10,000 files in the Windows ZIP
+  only after verifying ADT rebuilds and bundled packs still work. Test native
+  Windows shutdown for both `osd.exe` and its serving child.

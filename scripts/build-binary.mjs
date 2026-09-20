@@ -1,6 +1,6 @@
 // bin/osd.mjs as one executable, build/osd (SP4, docs/bun-spike.md part three).
 //
-// Run with bun: `bun scripts/build-binary.mjs`. Two things the bundler is
+// Run with bun: `bun scripts/build-binary.mjs [outfile] [target]`. Two things the bundler is
 // told: DuckDB stays outside (native, optional), and @abaplint/core is ONE
 // module — the transpiler resolves its own copy from where it lives and the
 // entry another from here, same version, different files, and the
@@ -12,11 +12,18 @@ const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dir, "..");
 const core = require.resolve("@abaplint/core");
 const outfile = process.argv[2] ?? resolve(root, "build", "osd");
+const target = process.argv[3];
+const releaseTargets = new Set([
+  "bun-linux-x64-baseline", "bun-linux-arm64", "bun-windows-x64-baseline", "bun-darwin-arm64",
+]);
+if (target !== undefined && !releaseTargets.has(target)) {
+  throw new Error(`Unsupported release target ${target}; expected one of ${[...releaseTargets].join(", ")}`);
+}
 const started = Date.now();
 const result = await Bun.build({
   entrypoints: [resolve(root, "bin", "osd.mjs")],
   target: "bun",
-  compile: {outfile},
+  compile: {...(target ? {target} : {}), outfile},
   plugins: [{
     name: "one-core",
     setup(build) {
@@ -39,4 +46,4 @@ if (!result.success) {
   process.exit(1);
 }
 const size = (await Bun.file(outfile).size) / 1e6;
-console.log(`built ${outfile}: ${size.toFixed(1)} MB in ${Date.now() - started} ms`);
+console.log(`built ${outfile}${target ? ` for ${target}` : ""}: ${size.toFixed(1)} MB in ${Date.now() - started} ms`);

@@ -15,7 +15,8 @@
 // resolves them from a node_modules that is not there.
 import {basename} from "node:path";
 
-export const compiled = typeof Bun !== "undefined" && import.meta.url.startsWith("file:///$bunfs/");
+// Bun uses /$bunfs/ on Unix and a virtual B:/~BUN/root path on Windows.
+export const compiled = typeof Bun !== "undefined" && /(?:\/\$bunfs\/|\/(?:~|%7E)BUN\/)/i.test(import.meta.url);
 
 // How this very program is started again, as [command, ...args]: set by
 // bin/osd.mjs for whichever host it finds itself on (a Bun binary, a Node

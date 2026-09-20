@@ -45,7 +45,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |<!DOCTYPE html>{ lv_n }| &&
       |<html>{ lv_n }| &&
       |<head>{ lv_n }| &&
-      |  <title>ZORK on SAP HANA</title>{ lv_n }| &&
+      |  <title>ZORK on Off-Stack Doppelganger</title>{ lv_n }| &&
       |  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />{ lv_n }| &&
       |  <style>{ lv_n }| &&
       |    * \{ box-sizing: border-box; \}{ lv_n }| &&
@@ -71,7 +71,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |  </style>{ lv_n }| &&
       |</head>{ lv_n }| &&
       |<body>{ lv_n }| &&
-      |  <h1>ZORK on SAP HANA</h1>{ lv_n }| &&
+      |  <h1>ZORK on Off-Stack Doppelganger</h1>{ lv_n }| &&
       |  <div id="terminal-container"><div id="terminal"></div></div>{ lv_n }| &&
       |  <div id="status">Status: <span id="statusText" class="disconnected">Connecting...</span></div>{ lv_n }| &&
       |  <div id="replay-controls">| &&
