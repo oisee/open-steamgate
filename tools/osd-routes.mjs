@@ -104,6 +104,13 @@ export function icfNodes(root = "src") {
 // answering a question nobody asked -- the same shape we have caught four
 // times today, and this time in my own instrument.
 const ICF_PATHS = [/^\/sap\/opu\/odata/, /^\/sap\/bc\/gui/, /^\/sap\/bc\/adt/, /^\/sap\/bc\/osd/];
+// **`/sap/bc/*` is the ICF branch handed to the runtime that owns it**,
+// which is the definition of a mount above: deleting it would unplug the
+// tree, not move a path into it. It is matched by its path rather than by
+// the name of the function on the line, because renaming a variable until a
+// regular expression is satisfied is how a scoreboard is made green instead
+// of right -- and this instrument has been made wrong twice already.
+const BRANCH_MOUNTS = [/^\/sap\/bc\/\*$/, /^\/sap\/opu\/odata\/sap\/\*$/];
 const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 
 // **Every registration must be explained by a declared node, and that is the
@@ -147,7 +154,7 @@ export function classify(line, path) {
   if (path === "(no path: middleware)") {
     return /express\.(raw|json|urlencoded|text)\s*\(/.test(line) ? "plumbing" : "rival";
   }
-  if (MOUNTS.some((r) => r.test(line))) {
+  if (BRANCH_MOUNTS.some((r) => r.test(path)) || MOUNTS.some((r) => r.test(line))) {
     return "mount";
   }
   if (ICF_PATHS.some((r) => r.test(path))) {

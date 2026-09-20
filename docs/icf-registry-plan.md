@@ -242,14 +242,32 @@ the start correctly set the edit aside with
 `zosd_icf_aside.why = "the row was edited here and the object now says
 something else"`, which is the rule catching the experimenter.
 
-What is left, and it is real rather than tidy-up: in child mode the
-**parent** still lists and proxies the ICF paths from the files, because the
-child holds the database. So a node deactivated in the table is still
-advertised by the parent and answered 404 by the child, instead of not being
-there. The parent has to ask the child, or the rows have to reach the
-parent.
+**Both are closed.** The screen is `/sap/bc/osd/sicf/` (`ZCL_OSD_SICF`),
+and the parent stopped keeping a list: in child mode it forwards
+`/sap/bc/*` minus what a declared node owns and lets the child decide,
+because the child holds the registry. Proved with a node that exists
+**only as a row** -- `/sap/bc/osd/onlyrow/`, named by no file anywhere --
+which answers 200 and appears on the screen. Under the old shape it would
+have been unreachable however correctly the registry described it.
 
-And the screen itself: `markEdited` exists and nothing but a test calls it.
+### What this uncovered, and it is not small
+
+**Nothing the serving runtime says is ever printed.** `tools/osd-runtime.mjs`
+spawns the child with `stdio: [ignore, pipe, pipe, ipc]` and keeps the last
+4 KB as a rolling tail, used only to explain a failure to start. So the
+registry's apply report -- "no object explains it", "kept aside" -- is
+produced, returned, and seen by nobody in the deployed configuration. The
+same is true of every `runtime error:` dump line the child logs.
+
+"Never silently" is half the drift rule and it does not currently hold where
+it matters most. The tail is capped on purpose (the demo writes a line a
+frame; `docs/demo-profile.md`), so blanket forwarding would reopen a cost
+somebody measured. Two honest ways out, and the first is probably right:
+
+- the child already has an IPC channel (it sends `{type: "ready"}`), so a
+  `{type: "say"}` for the few things that must be said is precise and cheap;
+- or the report goes where a person already looks -- the screen -- which is
+  this session's own lesson about checks nobody reads.
 
 ---
 

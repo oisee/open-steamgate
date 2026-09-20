@@ -235,17 +235,30 @@ export function startServer(quiet) {
       base: new abap.types.String().set(args.base),
     }), {root: process.cwd(), claimed});
   } else {
-    // the same paths, proxied to the child that answers them
-    // the same filter mountServices applies: a path a declared node owns, a
-    // handler type this host does not serve, or no handler at all (an APC
-    // path's SICF entry) is not a service
-    icf = icfServices(process.cwd()).filter((s) => s.handler !== undefined
-      && s.type === "ABAP"
+    // **The child owns the registry, so the parent forwards the branch and
+    // does not keep a list of its own.**
+    //
+    // This used to derive the paths from the `*.sicf.xml` files and mount
+    // one proxy each, which made the parent a second registry -- and a
+    // wrong one the moment the child's differed. The child mounts from
+    // `ICFSERVICE` now (tools/osd-serve.mjs), so a node deactivated from
+    // /sap/bc/osd/sicf/ was still advertised here and 404'd there, and a
+    // node that existed only as a row would have been unreachable however
+    // correctly the registry described it.
+    //
+    // One forward for the ICF branch, minus what a declared node already
+    // owns, and the child decides. That is what a system does: the parent
+    // is a dispatcher, not an inventory.
+    const forwarded = (req, res, next) =>
+      (claimed.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))
+        ? next()
+        : odataProxy(runtime)(req, res, next));
+    app.all("/sap/bc/*", forwarded);
+    // what the files say, for the startup line only: the parent no longer
+    // decides with it, and a difference from the child is now a thing the
+    // registry screen shows rather than a route that is missing
+    icf = icfServices(process.cwd()).filter((s) => s.handler !== undefined && s.type === "ABAP"
       && claimed.some((prefix) => s.path === prefix || s.path.startsWith(`${prefix}/`)) === false);
-    for (const service of icf) {
-      app.all(service.path, odataProxy(runtime));
-      app.all(`${service.path}/*`, odataProxy(runtime));
-    }
   }
   if (quiet !== true && icf.length > 0) {
     for (const service of icf) {
