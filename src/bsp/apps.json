@@ -1,0 +1,7 @@
+{
+  "ZOSD_STATUS_APP": {
+    "folder": "webapp/status",
+    "text": "System status: what runs, on which ports, out of which packs",
+    "service": "ZOSD_STATUS_SRV"
+  }
+}

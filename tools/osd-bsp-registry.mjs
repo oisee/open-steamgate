@@ -24,6 +24,7 @@
 // in every tool that would ever show it.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
+import {manifestFor} from "./osd-bsp-app.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // what a browser is told a page is. A BSP page carries no MIME in the
@@ -62,6 +63,53 @@ function walk(dir, hit = []) {
  *  not name is not a page of the application. A page the descriptor names
  *  and whose file is missing is an error and says so -- the pair is the
  *  thing, and half of it is not a smaller thing. */
+// **An application of ours is declared, not hand-serialized.**
+//
+// A `*.wapa.xml` beside its pages is how an application ARRIVES -- imported
+// from a system, or built for one. It is a poor way to keep one we edit:
+// the pages are flat files named `<app>.wapa.i18n_-i18n.properties`, and a
+// second copy of a folder we already have is two copies that drift.
+//
+// So our own apps stay readable folders and declare themselves in
+// `src/bsp/apps.json`: `{"ZOSD_STATUS_APP": {"folder": "webapp/status",
+// "text": "..."}}`. The object is generated from the folder, the same way
+// gen/stg is generated from a YAML, and there is one source for each app.
+export function declared(file = "src/bsp/apps.json") {
+  if (existsSync(file) === false) {
+    return [];
+  }
+  const decl = JSON.parse(readFileSync(file, "utf8"));
+  return Object.entries(decl).map(([app, d]) => {
+    const at = d.folder;
+    const pages = walk(at).map((f) => f.slice(at.length + 1).replaceAll("\\", "/")).sort();
+    return {
+      app,
+      text: d.text ?? app,
+      file,
+      // **The data source is made absolute, and the folder keeps its
+      // relative one.** A manifest under /app/status/ reaches its service
+      // with `../../sap/opu/odata/...`; under
+      // /sap/bc/ui5_ui5/sap/<app>/ that same string lands in
+      // /sap/bc/ui5_ui5/sap/opu/odata/ and the app reads nothing. It cannot
+      // simply be made absolute at the source either: in the GitHub Pages
+      // preview the origin's root is not this system's root, which is why it
+      // was relative in the first place.
+      //
+      // So the generated object differs from the folder in exactly one line,
+      // and that is derivation rather than drift -- but it is said out loud
+      // here, because "byte for byte with its source" is a claim this breaks.
+      pages: pages.map((page) => ({
+        page,
+        mime: mimeOf(page),
+        content: page.endsWith("manifest.json") && d.service !== undefined
+          ? Buffer.from(manifestFor(readFileSync(join(at, page), "utf8"), d.service))
+          : readFileSync(join(at, page)),
+      })),
+      missing: existsSync(at) ? [] : [`the folder ${at} is not there`],
+    };
+  });
+}
+
 export function applications(folders) {
   const apps = [];
   for (const folder of folders) {
@@ -130,7 +178,7 @@ ENDCLASS.
 }
 
 export function generate(folders, out = "gen/bsp") {
-  const apps = applications(folders);
+  const apps = [...applications(folders), ...declared()];
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "zcl_stg_bsp_registry.clas.abap"), registryClass(apps));
   return apps;
