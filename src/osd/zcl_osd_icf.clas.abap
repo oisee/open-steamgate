@@ -1,10 +1,18 @@
 CLASS zcl_osd_icf DEFINITION PUBLIC CREATE PUBLIC.
 * The ICF registry, read from the tables a system keeps it in.
 *
-* `ICFSERVICE` and `ICFHANDLER` are not our tables: they are the ones SICF is
-* a screen over, reimplemented in src/osd/ddic/ the way CROSS and WBCROSSGT
-* already are. So this class is ABAP that reads SICF the way ABAP on a system
-* reads it, and nothing about it is specific to OSD.
+* `ICFSERVICE`, `ICFHANDLER` and `ICFDOCU` are ICF-SHAPED tables of ours,
+* reimplemented in src/osd/ddic/ the way CROSS and WBCROSSGT already are.
+*
+* **They are not SAP's, and an earlier version of this comment said they
+* were.** `ICF_NAME` (CHAR 15) and `ICFPARGUID` (CHAR 25) match; `URL` does
+* not exist on a system at all -- a node's path IS the parent chain, and
+* abapGit reconstructs it with `cl_icf_tree=>service_from_url` precisely
+* because it is not stored. We denormalise it because this runtime has no
+* ICF tree to walk. So "ABAP that reads SICF the way a system does works
+* here unchanged" was false, and is withdrawn: this class would not compile
+* on a system. Deriving the path from ICFPARGUID is the truer thing and is
+* a later step. Found by an adversarial review, 2026-09-20.
 *
 * Why it exists at all: until now "who answers this path" could only be
 * answered by a JavaScript host parsing *.sicf.xml files. That made the
@@ -17,7 +25,7 @@ CLASS zcl_osd_icf DEFINITION PUBLIC CREATE PUBLIC.
              icfparguid TYPE icfservice-icfparguid,
              url        TYPE icfservice-url,
              icfactive  TYPE icfservice-icfactive,
-             icf_docu   TYPE icfservice-icf_docu,
+             icf_docu   TYPE icfdocu-icf_docu,
              handler    TYPE icfhandler-icfhandler,
              icftyp     TYPE icfhandler-icftyp,
            END OF ty_node.
@@ -30,7 +38,8 @@ CLASS zcl_osd_icf DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rt_nodes) TYPE tt_node.
 
-*   The class that answers a URL, **inherited down the tree**.
+*   The class that answers a URL, **inherited down the tree** -- and
+*   nothing at all if any node on the way is switched off.
 *
 *   This is ICF's own rule and not a convenience: a UI5 application's node
 *   carries no handler at all and is served by the handler on the branch
@@ -62,10 +71,16 @@ CLASS zcl_osd_icf IMPLEMENTATION.
     DATA ls_service LIKE LINE OF lt_service.
     DATA lt_handler TYPE STANDARD TABLE OF icfhandler.
     DATA ls_handler LIKE LINE OF lt_handler.
+    DATA lt_docu    TYPE STANDARD TABLE OF icfdocu.
+    DATA ls_docu    LIKE LINE OF lt_docu.
     DATA ls_node    TYPE ty_node.
 
     SELECT * FROM icfservice INTO TABLE lt_service.
     SELECT * FROM icfhandler INTO TABLE lt_handler.
+*   the description is a row of its own, keyed by language, because that is
+*   where a real system keeps it -- every *.sicf.xml in the corpus carries
+*   it in an <ICFDOCU> block and not inside <ICFSERVICE>
+    SELECT * FROM icfdocu INTO TABLE lt_docu.
 
     LOOP AT lt_service INTO ls_service.
       CLEAR ls_node.
@@ -73,7 +88,13 @@ CLASS zcl_osd_icf IMPLEMENTATION.
       ls_node-icfparguid = ls_service-icfparguid.
       ls_node-url        = ls_service-url.
       ls_node-icfactive  = ls_service-icfactive.
-      ls_node-icf_docu   = ls_service-icf_docu.
+      READ TABLE lt_docu INTO ls_docu
+        WITH KEY icf_name = ls_service-icf_name icfparguid = ls_service-icfparguid.
+      IF sy-subrc = 0.
+        ls_node-icf_docu = ls_docu-icf_docu.
+      ELSE.
+        CLEAR ls_node-icf_docu.
+      ENDIF.
 *     the last of the chain answers; the earlier rows are the inherited ones
       LOOP AT lt_handler INTO ls_handler
         WHERE icf_name = ls_service-icf_name AND icfparguid = ls_service-icfparguid.
@@ -113,6 +134,19 @@ CLASS zcl_osd_icf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD handler_of.
+*   **Deactivating a node takes its subtree with it.**
+*
+*   The first version skipped an inactive node and carried on up the tree,
+*   so a deactivated node was served by its parent's handler and a
+*   deactivated BRANCH kept answering through every child that had a
+*   handler of its own. That is the opposite of what SICF's switch is for.
+*
+*   Said plainly about its own evidence: this is reasoned from what
+*   deactivation MEANS and is **not measured on a system** -- unlike the
+*   inheritance rule two methods up, which was measured on A4H on
+*   2026-09-19 and says so. The earlier version asserted the wrong
+*   behaviour with a comment claiming it was what SICF does, which is the
+*   shape of claim this tree keeps paying for.
     DATA lt_nodes TYPE tt_node.
     DATA ls_node  LIKE LINE OF lt_nodes.
     DATA lv_url   TYPE string.
@@ -124,14 +158,22 @@ CLASS zcl_osd_icf IMPLEMENTATION.
     ENDIF.
 
     lt_nodes = nodes( ).
-*   the deepest node that is a prefix AND has a handler: a node with none
-*   does not end the search, it is skipped, because on a system it inherits
+*   first pass: anything on the path from the root to this request that is
+*   switched off ends the search, whatever is below it
     LOOP AT lt_nodes INTO ls_node.
-      IF ls_node-url IS INITIAL OR ls_node-handler IS INITIAL.
+      IF ls_node-url IS INITIAL.
         CONTINUE.
       ENDIF.
-      IF ls_node-icfactive <> 'X'.
-*       an inactive node answers nothing, and does not hide the node above it
+      IF lv_url CP |{ ls_node-url }*| AND ls_node-icfactive <> 'X'.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+*   second pass: the deepest node that is a prefix AND has a handler. A
+*   node with none does not end the search -- on a system it inherits one
+*   from its branch, which is what makes a deployed Fiori application work
+    LOOP AT lt_nodes INTO ls_node.
+      IF ls_node-url IS INITIAL OR ls_node-handler IS INITIAL.
         CONTINUE.
       ENDIF.
       IF lv_url CP |{ ls_node-url }*|.

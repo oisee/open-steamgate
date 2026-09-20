@@ -52,12 +52,14 @@ describe("the ICF registry, applied to a database", function () {
     // object would undo every edit and the ABAP screen would be a picture
     await applyTo(client(), objects());
     const node = (await currentRows(client())).ICFSERVICE.find((s) => s.URL === "/sap/bc/osd/rfc/");
-    await client().execute(`UPDATE "icfservice" SET "icf_docu" = 'changed by a person' WHERE "icf_name" = '${node.ICF_NAME}';`);
+    // `icfaltnme` rather than a description: the description moved into
+    // ICFDOCU, where a real system keeps it, and ICFSERVICE never had it
+    await client().execute(`UPDATE "icfservice" SET "icfaltnme" = 'SETBYAPERSON' WHERE "icf_name" = '${node.ICF_NAME}';`);
     await markEdited(client(), node.ICF_NAME, node.ICFPARGUID);
 
     await applyTo(client(), objects());
     const after = (await currentRows(client())).ICFSERVICE.find((s) => s.URL === "/sap/bc/osd/rfc/");
-    expect(after.ICF_DOCU, "the edit stands").to.equal("changed by a person");
+    expect(after.ICFALTNME, "the edit stands").to.equal("SETBYAPERSON");
   });
 
   it("an object that changed replaces an edited row, and the old one is kept", async () => {
@@ -68,7 +70,7 @@ describe("the ICF registry, applied to a database", function () {
 
     // the object now says something else
     const changed = {
-      ICFSERVICE: before.ICFSERVICE.map((s) => (s.URL === target.URL ? {...s, ICF_DOCU: "what the object says now"} : s)),
+      ICFSERVICE: before.ICFSERVICE.map((s) => (s.URL === target.URL ? {...s, ICFALTNME: "WHATTHEOBJECT"} : s)),
       ICFHANDLER: before.ICFHANDLER,
     };
     const said = [];
@@ -76,7 +78,7 @@ describe("the ICF registry, applied to a database", function () {
     expect(actions.filter((a) => a.action === "ASIDE").map((a) => a.url)).to.deep.equal(["/sap/bc/osd/rfc/"]);
 
     const after = (await currentRows(client())).ICFSERVICE.find((s) => s.URL === "/sap/bc/osd/rfc/");
-    expect(after.ICF_DOCU, "the object wins").to.equal("what the object says now");
+    expect(after.ICFALTNME, "the object wins").to.equal("WHATTHEOBJECT");
     const aside = (await client().select({select: `SELECT * FROM zosd_icf_aside`})).rows;
     expect(aside.length, "and the previous row is somewhere that survives the restart").to.equal(1);
     // **and it keeps the handler it replaced.** The first version read the

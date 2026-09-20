@@ -57,8 +57,15 @@ export function rowsOf(node) {
     // not be in the tree at all.
     ICFACTIVE: "X",
     ORIG_NAME: name.toLowerCase(),
+    // **`URL` is ours, and a real `ICFSERVICE` has no such column.** On a
+    // system a node's path IS the parent chain -- abapGit reconstructs it
+    // with `cl_icf_tree=>service_from_url` and `HTTP_GET_URL_FROM_NODGUID`
+    // precisely because it is not stored. We denormalise it because this
+    // runtime has no ICF tree to walk, and saying so here is the honest
+    // version of a claim that was wrong until an adversarial review caught
+    // it: these tables are ICF-SHAPED, not ICF's. Deriving the path from
+    // ICFPARGUID is the truer thing and it is a later step, not a comment.
     URL: url,
-    ICF_DOCU: node.description ?? "",
   };
   const handlers = (node.handlers ?? []).map((h, i) => ({
     ICF_NAME: name,
@@ -73,6 +80,10 @@ export function rowsOf(node) {
 export function icfRows(root = ".", options = {}) {
   const icfservice = [];
   const icfhandler = [];
+  // the description is a row of its own, keyed by language, which is where
+  // a real system keeps it: every *.sicf.xml in the corpus carries it in an
+  // <ICFDOCU> block rather than inside <ICFSERVICE>
+  const icfdocu = [];
   for (const node of services(root, options)) {
     // the whole chain, not the last of it: a row per handler is what the
     // table holds, and `serviceOf` reduces the chain to the one that answers
@@ -81,6 +92,12 @@ export function icfRows(root = ".", options = {}) {
     const {service, handlers} = rowsOf({...node, handlers: chain});
     icfservice.push(service);
     icfhandler.push(...handlers);
+    if (node.description !== undefined && node.description !== "") {
+      icfdocu.push({
+        ICF_NAME: service.ICF_NAME, ICFPARGUID: service.ICFPARGUID,
+        ICF_LANGU: "E", ICF_DOCU: node.description.slice(0, 100),
+      });
+    }
   }
   // an APC application's SICF node carries no handler at all, and it is
   // still a node: it exists, and the inventory that cannot see it is the
@@ -92,7 +109,7 @@ export function icfRows(root = ".", options = {}) {
     }
   }
   const by = (a, b) => (a.URL ?? a.ICF_NAME) < (b.URL ?? b.ICF_NAME) ? -1 : 1;
-  return {ICFSERVICE: icfservice.sort(by), ICFHANDLER: icfhandler.sort(by)};
+  return {ICFSERVICE: icfservice.sort(by), ICFHANDLER: icfhandler.sort(by), ICFDOCU: icfdocu.sort(by)};
 }
 
 if (runsAs("osd-icf-rows.mjs")) {

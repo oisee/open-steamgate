@@ -194,13 +194,33 @@
           }
         }
       },
+      // **The component URLs are relative to this page, and an absolute one
+      // broke every tile on GitHub Pages.**
+      //
+      // `fc03de9` repointed these at the BSP paths, which is right -- the
+      // apps come out of the object store now. But `/sap/bc/ui5_ui5/...`
+      // is absolute from the ORIGIN root, and on Pages this system lives
+      // under /open-steamgate/main/, so the loader asked
+      // oisee.github.io/sap/bc/... and got a 404: "App could not be opened
+      // because the SAP UI5 component of the application could not be
+      // loaded", on every tile.
+      //
+      // The same trap is already written down one layer below, in
+      // tools/osd-bsp-registry.mjs, about the manifest's data source: "in
+      // the GitHub Pages preview the origin's root is not this system's
+      // root, which is why it was relative in the first place". I wrote
+      // that comment and then made the same mistake above it.
+      //
+      // `../sap/bc/...` from /app/flp.html is /sap/bc/... on a system and
+      // /open-steamgate/main/sap/bc/... on Pages, which is the one spelling
+      // that is right in both.
       applications: {
         "Travel-manage": {
           title: "Travels",
           description: "open-steamgate demo",
           additionalInformation: "SAPUI5.Component=stg.travel",
           applicationType: "URL",
-          url: "/sap/bc/ui5_ui5/sap/zosd_travel_app/",
+          url: "../sap/bc/ui5_ui5/sap/zosd_travel_app/",
           navigationMode: "embedded"
         },
         "Booking-display": {
@@ -208,7 +228,7 @@
           description: "open-steamgate demo",
           additionalInformation: "SAPUI5.Component=stg.booking",
           applicationType: "URL",
-          url: "/sap/bc/ui5_ui5/sap/zosd_booking_ap/",
+          url: "../sap/bc/ui5_ui5/sap/zosd_booking_ap/",
           navigationMode: "embedded"
         },
         "Flight-analyze": {
@@ -216,7 +236,7 @@
           description: "open-steamgate demo",
           additionalInformation: "SAPUI5.Component=stg.analytics",
           applicationType: "URL",
-          url: "/sap/bc/ui5_ui5/sap/zosd_analytics/",
+          url: "../sap/bc/ui5_ui5/sap/zosd_analytics/",
           navigationMode: "embedded"
         },
         "SegwProject-manage": {
@@ -224,7 +244,7 @@
           description: "the Service Builder as an app",
           additionalInformation: "SAPUI5.Component=stg.segw",
           applicationType: "URL",
-          url: "/sap/bc/ui5_ui5/sap/zosd_segw_app/",
+          url: "../sap/bc/ui5_ui5/sap/zosd_segw_app/",
           navigationMode: "embedded"
         },
         "System-status": {
@@ -232,7 +252,7 @@
           description: "what runs, on which ports, out of which packs",
           additionalInformation: "SAPUI5.Component=stg.status",
           applicationType: "URL",
-          url: "/sap/bc/ui5_ui5/sap/zosd_status_app/",
+          url: "../sap/bc/ui5_ui5/sap/zosd_status_app/",
           navigationMode: "embedded"
         },
         // Two that are not UI5 at all.

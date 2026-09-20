@@ -918,3 +918,39 @@ test("the launchpad's console and network, characterised", async () => {
     await rm(profile, {recursive: true, force: true});
   }
 });
+
+// **A tile that cannot be opened, on the deployment people actually visit.**
+//
+// Fourteen checks ran against this build and not one of them pressed a
+// tile, so `fc03de9` -- which repointed the launchpad at the BSP paths --
+// shipped with every application broken on Pages and green here. Alice
+// found it by clicking. The whole point of the launchpad is that it opens
+// something; asserting everything around that and not that is a suite
+// shaped like the code rather than like the use.
+test("a tile opens its application, which is the one thing a launchpad does", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "osd-preview-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    const missing = [];
+    page.on("response", (r) => { if (r.status() === 404) missing.push(r.url()); });
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${ORIGIN}/app/flp.html`);
+    await page.locator(".sapMGT").first().waitFor({timeout: 60000});
+    await page.locator(".sapMGT").first().click();
+
+    // the failure this exists for is a component that will not load, and
+    // the sandbox reports it as a dialog rather than as a broken page
+    await expect(page.locator("body")).not.toContainText(
+      "could not be loaded", {timeout: 60000});
+    // and the component's own resources were found: a 404 under the BSP
+    // branch is the shape an absolute URL takes on a prefixed origin
+    expect(missing.filter((u) => u.includes("/sap/bc/ui5_ui5/")),
+      "the application's resources are where the page asked for them").toEqual([]);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+

@@ -13,6 +13,7 @@ CLASS ltcl_lookup DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINA
     METHODS the_deepest_node_wins FOR TESTING RAISING cx_static_check.
     METHODS a_child_inherits_the_handler FOR TESTING RAISING cx_static_check.
     METHODS an_inactive_node_answers_none FOR TESTING RAISING cx_static_check.
+    METHODS a_branch_off_takes_its_subtree FOR TESTING RAISING cx_static_check.
     METHODS an_unknown_path_has_no_handler FOR TESTING RAISING cx_static_check.
     METHODS node_and_handler_differ FOR TESTING RAISING cx_static_check.
     METHODS add
@@ -99,16 +100,30 @@ CLASS ltcl_lookup IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD an_inactive_node_answers_none.
-*   and it does not hide the node above it either: an inactive child of an
-*   active branch is served by the branch, which is what deactivating a
-*   single service in SICF does
+*   **A node switched off answers nothing -- not its parent's handler.**
+*
+*   This test used to assert the opposite, with a comment saying it was
+*   "what deactivating a single service in SICF does". It was not measured
+*   and it is not what that switch is for: an inactive node and everything
+*   below it stops answering. The assertion asserted the defect.
     add( iv_name = 'ZOSD_BSP' iv_url = '/sap/bc/ui5_ui5/sap/' iv_handler = 'ZCL_OSD_BSP' ).
     add( iv_name = 'ZOFF'     iv_url = '/sap/bc/ui5_ui5/sap/zoff/'
          iv_handler = 'ZCL_OFF' iv_active = ' ' ).
 
+    cl_abap_unit_assert=>assert_initial( zcl_osd_icf=>handler_of( '/sap/bc/ui5_ui5/sap/zoff/index.html' ) ).
+*   and the branch beside it is untouched
     cl_abap_unit_assert=>assert_equals(
-      act = zcl_osd_icf=>handler_of( '/sap/bc/ui5_ui5/sap/zoff/index.html' )
+      act = zcl_osd_icf=>handler_of( '/sap/bc/ui5_ui5/sap/other/index.html' )
       exp = 'ZCL_OSD_BSP' ).
+  ENDMETHOD.
+
+  METHOD a_branch_off_takes_its_subtree.
+*   the half the old shape got most wrong: a deactivated branch kept
+*   answering through every child that had a handler of its own
+    add( iv_name = 'ZBRANCH' iv_url = '/sap/bc/osd/' iv_handler = 'ZCL_BRANCH' iv_active = ' ' ).
+    add( iv_name = 'ZCHILD'  iv_url = '/sap/bc/osd/child/' iv_handler = 'ZCL_CHILD' ).
+
+    cl_abap_unit_assert=>assert_initial( zcl_osd_icf=>handler_of( '/sap/bc/osd/child/x' ) ).
   ENDMETHOD.
 
   METHOD an_unknown_path_has_no_handler.

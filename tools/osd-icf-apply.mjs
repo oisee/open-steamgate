@@ -58,6 +58,7 @@ export function plan(objects, table, origins = new Map()) {
   const actions = [];
   const byKey = new Map(table.ICFSERVICE.map((r) => [keyOf(r), r]));
   const chainOf = (rows, key) => rows.ICFHANDLER.filter((h) => keyOf(h) === key);
+  const docuOf = (rows, key) => (rows.ICFDOCU ?? []).filter((d) => keyOf(d) === key);
 
   for (const service of objects.ICFSERVICE) {
     const key = keyOf(service);
@@ -66,7 +67,7 @@ export function plan(objects, table, origins = new Map()) {
     const was = byKey.get(key);
     const origin = origins.get(key);
     if (was === undefined) {
-      actions.push({action: "INSERT", key, url: service.URL, service, handlers, hash});
+      actions.push({action: "INSERT", key, url: service.URL, service, handlers, docu: docuOf(objects, key), hash});
       continue;
     }
     if (origin?.hash === hash) {
@@ -78,11 +79,11 @@ export function plan(objects, table, origins = new Map()) {
       continue;
     }
     if (origin?.origin === EDITED) {
-      actions.push({action: "ASIDE", key, url: service.URL, service, handlers, hash, previous: was,
+      actions.push({action: "ASIDE", key, url: service.URL, service, handlers, docu: docuOf(objects, key), hash, previous: was,
         why: "the row was edited here and the object now says something else"});
       continue;
     }
-    actions.push({action: "REPLACE", key, url: service.URL, service, handlers, hash});
+    actions.push({action: "REPLACE", key, url: service.URL, service, handlers, docu: docuOf(objects, key), hash});
   }
 
   const said = new Set(objects.ICFSERVICE.map(keyOf));
@@ -138,6 +139,7 @@ export async function currentRows(client) {
   return {
     ICFSERVICE: await rows(`SELECT * FROM icfservice`),
     ICFHANDLER: await rows(`SELECT * FROM icfhandler`),
+    ICFDOCU: await rows(`SELECT * FROM icfdocu`),
   };
 }
 
@@ -190,12 +192,14 @@ export async function applyTo(client, objects, options = {}) {
 
     await write(`DELETE FROM "icfservice" WHERE ${where(a)};`);
     await write(`DELETE FROM "icfhandler" WHERE ${where(a)};`);
+    await write(`DELETE FROM "icfdocu" WHERE ${where(a)};`);
     if (a.action === "REMOVE") {
       await write(`DELETE FROM "zosd_icf_origin" WHERE ${where(a)};`);
       continue;
     }
     await write(row("icfservice", a.service));
     for (const h of a.handlers) await write(row("icfhandler", h));
+    for (const d of a.docu ?? []) await write(row("icfdocu", d));
     await write(`DELETE FROM "zosd_icf_origin" WHERE ${where(a)};`);
     await write(row("zosd_icf_origin", {
       ICF_NAME: a.service.ICF_NAME, ICFPARGUID: a.service.ICFPARGUID,

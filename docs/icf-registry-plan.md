@@ -212,9 +212,19 @@ the objects disagree. That rule is now written, before the table, in
   `*.sicf.xml` is a transport rather than a source. So the table is the truth
   at runtime and an object is applied **when it arrives**, not on every
   start;
-- so **do not invent `ZOSD_ICF`** -- implement `ICFSERVICE` and
-  `ICFHANDLER`, and ABAP that reads SICF the way a system does works here
-  unchanged;
+- so **do not invent `ZOSD_ICF`** -- implement `ICFSERVICE`, `ICFHANDLER`
+  and `ICFDOCU`. **The second half of this line was wrong and is
+  withdrawn:** "ABAP that reads SICF the way a system does works here
+  unchanged" is false. `ICF_NAME` (CHAR 15) and `ICFPARGUID` (CHAR 25)
+  match a system; `URL` does not exist on one at all -- a node's path IS
+  the parent chain, which is why abapGit reconstructs it with
+  `cl_icf_tree=>service_from_url` rather than reading a column. Ours
+  denormalises it because this runtime has no ICF tree to walk, so
+  `ZCL_OSD_ICF` would not compile on a system. The tables are
+  **ICF-shaped**, not ICF's, and deriving the path from `ICFPARGUID` is
+  the later step that would make the claim true. Caught by an adversarial
+  review, 2026-09-20, after the claim had been repeated in three commit
+  messages;
 - the disagreement keys off **who last wrote the row**, `SEEDED` or
   `EDITED`, and an edited row an object contradicts is **replaced, kept
   aside and reported** -- the shape the schema-drift rule already has.
