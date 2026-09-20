@@ -1151,52 +1151,57 @@ of a day.
 
 ## The order of work, settled 2026-09-18
 
-> **What is actually next, 2026-09-19, fourth correction (21:50).** Four
-> corrections in one day. Keep reading this file rather than reciting a
-> queue; a list that is edited four times is edited a fifth time late.
+> **What is actually next, 2026-09-20 (05:30). The lane changed, and not
+> because it was stale -- because Alice corrected the design.**
 >
-> **Closed this evening, and it was not on any list:** the last mile of the
-> README's loop. One YAML is now a SEGW project, a DDIC, seed rows, an
-> activated service **and a Fiori application** on an A4H sandbox, carried
-> as abapGit zips. Eight numbered attempts; `$metadata` 8 of 8 kinds
-> identical with the system's; `TravelSet` and the search help answering
-> there; the page served at `/sap/bc/ui5_ui5/sap/<app>/`. Thirteen defects
-> found, seven of them in hand-written files no check compared with
-> anything, and every constant is written down in
-> [`a4h-deploy.md`](a4h-deploy.md) rather than in a person.
+> The night's lane was "ICF is the only router": destinations → the host
+> stops routing → WAPA from the object store → webapp/ and packs behind
+> nodes → G.5. Four of those are done and the fifth is where the correction
+> lands.
 >
-> That the three "levels" existed at all is worth noting: they were invented
-> during the evening, not planned. The plan is what follows.
+> **Done overnight**, each verified by reading what is served:
+> one destination registry (a destination is a system, a binding is who uses
+> it here); a scoreboard that names every rival with a declared reason
+> (`node tools/osd-routes.mjs`); the first express route migrated to a node
+> and **deleted** (`POST /osd/status` → `/sap/bc/osd/status/`); a BSP
+> application served from the object store by `ZCL_OSD_BSP`; and all five
+> Fiori apps plus the pack page behind it. An adversarial review then found
+> six defects in that work, all fixed -- including two instruments lying
+> about themselves and a test that could not go red.
 >
-> **Upstream is merged and unshipped**, unchanged from the third
-> correction: transpiler #1874 and #1877 merged,
-> `@abaplint/database-hdb` still answers 404 on npm and the transpiler is
-> still 2.13.89 (`hdb: ["todo"]`). #1878 open, no comments. Not ours to
-> push; nothing of ours depends on the package.
+> **The correction (`docs/icf-as-the-registry.md`, the section at the
+> bottom).** The claim was "ICF is the only **router**". It should be "ICF
+> is the only **registry**". `ICFHANDLER` is a table keyed by
+> `(node, parent, order, TYPE)` whose payload is a handler **name** -- so a
+> real tree already lets different kinds of thing serve different nodes and
+> does not care which. The old claim forced one execution model on
+> everything, and the bill arrived measured: 137.9 KB of base64 in a
+> generated ABAP class and a page three times slower than `express.static`.
 >
-> **The next unstarted items, in the order they block each other:**
+> **So the next three, in dependency order:**
 >
-> 1. **OSD does not serve a WAPA** (new, born tonight). The application
->    goes to a system as one object and comes back here as a folder of
->    static files that `express` serves — the only place in this tree where
->    the request path is not ABAP. Serving `/sap/bc/ui5_ui5/sap/<app>/<page>`
->    out of the object store, in ABAP, makes one artefact run in both
->    runtimes. Small, and it closes a real asymmetry.
-> 2. **G.5, SICF as a real application** — the same neighbourhood, and
->    tonight added the reason: this tree now creates ICF nodes on somebody
->    else's system and cannot show its own.
-> 3. **A.12, SRVD + SRVB** — what the 09-18 list said to take after B.1 and
->    D.3, both of which were done on 09-19.
-> 4. **The machine deploy.** `/sap/bc/adt/filestore/ui5-bsp/objects` answers
->    200 for an ordinary developer and is what the Fiori tools speak;
->    nothing here speaks it. It would turn "a person with a zip" into a
->    command. `/UI5/ABAP_REPOSITORY_SRV` answers 403 there, so that route is
->    unmeasured.
+> 1. **The registry becomes a table**, seeded from `*.sicf.xml`, read and
+>    written from ABAP. This *is* G.5: a screen over files would be a
+>    picture of a registry rather than one. It needs the rule this tree has
+>    for the database and not yet for this -- what happens when the table
+>    and the objects disagree.
+> 2. **A handler row carries a type** (ABAP / HOST / PROXY / CONTENT), and
+>    each type records whether it exists on a system. That is where
+>    "can this node travel" belongs -- a property of the type rather than a
+>    flag somebody maintains.
+> 3. **Pages move out of the generated class into a table.** Removes the
+>    growth and the rebuild on every image, and lets content be served from
+>    ABAP or the host by configuration rather than by architecture.
 >
-> **The horizon Alice named stays CDS-BOPF and RAP end to end**, and stays
-> deliberately behind the HANA path being released: it would be a second
-> storey on a ground floor that only stands in our own checkout. The
-> SQLScript front end (B.19) is on its declared pause at 78 of 364 bodies.
+> Behind them, unchanged: A.12 (SRVD + SRVB), the machine UI5 deploy
+> through `/sap/bc/adt/filestore/ui5-bsp/objects` (200 for an ordinary
+> developer, nothing here speaks it), and the horizon Alice named, CDS-BOPF
+> and RAP, still deliberately behind the HANA path being released.
+>
+> **Upstream is merged and unshipped**, unchanged since the third
+> correction: transpiler #1874 and #1877 merged, `@abaplint/database-hdb`
+> still 404 on npm, the transpiler still 2.13.89 with `hdb: ["todo"]`.
+> #1878, abaplint #4311 and #4312 open with no replies. Not ours to push.
 
 Alice asked for the queue to be sorted into three, and it was agreed between
 the two sessions rather than decided by one. A bucket is not a priority

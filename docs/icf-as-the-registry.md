@@ -80,3 +80,105 @@ than defended.
 See also: [`rfc-channel.md`](rfc-channel.md) for what D.4 and D.5 already
 are, [`a4h-deploy.md`](a4h-deploy.md) for what a node does and does not fix
 on a real system, and backlog Track R for the RFC kind.
+
+---
+
+## Correction, 2026-09-20: the only **registry**, not the only **router**
+
+*Alice read the note and the night's work and said the thing neither session
+had: a JS node can be served by the JS part of the system, and what matters
+is that everything shows up in one place that can be inspected and changed
+from ABAP. She asked to be criticised. She is right, and the evidence is in
+SAP's own dictionary.*
+
+`ICFHANDLER` is a transparent table:
+
+```abap
+key icf_name   : icfname      the node
+key icfparguid : icfparguid   its parent
+key icforder   : icforder     the order
+key icftyp     : char1        the TYPE of handler
+    icfhandler : icf_hand     a NAME
+```
+
+So in the thing we are imitating: the registry is a **table**, a node has an
+**ordered list** of handlers, each row carries a **type**, and the handler
+itself is a **name**. The tree does not care what is behind the name.
+
+**The note above invented a rule the original has a column for.** It said a
+JS handler must be an ABAP class delegating to the host -- the shape
+`W3MI_LOADER` and the RFC `live` destination already use. That is a good
+pattern for *content*; it is the wrong answer to *who executes a node*,
+because the tree already has `ICFTYP` and does not need us to disguise one
+kind as another.
+
+**The error has a name: the claim conflated the registry with execution.**
+Routing is execution; a registry is data. "ICF is the only router" forces
+one execution model on everything. "ICF is the only registry" does not, and
+it is the claim that is actually true of a system.
+
+### What the conflation cost, measured
+
+Serving five Fiori applications through ABAP on 2026-09-19/20 proved a node
+can decide, and charged for it:
+
+```
+gen/bsp/zcl_stg_bsp_registry.clas.abap   137.9 KB of base64 in generated source
+a page through the node                  ~0.003 s
+the same page through express.static     ~0.001 s
+```
+
+Three times slower and a class that grows with every byte of every asset.
+Those costs bought **unity of the registry** -- and under the corrected
+model the same unity is free: the node says which application a path is,
+the handler type says who serves it, and ABAP-for-portability against
+host-for-speed becomes a setting rather than an architecture.
+
+### The two risks in the corrected model, and neither is small
+
+**A unified registry makes the inventory honest and says nothing about
+portability.** If a node may be served from JS, then "the same thing runs in
+a system's ICF" can quietly stop being true for more and more nodes while
+the registry reports that all is well. So a handler type must carry whether
+that kind exists on a system. That is fable-osd's requirement -- a node must
+say whether it can travel, in the object rather than in somebody's memory --
+arriving from the other side, and it is better here: not a flag of ours to
+maintain, but a property of the type.
+
+**"Changeable" is the expensive half.** Today a node is a file read at build
+time. Inspectable and changeable at runtime means the registry is a **table
+seeded from the objects**, which is exactly how SICF works -- objects
+transport, the tree lives in a table. This tree already has that pattern
+(`data/*.tabu.json` seeds tables from abapGit objects) and it carries an
+obligation with it: two representations, one authoritative at runtime, and a
+written rule for what happens when they disagree. There is such a rule for
+the database (schema drift: move aside and say so). There is none for this
+yet, and inventing it late is how a table and its objects come to disagree
+in silence.
+
+### It also fixes something made the same night
+
+Destinations are SM59, and SM59 is a table too. If the registry is
+inspectable from ABAP then so are destinations, `.local/destinations.json`
+becomes a **seed rather than a source**, and the preflight asks the system
+instead of a file.
+
+### What survives from the original note
+
+The falsification -- a registry is migrated when its **code is deleted**,
+not when a path moves. The scoreboard. And the central claim, which gets
+*stronger*: it stops requiring that everything execute the same way, which
+was the part that could not be true.
+
+### The order this implies
+
+1. **The registry becomes a table**, seeded from `*.sicf.xml`, read and
+   written from ABAP. This is G.5 -- not a screen over files.
+2. **A handler carries a type** -- ABAP / HOST / PROXY / CONTENT -- and each
+   type records whether it travels.
+3. **Pages move out of the generated class and into a table**, which removes
+   both the growth and the rebuild on every image, and lets `CONTENT` be
+   served from ABAP or from the host by configuration.
+
+The first is the one to take, because without the table "inspect and change"
+is a word, and with it the other two are rows in it.
