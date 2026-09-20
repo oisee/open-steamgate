@@ -57,27 +57,47 @@ const DECLARED = join("icf", "nodes.json");
 
 /** Paths a real system already answers on, and what answers there.
  *
- *  **An object of ours on one of these would replace SAP's handler on
- *  import.** Not shadow it, not sit beside it -- `ICFSERVICE` is keyed by
- *  the node and abapGit writes the row, so importing this repository into a
- *  system would take its WebGUI or its UI5 repository away from it.
+ *  **An object of ours on one of these must not travel, and the reason is
+ *  that nobody knows what an import would do with it.** The first version of
+ *  this said "ICFSERVICE is keyed by the node and abapGit writes the row, so
+ *  importing would replace SAP's handler". That mechanism is wrong, and an
+ *  adversarial review caught it. Read off `zcl_abapgit_object_sicf` in
+ *  .local/lars/abapgit: deserialize calls
+ *  `cl_icf_tree=>if_icf_tree~insert_node( icf_name = orig_name, icfparguid =
+ *  find_parent( url ) )`, and it decides insert-versus-update by looking for
+ *  `icf_name = ms_item-obj_name(15)` -- the **file's** name, not the URL.
  *
- *  We answer on those paths on purpose: OSD is a doppelganger and "the same
- *  URL" is the whole point of it locally. What must not happen is the
- *  object *travelling*. So a node on one of these does not transport, and
- *  that follows from the path rather than from somebody remembering -- the
- *  same move as reading a package's `$` instead of inventing a flag.
+ *  Which means three things are true and one is not:
+ *
+ *    - the URLs below are a real system's (the UI5 one measured on A4H on
+ *      2026-09-19, where /sap/bc/ui5_ui5/sap/arsrvc_upb_admn/ answers 200);
+ *    - our objects claim them, and `src/bsp/zosd_bsp.sicf.xml` claims
+ *      `/sap/bc/ui5_ui5/sap/` while calling itself `zosd_bsp` -- a URL and a
+ *      name that disagree, which on a system is not the node it looks like;
+ *    - none of our `*.sicf.xml` use abapGit's own SICF file-name format
+ *      (a name padded to 15 plus 25 hex, which `osd-bsp-app.mjs` knows), so
+ *      the existence check looks for a node that is not there;
+ *    - and "it would replace SAP's handler" is **not** established. It might
+ *      nest, it might collide, it might fail. Measuring that needs a system,
+ *      and this tree touches A4H only when Alice asks.
+ *
+ *  An object whose effect on a system is unknown is exactly one that should
+ *  not be in a zip, so the gate stands and the claim under it is now the one
+ *  that was checked. `tools/osd-abapgit-zip.mjs` refuses these outright --
+ *  until that commit `travels: false` was an annotation two tools read and
+ *  no packaging path did.
  *
  *  Adding a child under one of these is not the same thing and is not
  *  flagged: `/sap/bc/ui5_ui5/sap/zosd_008_app/` is exactly how a Fiori
- *  application reaches a system, measured on A4H, and
- *  `/sap/bc/apc/sap/zstg_apc_demo` is how a push channel does. Only a node
- *  that claims the delivered node ITSELF is the hazard. */
+ *  application reaches a system, measured, and `/sap/bc/apc/sap/zstg_apc_demo`
+ *  is how a push channel does. Only a node that claims the delivered node
+ *  ITSELF is here. */
 export const SAP_DELIVERED = {
-  "/sap/bc/ui5_ui5/sap": "the UI5 repository's namespace node, served by /UI5/CL_UI5_HTTP_HANDLER; "
-    + "measured on A4H 2026-09-19, where /sap/bc/ui5_ui5/sap/arsrvc_upb_admn/ answers 200 under it",
+  "/sap/bc/ui5_ui5/sap": "the UI5 repository's namespace node, served by /UI5/CL_UI5_HTTP_HANDLER; measured on "
+    + "A4H 2026-09-19, where /sap/bc/ui5_ui5/sap/arsrvc_upb_admn/ answers 200 under it. Our object claims this "
+    + "URL and calls itself zosd_bsp, so on a system it is not the node it looks like",
   "/sap/bc/gui/sap/its/webgui": "the ITS WebGUI, which src/webgui/ imitates on the real path on purpose "
-    + "(docs/webgui.md); replacing its handler is how a system loses SAP Easy Access",
+    + "(docs/webgui.md); what an import of our node would do to a system's own is not established",
   "/sap/bc/gui/sap/its/webgui/sapevent": "the WebGUI's own event round trip, a child of the node above "
     + "and delivered with it",
 };

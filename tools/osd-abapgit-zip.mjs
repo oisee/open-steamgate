@@ -20,6 +20,7 @@ import {basename, join, resolve} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileFile} from "./stg-compile.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {deliveredAt} from "./osd-nodes.mjs";
 
 const BOM = "﻿";
 
@@ -141,7 +142,40 @@ export function layout(from, into, description, data) {
     throw new Error(`${from} has ${nested.length} subdirector${nested.length === 1 ? "y" : "ies"} (${nested.join(", ")}). `
       + "abapGit reads one as a sub-package and this zip puts every object in one package, so flatten them into the folder.");
   }
-  const files = entries.filter((f) => statSync(join(from, f)).isFile());
+  const all = entries.filter((f) => statSync(join(from, f)).isFile());
+  // **A node that would replace a system's own does not go in the zip.**
+  //
+  // `SAP_DELIVERED` in tools/osd-nodes.mjs names the paths a real system
+  // delivers -- the ITS WebGUI and its sapevent, measured against abapGit's
+  // own deserialize -- and a `*.sicf.xml` of ours on one of them is an
+  // object that, imported, takes that service away from the system. Until
+  // now that fact was an annotation two tools read and no packaging path
+  // did: this one copied every file of the folder, so `segw:zip src/webgui`
+  // carried the WebGUI node verbatim. An adversarial review found it, and
+  // "it is written down in the inventory" is not a gate.
+  //
+  // Refused rather than dropped quietly: a zip missing an object somebody
+  // put in the folder is the shape of defect this same function already
+  // shouts about one paragraph above.
+  const files = [];
+  const refused = [];
+  for (const f of all) {
+    const url = f.endsWith(".sicf.xml")
+      ? /<URL>([^<]*)/.exec(readFileSync(join(from, f), "utf8"))?.[1]?.replace(/\/+$/, "")
+      : undefined;
+    const delivered = url === undefined ? undefined : deliveredAt(url);
+    if (delivered !== undefined) {
+      refused.push({file: f, url, why: delivered});
+      continue;
+    }
+    files.push(f);
+  }
+  if (refused.length > 0) {
+    throw new Error(`${from} carries ${refused.length} ICF node(s) a real system delivers itself:\n`
+      + refused.map((r) => `  ${r.file}  ${r.url}\n    ${r.why}`).join("\n")
+      + `\nImporting one would replace that system's own handler. Move them out of the folder this zip is built `
+      + `from, or build the zip from a folder that does not contain them.`);
+  }
   for (const f of files) cpSync(join(from, f), join(into, "src", f));
 
   // an object is its name up to the first dot; `zstg_demo_srv    0001.iwsv.xml`

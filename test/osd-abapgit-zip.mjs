@@ -1,0 +1,68 @@
+// What goes into a zip that reaches a real system, and what must not.
+import {expect} from "chai";
+import {mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {layout} from "../tools/osd-abapgit-zip.mjs";
+import {SAP_DELIVERED} from "../tools/osd-nodes.mjs";
+
+const node = (url, name) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_SICF">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+   <URL>${url}</URL>
+   <ICFSERVICE><ICF_NAME>${name}</ICF_NAME><ORIG_NAME>${name.toLowerCase()}</ORIG_NAME></ICFSERVICE>
+ </asx:values></asx:abap></abapGit>`;
+
+describe("tools/osd-abapgit-zip: what may leave for a system", () => {
+  let dir;
+  let out;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "zip-in-"));
+    out = mkdtempSync(join(tmpdir(), "zip-out-"));
+  });
+  afterEach(() => {
+    rmSync(dir, {recursive: true, force: true});
+    rmSync(out, {recursive: true, force: true});
+  });
+
+  it("an ordinary node of ours goes in", () => {
+    writeFileSync(join(dir, "zosd_thing.sicf.xml"), node("/sap/bc/osd/thing/", "ZOSD_THING"));
+    const made = layout(dir, out, "a probe");
+    expect(made.objects.get("SICF")).to.not.equal(undefined);
+    expect(readdirSync(join(out, "src"))).to.include("zosd_thing.sicf.xml");
+  });
+
+  it("a node a real system delivers is refused, and the message names it", () => {
+    // **`travels: false` was an annotation nothing enforced.** Two tools
+    // read it -- the inventory that computes it and the test over that --
+    // and no packaging path did: this function copied every file of the
+    // folder, so `segw:zip src/webgui` carried the WebGUI node verbatim.
+    // An adversarial review found it. "It is written down in the
+    // inventory" is not a gate.
+    const url = Object.keys(SAP_DELIVERED)[0];
+    writeFileSync(join(dir, "zosd_claim.sicf.xml"), node(`${url}/`, "ZOSD_CLAIM"));
+    expect(() => layout(dir, out, "a probe")).to.throw(/a real system delivers itself/);
+    expect(() => layout(dir, out, "a probe")).to.throw(url);
+  });
+
+  it("refuses rather than dropping it, because a zip with a hole is worse", () => {
+    // the same judgement this function already makes about a nested folder:
+    // a build that quietly produced a smaller zip printed "23 files" over
+    // the hole, and that cost a day
+    const url = Object.keys(SAP_DELIVERED)[0];
+    writeFileSync(join(dir, "zosd_ok.sicf.xml"), node("/sap/bc/osd/ok/", "ZOSD_OK"));
+    writeFileSync(join(dir, "zosd_claim.sicf.xml"), node(`${url}/`, "ZOSD_CLAIM"));
+    expect(() => layout(dir, out, "a probe")).to.throw();
+    // and nothing of the folder was copied on the way to refusing
+    expect(readdirSync(join(out, "src")).filter((f) => f.endsWith(".sicf.xml"))).to.deep.equal([]);
+  });
+
+  it("a child of a delivered node is not a delivered node", () => {
+    // `/sap/bc/ui5_ui5/sap/zosd_008_app/` is exactly how a Fiori
+    // application reaches a system, measured on A4H; a gate that stopped
+    // it would stop the thing that works
+    writeFileSync(join(dir, "zosd_008.sicf.xml"),
+      node("/sap/bc/ui5_ui5/sap/zosd_008_app/", "ZOSD_008_APP"));
+    expect(() => layout(dir, out, "a probe")).to.not.throw();
+  });
+});
