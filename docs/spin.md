@@ -303,9 +303,11 @@ set `STG_DB=duckdb`, `STG_DB_PATH="$PWD/.local/db/osd.duckdb"` and
 `HANA_PASSWORD` and optionally `HANA_SCHEMA=OSD`, then run the same last
 command. Use a dedicated schema and keep the password out of shell history.
 For an existing PostgreSQL database, set `STG_DB=postgres`, `PGHOST`, `PGPORT`,
-`PGUSER`, `PGPASSWORD` and `PGDATABASE`; use a dedicated database. The public
-Docker image must be rebuilt before using the new PostgreSQL Compose block:
-older `docker-draft` tags reject `STG_DB=postgres`.
+`PGUSER`, `PGPASSWORD` and `PGDATABASE`; use a dedicated database. Use a
+PostgreSQL-capable image published from commit `0d816d8` or newer; images
+published before it reject `STG_DB=postgres`. In Portainer, set `OSD_TAG` to
+the immutable tag from the successful Docker workflow run if you want to pin
+the exact tested image instead of tracking `docker-draft`.
 See [database backends](db-backends.md) for details.
 
 To add the DIAG and ADT-over-RFC ports to this **local** Node server, install

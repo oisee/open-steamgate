@@ -2196,11 +2196,12 @@ B.7  Database seam                                                       [S]
      ├─ **PostgreSQL reopened 2026-09-20 (Alice).** Adapter, dedicated-database
      │  atomic seed/schema-drift guard, `sy-dbsys`/System Status, local OData
      │  persistence across restart and short Compose/spin.md example are in
-     │  the Docker draft branch. The public image still needs a successful
-     │  rebuild and container smoke test before Portainer acceptance. The
-     │  previous `docker-draft` publication rejects `STG_DB=postgres`.
-     ├─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
-     │  (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+     │  the Docker draft branch. The image from commit `0d816d8` passed the
+     │  default SQLite/DuckDB/PostgreSQL container smoke suite and was
+     │  published to GHCR. HXE is opt-in. Older image
+     │  tags reject `STG_DB=postgres`; user Portainer acceptance remains.
+     ├─ SQLite, DuckDB, HANA and PostgreSQL are integrated; sql.js serves
+     │  browser preview (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
      └─ **DuckDB is parked entirely, 2026-09-18 (Alice)**: "можно
         полностью забыть пока - мы его исследуем когда прям необходимость
         появится острая. То есть далеко в будущем."
