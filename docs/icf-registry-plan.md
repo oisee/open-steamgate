@@ -103,8 +103,26 @@ before a read of it. `"mount": "elsewhere"` says so and `"why"` is checked
 non-empty by the test, the way `.leak-allow.json` makes an exception cost a
 sentence.
 
-**What is left of B:** writing the OData front's own `*.sicf.xml`, so the
-node travels as well as the handler.
+**What was left of B, and why it turned out to be wrong.** This said
+"write the OData front's own `*.sicf.xml`, so the node travels as well as
+the handler". Do not. `/sap/opu/odata/sap/` is a node a real system
+**delivers**, served by `/IWFND/CL_SODATA_HTTP_HANDLER`; an object of ours
+at that URL would replace it on import and take the system's own gateway
+away. Its place is `src/icf/nodes.json`, which is where it already is.
+
+Looking for that object found three that already exist and have the same
+problem: `/sap/bc/gui/sap/its/webgui`, `.../sapevent` and
+`/sap/bc/ui5_ui5/sap` are ours as `*.sicf.xml` and are SAP's on a system.
+We answer on those paths **on purpose** -- OSD is a doppelganger and the
+same URL is the point -- so the fix is not to move them but to stop them
+travelling, which `SAP_DELIVERED` in `tools/osd-nodes.mjs` now does from
+the path rather than from anybody's memory. A child of such a node
+(`/sap/bc/ui5_ui5/sap/zosd_008_app/`) is exactly how a Fiori application
+reaches a system and is not flagged.
+
+So B is closed, and what is left is the thing it uncovered: **15 nodes
+travel and three of them must not**, which is now stated by the inventory
+and checked by a test.
 
 ### B (as written before it was done)
 

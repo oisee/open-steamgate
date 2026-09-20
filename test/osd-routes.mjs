@@ -4,7 +4,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {drift, hostRoutes, icfNodes, scoreboard, servedBy} from "../tools/osd-routes.mjs";
-import {WORKS_IN, declaredNodes, nodes} from "../tools/osd-nodes.mjs";
+import {SAP_DELIVERED, WORKS_IN, declaredNodes, deliveredAt, nodes} from "../tools/osd-nodes.mjs";
 
 // **This used to be a ratchet on the number of express routes that rival the
 // ICF tree, and the number was the wrong one.** Alice's third correction:
@@ -82,9 +82,12 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
     // OData front say the true thing about itself: its handler is ABAP and
     // its node is not an object yet, which is a gap somebody should close
     // rather than a wording to argue about.
+    // and there is exactly one exception, which is a second reason and not
+    // a second flag: a node that would REPLACE a delivered one is a SAP
+    // object and still must not leave.
     for (const n of all) {
-      expect(n.travels, `${n.path} travels iff it is a SAP object`)
-        .to.equal(/\.(sicf|sapc)\.xml$/.test(n.source ?? ""));
+      expect(n.travels, `${n.path} travels iff it is a SAP object that replaces nothing`)
+        .to.equal(/\.(sicf|sapc)\.xml$/.test(n.source ?? "") && n.shadows === undefined);
     }
     expect(all.filter((n) => n.type === "HOST").every((n) => n.travels === false)).to.equal(true);
     const odata = all.find((n) => n.path === "/sap/opu/odata/sap");
@@ -95,6 +98,33 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
     for (const n of declaredNodes(".")) {
       expect(n.text, `${n.path} must say what it is`).to.have.length.greaterThan(10);
       expect(n.implementedIn, `${n.path} must name the file that serves it`).to.match(/\.mjs$/);
+    }
+  });
+
+  it("a node that would replace a delivered one does not travel", async () => {
+    // **The hazard, named.** OSD answers on the real paths on purpose -- it
+    // is a doppelganger and the same URL is the point. What must not happen
+    // is the OBJECT travelling: `ICFSERVICE` is keyed by the node, abapGit
+    // writes the row, and an import would take a system's own WebGUI or UI5
+    // repository away from it. Three of this tree's *.sicf.xml sit on such
+    // a path today.
+    const all = nodes(".", {proxies: false});
+    const shadowing = all.filter((n) => n.shadows !== undefined);
+    expect(shadowing.map((n) => n.path).sort()).to.deep.equal(
+      ["/sap/bc/gui/sap/its/webgui", "/sap/bc/gui/sap/its/webgui/sapevent", "/sap/bc/ui5_ui5/sap"]);
+    for (const n of shadowing) {
+      expect(n.travels, `${n.path} must not transport`).to.equal(false);
+      expect(n.shadows, `${n.path} must say what it would replace`).to.have.length.greaterThan(30);
+    }
+    // **A child of a delivered node is not the same thing.** That is how a
+    // Fiori application and a push channel reach a system at all -- measured
+    // on A4H -- and flagging it would flag the thing that works.
+    expect(deliveredAt("/sap/bc/ui5_ui5/sap/zosd_008_app")).to.equal(undefined);
+    const channel = all.find((n) => n.path === "/sap/bc/apc/sap/zstg_apc_demo");
+    expect(channel.shadows, "a push channel under SAP's apc node is normal").to.equal(undefined);
+    expect(channel.travels).to.equal(true);
+    for (const reason of Object.values(SAP_DELIVERED)) {
+      expect(reason, "each entry says how it is known").to.have.length.greaterThan(30);
     }
   });
 

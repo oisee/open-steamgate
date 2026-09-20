@@ -55,6 +55,35 @@ export const WORKS_IN = {
 
 const DECLARED = join("icf", "nodes.json");
 
+/** Paths a real system already answers on, and what answers there.
+ *
+ *  **An object of ours on one of these would replace SAP's handler on
+ *  import.** Not shadow it, not sit beside it -- `ICFSERVICE` is keyed by
+ *  the node and abapGit writes the row, so importing this repository into a
+ *  system would take its WebGUI or its UI5 repository away from it.
+ *
+ *  We answer on those paths on purpose: OSD is a doppelganger and "the same
+ *  URL" is the whole point of it locally. What must not happen is the
+ *  object *travelling*. So a node on one of these does not transport, and
+ *  that follows from the path rather than from somebody remembering -- the
+ *  same move as reading a package's `$` instead of inventing a flag.
+ *
+ *  Adding a child under one of these is not the same thing and is not
+ *  flagged: `/sap/bc/ui5_ui5/sap/zosd_008_app/` is exactly how a Fiori
+ *  application reaches a system, measured on A4H, and
+ *  `/sap/bc/apc/sap/zstg_apc_demo` is how a push channel does. Only a node
+ *  that claims the delivered node ITSELF is the hazard. */
+export const SAP_DELIVERED = {
+  "/sap/bc/ui5_ui5/sap": "the UI5 repository's namespace node, served by /UI5/CL_UI5_HTTP_HANDLER; "
+    + "measured on A4H 2026-09-19, where /sap/bc/ui5_ui5/sap/arsrvc_upb_admn/ answers 200 under it",
+  "/sap/bc/gui/sap/its/webgui": "the ITS WebGUI, which src/webgui/ imitates on the real path on purpose "
+    + "(docs/webgui.md); replacing its handler is how a system loses SAP Easy Access",
+  "/sap/bc/gui/sap/its/webgui/sapevent": "the WebGUI's own event round trip, a child of the node above "
+    + "and delivered with it",
+};
+
+export const deliveredAt = (path) => SAP_DELIVERED[path];
+
 function layers(root) {
   const file = join(root, "abap_transpile.json");
   const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src", "local", "test", "gen"]};
@@ -151,7 +180,13 @@ export function nodes(root = ".", options = {}) {
     ...channels(root, options).map((c) => ({...c, type: "ABAP", travels: true, implementedIn: c.source, text: c.description})),
   ];
   const all = [...sap, ...declaredNodes(root), ...packNodes(root), ...(options.proxies === false ? [] : proxyNodes(options))];
-  return all.map((n) => ({...n, type: n.type ?? "NODE", worksIn: WORKS_IN[n.type ?? "NODE"] ?? []}))
+  return all.map((n) => {
+    // a node that would replace a delivered one does not travel, whatever
+    // file it was declared in
+    const shadows = deliveredAt(n.path);
+    return {...n, type: n.type ?? "NODE", shadows, travels: shadows === undefined && n.travels,
+      worksIn: WORKS_IN[n.type ?? "NODE"] ?? []};
+  })
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
@@ -205,7 +240,9 @@ export function mountHost(app, all, handlers, options = {}) {
 }
 
 if (runsAs("osd-nodes.mjs")) {
-  const all = nodes(process.argv[2] ?? ".");
+  // the root is the first argument that is not a flag -- `--json` used to
+  // land here as a folder name and the inventory came back with one node
+  const all = nodes(process.argv.slice(2).find((a) => a.startsWith("--") === false) ?? ".");
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify(all, undefined, 2));
   } else {
@@ -217,8 +254,15 @@ if (runsAs("osd-nodes.mjs")) {
         : `  [not in the ${["server", "binary", "preview"].filter((w) => n.worksIn.includes(w) === false).join("/")}]`;
       console.log(`${(n.type ?? "NODE").padEnd(8)} ${n.path.padEnd(42)} ${(n.handler ?? "-").padEnd(24)}${where}`);
       if (n.text) console.log(`         ${n.text}`);
+      if (n.shadows) console.log(`         MUST NOT TRAVEL: ${n.shadows}`);
     }
     console.log(`\n${all.length} nodes: ${Object.entries(by).map(([t, n]) => `${n} ${t}`).join(", ")}.`);
     console.log(`${all.filter((n) => n.travels).length} travel to a system; the rest are this host's own and say so by where they are declared.`);
+  const shadowing = all.filter((n) => n.shadows !== undefined);
+  if (shadowing.length > 0) {
+    console.log(`\n${shadowing.length} answer on a path a real system delivers, so they must not travel:`);
+    for (const n of shadowing) console.log(`  ${n.path}  (${n.source})`);
+    console.log("An abapGit import of one of these would replace SAP's own handler on that node.");
+  }
   }
 }

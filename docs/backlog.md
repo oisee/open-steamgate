@@ -1207,9 +1207,14 @@ of a day.
 > followed: the registry class is 8.8 KB and each page is a Web Repository
 > object, not base64 in generated source. Scoreboard: 30 nodes, 0
 > registrations nobody declared, 0 declared nodes nothing serves.
-> `docs/icf-registry-plan.md` carries what each cost. What is left of B is
-> the OData front's own `*.sicf.xml`, so the node travels and not only the
-> handler. The originals are kept below because the reasoning is the record.
+> `docs/icf-registry-plan.md` carries what each cost. B is closed; the line
+> that said the OData front still needed its own `*.sicf.xml` was **wrong**
+> -- `/sap/opu/odata/sap/` is delivered by a system and an object of ours
+> there would replace `/IWFND/CL_SODATA_HTTP_HANDLER` on import. Looking for
+> it found three objects that already have that problem
+> (`/sap/bc/gui/sap/its/webgui`, `.../sapevent`, `/sap/bc/ui5_ui5/sap`); they
+> answer on the real paths on purpose and now do not travel, by the path
+> rather than by memory. The originals are kept below because the reasoning is the record.
 >
 > **B. A handler row carries a type.** ABAP / HOST / PROXY / CONTENT, each
 > saying **where it works** rather than whether it is allowed: ABAP
