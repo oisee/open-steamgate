@@ -10,6 +10,9 @@
     {"folder": "open-abap-odata", "repo": "oisee/open-abap-odata", "ref": "bd9f1fb175e7b26678e48eb2e311a278a13ef91b",
       "licenseAssumption": {"license": "MIT", "basis": "Repository owner explicitly authorized a temporary MIT assumption for this fork on 2026-09-20. Upstream LICENSE still says todo; this is not an upstream license grant."}}
   ],
+  "clients": [
+    {"folder": "sap-tui", "repo": "oisee/sap-tui", "ref": "fbea19a611c8218aa7a10824dd5b12845d7db35a"}
+  ],
   "protocols": [
     {"folder": "open-rfc-go", "repo": "oisee/open-rfc-go", "ref": "274c0c912ddb93ebbf07b2b5768bbdf97d4104cf"},
     {"folder": "vsp", "repo": "oisee/vibing-steampunk", "ref": "9886d2727f47506368b0a3c2f1c1766f1200f747"},

@@ -15,8 +15,36 @@ the ready image uses `docker/image/Dockerfile` and the three named stacks.
 
 ```sh
 docker buildx build --platform linux/amd64 --load -f docker/image/Dockerfile -t osd:ci .
+docker buildx build --platform linux/amd64 --load -f docker/image/Dockerfile.probes -t osd-probes:ci .
 sh docker/image/smoke.sh
 ```
+
+The smoke suite deploys the actual SQLite and DuckDB Compose files in
+disposable projects, creates an OData record and reads it after restarting OSD.
+From a separate client container it checks the published HTTP/HTTPS ADT and
+OData endpoints, renders the DIAG tape screen with pinned SAP-TUI, and calls
+`SADT_REST_RFC_ENDPOINT` over 33nn. The RFC response must carry HTTP status 200
+and the same serving generation as the direct HTTP/HTTPS build endpoint.
+This is a schema-bound wire client: automatic deep-type discovery via
+`RFC_METADATA_GET` is not supported by the current stub. It is not a claim of
+general RFC compatibility or TLS transport over RFC.
+
+Reports, raw ANSI, the rendered `diag.svg` screenshot, and RFC responses are in
+`.local/image-acceptance/`; CI uploads them as `protocol-acceptance` even on
+failure. Test-client binaries are not added to the runtime image.
+On a sufficiently sized **Linux amd64** test host, after accepting SAP's license:
+
+```sh
+OSD_TEST_DATABASES='sqlite duckdb hana' ACCEPT_SAP_LICENSE=YES sh docker/image/smoke.sh
+```
+
+This also boots a fresh HXE and deletes only the suite's disposable projects
+and volumes afterwards. Each test selects a random starting point in instance
+range **50–89**, then finds a free set of `30nn/32nn/33nn/80nn/443nn` ports.
+`30nn` is reserved conservatively; the image currently uses internal HTTP 3030.
+The Portainer defaults remain 11/15/17. Selection is advisory, not an atomic
+reservation: if another process claims a port before Compose binds it, startup
+fails without stopping the other process. Do not run against real data.
 
 The GitHub Actions **OSD Docker draft** workflow builds and tests on the draft
 branch and relevant PRs. PRs cannot publish. Pushes to `feat/docker-image`,
@@ -68,6 +96,9 @@ isolated test environment. The SQL port is not published to the host. The
 password is stored in the HXE volume and cannot be changed by merely editing
 the Stack variable on a subsequent deployment. A cold HXE startup can take
 several minutes; an orderly shutdown may also take a few minutes.
+`hana-init` uses the same OSD image, not an extra custom image. It must finish
+with exit code 0 before HXE starts; an exited initializer is normal. It writes
+the password file that HXE requires before its first boot.
 
 For an *existing* HANA server, configure the OSD image with `HANA_HOST`,
 **tenant SQL** `HANA_PORT`, `HANA_USER`, `HANA_PASSWORD` and optionally
@@ -95,8 +126,9 @@ or boot it. Test the full HXE Stack on a host with enough memory.
    Read Travels, create a test travel, restart OSD, and confirm it remains.
 4. Repeat with a new stack for DuckDB (default instance `15`): expect `duckdb` and
    `file`. Use exactly one worker for a writable DuckDB file.
-5. Check TCP 32nn and 33nn. They are DIAG/RFC stub entry points; listening
-   ports alone do not prove all SAP GUI/RFC functionality.
+5. Run the acceptance suite above: SAP-TUI must display `Tape loading error, 0:1`
+   from 32nn, and ADT-over-RFC must return the running OSD generation from 33nn.
+   These are DIAG/RFC stub entry points, not full SAP GUI/RFC implementations.
 6. Use the HANA Stack (default instance `17`) after license acceptance, and
    verify `HDB` / `server` and a new HXE container.
 

@@ -41,6 +41,10 @@ It uses the demo master password `OSD17_Demo!ChangeMe` unless you set
 OSD are for an isolated test network only; HXE's SQL port is not published on
 the host. Reuse the same password with an existing volume. See
 [HANA setup and acceptance](docker-image.md).
+The one-shot `hana-init` service uses the same OSD image and should show
+**Exited (0)**; it prepares HXE's password file before the database starts.
+Automated protocol checks and SAP-TUI screen artifacts are described in
+[image acceptance](docker-image.md#build-and-automation).
 
 <!-- BEGIN GENERATED IMAGE STACKS -->
 
@@ -239,9 +243,10 @@ set `STG_DB=duckdb`, `STG_DB_PATH="$PWD/.local/db/osd.duckdb"` and
 command. Use a dedicated schema and keep the password out of shell history.
 See [database backends](db-backends.md) for details.
 
-The older source-building Portainer stacks are still available under
-[`docker/portainer/`](../docker/portainer/README.md). They download and compile
-at startup and are not the recommended quickstart.
+The files under [`docker/portainer/`](../docker/portainer/README.md) are
+generated copies of the same three ready-image stacks. The older source-build
+Compose recipes are retained in Git history.
 
 The YAML blocks above are embedded verbatim from `docker/compose.*.yml` by
-`node scripts/sync-spin.mjs`; CI checks that the page matches those files.
+`node scripts/sync-spin.mjs`; CI checks the page and Portainer copies against
+those files.

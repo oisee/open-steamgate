@@ -1,37 +1,65 @@
 #!/bin/sh
-# Disposable CI resources only. No access to an existing Portainer stack.
+# Disposable Compose projects only; choose a free test instance in 50–89.
+# HXE is opt-in: OSD_TEST_DATABASES='sqlite duckdb hana' ACCEPT_SAP_LICENSE=YES.
 set -eu
 osd_image=${1:-osd:ci}
-probe="osd-image-probe-$$"
+client_image=${2:-osd-probes:ci}
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+report_dir=${OSD_ACCEPTANCE_DIR:-"$repo_dir/.local/image-acceptance"}
+mkdir -p "$report_dir"
+report_dir=$(CDPATH= cd -- "$report_dir" && pwd)
+project="osd-image-probe-$$"
+export OSD_TAG="smoke-$$"
+test_tag="ghcr.io/oisee/open-steamgate:$OSD_TAG"
+compose_file=""
+compose() { docker compose -p "$project" -f "$compose_file" "$@"; }
 cleanup() {
-  docker rm -f "$probe" >/dev/null 2>&1 || true
-  docker volume rm "$probe-data" "$probe-tls" >/dev/null 2>&1 || true
-  docker network rm "$probe-net" >/dev/null 2>&1 || true
+  if [ -n "$compose_file" ]; then
+    compose logs --no-color > "$report_dir/${db:-unknown}-containers.log" 2>&1 || true
+    compose down --volumes --timeout 300 >/dev/null 2>&1 || true
+  fi
+  docker image rm "$test_tag" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
-docker network create "$probe-net" >/dev/null
-wait_ready() {
-  count=0
-  until docker exec "$probe" node docker/image/healthcheck.mjs; do
-    count=$((count + 1))
-    if [ "$count" -ge 60 ]; then docker logs "$probe"; return 1; fi
-    sleep 2
-  done
-}
-for db in file duckdb; do
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+docker tag "$osd_image" "$test_tag"
+for db in ${OSD_TEST_DATABASES:-sqlite duckdb}; do
   case "$db" in
-    file) instance=11 ;;
-    duckdb) instance=15 ;;
+    sqlite|duckdb) ;;
+    hana)
+      [ "${ACCEPT_SAP_LICENSE:-}" = YES ] || { echo 'Set ACCEPT_SAP_LICENSE=YES after accepting the SAP HANA Express license' >&2; exit 2; }
+      docker pull saplabs/hanaexpress:latest
+      ;;
+    *) echo "Unknown acceptance database: $db" >&2; exit 2 ;;
   esac
-  docker volume create "$probe-data" >/dev/null
-  docker volume create "$probe-tls" >/dev/null
-  docker run -d --init --name "$probe" --network "$probe-net" --network-alias osd \
-    -e STG_DB="$db" -e INSTANCE="$instance" -v "$probe-data:/data" -v "$probe-tls:/opt/osd/.local/tls" "$osd_image" >/dev/null
-  wait_ready
-  docker exec -e PROTOCOL_HOST=127.0.0.1 "$probe" node docker/image/probe.mjs create
-  docker restart -t 30 "$probe" >/dev/null
-  wait_ready
-  docker exec -e PROTOCOL_HOST=127.0.0.1 "$probe" node docker/image/probe.mjs read
-  docker rm -f "$probe" >/dev/null
-  docker volume rm "$probe-data" "$probe-tls" >/dev/null
+  INSTANCE=$(docker run --rm --network host --entrypoint node "$client_image" /probe/free-instance.mjs)
+  export INSTANCE
+  echo "Testing $db with INSTANCE=$INSTANCE (free port scan; Compose validates the actual bind)"
+  compose_file="$repo_dir/docker/compose.$db.yml"
+  # Test the exact copy-paste YAML, using only a local alias of the tested image.
+  # --pull never overrides pull_policy:always during this pre-publication test.
+  if ! compose up -d --pull never --wait --wait-timeout 900; then
+    compose logs --no-color > "$report_dir/$db-startup.log" 2>&1
+    echo "Startup failed for $db instance $INSTANCE; check $report_dir/$db-startup.log (a port may have been claimed after the scan)" >&2
+    exit 1
+  fi
+  for phase in create read; do
+    if [ "$phase" = read ]; then
+      compose restart osd
+      compose up -d --pull never --wait --wait-timeout 180 osd
+    fi
+    compose exec -T -e PROTOCOL_HOST=127.0.0.1 osd node docker/image/probe.mjs "$phase" > "$report_dir/$db-$phase-persistence.log" 2>&1 || {
+      cat "$report_dir/$db-$phase-persistence.log"
+      exit 1
+    }
+    cat "$report_dir/$db-$phase-persistence.log"
+    docker run --rm --network host --user "$(id -u):$(id -g)" \
+      -e PROBE_HOST=127.0.0.1 -e INSTANCE="$INSTANCE" \
+      -e PROBE_HTTP_PORT="80$INSTANCE" -e PROBE_HTTPS_PORT="443$INSTANCE" \
+      -e PROBE_LABEL="$db-$phase" -e OSD_TEST_IMAGE="$osd_image" \
+      -v "$report_dir:/reports" "$client_image"
+  done
+  compose down --volumes --timeout 300
+  compose_file=""
 done

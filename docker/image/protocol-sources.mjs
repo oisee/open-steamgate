@@ -1,7 +1,7 @@
 import {readFileSync, mkdirSync} from "node:fs";
 import {execFileSync} from "node:child_process";
-const {protocols} = JSON.parse(readFileSync("/sources.json", "utf8"));
-for (const {repo, ref, folder} of protocols) {
+const sources = JSON.parse(readFileSync("/sources.json", "utf8"));
+for (const {repo, ref, folder} of sources[process.argv.includes("--clients") ? "clients" : "protocols"]) {
   const cwd = `/src/${folder}`;
   mkdirSync(cwd, {recursive: true});
   const git = args => execFileSync("git", args, {cwd, stdio: "inherit"});

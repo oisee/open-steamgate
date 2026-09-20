@@ -34,6 +34,7 @@ jobs:
           ACCEPT_SAP_LICENSE: 'YES' # compose config only; CI does not start HXE
         run: |
           node scripts/sync-spin.mjs --check
+          node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs
           for db in sqlite duckdb hana; do
             docker compose -f "docker/compose.$db.yml" config --quiet
           done
@@ -46,8 +47,19 @@ jobs:
           docker run --rm --entrypoint node osd:ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
           docker run --rm --entrypoint cat osd:ci /opt/protocols/licenses.json > protocol-licenses.json
           node -e 'const r=require("./protocol-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
-      - name: SQLite, DuckDB, persistence, HTTPS and protocol listeners
+      - name: Build pinned SAP-TUI and RFC acceptance clients
+        run: docker buildx build --platform linux/amd64 --load --tag osd-probes:ci -f docker/image/Dockerfile.probes .
+      - name: Compose startup, persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
+        env:
+          OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance
         run: sh docker/image/smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-acceptance
+          retention-days: 14
+          if-no-files-found: error
+          path: image-acceptance/
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
           image: osd:ci

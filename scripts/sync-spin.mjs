@@ -11,7 +11,15 @@ if (original.split(imageStart).length !== 2 || original.split(imageEnd).length !
 }
 const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'New HANA Express + OSD']].map(([id, title]) => {
   const path = `docker/compose.${id}.yml`;
-  return `### Ready image: ${title}\n\nSource: [${path}](../${path}).\n\n\`\`\`yaml\n${readFileSync(new URL(path, root), 'utf8').trimEnd()}\n\`\`\``;
+  const yaml = readFileSync(new URL(path, root), 'utf8');
+  const mirror = new URL(`docker/portainer/compose.${id}.yml`, root);
+  if (readFileSync(mirror, 'utf8') !== yaml) {
+    if (process.argv.includes('--check')) {
+      console.error(`docker/portainer/compose.${id}.yml is stale. Run: node scripts/sync-spin.mjs`);
+      process.exitCode = 1;
+    } else writeFileSync(mirror, yaml);
+  }
+  return `### Ready image: ${title}\n\nSource: [${path}](../${path}).\n\n\`\`\`yaml\n${yaml.trimEnd()}\n\`\`\``;
 });
 const updated = original.slice(0, original.indexOf(imageStart)) + `${imageStart}\n\n${imageBlocks.join('\n\n')}\n\n${imageEnd}` + original.slice(original.indexOf(imageEnd) + imageEnd.length);
 if (process.argv.includes('--check')) {
