@@ -82,6 +82,12 @@ export function parseIwpr(xml) {
     referentialConstraints: t("SBO_RC"),
     functionImports: t("SBO_FI"),
     functionParameters: t("SBO_FP"),
+    // The text tables of the actions and their parameters, read for the same
+    // reason SBO_PRT is: the label is what a person typed, the name is what
+    // the tool made. A project imported from a real IWPR with a label of its
+    // own was served under its name.
+    functionImportTexts: t("SBO_FIT"),
+    functionParameterTexts: t("SBO_FPT"),
     complexTypes: t("SBO_CT"),
     referenceDataSources: t("SBO_DSR"),
   };
@@ -231,12 +237,18 @@ export function buildModel(p) {
     name: np.NAME, abapField: np.TECH_NAME || np.NAME.toUpperCase(),
     entity: typeName(np.ENTITY_GUID), association: typeName(np.RELATION_GUID),
   }));
+  // `|| undefined` and not `?? ""`: the pool falls back with `label ?? name`,
+  // so an empty string would pool an empty text instead of the name. The
+  // property path wants the opposite -- no label means no symbol at all --
+  // which is why the two read the same tables and treat "absent" differently.
+  const fiLabel = (uuid) => p.functionImportTexts.find((t2) => t2.NODE_UUID === uuid)?.FI_LABEL || undefined;
+  const fpLabel = (uuid) => p.functionParameterTexts.find((t2) => t2.NODE_UUID === uuid)?.FI_PARAM_LABEL || undefined;
   const functionImports = p.functionImports.map((fi) => ({
-    name: fi.NAME, httpMethod: fi.HTTP_METHOD ?? "", returnCard: fi.RETURN_CARD ?? "",
+    name: fi.NAME, label: fiLabel(fi.NODE_UUID), httpMethod: fi.HTTP_METHOD ?? "", returnCard: fi.RETURN_CARD ?? "",
     returnKind: fi.RETURN_TYPE_KIND, returnType: typeName(fi.RETURN_REF_TYPE), returnSet: typeName(fi.RETURN_ENTITYSET),
     actionFor: fi.ACTION_FOR ? typeName(fi.ACTION_FOR) : "",
     parameters: p.functionParameters.filter((fp) => fp.FUNCTION_IMPORT === fi.NODE_UUID).map((fp) => ({
-      name: fp.NAME, abapField: fp.ABAP_FIELD || fp.NAME.toUpperCase(), edmType: fp.EDM_CORE_TYPE,
+      name: fp.NAME, label: fpLabel(fp.NODE_UUID), abapField: fp.ABAP_FIELD || fp.NAME.toUpperCase(), edmType: fp.EDM_CORE_TYPE,
       dataElement: fp.DATA_ELEMENT ?? "", maxLength: fp.MAX_LENGTH ?? "",
     })),
   }));

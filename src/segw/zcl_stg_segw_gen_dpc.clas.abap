@@ -1304,7 +1304,13 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
       ENDIF.
       CLEAR ls_pool.
       ls_pool-name    = ls_fi_p-text_element.
+*     The label a person typed, and the name only when nobody typed one.
+*     SEGW writes sap:label="CancelTravel" for an action with no label of its
+*     own, so the fallback is not a placeholder -- it is what a system shows.
       ls_pool-content = ls_fi_p-name.
+      IF ls_fi_p-label IS NOT INITIAL.
+        ls_pool-content = ls_fi_p-label.
+      ENDIF.
       APPEND ls_pool TO lt_pool.
     ENDLOOP.
     LOOP AT is_model-function_imports INTO ls_fi_p.
@@ -1315,6 +1321,9 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
         CLEAR ls_pool.
         ls_pool-name    = ls_fp_p-text_element.
         ls_pool-content = ls_fp_p-name.
+        IF ls_fp_p-label IS NOT INITIAL.
+          ls_pool-content = ls_fp_p-label.
+        ENDIF.
         APPEND ls_pool TO lt_pool.
       ENDLOOP.
     ENDLOOP.

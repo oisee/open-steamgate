@@ -177,11 +177,13 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
              edm_type     TYPE string,
              data_element TYPE string,
              max_length   TYPE string,
+             label        TYPE string,
              text_element TYPE string,
            END OF ty_parameter.
     TYPES tt_parameter TYPE STANDARD TABLE OF ty_parameter WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_function_import,
              name        TYPE string,
+             label       TYPE string,
              http_method TYPE string,
              return_card TYPE string,
              return_kind TYPE string,
@@ -565,6 +567,9 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA lt_et   TYPE tt_row.
     DATA lt_prop TYPE tt_row.
     DATA lt_prtx TYPE tt_row.
+    DATA lt_fitx TYPE tt_row.
+    DATA lt_fptx TYPE tt_row.
+    DATA ls_labl TYPE ty_row.
     DATA lt_es   TYPE tt_row.
     DATA lt_aso  TYPE tt_row.
     DATA lt_at   TYPE tt_row.
@@ -622,6 +627,15 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     lt_np   = rows( iv_tag = 'SBO_NP'  iv_project = iv_project ).
     lt_rc   = rows( iv_tag = 'SBO_RC'  iv_project = iv_project ).
     lt_fi   = rows( iv_tag = 'SBO_FI'  iv_project = iv_project ).
+*   The text tables of the actions and their parameters, read for the same
+*   reason SBO_PRT is: a label is what a person typed and the name is what
+*   the tool made. They were not read here, and the omission was recorded as
+*   a gap with a wrong reason beside it -- "ty_function_import carries no
+*   node uuid to look one up by". The type does not need one: the row does,
+*   and this loop has the row. What has no uuid is the model AFTER it is
+*   assembled, which is where assign_text_elements runs.
+    lt_fitx = rows( iv_tag = 'SBO_FIT' iv_project = iv_project ).
+    lt_fptx = rows( iv_tag = 'SBO_FPT' iv_project = iv_project ).
     lt_fp   = rows( iv_tag = 'SBO_FP'  iv_project = iv_project ).
     lt_ct   = rows( iv_tag = 'SBO_CT'  iv_project = iv_project ).
     lt_se   = rows( iv_tag = 'SBD_SE'  iv_project = iv_project ).
@@ -852,6 +866,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     LOOP AT lt_fi INTO ls_row.
       CLEAR ls_fi.
       ls_fi-name        = ls_row-name.
+      CLEAR ls_labl.
+      READ TABLE lt_fitx INTO ls_labl WITH KEY uuid = ls_row-uuid.
+      IF sy-subrc = 0.
+        ls_fi-label = val( is_row = ls_labl iv_field = 'FI_LABEL' ).
+      ENDIF.
       ls_fi-http_method = val( is_row = ls_row iv_field = 'HTTP_METHOD' ).
       ls_fi-return_card = val( is_row = ls_row iv_field = 'RETURN_CARD' ).
       ls_fi-return_kind = val( is_row = ls_row iv_field = 'RETURN_TYPE_KIND' ).
@@ -864,7 +883,13 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         IF val( is_row = ls_sub iv_field = 'FUNCTION_IMPORT' ) <> ls_row-uuid.
           CONTINUE.
         ENDIF.
+        CLEAR ls_fp.
         ls_fp-name       = ls_sub-name.
+        CLEAR ls_labl.
+        READ TABLE lt_fptx INTO ls_labl WITH KEY uuid = ls_sub-uuid.
+        IF sy-subrc = 0.
+          ls_fp-label = val( is_row = ls_labl iv_field = 'FI_PARAM_LABEL' ).
+        ENDIF.
         ls_fp-abap_field = val( is_row = ls_sub iv_field = 'ABAP_FIELD' ).
         IF ls_fp-abap_field IS INITIAL.
           ls_fp-abap_field = to_upper( ls_fp-name ).
@@ -1282,11 +1307,20 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 * The first version of this had one rule and was written for the defect that
 * had been seen rather than for the rule behind it.
 *
-* The label of an action is not read from SBO_FIT here: `ty_function_import`
-* carries no node uuid to look one up by, and `stg-compile` writes
-* `FI_LABEL` equal to the name, so the two paths agree today. A project
-* imported from a real IWPR with a different label would not be served
-* correctly, and that is a gap rather than a decision.
+* The labels of actions and parameters ARE read now, out of SBO_FIT and
+* SBO_FPT, and the note that stood here said they were not, for a reason that
+* was wrong: `ty_function_import` carries no node uuid, but it does not need
+* one -- the ROW does, and build_model reads the label while it still has it.
+* What has no uuid is the model after it is assembled, which is where this
+* method runs, and the two were confused.
+*
+* It survived because all three implementations were blind in the same place:
+* `stg-compile` wrote FI_LABEL equal to the name, and neither generator read
+* the text tables, so the byte comparison between them was green and correct
+* -- it asks whether the two agree, not whether either is right. Not one of
+* the fixtures had a function import at all, so no tree in the suite could
+* express the thing they both ignored. `test/fixtures/segw/zstg_label` is
+* that tree, and the pool is asserted against a label a person typed.
     DATA lv_next TYPE i.
     DATA lv_max  TYPE i.
     DATA lv_num  TYPE i.

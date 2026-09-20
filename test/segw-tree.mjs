@@ -215,6 +215,30 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     expect(await pullFile(DEFAULT_URL, "ZSTG_MAPPED")).to.equal(xml);
   });
 
+  // **A twin comparison cannot tell "both right" from "both blind."**
+  //
+  // The label of an action was not read from SBO_FIT by either generator,
+  // and `stg-compile` wrote FI_LABEL equal to the name, so all three agreed
+  // and all three were unaware. The byte test below stayed green through the
+  // whole of it -- correctly, because it asks whether the two agree and not
+  // whether either is right.
+  //
+  // So the label is asserted against the text a person typed, once, here,
+  // where it goes red if the reading is removed from EITHER side. Checked
+  // failing before it was kept.
+  it("an action and a parameter are pooled under the label a person typed, not their names", () => {
+    const g = generate(readFileSync("test/fixtures/segw/zstg_label.iwpr.xml", "utf8"),
+      {functionModules: new Map(), warnings: []});
+    const xml = {...g.files, ...g.ext}["zcl_zstg_label_mpc.clas.xml"];
+    expect(xml, "the MPC is generated").to.be.a("string");
+    const pool = /<TPOOL>[\s\S]*?<\/TPOOL>/.exec(xml)?.[0] ?? "";
+    expect(pool, "the action's own label").to.contain("<ENTRY>Cancel this travel</ENTRY>");
+    expect(pool, "the parameter's own label").to.contain("<ENTRY>Travel number</ENTRY>");
+    // and the names are NOT what was pooled, which is what the fixture is for
+    expect(pool, "the name is not the label here").to.not.contain("<ENTRY>CancelTravel</ENTRY>");
+    expect(pool, "nor the parameter's").to.not.contain("<ENTRY>TravelId</ENTRY>");
+  });
+
   // segw-gen in ABAP: for every project we have, the classes GenerateSet
   // returns are the bytes tools/segw-gen.mjs makes of the same tree
   it("GenerateSet gives segw-gen's files byte for byte for the fixtures, the compiled demo and the corpus", async () => {
@@ -223,6 +247,11 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     const sources = [
       ["zstg_mapped", readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"), "test/fixtures/segw"],
       ["zstg_mini", readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8"), "test/fixtures/segw"],
+      // An action and a parameter with labels of their own. Not one of the
+      // other fixtures has a function import at all, which is why the label
+      // gap survived: the byte comparison was comparing two implementations
+      // over trees that could not express the thing they both ignored.
+      ["zstg_label", readFileSync("test/fixtures/segw/zstg_label.iwpr.xml", "utf8"), "test/fixtures/segw"],
       ["zstg_demo (compiled)", compile(readFileSync("src/demo/zstg_demo.stg.yaml", "utf8"), {file: "zstg_demo.stg.yaml", functionModules: loadFunctionGroups(["src/demo"])}).iwpr, "src/demo"],
       // this service itself: 55 SADL sets, the SADL definition built in pieces
       ["zstg_segw (compiled)", compile(readFileSync("src/segw/zstg_segw.stg.yaml", "utf8"), {file: "zstg_segw.stg.yaml"}).iwpr, "src/segw"],

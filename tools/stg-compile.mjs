@@ -344,6 +344,7 @@ export function readModel(text, file = "stg.yaml") {
     }
     return {
       name,
+      label: spec.label === undefined ? "" : String(spec.label),
       method: (spec.method ?? "POST").toUpperCase(),
       returnEntity: returns.entity ? entity(returns.entity) : undefined,
       returnComplex: returns.complexType ? String(returns.complexType) : "",
@@ -897,11 +898,17 @@ export function iwprXml(m, opts = {}) {
         ? esId(m.entities.find((e) => e.set === f.returnSet) ?? f.returnEntity) : "",
       REF_TYPE: "T", DESCRIPTION_XU: "X",
     });
-    rows.SBO_FIT.push(text(fiId, "FI_LABEL", f.name));
+    // **A label is what a person typed; the name is what the tool made.**
+    // This wrote the name unconditionally, and both generators read no label
+    // at all, so the three agreed by all being blind in the same place. A
+    // YAML can now say `label:` on an operation or a parameter, and where it
+    // does not the name is still written -- which is what SEGW does and what
+    // a system shows.
+    rows.SBO_FIT.push(text(fiId, "FI_LABEL", f.label || f.name));
     for (const p of f.parameters) {
       const fpId = id("FPAR", f.name, p.name);
       rows.SBO_FP.push({PROJECT: P, NODE_UUID: fpId, NAME: p.name, FUNCTION_IMPORT: fiId, ABAP_FIELD: p.field, EDM_CORE_TYPE: p.type, MAX_LENGTH: p.length, REF_TYPE: "T", ABTY_XU: "X", DESCRIPTION_XU: "X"});
-      rows.SBO_FPT.push(text(fpId, "FI_PARAM_LABEL", p.name));
+      rows.SBO_FPT.push(text(fpId, "FI_PARAM_LABEL", p.label || p.name));
     }
   }
 

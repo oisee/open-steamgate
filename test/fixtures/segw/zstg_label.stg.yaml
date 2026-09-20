@@ -1,0 +1,30 @@
+# A project whose action and parameter have labels of their own.
+#
+# It exists because the twins agreed about labels by both ignoring them.
+# `stg-compile` wrote `FI_LABEL` equal to the name, and neither generator
+# read the text tables, so three implementations were consistent and all
+# three were blind. A fixture where the label differs from the name is the
+# only thing that can tell "both right" from "both unaware" -- the tree's own
+# rule about twins, and the reason the fixtures it already had could not
+# catch this: not one of them has a function import at all.
+project: ZSTG_LABEL
+service: ZSTG_LABEL_SRV
+model: ZSTG_LABEL_MDL
+namespace: ZSTG
+description: labels on an action and its parameter
+
+entities:
+  Travel:
+    set: TravelSet
+    properties:
+      TravelId: {type: String(10), key: true}
+      Status: {type: String(1)}
+
+functions:
+  CancelTravel:
+    label: Cancel this travel
+    for: Travel
+    method: POST
+    returns: {entity: Travel, multiplicity: "1"}
+    parameters:
+      TravelId: {type: String(10), field: TRAVEL_ID, label: Travel number}
