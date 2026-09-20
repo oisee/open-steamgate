@@ -1587,7 +1587,34 @@ export function assignTextElements(m) {
    *  else is given -- actions and their parameters, whose $metadata on a
    *  system reads `sap:label="CancelTravel"` and `sap:label="Status"`. A
    *  property is not one of them: a property with no label has none, and
-   *  inventing one would put a text in the model the author never wrote. */
+   *  inventing one would put a text in the model the author never wrote.
+   *
+   *  **An open question, with a measurement on each side (2026-09-20).**
+   *
+   *  For: SEGW regenerated the demo's MPC from our tree on A4H (2026-09-19)
+   *  and wrote `lo_action->set_label_from_text_element(` straight after
+   *  `create_action` -- `test/stg-compile.mjs` pins those bytes. Our tree
+   *  carried `FI_LABEL` for that action, because `stg-compile` writes one.
+   *
+   *  Against: the corpus holds exactly one real SEGW-generated MPC that has
+   *  actions, `ycl_slpm_mpc`. It has 39 property label calls, symbols 001 to
+   *  039 contiguous with no gaps, a TPOOL of exactly 39 entries, and **two
+   *  actions with four parameters carrying no symbol at all**. Under this
+   *  rule that pool would hold 45.
+   *
+   *  Both hold if SEGW emits the call when the TREE carries a label and not
+   *  otherwise -- our tree always does because `stg-compile` writes one, and
+   *  that project's evidently did not. If that is right, `orName` is a
+   *  coincidence: it produces the measured bytes for the wrong reason, and
+   *  would produce wrong ones for a project imported from a real IWPR whose
+   *  actions have no label.
+   *
+   *  **Not changed on that inference.** The A4H run is a measurement of a
+   *  system and the corpus reading is an inference about a tree nobody has;
+   *  trading the first for the second is the wrong direction. What settles
+   *  it is one A4H run: create an action, type no label, regenerate, read
+   *  whether the call is there. Until then the rule stands and the doubt is
+   *  written next to it rather than in somebody's memory. */
   const take = (node, orName = false) => {
     if (node.textElement) {
       pool.push([String(node.textElement), node.label ?? node.name]);

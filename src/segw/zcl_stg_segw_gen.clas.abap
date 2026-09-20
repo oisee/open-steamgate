@@ -1307,6 +1307,20 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 * The first version of this had one rule and was written for the defect that
 * had been seen rather than for the rule behind it.
 *
+* **The second rule is an open question, with a measurement on each side
+* (2026-09-20).** For it: SEGW regenerated this MPC from our tree on A4H and
+* wrote the label call after create_action, and test/stg-compile.mjs pins
+* those bytes -- but our tree carries FI_LABEL, because stg-compile writes
+* one. Against it: the one real SEGW-generated MPC in the corpus that has
+* actions has 39 property labels, symbols 001-039 with no gaps, a pool of
+* exactly 39, and two actions with four parameters carrying no symbol at
+* all; under this rule that pool would hold 45. Both hold if SEGW emits the
+* call when the TREE carries a label and not otherwise, in which case this
+* rule gives the measured bytes for the wrong reason and would give wrong
+* ones for a project imported from a real IWPR. Not changed on that
+* inference: one A4H run settles it -- an action with no label typed,
+* regenerated, read. See tools/segw-gen.mjs for the same note.
+*
 * The labels of actions and parameters ARE read now, out of SBO_FIT and
 * SBO_FPT, and the note that stood here said they were not, for a reason that
 * was wrong: `ty_function_import` carries no node uuid, but it does not need
