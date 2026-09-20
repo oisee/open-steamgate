@@ -235,7 +235,7 @@ export function startServer(quiet) {
       const asked = httpRequest({
         hostname: "127.0.0.1",
         port: Number(new URL(url).port),
-        path: "/osd/status",
+        path: "/sap/bc/osd/status/",
         method: "POST",
         headers: {"content-type": "application/json", "content-length": Buffer.byteLength(body)},
       }, (answer) => {
@@ -243,7 +243,7 @@ export function startServer(quiet) {
         answer.on("data", (d) => {
           text = text + d.toString();
         });
-        answer.on("end", () => (answer.statusCode === 200 ? resolve(text) : reject(new Error(`/osd/status answered ${answer.statusCode}: ${text.slice(0, 200)}`))));
+        answer.on("end", () => (answer.statusCode === 200 ? resolve(text) : reject(new Error(`/sap/bc/osd/status/ answered ${answer.statusCode}: ${text.slice(0, 200)}`))));
       });
       asked.on("error", reject);
       asked.end(body);

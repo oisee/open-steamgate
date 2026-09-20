@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_SICF" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <URL>/sap/bc/osd/status/</URL>
+   <ICFSERVICE><ICF_NAME>ZOSD_STATUS</ICF_NAME><ORIG_NAME>zosd_status</ORIG_NAME></ICFSERVICE>
+   <ICFDOCU><ICF_NAME>ZOSD_STATUS</ICF_NAME><ICF_LANGU>E</ICF_LANGU><ICF_DOCU>The system status, written from outside with a JSON body</ICF_DOCU></ICFDOCU>
+   <ICFHANDLER_TABLE>
+    <ICFHANDLER><ICF_NAME>ZOSD_STATUS</ICF_NAME><ICFORDER>01</ICFORDER><ICFTYP>A</ICFTYP><ICFHANDLER>ZCL_OSD_STATUS_HTTP</ICFHANDLER></ICFHANDLER>
+   </ICFHANDLER_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>

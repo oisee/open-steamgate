@@ -19,7 +19,7 @@ import {hostRoutes, icfNodes, needs, rivalCount, scoreboard} from "../tools/osd-
 //
 // Both corrections came from adversarial review rather than from the tool,
 // which is the argument for having one.
-const CEILING = 15;
+const CEILING = 14;
 
 describe("tools/osd-routes: four registries answer one question", () => {
   it("counts them, and the count outside ICF is a ceiling that goes down", async () => {
@@ -86,9 +86,11 @@ describe("tools/osd-routes: four registries answer one question", () => {
       expect(r.needs, `${r.path}`).to.be.oneOf(["pure", "fs", "state"]);
       expect(r.because, `${r.path} must say why`).to.have.length.greaterThan(10);
     }
-    // and the one the guess hid: already ABAP, so it moves today
-    const status = rivals.find((r) => r.path === "/osd/status");
-    expect(status?.needs, "POST /osd/status wraps zcl_osd_status.refresh").to.equal("pure");
+    // and the one the guess hid is gone: POST /osd/status is an ICF node
+    // now (/sap/bc/osd/status/, ZCL_OSD_STATUS_HTTP), so it is not a rival
+    // any more and the ceiling came down with it
+    expect(rivals.find((r) => r.path === "/osd/status"), "migrated to a node").to.equal(undefined);
+    expect(icfNodes("src").some((n) => n.url === "/sap/bc/osd/status/"), "and the node is there").to.equal(true);
   });
 
   it("a registration with no literal path is a rival, not nothing", () => {

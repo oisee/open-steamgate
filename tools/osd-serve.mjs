@@ -127,7 +127,11 @@ app.post("/osd/sql", async function (req, res) {
 const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.run({
   ...args,
   base: new globalThis.abap.types.String().set(args.base),
-})), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"]});
+})), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"],
+  // a node's error belongs in the dumps like any other, and used to reach
+  // only console.error -- which is why the one route that moved into a node
+  // would have lost its dump() on the way. Given back to every node at once.
+  onError: (service, e, req) => dump(e, `${req?.method ?? ""} ${service.path}`)});
 
 // The system status, written from outside.
 //
@@ -135,16 +139,13 @@ const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.ru
 // (tools/osd-status.mjs) and posts it here just before it proxies a read of
 // that service. Not an OData surface and not an ADT one: a door of this
 // process, like /osd/sql beside it.
-app.post("/osd/status", async function (req, res) {
-  const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
-  try {
-    const rows = await dialogStep(() => zcl_osd_status.refresh({iv_json: body}));
-    res.json({rows: rows.get()});
-  } catch (e) {
-    dump(e, "POST /osd/status");
-    res.status(500).json({error: {code: "STATUS_REFRESH", message: String(e?.message?.get?.() ?? e?.message ?? e)}});
-  }
-});
+// POST /osd/status was here. It is an ICF node now --
+// src/status/zosd_status.sicf.xml at /sap/bc/osd/status/, handled by
+// ZCL_OSD_STATUS_HTTP -- because nothing in it needed the host: the work
+// was already zcl_osd_status=>refresh, and the body read, the JSON answer
+// and the error log all come from the shim. First of the rivals in
+// tools/osd-routes.mjs to become a node.
+
 
 app.all("/sap/opu/odata/sap/*", async function (req, res) {
   try {

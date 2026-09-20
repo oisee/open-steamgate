@@ -142,6 +142,10 @@ const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 //   state  needs process state. Moves as a node plus a LIVE host, and in
 //          the browser preview does not work ever, not "yet".
 //   pure   moves today.
+// MIGRATED, and the entry is gone rather than marked: `POST /osd/status`
+// became src/status/zosd_status.sicf.xml at /sap/bc/osd/status/ with
+// ZCL_OSD_STATUS_HTTP. A registry shrinks when its code is deleted, and
+// this table shrinking is that, one line at a time.
 export const VERDICTS = {
   "test/start.mjs /": {needs: "fs", why: "probes the tree for webapp/flp.html before redirecting"},
   "test/start.mjs /app": {needs: "fs", why: "express.static over webapp/"},
@@ -154,7 +158,6 @@ export const VERDICTS = {
   "tools/osd-serve.mjs /osd/serving": {needs: "state", why: "which generation this process is serving"},
   "tools/osd-serve.mjs /osd/dumps": {needs: "state", why: "the runtime errors this process has collected"},
   "tools/osd-serve.mjs /osd/sql": {needs: "state", why: "the statement log this process holds"},
-  "tools/osd-serve.mjs /osd/status": {needs: "pure", why: "a wrapper over zcl_osd_status.refresh( iv_json ), which is already ABAP; only the error-path dump() is the host's, and a node loses nothing a 500 does not already give"},
 };
 
 export function needs(host, path) {
