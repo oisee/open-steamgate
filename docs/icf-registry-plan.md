@@ -141,7 +141,28 @@ rivals; `reserved = ["/sap/opu/odata", "/sap/bc/adt"]` in both hosts is gone
 because the registry says what those paths are; and the scoreboard answers
 "what does this system expose and what implements it".
 
-### A. Pages out of the generated class
+### A. Pages out of the generated class — **done, 2026-09-20**
+
+`zcl_stg_bsp_registry` went from **141 KB to 8.8 KB**: app, page, MIME and a
+key, no bytes. Each page is a Web Repository object beside it
+(`gen/bsp/*.w3mi.xml` + its data file), read with `WWWDATA_IMPORT` +
+`SCMS_BINARY_TO_XSTRING`, answered by `abap.W3MI_LOADER` where there is no
+file system. The mechanism was not invented a third time.
+
+Four constants it cost, every one found by running it:
+
+| | |
+| --- | --- |
+| `WWWPARAMS-OBJID` | **CHAR 40**, not 60. Three of the 33 pages were longer. A long name is cut to the column and `generate()` throws on a collision naming both pages |
+| `filesize` in `<PARAMS>` | kills the seed — the transpiler writes one from the data file's real length, so ours was the same key twice (`UNIQUE constraint failed: wwwparams`) |
+| the file name | escapes `.` as `%2e`, because abaplint reads an object's **type** out of the file name: `…manifest.json.w3mi.xml` is type `json.w3mi` |
+| a stale object | is removed — a generator that only adds leaves a wwwparams row for a page no application has |
+
+Verified by reading what is served: six pages answer 200 with the right
+content type, three of them byte-identical to their source files, on the i7
+as well.
+
+### A (as written before it was done)
 
 Independent hygiene, not part of routing. 137.9 KB of base64 in generated
 ABAP source is wrong on its own terms: assets in code, a transpile on every
