@@ -4,6 +4,7 @@
 services:
   hana-init:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     user: "0:0"
     entrypoint: ["node", "docker/image/hana-init.mjs"]
     environment:
@@ -40,6 +41,7 @@ services:
 
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-17}"

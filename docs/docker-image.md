@@ -32,6 +32,10 @@ record as artifacts. It transfers the exact smoke-tested image to a separate
 publish job and verifies its ID; publication never rebuilds it. The action summary
 prints `OSD_TAG`. The GHCR package must be public for anonymous Portainer pulls;
 otherwise add GHCR credentials in Portainer. No Docker Hub account is needed.
+The ready-image stacks set `pull_policy: always` for OSD, including the HXE
+initializer, so a redeployment checks GHCR instead of reusing a stale local
+`docker-draft`. Existing Portainer stacks need their pasted YAML updated, or
+their `OSD_TAG` set to a newer immutable tag.
 The older `open-steamgate-protocols` GHCR package remains a historical
 artifact; these stacks neither pull it nor update it.
 

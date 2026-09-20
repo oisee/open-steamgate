@@ -25,6 +25,11 @@ in a different Stack; don't switch engines on an existing data volume.
 
 `docker-draft` tracks the newest published draft. For a repeatable test, set
 `OSD_TAG` to the exact value in the [successful image workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker-image.yml).
+The stacks request the OSD image from GHCR on each deployment, so an older
+locally cached `docker-draft` is not silently reused. If a stack was already
+pasted into Portainer, update its Web editor YAML or set `OSD_TAG` to a new
+immutable tag before redeploying; changing this document does not update an
+existing Portainer stack.
 The single image is public on GHCR; no registry credentials are needed.
 
 Start with **SQLite**. **DuckDB** uses the same image with one writable worker.
@@ -48,6 +53,7 @@ Source: [docker/compose.sqlite.yml](../docker/compose.sqlite.yml).
 services:
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-11}"
@@ -79,6 +85,7 @@ Source: [docker/compose.duckdb.yml](../docker/compose.duckdb.yml).
 services:
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-15}"
@@ -113,6 +120,7 @@ Source: [docker/compose.hana.yml](../docker/compose.hana.yml).
 services:
   hana-init:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     user: "0:0"
     entrypoint: ["node", "docker/image/hana-init.mjs"]
     environment:
@@ -149,6 +157,7 @@ services:
 
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-17}"
