@@ -1320,6 +1320,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 * ones for a project imported from a real IWPR. Not changed on that
 * inference: one A4H run settles it -- an action with no label typed,
 * regenerated, read. See tools/segw-gen.mjs for the same note.
+* A second opinion was asked and agreed (2026-09-20).
 *
 * The labels of actions and parameters ARE read now, out of SBO_FIT and
 * SBO_FPT, and the note that stood here said they were not, for a reason that

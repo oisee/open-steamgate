@@ -1614,7 +1614,11 @@ export function assignTextElements(m) {
    *  trading the first for the second is the wrong direction. What settles
    *  it is one A4H run: create an action, type no label, regenerate, read
    *  whether the call is there. Until then the rule stands and the doubt is
-   *  written next to it rather than in somebody's memory. */
+   *  written next to it rather than in somebody's memory.
+   *
+   *  A second opinion was asked and agreed (codex gpt-5.6-sol, 2026-09-20):
+   *  the only controlled byte-level observation supports what is here, and
+   *  the alternative rests on a reconstruction of a tree nobody has. */
   const take = (node, orName = false) => {
     if (node.textElement) {
       pool.push([String(node.textElement), node.label ?? node.name]);
