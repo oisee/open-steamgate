@@ -63,6 +63,9 @@ test("system status: the object page over the running tree", async ({page}) => {
   const storage = database.locator(".sapMListTblRow", {hasText: "Storage"}).first();
   await expect(storage).toBeVisible();
   await expect(storage).toContainText(/memory|file|server/);
+  const architecture = database.locator(".sapMListTblRow", {hasText: "Architecture"}).first();
+  await expect(architecture).toBeVisible();
+  await expect(architecture).toContainText(/linux|darwin|win32/);
 
   expect(failed).toEqual([]);
 });
