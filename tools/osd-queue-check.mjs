@@ -132,6 +132,31 @@ export function alone(line) {
   return [...line.matchAll(/(^|[^A-Za-z0-9/#])#\d{3,5}\b/g)].length === 1;
 }
 
+/** The sentence a reference sits in, rather than the whole line.
+ *
+ *  **A line may say two things.** "transpiler #1878 still open with no
+ *  replies. abaplint #4311 and #4312 were merged" is true, and this tool
+ *  called it a contradiction twice, because it tested the state word
+ *  against the whole line and #4311 was on a line that contained the word
+ *  "open" -- about a different issue.
+ *
+ *  The tool already knew this was a hazard: the other direction carries an
+ *  `alone()` guard for exactly this reason. Only one of the two had it,
+ *  and the one that did not is the one that fires, which is why the gap
+ *  survived. Attributing a state word to the sentence it is in, rather
+ *  than to every number within a line of it, is the smallest thing that
+ *  is right in both directions.
+ *
+ *  A sentence here is what a period, a semicolon or a bullet ends. It is
+ *  not a grammar: it is enough to keep two clauses apart, and a reference
+ *  whose sentence cannot be found falls back to the line, which is the
+ *  behaviour this replaced. */
+export function sentenceAround(line, number) {
+  const parts = line.split(/(?<=[.;])\s+|\s+--\s+|\s+\u2014\s+/);
+  const found = parts.filter((part) => new RegExp(`(^|[^A-Za-z0-9/#])#${number}\\b`).test(part));
+  return found.length === 0 ? line : found.join(" ");
+}
+
 export function contradictions(refs, ask = stateOf) {
   const seen = new Map();
   const out = [];
@@ -145,7 +170,8 @@ export function contradictions(refs, ask = stateOf) {
     const state = seen.get(key);
     if (state === undefined) {
       out.push({...r, kind: "unreachable"});
-    } else if ((state === "closed" || state === "merged") && OPEN_WORDS.test(withoutNames(r.text))) {
+    } else if ((state === "closed" || state === "merged")
+      && OPEN_WORDS.test(withoutNames(sentenceAround(r.text, r.number)))) {
       out.push({...r, kind: state, state, said: "open"});
     } else if (state === "open" && alone(r.text) && DONE_WORDS.test(withoutNames(r.text))) {
       out.push({...r, kind: "open", state, said: "done"});
