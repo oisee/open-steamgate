@@ -1,0 +1,148 @@
+# The ICF service tree, as a service it serves itself.
+#
+# This is the model half of backlog G.5 (Alice, 2026-09-18: "a real
+# application, the analogue of transaction SICF, as a proper Fiori Elements
+# app where handlers and the rest are configured"). The live half already
+# works: the tables are the truth at runtime, the serving runtime mounts
+# from them, and switching a node off stops it answering
+# (docs/registry-drift.md, docs/icf-registry-plan.md).
+#
+# The storage is ICF-shaped tables in src/osd/ddic/ -- ICFSERVICE,
+# ICFHANDLER, ICFDOCU -- plus ZOSD_ICF_ORIGIN, which is ours and says so.
+# The data model is CDS over them (src/cds/zc_osd_icf_*.ddls.asddls), and
+# this file is the shell, built exactly the way src/status/ is.
+#
+# **Read-only in this first cut, on purpose.** The screen at
+# /sap/bc/osd/sicf/ writes through ZCL_OSD_SICF=>SET_ACTIVE, which keeps the
+# object's hash while flipping the origin -- without that bookkeeping the
+# next build silently undoes the edit, which is the whole content of the
+# drift rule. A write arriving through OData would go round it. So the
+# writable cut comes when `markEdited` sits in what the dispatcher writes
+# through rather than in one screen, and not before: a service that can be
+# written and forgets who wrote it is worse than one that cannot.
+#
+# Compiled by `stg-compile --all` during `npm run transpile` into
+# gen/stg/zosd_icf/.
+project: ZOSD_ICF
+service: ZOSD_ICF_SRV
+model: ZOSD_ICF_MDL
+description: "OSD ICF registry: what answers which path, and who last said so"
+
+entities:
+  Node:
+    set: NodeSet
+    description: "an ICF node of this system"
+    source: {cds: ZC_OSD_ICF_NODE, struct: "ZCL_STG_CDS_ZVOSDICFN=>TY_ROW"}
+    keys: [IcfName, IcfParGuid]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
+      IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
+      Url: {type: String(255), field: URL, readonly: true, label: URL}
+      IcfActive: {type: String(1), field: ICFACTIVE, readonly: true, label: Active}
+      OrigName: {type: String(30), field: ORIGNAME, readonly: true, label: Original name}
+      IcfAltNme: {type: String(15), field: ICFALTNME, readonly: true, label: Alias}
+
+  Handler:
+    set: HandlerSet
+    description: "one row of a node's handler chain, in the order ICF runs them"
+    source: {cds: ZC_OSD_ICF_HANDLER, struct: "ZCL_STG_CDS_ZVOSDICFH=>TY_ROW"}
+    keys: [IcfName, IcfParGuid, IcfOrder]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
+      IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
+      IcfOrder: {type: String(2), field: ICFORDER, readonly: true, label: Order}
+      IcfTyp: {type: String(1), field: ICFTYP, readonly: true, label: Type}
+      Handler: {type: String(30), field: HANDLER, readonly: true, label: Handler}
+
+  Docu:
+    set: DocuSet
+    description: "a node's description, per language"
+    source: {cds: ZC_OSD_ICF_DOCU, struct: "ZCL_STG_CDS_ZVOSDICFD=>TY_ROW"}
+    keys: [IcfName, IcfParGuid, IcfLangu]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
+      IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
+      IcfLangu: {type: String(1), field: ICFLANGU, readonly: true, label: Language}
+      IcfDocu: {type: String(100), field: ICFDOCU, readonly: true, label: Description}
+
+  Origin:
+    set: OriginSet
+    description: "who last wrote a row, and what the object said then"
+    source: {cds: ZC_OSD_ICF_ORIGIN, struct: "ZCL_STG_CDS_ZVOSDICFO=>TY_ROW"}
+    keys: [IcfName, IcfParGuid]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
+      IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
+      Origin: {type: String(1), field: ORIGIN, readonly: true, label: Written by}
+      ObjHash: {type: String(16), field: OBJHASH, readonly: true, label: Object as applied}
+      ChangedAt: {type: String(30), field: CHANGEDAT, readonly: true, label: Changed}
+
+associations:
+  NodeToHandlers:
+    from: Node
+    to: Handler
+    cardinality: 1:N
+    navigation: {Node: to_Handlers}
+  NodeToDocu:
+    from: Node
+    to: Docu
+    cardinality: 1:N
+    navigation: {Node: to_Docu}
+  NodeToOrigin:
+    from: Node
+    to: Origin
+    cardinality: 1:N
+    navigation: {Node: to_Origin}
+
+annotations:
+  Node:
+    header: {typeName: ICF node, typeNamePlural: ICF nodes, title: Url, description: IcfName}
+    selectionFields: [IcfActive, IcfName]
+    lineItem:
+      - {value: Url, label: URL}
+      - {value: IcfName, label: Node}
+      - {value: IcfActive, label: Active}
+      - {value: OrigName, label: Original name}
+    facets:
+      - {id: General, label: General, fieldGroup: General}
+      - {id: Handlers, label: Handlers, lineItem: to_Handlers}
+      - {id: Descriptions, label: Descriptions, lineItem: to_Docu}
+      - {id: Origin, label: Origin, lineItem: to_Origin}
+    fieldGroups:
+      General: [Url, IcfName, IcfParGuid, IcfActive, OrigName, IcfAltNme]
+
+  Handler:
+    header: {typeName: Handler, typeNamePlural: Handlers, title: Handler, description: IcfName}
+    lineItem:
+      - {value: IcfOrder, label: Order}
+      - {value: Handler, label: Handler}
+      - {value: IcfTyp, label: Type}
+
+  Docu:
+    header: {typeName: Description, typeNamePlural: Descriptions, title: IcfDocu, description: IcfLangu}
+    lineItem:
+      - {value: IcfLangu, label: Language}
+      - {value: IcfDocu, label: Description}
+
+  Origin:
+    header: {typeName: Origin, typeNamePlural: Origins, title: Origin, description: ChangedAt}
+    lineItem:
+      - {value: Origin, label: Written by}
+      - {value: ObjHash, label: Object as applied}
+      - {value: ChangedAt, label: Changed}
