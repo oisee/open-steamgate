@@ -41,6 +41,7 @@
     "test/osd-proxy.mjs",
     "test/osd-rfc.mjs",
     "test/osd-icf-apply.mjs",
+    "test/osd-icf-registry.mjs",
     "test/osd-icf-rows.mjs",
     "test/osd-routes.mjs",
     "test/osd-runtime.mjs",

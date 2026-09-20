@@ -111,6 +111,103 @@ export function report(actions) {
   return lines;
 }
 
+// --- and the same decision, carried out against a database -------------
+
+const quote = (v) => `'${String(v ?? "").replaceAll("'", "''")}'`;
+const row = (table, values) => `INSERT INTO "${table}" (${Object.keys(values).map((k) => `"${k.toLowerCase()}"`).join(", ")}) `
+  + `VALUES (${Object.values(values).map(quote).join(", ")});`;
+const where = (a) => `"icf_name" = ${quote(a.key.split("|")[0])} AND "icfparguid" = ${quote(a.key.split("|")[1])}`;
+
+/** What the registry holds right now. */
+export async function currentRows(client) {
+  // the eleven-method DatabaseClient answers `{rows}`, not an array -- the
+  // shape the transpiler's runtime expects, and the one a caller writing
+  // `.map` on the answer finds out about by exception
+  const rows = async (sql) => ((await client.select({select: sql})).rows ?? []).map((r) => {
+    const out = {};
+    for (const [k, v] of Object.entries(r)) out[k.toUpperCase()] = typeof v === "string" ? v.trimEnd() : v;
+    return out;
+  });
+  return {
+    ICFSERVICE: await rows(`SELECT * FROM icfservice`),
+    ICFHANDLER: await rows(`SELECT * FROM icfhandler`),
+  };
+}
+
+export async function currentOrigins(client) {
+  const found = new Map();
+  for (const r of (await client.select({select: `SELECT * FROM zosd_icf_origin`})).rows ?? []) {
+    const name = String(r.ICF_NAME ?? r.icf_name ?? "").trimEnd();
+    const parent = String(r.ICFPARGUID ?? r.icfparguid ?? "").trimEnd();
+    found.set(`${name}|${parent}`, {
+      origin: String(r.ORIGIN ?? r.origin ?? "").trimEnd(),
+      hash: String(r.OBJHASH ?? r.objhash ?? "").trimEnd(),
+    });
+  }
+  return found;
+}
+
+/** Apply the objects to the registry and say what that cost.
+ *
+ *  **The report is returned, not printed.** Who says it out loud is the
+ *  host's business; that it is said is not optional, which is why an empty
+ *  array is a different thing from a caller who did not ask. */
+export async function applyTo(client, objects, options = {}) {
+  const now = new Date().toISOString();
+  const actions = plan(objects, await currentRows(client), await currentOrigins(client));
+  const write = (sql) => client.execute(sql);
+
+  for (const a of actions) {
+    if (a.action === "KEEP") continue;
+    if (a.action === "ORPHAN") continue;
+
+    if (a.action === "ASIDE") {
+      // kept, with a name and a time, so "aside" is a place and not a log
+      // line the next restart overwrites
+      await write(row("zosd_icf_aside", {
+        ICF_NAME: a.previous.ICF_NAME, ICFPARGUID: a.previous.ICFPARGUID, CHANGED_AT: now,
+        URL: a.previous.URL, HANDLER: a.previous.ICFHANDLER ?? "", WHY: a.why,
+      }));
+    }
+
+    await write(`DELETE FROM "icfservice" WHERE ${where(a)};`);
+    await write(`DELETE FROM "icfhandler" WHERE ${where(a)};`);
+    if (a.action === "REMOVE") {
+      await write(`DELETE FROM "zosd_icf_origin" WHERE ${where(a)};`);
+      continue;
+    }
+    await write(row("icfservice", a.service));
+    for (const h of a.handlers) await write(row("icfhandler", h));
+    await write(`DELETE FROM "zosd_icf_origin" WHERE ${where(a)};`);
+    await write(row("zosd_icf_origin", {
+      ICF_NAME: a.service.ICF_NAME, ICFPARGUID: a.service.ICFPARGUID,
+      ORIGIN: SEEDED, OBJHASH: a.hash, CHANGED_AT: now,
+    }));
+  }
+  if (options.say !== undefined) for (const line of report(actions)) options.say(line);
+  return {actions, report: report(actions)};
+}
+
+/** A row a person changed says so, and that is the only way the rule can
+ *  tell an edit from a seed. Exported because whatever writes the registry
+ *  from ABAP or from a screen has to call it -- a rule about what every
+ *  writer must do lives in the module they import. */
+export async function markEdited(client, name, parent) {
+  const now = new Date().toISOString();
+  // **The object's hash is kept, and the first version of this blanked it.**
+  // Only the origin changes: the row is a person's now. "Has the object
+  // changed since it was applied" is still a question that has to be
+  // answerable, and with no hash to compare, every later apply read the
+  // object as changed and set the edit aside -- so an edit did not survive
+  // the next start even though nothing about the object had moved. Found by
+  // the test that exists for exactly that case.
+  const previous = (await currentOrigins(client)).get(`${name}|${parent}`);
+  await client.execute(`DELETE FROM "zosd_icf_origin" WHERE "icf_name" = ${quote(name)} AND "icfparguid" = ${quote(parent)};`);
+  await client.execute(row("zosd_icf_origin", {
+    ICF_NAME: name, ICFPARGUID: parent, ORIGIN: EDITED, OBJHASH: previous?.hash ?? "", CHANGED_AT: now,
+  }));
+}
+
 if (runsAs("osd-icf-apply.mjs")) {
   // With no table to read yet, the plan against an empty registry is what a
   // first apply would do -- which is the honest thing this can print today.
