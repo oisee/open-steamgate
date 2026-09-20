@@ -213,12 +213,52 @@ export function services(root = process.cwd(), options = {}) {
   return routes(scan(root, options, ".sicf.xml", serviceOf));
 }
 
+/** The registry the way a system holds it, shaped like the nodes
+ *  `mountServices` takes. The caller reads the rows -- this file has no
+ *  database and should not grow one. */
+export function servicesFromRows(rows) {
+  const found = [];
+  for (const s of rows.ICFSERVICE ?? []) {
+    if (String(s.ICFACTIVE ?? "").trim() !== "X") {
+      continue;
+    }
+    const chain = (rows.ICFHANDLER ?? []).filter(
+      (h) => h.ICF_NAME === s.ICF_NAME && h.ICFPARGUID === s.ICFPARGUID);
+    const last = chain[chain.length - 1];
+    found.push({
+      path: String(s.URL ?? "").replace(/\/+$/, ""),
+      name: s.ICF_NAME,
+      description: s.ICF_DOCU,
+      handler: last?.ICFHANDLER,
+      icftyp: last?.ICFTYP,
+      type: last === undefined ? undefined : (last.ICFTYP === "A" ? "ABAP" : last.ICFTYP),
+      travels: true,
+      source: "ICFSERVICE",
+    });
+  }
+  // longest first, the same rule `routes()` applies to the files: a parent
+  // must not swallow its child
+  return found.sort((a, b) => b.path.length - a.path.length);
+}
+
 // Mount them on an express app. `run` is cl_express_icf_shim.run, passed in
 // rather than imported, because this file is loaded by the façade process and
 // the transpiled runtime belongs to whoever is serving.
 export function mountServices(app, run, options = {}) {
   const mounted = [];
-  for (const service of services(options.root ?? process.cwd(), options)) {
+  // **`from` is the registry as the SYSTEM holds it, and it is the truth
+  // when the caller has one.** The objects on disk are a transport
+  // (docs/registry-drift.md): a node edited from ABAP is a row and not a
+  // file, so a host that mounted from the files would serve what the
+  // repository says and not what the system says, and the screen over the
+  // registry would be a picture of it.
+  //
+  // Reading the files stays the default, and not out of caution: the static
+  // tools -- tools/osd-routes.mjs, tools/osd-nodes.mjs -- inspect a
+  // repository and have no database to ask. The runtime inspects a system.
+  // Those are two different questions that happen to have the same answer
+  // most of the time.
+  for (const service of options.from ?? services(options.root ?? process.cwd(), options)) {
     if (service.handler === undefined) {
       continue;
     }

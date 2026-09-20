@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {serviceOf, channelOf, handlerRows, mountServices, services, channels} from "../tools/osd-icf.mjs";
+import {serviceOf, channelOf, handlerRows, mountServices, services, servicesFromRows, channels} from "../tools/osd-icf.mjs";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -100,6 +100,44 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     expect(mounted).to.deep.equal([]);
     expect(said.join(" ")).to.contain("not mounted");
     rmSync(dir, {recursive: true, force: true});
+  });
+
+  // **The registry as a system holds it, which is the truth at runtime.**
+  // The objects on disk are a transport (docs/registry-drift.md): a node
+  // edited from ABAP is a row and not a file, so a host that mounted from
+  // the files would serve what the repository says and not what the system
+  // says -- and the screen over the registry would be a picture of it.
+  const ROWS = {
+    ICFSERVICE: [
+      {ICF_NAME: "ZORK", ICFPARGUID: "P", URL: "/sap/bc/zork/", ICFACTIVE: "X", ICF_DOCU: "Zork"},
+      {ICF_NAME: "ZOFF", ICFPARGUID: "P", URL: "/sap/bc/off/", ICFACTIVE: " ", ICF_DOCU: "off"},
+      {ICF_NAME: "ZDEEP", ICFPARGUID: "P", URL: "/sap/bc/zork/deep/", ICFACTIVE: "X", ICF_DOCU: "deeper"},
+    ],
+    ICFHANDLER: [
+      {ICF_NAME: "ZORK", ICFPARGUID: "P", ICFORDER: "01", ICFTYP: "A", ICFHANDLER: "ZCL_INHERITED"},
+      {ICF_NAME: "ZORK", ICFPARGUID: "P", ICFORDER: "02", ICFTYP: "A", ICFHANDLER: "ZCL_ZORK_HTTP_HANDLER"},
+      {ICF_NAME: "ZOFF", ICFPARGUID: "P", ICFORDER: "01", ICFTYP: "A", ICFHANDLER: "ZCL_OFF"},
+      {ICF_NAME: "ZDEEP", ICFPARGUID: "P", ICFORDER: "01", ICFTYP: "A", ICFHANDLER: "ZCL_DEEP"},
+    ],
+  };
+
+  it("an inactive node is not mounted, which is what deactivating one in SICF does", () => {
+    const found = servicesFromRows(ROWS);
+    expect(found.map((s) => s.path)).to.not.include("/sap/bc/off");
+    expect(found.map((s) => s.path)).to.include("/sap/bc/zork");
+  });
+
+  it("the last of the handler chain answers, and the earlier rows are inherited", () => {
+    const zork = servicesFromRows(ROWS).find((s) => s.path === "/sap/bc/zork");
+    expect(zork.handler).to.equal("ZCL_ZORK_HTTP_HANDLER");
+    expect(zork.type, "ICFTYP A is an ABAP class").to.equal("ABAP");
+  });
+
+  it("a child sorts before its parent, so a parent cannot swallow it", () => {
+    // the same rule `routes()` applies to the files, for the same reason,
+    // and it has to hold on whichever of the two a host mounts from
+    const paths = servicesFromRows(ROWS).map((s) => s.path);
+    expect(paths.indexOf("/sap/bc/zork/deep")).to.be.lessThan(paths.indexOf("/sap/bc/zork"));
   });
 
   // a node that carries no handler is a real thing — an alias, or a node that

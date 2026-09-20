@@ -16,9 +16,9 @@ import {dialogStep} from "./osd-dialog-step.mjs";
 import express from "express";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
-import {mountServices, channels} from "./osd-icf.mjs";
+import {mountServices, servicesFromRows, channels} from "./osd-icf.mjs";
 import {mountHost, nodes} from "./osd-nodes.mjs";
-import {applyAtStartup} from "./osd-icf-apply.mjs";
+import {applyAtStartup, currentRows} from "./osd-icf-apply.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
@@ -49,7 +49,16 @@ await initializeABAP();
 // docs/registry-drift.md: applied when an object arrives, never re-applied
 // over an edit. One module for all three hosts, because that is what the
 // end-of-dialog-step rule cost when it was written once in one of them.
-await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root});
+// **This is the process that holds the system, so it routes from the
+// system.** Fatal, and it was written as "loud and not fatal, and that is a
+// statement with a shelf life" one commit ago: the ICF paths below are
+// mounted from these rows now, so a registry that could not be applied is a
+// runtime that would answer nothing on them and say it was fine.
+const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root});
+if (registry === undefined) {
+  throw new Error("the ICF registry could not be applied, and the routes below come from it");
+}
+const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections.DEFAULT);
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 
@@ -149,7 +158,7 @@ const claimed = declared.filter((n) => n.source.endsWith("nodes.json")).map((n) 
 const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.run({
   ...args,
   base: new globalThis.abap.types.String().set(args.base),
-})), {root, claimed,
+})), {root, claimed, from: servicesFromRows(icfRowsNow),
   // a node's error belongs in the dumps like any other, and used to reach
   // only console.error -- which is why the one route that moved into a node
   // would have lost its dump() on the way. Given back to every node at once.

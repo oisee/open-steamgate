@@ -232,6 +232,25 @@ survives the restart which produced it.
 disagreement between the table and the objects is reported rather than
 resolved in silence.
 
+**Both halves measured, 2026-09-20.** The serving runtime mounts from
+`ICFSERVICE`/`ICFHANDLER` rather than from the files, and the falsification
+was run rather than argued: `UPDATE icfservice SET icfactive = ' '` on
+`/sap/bc/zork/`, marked edited, recycle -- that path answers **404** and the
+untouched `/sap/bc/osd/rfc/` still answers 200. The first attempt at the
+same experiment blanked the object hash instead of using `markEdited`, and
+the start correctly set the edit aside with
+`zosd_icf_aside.why = "the row was edited here and the object now says
+something else"`, which is the rule catching the experimenter.
+
+What is left, and it is real rather than tidy-up: in child mode the
+**parent** still lists and proxies the ICF paths from the files, because the
+child holds the database. So a node deactivated in the table is still
+advertised by the parent and answered 404 by the child, instead of not being
+there. The parent has to ask the child, or the rows have to reach the
+parent.
+
+And the screen itself: `markEdited` exists and nothing but a test calls it.
+
 ---
 
 ## Deliberately not in the plan
