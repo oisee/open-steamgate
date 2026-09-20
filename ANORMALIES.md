@@ -1102,7 +1102,7 @@ measurement and cost two sessions half an hour.
   that a number can never travel without the state it was taken in
 
 
-### NOTE-2026-09-20-generation-hash-moved — and the cause I named was wrong
+### NOTE-2026-09-20-generation-hash-moved — a test writes into `src/`, and the first cause I named was wrong
 
 Not an anomaly in anybody's software yet, because it has not been isolated.
 Written down because a **wrong explanation was published in a commit
@@ -1127,13 +1127,32 @@ the next person stops looking.
   minutes (`find … -newermt`); `describeBuild()` is stable across repeated
   calls; and a suite that starts and recycles servers
   (`test/osd-runtime.mjs`) held the hash steady for 30 seconds of polling.
-- What is still unknown: which input the **full** tree run touches. A file
-  created and removed during the run would not show up in `-newermt`, which
-  is the shape to look for next.
-- How to find it: snapshot the file list and sizes of `inputsOf(root)`
-  before a full run, poll during it, and diff on the first change of
-  `hashOf`. Twenty lines, and it either names the file or shows the hash
-  moving with no input changing, which would be a defect in `hashOf` itself.
+- **Isolated, 2026-09-20, in five seconds of the measurement described
+  below.** `test/adt-devloop.mjs` writes `src/osd/zcl_osd_scratch.clas.abap`
+  -- the state-changing half of the ADT façade is tested by locking, writing
+  and activating a real class, and the façade's store writes an object where
+  objects live. Its `after()` removes the file again ("the scratch object is
+  a file like any other, so it is removed like one"), which is why
+  `find … -newermt` afterwards shows nothing and why the hash returns to its
+  old value on its own.
+- **And it is not the only one.** Caught mid-run while writing this up:
+  `test/cds-check.mjs` rewrites `src/cds/zc_osd_pack.ddls.asddls` to check
+  that a changed annotation is noticed, and restores it -- it even carries
+  an assertion of its own, "and the file is restored, or this suite breaks
+  the tree it measures". Two suites, both deliberate, both tidy, and
+  together they mean an input folder is in motion for part of every run.
+- **So `hashOf` is right and the reader was wrong.** While that file exists
+  it IS part of the tree, and a build would produce a different generation.
+  Nothing to fix in the hash, nothing to fix in the test: what was missing
+  is the precondition, now written down -- **`synchronized` is only readable
+  when the tree is quiet.** A deploy is verified after the suites, not
+  beside them.
+- How it was found, kept because the shape generalises: snapshot the file
+  list and sizes of `inputsOf(root)`, poll `hashOf` once a second, and on
+  the first change diff the snapshot -- added, gone, resized. Thirty lines.
+  It prints the file, or it prints "nothing changed under the inputs", which
+  would have meant the defect was in `hashOf` itself. Either answer is one
+  run away, which is the argument for writing it instead of reasoning.
 - Why it matters beyond tidiness: `synchronized` is how this session decides
   whether the i7 is serving its own source, and it is read after every
   deploy. A field that is unreadable while a suite runs is a field whose
