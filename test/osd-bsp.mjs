@@ -54,13 +54,27 @@ describe("tools/osd-bsp-registry: a BSP application is an object, not a folder",
     }
   });
 
-  it("the file name escapes the dot, because abaplint reads the type out of it", () => {
+  it("the file name carries no dot, because abaplint reads the type out of it", () => {
     // `ztravels_a4h_-manifest.json.w3mi.xml` parses as an object of type
     // `json.w3mi` and comes back "Unknown object type" -- 33 of these failed
-    // the lint before abapGit's own percent-escape was copied.
+    // the lint before the dot was escaped at all.
     expect(w3miFile("ZOSD_008_APP", "i18n/i18n.properties"))
-      .to.equal("zosd_008_app_-i18n_-i18n%2eproperties");
+      .to.equal("zosd_008_app_-i18n_-i18n_properties");
     expect(w3miFile("Z", "manifest.json")).to.not.contain(".json.");
+  });
+
+  it("and no percent either, because these names are fetched over HTTP", () => {
+    // **The first escape was abapGit's, `%2e`, and it does not survive a
+    // URL.** abapGit's files are read from disk; ours are fetched, because
+    // the browser preview reads a page's bytes out of `media/` over the
+    // network. `...%2e...` decodes back to a dot and finds nothing, and the
+    // literal name needs `%252e` -- measured on the published deployment,
+    // where `%252e` answered 200 and `%2e` answered 404 for the same file.
+    for (const page of ["index.html", "i18n/i18n.properties", "annotations/annotations.xml"]) {
+      const file = w3miFile("ZAPP", page);
+      expect(file, page).to.match(/^[a-z0-9_-]+$/);
+      expect(encodeURIComponent(file), "survives a URL unchanged").to.equal(file);
+    }
   });
 
   it("writes one object per page and sweeps what it did not write", () => {

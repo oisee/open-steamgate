@@ -57,9 +57,9 @@ describe("tools/osd-bsp-app: a folder of web files as a BSP application", () => 
       expect(files).to.include("zosd_test_app.wapa.xml");
       // the one line that changes, and it changes in the written file only
       const manifest = JSON.parse(readFileSync(join(dir, pageFile("ZOSD_TEST_APP", "manifest.json")), "utf8"));
-      expect(manifest["sap.app"].dataSources.mainService.uri).to.equal("/sap/opu/odata/sap/ZX_SRV/");
+      expect(manifest["sap.app"].dataSources.mainService.uri).to.equal("../../../../opu/odata/sap/ZX_SRV/");
       expect(JSON.parse(readFileSync("packs/travels-a4h/webapp/manifest.json", "utf8"))["sap.app"].dataSources.mainService.uri,
-        "the tree is not edited").to.not.equal("/sap/opu/odata/sap/ZX_SRV/");
+        "the tree is not edited").to.not.equal("../../../../opu/odata/sap/ZX_SRV/");
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }

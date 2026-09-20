@@ -73,15 +73,46 @@ ${items}   </PAGES>
 `;
 }
 
-/** The one line that has to change. A manifest served from
- *  /sap/bc/ui5_ui5/sap/<app>/ cannot reach a service with `../`, so the
- *  data source is made absolute -- and it is done here rather than in the
- *  tree, so nothing committed points at one system's service. */
+/** The one line that has to change, because the same file is served from two
+ *  places. A manifest under `/app/<name>/` reaches its service with
+ *  `../../sap/opu/odata/...`; served from `/sap/bc/ui5_ui5/<ns>/<app>/` that
+ *  same string lands in `/sap/bc/ui5_ui5/sap/opu/odata/` and the application
+ *  reads nothing.
+ *
+ *  **"It cannot reach the service with `../`" is what this comment used to
+ *  say, and it was the assumption the defect grew out of.** It can: the
+ *  branch is four segments deep, so `../../../../opu/odata/sap/<srv>/` gets
+ *  there. The first fix made the URL absolute instead, which is right on a
+ *  system and wrong wherever this system is not at the origin root -- on
+ *  GitHub Pages the tile opened onto an empty application. Recounted
+ *  independently by fable-osd before it went out. */
+// How far up from `/sap/bc/ui5_ui5/<ns>/<app>/` the OData branch sits: four
+// segments, back to `/sap/`. Counted once, here, rather than written as a
+// run of `../` somebody has to trust.
+const UP_TO_SAP = "../".repeat(4);
+
 export function manifestFor(text, service) {
   const m = JSON.parse(text);
   for (const ds of Object.values(m["sap.app"]?.dataSources ?? {})) {
     if (ds.type === "OData") {
-      ds.uri = `/sap/opu/odata/sap/${service}/`;
+      // **Relative to the application, not absolute from the origin.**
+      //
+      // The folder's own manifest says `../../sap/opu/odata/...`, which is
+      // right for `/app/<name>/` and wrong once the same file is served
+      // from `/sap/bc/ui5_ui5/<ns>/<app>/`. The first fix for that made it
+      // absolute, `/sap/opu/odata/sap/<srv>/`, which is right on a system
+      // and wrong on GitHub Pages: the deployment lives under
+      // /open-steamgate/main/, the service worker's scope is that
+      // directory, and a request to the origin root never reaches it. The
+      // tile then opened onto an empty application with
+      // `[ODataMetadata] initial loading of metadata failed`.
+      //
+      // `../../../../opu/odata/sap/<srv>/` from the application's own
+      // location is `/sap/opu/odata/sap/<srv>/` on a system and
+      // `/open-steamgate/main/sap/opu/odata/sap/<srv>/` on Pages -- the one
+      // spelling that is right in both, and the same correction the
+      // launchpad's component URLs needed an hour earlier.
+      ds.uri = `${UP_TO_SAP}opu/odata/sap/${service}/`;
     }
   }
   return JSON.stringify(m, undefined, 2) + "\n";

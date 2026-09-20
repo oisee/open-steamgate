@@ -944,10 +944,20 @@ test("a tile opens its application, which is the one thing a launchpad does", as
     // the sandbox reports it as a dialog rather than as a broken page
     await expect(page.locator("body")).not.toContainText(
       "could not be loaded", {timeout: 60000});
-    // and the component's own resources were found: a 404 under the BSP
-    // branch is the shape an absolute URL takes on a prefixed origin
-    expect(missing.filter((u) => u.includes("/sap/bc/ui5_ui5/")),
-      "the application's resources are where the page asked for them").toEqual([]);
+    // **Both branches, because the first version watched only one.** A 404
+    // under `/sap/bc/ui5_ui5/` is a component or a page the application
+    // could not fetch; a 404 under `/sap/opu/` is its DATA -- and that is
+    // exactly where the next instance of the same defect landed, with the
+    // tile opening onto an empty application while this assertion passed.
+    // fable-osd pointed out that the check was right and looking at the
+    // wrong prefix.
+    //
+    // `changes/*-bundle.json` is excluded on purpose: UI5's flexibility
+    // layer probes for those on every application and their absence is not
+    // a fault of ours.
+    const ours = missing.filter((u) => /\/sap\/(bc\/ui5_ui5|opu)\//.test(u))
+      .filter((u) => u.includes("/changes/") === false);
+    expect(ours, "the application's resources and its data are where the page asked for them").toEqual([]);
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});

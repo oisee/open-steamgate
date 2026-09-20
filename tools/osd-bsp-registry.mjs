@@ -125,14 +125,19 @@ export function declared(file = "src/bsp/apps.json") {
       app,
       text: d.text ?? app,
       file,
-      // **The data source is made absolute, and the folder keeps its
-      // relative one.** A manifest under /app/status/ reaches its service
-      // with `../../sap/opu/odata/...`; under
-      // /sap/bc/ui5_ui5/sap/<app>/ that same string lands in
-      // /sap/bc/ui5_ui5/sap/opu/odata/ and the app reads nothing. It cannot
-      // simply be made absolute at the source either: in the GitHub Pages
-      // preview the origin's root is not this system's root, which is why it
-      // was relative in the first place.
+      // **The data source is re-based, and the folder keeps its own.** A
+      // manifest under /app/status/ reaches its service with
+      // `../../sap/opu/odata/...`; served from /sap/bc/ui5_ui5/sap/<app>/
+      // that same string lands in /sap/bc/ui5_ui5/sap/opu/odata/ and the
+      // application reads nothing.
+      //
+      // It is **not** made absolute, and it was: `/sap/opu/odata/sap/<srv>/`
+      // is right on a system and wrong wherever this system is not at the
+      // origin's root, which is the case in the GitHub Pages preview -- the
+      // tile opened onto an empty application with "initial loading of
+      // metadata failed". `../../../../opu/odata/...` from the application's
+      // own place is right in both. The comment two files over said this
+      // hazard out loud and the code beside it walked into it anyway.
       //
       // So the generated object differs from the folder in exactly one line,
       // and that is derivation rather than drift -- but it is said out loud
@@ -224,17 +229,27 @@ export function w3miName(app, page) {
 // The file the pair is written as.
 //
 // `/` is spelled `_-`, which is what the tree already does for a BSP page
-// (tools/osd-bsp-app.mjs), and **`.` is spelled `%2e`, which is not
-// cosmetic**: abaplint reads an object's type out of the file name, so
-// `ztravels_a4h_-manifest.json.w3mi.xml` parses as type `json.w3mi` and
-// comes back "Unknown object type, currently not supported". That is why
-// abapGit percent-escapes a name in the first place, and 33 of these
-// failed the lint before the escape was copied.
+// (tools/osd-bsp-app.mjs), and a `.` is spelled `_`.
+//
+// The dot has to go somewhere, because abaplint reads an object's **type**
+// out of the file name: `ztravels_a4h_-manifest.json.w3mi.xml` parses as
+// type `json.w3mi` and comes back "Unknown object type", which is what 33
+// of these did before the dot was escaped at all.
+//
+// **It was `%2e` first, copying abapGit, and a literal `%` in a file name
+// is hostile to HTTP.** abapGit's files are read from disk and never
+// fetched; ours are, because the browser preview reads a page's bytes out
+// of `media/` over the network. A URL asking for `…%2e…` has that decoded
+// back to a dot and finds nothing, and asking for the literal name needs
+// `%252e` -- measured on the published deployment, where `%252e` answered
+// 200 and `%2e` answered 404 for the same file. So the dot becomes `_`:
+// nothing reads the name for meaning (the object's real name is in the
+// XML), and `generate()` refuses a collision naming both pages.
 export function w3miFile(app, page) {
   return `${app}_-${page.replaceAll("/", "_-")}`
     .toLowerCase()
-    .replaceAll(".", "%2e")
-    .replace(/[^a-z0-9_%-]/g, "_");
+    .replaceAll(".", "_")
+    .replace(/[^a-z0-9_-]/g, "_");
 }
 
 const extensionOf = (page) => {
