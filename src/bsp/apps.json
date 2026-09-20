@@ -18,5 +18,16 @@
     "folder": "webapp/analytics",
     "text": "Flight analytics: the analytical list page",
     "service": "ZSTG_SADL_SRV"
+  },
+  "ZOSD_TRAVEL_APP": {
+    "folder": "webapp",
+    "files": [
+      "index.html",
+      "Component.js",
+      "manifest.json",
+      "i18n"
+    ],
+    "text": "Travels: the demo list report",
+    "service": "ZSTG_DEMO_SRV"
   }
 }

@@ -89,7 +89,20 @@ export function declared(file = "src/bsp/apps.json") {
     // first three declarations included a 16-character name.
     checkAppName(app);
     const at = d.folder;
-    const pages = walk(at).map((f) => f.slice(at.length + 1).replaceAll("\\", "/")).sort();
+    // **An application is a list of files, and a folder is the common case
+    // rather than the definition.** webapp/'s top level holds two of them --
+    // the travel app (index.html, Component.js, manifest.json, i18n/) and
+    // the launchpad shell (flp.html, launchpad.js, and its images) -- and on
+    // a system they are two BSP applications. Moving the files apart would
+    // be truer, and it would touch about forty references in a dozen files,
+    // including two e2e suites, the Easy Access screen's ABAP and the
+    // preview. So `files` says which of a folder's files an application is,
+    // and the move stays a separate decision rather than a 5am one.
+    const pages = (d.files ?? walk(at).map((f) => f.slice(at.length + 1).replaceAll("\\", "/")))
+      .flatMap((f) => (existsSync(join(at, f)) && statSync(join(at, f)).isDirectory()
+        ? walk(join(at, f)).map((g) => g.slice(at.length + 1).replaceAll("\\", "/"))
+        : [f]))
+      .sort();
     return {
       app,
       text: d.text ?? app,
@@ -113,7 +126,10 @@ export function declared(file = "src/bsp/apps.json") {
           ? Buffer.from(manifestFor(readFileSync(join(at, page), "utf8"), d.service))
           : readFileSync(join(at, page)),
       })),
-      missing: existsSync(at) ? [] : [`the folder ${at} is not there`],
+      missing: [
+        ...(existsSync(at) ? [] : [`the folder ${at} is not there`]),
+        ...pages.filter((f) => existsSync(join(at, f)) === false).map((f) => `${at}/${f}`),
+      ],
     };
   });
 }
