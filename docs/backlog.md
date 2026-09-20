@@ -4453,3 +4453,26 @@ The class ran with the file and without it — eight methods both times — and
 what differed between the two readings was not the file but **how the log
 was read**. Two things changed between the runs and only one was noticed,
 which is the control an experiment needs and did not have.
+
+### NYC taxi cross-database visual benchmark (2026-09-20)
+
+Compare the same January 2025 NYC TLC analytical facts on SQLite, DuckDB and
+HANA Express; the current full import is DuckDB-only. Build a repeatable,
+validated import for the other adapters before making performance claims.
+Keep schema, client, fact rows, source checksum and OData query shapes equal.
+On equivalent hardware, without competing workloads, record cold and warm
+runs separately. Measure visible first chart/table and filter-response times
+in Playwright, OData latency (median and p95 for the five existing
+`tools/bench-taxi.mjs` shapes), and SQL execution where possible. Capture
+browser traces, DB/host configuration, network placement, errors and result
+counts; display a visual comparison without conflating CDN/UI5 startup with
+database time. HANA Express availability and licensing remain external gates.
+Do not use this benchmark to mutate an existing production volume.
+
+Release gate: adding `ZOSD_TAXIFACT` changes the generated schema. Existing
+SQLite files can be moved aside or rebuilt on fingerprint drift; PostgreSQL
+refuses drift, while existing DuckDB/HANA schemas do not create the new table
+at startup. Before rolling this code into a persistent stack, provide and
+test an additive, non-destructive migration for each backend (including
+restart and data-retention checks), or use an explicitly fresh demo database.
+Until then, keep the previously working container image active.
