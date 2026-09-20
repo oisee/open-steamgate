@@ -137,6 +137,20 @@ const DIALECTS = {
     },
     // no truncation here either, and SQLite has no TRUNC to borrow
     castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    // **SQLite has no decimal type at all.** A DECIMAL(15,2) column is
+    // NUMERIC, which is binary floating point, so 0.10 + 0.20 answers
+    // 0.30000000000000004 where HANA and DuckDB answer 0.30. It is the one
+    // row of the conformance table that nothing addressed, and the most
+    // dangerous of them: it does not raise, it does not return a different
+    // kind of thing, it returns a number that is nearly right, and a body
+    // that compares it or sums it over a thousand rows is wrong quietly.
+    //
+    // The result type says what the scale is -- the same premise the
+    // division above rests on -- so the arithmetic is rounded back to it.
+    // Only `+` has an oracle row behind it (`dec_arith`). `-` shares its
+    // scale rule and rides on the same measurement; `*` does NOT and is
+    // deliberately left alone -- see the call site.
+    decArith: (e, scale) => `ROUND(${e}, ${scale})`,
     // SQLite's LIKE is case-INSENSITIVE for ASCII unless the connection says
     // otherwise, and HANA's is not. `PRAGMA case_sensitive_like = ON` fixes
     // it, is connection-scoped and survives transactions (measured), so the
@@ -249,7 +263,22 @@ export function lower(rel, dialectName, options = {}) {
           const divided = e.type?.abap === "I" ? d.intDiv(left, right) : d.divide(left, right);
           return d.guardZero === undefined ? divided : d.guardZero(divided, expr(e.right));
         }
-        return `(${left} ${e.op} ${right})`;
+        const rendered = `(${left} ${e.op} ${right})`;
+        // a decimal result on an engine that has no decimals
+        // **`+` and `-` only, and the exclusion of `*` is the interesting
+        // half.** For addition HANA's result scale is the operands' own, so
+        // rounding back to the declared scale restores exactly what it would
+        // have answered. For multiplication the result scale is s1 + s2:
+        // 0.15 * 0.15 is 0.0225 on HANA, and rounding that to the declared 2
+        // would answer 0.02 -- a rewrite that fixes one row by breaking a
+        // case nobody had measured. There is no oracle row for it, so it is
+        // left alone and `dec_mult` is in the case list to be asked the next
+        // time a machine with HANA is in reach.
+        if (d.decArith !== undefined && e.type?.abap === "P" && e.type.dec !== undefined
+            && (e.op === "+" || e.op === "-")) {
+          return d.decArith(rendered, Number(e.type.dec));
+        }
+        return rendered;
       }
       case "cast":
         if (e.type?.abap === "I") return d.castInt(expr(e.expr));

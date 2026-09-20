@@ -140,6 +140,15 @@ export const CASES = [
   // happens to agree, which is exactly how "one sqlite dialect is fine" would
   // have become a belief rather than a measurement. HANA takes LOG(base, x)
   // and refuses the one-argument form, which is its own answer and a true one.
+  // Added 2026-09-20 with no oracle answer behind it, on purpose. The
+  // decimal treatment in `sqlscript-lower.mjs` covers `+` and `-`, where
+  // HANA's result scale is the operands' own; multiplication's is s1 + s2,
+  // so the same rewrite would ROUND 0.0225 to 0.02 and be wrong in a way no
+  // row here would catch. Until a machine with HANA answers this, the table
+  // reports it as NOT measured -- which is the honest state and is visible,
+  // rather than an assumption living in a comment.
+  {id: "dec_mult", sql: "SELECT d1 * d1 AS v FROM t WHERE k = 'r3'",
+   why: "decimal multiplication: HANA's result scale is s1 + s2, which decides whether the SQLite rounding may be extended to it"},
   {id: "fn_log", sql: "SELECT LOG(10) AS v FROM t WHERE k = 'r1'",
    why: "LOG: base ten or natural - the row that keeps the two SQLite builds honest"},
 ];
@@ -193,12 +202,12 @@ const DDL = {duckdb: ddlFor("duckdb"), sqlite: ddlFor("sqlite"), hana: ddlFor("h
 // between the two are the size of the decision and somebody will want to see
 // them again. A column measured on one fixture cannot be merged into a run
 // of the other: it is refused by name.
-const PADDED = [
+export const PADDED = [
   `INSERT INTO t VALUES ('r1', 'abc       ', 'oops', '42', 'ABC', 'abcdef', 1, 2, -7, 0, 0.10, 0.20, 5)`,
   `INSERT INTO t VALUES ('r2', 'zz        ', 'oops', '7',  'ZZ',  'zz',     1, 2, -7, 0, 1.00, 2.00, NULL)`,
   `INSERT INTO t VALUES ('r3', 'cc        ', '3',    '3',  'CC',  'cc',     1, 2, -7, 0, 1.70, 0.30, NULL)`,
 ];
-const UNPADDED = [
+export const UNPADDED = [
   `INSERT INTO t VALUES ('r1', 'abc', 'oops', '42', 'ABC', 'abcdef', 1, 2, -7, 0, 0.10, 0.20, 5)`,
   `INSERT INTO t VALUES ('r2', 'zz',  'oops', '7',  'ZZ',  'zz',     1, 2, -7, 0, 1.00, 2.00, NULL)`,
   `INSERT INTO t VALUES ('r3', 'cc',  '3',    '3',  'CC',  'cc',     1, 2, -7, 0, 1.70, 0.30, NULL)`,
@@ -485,8 +494,11 @@ export const VERDICTS = {
     why: "HANA's / over two integers yields a DECIMAL; SQLite truncates. The form has to be chosen from the HANA result type, which is what makes it typed rather than a rewrite."},
   int_div_neg: {class: "typed", done: true,
     where: "the same entry: one rewrite answers both rows",
+    measured: "test/sqlscript-treatments.mjs: int_div_neg -- the forced decimal fixes the sign too",
     why: "the sign half of the same divergence. sql.js truncates toward zero and HANA does not, and the forced decimal fixes both -- but the suite above only asserts the positive case, so this row is covered by the same code and not by its own measurement."},
-  dec_arith: {class: "typed", done: false,
+  dec_arith: {class: "typed", done: true,
+    where: "DIALECTS.sqlite.decArith -- ROUND(e, scale), for + and - only",
+    measured: "test/sqlscript-treatments.mjs: dec_arith, and that an engine with decimals is left alone",
     why: "DECIMAL(15,2) + DECIMAL(15,2). DuckDB has a real decimal and agrees with HANA; SQLite has none and adds in binary floating point. Nothing in the lowering addresses it -- this is the one row of the nine with no treatment anywhere, and it is the one most likely to reach a body unnoticed, because it answers a number that is nearly right."},
   cast_bad: {class: "refuse", done: true,
     where: "sqlscript-lower.mjs DIALECTS.sqlite.castInt -- throws Refused",
@@ -494,18 +506,23 @@ export const VERDICTS = {
     why: "SQLite's CAST returns 0 where HANA raises, which is a different program and not a different number. No expression makes it raise, so the dialect declines the node instead of answering quietly."},
   div_zero: {class: "compat", done: true,
     where: "DIALECTS.duckdb.guardZero -- CASE WHEN divisor = 0 THEN error(...); sqlite has none, deliberately",
+    measured: "test/sqlscript-treatments.mjs: div_zero -- DuckDB raises, and SQLite's NULL is pinned rather than remembered",
     why: "DuckDB can be made to raise and is. SQLite cannot raise at all, so faithfulness would mean refusing division outright -- a common operator declined for a rare case. That trade is written down in the dialect and the row goes on being measured."},
   like_case: {class: "compat", done: true,
     where: "the CONNECTION, not the dialect: PRAGMA case_sensitive_like = ON in tools/sqljs-native.mjs and tools/sqlite-file-client.mjs",
+    measured: "test/sqlscript-treatments.mjs: like_case -- asserted through the client, since that is where the treatment is",
     why: "SQLite's LIKE is case-insensitive for ASCII unless the connection says otherwise. The fix is connection-scoped and survives transactions, so the dialect passes LIKE through -- which means this table, which opens its own connections, keeps showing the difference while the runtime does not have it."},
   cast_char_narrow: {class: "compat", done: true,
     where: "DIALECTS.duckdb.castChar and DIALECTS.sqlite.castChar -- SUBSTR(CAST(e AS VARCHAR), 1, n)",
+    measured: "test/sqlscript-treatments.mjs: cast_char_narrow",
     why: "HANA truncates a CAST to a narrower character type and neither other engine does. One expression serves both dialects."},
   cast_round: {class: "compat", done: true,
     where: "DIALECTS.duckdb.castInt -- CAST(TRUNC(CAST(e AS DOUBLE)) AS INTEGER)",
+    measured: "test/sqlscript-treatments.mjs: cast_round",
     why: "HANA truncates toward zero where DuckDB rounds. This one shipped wrong before the oracle column existed, which is the strongest argument in this file for tracking the oracle."},
   fn_log: {class: "refuse", done: true,
     where: "sqlscript-lower.mjs PORTABLE -- LOG is not in it, and an unknown function is refused rather than rendered",
+    measured: "test/sqlscript-treatments.mjs: fn_log -- the lowering declines",
     why: "HANA takes LOG(base, x) and refuses the one-argument form. The two SQLite builds disagree with each other here -- base ten under Node, natural in the browser -- which is what makes this row the one that catches a build standing in for another."},
 };
 

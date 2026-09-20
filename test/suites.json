@@ -92,6 +92,7 @@
     "test/sqlscript-portable.mjs",
     "test/sqlscript-refusals.mjs",
     "test/sqlscript-to-ir.mjs",
+    "test/sqlscript-treatments.mjs",
     "test/sqlscript-values.mjs",
     "test/sqlscript-vs-hana.mjs",
     "test/stg-compile.mjs",
