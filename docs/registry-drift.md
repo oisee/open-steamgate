@@ -64,6 +64,31 @@ never silently.** That rule is in `tools/sqlite-file-client.mjs` and it was
 paid for -- a database moved aside while a runtime still had it open took the
 i7 down for eight hours, which is why the sidecars now travel with it.
 
+## What an unmarked edit actually costs
+
+*Added 2026-09-20 because the sentence used everywhere else -- "without the
+bookkeeping the next build silently undoes the edit" -- is stronger than the
+code, and it had reached three commit messages, a YAML comment and an app
+component before anybody read the branches back.*
+
+The decision is a three-way, and only one arm loses anything:
+
+| the object | the row | what happens |
+| --- | --- | --- |
+| unchanged since it was applied | marked or not | `KEEP`. The edit stands either way |
+| changed | marked `EDITED` | `ASIDE`. The object wins, the previous row is kept and the start says so |
+| changed | **not** marked | `REPLACE`. The object wins **silently** |
+
+So an edit made round the bookkeeping is not undone by the next build. It is
+undone, without a word, **on the day its object next changes** -- which may
+be weeks later and will not be connected to that build by anybody looking.
+Quieter and later, and therefore worse than the thing the stronger sentence
+described.
+
+That is the argument for putting `markEdited` in what the dispatcher writes
+through rather than in one screen: not that the alternative breaks loudly,
+but that it breaks quietly at a time nobody is watching.
+
 ## What this rule refuses to do
 
 **It does not merge.** A three-way merge of a node -- what the object said
@@ -77,7 +102,9 @@ not survive it. That is **correct for seed data** -- nobody edits a flight
 booking fixture on purpose -- and it is exactly why the registry must not be
 seed data. If the ICF table were seeded the way `ZSTG_DEMO` is, every node
 somebody made from the screen would vanish at the next build and the screen
-would be a toy. The two kinds of row look identical in SQLite and are not the
+would be a toy. (That one is exact: a re-seed writes the rows back whatever
+they say. The weaker case -- an edit made round the bookkeeping -- is in
+"What an unmarked edit actually costs" below, and is quieter.) The two kinds of row look identical in SQLite and are not the
 same thing.
 
 ## How anybody will know it works

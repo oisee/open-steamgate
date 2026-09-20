@@ -15,7 +15,8 @@
 # **Read-only in this first cut, on purpose.** The screen at
 # /sap/bc/osd/sicf/ writes through ZCL_OSD_SICF=>SET_ACTIVE, which keeps the
 # object's hash while flipping the origin -- without that bookkeeping the
-# next build silently undoes the edit, which is the whole content of the
+# next build that carries a CHANGED object replaces the edit silently --
+# an unchanged object leaves it alone -- which is the whole content of the
 # drift rule. A write arriving through OData would go round it. So the
 # writable cut comes when `markEdited` sits in what the dispatcher writes
 # through rather than in one screen, and not before: a service that can be
