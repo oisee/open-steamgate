@@ -19,6 +19,7 @@ export class DuckDBDatabaseClient {
   constructor(input = {}) {
     this.name = "duckdb";
     this.path = input.path ?? ":memory:";
+    this.connected = false;
     this.trace = input.trace === true;
     this.instance = undefined;
     this.connection = undefined;
@@ -31,6 +32,13 @@ export class DuckDBDatabaseClient {
   async connect() {
     this.instance = await DuckDBInstance.create(this.path);
     this.connection = await this.instance.connect();
+    // Match the SQLite and HANA clients: sy-dbsys is a fact about the
+    // connection that actually opened, not a label supplied by status or
+    // configuration. Keep the assignment after connect succeeds.
+    if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) {
+      globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
+    }
+    this.connected = true;
   }
 
   async disconnect() {
@@ -39,6 +47,7 @@ export class DuckDBDatabaseClient {
     this.instance?.closeSync?.();
     this.connection = undefined;
     this.instance = undefined;
+    this.connected = false;
   }
 
   // a persisted file already carries the schema and the seed

@@ -3,12 +3,14 @@ on:
   push:
     paths:
       - 'docker/portainer/**'
+      - 'docker/compose.*.yml'
       - 'docs/spin.md'
       - 'scripts/sync-spin.mjs'
       - '.github/workflows/spin-docs.yml'
   pull_request:
     paths:
       - 'docker/portainer/**'
+      - 'docker/compose.*.yml'
       - 'docs/spin.md'
       - 'scripts/sync-spin.mjs'
       - '.github/workflows/spin-docs.yml'

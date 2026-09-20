@@ -1,5 +1,16 @@
 # Running it in containers, and connecting an IDE to it
 
+For a new installation, use the [ready-image quickstart](spin.md): one
+prebuilt OSD image serves SQLite, DuckDB or HANA Express, including the
+DIAG/RFC stubs. The short Portainer stacks are embedded there in full. Build
+instructions and image verification are in [docker-image.md](docker-image.md).
+
+The Bun release instructions below document an older experiment. In particular,
+its HANA profile is **not** the working HANA Express stack and its image does
+not include the DIAG/RFC bridge. Do not use it for a new Portainer deployment.
+
+## Historical Bun release experiment
+
 Three configurations exist, they differ by one variable at the database seam,
 and the simplest needs nothing installed but docker.
 

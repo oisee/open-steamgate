@@ -121,7 +121,9 @@ export function startServer(quiet) {
   // and already carries a webapp/, and asking it to repeat that in a second
   // file is the extra registry this whole track removes.
   const packDirs = new Map(webappsOf(process.cwd()).map((pack) => [`/app/${pack.name}`, pack.dir]));
-  hostNodes["pack-static"] = (a, node) => a.use(node.path, express.static(packDirs.get(node.path)));
+  if (packDirs.size > 0) {
+    hostNodes["pack-static"] = (a, node) => a.use(node.path, express.static(packDirs.get(node.path)));
+  }
 
   // a service on another system, answered on this origin. A page this system
   // serves may then read it the way it reads ours, which a proxy on another

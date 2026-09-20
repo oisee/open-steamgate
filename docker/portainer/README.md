@@ -1,13 +1,25 @@
-# Portainer stacks
+# Portainer: four ready stacks
 
-See [Spin up OSD](../../docs/spin.md) for local, Docker and Portainer instructions.
+Paste one complete file into **Stacks → Add stack → Web editor** on Docker
+Standalone (Linux amd64):
 
-Paste an entire `compose.*.yml` into the Stack Web editor on Docker Standalone.
-Set `INSTANCE=06` in Environment variables (default `00`). No local image,
-`OSD_SUITE_IMAGE`, host file or Caddy is needed. Public Node/Go images download
-and compile the sources at first startup; internet access is required.
+- [SQLite](compose.sqlite.yml): instance 11, open `http://DOCKER-HOST:8011/app/flp.html`.
+- [DuckDB](compose.duckdb.yml): instance 15, open `http://DOCKER-HOST:8015/app/flp.html`.
+- [New HANA Express + OSD](compose.hana.yml): instance 17, open
+  `http://DOCKER-HOST:8017/app/flp.html`. Set `ACCEPT_SAP_LICENSE=YES` after
+  accepting SAP's license; allow several minutes for HXE's first start.
+- [New PostgreSQL + OSD](compose.postgres.yml): instance 19, open
+  `http://DOCKER-HOST:8019/app/flp.html`. The SQL port stays private.
 
-HANA additionally requires `HANA_PASSWORD` and `ACCEPT_SAP_LICENSE=YES` after
-accepting SAP's license. Its password file is created in a named volume.
+All four use the same ready OSD image, including DIAG/RFC. HANA's short-lived
+`hana-init` service uses that image too; `Exited (0)` is its successful state.
+The SQL server is a separate SAP image. No source compilation happens on start.
 
-These bootstrap stacks have not yet been booted end-to-end in Docker here.
+These files are generated copies of `docker/compose.*.yml`. Update the source
+files and run `node scripts/sync-spin.mjs`; CI verifies both copies and the
+full YAML blocks in [spin.md](../../docs/spin.md).
+
+The old source-building Compose files are retained in Git history. The local
+source installation helper [setup-local.sh](setup-local.sh) remains available.
+For local DIAG/RFC ports, see [setup-protocols-local.sh](setup-protocols-local.sh)
+and the [local instructions](../../docs/spin.md#locally-without-docker).

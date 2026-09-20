@@ -15,7 +15,8 @@
 //                  "sockets","rss_mb","alive"}],
 //    "ports":[{"port","protocol","purpose","state","note"}],
 //    "services":[{"path","kind","handler","text","pack"}],
-//    "packs":[{"name","order","objects","folders","description"}]}
+//    "packs":[{"name","order","objects","folders","description"}],
+//    "database":[{"section","name","value","note"}]}
 //
 // Counts only. No host names, no user names, no addresses, no absolute
 // paths, no identity of whoever is connected: a status page that leaks the
@@ -26,6 +27,7 @@ import {createConnection} from "node:net";
 import {basename, join, resolve} from "node:path";
 import {readFileSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
+import {DEFAULT_DATABASE} from "./sqlite-file-client.mjs";
 import {liveHash} from "./osd-build.mjs";
 import {instances} from "./osd-runtime.mjs";
 import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
@@ -33,6 +35,7 @@ import {segwRegistrations} from "./segw-registry.mjs";
 import {contentFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
 import {identity} from "./osd-identity.mjs";
+import {databaseDescriptor} from "./osd-database-identity.mjs";
 
 const PAGE = 4096;
 
@@ -224,6 +227,57 @@ export function packsInfo(root, env = process.env) {
   });
 }
 
+/** Safe backend facts. A connected client is authoritative; the environment
+ * fallback is explicitly marked configured because the parent façade may
+ * refresh status while the serving child owns the actual connection. */
+export function databaseFacts({client, env = process.env} = {}) {
+  const liveClient = client ?? globalThis.abap?.context?.databaseConnections?.DEFAULT;
+  const configured = String(env.STG_DB ?? "file").toLowerCase();
+  const rawEngine = String(liveClient?.name ?? (configured === "file" ? "sqlite" : configured)).toLowerCase();
+  const engines = {file: "sqlite", sqlite: "sqlite", duckdb: "duckdb", hana: "HDB", hdb: "HDB", postgres: "postgres"};
+  const engine = Object.hasOwn(engines, rawEngine) ? engines[rawEngine] : "unknown";
+  const path = liveClient === undefined
+    ? env.STG_DB_PATH ?? (configured === "file" ? DEFAULT_DATABASE : undefined)
+    : liveClient.path;
+  const storage = engine === "HDB" || engine === "postgres"
+    ? "server"
+    : path === undefined || path === "" || path === ":memory:"
+      ? "memory"
+      : "file";
+  const connected = databaseDescriptor(liveClient).connected;
+  return databaseRows(engine, storage, connected);
+}
+
+function databaseRows(engine, storage, connected) {
+  return [
+    {section: "Database", name: "Engine", value: engine, note: connected ? "connected backend" : "configured backend; connection not observed"},
+    {section: "Database", name: "Storage", value: storage, note: storage === "file" ? "persistent database storage" : storage === "server" ? "external database server" : "process memory"},
+  ];
+}
+
+// Only ask the supervisor's local child, never an environment-supplied URL.
+// Failure is an observation, not permission to label configured data connected.
+export async function childDatabaseFacts(runtime, {fetcher = fetch, timeoutMs = 1000} = {}) {
+  if (!runtime?.url) return undefined;
+  try {
+    const url = new URL(runtime.url);
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.username || url.password) return undefined;
+    url.pathname = "/osd/serving";
+    url.search = "";
+    url.hash = "";
+    const res = await fetcher(url, {signal: AbortSignal.timeout(timeoutMs), redirect: "error"});
+    if (!res.ok) return undefined;
+    const body = await res.json();
+    const d = body.databaseIdentity;
+    if (body.ready !== true || body.generation !== runtime.generation || d?.connected !== true ||
+        !["sqlite", "duckdb", "HDB", "postgres"].includes(d.engine) ||
+        !(["HDB", "postgres"].includes(d.engine) ? d.storage === "server" : ["file", "memory"].includes(d.storage))) return undefined;
+    return databaseRows(d.engine, d.storage, true);
+  } catch {
+    return undefined;
+  }
+}
+
 // The ports this instance has, and the two it has not.
 //
 // RFC and DIAG are the sibling projects' territory (open-rfc-go carries the
@@ -340,6 +394,7 @@ export async function snapshot(root = process.cwd(), options = {}) {
     ports: await portsOf(options.listeners ?? [], {instance: facadePort}),
     services: options.services ?? servicesOf(root, env),
     packs: options.packs ?? packsInfo(root, env),
+    database: options.database ?? await childDatabaseFacts(runtime) ?? databaseFacts({client: options.client, env}),
   };
 }
 

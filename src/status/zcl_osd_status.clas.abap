@@ -295,11 +295,13 @@ CLASS zcl_osd_status IMPLEMENTATION.
     DATA ls_port_out TYPE ty_port.
     DATA ls_svc_out  TYPE ty_service.
     DATA ls_pack_out TYPE ty_pack.
+    DATA ls_db_out   TYPE ty_dbfact.
     DATA ls_sys     TYPE zosd_sys.
     DATA ls_proc    TYPE zosd_proc.
     DATA ls_port    TYPE zosd_port.
     DATA ls_svc     TYPE zosd_svc.
     DATA ls_pack    TYPE zosd_pack.
+    DATA ls_db      TYPE zosd_db.
 
     SELECT SINGLE * FROM zosd_sys INTO ls_sys.
     IF sy-subrc = 0.
@@ -357,6 +359,15 @@ CLASS zcl_osd_status IMPLEMENTATION.
       ls_pack_out-folders     = ls_pack-folders.
       ls_pack_out-description = ls_pack-description.
       APPEND ls_pack_out TO ls_snap-packs.
+    ENDSELECT.
+
+    SELECT * FROM zosd_db INTO ls_db ORDER BY seq.
+      CLEAR ls_db_out.
+      ls_db_out-section = ls_db-section.
+      ls_db_out-name    = ls_db-name.
+      ls_db_out-value   = ls_db-value.
+      ls_db_out-note    = ls_db-note.
+      APPEND ls_db_out TO ls_snap-database.
     ENDSELECT.
 
     rv_json = /ui2/cl_json=>serialize( data = ls_snap ).

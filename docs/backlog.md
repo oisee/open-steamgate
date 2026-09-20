@@ -1491,6 +1491,14 @@ A.4  The metadata bootstrap, proven live                            [R] DONE
         far are small enough that the system sends them uncompressed too
 
 A.4b An RFC client that can CALL it, not only describe it                [R]
+     ├─ **Container acceptance, 2026-09-20:** a schema-bound test client now
+     │  sends a real SADT_REST_RFC_ENDPOINT call through the published 33nn
+     │  port and validates OSD's HTTP response. The generic `orfc` path still
+     │  fails: its recursive codec needs RFC_METADATA_GET, which the pinned
+     │  bridge does not serve. Add compatible deep-metadata discovery and
+     │  a generic-client regression test; the explicit-schema probe is not
+     │  evidence that discovery works. Generic `orfc ping` also encounters
+     │  FU_NOT_FOUND during interface discovery; transport logon/ping works.
      ├─ `rfc call SADT_REST_RFC_ENDPOINT` stops in the client's own classic
      │  structure codec: "classic RFC type v is not implemented"
      ├─ this function's parameters are recursive and travel as BASXML; the
@@ -2185,8 +2193,15 @@ B.11 The binary beyond the checkout                                      [S]
         change that renames another one shows up there first
 
 B.7  Database seam                                                       [S]
-     ├─ SQLite, DuckDB and sql.js today; a third needs no change elsewhere
-     │  (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
+     ├─ **PostgreSQL reopened 2026-09-20 (Alice).** Adapter, dedicated-database
+     │  atomic seed/schema-drift guard, `sy-dbsys`/System Status, local OData
+     │  persistence across restart and short Compose/spin.md example are in
+     │  the Docker draft branch. The image from commit `0d816d8` passed the
+     │  default SQLite/DuckDB/PostgreSQL container smoke suite and was
+     │  published to GHCR. HXE is opt-in. Older image
+     │  tags reject `STG_DB=postgres`; user Portainer acceptance remains.
+     ├─ SQLite, DuckDB, HANA and PostgreSQL are integrated; sql.js serves
+     │  browser preview (docs/db-backends.md). bun:sqlite is 1.1, gated on 0.1
      └─ **DuckDB is parked entirely, 2026-09-18 (Alice)**: "можно
         полностью забыть пока - мы его исследуем когда прям необходимость
         появится острая. То есть далеко в будущем."

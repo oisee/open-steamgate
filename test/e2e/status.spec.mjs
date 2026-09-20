@@ -4,7 +4,7 @@ const PORT = Number(process.env.STG_PORT ?? 3030);
 
 // The system status app: a Fiori Elements V2 list report over SystemSet (one
 // row) and an object page whose facets are the processes, the ports, the
-// services and the packs of the tree that is answering. Every annotation --
+// services, packs and database facts of the tree that is answering. Every annotation --
 // HeaderInfo, LineItem, Facets -- comes out of ZOSD_STATUS_SRV's own
 // $metadata, so what this proves is that the service annotates itself well
 // enough for a stock template to render it, with no annotation file in the
@@ -29,7 +29,7 @@ test("system status: the object page over the running tree", async ({page}) => {
   await expect(header).toBeVisible();
   await expect(header).toContainText("OSG");
 
-  // the four table facets, each scoped by the ID the service's ReferenceFacet
+  // the five table facets, each scoped by the ID the service's ReferenceFacet
   // gave it (the section id ends in "--<ID>::Section")
   const section = (id) => page.locator(`[id$="--${id}::Section"]`).first();
   // a number is rendered with the locale's group separator ("3,055"), so a
@@ -54,6 +54,15 @@ test("system status: the object page over the running tree", async ({page}) => {
   // Packs: the content packs layered into the build
   const pack = section("Packs").locator(".sapMListTblRow").filter({hasText: /\S/}).first();
   await expect(pack).toBeVisible();
+
+  const database = section("Database");
+  await database.scrollIntoViewIfNeeded();
+  const engine = database.locator(".sapMListTblRow", {hasText: "Engine"}).first();
+  await expect(engine).toBeVisible();
+  await expect(engine).toContainText(/sqlite|duckdb|HDB/);
+  const storage = database.locator(".sapMListTblRow", {hasText: "Storage"}).first();
+  await expect(storage).toBeVisible();
+  await expect(storage).toContainText(/memory|file|server/);
 
   expect(failed).toEqual([]);
 });

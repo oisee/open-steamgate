@@ -132,6 +132,7 @@ export class FileSqliteClient {
   constructor(input = {}) {
     this.name = "sqlite";
     this.path = input.path ?? ":memory:";
+    this.connected = false;
     this.readOnly = input.readOnly === true;
     this.trace = input.trace === true;
     this.db = undefined;
@@ -157,12 +158,14 @@ export class FileSqliteClient {
     if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) {
       globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
     }
+    this.connected = true;
   }
 
   async disconnect() {
     await this.commit();
     this.db?.close();
     this.db = undefined;
+    this.connected = false;
   }
 
   async execute(sql) {
