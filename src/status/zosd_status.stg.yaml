@@ -1,16 +1,16 @@
 # The system OSD is, as a service it serves itself.
 #
-# Five DDIC tables are the storage (src/status/*.tabl.xml); the data model
+# Six DDIC tables are the storage (src/status/*.tabl.xml); the data model
 # is CDS over them (src/cds/zc_osd_*.ddls.asddls), and this file is the
-# service shell: five entity sets, all read-only, each `cds:`-sourced, so
+# service shell: six entity sets, all read-only, each `cds:`-sourced, so
 # the generic SADL delegation reads them and no hand-written DPC exists.
 # What fills the tables is the facade: it knows the live facts (ports, pool
 # children, generation, ICF services, packs), computes a snapshot
 # (tools/osd-status.mjs) and posts it to ZCL_OSD_STATUS=>REFRESH before a
 # read of this service is proxied.
 #
-# The four navigations mirror the four associations ZC_OSD_SYSTEM exposes
-# (_Processes, _Ports, _Services, _Packs) and carry no referential
+# The five navigations mirror the five associations ZC_OSD_SYSTEM exposes
+# (_Processes, _Ports, _Services, _Packs, _Database) and carry no referential
 # constraint on purpose: there is one system row, and every process, port,
 # service and pack of this instance belongs to it, so the association is
 # unconditional and the SADL runtime reads the whole target set for the
@@ -116,6 +116,21 @@ entities:
       Folders: {type: String(120), field: FOLDERS, readonly: true, label: Folders}
       Description: {type: String(120), field: DESCRIPTION, readonly: true, label: Description}
 
+  Database:
+    set: DatabaseSet
+    description: "safe facts about the database backend"
+    source: {cds: ZC_OSD_DATABASE, struct: "ZCL_STG_CDS_ZVOSDDB=>TY_ROW"}
+    keys: [Section, Name]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Section: {type: String(20), field: SECTION, readonly: true, label: Section}
+      Name: {type: String(60), field: NAME, readonly: true, label: Fact}
+      Value: {type: String(240), field: VALUE, readonly: true, label: Value}
+      Note: {type: String(240), field: NOTE, readonly: true, label: Note}
+
 associations:
   SystemToProcesses:
     from: System
@@ -137,6 +152,11 @@ associations:
     to: Pack
     cardinality: 1:N
     navigation: {System: to_Packs}
+  SystemToDatabase:
+    from: System
+    to: Database
+    cardinality: 1:N
+    navigation: {System: to_Database}
 
 annotations:
   System:
@@ -160,6 +180,7 @@ annotations:
       - {id: Ports, label: Ports, lineItem: to_Ports}
       - {id: Services, label: Services, lineItem: to_Services}
       - {id: Packs, label: Packs, lineItem: to_Packs}
+      - {id: Database, label: Database, lineItem: to_Database}
     fieldGroups:
       General: [Sid, HostKind, GenLive, GenServing, Synced, Workers, StartedAt, SnapAt, RootHint, Pid]
       Runtime: [HostKind, Workers, StartedAt, Pid]
@@ -258,3 +279,20 @@ annotations:
   Pack/Objects: {label: Objects}
   Pack/Folders: {label: Folders}
   Pack/Description: {label: Description}
+
+  Database:
+    header: {typeName: Database fact, typeNamePlural: Database facts, title: Name, description: Value}
+    selectionFields: [Section, Name]
+    lineItem:
+      - {value: Section, label: Section}
+      - {value: Name, label: Fact}
+      - {value: Value, label: Value}
+      - {value: Note, label: Note}
+    facets:
+      - {id: DatabaseGeneral, label: General, fieldGroup: General}
+    fieldGroups:
+      General: [Section, Name, Value, Note]
+  Database/Section: {label: Section}
+  Database/Name: {label: Fact}
+  Database/Value: {label: Value}
+  Database/Note: {label: Note}

@@ -3,6 +3,7 @@ CLASS ltcl_status DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
   PRIVATE SECTION.
     METHODS setup.
     METHODS round_trip FOR TESTING RAISING cx_static_check.
+    METHODS database_round_trip FOR TESTING RAISING cx_static_check.
     METHODS second_refresh_replaces FOR TESTING RAISING cx_static_check.
     METHODS malformed_json_keeps_rows FOR TESTING RAISING cx_static_check.
 
@@ -28,6 +29,7 @@ CLASS ltcl_status IMPLEMENTATION.
     DELETE FROM zosd_port WHERE port >= 0.
     DELETE FROM zosd_svc WHERE path <> ''.
     DELETE FROM zosd_pack WHERE name <> ''.
+    DELETE FROM zosd_db WHERE name <> ''.
   ENDMETHOD.
 
   METHOD snapshot_json.
@@ -63,6 +65,8 @@ CLASS ltcl_status IMPLEMENTATION.
     rv_rows = rv_rows + lv_count.
     SELECT COUNT(*) FROM zosd_pack INTO lv_count.
     rv_rows = rv_rows + lv_count.
+    SELECT COUNT(*) FROM zosd_db INTO lv_count.
+    rv_rows = rv_rows + lv_count.
   ENDMETHOD.
 
   METHOD round_trip.
@@ -94,6 +98,28 @@ CLASS ltcl_status IMPLEMENTATION.
                                          exp = '*"order":40*' ).
     cl_abap_unit_assert=>assert_char_cp( act = lv_json
                                          exp = '*"state":"absent"*' ).
+  ENDMETHOD.
+
+  METHOD database_round_trip.
+    DATA lv_json TYPE string.
+    DATA lv_rows TYPE i.
+    DATA ls_db TYPE zosd_db.
+    lv_json = '{"system":{"sid":"OSG"},"database":[' &&
+      '{"section":"Database","name":"Engine","value":"duckdb","note":"connected backend"}]}'.
+    lv_rows = zcl_osd_status=>refresh( lv_json ).
+    cl_abap_unit_assert=>assert_equals( act = lv_rows exp = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = count_rows( ) exp = 2 ).
+    SELECT SINGLE * FROM zosd_db INTO ls_db.
+    cl_abap_unit_assert=>assert_equals( act = ls_db-section exp = 'Database' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_db-name exp = 'Engine' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_db-value exp = 'duckdb' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_db-note exp = 'connected backend' ).
+    lv_json = zcl_osd_status=>snapshot( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_json
+      exp = '*"database":[*"value":"duckdb"*"note":"connected backend"*' ).
+    zcl_osd_status=>refresh( snapshot_json( iv_sid = 'OSG' iv_pid = '4711' ) ).
+    lv_json = zcl_osd_status=>snapshot( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_json exp = '*"database":[]*' ).
   ENDMETHOD.
 
   METHOD second_refresh_replaces.

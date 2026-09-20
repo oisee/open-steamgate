@@ -3,8 +3,8 @@
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'OSD system status: the system'
 // The one row the facade refreshes before a read of ZOSD_STATUS_SRV. The
-// four associations are unconditional on purpose: there is one system, and
-// every process, port, service and pack of this instance belongs to it, so
+// five associations are unconditional on purpose: there is one system, and
+// every process, port, service, pack and database fact belongs to it, so
 // the ON condition guards nothing and the expand reads the whole target set.
 define view ZC_OSD_SYSTEM
   as select from zosd_sys
@@ -12,6 +12,7 @@ define view ZC_OSD_SYSTEM
   association [0..*] to ZC_OSD_PORT    as _Ports     on  _Ports.Port        >= 0
   association [0..*] to ZC_OSD_SERVICE as _Services  on  _Services.Path     <> ''
   association [0..*] to ZC_OSD_PACK    as _Packs     on  _Packs.Name        <> ''
+  association [0..*] to ZC_OSD_DATABASE as _Database  on  _Database.Name      <> ''
 {
       @EndUserText.label: 'System'
   key sid         as Sid,
@@ -36,5 +37,6 @@ define view ZC_OSD_SYSTEM
       _Processes,
       _Ports,
       _Services,
-      _Packs
+      _Packs,
+      _Database
 }
