@@ -399,6 +399,42 @@ Measured through OSD into A4H: `POST TravelSet` inside a changeset answered
 The zips of one evening are eight numbered files; nothing about the route
 depends on which number an attempt has.
 
+## A BSP page round trip does not preserve bytes
+
+Measured 2026-09-20 by serving the **same object** from this system's own
+ABAP and from A4H and comparing the responses page by page. The object is
+one; the responses are not, and the differences are the system's.
+
+```
+page            ours   A4H    what the difference is
+index.html      1197   1326   CRLF, and an injected <meta name="sap-client">
+manifest.json   3194   3310   CRLF (plus a stale deploy, see below)
+Component.js     460    468   CRLF, and the trailing newline is gone
+osg.svg         1031     54   "File NOT found!"
+```
+
+**A BSP page is stored as lines.** So `LF` comes back as `CRLF`, the final
+newline is dropped — ours ends `0a`, the system's ends `;` — and for HTML
+the runtime adds the client meta tag on the way out. None of that is a
+defect on either side; it is what a page is on a system.
+
+What follows for us, and it is the useful part:
+
+- **"one artefact, two runtimes" is true of the object and false of the
+  response.** Our handler serves the stored bytes exactly; a system serves a
+  re-assembled document. A test comparing the two byte for byte cannot pass,
+  and writing one that pretends otherwise would be the same mistake as a
+  fixture that does not look like a real file;
+- **a binary page is not safe this way.** `osg.svg` answers *File NOT found!*
+  there. The UI5 repository has `put_file( iv_is_binary )` for exactly this
+  reason, and a line-oriented page store is the wrong carrier for bytes.
+  That is an argument for the machine route rather than a nicer zip;
+- **one of the four differences was ours, not the system's.** `manifest.json`
+  line 22 says `Travel-manageRemote` here and `Travel-manage` there, because
+  the zip on that system was built before the intent was renamed. A stale
+  artefact looks exactly like a runtime transformation until you read the
+  line, and three of the four here were the runtime while one was me.
+
 ## The launchpad, mapped but not walked
 
 Deferred by Alice on 2026-09-19; the probing is recorded so the next session

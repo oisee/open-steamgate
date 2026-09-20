@@ -26,6 +26,7 @@
     "test/naming-scan.mjs",
     "test/osd-apc.mjs",
     "test/osd-binary.mjs",
+    "test/osd-bsp.mjs",
     "test/osd-build.mjs",
     "test/osd-closure.mjs",
     "test/osd-data.mjs",

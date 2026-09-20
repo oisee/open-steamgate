@@ -47,6 +47,10 @@ const GENERATORS = [
   ["stg-compile.mjs", "--all"],
   ["segw-registry.mjs"],
   ["segw-shlp.mjs"],
+  // BSP applications: a *.wapa.xml and its pages become a registry the ABAP
+  // handler reads, so a page this system serves is an object like any other
+  // rather than a file behind express
+  ["osd-bsp-registry.mjs"],
   // AMDP: the bodies the transpiler cannot compile become routed calls, and
   // the SQLScript is put aside for HANA (docs/amdp-in-hana.md). Before the
   // function-module registry, because the modules it writes are what that
