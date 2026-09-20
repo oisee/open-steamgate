@@ -1,0 +1,208 @@
+# The ICF registry: the working plan
+
+*Written 2026-09-20 during the night shift, to be picked up after a context
+compaction without re-deriving anything. The **why** lives in
+[`icf-as-the-registry.md`](icf-as-the-registry.md); this is the **what, in
+what order, and how you know it is done**.*
+
+---
+
+## Re-orienting in four commands
+
+```sh
+node tools/osd-routes.mjs --list     # the scoreboard: who answers what, and why
+node tools/osd-bsp-registry.mjs src  # the BSP applications this tree carries
+npm run lint && npm run transpile    # 0 issues, ~12 s, 1530 objects
+node tools/osd-unit-run.mjs          # ABAP Unit, prints OK
+```
+
+The i7 deployment is restarted with `sh scripts/osd-restart.sh 3030` and
+verified by **reading what it serves**, never by the fact that it started.
+
+---
+
+## Where this stands, measured
+
+**The A4H loop is closed end to end.** One YAML becomes a SEGW project, a
+DDIC, seed rows, an activated OData service and a Fiori application that a
+real system serves at `/sap/bc/ui5_ui5/sap/<app>/`. Every constant it cost
+is in [`a4h-deploy.md`](a4h-deploy.md).
+
+On this side, as of `26954cd`:
+
+| | |
+| --- | --- |
+| `test/segw-tree.mjs` | 20 of 20 (was 8 red at the start of the night) |
+| CI | `tests.yml` runs lint + transpile + ABAP Unit + the suites, and **reports what it could not look at**. Before it, no workflow read a test |
+| destinations | one registry: a *destination* is a system, a *binding* is who uses it here |
+| `POST /osd/status` | an ICF node at `/sap/bc/osd/status/`; the express route is **deleted** |
+| BSP | `ZCL_OSD_BSP` serves five Fiori apps and a pack page out of a generated registry |
+| scoreboard | 10 ICF nodes, 12 host rivals, 6 mount/wrapper, 1 pack mount, 1 binding |
+
+---
+
+## The three corrections, all Alice's, in the order they landed
+
+**1. ICF is the only *registry*, not the only *router*.** `ICFHANDLER` is a
+transparent table keyed by `(icf_name, icfparguid, icforder, ICFTYP)` whose
+payload is a handler **name**. The tree does not care what is behind the
+name. So the goal is one inspectable truth about what the system is made
+of — not one execution model.
+
+**2. Do not imitate the storage, imitate the interface.** Pages went into a
+generated ABAP class as base64 (137.9 KB) because a system keeps them in
+`O2PAGELINE`. Wrong layer. They are already files in a directory and can
+stay there.
+
+**3. What is served by the host can stay served by the host — it only has to
+be *declared*.** This dissolves most of the migration backlog. The launchpad
+shell, the ADT façade, the dumps, the SQL log: none of them should become
+ABAP. `/sap/bc/adt/` is **one node of type HOST**, not thirteen rivals.
+
+The consequence for the falsification: "a registry is migrated when its code
+is **deleted**" still holds, and what gets deleted is the **second table of
+routes**, not the serving. A host stops carrying `app.get(...)` lines and
+starts mounting **what the registry declares**, asking the type what serves
+it.
+
+---
+
+## The plan
+
+### B. A handler row carries a type — **do this first**
+
+Was second; promoted by correction 3, because it turns "12 rivals to
+migrate" into "0 rivals, 12 declared nodes of known types" without moving a
+file.
+
+Types, each saying **where it works** rather than whether it is allowed:
+
+| type | who serves it | works in |
+| --- | --- | --- |
+| `ABAP` | a class implementing `if_http_extension` | server, binary, browser preview |
+| `HOST` | a function of the JavaScript host | server and binary; **not** the preview |
+| `PROXY` | a destination, another system | server and binary; **never** the preview |
+| `CONTENT` | pages out of the store | everywhere |
+
+Work:
+
+1. `*.sicf.xml` already has `<ICFHANDLER_TABLE>` with `ICFTYP`. Read it
+   (`tools/osd-icf.mjs`) instead of ignoring it; today every node is assumed
+   ABAP.
+2. Declare the host-served paths as nodes. Candidates, from
+   `node tools/osd-routes.mjs --list`: `/sap/bc/adt/` (the façade),
+   `/app` (the launchpad shell and static), `/osd/dumps`, `/osd/sql`,
+   `/osd/serving`, `/segw/generate/:project`.
+3. The host mounts **from the registry**: `mountServices` grows a case per
+   type, and the hardcoded `app.get(...)` list in `test/start.mjs` and
+   `tools/osd-serve.mjs` goes.
+4. `tools/osd-routes.mjs` stops counting rivals and starts reporting an
+   inventory: node, type, where it works.
+
+**Done when**: the ADT façade appears as one HOST node rather than thirteen
+rivals; `reserved = ["/sap/opu/odata", "/sap/bc/adt"]` in both hosts is gone
+because the registry says what those paths are; and the scoreboard answers
+"what does this system expose and what implements it".
+
+### A. Pages out of the generated class
+
+Independent hygiene, not part of routing. 137.9 KB of base64 in generated
+ABAP source is wrong on its own terms: assets in code, a transpile on every
+image, linear growth per application.
+
+The mechanism exists and is **not** to be invented a third time. Media out of
+SMW0 (33 objects, 16 MB) goes: content beside the modules, a `@KERNEL` read
+with `abap.W3MI_LOADER` as the host hook, disk as the normal path. See
+`.local/lars/open-abap-core/src/w3mi/zw3mi.fugr.wwwdata_import.abap` lines
+45-54 for the exact escape.
+
+Work: `tools/osd-bsp-registry.mjs` emits a **list** (app, page, MIME, file)
+and no bytes; `ZCL_OSD_BSP` asks a reader for the content.
+
+**Done when**: the generated class is a few KB, changing an image is not a
+rebuild, and every page still answers 200 with the right content type.
+
+### C. The registry readable and writable from ABAP — this is G.5
+
+Seeded from `*.sicf.xml`, the way `data/*.tabu.json` seeds tables from
+abapGit objects.
+
+**It needs a rule this tree does not have yet**: what happens when the table
+and the objects disagree. There is one for the database (schema drift: move
+aside, say so, never silently) and none for this. Write it before the table,
+not after.
+
+**Done when**: changing a node from a screen changes what answers, and a
+disagreement between the table and the objects is reported rather than
+resolved in silence.
+
+---
+
+## Deliberately not in the plan
+
+- **Porting the JS parts to a real system.** The ADT façade is meant to be
+  JS; A4H has ADT, the façade imitates it.
+- **Moving the launchpad shell's files.** About forty references in a dozen
+  files, including two e2e suites, the Easy Access screen's ABAP and the
+  preview. Correction 3 removes the need: it is declared, not moved.
+- **`/app` going away.** It follows from B, it does not lead.
+- **The Fiori scaffolding writers** (`@sap-ux/*-writer`, Apache-2.0, 8–16
+  deps). Worth **one run as an oracle** — diff their manifest against ours,
+  which would also settle whether our app is missing something the app index
+  needs — and never as a dependency. Parked with the launchpad tile Alice
+  deferred.
+- **CDS-BOPF and RAP**, still behind the HANA path being released.
+
+---
+
+## Traps already paid for tonight — do not re-pay them
+
+- **An instrument that answers a question nobody asked.** The scoreboard said
+  23 rivals, then 12, and is 15 in the shape that counts everything: it had
+  been calling `app.use(facade.router)` "plumbing" and counting no plumbing,
+  so the largest rival was invisible to the tool built to find rivals.
+- **A regex over source is not a measurement.** `needs()` matched
+  `status\b`, which is `res.status(500)` in an error branch, and filed three
+  routes as process state. Verdicts are **declared** now, with a reason each,
+  and an unjudged route is an error rather than a default.
+- **A test that cannot go red.** `some(none) || every(some)` is true of every
+  input. One was written and reverted the same night; a sibling survived and
+  was found by review.
+- **A ratchet whose number depends on a gitignored file** is not a ratchet:
+  locally 15, on a runner 14, ceiling 15.
+- **The exit code of a pipeline is the last stage's.**
+  `node tools/osd-suites.mjs | tail -6` returns `tail`'s zero. `tests.yml`
+  sets `shell: bash` for `pipefail` once, for the job.
+- **A number measured in a configuration the instrument does not work in.**
+  The first full suite run said 25 failing; it ran on the port the live
+  deployment holds, so twelve were "before all" hooks. On a free port the
+  same tree is 1036 passing, 5 failing.
+- **Committed, pushed and built are three states.** Each of the three cost an
+  hour tonight, once each, to each session.
+- **`git add -A` before a stash sweeps untracked files.** Six left the tree
+  and were only noticed when a script went missing. Compare the `??` list
+  before and after.
+- **Equal ignorance keeps two implementations equal.** A twin test goes red
+  when one twin gets *better*, so the alarm fires on the improvement and
+  reads like a regression. A fixture is a twin too, and it drifts by standing
+  still — three fixtures in one night did not look like the thing they stood
+  for.
+
+---
+
+## The state of the other session
+
+`fable-osd` finished the ABAP generator's text-element port (`9289674`,
+"The twin is equal again") and pushed before her session ended. Open items
+that were hers and are now unowned:
+
+- the **preflight** (`f593d77`): built, with the request body isolated behind
+  `BODY_IS_OBSERVED = false` because the wire form was never measured. The
+  way to measure it is to point vsp's `--url` at `tools/osd-tls-proxy.mjs`
+  and read the dump — keep the dump under `.local/`, `*.jsonl` is gitignored
+  because captures carry logons;
+- **R.2**: one call to `SADT_REST_RFC_ENDPOINT` with a non-ADT path, which
+  decides whether that track reaches services at all or only ADT. A4H, so it
+  is Alice's word;
+- correcting the count in her own note, which this plan's parent commit
+  already did.

@@ -1151,8 +1151,16 @@ of a day.
 
 ## The order of work, settled 2026-09-18
 
-> **The plan, 2026-09-20. Written after a pause, because the design changed
-> twice during the night and a plan held in the head drifts.**
+> **The plan, 2026-09-20 — the detailed one is
+> [`icf-registry-plan.md`](icf-registry-plan.md), written to be picked up
+> after a context compaction without re-deriving anything. The summary
+> below is kept in step with it.**
+>
+> **Order changed once more (correction 3, Alice): B before A.** What is
+> served by the host may stay served by the host — it only has to be
+> *declared*. That turns "12 rivals to migrate" into "0 rivals, 12
+> declared nodes of known types" without moving a file, and what gets
+> deleted is the hardcoded route list rather than the serving.
 >
 > ### Where this is, measured
 >
