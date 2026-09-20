@@ -282,7 +282,12 @@ if (runsAs("osd-nodes.mjs")) {
   if (shadowing.length > 0) {
     console.log(`\n${shadowing.length} answer on a path a real system delivers, so they must not travel:`);
     for (const n of shadowing) console.log(`  ${n.path}  (${n.source})`);
-    console.log("An abapGit import of one of these would replace SAP's own handler on that node.");
+    // The comment on SAP_DELIVERED was corrected when this claim was
+    // withdrawn; this line, which is the one a person actually reads, was
+    // not. Saying it here for the third time would have outlived the
+    // retraction by however long nobody ran the tool.
+    console.log("What an abapGit import would do with one of these is NOT known: it might nest, collide or fail.");
+    console.log("Measuring it needs a system. Until then they do not travel, and the packaging refuses them.");
   }
   }
 }
