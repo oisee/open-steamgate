@@ -1,4 +1,5 @@
 import {test, expect, chromium} from "@playwright/test";
+import {packsOf} from "../../tools/osd-packs.mjs";
 import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -799,20 +800,42 @@ test("the status app says what the deployment in the browser is", async () => {
     await expect(section("Processes")).toContainText("worker");
     // no port, said out loud rather than left blank
     await expect(section("Ports")).toContainText("absent");
-    // the paths this bundle really answers, and the packs really in it. The
-    // table grows ten rows at a time and this bundle serves more than ten
-    // things -- the UI5 apps sort above the ICF paths -- so ask for the rest
-    // before looking for one of them.
-    await section("Services").locator(".sapMGrowingListTrigger").scrollIntoViewIfNeeded();
-    await section("Services").locator(".sapMGrowingListTrigger").click();
+    // The paths this bundle really answers, and the packs really in it.
+    //
+    // **The table grows ten rows at a time, so it is grown until it stops
+    // growing** rather than clicked once. One click was enough when the
+    // inventory was under twenty rows; it reached thirty-three -- the UI5
+    // apps sort above the ICF paths and `/sap/bc/zork` sorts near the
+    // bottom -- and the click that used to reveal it stopped at twenty. The
+    // preview deployment then failed on every commit for nine hours, and
+    // GitHub Pages served yesterday's build the whole time, because a red
+    // check nobody reads is a check that is not there.
+    //
+    // A fixture drifts by standing still. Pressing the trigger while there
+    // is a trigger does not.
+    for (let i = 0; i < 20; i += 1) {
+      const more = section("Services").locator(".sapMGrowingListTrigger");
+      if (await more.count() === 0 || await more.isVisible() === false) break;
+      await more.scrollIntoViewIfNeeded();
+      await more.click();
+      await page.waitForTimeout(200);
+    }
     await expect(section("Services")).toContainText("/sap/bc/zork");
     // an app is a row of the inventory too, at the intent its manifest declares
     await expect(section("Services")).toContainText("/app/flp.html#Travel-manage");
     // the last section is bound when it is looked at, so look at it: unscrolled
     // it says "No data available", which is the template waiting, not an answer
     await section("Packs").scrollIntoViewIfNeeded();
-    await expect(section("Packs")).toContainText("Packs (3)");
-    await expect(section("Packs")).toContainText("zork");
+    // **The count is derived, not written down.** This said "Packs (3)" and
+    // a fourth pack -- travels-a4h -- made it wrong without making anything
+    // else wrong; a fixture drifts by standing still. The tree's own reader
+    // is the one the build uses, so the two cannot disagree.
+    const packs = packsOf(join(import.meta.dirname, "..", ".."));
+    expect(packs.length, "the tree carries packs to count").toBeGreaterThan(2);
+    await expect(section("Packs")).toContainText(`Packs (${packs.length})`);
+    for (const pack of packs) {
+      await expect(section("Packs")).toContainText(pack.name);
+    }
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
