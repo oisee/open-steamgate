@@ -1255,8 +1255,13 @@ of a day.
 >
 > **Upstream is merged and unshipped** and nothing here waits on it:
 > transpiler #1874 and #1877 merged, `@abaplint/database-hdb` still 404 on
-> npm, the transpiler still 2.13.89 with `hdb: ["todo"]`; #1878, abaplint
-> #4311 and #4312 open with no replies. Not ours to push.
+> npm, the transpiler still 2.13.89 with `hdb: ["todo"]`; transpiler #1878
+> still open with no replies. **abaplint #4311 and #4312 were merged by
+> larshp on 2026-09-20** (08:24 and 08:38) -- both unreleased, so both
+> workarounds stay: `withoutBangValue()` in `tools/amdp-extract.mjs` and the
+> colon handling in the SQLScript parser. Their expiry tests fire on the
+> release, not on the merge, which is the honest trigger: merged is not
+> shipped. Not ours to push.
 
 Alice asked for the queue to be sorted into three, and it was agreed between
 the two sessions rather than decided by one. A bucket is not a priority
