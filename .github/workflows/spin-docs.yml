@@ -1,0 +1,25 @@
+name: Spin quickstart consistency
+on:
+  push:
+    paths:
+      - 'docker/portainer/**'
+      - 'docs/spin.md'
+      - 'scripts/sync-spin.mjs'
+      - '.github/workflows/spin-docs.yml'
+  pull_request:
+    paths:
+      - 'docker/portainer/**'
+      - 'docs/spin.md'
+      - 'scripts/sync-spin.mjs'
+      - '.github/workflows/spin-docs.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/sync-spin.mjs --check

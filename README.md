@@ -5,6 +5,11 @@
 > runtime and the database are all in a service worker on your own machine,
 > and every app on the launchpad is answered there.
 
+## Try it yourself
+
+[**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).
+SQLite, DuckDB and HANA Express options, HTTP/HTTPS, and the RFC/DIAG sidecar.
+
 # open-steamgate
 
 **An ABAP application server you can clone.**

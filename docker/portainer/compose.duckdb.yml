@@ -1,0 +1,162 @@
+# Portainer Web editor, Docker Standalone. Set INSTANCE=06 (default 00).
+# Optional TLS_SAN=DNS:osd.example.test.
+# First start downloads sources/dependencies and compiles. See docs/spin.md.
+services:
+  osd:
+    image: node:24-bookworm
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+      TLS_SAN: "${TLS_SAN:-DNS:osd}"
+      STG_PORT: "3030"
+      STG_TLS_PORT: "44300"
+      STG_ADT_SID: OSD
+      STG_DB: duckdb
+      OSD_WORKERS: "1"
+      STG_DB_PATH: /data/osd.duckdb
+    volumes:
+      - osd-workspace:/workspace
+      - osd-data:/data
+    ports:
+      - "80${INSTANCE:-00}:3030"
+      - "443${INSTANCE:-00}:44300"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$$INSTANCE" in [0-9][0-9]) ;; *) echo "INSTANCE must be two digits, e.g. 06" >&2; exit 2;; esac
+        if ! command -v openssl >/dev/null || ! command -v git >/dev/null; then
+          apt-get update
+          apt-get install -y --no-install-recommends git openssl ca-certificates
+        fi
+        cd /workspace
+        if [ ! -d osd/.git ]; then
+          mkdir -p osd
+          git -C osd init
+          git -C osd remote add origin https://github.com/oisee/open-steamgate.git
+        fi
+        if ! git -C osd rev-parse --verify HEAD >/dev/null 2>&1; then
+          git -C osd fetch --depth 1 origin 53ff28f39d37b3394fd3755e175d9259e45c0669
+          git -C osd checkout --detach FETCH_HEAD
+        fi
+        if [ "$$(git -C osd rev-parse HEAD)" != "53ff28f39d37b3394fd3755e175d9259e45c0669" ]; then
+          echo "OSD revision mismatch; use a new project name (keep data volumes)" >&2; exit 1
+        fi
+        cd osd
+        if [ ! -f .portainer-ready-53ff28f-0263e428-52ba51a5-0324e1c1-v1 ]; then
+          checkout() {
+            repo="$$1"; revision="$$2"; folder="$$3"
+            if [ ! -d "$$folder/.git" ]; then
+              mkdir -p "$$folder"
+            if [ -n "$$(ls -A "$$folder")" ]; then
+              echo "Non-repository folder $$folder is not empty; use a fresh directory/project" >&2; exit 1
+            fi
+              git -C "$$folder" init
+              git -C "$$folder" remote add origin "https://github.com/oisee/$$repo.git"
+            fi
+            if ! git -C "$$folder" rev-parse --verify HEAD >/dev/null 2>&1; then
+              git -C "$$folder" fetch --depth 1 origin "$$revision"
+              git -C "$$folder" checkout --detach FETCH_HEAD
+            fi
+            if [ "$$(git -C "$$folder" rev-parse HEAD)" != "$$revision" ]; then
+              echo "Expected $$folder at $$revision; existing checkout left intact" >&2
+              exit 1
+            fi
+          }
+          npm ci --include=dev --include=optional
+          checkout transpiler 0263e42892063be5008eab42a5f836bc19385b82 ../transpiler
+          npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$$package" install --no-audit --no-fund
+          done
+          for package in runtime transpiler extras cli; do
+            npm --prefix "../transpiler/packages/$$package" run compile
+          done
+          chmod +x ../transpiler/packages/cli/abap_transpile
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          checkout open-abap-core 52ba51a5662b93bd5093a9c1adef64bd438ce7f0 .local/lars/open-abap-core
+          checkout open-abap-gui 0324e1c1538f7ac63826ebbddab3fbee31c4501c .local/lars/open-abap-gui
+          node tools/osd-libs.mjs
+          npm run packs:fetch
+          npm run transpile
+          touch .portainer-ready-53ff28f-0263e428-52ba51a5-0324e1c1-v1
+        fi
+        if [ ! -f .local/tls/osd.crt ]; then
+          mkdir -p .local/tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout .local/tls/osd.key -out .local/tls/osd.crt \
+            -subj /CN=osd/O=open-steamgate \
+            -addext "subjectAltName=DNS:osd,DNS:localhost,IP:127.0.0.1,$${TLS_SAN}"
+        fi
+        exec node test/run.mjs
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          Promise.all([
+          fetch('http://localhost:3030/sap/bc/adt/core/http/build').then(r=>r.json()).then(j=>{if(!j.system?.serving)throw Error('No runtime')}),
+          fetch('http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$$top=1&$$format=json').then(r=>{if(!r.ok)throw Error(r.status);return r.json()}).then(j=>{if(!j.d?.results?.length)throw Error('No seed')})
+          ]).catch(e=>{console.error(e);process.exit(1)})
+      interval: 15s
+      timeout: 10s
+      start_period: 20m
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  protocols:
+    image: golang:1.26-bookworm
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-00}"
+    volumes:
+      - protocol-workspace:/workspace
+      - go-cache:/go
+    ports:
+      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
+      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        cd /workspace
+        checkout() {
+          repo="$$1"; revision="$$2"; folder="$$3"
+          if [ ! -d "$$folder/.git" ]; then
+            mkdir -p "$$folder"
+            if [ -n "$$(ls -A "$$folder")" ]; then
+              echo "Non-repository folder $$folder is not empty; use a fresh directory/project" >&2; exit 1
+            fi
+            git -C "$$folder" init
+            git -C "$$folder" remote add origin "https://github.com/oisee/$$repo.git"
+          fi
+          if ! git -C "$$folder" rev-parse --verify HEAD >/dev/null 2>&1; then
+            git -C "$$folder" fetch --depth 1 origin "$$revision"
+            git -C "$$folder" checkout --detach FETCH_HEAD
+          fi
+          if [ "$$(git -C "$$folder" rev-parse HEAD)" != "$$revision" ]; then
+            echo "Revision mismatch in $$folder; use a new project name (keep data volumes)" >&2; exit 1
+          fi
+        }
+        checkout open-rfc-go 274c0c912ddb93ebbf07b2b5768bbdf97d4104cf open-rfc-go
+        checkout vibing-steampunk 9886d2727f47506368b0a3c2f1c1766f1200f747 vsp
+        checkout open-diag-go dd36ebe2d1b4c4fe3c9d61c6468cc44981b20e7b open-diag-go
+        if [ ! -x /workspace/osd-up-dd36ebe2-274c0c91-9886d272 ]; then
+          cd /workspace/open-diag-go
+          go build -o /workspace/osd-up-dd36ebe2-274c0c91-9886d272 ./cmd/osd-up
+        fi
+        exec /workspace/osd-up-dd36ebe2-274c0c91-9886d272 -attach http://osd:3030 -instance "$$INSTANCE" -stub tape
+    depends_on:
+      osd:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  osd-workspace:
+  osd-data:
+  protocol-workspace:
+  go-cache:
