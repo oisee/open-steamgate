@@ -33,7 +33,13 @@ CLASS zcl_osd_bsp DEFINITION PUBLIC CREATE PUBLIC.
         ev_page TYPE string.
   PROTECTED SECTION.
   PRIVATE SECTION.
-    CONSTANTS gc_base TYPE string VALUE '/sap/bc/ui5_ui5/sap/' ##NO_TEXT.
+*   The branch, without the namespace: an application may live under any of
+*   them. `tools/osd-bsp-app.mjs` already writes nodes under `mindset` as
+*   well as `sap`, and the corpus carries a real one at
+*   /sap/bc/ui5_ui5/mindset/analyzer_detail/ -- so a parser that assumed
+*   `sap` answered "no page bc/ui5_ui5/mindset/... in application SAP" for
+*   every other namespace. Found by an adversarial review, 2026-09-20.
+    CONSTANTS gc_branch TYPE string VALUE '/sap/bc/ui5_ui5/' ##NO_TEXT.
 ENDCLASS.
 
 CLASS zcl_osd_bsp IMPLEMENTATION.
@@ -45,10 +51,20 @@ CLASS zcl_osd_bsp IMPLEMENTATION.
     CLEAR ev_app.
     CLEAR ev_page.
     lv_rest = iv_path.
-*   everything after the node's own path
-    IF lv_rest CS gc_base.
-      lv_rest = lv_rest+sy-fdpos.
-      lv_rest = lv_rest+20.
+*   Everything after the node's own path. The offset is the constant's own
+*   length and not a number beside it: a literal 20 here duplicates
+*   strlen( gc_base ), and a duplicated rule is one that goes wrong silently
+*   the day somebody edits the other half -- every path test would still
+*   pass, because they check paths and not the link between the two.
+    IF lv_rest CS gc_branch.
+      lv_at   = sy-fdpos + strlen( gc_branch ).
+      lv_rest = lv_rest+lv_at.
+*     and then the namespace segment, whatever it is called
+      FIND FIRST OCCURRENCE OF '/' IN lv_rest MATCH OFFSET lv_at.
+      IF sy-subrc = 0.
+        lv_at   = lv_at + 1.
+        lv_rest = lv_rest+lv_at.
+      ENDIF.
     ENDIF.
 *   a query string is not part of the page name
     IF lv_rest CS '?'.

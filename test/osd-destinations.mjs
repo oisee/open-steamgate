@@ -93,3 +93,37 @@ describe("tools/osd-destinations: a destination is a system, a binding is who us
     expect(errors.join(" ")).to.contain("treated as absent");
   });
 });
+
+// The two shapes an adversarial review found, both of which the first
+// version answered wrongly and quietly.
+describe("tools/osd-destinations: the shapes a first file actually has", () => {
+  let dir;
+  const write = (name, body) => {
+    const p = join(dir, name);
+    writeFileSync(p, JSON.stringify(body));
+    return p;
+  };
+  before(() => { dir = mkdtempSync(join(tmpdir(), "osd-dest2-")); });
+  after(() => rmSync(dir, {recursive: true, force: true}));
+
+  it("a unified file with services and no destinations yet invents nothing", () => {
+    // `unified.destinations ?? unified` used to fall through to the bare map
+    // and produce a destination literally named `services`
+    const f = write("half.json", {services: {ZOSD_006_DEMO_SRV: "A4H"}});
+    const all = destinations({file: f, say: () => {}});
+    expect(Object.keys(all), "no phantom destination").to.deep.equal([]);
+    expect(bindings({file: f, say: () => {}})).to.deep.equal({ZOSD_006_DEMO_SRV: "A4H"});
+    const said = [];
+    expect(remoteServices({file: f, say: (l) => said.push(l)})).to.deep.equal([]);
+    expect(said.join(" "), "the dangling binding is named").to.contain("A4H");
+  });
+
+  it("a bare destination map says it carries no bindings instead of returning nothing", () => {
+    const f = write("bare.json", {A4H: {type: "http", url: "http://x", user: "u", password: "p"}});
+    expect(destinations({file: f, say: () => {}}).A4H.url).to.equal("http://x");
+    const said = [];
+    expect(bindings({file: f, say: (l) => said.push(l)})).to.deep.equal({});
+    expect(said.join(" "), "silence would make 'none bound' and 'cannot say' look the same")
+      .to.contain("nothing is bound");
+  });
+});

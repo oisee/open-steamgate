@@ -119,19 +119,56 @@ const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 //
 // Counting them together would make "the host stops routing" look like one
 // move. It is three, and one of them is a refusal.
-const NEEDS_FS = /existsSync|readFileSync|readdirSync|writeFileSync|express\.static|join\(process\.cwd|tilesOf|pack\.dir/;
-const NEEDS_STATE = /runtime\b|facade|dumps|notServed|not-served|serving|sqlLog|status\b/;
+// **What a rival needs is declared, not guessed.**
+//
+// The first two versions of this matched regexes against a window of source
+// lines, and were wrong in both directions: `status\b` caught
+// `res.status(500)` in an error branch, so three routes were filed as
+// "needs process state" because of how they report a failure; and a
+// twelve-line window picked up `express.static` from the *next* route. One
+// of the mistakes made a published headline -- "0 of the 10 move today" --
+// false, and the route it hid, POST /osd/status, is a thin wrapper over
+// `zcl_osd_status.refresh( iv_json )` that is **already ABAP**.
+//
+// A measurement that decides what work exists should not be a guess about
+// source text. So the verdict is written down with its reason, the way
+// `.leak-allow.json` makes an exception cost a sentence, and the tool's job
+// is to notice **drift**: a route nobody has judged is an error, not a
+// default. Being wrong is then a thing somebody wrote and can be argued
+// with, rather than an artefact of a regular expression.
+//
+//   fs     needs the file system. Moves as a node plus content in the
+//          object store -- the WAPA work -- and can travel to a system.
+//   state  needs process state. Moves as a node plus a LIVE host, and in
+//          the browser preview does not work ever, not "yet".
+//   pure   moves today.
+export const VERDICTS = {
+  "test/start.mjs /": {needs: "fs", why: "probes the tree for webapp/flp.html before redirecting"},
+  "test/start.mjs /app": {needs: "fs", why: "express.static over webapp/"},
+  "test/start.mjs /app/packs.json": {needs: "fs", why: "tilesOf() reads every pack's manifest from disk"},
+  "test/start.mjs /app/${pack.name}": {needs: "fs", why: "express.static over each pack's folder"},
+  "test/start.mjs /segw/generate/:project": {needs: "fs", why: "writes gen/segw-editor; dev-only, and belongs in a local package"},
+  "test/start.mjs (no path: middleware)": {needs: "state", why: "app.use(facade.router): the ADT facade, 59 registrations of its own"},
+  "test/start.mjs /osd/not-served": {needs: "state", why: "what the facade could not answer, held in memory"},
+  "tools/osd-serve.mjs (no path: middleware)": {needs: "state", why: "the serving runtime's own middleware"},
+  "tools/osd-serve.mjs /osd/serving": {needs: "state", why: "which generation this process is serving"},
+  "tools/osd-serve.mjs /osd/dumps": {needs: "state", why: "the runtime errors this process has collected"},
+  "tools/osd-serve.mjs /osd/sql": {needs: "state", why: "the statement log this process holds"},
+  "tools/osd-serve.mjs /osd/status": {needs: "pure", why: "a wrapper over zcl_osd_status.refresh( iv_json ), which is already ABAP; only the error-path dump() is the host's, and a node loses nothing a 500 does not already give"},
+};
 
-export function needs(line, body = "") {
-  const text = `${line} ${body}`;
-  if (NEEDS_FS.test(text)) return "fs";
-  if (NEEDS_STATE.test(text)) return "state";
-  return "pure";
+export function needs(host, path) {
+  return VERDICTS[`${host} ${path}`];
 }
 
 export function classify(line, path) {
+  // **A registration with no literal path is not nothing.** This used to
+  // return "plumbing" and no row counted it, so `app.use(facade.router)` --
+  // the ADT facade, 59 router registrations of its own -- vanished from a
+  // scoreboard whose whole purpose is that nothing answers a path
+  // unaccounted for. It is a rival, and the biggest one.
   if (path === "(no path: middleware)") {
-    return "plumbing";
+    return /express\.(raw|json|urlencoded|text)\s*\(/.test(line) ? "plumbing" : "rival";
   }
   if (MOUNTS.some((r) => r.test(line))) {
     return "mount";
@@ -158,8 +195,10 @@ export function hostRoutes(hosts = HOSTS) {
       // on the line that registers it
       const body = text.split("\n").slice(i, i + 12).join("\n");
       const kind = classify(line, path);
+      void body;
+      const verdict = kind === "rival" ? needs(host, path) : undefined;
       out.push({host, line: i + 1, method: m[1], path, kind,
-        needs: kind === "rival" ? needs(line, body) : undefined});
+        needs: verdict?.needs, because: verdict?.why, judged: kind !== "rival" || verdict !== undefined});
     }
   }
   return out;
@@ -213,7 +252,7 @@ if (runsAs("osd-routes.mjs")) {
     if (list) {
       for (const e of r.entries) {
         const travel = e.travels === false ? "  [local package: does not travel]" : "";
-        const need = e.needs ? `  [needs ${e.needs}]` : "";
+        const need = e.needs ? `  [${e.needs}: ${e.because}]` : (e.judged === false ? "  [UNJUDGED -- add it to VERDICTS with a reason]" : "");
         console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}${travel}${need}`);
       }
     }
@@ -222,8 +261,16 @@ if (runsAs("osd-routes.mjs")) {
   console.log(`\n${rivals.length} registries rival the tree; ${others} paths live in them.`);
   const rivalRoutes = board.find((r) => r.name === "host routes (rival)")?.entries ?? [];
   const by = {pure: 0, fs: 0, state: 0};
-  for (const r of rivalRoutes) by[r.needs ?? "pure"] += 1;
+  const unjudged = rivalRoutes.filter((r) => r.judged === false);
+  for (const r of rivalRoutes.filter((r) => r.judged !== false)) by[r.needs] += 1;
+  const plumbing = hostRoutes().filter((r) => r.kind === "plumbing").length;
   console.log(`Of the ${rivalRoutes.length} host rivals: ${by.pure} move today, ${by.fs} need content in the store (the WAPA work), ${by.state} need a live host and never work in the preview.`);
+  console.log(`${plumbing} registrations are body parsing and answer no path.`);
+  if (unjudged.length > 0) {
+    console.log(`\n${unjudged.length} route(s) nobody has judged. A route with no verdict is not "pure":`);
+    for (const r of unjudged) console.log(`  ${r.path}  (${r.host}:${r.line})`);
+    console.log("Add each to VERDICTS in tools/osd-routes.mjs with a reason.");
+  }
   console.log(`The mount/wrapper row is not one of them -- deleting it would unplug the tree, not move a path into it.`);
   console.log("A registry is not migrated until its code is deleted -- see docs/icf-as-the-registry.md.");
 }

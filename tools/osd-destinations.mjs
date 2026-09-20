@@ -50,9 +50,20 @@ const read = (file) => {
 export function destinations({file = FILE, rfcFile = LEGACY_RFC, httpFile = LEGACY_HTTP, say = console.error} = {}) {
   const unified = existsSync(file) ? read(file) : undefined;
   if (unified !== undefined) {
+    // **`?? unified` was a defect and the first file anybody writes trips
+    // it.** A unified file with `services` and no `destinations` yet fell
+    // through to the bare map and produced a phantom destination literally
+    // named `services`, after which every binding reported "bound to A4H,
+    // which is not a destination". Found by an adversarial review,
+    // 2026-09-20. The shape is decided by whether the file HAS the key, not
+    // by whether that key is empty.
+    const bare = unified.destinations === undefined && unified.services === undefined;
     const out = {};
-    for (const [name, d] of Object.entries(unified.destinations ?? unified)) {
-      out[name] = {...d, type: d.type ?? (d.url === undefined ? "rfc" : "http")};
+    for (const [name, d] of Object.entries(bare ? unified : unified.destinations ?? {})) {
+      // inference only where the shape is unambiguous -- a legacy bare map.
+      // The comment above used to promise that and the code did it in both
+      // branches, which is a rule and its violation in one file.
+      out[name] = bare ? {...d, type: d.type ?? (d.url === undefined ? "rfc" : "http")} : {...d, type: d.type ?? "http"};
     }
     return out;
   }
@@ -81,6 +92,13 @@ export function destinations({file = FILE, rfcFile = LEGACY_RFC, httpFile = LEGA
 export function bindings({file = FILE, httpFile = LEGACY_HTTP, say = console.error} = {}) {
   const unified = existsSync(file) ? read(file) : undefined;
   if (unified !== undefined) {
+    if (unified.services === undefined && unified.destinations === undefined) {
+      // a bare map is the legacy destination shape and carries no bindings.
+      // Returning {} silently made "no service is answered remotely" and "I
+      // read a file that cannot say" look the same.
+      say(`${file} is a bare destination map with no "services": nothing is bound, so no path is answered remotely`);
+      return {};
+    }
     return {...(unified.services ?? {})};
   }
   const legacyHttp = existsSync(httpFile) ? read(httpFile) : undefined;
