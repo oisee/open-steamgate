@@ -182,3 +182,49 @@ was the part that could not be true.
 
 The first is the one to take, because without the table "inspect and change"
 is a word, and with it the other two are rows in it.
+
+---
+
+## What was actually done, 2026-09-20 — and where this note was wrong
+
+*Amended after the work, because a plan left standing beside its outcome is
+read as the outcome. The reasoning above holds; two of the three steps were
+taken in the other order and the third was taken differently.*
+
+**2 was taken first, not 1**, on Alice's third correction: what the host
+serves may stay served by the host, it only has to be **declared**. That
+turns "12 rivals to migrate" into an inventory without moving a file, and it
+had to come first because it decides what the table would hold.
+
+**The type is not a field we invent in somebody else's format.** `ICFTYP` is
+already in every `*.sicf.xml` -- it had been serialised since the first node
+and read by nothing. But a path this host answers from JavaScript **cannot**
+be a `*.sicf.xml` at all: on a real system that object does not exist, and
+writing one would claim it transports. So the type follows from **where the
+node is declared** -- a SAP object, or `src/icf/nodes.json` -- and "does it
+travel" follows from that rather than from a flag somebody keeps true.
+`tools/osd-nodes.mjs` reads both; `tools/osd-routes.mjs` is the drift check
+over them, in both directions.
+
+**3 was taken, and not into a table.** Alice, on the proposal to move the
+pages into a DDIC table: "Страницы могут по прежнему лкжать в файлах в
+каталоге!" She is right, and the correction generalises -- *imitate the
+interface, not the storage*. A system keeps pages in `O2PAGELINE`; that is
+its business. Ours are files, and each one is now a Web Repository object
+beside the generated class, which is the mechanism this tree already carries
+33 media objects and 16 MB on.
+
+**The numbers above are historical.** As of `ef8101a`:
+
+```
+gen/bsp/zcl_stg_bsp_registry.clas.abap   8.8 KB -- a list (was 137.9 KB of base64)
+reserved = ["/sap/opu/odata", "/sap/bc/adt"]   deleted from both hosts
+the hosts' own route lists                     deleted; mountHost attaches what the registry declares
+30 nodes: 18 ABAP, 10 HOST, 1 PROXY, 1 with no handler
+0 express registrations nobody declared, 0 declared nodes nothing serves
+```
+
+**1 is still the one to take**, for the reason given -- and the rule it
+still lacks is the one named further up: what happens when the table and the
+objects disagree. There is one for the database (schema drift: move aside,
+say so, never silently) and none for this. Write it before the table.

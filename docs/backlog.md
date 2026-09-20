@@ -1200,6 +1200,17 @@ of a day.
 > instead of 138, changing an image is not a rebuild, and every page still
 > answers 200.
 >
+> **A and B are done (2026-09-20, `ef8101a`).** B first, on correction 3:
+> `ICFTYP` is read, the host-served paths are declared in
+> `src/icf/nodes.json`, both hosts mount from the registry, and
+> `reserved = ["/sap/opu/odata", "/sap/bc/adt"]` is gone from both. A
+> followed: the registry class is 8.8 KB and each page is a Web Repository
+> object, not base64 in generated source. Scoreboard: 30 nodes, 0
+> registrations nobody declared, 0 declared nodes nothing serves.
+> `docs/icf-registry-plan.md` carries what each cost. What is left of B is
+> the OData front's own `*.sicf.xml`, so the node travels and not only the
+> handler. The originals are kept below because the reasoning is the record.
+>
 > **B. A handler row carries a type.** ABAP / HOST / PROXY / CONTENT, each
 > saying **where it works** rather than whether it is allowed: ABAP
 > everywhere, HOST needs Node (so not the browser preview), PROXY needs a
