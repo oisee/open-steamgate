@@ -3,7 +3,8 @@
 Want to try it without installing anything? Open the [browser demo](https://oisee.github.io/open-steamgate/main/app/flp.html).
 For your own server, the fastest route is one ready Docker image containing
 OSD and the DIAG/RFC stubs. The examples below are complete Portainer stacks:
-copy one block and deploy. The image is currently built for **Linux amd64**.
+copy one block and deploy. `docker-draft` is currently **Linux amd64**;
+`arm64-draft` is a separately tested **Linux arm64** build for SQLite and DuckDB.
 
 ## Portainer: paste one short stack
 
@@ -31,6 +32,10 @@ pasted into Portainer, update its Web editor YAML or set `OSD_TAG` to a new
 immutable tag before redeploying; changing this document does not update an
 existing Portainer stack.
 The single image is public on GHCR; no registry credentials are needed.
+On a 64-bit ARM host, use the SQLite or DuckDB block and set the Portainer
+Stack variable `OSD_TAG=arm64-draft`. Do not use the HANA Express block there:
+its SAP image is pinned to `linux/amd64`. PostgreSQL is not yet part of the
+ARM64 acceptance suite. See [Raspberry Pi](#raspberry-pi-arm64) below.
 
 Start with **SQLite**. **DuckDB** uses the same image with one writable worker.
 The **HANA Express** block starts a *new HXE container* alongside OSD. Its
@@ -264,13 +269,65 @@ are stubs, not a full SAP GUI or RFC implementation. This draft has no
 production authentication boundary; expose it only on a trusted network.
 For exact test steps and volume notes, see [the image guide](docker-image.md).
 
+## Raspberry Pi (ARM64)
+
+The ARM64 image was built and smoke-tested on a native ARM64 runner with
+SQLite and DuckDB, including HTTP/HTTPS ADT and OData, the DIAG tape on 32nn,
+ADT-over-RFC on 33nn, and persistence across a whole-stack restart. SQLite
+also ran on a **Raspberry Pi 4 with 2 GB RAM**, Debian 13 (trixie) arm64:
+the container became healthy and served ADT/OData with its existing database
+after an image update. HANA Express is not supported by this ARM64 recipe.
+
+On the Pi, check `uname -m` reports `aarch64` and `getconf LONG_BIT` reports
+`64`. In Portainer, paste the complete SQLite or DuckDB Stack above and set
+`OSD_TAG=arm64-draft` under **Stack variables**. The default instances are 11
+and 15. For a repeatable deployment, use an immutable `sha-…-arm64` tag from
+the [successful ARM64 workflow](https://github.com/oisee/open-steamgate/actions/workflows/docker-arm64.yml)
+instead of `arm64-draft`. No QEMU or host-wide emulator registration is needed
+on the Pi.
+
+Without Portainer, from a checkout of this repository on the Pi:
+
+```sh
+export OSD_TAG=arm64-draft
+docker compose -p osd11 -f docker/compose.sqlite.yml up -d --wait
+docker compose -p osd11 -f docker/compose.sqlite.yml ps
+curl -fsS http://localhost:8011/sap/bc/adt/core/http/build
+```
+
+Use `docker/compose.duckdb.yml` and project `osd15` for DuckDB. Compose gives
+each project its own database and TLS volumes. Keep the same project name on
+redeployment; `docker compose down -v` **deletes the database volume**.
+
+System Status always shows container architecture and runtime OS. To show the
+**host** OS and Raspberry Pi model as well, add these read-only mounts under
+the `osd` service's `volumes:` before deploying (only on a host where both
+source paths exist):
+
+```yaml
+      - /etc/os-release:/run/host/os-release:ro
+      - /proc/device-tree/model:/run/host/device-model:ro
+```
+
+For an existing Stack, back up its database volume first, then redeploy the
+**same Stack** with a newer `OSD_TAG`; do not delete or rename its volumes.
+For a container started manually with `docker run`, first pull the chosen
+new image, stop the old container gracefully, and copy `/data` from the
+stopped container to a backup directory. Start a new container with the same
+named data/TLS volumes and port mappings, but a different container name; keep
+the stopped old container for rollback. An image pull alone does not update a
+running container. Verify the build endpoint, a previously saved Travel and
+System Status before removing any rollback copy. The tested Pi update kept
+`osd-pi-data:/data` and `osd-pi-tls:/opt/osd/.local/tls`; these are examples,
+not universal volume names.
+
 ## Docker Compose CLI
 
 Use the same short files from the repository root. Set a unique project name
 for each variant; their default instance numbers already differ:
 
 ```sh
-git clone -b feat/docker-image https://github.com/oisee/open-steamgate.git
+git clone https://github.com/oisee/open-steamgate.git
 cd open-steamgate
 docker compose -p osd11 -f docker/compose.sqlite.yml up -d
 docker compose -p osd11 -f docker/compose.sqlite.yml ps
