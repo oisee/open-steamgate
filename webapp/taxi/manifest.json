@@ -59,6 +59,8 @@
           "settings": {
             "tableType": "AnalyticalTable",
             "defaultContentView": "charttable",
+            "defaultFilterMode": "compact",
+            "autoHide": false,
             "showGoButton": false,
             "condensedTableLayout": true,
             "smartVariantManagement": false,
