@@ -79,6 +79,28 @@ sap.ui.define([], function () {
     });
   }
 
+  // The 1.120 sandbox renders SAPLogo.svg even when shellLogo is configured.
+  // Replace only that image, retaining UI5's home link and its fixed header
+  // slot. Watch for shell re-renders when navigation switches applications.
+  function installHeaderLogo() {
+    var root = document.getElementById("content");
+    var logo = new URL("./pass-logo.png", document.baseURI).href;
+    function update() {
+      var icon = document.getElementById("shell-header-icon");
+      if (icon && icon.getAttribute("src") !== logo) {
+        icon.setAttribute("src", logo);
+      }
+      if (icon && icon.getAttribute("alt") !== "PASS logo") {
+        icon.setAttribute("alt", "PASS logo");
+      }
+    }
+    new MutationObserver(update).observe(root, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ["src", "alt"]
+    });
+    update();
+  }
+
+  installHeaderLogo();
   withPackTiles().then(greyAmdpWithoutEngine).then(function () {
     return sap.ushell.Container.createRenderer("fiori2", true);
   }).then(function (renderer) {
