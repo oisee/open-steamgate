@@ -1,0 +1,66 @@
+{
+  "_": [
+    "Nodes this system answers on that are NOT SAP objects.",
+    "",
+    "A *.sicf.xml is a claim: this node exists on a system and travels there.",
+    "The ADT facade, the launchpad shell, the dumps and the SQL log are none",
+    "of those things -- they are JavaScript, on purpose, and writing a SICF",
+    "object for them would say they can be transported, which is false. So",
+    "the type of a node is not a field we invent inside somebody else's",
+    "format: it is WHERE THE NODE IS DECLARED. A SAP object is ABAP and",
+    "travels; an entry here is served by this host and does not.",
+    "",
+    "What this buys, which is Alice's point and the whole track: one",
+    "inspectable answer to 'what does this system expose and what implements",
+    "it', without pretending everything must become ABAP to be listed.",
+    "",
+    "type   HOST   a function of the JavaScript host. Server and binary; not",
+    "              the browser preview.",
+    "       PROXY  a destination -- another system answers. Derived from",
+    "              .local/destinations.json, never written here: a list of",
+    "              credentials cannot be tracked.",
+    "handler  the name the host registers under, so a host can mount from",
+    "         this registry instead of carrying its own list.",
+    "needs    fs   could become CONTENT in the object store later.",
+    "         state  process state: it needs a LIVE host and never works in",
+    "                the preview -- a different promise, not a smaller one."
+  ],
+
+  "/": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "root", "needs": "fs",
+    "text": "probes the tree for webapp/flp.html before redirecting to the launchpad"
+  },
+  "/app": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "app-static", "needs": "fs",
+    "text": "express.static over webapp/: the launchpad shell and the apps' files"
+  },
+  "/app/packs.json": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "pack-tiles", "needs": "fs",
+    "text": "tilesOf() reads every pack's manifest from disk for the launchpad"
+  },
+  "/segw/generate": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "segw-generate", "needs": "fs",
+    "text": "the SEGW editor's Save to gen/; writes a developer's file system, dev-only"
+  },
+
+  "/sap/bc/adt": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "adt-facade", "needs": "state",
+    "text": "the ADT facade: 59 registrations of its own, meant to stay JavaScript -- A4H has ADT, this imitates it"
+  },
+  "/osd/not-served": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "not-served", "needs": "state",
+    "text": "what the facade could not answer, held in this process's memory"
+  },
+  "/osd/serving": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "serving", "needs": "state",
+    "text": "which generation this process is serving: how a supervisor knows it is alive"
+  },
+  "/osd/dumps": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "dumps", "needs": "state",
+    "text": "the runtime errors this process has collected, the way ST22 keeps them"
+  },
+  "/osd/sql": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "sql", "needs": "state",
+    "text": "the statement log and the bounded SELECT door this process holds"
+  }
+}

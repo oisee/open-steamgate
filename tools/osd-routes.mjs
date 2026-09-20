@@ -1,8 +1,8 @@
 // Who answers a path in this system, counted across every registry that
 // currently claims to know.
 //
-//   node tools/osd-routes.mjs            the scoreboard
-//   node tools/osd-routes.mjs --list     every entry, by registry
+//   node tools/osd-routes.mjs            the inventory and the drift
+//   node tools/osd-routes.mjs --list     every node, with its type
 //
 // **This is a scoreboard for a migration, and it exists because a registry
 // cannot be deleted until it can be enumerated.** Two sessions independently
@@ -20,6 +20,7 @@
 // and a running host has already collapsed them into one table.
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
+import {nodes} from "./osd-nodes.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const HOSTS = ["test/start.mjs", "tools/osd-serve.mjs", "web/preview-backend.mjs"];
@@ -105,63 +106,46 @@ export function icfNodes(root = "src") {
 const ICF_PATHS = [/^\/sap\/opu\/odata/, /^\/sap\/bc\/gui/, /^\/sap\/bc\/adt/, /^\/sap\/bc\/osd/];
 const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 
-// **What a rival needs decides how it can move, and they are not one group.**
-// fable-osd's split, which is sharper than "needs the host":
+// **Every registration must be explained by a declared node, and that is the
+// only number left that can go red.**
 //
-//   fs     needs the FILE SYSTEM -- static content, a directory listing.
-//          Moves as a node plus content in the object store; that is the
-//          WAPA work, and it can travel to a system.
-//   state  needs PROCESS STATE -- what the facade could not answer, the
-//          dumps, the SQL log. It lives in memory and dies with the host, so
-//          it moves as a node plus a LIVE host, and in the browser preview
-//          it does not work **ever**, not "yet". A different promise.
-//   pure   neither. Moves today.
+// This table used to be VERDICTS: a judgement per express route about how
+// hard it would be to migrate. Alice's third correction retired the
+// question. What the host serves can stay served by the host -- it only has
+// to be *declared* -- so the interesting fact about `/osd/dumps` is not
+// "state, therefore hard", it is that `src/icf/nodes.json` says it exists,
+// who implements it and where it works. `tools/osd-nodes.mjs` is that
+// inventory.
 //
-// Counting them together would make "the host stops routing" look like one
-// move. It is three, and one of them is a refusal.
-// **What a rival needs is declared, not guessed.**
+// What remains for this file is **drift**, in both directions, the way
+// `npm run parked` complains about a branch nothing explains and an entry
+// naming a branch that is gone:
 //
-// The first two versions of this matched regexes against a window of source
-// lines, and were wrong in both directions: `status\b` caught
-// `res.status(500)` in an error branch, so three routes were filed as
-// "needs process state" because of how they report a failure; and a
-// twelve-line window picked up `express.static` from the *next* route. One
-// of the mistakes made a published headline -- "0 of the 10 move today" --
-// false, and the route it hid, POST /osd/status, is a thin wrapper over
-// `zcl_osd_status.refresh( iv_json )` that is **already ABAP**.
+//   - an express registration that maps to no declared node -- something
+//     answers a path and the inventory does not know;
+//   - a declared node that no registration claims -- the inventory names
+//     something nothing serves.
 //
-// A measurement that decides what work exists should not be a guess about
-// source text. So the verdict is written down with its reason, the way
-// `.leak-allow.json` makes an exception cost a sentence, and the tool's job
-// is to notice **drift**: a route nobody has judged is an error, not a
-// default. Being wrong is then a thing somebody wrote and can be argued
-// with, rather than an artefact of a regular expression.
-//
-//   fs     needs the file system. Moves as a node plus content in the
-//          object store -- the WAPA work -- and can travel to a system.
-//   state  needs process state. Moves as a node plus a LIVE host, and in
-//          the browser preview does not work ever, not "yet".
-//   pure   moves today.
-// MIGRATED, and the entry is gone rather than marked: `POST /osd/status`
-// became src/status/zosd_status.sicf.xml at /sap/bc/osd/status/ with
-// ZCL_OSD_STATUS_HTTP. A registry shrinks when its code is deleted, and
-// this table shrinking is that, one line at a time.
-export const VERDICTS = {
-  "test/start.mjs /": {needs: "fs", why: "probes the tree for webapp/flp.html before redirecting"},
-  "test/start.mjs /app": {needs: "fs", why: "express.static over webapp/"},
-  "test/start.mjs /app/packs.json": {needs: "fs", why: "tilesOf() reads every pack's manifest from disk"},
-  "test/start.mjs /app/${pack.name}": {needs: "fs", why: "express.static over each pack's folder"},
-  "test/start.mjs /segw/generate/:project": {needs: "fs", why: "writes gen/segw-editor; dev-only, and belongs in a local package"},
-  "test/start.mjs (no path: middleware)": {needs: "state", why: "app.use(facade.router): the ADT facade, 59 registrations of its own"},
-  "test/start.mjs /osd/not-served": {needs: "state", why: "what the facade could not answer, held in memory"},
-  "tools/osd-serve.mjs (no path: middleware)": {needs: "state", why: "the serving runtime's own middleware"},
-  "tools/osd-serve.mjs /osd/serving": {needs: "state", why: "which generation this process is serving"},
-  "tools/osd-serve.mjs /osd/dumps": {needs: "state", why: "the runtime errors this process has collected"},
-  "tools/osd-serve.mjs /osd/sql": {needs: "state", why: "the statement log this process holds"},
+// The mapping is written rather than guessed, because two of these routes
+// have no literal path at all (`app.use(facade.router)` is 59 registrations
+// of the ADT facade) and a regex over source text got this wrong in both
+// directions twice in one night.
+export const SERVED_BY = {
+  "test/start.mjs /": {node: "/"},
+  "test/start.mjs /app": {node: "/app"},
+  "test/start.mjs /app/packs.json": {node: "/app/packs.json"},
+  "test/start.mjs /app/${pack.name}": {node: "/app/*", why: "one registration per pack; the nodes are derived from the packs"},
+  "test/start.mjs /segw/generate/:project": {node: "/segw/generate"},
+  "test/start.mjs (no path: middleware)": {node: "/sap/bc/adt"},
+  "test/start.mjs /osd/not-served": {node: "/osd/not-served"},
+  "tools/osd-serve.mjs (no path: middleware)": {wrapper: "sets X-OSD-Generation on every answer: it decorates, it does not decide"},
+  "tools/osd-serve.mjs /osd/serving": {node: "/osd/serving"},
+  "tools/osd-serve.mjs /osd/dumps": {node: "/osd/dumps"},
+  "tools/osd-serve.mjs /osd/sql": {node: "/osd/sql"},
 };
 
-export function needs(host, path) {
-  return VERDICTS[`${host} ${path}`];
+export function servedBy(host, path) {
+  return SERVED_BY[`${host} ${path}`];
 }
 
 export function classify(line, path) {
@@ -199,81 +183,101 @@ export function hostRoutes(hosts = HOSTS) {
       const body = text.split("\n").slice(i, i + 12).join("\n");
       const kind = classify(line, path);
       void body;
-      const verdict = kind === "rival" ? needs(host, path) : undefined;
+      // A registration is explained by the node it serves, by being the
+      // tree's own wiring, or by nothing -- and the last is the defect.
+      const said = kind === "rival" ? servedBy(host, path) : undefined;
       out.push({host, line: i + 1, method: m[1], path, kind,
-        needs: verdict?.needs, because: verdict?.why, judged: kind !== "rival" || verdict !== undefined});
+        node: said?.node, wrapper: said?.wrapper, why: said?.why,
+        declared: kind !== "rival" || said !== undefined});
     }
   }
   return out;
 }
 
-/** The pack mounting: a pack's page served under its name. */
-export function packMounts(root = ".") {
-  const packs = [];
-  for (const dir of ["packs", ...(process.env.OSD_PACKS ?? "").split(":").filter(Boolean)]) {
-    const at = join(root, dir);
-    if (existsSync(at) === false) continue;
-    for (const name of readdirSync(at)) {
-      if (existsSync(join(at, name, "osd-pack.json")) && existsSync(join(at, name, "webapp"))) {
-        packs.push({pack: name, path: `/app/${name}`});
-      }
-    }
-  }
-  return packs;
-}
+// **`packMounts` and `destinationBindings` used to live here and are gone.**
+// They read a pack's folder and a destination file to derive a path, which
+// is exactly what `packNodes` and `proxyNodes` in tools/osd-nodes.mjs do --
+// two copies of one derivation, in the file whose whole subject is that
+// there should be one. The scoreboard asks the inventory now.
 
-/** A binding: a path another system answers. */
-export async function destinationBindings(options = {}) {
-  const {remoteServices} = await import("./osd-destinations.mjs");
-  return remoteServices({say: () => {}, ...options}).map((r) => ({path: `/sap/opu/odata/sap/${r.service}`, destination: r.name}));
-}
+/** The nodes an express registration may legitimately claim.
+ *
+ *  `/app/*` is a shape rather than a path: one `app.get` inside a loop
+ *  registers one route per pack, and the nodes for those are derived from
+ *  the packs themselves (`packNodes`). Writing the shape down is how a
+ *  registration that claims a pack node it does not serve still counts as
+ *  explained, without the table having to list every pack twice. */
+const claims = (node, paths) => node === "/app/*"
+  ? paths.some((p) => p.startsWith("/app/"))
+  : paths.includes(node);
 
-/** Which rows of the scoreboard count against the proposal, and the total.
- *  Exported because the CLI and the test both need the answer and a copy in
- *  each is how they came to print 12 and 18 of the same tree -- the rule a
- *  module's callers must share lives in the module. */
-export const isRival = (row) => row.name !== "ICF nodes" && row.name.includes("mount/wrapper") === false;
-export const rivalCount = (board) => board.filter(isRival).reduce((n, r) => n + r.count, 0);
+/** Drift, in both directions.
+ *
+ *  `unexplained`  an express registration mapped to no node: something
+ *                 answers a path and the inventory does not know. This is
+ *                 the number that must be zero, and the one a new express
+ *                 route makes go red.
+ *  `unclaimed`    a HOST or PROXY node no registration serves: the inventory
+ *                 names something nothing answers. An ABAP node is not in
+ *                 this list -- it is served by the shim from the object
+ *                 itself and has no express line to find.
+ */
+export async function drift(options = {}) {
+  const all = await nodes(options.at ?? ".", options);
+  const paths = all.map((n) => n.path);
+  const routes = hostRoutes(options.hosts).filter((r) => r.kind === "rival");
+  const unexplained = routes.filter((r) => r.declared === false
+    || (r.node !== undefined && claims(r.node, paths) === false));
+  const served = new Set(routes.map((r) => r.node).filter(Boolean));
+  const unclaimed = all.filter((n) => (n.type === "HOST" || n.type === "PROXY")
+    && served.has(n.path) === false
+    && (n.path.startsWith("/app/") === false || served.has("/app/*") === false)
+    && n.type !== "PROXY");
+  return {nodes: all, routes, unexplained, unclaimed};
+}
 
 export async function scoreboard(options = {}) {
-  const registries = [
-    ["ICF nodes", icfNodes(options.root ?? "src"), "the one this tree is keeping"],
-    ["host routes (rival)", hostRoutes(options.hosts).filter((r) => r.kind === "rival"), "a path answered outside the tree"],
-    ["host routes (mount/wrapper)", hostRoutes(options.hosts).filter((r) => r.kind === "mount" || r.kind === "wrapper"), "the tree's own wiring and decoration -- NOT a rival"],
-    ["pack mounts", packMounts(options.at ?? "."), "a pack's page under its name"],
-    ["destination bindings", await destinationBindings(options), "a path another system answers"],
-  ];
-  return registries.map(([name, entries, why]) => ({name, count: entries.length, why, entries}));
+  const {nodes: all, unexplained, unclaimed} = await drift(options);
+  const wiring = hostRoutes(options.hosts).filter((r) => r.kind === "mount" || r.kind === "wrapper");
+  const by = {};
+  for (const n of all) by[n.type] = (by[n.type] ?? 0) + 1;
+  return {nodes: all, byType: by, wiring, unexplained, unclaimed};
 }
 
 if (runsAs("osd-routes.mjs")) {
   const list = process.argv.includes("--list");
   const board = await scoreboard();
-  const others = rivalCount(board);
-  for (const r of board) {
-    console.log(`${String(r.count).padStart(4)}  ${r.name.padEnd(22)} ${r.why}`);
-    if (list) {
-      for (const e of r.entries) {
-        const travel = e.travels === false ? "  [local package: does not travel]" : "";
-        const need = e.needs ? `  [${e.needs}: ${e.because}]` : (e.judged === false ? "  [UNJUDGED -- add it to VERDICTS with a reason]" : "");
-        console.log(`      ${e.url ?? e.path ?? ""}${e.host ? `  (${e.host}:${e.line})` : ""}${e.handlers?.length ? `  -> ${e.handlers.join(", ")}` : ""}${travel}${need}`);
-      }
+  if (list) {
+    for (const n of board.nodes) {
+      const where = n.worksIn.length === 0 ? "  [no handler: nothing answers here]"
+        : n.worksIn.length === 3 ? ""
+        : `  [not in the ${["server", "binary", "preview"].filter((w) => n.worksIn.includes(w) === false).join("/")}]`;
+      console.log(`  ${n.type.padEnd(8)} ${n.path.padEnd(42)} ${(n.handler ?? "-").padEnd(24)}${where}`);
     }
+    console.log("");
   }
-  const rivals = board.filter(isRival);
-  console.log(`\n${rivals.length} registries rival the tree; ${others} paths live in them.`);
-  const rivalRoutes = board.find((r) => r.name === "host routes (rival)")?.entries ?? [];
-  const by = {pure: 0, fs: 0, state: 0};
-  const unjudged = rivalRoutes.filter((r) => r.judged === false);
-  for (const r of rivalRoutes.filter((r) => r.judged !== false)) by[r.needs] += 1;
-  const plumbing = hostRoutes().filter((r) => r.kind === "plumbing").length;
-  console.log(`Of the ${rivalRoutes.length} host rivals: ${by.pure} move today, ${by.fs} need content in the store (the WAPA work), ${by.state} need a live host and never work in the preview.`);
-  console.log(`${plumbing} registrations are body parsing and answer no path.`);
-  if (unjudged.length > 0) {
-    console.log(`\n${unjudged.length} route(s) nobody has judged. A route with no verdict is not "pure":`);
-    for (const r of unjudged) console.log(`  ${r.path}  (${r.host}:${r.line})`);
-    console.log("Add each to VERDICTS in tools/osd-routes.mjs with a reason.");
+  console.log(`${String(board.nodes.length).padStart(4)}  nodes, from every registry that declares one:`);
+  for (const [type, n] of Object.entries(board.byType).sort()) {
+    console.log(`      ${String(n).padStart(3)} ${type}`);
   }
-  console.log(`The mount/wrapper row is not one of them -- deleting it would unplug the tree, not move a path into it.`);
-  console.log("A registry is not migrated until its code is deleted -- see docs/icf-as-the-registry.md.");
+  console.log(`${String(board.wiring.length).padStart(4)}  express registrations are the tree's own wiring and decoration -- not routes of their own`);
+
+  // **The thing that can go red.** The old ratchet counted rivals and went
+  // down by migrating; this one counts what nothing explains and goes up the
+  // moment somebody adds an express route without declaring it.
+  console.log(`${String(board.unexplained.length).padStart(4)}  express registrations nobody declared`);
+  for (const r of board.unexplained) {
+    console.log(`      ${r.path}  (${r.host}:${r.line})  -- add it to src/icf/nodes.json and to SERVED_BY`);
+  }
+  console.log(`${String(board.unclaimed.length).padStart(4)}  declared HOST nodes no registration serves`);
+  for (const n of board.unclaimed) {
+    console.log(`      ${n.path}  (${n.source})  -- the inventory names it and nothing answers on it`);
+  }
+
+  const movable = board.nodes.filter((n) => n.type === "HOST" && n.needs === "fs");
+  const staying = board.nodes.filter((n) => n.type === "HOST" && n.needs === "state");
+  console.log(`
+Of the HOST nodes: ${movable.length} need only the file system and can become CONTENT in the store (the WAPA work); ${staying.length} need process state and stay HOST by design.`);
+  console.log("A node's type is where it is declared -- src/icf/nodes.json, not a field inside somebody else's format.");
+  console.log("See docs/icf-registry-plan.md; the inventory itself is `node tools/osd-nodes.mjs`.");
 }

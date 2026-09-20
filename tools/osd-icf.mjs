@@ -64,20 +64,78 @@ const tag = (xml, name) => new RegExp(`<${name}>([^<]*)</${name}>`, "i").exec(xm
 // authentication for its children — and it is not something we can serve, so
 // it comes back without one and the caller skips it rather than mounting a
 // path that would answer with an error.
+// **The handler rows, each with the type SAP already keeps beside it.**
+//
+// `ICFHANDLER` is the name of the table row AND of the field inside it, so
+// the table cannot be read with one regular expression: a match for the
+// field also matches the row, and a reader that takes the first gets
+// whitespace, one that takes the last gets the right answer for one row and
+// silently drops the others. Both mistakes have been made here. A scan that
+// counts the nesting is what tells a row from its own field, and it is ten
+// lines.
+//
+// `ICFTYP` was serialised in every one of our nodes from the day they were
+// written and read by nothing. It is the handler's **kind** -- what the name
+// in `ICFHANDLER` refers to -- and `A`, the only value this tree has ever
+// produced or imported, is an ABAP class. We do not invent values for it:
+// a row whose type we do not implement comes back with its letter and is
+// not mounted, which is the difference between "we cannot serve this" and
+// "we served it as something it is not".
+export function handlerRows(xml) {
+  const table = /<ICFHANDLER_TABLE>([\s\S]*?)<\/ICFHANDLER_TABLE>/i.exec(xml)?.[1] ?? xml;
+  const rows = [];
+  const re = /<(\/?)ICFHANDLER>/gi;
+  let depth = 0;
+  let start = 0;
+  let m;
+  while ((m = re.exec(table)) !== null) {
+    if (m[1] === "") {
+      if (depth++ === 0) {
+        start = re.lastIndex;
+      }
+    } else if (--depth === 0) {
+      rows.push(table.slice(start, m.index));
+    }
+  }
+  return rows.map((row) => ({
+    order: tag(row, "ICFORDER"),
+    // absent in a hand-written fixture and in some abapGit versions; the
+    // only thing a *.sicf.xml can name is a class, so that is the reading,
+    // and `icftyp` stays undefined so nobody can claim it was measured
+    icftyp: tag(row, "ICFTYP")?.toUpperCase(),
+    handler: /<ICFHANDLER>([A-Za-z0-9_/]+)<\/ICFHANDLER>/i.exec(row)?.[1],
+  })).filter((r) => r.handler !== undefined && r.handler !== "");
+}
+
+// What an `ICFTYP` letter means here. One entry, because one letter is all
+// this tree has seen -- and a map with one entry is honest where a default
+// would not be.
+const ICFTYP = {A: "ABAP"};
+
 export function serviceOf(xml, source) {
   const url = tag(xml, "URL");
   if (url === undefined || url === "") {
     return undefined;
   }
-  // ICFHANDLER is both the table row and the field inside it; the field is
-  // the one that names a class, and it is the last of the two
-  const handlers = [...xml.matchAll(/<ICFHANDLER>([A-Za-z0-9_\/]+)<\/ICFHANDLER>/gi)].map((m) => m[1]);
+  const rows = handlerRows(xml);
+  // the last handler of the chain is the one that answers; the earlier rows
+  // of a real node are the inherited ones
+  const row = rows[rows.length - 1];
   const path = url.replace(/\/+$/, "");
   return {
     path,
     name: tag(xml, "ICF_NAME") ?? path.split("/").pop(),
     description: tag(xml, "ICF_DOCU"),
-    handler: handlers[handlers.length - 1],
+    handler: row?.handler,
+    icftyp: row?.icftyp,
+    // **A node declared as a SAP object is served by ABAP, and that is not a
+    // flag we set: it follows from the file it is declared in.** A path this
+    // system answers from JavaScript cannot be a *.sicf.xml, because on a
+    // real system that object does not exist and writing one would claim it
+    // travels. Those are declared in src/icf/nodes.json instead --
+    // tools/osd-nodes.mjs is the reader that sees both.
+    type: row === undefined ? undefined : (ICFTYP[row.icftyp ?? "A"] ?? row.icftyp),
+    travels: true,
     source,
   };
 }
@@ -159,6 +217,14 @@ export function mountServices(app, run, options = {}) {
   const mounted = [];
   for (const service of services(options.root ?? process.cwd(), options)) {
     if (service.handler === undefined) {
+      continue;
+    }
+    // A handler row whose type we do not implement is not an ABAP class,
+    // and running it as one would be a guess with a 500 at the end of it.
+    // Nothing in this tree produces such a row today; the check exists so
+    // that an imported node carrying one is refused out loud.
+    if (service.type !== "ABAP") {
+      options.say?.(`ICF ${service.path}: handler type ${service.icftyp} is not one this host serves -- not mounted`);
       continue;
     }
     // the OData front owns its own prefix and mounts itself; a service node

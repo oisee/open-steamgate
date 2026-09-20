@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {serviceOf, channelOf, services, channels} from "../tools/osd-icf.mjs";
+import {serviceOf, channelOf, handlerRows, mountServices, services, channels} from "../tools/osd-icf.mjs";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -42,6 +42,64 @@ describe("tools/osd-icf: the table that says who answers where", () => {
   it("the handler is the class, not the element that wraps it", () => {
     expect(serviceOf(SICF, "x").handler).to.not.contain("TABLE");
     expect(serviceOf(SICF, "x").handler.startsWith("ZCL_")).to.equal(true);
+  });
+
+  // **ICFTYP was serialised in every node from the day they were written and
+  // read by nothing.** It is the handler's kind -- what the name in
+  // ICFHANDLER refers to -- and reading it is what lets a node say where it
+  // works instead of every node being assumed to be an ABAP class.
+  const TYPED = `<asx:values>
+   <URL>/sap/bc/osd/status/</URL>
+   <ICFHANDLER_TABLE>
+    <ICFHANDLER><ICF_NAME>Z</ICF_NAME><ICFORDER>01</ICFORDER><ICFTYP>A</ICFTYP><ICFHANDLER>ZCL_PARENT</ICFHANDLER></ICFHANDLER>
+    <ICFHANDLER><ICF_NAME>Z</ICF_NAME><ICFORDER>02</ICFORDER><ICFTYP>A</ICFTYP><ICFHANDLER>ZCL_OSD_STATUS_HTTP</ICFHANDLER></ICFHANDLER>
+   </ICFHANDLER_TABLE>
+ </asx:values>`;
+
+  it("the handler rows are rows, and each carries its own type", () => {
+    const rows = handlerRows(TYPED);
+    // the nesting is what tells a row from the field of the same name; a
+    // reader that took the last match of one regex saw one row out of two
+    expect(rows.map((r) => r.handler)).to.deep.equal(["ZCL_PARENT", "ZCL_OSD_STATUS_HTTP"]);
+    expect(rows.map((r) => r.order)).to.deep.equal(["01", "02"]);
+    expect(rows.every((r) => r.icftyp === "A")).to.equal(true);
+  });
+
+  it("a *.sicf.xml is an ABAP node, and that follows from the file it is in", () => {
+    const service = serviceOf(TYPED, "x");
+    expect(service.handler, "the last of the chain answers").to.equal("ZCL_OSD_STATUS_HTTP");
+    expect(service.type).to.equal("ABAP");
+    // it is a SAP object, so it transports -- not because a flag says so
+    expect(service.travels).to.equal(true);
+  });
+
+  it("a fixture with no ICFTYP is still a class, and does not claim to be measured", () => {
+    // abapGit has written the field for every node this tree has seen; a
+    // hand-written fixture may not. The only thing a *.sicf.xml can name is
+    // a class, so that is the reading -- and `icftyp` stays undefined so
+    // nobody can later report the assumption as a measurement.
+    const service = serviceOf(SICF, "x");
+    expect(service.type).to.equal("ABAP");
+    expect(service.icftyp).to.equal(undefined);
+  });
+
+  it("a handler type we do not implement is refused out loud, not guessed at", () => {
+    const odd = TYPED.replace("<ICFTYP>A</ICFTYP><ICFHANDLER>ZCL_OSD_STATUS_HTTP", "<ICFTYP>Q</ICFTYP><ICFHANDLER>ZCL_OSD_STATUS_HTTP");
+    const service = serviceOf(odd, "x");
+    expect(service.icftyp).to.equal("Q");
+    expect(service.type, "the letter comes back; it is not renamed into ABAP").to.equal("Q");
+
+    // and the mount refuses it rather than running the name as a class,
+    // which would be a guess with a 500 at the end of it
+    const dir = mkdtempSync(join(tmpdir(), "osd-icf-typ-"));
+    mkdirSync(join(dir, "src"), {recursive: true});
+    writeFileSync(join(dir, "src", "zq.sicf.xml"), odd);
+    const said = [];
+    const app = {all: () => { throw new Error("an unimplemented handler type must not be mounted"); }};
+    const mounted = mountServices(app, () => {}, {root: dir, roots: ["src"], say: (m) => said.push(m)});
+    expect(mounted).to.deep.equal([]);
+    expect(said.join(" ")).to.contain("not mounted");
+    rmSync(dir, {recursive: true, force: true});
   });
 
   // a node that carries no handler is a real thing — an alias, or a node that
