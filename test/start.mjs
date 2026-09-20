@@ -18,6 +18,7 @@ import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
+import {mountHost, nodes} from "../tools/osd-nodes.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
@@ -71,10 +72,22 @@ export function startServer(quiet) {
   // an IWPR of a real SEGW project is a few hundred KB (ImportSet takes it as JSON)
   app.use(express.raw({type: "*/*", limit: "16mb"}));
 
+  // **What this host answers is declared in src/icf/nodes.json.** It used to
+  // be this list of app.get/app.use lines, which is how three hosts came to
+  // disagree by construction -- each one carrying its own idea of what the
+  // system exposes. The registry has the list now, and what follows only
+  // says how each entry attaches: those are genuinely different express
+  // shapes (an exact GET, a static prefix, a POST with a parameter, a router
+  // with no path at all) and flattening them would have meant inventing a
+  // field per shape. mountHost() below registers them longest path first and
+  // refuses a handler no node declares -- and `node tools/osd-routes.mjs`
+  // checks the other direction.
+  const hostNodes = {};
+
   // The port's front door is the launchpad when there is one: every app and
   // every demo this system serves is a tile on it, which is what a person
   // opening a system expects to find rather than a paragraph of paths.
-  app.get("/", function (req, res) {
+  hostNodes.root = (a, node) => a.get(node.path, function (req, res) {
     if (existsSync(join(process.cwd(), "webapp", "flp.html"))) {
       res.redirect(302, "/app/flp.html");
       return;
@@ -84,17 +97,20 @@ export function startServer(quiet) {
 
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   // the tree's webapp, not the module's: in a binary the module has no folder
-  app.use("/app", express.static(join(process.cwd(), "webapp")));
+  hostNodes["app-static"] = (a, node) => a.use(node.path, express.static(join(process.cwd(), "webapp")));
   serveSandboxConfig(app);
   // what the launchpad asks for at start: the tiles the packs declare, so a
   // pack appears on it without anybody editing webapp/flp.html (backlog E.2)
-  app.get("/app/packs.json", function (req, res) {
+  hostNodes["pack-tiles"] = (a, node) => a.get(node.path, function (req, res) {
     res.json({tiles: tilesOf(process.cwd())});
   });
-  // a pack brings its own static files, served under its name (backlog E.2)
-  for (const pack of webappsOf(process.cwd())) {
-    app.use(`/app/${pack.name}`, express.static(pack.dir));
-  }
+  // a pack brings its own static files, served under its name (backlog E.2).
+  // One handler, many nodes: the nodes are DERIVED from the packs
+  // (tools/osd-nodes.mjs packNodes), because a pack already says its name
+  // and already carries a webapp/, and asking it to repeat that in a second
+  // file is the extra registry this whole track removes.
+  const packDirs = new Map(webappsOf(process.cwd()).map((pack) => [`/app/${pack.name}`, pack.dir]));
+  hostNodes["pack-static"] = (a, node) => a.use(node.path, express.static(packDirs.get(node.path)));
 
   // a service on another system, answered on this origin. A page this system
   // serves may then read it the way it reads ours, which a proxy on another
@@ -113,7 +129,7 @@ export function startServer(quiet) {
   // gives, written to gen/segw-editor/<project>/ (Generate, Import and
   // Export are the service's; only the file system is Node's)
   const self = "http://localhost:" + PORT;
-  app.post("/segw/generate/:project", async function (req, res) {
+  hostNodes["segw-generate"] = (a, node) => a.post(`${node.path}/:project`, async function (req, res) {
     try {
       res.json(await generateProject(self, req.params.project));
     } catch (e) {
@@ -160,12 +176,19 @@ export function startServer(quiet) {
     data,
     systemID: process.env.STG_ADT_SID,
   });
-  app.use(facade.router);
+  // the façade claims no path of its own -- it is a router that answers
+  // /sap/bc/adt/** and passes everything else on -- so the node says the
+  // prefix it answers and the registration ignores it
+  hostNodes["adt-facade"] = (a) => a.use(facade.router);
   // what a client asked the façade for and did not get, on demand: point a
   // strange client at OSD, then read this to learn what it wanted
-  app.get("/osd/not-served", function (req, res) {
+  hostNodes["not-served"] = (a, node) => a.get(node.path, function (req, res) {
     res.json([...facade.missed.values()].sort((a, b) => b.count - a.count));
   });
+
+  // and now everything the registry declares for this host, in its order
+  const declaredNodeList = nodes(process.cwd(), {proxies: false});
+  mountHost(app, declaredNodeList, hostNodes, {host: "test/start.mjs"});
   // parsing the system is the expensive part of a syntax check or an object
   // structure, and it is shared once paid. A served instance pays it at
   // startup so the first client does not buy it for the second; it is
@@ -186,8 +209,12 @@ export function startServer(quiet) {
   // and which class answers which URL is what SICF holds. A repository that
   // brings a *.sicf.xml brings its own route with it, so an application can
   // be imported and served without this file learning its name. Mounted
-  // before the OData front only so the reserved prefix below is meaningful.
-  const reserved = ["/sap/opu/odata", "/sap/bc/adt"];
+  // before the OData front only so the claimed prefixes below are meaningful.
+  // the paths another registry already owns -- the OData front and the ADT
+  // façade -- asked of that registry instead of written out again here. The
+  // same two strings used to sit in this file and in tools/osd-serve.mjs,
+  // equal by nobody's effort.
+  const claimed = declaredNodeList.filter((n) => n.source.endsWith("nodes.json")).map((n) => n.path);
   // SAP Easy Access reads the same five tables ZOSD_STATUS_SRV reads
   // (src/webgui/, docs/webgui.md), so it pays for the same refresh. It is
   // registered here, before the SICF mount below, because that mount answers
@@ -199,12 +226,15 @@ export function startServer(quiet) {
     icf = mountServices(app, (args) => inline.cl_express_icf_shim.run({
       ...args,
       base: new abap.types.String().set(args.base),
-    }), {root: process.cwd(), reserved});
+    }), {root: process.cwd(), claimed});
   } else {
     // the same paths, proxied to the child that answers them
-    // the same filter mountServices applies: a reserved prefix, or a node
-    // without a handler (an APC path's SICF entry), is not a service
-    icf = icfServices(process.cwd()).filter((s) => s.handler !== undefined && !reserved.some((prefix) => s.path.startsWith(prefix)));
+    // the same filter mountServices applies: a path a declared node owns, a
+    // handler type this host does not serve, or no handler at all (an APC
+    // path's SICF entry) is not a service
+    icf = icfServices(process.cwd()).filter((s) => s.handler !== undefined
+      && s.type === "ABAP"
+      && claimed.some((prefix) => s.path === prefix || s.path.startsWith(`${prefix}/`)) === false);
     for (const service of icf) {
       app.all(service.path, odataProxy(runtime));
       app.all(`${service.path}/*`, odataProxy(runtime));

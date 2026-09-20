@@ -103,7 +103,10 @@ export function handlerRows(xml) {
     // only thing a *.sicf.xml can name is a class, so that is the reading,
     // and `icftyp` stays undefined so nobody can claim it was measured
     icftyp: tag(row, "ICFTYP")?.toUpperCase(),
-    handler: /<ICFHANDLER>([A-Za-z0-9_/]+)<\/ICFHANDLER>/i.exec(row)?.[1],
+    // the wrapper's own field, or -- in a hand-written fixture that writes
+    // the field alone, with no table around it -- the row's whole content
+    handler: /<ICFHANDLER>([A-Za-z0-9_/]+)<\/ICFHANDLER>/i.exec(row)?.[1]
+      ?? (/^[A-Za-z0-9_/]+$/.test(row.trim()) ? row.trim() : undefined),
   })).filter((r) => r.handler !== undefined && r.handler !== "");
 }
 
@@ -227,9 +230,16 @@ export function mountServices(app, run, options = {}) {
       options.say?.(`ICF ${service.path}: handler type ${service.icftyp} is not one this host serves -- not mounted`);
       continue;
     }
-    // the OData front owns its own prefix and mounts itself; a service node
-    // that claimed it would shadow the dispatcher
-    if (options.reserved?.some((prefix) => service.path.startsWith(prefix)) === true) {
+    // **A path another registry already owns is not mounted here, and which
+    // paths those are comes from the registry rather than from a list in
+    // this file.** It used to be `reserved = ["/sap/opu/odata",
+    // "/sap/bc/adt"]`, written out in both hosts: two constants that had to
+    // stay equal to each other and to the truth, and nothing checked either.
+    // Now the caller passes what `<layer>/icf/nodes.json` declares -- the
+    // OData front, the ADT façade -- so a node that would shadow one of them
+    // is refused by the same inventory that says they exist.
+    if (options.claimed?.some((prefix) => service.path === prefix || service.path.startsWith(`${prefix}/`)) === true) {
+      options.say?.(`ICF ${service.path}: a declared node already owns this path -- not mounted`);
       continue;
     }
     const handler = async (req, res) => {

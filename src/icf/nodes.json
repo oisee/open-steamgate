@@ -16,6 +16,10 @@
     "",
     "type   HOST   a function of the JavaScript host. Server and binary; not",
     "              the browser preview.",
+    "       ABAP   a class behind the shim. An entry here rather than a",
+    "              *.sicf.xml means the class is ours and the NODE is not an",
+    "              object yet -- true of the OData front, and a real gap",
+    "              rather than a wording.",
     "       PROXY  a destination -- another system answers. Derived from",
     "              .local/destinations.json, never written here: a list of",
     "              credentials cannot be tracked.",
@@ -43,6 +47,11 @@
     "text": "the SEGW editor's Save to gen/; writes a developer's file system, dev-only"
   },
 
+  "/sap/opu/odata/sap": {
+    "type": "ABAP", "host": "test/start.mjs", "mount": "elsewhere",
+    "why": "the front is attached beside the runtime it proxies to: the same lines start the child, install the dev loop and refresh ZOSD_STATUS_SRV before a read of it. Pulling the mount out of that would separate it from the thing it mounts.",
+    "text": "the OData front: ZCL_STG_HTTP_HANDLER behind the shim, or a proxy to the child that runs it. On a system this node is /IWFND/CL_SODATA_HTTP_HANDLER and an ICF object; ours is not one yet"
+  },
   "/sap/bc/adt": {
     "type": "HOST", "host": "test/start.mjs", "handler": "adt-facade", "needs": "state",
     "text": "the ADT facade: 59 registrations of its own, meant to stay JavaScript -- A4H has ADT, this imitates it"

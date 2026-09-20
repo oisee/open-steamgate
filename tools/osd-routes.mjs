@@ -131,17 +131,7 @@ const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 // of the ADT facade) and a regex over source text got this wrong in both
 // directions twice in one night.
 export const SERVED_BY = {
-  "test/start.mjs /": {node: "/"},
-  "test/start.mjs /app": {node: "/app"},
-  "test/start.mjs /app/packs.json": {node: "/app/packs.json"},
-  "test/start.mjs /app/${pack.name}": {node: "/app/*", why: "one registration per pack; the nodes are derived from the packs"},
-  "test/start.mjs /segw/generate/:project": {node: "/segw/generate"},
-  "test/start.mjs (no path: middleware)": {node: "/sap/bc/adt"},
-  "test/start.mjs /osd/not-served": {node: "/osd/not-served"},
   "tools/osd-serve.mjs (no path: middleware)": {wrapper: "sets X-OSD-Generation on every answer: it decorates, it does not decide"},
-  "tools/osd-serve.mjs /osd/serving": {node: "/osd/serving"},
-  "tools/osd-serve.mjs /osd/dumps": {node: "/osd/dumps"},
-  "tools/osd-serve.mjs /osd/sql": {node: "/osd/sql"},
 };
 
 export function servedBy(host, path) {
@@ -175,9 +165,19 @@ export function hostRoutes(hosts = HOSTS) {
     if (existsSync(host) === false) continue;
     const text = readFileSync(host, "utf8");
     for (const [i, line] of text.split("\n").entries()) {
-      const m = /app\.(all|use|get|post|put|delete)\(\s*(`[^`]*`|"[^"]*"|'[^']*')?/.exec(line);
+      // **A path held in a variable is a path.** `app.all(service.path, ...)`
+      // used to fall into the "(no path: middleware)" bucket, be judged
+      // against express.json and come out a rival -- the ICF mount itself,
+      // filed as something to migrate into the ICF tree. Captured as the
+      // expression it is, the line's own text then says it is a mount.
+      const m = /app\.(all|use|get|post|put|delete)\(\s*(`[^`]*`|"[^"]*"|'[^']*'|[A-Za-z_$][\w$.]*)?/.exec(line);
       if (m === null) continue;
-      const path = m[2] ? m[2].slice(1, -1) : "(no path: middleware)";
+      const quoted = m[2] !== undefined && /^[`"']/.test(m[2]);
+      // `app.use(express.raw({...}))` is body parsing: the expression is the
+      // middleware, not a path
+      const path = m[2] === undefined || (quoted === false && m[2].startsWith("express."))
+        ? "(no path: middleware)"
+        : (quoted ? m[2].slice(1, -1) : m[2]);
       // the handler body is the next few lines: what a route touches is not
       // on the line that registers it
       const body = text.split("\n").slice(i, i + 12).join("\n");
@@ -200,39 +200,51 @@ export function hostRoutes(hosts = HOSTS) {
 // two copies of one derivation, in the file whose whole subject is that
 // there should be one. The scoreboard asks the inventory now.
 
-/** The nodes an express registration may legitimately claim.
+/** The handlers a host file implements, read off the assignments to its
+ *  `hostNodes` table.
  *
- *  `/app/*` is a shape rather than a path: one `app.get` inside a loop
- *  registers one route per pack, and the nodes for those are derived from
- *  the packs themselves (`packNodes`). Writing the shape down is how a
- *  registration that claims a pack node it does not serve still counts as
- *  explained, without the table having to list every pack twice. */
-const claims = (node, paths) => node === "/app/*"
-  ? paths.some((p) => p.startsWith("/app/"))
-  : paths.includes(node);
+ *  A grep, and a narrow one on purpose: it matches an assignment to one
+ *  named object, not a guess about what a route "needs" from twelve lines of
+ *  source -- which is the shape that got this wrong twice. The real check is
+ *  at startup, where `mountHost` refuses a node declared as served here with
+ *  no handler and a handler no node declares. This exists so that the
+ *  disagreement is named by a test in a second rather than by a server that
+ *  will not come up. */
+export function implemented(host) {
+  if (existsSync(host) === false) return undefined;
+  const text = readFileSync(host, "utf8");
+  return new Set([
+    ...[...text.matchAll(/hostNodes\.([A-Za-z_$][\w$]*)\s*=/g)].map((m) => m[1]),
+    ...[...text.matchAll(/hostNodes\[\s*"([^"]+)"\s*\]\s*=/g)].map((m) => m[1]),
+  ]);
+}
 
 /** Drift, in both directions.
  *
- *  `unexplained`  an express registration mapped to no node: something
- *                 answers a path and the inventory does not know. This is
- *                 the number that must be zero, and the one a new express
- *                 route makes go red.
- *  `unclaimed`    a HOST or PROXY node no registration serves: the inventory
- *                 names something nothing answers. An ABAP node is not in
- *                 this list -- it is served by the shim from the object
- *                 itself and has no express line to find.
- */
+ *  `unexplained`  an express registration this scan finds that no node and
+ *                 no wiring explains. Since the hosts stopped carrying a
+ *                 list of paths there should be none left but the tree's own
+ *                 mount and one header decoration, so this is now mostly a
+ *                 guard against the list growing back.
+ *  `unclaimed`    a declared node whose own declaration names a host file
+ *                 that does not implement its handler. The inventory would
+ *                 be naming something nothing answers.
+ *
+ *  Both directions matter, the way `npm run parked` complains about a branch
+ *  nothing explains AND an entry naming a branch that is gone. One direction
+ *  alone is a check that passes by deleting things. */
 export async function drift(options = {}) {
-  const all = await nodes(options.at ?? ".", options);
-  const paths = all.map((n) => n.path);
+  const all = nodes(options.at ?? ".", options);
   const routes = hostRoutes(options.hosts).filter((r) => r.kind === "rival");
-  const unexplained = routes.filter((r) => r.declared === false
-    || (r.node !== undefined && claims(r.node, paths) === false));
-  const served = new Set(routes.map((r) => r.node).filter(Boolean));
-  const unclaimed = all.filter((n) => (n.type === "HOST" || n.type === "PROXY")
-    && served.has(n.path) === false
-    && (n.path.startsWith("/app/") === false || served.has("/app/*") === false)
-    && n.type !== "PROXY");
+  const unexplained = routes.filter((r) => servedBy(r.host, r.path) === undefined);
+  const unclaimed = [];
+  const byHost = new Map();
+  for (const n of all.filter((n) => n.type === "HOST" && n.implementedIn !== undefined && n.mountedElsewhere === undefined)) {
+    if (byHost.has(n.implementedIn) === false) byHost.set(n.implementedIn, implemented(n.implementedIn));
+    const has = byHost.get(n.implementedIn);
+    // a host file this build does not carry is not a disagreement
+    if (has !== undefined && has.has(n.handler) === false) unclaimed.push(n);
+  }
   return {nodes: all, routes, unexplained, unclaimed};
 }
 

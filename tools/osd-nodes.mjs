@@ -32,6 +32,7 @@
 import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
 import {channels, services} from "./osd-icf.mjs";
+import {remoteServices} from "./osd-destinations.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -77,6 +78,14 @@ export function declaredNodes(root = ".") {
         path: path.replace(/\/+$/, "") || "/",
         type: d.type ?? "HOST",
         handler: d.handler,
+        // **Declared, but attached by code of its own.** The OData front is
+        // mounted beside the runtime it proxies to, because the same lines
+        // start the child, install the dev loop and refresh the status
+        // service before a read of it. Saying so costs a written reason, the
+        // way `.leak-allow.json` makes an exception cost a sentence -- an
+        // entry without one is refused by the test, so this is a note and
+        // not a way out.
+        mountedElsewhere: d.mount === "elsewhere" ? (d.why ?? "") : undefined,
         implementedIn: d.host,
         needs: d.needs,
         text: d.text,
@@ -122,13 +131,7 @@ export function packNodes(root = ".") {
  *  Never written in nodes.json -- it is derived from
  *  `.local/destinations.json`, which is gitignored, because a list of the
  *  systems we can reach is not something a public repository carries. */
-export async function proxyNodes(options = {}) {
-  let remoteServices;
-  try {
-    ({remoteServices} = await import("./osd-destinations.mjs"));
-  } catch {
-    return [];
-  }
+export function proxyNodes(options = {}) {
   return remoteServices({say: () => {}, ...options}).map((r) => ({
     path: `/sap/opu/odata/sap/${r.service}`,
     type: "PROXY",
@@ -142,18 +145,67 @@ export async function proxyNodes(options = {}) {
 }
 
 /** Everything, from every registry that declares a node. */
-export async function nodes(root = ".", options = {}) {
+export function nodes(root = ".", options = {}) {
   const sap = [
     ...services(root, options).map((s) => ({...s, implementedIn: s.source, text: s.description})),
     ...channels(root, options).map((c) => ({...c, type: "ABAP", travels: true, implementedIn: c.source, text: c.description})),
   ];
-  const all = [...sap, ...declaredNodes(root), ...packNodes(root), ...(options.proxies === false ? [] : await proxyNodes(options))];
+  const all = [...sap, ...declaredNodes(root), ...packNodes(root), ...(options.proxies === false ? [] : proxyNodes(options))];
   return all.map((n) => ({...n, type: n.type ?? "NODE", worksIn: WORKS_IN[n.type ?? "NODE"] ?? []}))
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
+/** Mount the HOST nodes this host implements, **in the registry's order**.
+ *
+ *  The registry says what exists and in what order; the host says how each
+ *  one attaches. That seam is deliberate and it is where the earlier
+ *  attempt at this went wrong: those are genuinely different express
+ *  shapes -- an exact `app.get("/")`, a prefix `app.use("/app",
+ *  express.static(...))`, a POST with a parameter, a router with no path
+ *  at all -- and flattening them into one "handler" would have needed a
+ *  field per shape inside the declaration, which is the format-invention
+ *  this whole track is removing. So a value here is a *register* function:
+ *  it takes the app and its node and attaches itself however it likes.
+ *
+ *  What the host stops carrying is the **list**: which paths exist, in what
+ *  order, and whether this build has them at all. `tools/osd-routes.mjs`
+ *  then checks both directions, so the declaration and the code cannot
+ *  drift apart in silence.
+ *
+ *  Longest path first, for the same reason `services()` sorts that way:
+ *  `/app/packs.json` must not be swallowed by `/app`. That ordering used to
+ *  be an accident of the order somebody wrote the lines in.
+ *
+ *  A node whose declaration names THIS file and whose handler this file
+ *  does not have is an error and not a skip -- the inventory would be
+ *  naming something nothing answers, and the whole point is that it cannot. */
+export function mountHost(app, all, handlers, options = {}) {
+  const mounted = [];
+  const used = new Set();
+  for (const node of all.filter((n) => n.type === "HOST" && n.mountedElsewhere === undefined)
+    .sort((a, b) => b.path.length - a.path.length)) {
+    const register = handlers[node.handler];
+    if (register === undefined) {
+      if (node.implementedIn === options.host) {
+        throw new Error(`${node.source} declares ${node.path} as served by ${options.host} with the handler `
+          + `"${node.handler}", and ${options.host} has no such handler. Add it, or change the declaration.`);
+      }
+      continue;
+    }
+    register(app, node);
+    used.add(node.handler);
+    mounted.push(node);
+  }
+  const orphan = Object.keys(handlers).filter((name) => used.has(name) === false);
+  if (orphan.length > 0) {
+    throw new Error(`${options.host ?? "this host"} implements ${orphan.join(", ")} and no node declares `
+      + `${orphan.length === 1 ? "it" : "them"}. A path that answers and is in no inventory is the defect this registry exists to remove.`);
+  }
+  return mounted;
+}
+
 if (runsAs("osd-nodes.mjs")) {
-  const all = await nodes(process.argv[2] ?? ".");
+  const all = nodes(process.argv[2] ?? ".");
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify(all, undefined, 2));
   } else {

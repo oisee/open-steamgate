@@ -10,7 +10,8 @@ what order, and how you know it is done**.*
 ## Re-orienting in four commands
 
 ```sh
-node tools/osd-routes.mjs --list     # the scoreboard: who answers what, and why
+node tools/osd-nodes.mjs             # the inventory: every node, its type, where it works
+node tools/osd-routes.mjs            # the drift: what nothing explains (must be 0, both ways)
 node tools/osd-bsp-registry.mjs src  # the BSP applications this tree carries
 npm run lint && npm run transpile    # 0 issues, ~12 s, 1530 objects
 node tools/osd-unit-run.mjs          # ABAP Unit, prints OK
@@ -69,7 +70,43 @@ it.
 
 ## The plan
 
-### B. A handler row carries a type — **do this first**
+### B. A handler row carries a type — **done, 2026-09-20**
+
+`ICFTYP` is read (`handlerRows` in `tools/osd-icf.mjs`, a nesting-aware scan
+because `ICFHANDLER` names both the row and the field in it). The host-served
+paths are declared in `src/icf/nodes.json`. `tools/osd-nodes.mjs` is the one
+reader over both, plus two derivations (a pack's page, a destination's
+service). Both hosts mount **from it** — `hostNodes` in `test/start.mjs` and
+`tools/osd-serve.mjs` — and `reserved = ["/sap/opu/odata", "/sap/bc/adt"]`,
+which sat written out in both, is gone: the claimed prefixes come from the
+registry.
+
+Measured after: 30 nodes (18 ABAP, 10 HOST, 1 PROXY, 1 with no handler),
+**0** express registrations nobody declared, **0** declared nodes nothing
+serves. The twelve rivals are one HOST node each or gone; the one express
+registration left that is a route of its own is the `X-OSD-Generation`
+header, which decorates.
+
+**Two things this changed in the model, and they are worth keeping:**
+
+*`type` and `travels` are different questions.* `type` is what implements the
+node — an ABAP class, a function of this host, another system. `travels` is
+whether the **node** is a SAP object, which is exactly whether it was
+declared in a `*.sicf.xml`. Keeping them apart is what lets the OData front
+say the true thing about itself: its handler is ABAP and its node is not an
+object yet. That is a gap somebody should close, not a wording to argue with.
+
+*A node may be attached by code of its own, and it costs a written reason.*
+`/sap/opu/odata/sap` is mounted beside the runtime it proxies to — the same
+lines start the child, install the dev loop and refresh `ZOSD_STATUS_SRV`
+before a read of it. `"mount": "elsewhere"` says so and `"why"` is checked
+non-empty by the test, the way `.leak-allow.json` makes an exception cost a
+sentence.
+
+**What is left of B:** writing the OData front's own `*.sicf.xml`, so the
+node travels as well as the handler.
+
+### B (as written before it was done)
 
 Was second; promoted by correction 3, because it turns "12 rivals to
 migrate" into "0 rivals, 12 declared nodes of known types" without moving a

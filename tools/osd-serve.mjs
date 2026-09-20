@@ -17,6 +17,7 @@ import express from "express";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {mountServices, channels} from "./osd-icf.mjs";
+import {mountHost, nodes} from "./osd-nodes.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
@@ -58,9 +59,17 @@ app.use((req, res, next) => {
 });
 serveSandboxConfig(app);
 
+// **What this host answers is declared in src/icf/nodes.json, and what
+// follows registers it.** A host used to carry its own list of paths, which
+// is how three hosts came to disagree by construction; now the registry has
+// the list and each entry here only says how it attaches. mountHost() below
+// refuses a handler no node declares and a node this file is declared to
+// serve and does not.
+const hostNodes = {};
+
 // how a supervisor knows this runtime is alive and which generation of the
 // code it carries; not part of any ADT or OData surface
-app.get("/osd/serving", function (req, res) {
+hostNodes.serving = (a, node) => a.get(node.path, function (req, res) {
   res.json({
     ready: true,
     pid: process.pid,
@@ -92,7 +101,7 @@ function dump(error, request) {
   }
   return d;
 }
-app.get("/osd/dumps", function (req, res) {
+hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
 });
 
@@ -106,7 +115,7 @@ const connection = () => globalThis.abap.context.databaseConnections.DEFAULT;
 // is what the application serves, from the same connection. SELECT only,
 // bounded, the same Data the command line uses (tools/osd-data.mjs).
 const data = new Data({root, client: globalThis.abap.context.databaseConnections.DEFAULT});
-app.post("/osd/sql", async function (req, res) {
+hostNodes.sql = (a, node) => a.post(node.path, async function (req, res) {
   let asked;
   try {
     asked = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "{}");
@@ -121,13 +130,20 @@ app.post("/osd/sql", async function (req, res) {
   }
 });
 
+// and the declared ones attach, in the registry's order rather than in the
+// order the lines above happen to sit in
+const declared = nodes(root, {proxies: false});
+mountHost(app, declared, hostNodes, {host: "tools/osd-serve.mjs"});
+// the paths another registry owns, from that registry: see mountServices
+const claimed = declared.filter((n) => n.source.endsWith("nodes.json")).map((n) => n.path);
+
 // SICF: every other ICF service the tree carries, answered here by the
 // same shim the OData front uses. The parent lists the same paths and
 // proxies them, so an activated handler goes live with the recycle.
 const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.run({
   ...args,
   base: new globalThis.abap.types.String().set(args.base),
-})), {root, reserved: ["/sap/opu/odata", "/sap/bc/adt"],
+})), {root, claimed,
   // a node's error belongs in the dumps like any other, and used to reach
   // only console.error -- which is why the one route that moved into a node
   // would have lost its dump() on the way. Given back to every node at once.

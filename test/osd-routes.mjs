@@ -1,6 +1,6 @@
 // The inventory of "who answers a path", and the drift check over it.
 import {expect} from "chai";
-import {mkdtempSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {drift, hostRoutes, icfNodes, scoreboard, servedBy} from "../tools/osd-routes.mjs";
@@ -43,15 +43,23 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
   });
 
   it("a node nothing serves is found too", async () => {
-    // no hosts at all: every HOST node the inventory carries is then
-    // unclaimed, which is the other direction of the same question
-    const {unclaimed} = await drift({hosts: []});
-    expect(unclaimed.length, "with no host read, every HOST node is unserved").to.be.greaterThan(5);
-    expect(unclaimed.every((n) => n.type === "HOST")).to.equal(true);
+    // the other direction: a declaration naming a host file that does not
+    // implement its handler. Built rather than hoped for, because this check
+    // is the one that keeps the inventory from naming things nothing answers
+    const dir = mkdtempSync(join(tmpdir(), "osd-nodes-"));
+    mkdirSync(join(dir, "src", "icf"), {recursive: true});
+    writeFileSync(join(dir, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
+    writeFileSync(join(dir, "empty-host.mjs"), "// a host with no hostNodes table at all\n");
+    writeFileSync(join(dir, "src", "icf", "nodes.json"), JSON.stringify({
+      "/nowhere": {type: "HOST", host: join(dir, "empty-host.mjs"), handler: "nobody", text: "declared and unimplemented"},
+    }));
+    const {unclaimed} = await drift({at: dir, hosts: [], proxies: false});
+    expect(unclaimed.map((n) => n.path)).to.deep.equal(["/nowhere"]);
+    rmSync(dir, {recursive: true, force: true});
   });
 
   it("a node's type says where it works, and the preview is a different promise", async () => {
-    const all = await nodes(".", {proxies: false});
+    const all = nodes(".", {proxies: false});
     for (const n of all) {
       expect(WORKS_IN[n.type], `${n.path} has a type the table knows`).to.not.equal(undefined);
       expect(n.worksIn, n.path).to.be.an("array");
@@ -66,11 +74,24 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
   });
 
   it("travelling follows from where a node is declared, not from a flag", async () => {
-    const all = await nodes(".", {proxies: false});
-    // a SAP object travels; an entry in nodes.json is this host's own and
-    // cannot, because on a system that object does not exist
-    expect(all.filter((n) => n.type === "ABAP").every((n) => n.travels)).to.equal(true);
+    const all = nodes(".", {proxies: false});
+    // **The two questions are not one.** `type` is what implements the node
+    // -- an ABAP class, a function of this host, another system. `travels`
+    // is whether the NODE is a SAP object, and that is exactly whether it
+    // was declared in a *.sicf.xml. Keeping them apart is what lets the
+    // OData front say the true thing about itself: its handler is ABAP and
+    // its node is not an object yet, which is a gap somebody should close
+    // rather than a wording to argue about.
+    for (const n of all) {
+      expect(n.travels, `${n.path} travels iff it is a SAP object`)
+        .to.equal(/\.(sicf|sapc)\.xml$/.test(n.source ?? ""));
+    }
     expect(all.filter((n) => n.type === "HOST").every((n) => n.travels === false)).to.equal(true);
+    const odata = all.find((n) => n.path === "/sap/opu/odata/sap");
+    expect(odata.type, "the front is an ABAP class behind the shim").to.equal("ABAP");
+    expect(odata.travels, "and its node is not an object yet").to.equal(false);
+    expect(odata.mountedElsewhere, "a node attached by code of its own must say why")
+      .to.have.length.greaterThan(20);
     for (const n of declaredNodes(".")) {
       expect(n.text, `${n.path} must say what it is`).to.have.length.greaterThan(10);
       expect(n.implementedIn, `${n.path} must name the file that serves it`).to.match(/\.mjs$/);
@@ -111,13 +132,16 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
     // "plumbing" and no row counted plumbing, so the largest rival was
     // invisible. Body parsing still is plumbing; a router is not, and it is
     // now explained by one node, /sap/bc/adt, instead of thirteen rows.
-    const all = hostRoutes();
-    const nameless = all.filter((r) => r.path === "(no path: middleware)");
+    const nameless = hostRoutes().filter((r) => r.path === "(no path: middleware)");
     expect(nameless.length).to.be.greaterThan(1);
-    expect(nameless.some((r) => r.kind === "rival"), "a mounted router is a rival").to.equal(true);
-    expect(nameless.some((r) => r.kind === "plumbing"), "express.raw is not").to.equal(true);
-    expect(servedBy("test/start.mjs", "(no path: middleware)").node).to.equal("/sap/bc/adt");
-    // and the one registration that is neither: it decorates every answer
+    expect(nameless.some((r) => r.kind === "plumbing"), "express.raw is not a route").to.equal(true);
+    // The façade's own `app.use(facade.router)` is not in this list any
+    // more: it is registered from the registry, under the node
+    // /sap/bc/adt, so the scan no longer sees a path list to judge.
+    const all = nodes(".", {proxies: false});
+    expect(all.find((n) => n.path === "/sap/bc/adt")?.handler).to.equal("adt-facade");
+    // the one registration that is a route and is neither a node nor a
+    // mount: it decorates every answer with the generation that produced it
     expect(servedBy("tools/osd-serve.mjs", "(no path: middleware)").wrapper)
       .to.have.length.greaterThan(10);
   });

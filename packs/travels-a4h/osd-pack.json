@@ -1,5 +1,5 @@
 {
   "name": "travels-a4h",
-  "description": "The demo Fiori app reading a service on ANOTHER system, through a destination this system resolves. Same webapp/, one line different: the data source is absolute, so the page asks its own origin and OSD answers from .local/gateway-destinations.json.",
+  "description": "The demo travel app reading a service on ANOTHER system, through a destination this system resolves. Same webapp/, one line different: the data source is absolute, so the page asks its own origin and OSD answers from .local/destinations.json.",
   "order": 95
 }
