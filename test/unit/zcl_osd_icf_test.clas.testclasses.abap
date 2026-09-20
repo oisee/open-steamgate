@@ -131,3 +131,68 @@ CLASS ltcl_lookup IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+* The screen over the registry: the one field it writes, and the bookkeeping
+* without which writing it would be undone at the next start.
+CLASS ltcl_screen DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS teardown.
+    METHODS switching_off_is_an_edit FOR TESTING RAISING cx_static_check.
+    METHODS the_object_hash_is_kept FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_screen IMPLEMENTATION.
+
+  METHOD setup.
+    DATA ls_service TYPE icfservice.
+    DATA ls_origin  TYPE zosd_icf_origin.
+
+    DELETE FROM icfservice.
+    DELETE FROM zosd_icf_origin.
+
+    ls_service-icf_name   = 'ZORK'.
+    ls_service-icfparguid = 'P'.
+    ls_service-url        = '/sap/bc/zork/'.
+    ls_service-icfactive  = 'X'.
+    INSERT icfservice FROM ls_service.
+
+    ls_origin-icf_name   = 'ZORK'.
+    ls_origin-icfparguid = 'P'.
+    ls_origin-origin     = 'S'.
+    ls_origin-objhash    = 'abc123'.
+    INSERT zosd_icf_origin FROM ls_origin.
+  ENDMETHOD.
+
+  METHOD teardown.
+    DELETE FROM icfservice.
+    DELETE FROM zosd_icf_origin.
+  ENDMETHOD.
+
+  METHOD switching_off_is_an_edit.
+    DATA lv_active TYPE icfservice-icfactive.
+    DATA lv_origin TYPE zosd_icf_origin-origin.
+
+    zcl_osd_sicf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
+
+    SELECT SINGLE icfactive FROM icfservice INTO lv_active WHERE icf_name = 'ZORK'.
+    cl_abap_unit_assert=>assert_equals( act = lv_active exp = ' ' ).
+*   and the row is a person's now, which is the only thing that stops the
+*   next start replacing it from the object
+    SELECT SINGLE origin FROM zosd_icf_origin INTO lv_origin WHERE icf_name = 'ZORK'.
+    cl_abap_unit_assert=>assert_equals( act = lv_origin exp = 'E' ).
+  ENDMETHOD.
+
+  METHOD the_object_hash_is_kept.
+*   **Blanking it is the mistake the rule exists to catch**, and it was made
+*   by hand while proving the mechanism worked: with nothing to compare,
+*   "has the object changed since it was applied" is always yes, the next
+*   start sets the edit aside and the node comes back on.
+    DATA lv_hash TYPE zosd_icf_origin-objhash.
+
+    zcl_osd_sicf=>set_active( iv_name = 'ZORK' iv_parent = 'P' iv_active = ' ' ).
+    SELECT SINGLE objhash FROM zosd_icf_origin INTO lv_hash WHERE icf_name = 'ZORK'.
+    cl_abap_unit_assert=>assert_equals( act = lv_hash exp = 'abc123' ).
+  ENDMETHOD.
+
+ENDCLASS.
