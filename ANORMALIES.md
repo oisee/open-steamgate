@@ -1100,3 +1100,42 @@ measurement and cost two sessions half an hour.
 - The cheap check, which settled it in one step: print the count, the types,
   **and `git -C .local/lars/open-abap-core rev-parse HEAD` together**, so
   that a number can never travel without the state it was taken in
+
+
+### NOTE-2026-09-20-generation-hash-moved — and the cause I named was wrong
+
+Not an anomaly in anybody's software yet, because it has not been isolated.
+Written down because a **wrong explanation was published in a commit
+message** (`735feed`) and a wrong explanation is worse than an open question:
+the next person stops looking.
+
+- What was observed: the i7's `/sap/bc/adt/core/http/build` reported
+  `synchronized: false` three times, and `hashOf(root)` returned
+  `0c3527a9` -> `3aa2efb4` -> `b0de031f` within a few minutes **with no
+  build between them**. The last equals `liveHash`, and once the tree was
+  quiet `source == live` without anything being rebuilt.
+- What was in flight each time: a full `tools/osd-suites.mjs` run.
+- **What I blamed, and it is not true:**
+  `src/zosd_test/src/zosd_test_demo_inc.prog.abap` has been showing `M` all
+  session, so I said the suites write it. They do not: its diff is
+  `"comments added directly on FS` and `"+2`, a person's editor test, made
+  before this session started and deliberately left alone. The file being
+  dirty and the hash moving are two facts that happened to sit next to each
+  other, and I joined them because one explained the other.
+- What has since been ruled out, by measuring rather than reasoning: no file
+  under any input folder or library folder was written in the last 90
+  minutes (`find … -newermt`); `describeBuild()` is stable across repeated
+  calls; and a suite that starts and recycles servers
+  (`test/osd-runtime.mjs`) held the hash steady for 30 seconds of polling.
+- What is still unknown: which input the **full** tree run touches. A file
+  created and removed during the run would not show up in `-newermt`, which
+  is the shape to look for next.
+- How to find it: snapshot the file list and sizes of `inputsOf(root)`
+  before a full run, poll during it, and diff on the first change of
+  `hashOf`. Twenty lines, and it either names the file or shows the hash
+  moving with no input changing, which would be a defect in `hashOf` itself.
+- Why it matters beyond tidiness: `synchronized` is how this session decides
+  whether the i7 is serving its own source, and it is read after every
+  deploy. A field that is unreadable while a suite runs is a field whose
+  false readings get explained away -- which is exactly what happened three
+  times tonight, twice by blaming the deployment and once by blaming a test.
