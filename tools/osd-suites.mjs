@@ -9,8 +9,46 @@
 // forgets to pass its status back reports success for a failing suite, which
 // is the false green this project keeps paying for.
 import {spawnSync} from "node:child_process";
-import {existsSync, readFileSync} from "node:fs";
+import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {fileURLToPath} from "node:url";
+
+/** A suite on disk that the list does not name.
+ *
+ *  **A hand-kept list of suites is the same instrument as a hand-kept list of
+ *  tasks**: it is read like a measurement and ages like an opinion, and this
+ *  tree already grew a checker for the other one (`osd-queue-check.mjs`) for
+ *  exactly that reason. Measured 2026-09-20: ten files under `test/` with
+ *  `describe(` blocks in them were in no list and had run in nobody's suite
+ *  for as long as anybody could tell. All ten passed when finally run, so
+ *  nothing was hiding in them -- which is the point. A green `npm run
+ *  integration` was a true answer to a narrower question than the one it was
+ *  read as, and the drift was silent in the direction that reads as progress.
+ *
+ *  What counts as a suite is `describe(` at the start of a line. Deliberately
+ *  crude: `test/setup.mjs`, `test/start.mjs`, `test/run.mjs` and `test/seed.mjs`
+ *  are harness modules with no `describe` in them and drop out on their own,
+ *  so the rule needs no list of exceptions to keep true -- and a list of
+ *  exceptions is the thing that drifts. */
+export const hasSuites = (text) => /^describe\(/m.test(text);
+
+export function suitesOnDisk(dir, read = (p) => readFileSync(p, "utf8"), list = readdirSync) {
+  return list(dir)
+    .filter((f) => f.endsWith(".mjs"))
+    .map((f) => `${dir}/${f}`)
+    .filter((p) => hasSuites(read(p)));
+}
+
+/** Both directions, because a checker that complains in one is half a
+ *  checker: a suite nobody runs, and a name in the list that is no longer a
+ *  file. The second would fail the run on its own when mocha cannot find it;
+ *  it is named here so the reason arrives before the stack trace does. */
+export function listDrift(onDisk, listed) {
+  const named = new Set(listed.map((f) => f.replace(/^\.\//, "")));
+  return {
+    unlisted: onDisk.filter((p) => named.has(p) === false),
+    absent: [...named].filter((p) => onDisk.includes(p) === false && existsSync(p) === false),
+  };
+}
 
 // **What a run could not look at is a third value, and it is not a pass.**
 //
@@ -54,6 +92,20 @@ const listed = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites.jso
 const files = listed.files ?? [];
 if (files.length === 0) {
   console.error("test/suites.json lists no suites -- that is not a pass, it is an empty run");
+  process.exit(2);
+}
+
+// Asked before the run, not after: a list that does not cover the tree makes
+// every number below it narrower than it reads, and finding that out at the
+// end is finding it out after somebody has already believed the number.
+// the same way the list itself is resolved: both sides of a comparison must
+// be found by the same rule, or the checker answers about two trees
+const TESTS = fileURLToPath(new URL("../test", import.meta.url));
+const drift = listDrift(suitesOnDisk(TESTS).map((p) => `test/${p.slice(TESTS.length + 1)}`), files);
+if (drift.unlisted.length > 0 || drift.absent.length > 0) {
+  for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.json does not name it`);
+  for (const p of drift.absent) console.error(`osd-suites: test/suites.json names ${p}, which is not there`);
+  console.error("Add it, or delete it. A list of suites nobody checks is a list that quietly shrinks the run.");
   process.exit(2);
 }
 
