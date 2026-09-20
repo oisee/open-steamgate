@@ -14,7 +14,9 @@ sap.ui.define(["sap/suite/ui/generic/template/lib/AppComponent"], function (AppC
   // Read-only, and that is the drift rule rather than a missing feature: a
   // write through OData would go round ZCL_OSD_SICF=>SET_ACTIVE, which
   // keeps the object's hash while flipping the origin, and without that
-  // bookkeeping the next build silently undoes the edit
+  // bookkeeping the edit is replaced, without a word, on the day its
+  // object next changes -- not at the next build, which is quieter and
+  // therefore worse
   // (docs/registry-drift.md). The writable cut waits until that rule lives
   // in what the dispatcher writes through.
   return AppComponent.extend("stg.icf.Component", {
