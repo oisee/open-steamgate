@@ -42,6 +42,10 @@ import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
 // defaults to it; a suite that calls startServer() itself stays inline.
 const MODE = process.env.STG_SERVE === "child" ? "child" : "inline";
 
+/** the close of the last server this module started, so the next bind can
+ *  wait for it however its suite happened to write the hook */
+let closing;
+
 async function loadInline() {
   const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
   const {initializeABAP} = await from("init.mjs");
@@ -401,7 +405,24 @@ export function startServer(quiet) {
     });
   }
 
+  // **The port is a property of the run, and the hooks cannot be trusted to
+  // free it.** `close()` was made awaitable earlier tonight so that
+  // `after(() => server?.close())` would wait -- and three suites write it
+  // that way while twelve write `after(() => { server?.close(); })`, which
+  // returns undefined and waits for nothing. Fixing the mechanism and
+  // leaving the callers to use it correctly is the defect this tree has
+  // recorded seven times; the eighth was mine, four hours after I wrote the
+  // rule down.
+  //
+  // So binding does not depend on how a hook was written: if the port is
+  // still held by a server this module started, wait for that close and try
+  // again. Measured before: a full suite run on a free port answered
+  // EADDRINUSE twenty-four times.
   const server = app.listen(PORT);
+  server.on("error", (error) => {
+    if (error?.code !== "EADDRINUSE" || closing === undefined) throw error;
+    void closing.then(() => server.listen(PORT));
+  });
 
   // Push channels: the websocket half of what a repository declares.
   //
@@ -481,13 +502,18 @@ export function startServer(quiet) {
     if (typeof cb === "function") {
       secure?.close();
       void runtime?.stop();
-      return close(cb);
+      closing = new Promise((resolve) => close((...a) => {
+        cb(...a);
+        resolve();
+      }));
+      return server;
     }
-    return (async () => {
+    closing = (async () => {
       await new Promise((resolve) => (secure === undefined ? resolve() : secure.close(resolve)));
       await runtime?.stop();
       await new Promise((resolve) => close(resolve));
     })();
+    return closing;
   };
   return server;
 }
