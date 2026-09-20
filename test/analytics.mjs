@@ -46,3 +46,27 @@ describe("analytics: ZC_STG_FLIGHTCUBE through SADL", () => {
     expect(Number(d.__count)).to.equal(12);
   });
 });
+
+describe("analytics: NYC taxi cube through SADL", () => {
+  let server;
+  before(() => { server = startServer(true); });
+  after(() => { server.close(); });
+
+  it("exposes real dimensions and additive measures in the OData metadata", async () => {
+    const xml = await (await fetch(S + "/$metadata")).text();
+    expect(xml).to.match(/EntityType Name="Zc_Osd_Taxicube"[^>]*sap:semantics="aggregate"/);
+    expect(xml).to.match(/Name="BOROUGH"[^>]*sap:aggregation-role="dimension"/);
+    expect(xml).to.match(/Name="TRIPS"[^>]*sap:aggregation-role="measure"/);
+    expect(xml).to.match(/Name="TIP"[^>]*sap:aggregation-role="measure"/);
+  });
+
+  it("groups the four attributed TLC sample rows before sending them to Fiori", async () => {
+    const url = S + "/Zc_Osd_TaxicubeSet?$select=BOROUGH,TRIPS,FARE,TIP&$orderby=BOROUGH&$format=json";
+    const response = await fetch(url);
+    expect(response.status).to.equal(200);
+    const rows = (await response.json()).d.results;
+    expect(rows.map((row) => row.BOROUGH)).to.deep.equal(["Bronx", "Brooklyn", "Manhattan", "Queens"]);
+    expect(rows.reduce((n, row) => n + row.TRIPS, 0)).to.equal(4);
+    expect(rows.reduce((n, row) => n + Number(row.FARE), 0)).to.be.closeTo(99.4, 0.001);
+  });
+});
