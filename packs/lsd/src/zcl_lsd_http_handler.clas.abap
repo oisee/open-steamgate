@@ -9,10 +9,8 @@ CLASS zcl_lsd_http_handler DEFINITION
   " chunks, inflates it with the browser's own DecompressionStream, paints
   " rows of styled runs on a canvas in the xterm 256-colour palette the
   " recording's styles use, and paces itself by each frame's recorded time.
-  " It starts by itself once the show is in, because a light-show that waits
-  " to be asked is a screenshot; the music needs a gesture, so when the
-  " browser refuses to play it the show runs on and the first click or key
-  " brings the sound in at the right second. The toolbar keeps Play and Stop,
+  " Recording and music preload, but only Play starts the show and audio.
+  " The toolbar keeps Play and Stop,
   " which is how the show is replayed. When the recording runs out before the
   " music does, the finale is played again from where it begins rather than
   " the show restarting at the logon screen.
@@ -60,12 +58,14 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `<div class="win">` &&
 `<div class="title">LSD - Light-Show Dispatcher <span>ZAPC_LSD</span></div>` &&
 `<div class="menu"><b>Show</b><b>Screen</b><b>Help</b></div>` &&
-`<div class="tools"><button id="play">&#9654; Play</button><span id="status">Connecting...</span></div>` &&
+`<div class="tools"><button id="play" disabled>&#9654; Play</button><span id="status">Connecting...</span></div>` &&
 `<div class="screen"><canvas id="screen" width="1080" height="648"></canvas></div>` &&
 `<audio id="audio" src="?audio" preload="auto"></audio>` &&
 `<div class="bar"><span id="left">a demoscene show played to SAP GUI over DIAG, recorded screen by screen with sap-tui</span><span>replayed over an ABAP push channel</span></div>` &&
 `</div>` &&
-`<div class="foot"><a href="https://github.com/oisee/sap-lsd">sap-lsd</a> &middot; <a href="https://github.com/oisee/open-steamgate">open-steamgate</a> &middot; <a href="https://www.youtube.com/watch?v=Pszxxj-OUAk">sap-lsd in a real SAP GUI (video)</a></div>` &&
+`<div class="foot"><a href="https://github.com/oisee/sap-lsd">sap-lsd</a> &middot; ` &&
+`<a href="https://github.com/oisee/open-steamgate">open-steamgate</a> &middot; ` &&
+`<a href="https://www.youtube.com/watch?v=Pszxxj-OUAk">sap-lsd in a real SAP GUI (video)</a></div>` &&
 `<script>` &&
 `var APC='/sap/bc/apc/sap/zapc_lsd';` &&
 `var CHUNK=65536;` &&
@@ -125,7 +125,7 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `new Response(new Blob([all]).stream().pipeThrough(ds)).text().then(function(text){` &&
 `var ls=text.split(String.fromCharCode(10));` &&
 `for(var i=0;i<ls.length;i++){if(ls[i])line(ls[i]);}` &&
-`prepare();start();}).catch(function(e){statusEl.textContent='the show did not inflate: '+e;});}` &&
+`prepare();playBtn.disabled=!frames.length;statusEl.textContent='Ready - press PLAY to start';}).catch(function(e){statusEl.textContent='the show did not inflate: '+e;});}` &&
 `function askBytes(){var to=Math.min(total,got+CHUNK);ws.send(JSON.stringify({cmd:'bytes',from:got,to:to}));}` &&
 `function connect(){ws=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+APC);` &&
 `ws.onopen=function(){statusEl.textContent='Connected, loading the show...';};` &&
@@ -140,8 +140,6 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `ws.onerror=function(){if(!frames.length)statusEl.textContent='Disconnected';};}` &&
 `playBtn.onclick=function(){if(playing)stop(false);else start();};` &&
 `if(audio){audio.onended=function(){if(playing)stop(true);};}` &&
-`document.addEventListener('pointerdown',function(){if(!soundWanted)return;startAudio();});` &&
-`document.addEventListener('keydown',function(){if(!soundWanted)return;startAudio();});` &&
 `connect();` &&
 `</script></body></html>`.
   ENDMETHOD.

@@ -99,6 +99,7 @@ CLASS zcl_osd_icf IMPLEMENTATION.
 
     SELECT * FROM icfservice INTO TABLE lt_service.
     SELECT * FROM icfhandler INTO TABLE lt_handler.
+    SORT lt_handler BY icf_name icfparguid icforder icftyp.
 *   the description is a row of its own, keyed by language, because that is
 *   where a real system keeps it -- every *.sicf.xml in the corpus carries
 *   it in an <ICFDOCU> block and not inside <ICFSERVICE>

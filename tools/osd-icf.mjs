@@ -120,7 +120,8 @@ export function serviceOf(xml, source) {
   if (url === undefined || url === "") {
     return undefined;
   }
-  const rows = handlerRows(xml);
+  const rows = handlerRows(xml).sort((a, b) => String(a.order ?? "").localeCompare(String(b.order ?? ""))
+    || String(a.icftyp ?? "").localeCompare(String(b.icftyp ?? "")));
   // the last handler of the chain is the one that answers; the earlier rows
   // of a real node are the inherited ones
   const row = rows[rows.length - 1];
@@ -216,30 +217,7 @@ export function services(root = process.cwd(), options = {}) {
 /** The registry the way a system holds it, shaped like the nodes
  *  `mountServices` takes. The caller reads the rows -- this file has no
  *  database and should not grow one. */
-export function servicesFromRows(rows) {
-  const found = [];
-  for (const s of rows.ICFSERVICE ?? []) {
-    if (String(s.ICFACTIVE ?? "").trim() !== "X") {
-      continue;
-    }
-    const chain = (rows.ICFHANDLER ?? []).filter(
-      (h) => h.ICF_NAME === s.ICF_NAME && h.ICFPARGUID === s.ICFPARGUID);
-    const last = chain[chain.length - 1];
-    found.push({
-      path: String(s.URL ?? "").replace(/\/+$/, ""),
-      name: s.ICF_NAME,
-      description: s.ICF_DOCU,
-      handler: last?.ICFHANDLER,
-      icftyp: last?.ICFTYP,
-      type: last === undefined ? undefined : (last.ICFTYP === "A" ? "ABAP" : last.ICFTYP),
-      travels: true,
-      source: "ICFSERVICE",
-    });
-  }
-  // longest first, the same rule `routes()` applies to the files: a parent
-  // must not swallow its child
-  return found.sort((a, b) => b.path.length - a.path.length);
-}
+export {servicesFromRows} from "./osd-icf-routing.mjs";
 
 // Mount them on an express app. `run` is cl_express_icf_shim.run, passed in
 // rather than imported, because this file is loaded by the façade process and
@@ -259,14 +237,14 @@ export function mountServices(app, run, options = {}) {
   // Those are two different questions that happen to have the same answer
   // most of the time.
   for (const service of options.from ?? services(options.root ?? process.cwd(), options)) {
-    if (service.handler === undefined) {
+    if (service.handler === undefined && service.active !== false) {
       continue;
     }
     // A handler row whose type we do not implement is not an ABAP class,
     // and running it as one would be a guess with a 500 at the end of it.
     // Nothing in this tree produces such a row today; the check exists so
     // that an imported node carrying one is refused out loud.
-    if (service.type !== "ABAP") {
+    if (service.type !== "ABAP" && service.active !== false) {
       options.say?.(`ICF ${service.path}: handler type ${service.icftyp} is not one this host serves -- not mounted`);
       continue;
     }
@@ -283,6 +261,10 @@ export function mountServices(app, run, options = {}) {
       continue;
     }
     const handler = async (req, res) => {
+      if (service.active === false) {
+        res.status(404).end();
+        return;
+      }
       try {
         await run({req, res, class: service.handler, base: service.path});
       } catch (e) {

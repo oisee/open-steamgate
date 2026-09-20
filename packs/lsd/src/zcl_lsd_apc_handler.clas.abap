@@ -62,7 +62,12 @@ CLASS zcl_lsd_apc_handler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD if_apc_wsp_extension~on_message.
-    DATA(lv_json) = i_message->get_text( ).
+    DATA lv_json TYPE string.
+    TRY.
+        lv_json = i_message->get_text( ).
+      CATCH cx_apc_error.
+        RETURN.
+    ENDTRY.
     IF lv_json CS '"cmd":"info"'.
       load( ).
       send( i_message_manager = i_message_manager iv_text = info( ) ).
@@ -118,9 +123,13 @@ CLASS zcl_lsd_apc_handler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD send.
-    DATA(lo_message) = i_message_manager->create_message( ).
-    lo_message->set_text( iv_text ).
-    i_message_manager->send( lo_message ).
+    TRY.
+        DATA(lo_message) = i_message_manager->create_message( ).
+        lo_message->set_text( iv_text ).
+        i_message_manager->send( lo_message ).
+      CATCH cx_apc_error.
+        " The connection may already be closed; ON_ERROR handles cleanup.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD number_after.

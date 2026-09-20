@@ -78,6 +78,7 @@ describe("tools/osd-status: the system as one JSON object", () => {
   ];
 
   const take = (options = {}) => snapshot(root, {
+    client: null,
     runtime: pool(2),
     listeners,
     env: {},
@@ -262,9 +263,9 @@ describe("tools/osd-status: the system as one JSON object", () => {
 
   it("does not reflect an unknown backend label", () => {
     for (const name of ["constructor", "__proto__", "toString"]) {
-      expect(databaseFacts({env: {STG_DB: name}})[0].value).to.equal("unknown");
+      expect(databaseFacts({client: null, env: {STG_DB: name}})[0].value).to.equal("unknown");
     }
-    const facts = databaseFacts({env: {STG_DB: "password-looking-value"}});
+    const facts = databaseFacts({client: null, env: {STG_DB: "password-looking-value"}});
     expect(facts[0].value).to.equal("unknown");
     expect(JSON.stringify(facts)).to.not.include("password-looking-value");
   });

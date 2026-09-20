@@ -13,12 +13,12 @@ import {shim} from "./generated/socket-shim.mjs";
 import {describe} from "../tools/osd-describe.mjs";
 
 const MOUNT = new URL("./", self.location).pathname;
-// every prefix this deployment answers, longest first so a service nested
-// under another is matched before its parent. Generated from the SICF nodes
-// in the tree, so an imported application arrives with its own route.
-const SERVICE_PREFIXES = services
+// Forward the ICF branch to the backend that owns the registry, including
+// nodes created only in the database. File-derived prefixes alone would
+// leave those requests to Pages and return its static 404.
+const SERVICE_PREFIXES = ["sap/bc/", ...services
   .map((s) => s.path.replace(/^\//, "") + "/")
-  .sort((a, b) => b.length - a.length);
+  .sort((a, b) => b.length - a.length)];
 const RESET_PATH = "__preview/reset";
 // Which bundle is actually answering, said by the bundle itself.
 //

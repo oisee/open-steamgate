@@ -3,6 +3,8 @@ import {serviceOf, channelOf, handlerRows, mountServices, services, servicesFrom
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import express from "express";
+import {serviceForPath} from "../tools/osd-icf-routing.mjs";
 
 // SICF, and the APC application beside it: which class answers which URL.
 // The shapes are abapGit's, so these are read from the real serialisations
@@ -65,6 +67,11 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     expect(rows.every((r) => r.icftyp === "A")).to.equal(true);
   });
 
+  it("XML handler selection follows ICFORDER rather than document position", () => {
+    const reversedOrder = TYPED.replace("<ICFORDER>01</ICFORDER>", "<ICFORDER>03</ICFORDER>");
+    expect(serviceOf(reversedOrder, "fixture").handler).to.equal("ZCL_PARENT");
+  });
+
   it("a *.sicf.xml is an ABAP node, and that follows from the file it is in", () => {
     const service = serviceOf(TYPED, "x");
     expect(service.handler, "the last of the chain answers").to.equal("ZCL_OSD_STATUS_HTTP");
@@ -121,16 +128,56 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     ],
   };
 
-  it("an inactive node is not mounted, which is what deactivating one in SICF does", () => {
+  it("an inactive node remains a routing barrier", () => {
     const found = servicesFromRows(ROWS);
-    expect(found.map((s) => s.path)).to.not.include("/sap/bc/off");
+    expect(found.find((s) => s.path === "/sap/bc/off").active).to.equal(false);
     expect(found.map((s) => s.path)).to.include("/sap/bc/zork");
   });
 
   it("the last of the handler chain answers, and the earlier rows are inherited", () => {
-    const zork = servicesFromRows(ROWS).find((s) => s.path === "/sap/bc/zork");
+    const zork = servicesFromRows({...ROWS, ICFHANDLER: [...ROWS.ICFHANDLER].reverse()})
+      .find((s) => s.path === "/sap/bc/zork");
     expect(zork.handler).to.equal("ZCL_ZORK_HTTP_HANDLER");
     expect(zork.type, "ICFTYP A is an ABAP class").to.equal("ABAP");
+  });
+
+  for (const disabled of ["ZORK", "ZDEEP"]) {
+    it(`HTTP and preview block an inactive ${disabled} subtree while siblings still answer`, async () => {
+      const rows = {...ROWS, ICFSERVICE: ROWS.ICFSERVICE.map((s) => ({...s,
+        ICFACTIVE: s.ICF_NAME === disabled ? " " : "X"}))};
+      const from = servicesFromRows(rows);
+      const app = express();
+      const called = [];
+      mountServices(app, async ({res, class: handler}) => {
+        called.push(handler);
+        res.send(handler);
+      }, {from});
+      const server = app.listen(0, "127.0.0.1");
+      await new Promise((resolve) => server.once("listening", resolve));
+      try {
+        const origin = `http://127.0.0.1:${server.address().port}`;
+        for (const path of ["/sap/bc/zork/deep", "/sap/bc/zork/deep/page.html"]) {
+          expect((await fetch(origin + path)).status).to.equal(404);
+          expect(serviceForPath(from, path), "browser selection agrees").to.equal(undefined);
+        }
+        expect(called).to.deep.equal([]);
+        const sibling = disabled === "ZORK" ? "/sap/bc/off/" : "/sap/bc/zork/other/";
+        expect((await fetch(origin + sibling)).status).to.equal(200);
+        expect(serviceForPath(from, sibling).handler).to.equal(called[0]);
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+  }
+
+  it("a handlerless active child inherits, but a handlerless inactive child blocks", () => {
+    const rows = {...ROWS, ICFHANDLER: ROWS.ICFHANDLER.filter((h) => h.ICF_NAME !== "ZDEEP")};
+    expect(serviceForPath(servicesFromRows(rows), "/sap/bc/zork/deep/page").handler)
+      .to.equal("ZCL_ZORK_HTTP_HANDLER");
+    rows.ICFSERVICE = ROWS.ICFSERVICE.map((s) => s.ICF_NAME === "ZDEEP" ? {...s, ICFACTIVE: " "} : s);
+    expect(serviceForPath(servicesFromRows(rows), "/sap/bc/zork/deep/page")).to.equal(undefined);
+    expect(serviceForPath(servicesFromRows(rows), "/sap/bc/zork/deeper/page").handler)
+      .to.equal("ZCL_ZORK_HTTP_HANDLER");
   });
 
   it("a child sorts before its parent, so a parent cannot swallow it", () => {

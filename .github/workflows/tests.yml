@@ -151,3 +151,14 @@ jobs:
         run: node tools/osd-suites.mjs --report-skips
         env:
           STG_PORT: "3030"
+
+      # Keep the launchpad's six core intents covered on the live Node shape
+      # as well as in preview.yml's static Pages check.  This comes after the
+      # build and suites, so a broken main build fails before browser work;
+      # preview.yml remains an independent job and only publishes after its
+      # own browser check succeeds.
+      - name: Install Chromium for browser smoke tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Launchpad, FCL navigation and Zork APC smoke tests
+        run: node scripts/run-e2e-isolated.mjs test/e2e/launchpad-navigation.spec.mjs test/e2e/fcl.spec.mjs test/e2e/listreport.spec.mjs test/e2e/zork.spec.mjs test/e2e/lsd.spec.mjs --config playwright.config.mjs

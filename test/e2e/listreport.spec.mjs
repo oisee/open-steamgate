@@ -256,7 +256,8 @@ test("object page: Create on the bookings table posts to TravelSet('T0001')/to_B
   await expect(page.getByText("Ada Lovelace")).toBeVisible();
 
   // the sub-object page in create mode (non-draft): keys and fields editable
-  await page.getByRole("button", {name: "Create"}).first().focus();
+  // FCL also keeps the list's Create visible: target the bookings column.
+  await page.locator(".sapFFCLColumnMid").getByRole("button", {name: "Create", exact: true}).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", {name: "Unnamed Object"})).toBeVisible();
   const bookingId = page.getByRole("textbox", {name: "Booking"});
@@ -277,8 +278,8 @@ test("object page: Create on the bookings table posts to TravelSet('T0001')/to_B
   // the app moves on to the created booking's page
   await expect(page.getByRole("heading", {name: "Alan Turing"})).toBeVisible();
 
-  // back on the travel (breadcrumb): the bookings table shows the new one with the old two
-  await page.getByRole("link", {name: "Berlin to Copenhagen"}).first().click();
+  // Close the nested FCL column: the parent table shows the new booking.
+  await page.locator(".sapFFCLColumnEnd").getByRole("button", {name: "Close", exact: true}).click();
   await expect(page.getByRole("gridcell", {name: "Ada Lovelace"})).toBeVisible();
   await expect(page.getByRole("gridcell", {name: "Alan Turing"})).toBeVisible();
 });
