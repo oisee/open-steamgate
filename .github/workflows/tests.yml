@@ -100,6 +100,24 @@ jobs:
       - name: Fetch the pack sources
         run: node tools/osd-fetch.mjs
 
+      # **The library folders, from the config rather than from a list here.**
+      # The transpiler falls back to a lib's url and clones into a temporary
+      # directory, so a BUILD on a clean machine works. The object store does
+      # not: it reads `lib.folder` off the disk, and a folder that is not
+      # there is a library its registry does not have. Four of the six were
+      # missing on this runner, and it came back as twelve failures that
+      # looked like twelve different things -- "RAISE, unknown class
+      # /iwbep/cx_mgw_busi_exception", a check run that never reached
+      # `processed`, an activation that never reported activationExecuted.
+      #
+      # It runs after the two pinned clones above, which it then leaves
+      # alone: a folder that is there is not fetched, so the pins stay the
+      # pins and the rest follow abap_transpile.json.
+      - name: The library folders the object store reads
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-libs.mjs --check
+
       # **Transpile first, and the order is load-bearing.** `npm run lint`
       # analyses `src/` **and `gen/`**, and `gen/` is written by the
       # transpile step: the SEGW registry, the search-help registry, the RFC
