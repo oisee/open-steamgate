@@ -268,14 +268,17 @@ const STATUS_SERVICE = /^(\/sap\/opu\/odata\/sap\/ZOSD_STATUS_SRV|\/sap\/bc\/gui
 const bootedAt = realNow();
 // the worker fills these in when it starts the backend; the fallbacks are for
 // a host that does not (a test importing this module directly)
-let identity = {stamp: buildId, rootHint: "preview"};
+let identity = {stamp: buildId, rootHint: "preview", mount: ""};
 
 function statusSnapshot() {
   const since = bootedAt.toISOString();
+  // every path a person can click is written from outside this system's
+  // root, because in the browser preview that root is not the origin's
+  const outside = (path) => (path.startsWith("/") ? `${identity.mount}${path}` : path);
   const rows = [
-    ...services.map((s) => ({path: s.path, kind: "ICF", handler: s.handler ?? "", text: s.text ?? "", pack: s.pack ?? ""})),
-    ...channels.map((c) => ({path: c.path, kind: "APC", handler: c.handler ?? "", text: c.text ?? "", pack: c.pack ?? ""})),
-    ...odataServices,
+    ...services.map((s) => ({path: outside(s.path), kind: "ICF", handler: s.handler ?? "", text: s.text ?? "", pack: s.pack ?? ""})),
+    ...channels.map((c) => ({path: outside(c.path), kind: "APC", handler: c.handler ?? "", text: c.text ?? "", pack: c.pack ?? ""})),
+    ...odataServices.map((o) => ({...o, path: outside(o.path)})),
   ].sort((a, b) => a.path.localeCompare(b.path));
   return {
     system: {
@@ -344,6 +347,18 @@ export async function startBackend(stored, options = {}) {
     // the deployment's own directory (main, pr-7), which is all of the
     // location this may say; never a path from anybody's disk
     rootHint: String(options.mount ?? "").split("/").filter((p) => p !== "").pop() ?? "preview",
+    // **Where this system sits on the origin, because here it is not the
+    // root.** On a server `/app/flp.html` is a working address; on GitHub
+    // Pages the deployment lives under /open-steamgate/main/ and the same
+    // string sends a browser to oisee.github.io/app/flp.html, which is not
+    // a page. Alice clicked one and got GitHub's 404.
+    //
+    // The status rows are a snapshot regenerated on every read, so an
+    // outside-view address in them costs nothing and is not carried
+    // anywhere: this is the same correction `x-forwarded-prefix` already
+    // makes to the absolute URLs the OData front writes, applied to the
+    // one kind of address that is data rather than a header.
+    mount: String(options.mount ?? "").replace(/\/$/, ""),
   };
   await initializeABAP();
   await registerServices();
