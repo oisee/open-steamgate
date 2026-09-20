@@ -821,7 +821,27 @@ files:
   sieve and the screen are the same person.
 - Before pausing: a mechanical comparison of the grammar against the binder,
   so that "we found five silent substitutions by hand" becomes "the two are
-  compared automatically".
+  compared automatically". **Done 2026-09-20, and it found a sixth on its
+  first run.** `tools/sqlscript/grammar-cover.mjs`: every grammar class must
+  be bound, refused by name, or listed in `NOT_NAMED` with a reason, and it
+  complains in both directions. The sixth was `TableFunctionCall` -- a name
+  the binder mentioned nowhere, so `FROM my_func(:p)` fell through the
+  wrapper-unwrapping fallback and lowered to `FROM "MY_FUNC"`: the call read
+  as a table, the argument gone, no refusal. Reading found it; one
+  `compile()` call confirmed it, which reading alone could not, because
+  `FROM "MY_FUNC"` looks like working output. Two of the five allowances
+  claim a refusal that happens through a `default` branch and names nothing
+  in the source, so `test/sqlscript-cover.mjs` runs a DECLARE and an IF and
+  reads what comes back.
+
+  The same comparison one storey down — the IR's node names against the
+  lowering's dispatch — was run and finds **nothing**: 12 expression nodes,
+  10 relations, every one dispatched on, and no branch for a name the IR
+  cannot build. No instrument was built for it, and the measurement is
+  recorded so that nobody spends an hour discovering the same zero. The
+  asymmetry has a reason: the IR is a closed set of constructors in one
+  file, the grammar is 32 classes matched by a fallback that unwraps what it
+  does not know.
 
 **this session** — what it has already shipped and owns:
 - **E.5**, the launchpad asking for a config we do not serve — **done
@@ -953,6 +973,10 @@ live in the entries further down and in
 DISTINCT, EXCEPT/INTERSECT and qualified columns in the SQLScript front end,
 a `WHERE` dropped from a CDS view, and a CDS view checked by nobody. Every
 one of them parsed, lowered or passed, and computed something else.
+
+**A sixth, 2026-09-20, and this one was found by a tool rather than by hand**
+— `FROM my_func(:p)` lowering to `FROM "MY_FUNC"`. That is what the
+grammar-against-binder comparison was for, and the first thing it printed.
 
 **Still open, in the order we would take them**
 
