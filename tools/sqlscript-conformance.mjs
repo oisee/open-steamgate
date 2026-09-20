@@ -31,7 +31,7 @@
 //
 // The HANA column is measured on the machine that has HANA Express and
 // merged in; this file prints the columns it can reach.
-import {readFileSync} from "node:fs";
+import {readFileSync, existsSync} from "node:fs";
 import {basename} from "node:path";
 import {isInvalid} from "./sqlscript-eager.mjs";
 
@@ -443,8 +443,55 @@ export async function measureEngines() {
   return {engines, builds: {...BUILDS}};
 }
 
+/** The oracle column, kept in the tree because it cannot be re-measured here.
+ *
+ *  HANA Express lives on another machine, so until now everyone without one
+ *  compared against DuckDB under a footer saying it was a stand-in. That
+ *  footer was honest and it was also the whole answer: an oracle that exists
+ *  on one machine is an oracle nobody can check against, and the instrument
+ *  spent three sessions comparing two guesses. The measurement is a fact
+ *  about an engine's behaviour over a fixture we wrote -- the same kind of
+ *  thing as the protocol facts this repository already keeps -- so it is
+ *  tracked. */
+export const ORACLE = "test/sqlscript-hana-oracle.json";
+
+/** What a stored column may be used for, decided without reading a file.
+ *
+ *  Three answers, and the third is the one instruments here keep losing:
+ *  usable, refused, and **usable but incomplete**. A column measured before
+ *  a case existed has nothing to say about that case, and the comparison
+ *  already knows to call such a row unmeasured -- what it could not know is
+ *  the other direction, a stored answer for a case that no longer exists.
+ *  That one means the oracle was measured against a different list and is
+ *  quietly older than it looks, which is exactly how a fixture drifts by
+ *  standing still. So it is reported rather than ignored. */
+export function oracleFrom(file, fixture, caseIds) {
+  if (file?.hana === undefined) {
+    return {refused: "carries no hana column"};
+  }
+  if (file.fixture !== undefined && file.fixture !== fixture) {
+    return {refused: `was measured on the ${file.fixture} fixture and this run is ${fixture}`};
+  }
+  const known = new Set(caseIds);
+  return {
+    hana: file.hana,
+    measuredAt: file.measuredAt,
+    build: file.builds?.hana ?? undefined,
+    // a case the oracle never answered: the comparison calls it unmeasured
+    missing: caseIds.filter((id) => file.hana[id] === undefined),
+    // and a stored answer for a case nobody asks any more
+    stale: Object.keys(file.hana).filter((id) => known.has(id) === false),
+  };
+}
+
+/** where the column came from, in the words the header prints */
+export function oracleSource(from, at, build) {
+  const when = at === undefined ? "date not recorded" : `measured ${at}`;
+  return `hana: ${build ?? "build not recorded"} (${when}, from ${from})`;
+}
+
 async function main() {
-  const {engines} = await measureEngines();
+  const {engines, builds} = await measureEngines();
 
   // a column measured elsewhere (HANA Express lives on another machine) merges in
   if (process.argv.includes("--hana")) {
@@ -454,34 +501,48 @@ async function main() {
       console.error("hana: " + (error.message ?? error));
     }
   }
-  const merged = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
+  // Where the oracle column comes from when this machine has no HANA:
+  // `--merge <file>` names one, `--no-oracle` asks for none (which is how the
+  // stand-in path stays testable), and otherwise the tracked one is used. A
+  // default that has to be remembered is a default nobody gets.
+  const asked = process.argv.includes("--merge") ? process.argv[process.argv.indexOf("--merge") + 1] : undefined;
+  const merged = asked ?? (process.argv.includes("--no-oracle") || engines.hana !== undefined
+    || existsSync(ORACLE) === false ? undefined : ORACLE);
+  let oracleNote;
   if (merged !== undefined) {
     const file = JSON.parse(readFileSync(merged, "utf8"));
-    // A column measured on the padded fixture, merged into an unpadded run,
-    // compares two different questions and answers confidently. It is the
-    // shape this table keeps finding elsewhere and it would have been easy
-    // to walk into here: the padded and unpadded columns differ by seven
-    // rows, which is exactly the size of a finding. A file written before
-    // this field existed says nothing, and is taken at the caller's word.
-    if (file.fixture !== undefined && file.fixture !== FIXTURE) {
-      // and the advice names a flag that EXISTS: padded is the default and
-      // there is no --padded, so telling somebody to add it costs the hour
-      // this message was written to save
-      console.error(`refusing to merge: ${merged} was measured on the ${file.fixture} fixture and this run is ` +
-        `${FIXTURE}. Re-measure it, or ${file.fixture === "padded" ? "add --padded" : "drop --padded"}.`);
-      process.exit(2);
+    const use = oracleFrom(file, FIXTURE, CASES.map((c) => c.id));
+    if (use.refused !== undefined) {
+      // An explicitly named file that cannot be used is an error: somebody
+      // asked for it by name. The tracked one is a default, so a refusal
+      // there falls back to the stand-in and says so -- the run still works
+      // with `--padded`, which is the whole reason the other fixture exists.
+      console.error(`refusing the oracle: ${merged} ${use.refused}.` +
+        (file.fixture !== undefined ? ` Re-measure it, or ${file.fixture === "padded" ? "add --padded" : "drop --padded"}.` : ""));
+      if (asked !== undefined) process.exit(2);
+    } else {
+      engines.hana = use.hana;
+      oracleNote = oracleSource(merged, use.measuredAt, use.build);
+      if (use.stale.length > 0) {
+        console.error(`the oracle answers ${use.stale.length} case(s) this list no longer has ` +
+          `(${use.stale.join(", ")}): it was measured against a different list and is older than it looks.`);
+      }
     }
-    engines.hana = file.hana;
   }
-
   if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({fixture: FIXTURE, cases: CASES, ...engines}, null, 1));
+    // **`builds` travels with the column.** The oracle merged in today was
+    // measured on 2026-09-19 and carries no engine version, because this dump
+    // did not write one -- so the tracked file says `null` rather than a
+    // guess, and the next measurement will not have to.
+    console.log(JSON.stringify({fixture: FIXTURE, cases: CASES, builds: {...builds, ...BUILDS}, ...engines}, null, 1));
   } else {
     const names = Object.keys(engines);
     // the header says which BUILD answered, not only which name: two of these
     // columns are SQLite and they are not the same SQLite
     console.log(`fixture: ${FIXTURE} (the rows as they are written into the table)`);
-    console.log(names.map((n) => `${n}: ${BUILDS[n] ?? "build not recorded"}`).join("\n"));
+    console.log(names.map((n) => (n === "hana" && oracleNote !== undefined
+      ? oracleNote
+      : `${n}: ${BUILDS[n] ?? "build not recorded"}`)).join("\n"));
     console.log(`case              ${names.map((n) => n.padEnd(34)).join("")}`);
     for (const one of CASES) {
       console.log(`${one.id.padEnd(17)} ${names.map((n) => show(engines[n][one.id]).padEnd(34)).join("")}`);

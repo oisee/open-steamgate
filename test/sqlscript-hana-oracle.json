@@ -1,0 +1,143 @@
+{
+ "_": [
+  "The HANA column of tools/sqlscript-conformance.mjs, measured once and kept.",
+  "",
+  "Why it is tracked: the measurement needs a HANA, and everyone without one",
+  "got a stand-in (DuckDB) under a footer saying so. An oracle that exists on",
+  "a single machine is an oracle nobody else can check against, and the",
+  "instrument then compares two guesses and prints a number.",
+  "",
+  "It is a measurement, not a capture: 39 scalar answers over a synthetic",
+  "fixture this repository wrote. No identifiers in it and nothing of SAP's.",
+  "",
+  "Re-measure with --hana --json and keep fixture, builds.hana and hana from",
+  "the result. A file measured on the other fixture is refused by name: the",
+  "padded and unpadded columns differ by seven rows, which is the size of a",
+  "finding."
+ ],
+ "fixture": "unpadded",
+ "measuredAt": "2026-09-19",
+ "builds": {
+  "hana": null
+ },
+ "buildNote": "the run that produced this did not record an engine version -- --json did not carry builds until 2026-09-20. Unknown is the true value and is not invented here.",
+ "hana": {
+  "int_div": {
+   "value": "0.500000"
+  },
+  "int_div_neg": {
+   "value": "-3.500000"
+  },
+  "dec_arith": {
+   "value": "0.30"
+  },
+  "cast_ok": {
+   "value": "42"
+  },
+  "cast_bad": {
+   "error": "invalid number: SQL Error"
+  },
+  "concat_padded": {
+   "value": "abc|"
+  },
+  "substr_padded": {
+   "value": "abc"
+  },
+  "length_padded": {
+   "value": "3"
+  },
+  "char_equals": {
+   "value": "1"
+  },
+  "ifnull": {
+   "value": "-1"
+  },
+  "null_arith": {
+   "value": null
+  },
+  "null_order": {
+   "value": "5"
+  },
+  "empty_scalar": {
+   "value": null
+  },
+  "div_zero": {
+   "error": "division by zero undefined: SQL Error"
+  },
+  "like_case": {
+   "value": "0"
+  },
+  "cast_char_narrow": {
+   "value": "abc"
+  },
+  "cast_round": {
+   "value": "1"
+  },
+  "fn_lower": {
+   "value": "abc"
+  },
+  "fn_upper": {
+   "value": "ABC"
+  },
+  "fn_trim": {
+   "value": "abc"
+  },
+  "fn_ltrim": {
+   "value": "abc"
+  },
+  "fn_rtrim": {
+   "value": "abc"
+  },
+  "fn_abs": {
+   "value": "7"
+  },
+  "fn_coalesce": {
+   "value": "-1"
+  },
+  "fn_sum": {
+   "value": "3"
+  },
+  "fn_min": {
+   "value": "abc"
+  },
+  "fn_max": {
+   "value": "-7"
+  },
+  "fn_count": {
+   "value": "1"
+  },
+  "agg_concat_ordered": {
+   "value": "zz,cc,abc"
+  },
+  "agg_concat_unordered": {
+   "value": "abc,zz,cc"
+  },
+  "win_row_number": {
+   "value": "1"
+  },
+  "win_rank": {
+   "value": "1"
+  },
+  "win_dense_rank": {
+   "value": "1"
+  },
+  "win_count_over": {
+   "value": "1"
+  },
+  "fn_round_half": {
+   "value": "3.0"
+  },
+  "fn_round_half_negative": {
+   "value": "-3.0"
+  },
+  "fn_round_scale": {
+   "value": "2.350"
+  },
+  "fn_avg": {
+   "value": "1.000000"
+  },
+  "fn_log": {
+   "error": "wrong number of arguments in function invocation: line 1 col 8 (at pos 7)"
+  }
+ }
+}
