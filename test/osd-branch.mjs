@@ -16,7 +16,9 @@
 //   replay against one reported thirteen differences of "200 against 503",
 //   which is a true statement about nothing
 import {expect} from "chai";
-import {existsSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {safeName, databaseFor, freePort, missingPackages, isBuilt, environmentFor} from "../tools/osd-branch.mjs";
 
 describe("two branches cannot share what makes them one system", () => {
@@ -123,8 +125,23 @@ describe("a count is printed with the state it was taken in", () => {
     for (const one of libraryState()) {
       expect(one.head, `${one.folder} reported this repository's HEAD`).to.not.equal(ours);
     }
-    expect(libraryState().some((one) => one.head === "not a clone"),
-      "and the folder that is not a clone says so rather than borrowing a hash").to.equal(true);
+    // **And the plain folder is built rather than hoped for.** This used to
+    // assert that SOME configured library is not a clone, which was true
+    // only because `.local/lars/open-abap-apc` happened to be a plain
+    // folder on the machines that ran it. `tools/osd-libs.mjs` now clones
+    // every library the config names, so on a clean runner there is no
+    // such folder and the assertion failed -- a test about the tree's
+    // furniture wearing the clothes of a test about the function.
+    // (osg-osd-i7 caused it and fixed it here; the trap it guards is
+    // fable-osd's and is the assertion above.)
+    const dir = mkdtempSync(join(tmpdir(), "osd-branch-lib-"));
+    mkdirSync(join(dir, "plain"), {recursive: true});
+    writeFileSync(join(dir, "abap_transpile.json"),
+      JSON.stringify({input_folder: ["src"], libs: [{folder: "/plain"}]}));
+    // a folder inside no repository at all still has to say so
+    const outside = libraryState(dir);
+    expect(outside.map((one) => one.head), `${dir}/plain`).to.deep.equal(["not a clone"]);
+    rmSync(dir, {recursive: true, force: true});
   });
 
   it("the whole state carries a time, a count and the libraries together", async () => {
