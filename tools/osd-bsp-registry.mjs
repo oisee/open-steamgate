@@ -24,7 +24,7 @@
 // in every tool that would ever show it.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
-import {manifestFor} from "./osd-bsp-app.mjs";
+import {checkAppName, manifestFor} from "./osd-bsp-app.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // what a browser is told a page is. A BSP page carries no MIME in the
@@ -80,6 +80,14 @@ export function declared(file = "src/bsp/apps.json") {
   }
   const decl = JSON.parse(readFileSync(file, "utf8"));
   return Object.entries(decl).map(([app, d]) => {
+    // **The name limit is checked here too, and that gap was real.** A BSP
+    // application name is at most 15 characters because it becomes an
+    // ICFNAME (measured on A4H in cl_o2_helper=>check_application_name_valid).
+    // osd-bsp-app.mjs refused a longer one at DEPLOY time and this file did
+    // not, so an app could be declared, generated and served here and then
+    // be refused by the system with "WAPA - error from create_new: 4". The
+    // first three declarations included a 16-character name.
+    checkAppName(app);
     const at = d.folder;
     const pages = walk(at).map((f) => f.slice(at.length + 1).replaceAll("\\", "/")).sort();
     return {

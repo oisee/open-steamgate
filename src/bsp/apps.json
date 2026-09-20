@@ -3,5 +3,20 @@
     "folder": "webapp/status",
     "text": "System status: what runs, on which ports, out of which packs",
     "service": "ZOSD_STATUS_SRV"
+  },
+  "ZOSD_BOOKING_AP": {
+    "folder": "webapp/booking",
+    "text": "Bookings: the demo object page",
+    "service": "ZSTG_DEMO_SRV"
+  },
+  "ZOSD_SEGW_APP": {
+    "folder": "webapp/segw",
+    "text": "SEGW: the Service Builder as an app",
+    "service": "ZSTG_SEGW_SRV"
+  },
+  "ZOSD_ANALYTICS": {
+    "folder": "webapp/analytics",
+    "text": "Flight analytics: the analytical list page",
+    "service": "ZSTG_SADL_SRV"
   }
 }
