@@ -126,6 +126,16 @@ annotations:
       - {id: Origin, label: Origin, lineItem: to_Origin}
     fieldGroups:
       General: [Url, IcfName, IcfParGuid, IcfActive, OrigName, IcfAltNme]
+  # A property's label has to be said here as well as on the property: the
+  # filter bar reads the annotation and not the model, so without these the
+  # selection fields render as ICFACTIVE and ICFNAME -- the column names,
+  # shouted. Same shape as src/status/, which carries the same block.
+  Node/IcfName: {label: Node}
+  Node/IcfParGuid: {label: Parent}
+  Node/Url: {label: URL}
+  Node/IcfActive: {label: Active}
+  Node/OrigName: {label: Original name}
+  Node/IcfAltNme: {label: Alias}
 
   Handler:
     header: {typeName: Handler, typeNamePlural: Handlers, title: Handler, description: IcfName}
@@ -133,12 +143,17 @@ annotations:
       - {value: IcfOrder, label: Order}
       - {value: Handler, label: Handler}
       - {value: IcfTyp, label: Type}
+  Handler/IcfOrder: {label: Order}
+  Handler/Handler: {label: Handler}
+  Handler/IcfTyp: {label: Type}
 
   Docu:
     header: {typeName: Description, typeNamePlural: Descriptions, title: IcfDocu, description: IcfLangu}
     lineItem:
       - {value: IcfLangu, label: Language}
       - {value: IcfDocu, label: Description}
+  Docu/IcfLangu: {label: Language}
+  Docu/IcfDocu: {label: Description}
 
   Origin:
     header: {typeName: Origin, typeNamePlural: Origins, title: Origin, description: ChangedAt}
@@ -146,3 +161,6 @@ annotations:
       - {value: Origin, label: Written by}
       - {value: ObjHash, label: Object as applied}
       - {value: ChangedAt, label: Changed}
+  Origin/Origin: {label: Written by}
+  Origin/ObjHash: {label: Object as applied}
+  Origin/ChangedAt: {label: Changed}
