@@ -1,28 +1,32 @@
 // Compose files are the source of truth; generated Markdown is committed.
-import {readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const doc = new URL('docs/spin.md', root);
-const start = '<!-- BEGIN GENERATED PORTAINER STACKS -->';
-const end = '<!-- END GENERATED PORTAINER STACKS -->';
 const original = readFileSync(doc, 'utf8');
-if (original.split(start).length !== 2 || original.split(end).length !== 2 ||
-    original.indexOf(end) < original.indexOf(start)) {
-  throw new Error('Expected one ordered pair of generated stack markers in docs/spin.md');
+const imageStart = '<!-- BEGIN GENERATED IMAGE STACKS -->';
+const imageEnd = '<!-- END GENERATED IMAGE STACKS -->';
+if (original.split(imageStart).length !== 2 || original.split(imageEnd).length !== 2 || original.indexOf(imageEnd) < original.indexOf(imageStart)) {
+  throw new Error('Expected one ordered pair of generated image stack markers');
 }
-const blocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'HANA Express']].map(([id, title]) => {
-  const path = `docker/portainer/compose.${id}.yml`;
-  const yaml = readFileSync(new URL(path, root), 'utf8').trimEnd();
-  return `### ${title}: complete Portainer Stack\n\nSource: [${path}](../${path}). Copy the entire block into the Web editor.\n\n\`\`\`yaml\n${yaml}\n\`\`\``;
+const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'New HANA Express + OSD'], ['postgres', 'New PostgreSQL + OSD']].map(([id, title]) => {
+  const path = `docker/compose.${id}.yml`;
+  const yaml = readFileSync(new URL(path, root), 'utf8');
+  const mirror = new URL(`docker/portainer/compose.${id}.yml`, root);
+  if (!existsSync(mirror) || readFileSync(mirror, 'utf8') !== yaml) {
+    if (process.argv.includes('--check')) {
+      console.error(`docker/portainer/compose.${id}.yml is stale. Run: node scripts/sync-spin.mjs`);
+      process.exitCode = 1;
+    } else writeFileSync(mirror, yaml);
+  }
+  return `### Ready image: ${title}\n\nSource: [${path}](../${path}).\n\n\`\`\`yaml\n${yaml.trimEnd()}\n\`\`\``;
 });
-const generated = `${start}\n\n${blocks.join('\n\n')}\n\n${end}`;
-const updated = original.slice(0, original.indexOf(start)) + generated +
-  original.slice(original.indexOf(end) + end.length);
+const updated = original.slice(0, original.indexOf(imageStart)) + `${imageStart}\n\n${imageBlocks.join('\n\n')}\n\n${imageEnd}` + original.slice(original.indexOf(imageEnd) + imageEnd.length);
 if (process.argv.includes('--check')) {
   if (updated !== original) {
     console.error('docs/spin.md is stale. Run: node scripts/sync-spin.mjs');
     process.exitCode = 1;
-  } else console.log('spin.md matches all three Compose files');
+  } else console.log('spin.md matches the ready-image Compose files');
 } else if (updated !== original) {
   writeFileSync(doc, updated);
   console.log('Updated Compose blocks in docs/spin.md');

@@ -31,6 +31,7 @@
     "probe": "node tools/closure-probe.mjs",
     "amdp:oracle": "node tools/amdp-oracle.mjs",
     "e2e": "npm run transpile && playwright test",
+    "e2e:isolated": "node scripts/run-e2e-isolated.mjs",
     "e2e:install": "playwright install chromium",
     "cds": "node tools/cds2ddic.mjs",
     "unit:file": "npm run transpile && rm -f .local/db/unit.sqlite* && echo RUNNING on a SQLite file && STG_DB=file STG_DB_PATH=.local/db/unit.sqlite node --expose-gc output/index.mjs && echo OK",
@@ -87,6 +88,7 @@
   "devDependencies": {
     "@abaplint/cli": "^2.120.48",
     "@abaplint/core": "^2.120.48",
+    "@abaplint/database-pg": "^2.11.83",
     "@abaplint/database-sqlite": "^2.13.83",
     "@abaplint/runtime": "^2.13.89",
     "@abaplint/transpiler": "^2.13.89",

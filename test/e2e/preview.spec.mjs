@@ -741,6 +741,12 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     await page.goto(`${ORIGIN}/app/flp.html`, {waitUntil: "domcontentloaded", timeout: 60000});
     await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
     await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
+    const logo = page.locator("#shell-header-icon");
+    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect(logo).toHaveAttribute("src", /\/app\/pass-logo\.png$/);
+    await expect.poll(() => logo.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+    expect(await logo.evaluate((img) => ({width: img.clientWidth, height: img.clientHeight})))
+      .toEqual({width: 60, height: 30});
 
     // the tile targets, read off the page the shell actually booted from.
     // The shell consumes sap-ushell-config during startup, so only the group
@@ -891,7 +897,14 @@ test("the launchpad's console and network, characterised", async () => {
     // the allowance list is empty rather than kept "just in case" — an
     // allowance that outlives its defect is the failure this shape exists to
     // prevent, and the emptiest version of it is no list at all.
-    expect(refused, `the page asked for something it did not get:\n${refused.join("\n")}`).toHaveLength(0);
+    // The shell briefly requests its built-in logo before our PASS image
+    // replaces the src. The browser cancels only that superseded request;
+    // the replacement itself must load, and every other request must work.
+    const logo = page.locator("#shell-header-icon");
+    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect.poll(() => logo.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+    const missing = refused.filter((entry) => !/^net::ERR_ABORTED https:\/\/ui5\.sap\.com\/[^/]+\/resources\/sap\/ushell\/themes\/base\/img\/SAPLogo\.svg$/.test(entry));
+    expect(missing, `the page asked for something it did not get:\n${missing.join("\n")}`).toHaveLength(0);
     // and the one that was fixed: the tile's question now has an answer
     const engine = await page.evaluate(async () => {
       const res = await fetch("/sap/bc/osd/amdp/engine");
@@ -1002,6 +1015,37 @@ test("the registry screen counts the nodes this deployment actually serves", asy
 // this morning -- an absolute component URL, an absolute data source, a
 // file name that does not survive a URL -- would break this one too, and
 // each of those passed every check that existed at the time.
+test("preview restart routes from the saved ICF activity", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "osd-preview-icf-"));
+  let context;
+  const open = async () => {
+    context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    return page;
+  };
+  try {
+    let page = await test.step("start the initial browser", open);
+    await page.goto(`${ORIGIN}/sap/bc/osd/sicf/`);
+    const row = page.locator("tr").filter({has: page.locator("td.u", {hasText: "/sap/bc/zstg_icf_demo/"})});
+    await row.getByRole("button", {name: "switch off", exact: true}).click();
+    await expect(page.locator("body")).toContainText("switched off");
+    await test.step("stop the initial browser", () => context.close());
+    context = undefined;
+    page = await test.step("restart with the saved database", open);
+    const probe = () => page.evaluate(async () => {
+      const off = await fetch("sap/bc/zstg_icf_demo/", {signal: AbortSignal.timeout(15000)});
+      const on = await fetch("sap/bc/osd/sicf/", {signal: AbortSignal.timeout(15000)});
+      return {off: off.status, on: on.status};
+    });
+    expect(await test.step("probe after restart", probe)).toEqual({off: 404, on: 200});
+  } finally {
+    await context?.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 test("the ICF registry application lists the nodes it is a registry of", async () => {
   const profile = await mkdtemp(join(tmpdir(), "osd-preview-"));
   const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
@@ -1036,6 +1080,3 @@ test("the ICF registry application lists the nodes it is a registry of", async (
     await rm(profile, {recursive: true, force: true});
   }
 });
-
-
-

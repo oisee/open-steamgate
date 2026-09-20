@@ -2,7 +2,8 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {hostKind, packsInfo, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
+import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
+import {databaseDescriptor} from "../tools/osd-database-identity.mjs";
 
 // The snapshot the facade posts to ZCL_OSD_STATUS=>REFRESH. The contract is
 // the JSON below and the Fiori app is built against it, so these tests say
@@ -10,6 +11,49 @@ import {hostKind, packsInfo, portsOf, servicesOf, snapshot, socketsOn} from "../
 // snapshot cannot know without a real system — the pool, the listeners, the
 // generation — is injected, which is what makes it testable at all.
 describe("tools/osd-status: the system as one JSON object", () => {
+  it("exposes only safe connected descriptor fields", () => {
+    expect(databaseDescriptor({name: "HDB", connected: true, password: "secret", path: "/private/db", host: "private"}))
+      .to.deep.equal({engine: "HDB", storage: "server", connected: true});
+    expect(databaseDescriptor({name: "sqlite", sqlite: {}}).connected).to.equal(true);
+    expect(databaseDescriptor({name: "sqlite"}).connected).to.equal(false);
+    expect(databaseDescriptor({name: "postgres", connected: true, host: "private", password: "secret"}))
+      .to.deep.equal({engine: "postgres", storage: "server", connected: true});
+  });
+
+  it("reads child facts and rejects unavailable, stale or invalid descriptors", async () => {
+    const runtime = {url: "http://127.0.0.1:45678", generation: "abc"};
+    const good = {ready: true, generation: "abc", databaseIdentity: {engine: "duckdb", storage: "file", connected: true, password: "secret"}};
+    const read = (body) => childDatabaseFacts(runtime, {fetcher: async (url, options) => {
+      expect(url.pathname).to.equal("/osd/serving");
+      expect(options.signal).to.be.instanceOf(AbortSignal);
+      expect(options.redirect).to.equal("error");
+      return {ok: true, json: async () => body};
+    }});
+    expect((await read(good))[0]).to.include({value: "duckdb", note: "connected backend"});
+    const pg = {...good, databaseIdentity: {engine: "postgres", storage: "server", connected: true}};
+    expect((await read(pg))[0]).to.include({value: "postgres", note: "connected backend"});
+    expect(JSON.stringify(await read(good))).not.to.include("secret");
+    for (const body of [{}, {...good, generation: "old"}, {...good, ready: false},
+      {...good, databaseIdentity: {...good.databaseIdentity, connected: false}},
+      {...good, databaseIdentity: {...good.databaseIdentity, engine: "constructor"}},
+      {...good, databaseIdentity: {...good.databaseIdentity, storage: "/private/path"}}]) {
+      expect(await read(body)).to.equal(undefined);
+    }
+    expect(await childDatabaseFacts({})).to.equal(undefined);
+    expect(await childDatabaseFacts(runtime, {fetcher: async () => { throw new Error("unavailable"); }})).to.equal(undefined);
+    expect(await childDatabaseFacts({...runtime, url: "http://example.test"}, {fetcher: () => { throw new Error("must not fetch"); }})).to.equal(undefined);
+  });
+
+  it("bounds a stalled child request", async () => {
+    const result = await childDatabaseFacts({url: "http://127.0.0.1:1", generation: "abc"}, {
+      timeoutMs: 20,
+      fetcher: (_url, {signal}) => new Promise((_resolve, reject) => {
+        const keepAlive = setTimeout(() => reject(new Error("test timeout")), 500);
+        signal.addEventListener("abort", () => { clearTimeout(keepAlive); reject(signal.reason); });
+      }),
+    });
+    expect(result).to.equal(undefined);
+  });
   let root;
   const write = (file, text = "") => {
     mkdirSync(join(root, file, ".."), {recursive: true});
@@ -34,6 +78,7 @@ describe("tools/osd-status: the system as one JSON object", () => {
   ];
 
   const take = (options = {}) => snapshot(root, {
+    client: null,
     runtime: pool(2),
     listeners,
     env: {},
@@ -193,14 +238,46 @@ describe("tools/osd-status: the system as one JSON object", () => {
       }
     };
     flat(s.system);
-    for (const key of ["processes", "ports", "services", "packs"]) {
+    for (const key of ["processes", "ports", "services", "packs", "database"]) {
       expect(s[key]).to.be.an("array");
       s[key].forEach(flat);
     }
-    expect(Object.keys(s)).to.deep.equal(["system", "processes", "ports", "services", "packs"]);
+    expect(s.database).to.deep.equal([
+      {section: "Database", name: "Engine", value: "sqlite", note: "configured backend; connection not observed"},
+      {section: "Database", name: "Storage", value: "file", note: "persistent database storage"},
+    ]);
+    expect(Object.keys(s)).to.deep.equal(["system", "processes", "ports", "services", "packs", "database"]);
     expect(Object.keys(s.processes[0])).to.deep.equal(["pid", "role", "port", "generation", "epoch", "since", "sockets", "rss_mb", "alive"]);
     expect(Object.keys(s.ports[0])).to.deep.equal(["port", "protocol", "purpose", "state", "note"]);
     expect(Object.keys(s.packs[0])).to.deep.equal(["name", "order", "objects", "folders", "description"]);
+  });
+
+  it("reports facts from a connected client without exposing its path", () => {
+    const facts = databaseFacts({client: {name: "duckdb", path: "/private/stack/osd.duckdb", connected: true}, env: {STG_DB: "file"}});
+    expect(facts).to.deep.equal([
+      {section: "Database", name: "Engine", value: "duckdb", note: "connected backend"},
+      {section: "Database", name: "Storage", value: "file", note: "persistent database storage"},
+    ]);
+    expect(JSON.stringify(facts)).to.not.include("private");
+  });
+
+  it("does not reflect an unknown backend label", () => {
+    for (const name of ["constructor", "__proto__", "toString"]) {
+      expect(databaseFacts({client: null, env: {STG_DB: name}})[0].value).to.equal("unknown");
+    }
+    const facts = databaseFacts({client: null, env: {STG_DB: "password-looking-value"}});
+    expect(facts[0].value).to.equal("unknown");
+    expect(JSON.stringify(facts)).to.not.include("password-looking-value");
+  });
+
+  it("marks configuration unobserved when the child has not started", async () => {
+    const state = await take({runtime: {generation: "abc"}, env: {STG_DB: "hana"}});
+    expect(state.database[0]).to.include({value: "HDB", note: "configured backend; connection not observed"});
+  });
+
+  it("does not replace a pathless SQLite client's facts with file configuration", () => {
+    const facts = databaseFacts({client: {name: "sqlite", connected: true}, env: {STG_DB: "file", STG_DB_PATH: "/private/not-used.sqlite"}});
+    expect(facts[1].value).to.equal("memory");
   });
 
   it("counts sockets rather than naming peers", () => {

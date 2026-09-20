@@ -242,6 +242,7 @@ export class HanaDatabaseClient {
     this.droppedSchema = false;
     this.options = input;
     this.client = undefined;
+    this.connected = false;
     this.inTransaction = false;
   }
 
@@ -302,12 +303,14 @@ export class HanaDatabaseClient {
     await this.#run(`CREATE SCHEMA "${this.schema}"`).catch(() => undefined);
     await this.#run(`SET SCHEMA "${this.schema}"`);
     globalThis.abap?.builtin?.sy?.get()?.dbsys?.set(this.name);
+    this.connected = true;
   }
 
   async disconnect() {
     await this.commit();
     this.client?.end();
     this.client = undefined;
+    this.connected = false;
   }
 
   /** a persisted schema already carries the tables. The name is upper case

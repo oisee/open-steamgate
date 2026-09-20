@@ -135,6 +135,31 @@ export async function setup(abap, schemas, insert) {
   abap.context.RFCDestinations["AMDP"] = new AmdpDestination({trace: process.env.STG_AMDP_TRACE === "1"});
   installTraceDestination(abap);
   installStoreDestination(abap);
+  if (process.env.STG_DB === "postgres") {
+    // The preview returns above and has no PostgreSQL socket. Keep this
+    // server-only driver out of its service-worker bundle (as rfc-live does).
+    const {OsdPostgresClient, postgresInserts} = await import(/* webpackIgnore: true */ "../tools/postgres-client.mjs");
+    db = new OsdPostgresClient({trace: process.env.STG_DB_TRACE === "1"});
+    // The upstream client creates a pool before it opens a socket. Verify a
+    // real query before publishing the backend's identity to ABAP and status.
+    await db.connect();
+    abap.context.databaseConnections["DEFAULT"] = traced(db);
+    abap.builtin.sy.get().dbsys?.set(db.name);
+    if (await db.hasSchema(schemas.pg)) return;
+    await db.beginTransaction();
+    try {
+      await db.execute(schemas.pg);
+      await db.execute(postgresInserts(insert));
+      await db.execute(seedStatements());
+      await loadScaledData(db, "postgres");
+      await db.stamp(schemas.pg);
+      await db.commit();
+    } catch (error) {
+      await db.rollback();
+      throw error;
+    }
+    return;
+  }
   // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
   // procedure and the tables are then in one database and nothing has to be
   // mirrored (docs/amdp-in-hana.md, backlog B.19). Never a default: the cost

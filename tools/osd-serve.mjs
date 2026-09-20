@@ -13,6 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep} from "./osd-dialog-step.mjs";
+import {databaseDescriptor} from "./osd-database-identity.mjs";
 import express from "express";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -103,6 +104,7 @@ hostNodes.serving = (a, node) => a.get(node.path, function (req, res) {
     root,
     // the connection's own path, not the environment's guess about it
     database: globalThis.abap?.context?.databaseConnections?.DEFAULT?.path ?? process.env.STG_DB_PATH ?? ":memory:",
+    databaseIdentity: databaseDescriptor(globalThis.abap?.context?.databaseConnections?.DEFAULT),
   });
 });
 

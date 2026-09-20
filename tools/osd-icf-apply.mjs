@@ -33,9 +33,16 @@ export const keyOf = (row) => `${row.ICF_NAME}|${row.ICFPARGUID}`;
 /** What an object said, as one value, so "has it changed" is a comparison
  *  rather than a diff. The handler chain is part of it: a node whose class
  *  changed and whose URL did not has changed. */
-export function contentHash(service, handlers) {
+const descriptions = (docu) => docu.map((d) => [d.ICF_LANGU, d.ICF_DOCU])
+  .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+export function contentHash(service, handlers, docu = []) {
   const chain = handlers.map((h) => `${h.ICFORDER}:${h.ICFTYP}:${h.ICFHANDLER}`).sort().join(",");
-  return createHash("sha1").update(JSON.stringify([service, chain])).digest("hex").slice(0, 16);
+  // Preserve the old digest for objects without descriptions. Existing
+  // described objects are upgraded below without overwriting local edits.
+  const content = [service, chain];
+  if (docu.length > 0) content.push(descriptions(docu));
+  return createHash("sha1").update(JSON.stringify(content)).digest("hex").slice(0, 16);
 }
 
 /** The five cases of the rule, as the actions they are.
@@ -63,19 +70,38 @@ export function plan(objects, table, origins = new Map()) {
   for (const service of objects.ICFSERVICE) {
     const key = keyOf(service);
     const handlers = chainOf(objects, key);
-    const hash = contentHash(service, handlers);
+    const docu = docuOf(objects, key);
+    const hash = contentHash(service, handlers, docu);
     const was = byKey.get(key);
     const origin = origins.get(key);
     if (was === undefined) {
       actions.push({action: "INSERT", key, url: service.URL, service, handlers, docu: docuOf(objects, key), hash});
       continue;
     }
-    if (origin?.hash === hash) {
+    // Empty descriptions retain the legacy digest. A SEEDED legacy row
+    // may still carry descriptions which the incoming object just removed.
+    // EDITED rows retain the conservative migration rule below.
+    const removedLegacyDocu = origin?.origin === SEEDED
+      && docu.length === 0 && docuOf(table, key).length > 0
+      && origin.hash === contentHash(service, handlers);
+    if (origin?.hash === hash && !removedLegacyDocu) {
       // **The object has not changed since it was applied.** Whatever the
       // row says now -- including an edit -- stands. This is the case that
       // makes "writable" mean anything.
       actions.push({action: "KEEP", key, url: service.URL, hash,
         why: "the object has not changed since it was applied"});
+      continue;
+    }
+    // The previous format did not hash ICFDOCU. Upgrade only when the
+    // object still matches that digest. For seeded rows descriptions must
+    // also agree. For edited rows the old format cannot distinguish a local
+    // description edit from an incoming one: preserve the edit on this one
+    // upgrade, recording today's object as the baseline for future changes.
+    if (origin?.hash === contentHash(service, handlers)
+        && (origin.origin === EDITED
+          || JSON.stringify(descriptions(docu)) === JSON.stringify(descriptions(docuOf(table, key))))) {
+      actions.push({action: "KEEP", key, url: service.URL, hash, upgradeHash: true,
+        why: "record descriptions in the hash without replacing the row"});
       continue;
     }
     if (origin?.origin === EDITED) {
@@ -167,7 +193,10 @@ export async function applyTo(client, objects, options = {}) {
   const write = (sql) => client.execute(sql);
 
   for (const a of actions) {
-    if (a.action === "KEEP") continue;
+    if (a.action === "KEEP") {
+      if (a.upgradeHash) await write(`UPDATE "zosd_icf_origin" SET "objhash" = ${quote(a.hash)} WHERE ${where(a)};`);
+      continue;
+    }
     if (a.action === "ORPHAN") continue;
 
     if (a.action === "ASIDE") {
@@ -206,6 +235,13 @@ export async function applyTo(client, objects, options = {}) {
       ORIGIN: SEEDED, OBJHASH: a.hash, CHANGED_AT: now,
     }));
   }
+  // APC routing still comes from SAPC objects. This is its read-only
+  // inventory for the ICF object page, refreshed even when the SICF object
+  // is unchanged. Never put these classes in the HTTP handler chain.
+  if (objects.ZOSD_ICF_APC !== undefined) {
+    await write(`DELETE FROM "zosd_icf_apc";`);
+    for (const application of objects.ZOSD_ICF_APC) await write(row("zosd_icf_apc", application));
+  }
   if (options.say !== undefined) for (const line of report(actions)) options.say(line);
   return {actions, report: report(actions)};
 }
@@ -237,17 +273,12 @@ export async function markEdited(client, name, parent) {
  *  import. Three hosts wrote their own end-of-dialog-step once and two of
  *  them got it wrong.
  *
- *  **A failure here is loud and not fatal, and that is a statement with a
- *  shelf life.** Nothing routes off these rows yet -- the express hosts still
- *  mount from `tools/osd-nodes.mjs` reading the objects -- so a registry that
- *  could not be applied must not stop a listener that does not depend on it.
- *  The day routing asks the table, this becomes fatal, and the comment has to
- *  change with it rather than quietly stay true-sounding.
+ *  A failure returns undefined; serving hosts must refuse to start because
+ *  their routes depend on these rows.
  *
  *  It needs a file system, because the objects are files. The browser preview
- *  has neither, so there the registry is simply empty until the rows are
- *  generated into the bundle -- which is the `CONTENT`/`HOST` distinction
- *  `tools/osd-nodes.mjs` already draws, showing up one layer down. */
+ *  has neither, so its build generates the rows and its backend calls
+ *  applyTo directly. */
 export async function applyAtStartup(client, options = {}) {
   const say = options.say ?? ((line) => console.log(line));
   try {
@@ -281,7 +312,7 @@ export async function applyAtStartup(client, options = {}) {
     }
     return actions;
   } catch (e) {
-    say(`ICF registry not applied: ${e?.message ?? e}. Nothing routes off it yet, so this is not fatal -- and it will be.`);
+    say(`ICF registry not applied: ${e?.message ?? e}. The serving host must not start without it.`);
     return undefined;
   }
 }

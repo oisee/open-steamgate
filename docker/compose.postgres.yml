@@ -1,0 +1,51 @@
+# Portainer: new PostgreSQL + OSD, default instance 19 (8019/44319/3219/3319).
+# Demo password is public; change POSTGRES_PASSWORD before first start outside
+# an isolated test network. PostgreSQL's SQL port is not published to host.
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: osd
+      POSTGRES_DB: osd
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-OSD19_Demo!ChangeMe}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osd -d osd"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    pull_policy: always
+    init: true
+    environment:
+      INSTANCE: "${INSTANCE:-19}"
+      OSD_SID: OSD
+      STG_ADT_SID: OSD
+      STG_DB: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: osd
+      PGPASSWORD: "${POSTGRES_PASSWORD:-OSD19_Demo!ChangeMe}"
+      PGDATABASE: osd
+      TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
+    ports:
+      - "80${INSTANCE:-19}:3030"
+      - "443${INSTANCE:-19}:44300"
+      - "32${INSTANCE:-19}:32${INSTANCE:-19}"
+      - "33${INSTANCE:-19}:33${INSTANCE:-19}"
+    volumes:
+      - osd-tls:/opt/osd/.local/tls
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+volumes:
+  pg-data:
+  osd-tls:

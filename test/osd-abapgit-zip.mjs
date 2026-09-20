@@ -1,8 +1,9 @@
 // What goes into a zip that reaches a real system, and what must not.
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {createHash} from "node:crypto";
 import {layout} from "../tools/osd-abapgit-zip.mjs";
 import {SAP_DELIVERED} from "../tools/osd-nodes.mjs";
 
@@ -14,6 +15,29 @@ const node = (url, name) => `<?xml version="1.0" encoding="utf-8"?>
  </asx:values></asx:abap></abapGit>`;
 
 describe("tools/osd-abapgit-zip: what may leave for a system", () => {
+  it("the LSD service has the filename required by the A4H abapGit SICF mapper", () => {
+    const service = readdirSync("packs/lsd/src").filter((f) => f.endsWith(".sicf.xml"));
+    const hash = createHash("sha1").update("/sap/bc/lsd/").digest("hex").slice(0, 25);
+    const apcHash = createHash("sha1").update("/sap/bc/apc/sap/zapc_lsd/").digest("hex").slice(0, 25);
+    expect(service).to.have.members([
+      `${"zlsd".padEnd(15, " ")}${hash}.sicf.xml`,
+      `${"zapc_lsd".padEnd(15, " ")}${apcHash}.sicf.xml`,
+    ]);
+  });
+
+  it("the LSD W3MI payload names match the extensions in their metadata", () => {
+    const files = readdirSync("packs/lsd/src");
+    expect(files).to.include("zlsd-show.w3mi.data.gz");
+    expect(files).to.include("zlsd-music.w3mi.data.m4a");
+  });
+
+  it("the LSD SAPC matches the working plain WebSocket application on A4H", () => {
+    const xml = readFileSync("packs/lsd/src/zapc_lsd.sapc.xml", "utf8");
+    expect(xml).to.include("<STATEFUL>X</STATEFUL>");
+    expect(xml).to.not.include("<CONNECTION_TYPE>");
+    expect(xml).to.not.include("<PROTOCOL_TYPE_ID>V10.PCP.SAP.COM</PROTOCOL_TYPE_ID>");
+  });
+
   let dir;
   let out;
   beforeEach(() => {

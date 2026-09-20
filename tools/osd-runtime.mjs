@@ -53,11 +53,22 @@ function reapOnExit() {
     }
     CHILDREN.clear();
   };
+  let stopping = false;
   // exit handlers can only do synchronous work, and kill( ) is synchronous
   process.on("exit", reap);
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => {
-      reap();
+    process.on(signal, async () => {
+      if (stopping) return;
+      stopping = true;
+      // Let each worker finish its current request and close its database.
+      // In particular DuckDB must checkpoint before the container exits.
+      await Promise.all([...CHILDREN].map(child => new Promise(resolve => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 55000);
+        child.once("exit", () => { clearTimeout(timer); resolve(); });
+        try { child.send({type: "quiesce", grace: 45000}); }
+        catch { child.kill("SIGTERM"); }
+      })));
       process.exit(0);
     });
   }

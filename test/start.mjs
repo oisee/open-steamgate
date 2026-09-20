@@ -16,10 +16,10 @@ import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
 import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
-import {mountServices, services as icfServices, channels as pushChannels} from "../tools/osd-icf.mjs";
+import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
 import {mountHost, nodes} from "../tools/osd-nodes.mjs";
-import {applyAtStartup} from "../tools/osd-icf-apply.mjs";
+import {applyAtStartup, currentRows} from "../tools/osd-icf-apply.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
@@ -62,14 +62,16 @@ async function loadInline() {
   // applied is reported before the listener claims to be up. `quiet` is not
   // in scope here -- this runs once at module load, not per startServer() --
   // and a suite that starts a hundred servers still applies once.
-  await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root: process.cwd()});
+  const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root: process.cwd()});
+  if (registry === undefined) throw new Error("the ICF registry could not be applied");
+  const icf = servicesFromRows(await currentRows(globalThis.abap.context.databaseConnections.DEFAULT));
   // the SEGW registration objects (IWSV/IWMO in src/) say which service is
   // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
   await zcl_stg_segw_registry.register();
   // the search help objects (*.shlp.xml in src/) become value help providers;
   // tools/segw-shlp.mjs generated this
   await zcl_stg_shlp_registry.register();
-  return {cl_express_icf_shim, zcl_apc_host, zcl_osd_status};
+  return {cl_express_icf_shim, zcl_apc_host, zcl_osd_status, icf};
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
 
@@ -121,7 +123,9 @@ export function startServer(quiet) {
   // and already carries a webapp/, and asking it to repeat that in a second
   // file is the extra registry this whole track removes.
   const packDirs = new Map(webappsOf(process.cwd()).map((pack) => [`/app/${pack.name}`, pack.dir]));
-  hostNodes["pack-static"] = (a, node) => a.use(node.path, express.static(packDirs.get(node.path)));
+  if (packDirs.size > 0) {
+    hostNodes["pack-static"] = (a, node) => a.use(node.path, express.static(packDirs.get(node.path)));
+  }
 
   // a service on another system, answered on this origin. A page this system
   // serves may then read it the way it reads ours, which a proxy on another
@@ -237,7 +241,7 @@ export function startServer(quiet) {
     icf = mountServices(app, (args) => inline.cl_express_icf_shim.run({
       ...args,
       base: new abap.types.String().set(args.base),
-    }), {root: process.cwd(), claimed});
+    }), {root: process.cwd(), claimed, from: inline.icf});
   } else {
     // **The child owns the registry, so the parent forwards the branch and
     // does not keep a list of its own.**

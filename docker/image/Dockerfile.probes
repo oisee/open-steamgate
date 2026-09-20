@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Test clients only. This image is never published as the OSD runtime.
+FROM node:24-bookworm AS sources
+COPY docker/image/sources.json /sources.json
+COPY docker/image/protocol-sources.mjs /fetch.mjs
+RUN node /fetch.mjs && node /fetch.mjs --clients
+
+FROM golang:1.26-bookworm AS clients
+COPY --from=sources /src /src
+WORKDIR /src/sap-tui
+RUN CGO_ENABLED=0 go build -trimpath -o /out/sap-tui ./cmd/sap-tui
+WORKDIR /src/open-rfc-go
+COPY docker/image/rfc-probe.go ./cmd/osd-rfc-probe/main.go
+RUN CGO_ENABLED=0 go build -trimpath -o /out/rfc-probe ./cmd/osd-rfc-probe
+
+FROM node:24-bookworm-slim
+WORKDIR /probe
+COPY --from=clients /out/ /usr/local/bin/
+COPY docker/image/acceptance.mjs docker/image/terminal-svg.mjs ./
+COPY docker/image/free-instance.mjs ./
+ENTRYPOINT ["node", "/probe/acceptance.mjs"]

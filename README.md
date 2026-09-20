@@ -8,7 +8,7 @@
 ## Try it yourself
 
 [**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).
-SQLite, DuckDB and HANA Express options, HTTP/HTTPS, and the RFC/DIAG sidecar.
+SQLite, DuckDB and HANA Express options, HTTP/HTTPS, and built-in RFC/DIAG stubs.
 
 # open-steamgate
 

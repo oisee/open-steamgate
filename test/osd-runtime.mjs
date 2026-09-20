@@ -277,7 +277,9 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   });
 
   it("without a file the database is still in memory, so a recycle starts clean", async () => {
-    const runtime = new ServingRuntime();
+    // The host defaults to a file backend; this case explicitly asks for
+    // memory so it stays true even when the parent suite uses STG_DB=file.
+    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
     try {
       await runtime.start();
       await fetch(`${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {
