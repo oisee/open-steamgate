@@ -1151,57 +1151,81 @@ of a day.
 
 ## The order of work, settled 2026-09-18
 
-> **What is actually next, 2026-09-20 (05:30). The lane changed, and not
-> because it was stale -- because Alice corrected the design.**
+> **The plan, 2026-09-20. Written after a pause, because the design changed
+> twice during the night and a plan held in the head drifts.**
 >
-> The night's lane was "ICF is the only router": destinations → the host
-> stops routing → WAPA from the object store → webapp/ and packs behind
-> nodes → G.5. Four of those are done and the fifth is where the correction
-> lands.
+> ### Where this is, measured
 >
-> **Done overnight**, each verified by reading what is served:
-> one destination registry (a destination is a system, a binding is who uses
-> it here); a scoreboard that names every rival with a declared reason
-> (`node tools/osd-routes.mjs`); the first express route migrated to a node
-> and **deleted** (`POST /osd/status` → `/sap/bc/osd/status/`); a BSP
-> application served from the object store by `ZCL_OSD_BSP`; and all five
-> Fiori apps plus the pack page behind it. An adversarial review then found
-> six defects in that work, all fixed -- including two instruments lying
-> about themselves and a test that could not go red.
+> The A4H loop is closed end to end: one YAML becomes a SEGW project, a
+> DDIC, seed rows, an activated service and a Fiori application that a real
+> system serves (`docs/a4h-deploy.md`). On this side, `test/segw-tree.mjs`
+> is 20 of 20, **CI reads the suites for the first time** (`tests.yml`;
+> before it, nothing did), destinations are one registry, `POST /osd/status`
+> is an ICF node and its express route is **deleted**, and `ZCL_OSD_BSP`
+> serves five Fiori applications and a pack page out of the tree. An
+> adversarial review found six defects in that work and all six are fixed,
+> including two instruments that lied about themselves.
 >
-> **The correction (`docs/icf-as-the-registry.md`, the section at the
-> bottom).** The claim was "ICF is the only **router**". It should be "ICF
-> is the only **registry**". `ICFHANDLER` is a table keyed by
-> `(node, parent, order, TYPE)` whose payload is a handler **name** -- so a
-> real tree already lets different kinds of thing serve different nodes and
-> does not care which. The old claim forced one execution model on
-> everything, and the bill arrived measured: 137.9 KB of base64 in a
-> generated ABAP class and a page three times slower than `express.static`.
+> ### What changed in the design, and both corrections are Alice's
 >
-> **So the next three, in dependency order:**
+> **1. ICF is the only *registry*, not the only *router*.** `ICFHANDLER` is
+> a table keyed by `(node, parent, order, TYPE)` whose payload is a handler
+> *name*; the tree does not care what is behind it. So the value is a single
+> inspectable truth about what the system is made of -- not one execution
+> model. The JS parts of OSD (the ADT facade above all) are **not** going to
+> A4H and were never meant to; A4H has ADT, the facade imitates it. Under
+> the corrected model the facade is *one node of type HOST*, not thirteen
+> rivals to migrate.
 >
-> 1. **The registry becomes a table**, seeded from `*.sicf.xml`, read and
->    written from ABAP. This *is* G.5: a screen over files would be a
->    picture of a registry rather than one. It needs the rule this tree has
->    for the database and not yet for this -- what happens when the table
->    and the objects disagree.
-> 2. **A handler row carries a type** (ABAP / HOST / PROXY / CONTENT), and
->    each type records whether it exists on a system. That is where
->    "can this node travel" belongs -- a property of the type rather than a
->    flag somebody maintains.
-> 3. **Pages move out of the generated class into a table.** Removes the
->    growth and the rebuild on every image, and lets content be served from
->    ABAP or the host by configuration rather than by architecture.
+> **2. Do not imitate the storage, imitate the interface.** Pages went into
+> a generated ABAP class as base64 -- 137.9 KB -- because a system keeps
+> them in `O2PAGELINE`. That was imitating the wrong layer. The pages are
+> already files in a directory, and they can stay there.
 >
-> Behind them, unchanged: A.12 (SRVD + SRVB), the machine UI5 deploy
-> through `/sap/bc/adt/filestore/ui5-bsp/objects` (200 for an ordinary
-> developer, nothing here speaks it), and the horizon Alice named, CDS-BOPF
-> and RAP, still deliberately behind the HANA path being released.
+> ### The plan, in dependency order
 >
-> **Upstream is merged and unshipped**, unchanged since the third
-> correction: transpiler #1874 and #1877 merged, `@abaplint/database-hdb`
-> still 404 on npm, the transpiler still 2.13.89 with `hdb: ["todo"]`.
-> #1878, abaplint #4311 and #4312 open with no replies. Not ours to push.
+> **A. Pages out of the generated class.** The registry becomes a *list* --
+> application, page, MIME, file -- and the bytes come from disk through the
+> mechanism this tree already uses for 33 media objects and 16 MB: a
+> `@KERNEL` read with a host hook for the browser, disk as the normal path
+> rather than the only one. *Done when*: the generated class is a few KB
+> instead of 138, changing an image is not a rebuild, and every page still
+> answers 200.
+>
+> **B. A handler row carries a type.** ABAP / HOST / PROXY / CONTENT, each
+> saying **where it works** rather than whether it is allowed: ABAP
+> everywhere, HOST needs Node (so not the browser preview), PROXY needs a
+> socket (not the preview, ever), CONTENT everywhere. Descriptive, not
+> normative. *Done when*: `osd-routes` shows the ADT facade as one HOST node
+> rather than thirteen rivals, and the scoreboard answers "what does this
+> system expose, and what implements it" instead of "what is left to
+> migrate".
+>
+> **C. The registry becomes readable and writable from ABAP.** Seeded from
+> `*.sicf.xml`, the way `data/*.tabu.json` seeds tables from abapGit
+> objects. This *is* G.5 -- a screen over files would be a picture of a
+> registry rather than one. It needs the thing this tree has for the
+> database and not yet for this: **a written rule for what happens when the
+> table and the objects disagree.** *Done when*: changing a node from a
+> screen changes what answers, and a disagreement is reported rather than
+> silently resolved.
+>
+> ### Deliberately not in it
+>
+> - porting the JS parts to a real system -- the facade is meant to be JS;
+> - the launchpad shell behind a node: about forty references in a dozen
+>   files, including two e2e suites and the preview. A decision for daylight,
+>   not for 5am;
+> - `/app` going away: that follows from B and C, not before them;
+> - the Fiori scaffolding writers (`@sap-ux/*-writer`), parked with the tile
+>   they would serve -- worth one run as an **oracle**, never as a
+>   dependency;
+> - CDS-BOPF and RAP, still behind the HANA path being released.
+>
+> **Upstream is merged and unshipped** and nothing here waits on it:
+> transpiler #1874 and #1877 merged, `@abaplint/database-hdb` still 404 on
+> npm, the transpiler still 2.13.89 with `hdb: ["todo"]`; #1878, abaplint
+> #4311 and #4312 open with no replies. Not ours to push.
 
 Alice asked for the queue to be sorted into three, and it was agreed between
 the two sessions rather than decided by one. A bucket is not a priority
