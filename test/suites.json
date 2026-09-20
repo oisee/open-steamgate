@@ -22,6 +22,7 @@
     "test/database-identity-host.mjs",
     "test/ddic-corpus.mjs",
     "test/editor.mjs",
+    "test/e2e-instance.mjs",
     "test/generation-diff.mjs",
     "test/generation-hash.mjs",
     "test/hana-dialect.mjs",
