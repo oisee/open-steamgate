@@ -19,10 +19,14 @@ wait_ready() {
   done
 }
 for db in file duckdb; do
+  case "$db" in
+    file) instance=11 ;;
+    duckdb) instance=15 ;;
+  esac
   docker volume create "$probe-data" >/dev/null
   docker volume create "$probe-tls" >/dev/null
   docker run -d --init --name "$probe" --network "$probe-net" --network-alias osd \
-    -e STG_DB="$db" -e INSTANCE=11 -v "$probe-data:/data" -v "$probe-tls:/opt/osd/.local/tls" "$osd_image" >/dev/null
+    -e STG_DB="$db" -e INSTANCE="$instance" -v "$probe-data:/data" -v "$probe-tls:/opt/osd/.local/tls" "$osd_image" >/dev/null
   wait_ready
   docker exec -e PROTOCOL_HOST=127.0.0.1 "$probe" node docker/image/probe.mjs create
   docker restart -t 30 "$probe" >/dev/null

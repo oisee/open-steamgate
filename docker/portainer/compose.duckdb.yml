@@ -1,3 +1,4 @@
+# LEGACY source-build experiment. For a ready image, use docker/compose.duckdb.yml.
 # Portainer Web editor, Docker Standalone. Set INSTANCE=06 (default 00).
 # Optional TLS_SAN=DNS:osd.example.test.
 # First start downloads sources/dependencies and compiles. See docs/spin.md.
