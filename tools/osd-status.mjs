@@ -230,8 +230,9 @@ export function packsInfo(root, env = process.env) {
 /** Safe backend facts. A connected client is authoritative; the environment
  * fallback is explicitly marked configured because the parent façade may
  * refresh status while the serving child owns the actual connection. */
-export function databaseFacts({client, env = process.env} = {}) {
-  const liveClient = client ?? globalThis.abap?.context?.databaseConnections?.DEFAULT;
+export function databaseFacts({client = globalThis.abap?.context?.databaseConnections?.DEFAULT, env = process.env} = {}) {
+  // Explicit null means no observed connection; omitted uses this process.
+  const liveClient = client ?? undefined;
   const configured = String(env.STG_DB ?? "file").toLowerCase();
   const rawEngine = String(liveClient?.name ?? (configured === "file" ? "sqlite" : configured)).toLowerCase();
   const engines = {file: "sqlite", sqlite: "sqlite", duckdb: "duckdb", hana: "HDB", hdb: "HDB"};
