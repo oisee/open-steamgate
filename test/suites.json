@@ -26,6 +26,7 @@
     "test/generation-hash.mjs",
     "test/hana-dialect.mjs",
     "test/journal.mjs",
+    "test/lsd-a4h-011.mjs",
     "test/mocha.mjs",
     "test/naming-scan.mjs",
     "test/osd-abapgit-zip.mjs",

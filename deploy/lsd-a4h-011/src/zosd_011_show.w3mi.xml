@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_W3MI" serializer_version="v2.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <NAME>ZOSD_011_SHOW</NAME>
+   <TEXT>sap-lsd show, screens as styled runs, gzip</TEXT>
+   <PARAMS>
+    <WWWPARAMS>
+     <NAME>fileextension</NAME>
+     <VALUE>.gz</VALUE>
+    </WWWPARAMS>
+    <WWWPARAMS>
+     <NAME>filename</NAME>
+     <VALUE>show.ndjson.gz</VALUE>
+    </WWWPARAMS>
+    <WWWPARAMS>
+     <NAME>mimetype</NAME>
+     <VALUE>application/gzip</VALUE>
+    </WWWPARAMS>
+   </PARAMS>
+  </asx:values>
+ </asx:abap>
+</abapGit>

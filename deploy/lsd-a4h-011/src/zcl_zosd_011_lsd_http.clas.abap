@@ -1,10 +1,10 @@
-CLASS zcl_lsd_http_handler DEFINITION
+CLASS zcl_zosd_011_lsd_http DEFINITION
   PUBLIC
   FINAL
   CREATE PUBLIC.
 
   " The player page: a SAP GUI terminal drawn in JavaScript, fed by the
-  " recorded screens the push channel ZAPC_LSD hands out. The page speaks no
+  " recorded screens the push channel ZOSD_011_LSD hands out. The page speaks no
   " DIAG; it takes the gzip of the recording from the channel in base64
   " chunks, inflates it with the browser's own DecompressionStream, paints
   " rows of styled runs on a canvas in the xterm 256-colour palette the
@@ -20,13 +20,13 @@ CLASS zcl_lsd_http_handler DEFINITION
     METHODS page RETURNING VALUE(rv_html) TYPE string.
 ENDCLASS.
 
-CLASS zcl_lsd_http_handler IMPLEMENTATION.
+CLASS zcl_zosd_011_lsd_http IMPLEMENTATION.
 
   METHOD if_http_extension~handle_request.
     DATA: lv_data TYPE xstring, lv_size TYPE i.
     DATA(lv_query) = server->request->get_header_field( '~query_string' ).
     IF lv_query CS 'audio'.
-      zcl_lsd_media=>load( EXPORTING iv_name = 'ZLSD-MUSIC' IMPORTING ev_data = lv_data ev_size = lv_size ).
+      zcl_zosd_011_lsd_media=>load( EXPORTING iv_name = 'ZOSD_011_MUSIC' IMPORTING ev_data = lv_data ev_size = lv_size ).
       IF lv_data IS INITIAL.
         server->response->set_status( code = 404 reason = 'no music in this pack' ).
         RETURN.
@@ -56,7 +56,7 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `.bar{background:#eef2f7;border-top:1px solid #c5d0dd;padding:4px 10px;font-size:12px;color:#4a5a6d;display:flex;justify-content:space-between}` &&
 `.foot{max-width:1100px;margin:10px auto 0;font-size:11px;color:#77869a;text-align:center}.foot a{color:#5a7fa8;text-decoration:none}.foot a:hover{text-decoration:underline}</style></head><body>` &&
 `<div class="win">` &&
-`<div class="title">LSD - Light-Show Dispatcher <span>ZAPC_LSD</span></div>` &&
+`<div class="title">LSD - Light-Show Dispatcher <span>ZOSD_011_LSD</span></div>` &&
 `<div class="menu"><b>Show</b><b>Screen</b><b>Help</b></div>` &&
 `<div class="tools"><button id="play" disabled>&#9654; Play</button><span id="status">Connecting...</span></div>` &&
 `<div class="screen"><canvas id="screen" width="1080" height="648"></canvas></div>` &&
@@ -67,7 +67,7 @@ CLASS zcl_lsd_http_handler IMPLEMENTATION.
 `<a href="https://github.com/oisee/open-steamgate">open-steamgate</a> &middot; ` &&
 `<a href="https://www.youtube.com/watch?v=Pszxxj-OUAk">sap-lsd in a real SAP GUI (video)</a></div>` &&
 `<script>` &&
-`var APC='/sap/bc/apc/sap/zapc_lsd';` &&
+`var APC='/sap/bc/apc/sap/zosd_011_lsd';` &&
 `var CHUNK=65536;` &&
 `var FINALE=111000;` &&
 `var canvas=document.getElementById('screen'),ctx=canvas.getContext('2d'),statusEl=document.getElementById('status'),playBtn=document.getElementById('play'),audio=document.getElementById('audio');` &&

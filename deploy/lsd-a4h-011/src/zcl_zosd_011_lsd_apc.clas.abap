@@ -1,4 +1,4 @@
-CLASS zcl_lsd_apc_handler DEFINITION
+CLASS zcl_zosd_011_lsd_apc DEFINITION
   PUBLIC
   INHERITING FROM cl_apc_wsp_ext_stateful_base
   FINAL
@@ -10,7 +10,7 @@ CLASS zcl_lsd_apc_handler DEFINITION
   " terminal viewer, composed every screen it received into a grid of styled
   " runs and wrote the stream down (sap-tui --record): a header, the styles as
   " they first appear, then one frame per line with only the rows that
-  " changed. That stream is the SMW0 object ZLSD-SHOW here.
+  " changed. That stream is the SMW0 object ZOSD_011_SHOW here.
   "
   " The object is gzip, because the show is 5.2 MB of text and 225 KB
   " compressed, and neither side has to inflate it: the channel hands out the
@@ -38,7 +38,7 @@ CLASS zcl_lsd_apc_handler DEFINITION
       RETURNING VALUE(rv_base64) TYPE string.
 
   PRIVATE SECTION.
-    CONSTANTS c_object TYPE wwwdatatab-objid VALUE 'ZLSD-SHOW'.
+    CONSTANTS c_object TYPE wwwdatatab-objid VALUE 'ZOSD_011_SHOW'.
     DATA mv_data TYPE xstring.
 
     METHODS send
@@ -54,7 +54,7 @@ CLASS zcl_lsd_apc_handler DEFINITION
       RETURNING VALUE(rv_json) TYPE string.
 ENDCLASS.
 
-CLASS zcl_lsd_apc_handler IMPLEMENTATION.
+CLASS zcl_zosd_011_lsd_apc IMPLEMENTATION.
 
   METHOD if_apc_wsp_extension~on_start.
     load( ).
@@ -97,7 +97,7 @@ CLASS zcl_lsd_apc_handler IMPLEMENTATION.
       rv_bytes = xstrlen( mv_data ).
       RETURN.
     ENDIF.
-    zcl_lsd_media=>load( EXPORTING iv_name = c_object IMPORTING ev_data = mv_data ev_size = lv_size ).
+    zcl_zosd_011_lsd_media=>load( EXPORTING iv_name = c_object IMPORTING ev_data = mv_data ev_size = lv_size ).
     rv_bytes = xstrlen( mv_data ).
   ENDMETHOD.
 
