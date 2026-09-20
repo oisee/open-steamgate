@@ -134,6 +134,51 @@ export function declared(file = "src/bsp/apps.json") {
   });
 }
 
+/** A pack's page is a BSP application too, without the pack saying so.
+ *
+ *  A pack already declares a name and carries a `webapp/`; requiring it to
+ *  repeat itself in `apps.json` would be a second registry for the same
+ *  fact -- which is the thing this whole track is removing. The application
+ *  name is derived, and because a derivation can collide where a written
+ *  name cannot, a collision is **refused and names both packs** rather than
+ *  letting one pack quietly serve the other's pages. */
+export function packAppName(pack) {
+  return ("Z" + pack.toUpperCase().replace(/[^A-Z0-9]/g, "_")).slice(0, 15).replace(/_+$/, "");
+}
+
+export function packApps(root = ".") {
+  const packs = [];
+  for (const dir of ["packs", ...(process.env.OSD_PACKS ?? "").split(":").filter(Boolean)]) {
+    const at = join(root, dir);
+    if (existsSync(at) === false) continue;
+    for (const name of readdirSync(at)) {
+      const web = join(at, name, "webapp");
+      if (existsSync(join(at, name, "osd-pack.json")) && existsSync(web)) {
+        packs.push({pack: name, at: web});
+      }
+    }
+  }
+  const byName = new Map();
+  const apps = [];
+  for (const {pack, at} of packs) {
+    const app = packAppName(pack);
+    if (byName.has(app)) {
+      throw new Error(`packs ${byName.get(app)} and ${pack} both derive the BSP application name ${app}: rename one, or give it an entry in src/bsp/apps.json`);
+    }
+    byName.set(app, pack);
+    checkAppName(app);
+    const pages = walk(at).map((f) => f.slice(at.length + 1).replaceAll("\\", "/")).sort();
+    apps.push({
+      app,
+      text: `pack ${pack}`,
+      file: join(at, "..", "osd-pack.json"),
+      pages: pages.map((page) => ({page, mime: mimeOf(page), content: readFileSync(join(at, page))})),
+      missing: [],
+    });
+  }
+  return apps;
+}
+
 export function applications(folders) {
   const apps = [];
   for (const folder of folders) {
@@ -202,7 +247,7 @@ ENDCLASS.
 }
 
 export function generate(folders, out = "gen/bsp") {
-  const apps = [...applications(folders), ...declared()];
+  const apps = [...applications(folders), ...declared(), ...packApps()];
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "zcl_stg_bsp_registry.clas.abap"), registryClass(apps));
   return apps;
