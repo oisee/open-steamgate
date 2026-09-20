@@ -1,38 +1,70 @@
-# Existing HANA / HANA Express SQL endpoint; no SAP server is redistributed.
-# Required Stack variables: HANA_HOST, HANA_PORT, HANA_USER, HANA_PASSWORD.
+# Portainer: new HANA Express + OSD, instance 17. Set ACCEPT_SAP_LICENSE=YES.
+# Demo password is a known default; change HANA_PASSWORD before first start
+# outside an isolated test network. HXE's SQL port is not published to host.
 services:
+  hana-init:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    user: "0:0"
+    entrypoint: ["node", "docker/image/hana-init.mjs"]
+    environment:
+      ACCEPT_SAP_LICENSE: "${ACCEPT_SAP_LICENSE:?Set YES after accepting the SAP HANA Express license}"
+      HANA_PASSWORD: "${HANA_PASSWORD:-OSD17_Demo!ChangeMe}"
+    volumes:
+      - hana-data:/hana/mounts
+    restart: "no"
+
+  hxe:
+    image: saplabs/hanaexpress:latest
+    platform: linux/amd64
+    hostname: hxe
+    command: ["--passwords-url", "file:///hana/mounts/password.json", "--agree-to-sap-license"]
+    environment:
+      HANA_PASSWORD: "${HANA_PASSWORD:-OSD17_Demo!ChangeMe}"
+    volumes:
+      - hana-data:/hana/mounts
+    depends_on:
+      hana-init:
+        condition: service_completed_successfully
+    ulimits:
+      nofile: {soft: 1048576, hard: 1048576}
+    sysctls:
+      net.ipv4.ip_local_port_range: "40000 60999"
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/sap/HXE/HDB90/exe/hdbsql -n localhost:39017 -u SYSTEM -p \"$$HANA_PASSWORD\" 'SELECT 1 FROM DUMMY' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 5m
+      retries: 120
+    restart: unless-stopped
+    stop_grace_period: 5m
+
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
     init: true
     environment:
-      INSTANCE: "${INSTANCE:-00}"
+      INSTANCE: "${INSTANCE:-17}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
       STG_DB: hana
-      HANA_HOST: "${HANA_HOST:?Set the HANA hostname reachable from Docker}"
-      HANA_PORT: "${HANA_PORT:?Set the tenant SQL port}"
-      HANA_USER: "${HANA_USER:?Set the database user}"
-      HANA_PASSWORD: "${HANA_PASSWORD:?Set the database password}"
+      HANA_HOST: hxe
+      HANA_PORT: "39017"
+      HANA_USER: SYSTEM
+      HANA_PASSWORD: "${HANA_PASSWORD:-OSD17_Demo!ChangeMe}"
       HANA_SCHEMA: "${HANA_SCHEMA:-OSD}"
       TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
     ports:
-      - "80${INSTANCE:-00}:3030"
-      - "443${INSTANCE:-00}:44300"
+      - "80${INSTANCE:-17}:3030"
+      - "443${INSTANCE:-17}:44300"
+      - "32${INSTANCE:-17}:32${INSTANCE:-17}"
+      - "33${INSTANCE:-17}:33${INSTANCE:-17}"
     volumes:
       - osd-tls:/opt/osd/.local/tls
-    restart: unless-stopped
-    stop_grace_period: 60s
-  protocols:
-    image: ghcr.io/oisee/open-steamgate-protocols:${OSD_TAG:-docker-draft}
-    init: true
-    environment:
-      INSTANCE: "${INSTANCE:-00}"
-    ports:
-      - "32${INSTANCE:-00}:32${INSTANCE:-00}"
-      - "33${INSTANCE:-00}:33${INSTANCE:-00}"
     depends_on:
-      osd:
+      hxe:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 60s
+
 volumes:
+  hana-data:
   osd-tls:

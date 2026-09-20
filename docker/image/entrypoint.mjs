@@ -1,5 +1,6 @@
 import {existsSync, mkdirSync} from "node:fs";
 import {spawn, execFileSync} from "node:child_process";
+import {setTimeout as delay} from "node:timers/promises";
 
 const env = process.env;
 if (!/^\d{2}$/.test(env.INSTANCE ?? "00")) throw new Error("INSTANCE must be two digits, e.g. 06");
@@ -28,7 +29,47 @@ if (env.STG_TLS !== "0") {
       "-keyout", key, "-out", cert, "-subj", "/CN=osd/O=open-steamgate", "-addext", `subjectAltName=${san}`], {stdio: "pipe"});
   }
 }
-const child = spawn(process.execPath, ["test/run.mjs"], {stdio: "inherit", env});
-for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => child.kill(signal));
-child.on("error", error => { console.error(error.message); process.exitCode = 1; });
-child.on("exit", (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });
+const osd = spawn(process.execPath, ["test/run.mjs"], {stdio: "inherit", env});
+let protocols;
+let stopping = false;
+const stop = signal => {
+  if (stopping) return;
+  stopping = true;
+  protocols?.kill(signal);
+  osd.kill(signal);
+};
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => stop(signal));
+osd.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
+osd.on("exit", (code, signal) => {
+  process.exitCode = code ?? (signal ? 1 : 0);
+  if (!stopping) stop("SIGTERM");
+});
+if (env.STG_PROTOCOLS !== "0") {
+  let ready = false;
+  for (let attempt = 0; attempt < 300 && !stopping; attempt++) {
+    if (osd.exitCode !== null || osd.signalCode !== null) break;
+    try {
+      const response = await fetch("http://127.0.0.1:3030/sap/bc/adt/core/http/build", {signal: AbortSignal.timeout(3000)});
+      if (response.ok && (await response.json()).system?.serving) { ready = true; break; }
+    } catch { /* startup still in progress */ }
+    await delay(2000);
+  }
+  if (!ready && !stopping) {
+    console.error("OSD did not become ready for DIAG/RFC within 10 minutes");
+    process.exitCode = 1;
+    stop("SIGTERM");
+  }
+  if (ready && !stopping) {
+    protocols = spawn("/opt/protocols/osd-up", ["-attach", "http://127.0.0.1:3030",
+      "-instance", String(Number(env.INSTANCE ?? "00")), "-sid", env.OSD_SID ?? "OSD", "-stub", "tape"],
+    {stdio: "inherit", env});
+    protocols.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
+    protocols.on("exit", (code, signal) => {
+      if (!stopping) {
+        console.error(`DIAG/RFC bridge exited (${signal ?? code})`);
+        process.exitCode = code || 1;
+        stop("SIGTERM");
+      }
+    });
+  }
+}

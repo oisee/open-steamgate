@@ -9,7 +9,7 @@ const imageEnd = '<!-- END GENERATED IMAGE STACKS -->';
 if (original.split(imageStart).length !== 2 || original.split(imageEnd).length !== 2 || original.indexOf(imageEnd) < original.indexOf(imageStart)) {
   throw new Error('Expected one ordered pair of generated image stack markers');
 }
-const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'External HANA / HANA Express']].map(([id, title]) => {
+const imageBlocks = [['sqlite', 'SQLite'], ['duckdb', 'DuckDB'], ['hana', 'New HANA Express + OSD']].map(([id, title]) => {
   const path = `docker/compose.${id}.yml`;
   return `### Ready image: ${title}\n\nSource: [${path}](../${path}).\n\n\`\`\`yaml\n${readFileSync(new URL(path, root), 'utf8').trimEnd()}\n\`\`\``;
 });
