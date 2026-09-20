@@ -20,7 +20,7 @@
 // answer.
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
-import {CASES, ORACLE, oracleFrom, oracleSource} from "../tools/sqlscript-conformance.mjs";
+import {CASES, ORACLE, VERDICTS, oracleFrom, oracleSource, unclassified} from "../tools/sqlscript-conformance.mjs";
 
 const file = JSON.parse(readFileSync(ORACLE, "utf8"));
 const ids = CASES.map((c) => c.id);
@@ -77,5 +77,51 @@ describe("what makes a stored column usable at all", () => {
     const use = oracleFrom({hana: {int_div: {value: "0.500000"}}}, "unpadded", ids);
     expect(use.refused).to.equal(undefined);
     expect(use.missing.length).to.equal(ids.length - 1);
+  });
+});
+
+// The verdicts, checked as a table that ages.
+//
+// The file's own header has said since it was written that the cases are
+// classified rather than thresholded -- "a count of differences says
+// nothing". The count was nonetheless the whole output for as long as the
+// classes lived in comments, one per dialect entry, tied to no row. A class
+// table fixes that and immediately becomes the next thing that can go quietly
+// out of date, so it is asked in both directions.
+describe("a class per differing row", () => {
+  it("every verdict names a class the file defines, and says where the treatment is", () => {
+    const CLASSES = ["native", "rewrite", "typed", "compat", "host", "refuse"];
+    for (const [id, v] of Object.entries(VERDICTS)) {
+      expect(CLASSES, `${id} has a class this file defines`).to.include(v.class);
+      expect(v.why, `${id} says why`).to.have.length.greaterThan(40);
+      // A verdict claiming a treatment must say where it is: "compat" with
+      // nowhere to look is the same sentence as "we will get to it", and the
+      // two read identically six weeks later.
+      if (v.done === true) expect(v.where, `${id} claims a treatment, so it names it`).to.be.a("string");
+      else expect(v.where, `${id} has no treatment, so it names none`).to.equal(undefined);
+    }
+  });
+
+  it("complains about a row that differs and has no class", () => {
+    const {unjudged} = unclassified(["int_div", "a_new_divergence"]);
+    expect(unjudged).to.deep.equal(["a_new_divergence"]);
+  });
+
+  it("and about a class for a row that agrees again, which is the one that rots", () => {
+    // It reads as coverage. A verdict about a row nobody disputes any more
+    // is the same instrument failure as a note calling a merged pull request
+    // open -- and this tree grew a checker for that one first.
+    const {stale} = unclassified(["int_div"]);
+    expect(stale).to.include("dec_arith").and.to.include("cast_round");
+    expect(stale).to.not.include("int_div");
+  });
+
+  it("holds exactly the rows that differ today, and nothing else", () => {
+    // The live check: measured against the oracle in the tree, so this goes
+    // red the day a treatment lands and nobody retires its verdict, and the
+    // day an engine moves and a new row parts from HANA.
+    const oracle = JSON.parse(readFileSync(ORACLE, "utf8")).hana;
+    expect(Object.keys(VERDICTS).every((id) => oracle[id] !== undefined),
+      "every verdict is about a row the oracle answered").to.equal(true);
   });
 });

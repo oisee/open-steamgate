@@ -453,6 +453,72 @@ export async function measureEngines() {
  *  about an engine's behaviour over a fixture we wrote -- the same kind of
  *  thing as the protocol facts this repository already keeps -- so it is
  *  tracked. */
+
+/** A class per differing row, with where the treatment lives.
+ *
+ *  The header of this file has said since it was written that the cases are
+ *  **classified, not thresholded** -- "a count of differences says nothing".
+ *  Then the oracle column was merged, the count became nine, and the count
+ *  was the whole output. The classes existed only as prose in
+ *  `sqlscript-lower.mjs`, one comment per dialect entry, with nothing tying
+ *  them to the rows they answer.
+ *
+ *  So they are collected, and the collection is checked in both directions
+ *  (`unclassified()` below): a row that differs and has no verdict, and a
+ *  verdict for a row that agrees again. The second is the one that rots --
+ *  it reads as coverage.
+ *
+ *  **What this table is about matters: the rows measure the RAW engines.**
+ *  Most of these differences never reach a body, because the lowering
+ *  rewrites them; `div_zero` and `like_case` are the clearest cases, where
+ *  the engine still differs here and the runtime does not. A verdict saying
+ *  `done: true` means the treatment exists at `where`; it does not claim the
+ *  row will stop differing in this table, and it never will.
+ *
+ *  `measured` names the suite that watches the treatment, and is absent where
+ *  nothing does -- which is a smaller claim than the code deserves in two
+ *  places and is written that way on purpose. */
+export const VERDICTS = {
+  int_div: {class: "typed", done: true,
+    where: "sqlscript-lower.mjs DIALECTS.sqlite.divide -- ((a) * 1.0 / (b))",
+    measured: "test/sqlscript-values.mjs: division differs by engine exactly where the conformance table said",
+    why: "HANA's / over two integers yields a DECIMAL; SQLite truncates. The form has to be chosen from the HANA result type, which is what makes it typed rather than a rewrite."},
+  int_div_neg: {class: "typed", done: true,
+    where: "the same entry: one rewrite answers both rows",
+    why: "the sign half of the same divergence. sql.js truncates toward zero and HANA does not, and the forced decimal fixes both -- but the suite above only asserts the positive case, so this row is covered by the same code and not by its own measurement."},
+  dec_arith: {class: "typed", done: false,
+    why: "DECIMAL(15,2) + DECIMAL(15,2). DuckDB has a real decimal and agrees with HANA; SQLite has none and adds in binary floating point. Nothing in the lowering addresses it -- this is the one row of the nine with no treatment anywhere, and it is the one most likely to reach a body unnoticed, because it answers a number that is nearly right."},
+  cast_bad: {class: "refuse", done: true,
+    where: "sqlscript-lower.mjs DIALECTS.sqlite.castInt -- throws Refused",
+    measured: "test/sqlscript-values.mjs: sql.js refuses the cast it cannot make raise, and DuckDB raises",
+    why: "SQLite's CAST returns 0 where HANA raises, which is a different program and not a different number. No expression makes it raise, so the dialect declines the node instead of answering quietly."},
+  div_zero: {class: "compat", done: true,
+    where: "DIALECTS.duckdb.guardZero -- CASE WHEN divisor = 0 THEN error(...); sqlite has none, deliberately",
+    why: "DuckDB can be made to raise and is. SQLite cannot raise at all, so faithfulness would mean refusing division outright -- a common operator declined for a rare case. That trade is written down in the dialect and the row goes on being measured."},
+  like_case: {class: "compat", done: true,
+    where: "the CONNECTION, not the dialect: PRAGMA case_sensitive_like = ON in tools/sqljs-native.mjs and tools/sqlite-file-client.mjs",
+    why: "SQLite's LIKE is case-insensitive for ASCII unless the connection says otherwise. The fix is connection-scoped and survives transactions, so the dialect passes LIKE through -- which means this table, which opens its own connections, keeps showing the difference while the runtime does not have it."},
+  cast_char_narrow: {class: "compat", done: true,
+    where: "DIALECTS.duckdb.castChar and DIALECTS.sqlite.castChar -- SUBSTR(CAST(e AS VARCHAR), 1, n)",
+    why: "HANA truncates a CAST to a narrower character type and neither other engine does. One expression serves both dialects."},
+  cast_round: {class: "compat", done: true,
+    where: "DIALECTS.duckdb.castInt -- CAST(TRUNC(CAST(e AS DOUBLE)) AS INTEGER)",
+    why: "HANA truncates toward zero where DuckDB rounds. This one shipped wrong before the oracle column existed, which is the strongest argument in this file for tracking the oracle."},
+  fn_log: {class: "refuse", done: true,
+    where: "sqlscript-lower.mjs PORTABLE -- LOG is not in it, and an unknown function is refused rather than rendered",
+    why: "HANA takes LOG(base, x) and refuses the one-argument form. The two SQLite builds disagree with each other here -- base ten under Node, natural in the browser -- which is what makes this row the one that catches a build standing in for another."},
+};
+
+/** Both directions, because a table of verdicts ages exactly like the notes
+ *  this repository already grew a checker for. */
+export function unclassified(differing, verdicts = VERDICTS) {
+  const differs = new Set(differing);
+  return {
+    unjudged: [...differs].filter((id) => verdicts[id] === undefined),
+    stale: Object.keys(verdicts).filter((id) => differs.has(id) === false),
+  };
+}
+
 export const ORACLE = "test/sqlscript-hana-oracle.json";
 
 /** What a stored column may be used for, decided without reading a file.
@@ -587,24 +653,51 @@ async function main() {
     if (formattingOnly.length > 0) {
       console.log(`  formatting only, not behaviour: ${formattingOnly.map((f) => f.one.id).join(", ")}`);
     }
-    for (const {one, who} of real) console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${one.why}`);
+    for (const {one, who} of real) {
+      const v = VERDICTS[one.id];
+      const verdict = v === undefined ? "UNCLASSIFIED" : `${v.class}${v.done ? "" : " (no treatment yet)"}`;
+      console.log(`  ${one.id.padEnd(17)} ${who.join(",").padEnd(14)} ${verdict.padEnd(24)} ${one.why}`);
+      if (v?.where !== undefined) console.log(`  ${" ".repeat(17)} ${" ".repeat(14)} -> ${v.where}`);
+    }
+    // The two ways this table can lie about itself, asked of the run that
+    // just happened rather than of a list somebody keeps.
+    if (oracle === "hana") {
+      const {unjudged, stale} = unclassified(real.map(({one}) => one.id));
+      for (const id of unjudged) console.log(`  ${id} differs from HANA and has no class: the count is not the verdict.`);
+      for (const id of stale) console.log(`  ${id} has a class and no longer differs -- the verdict is about a row that agrees.`);
+    }
     // This footer used to end "the HANA column has to be merged in before any
     // of them can be assigned" -- and it is printed **only** when that column
     // is there, since everything above it compares against the oracle. So it
     // asked for the one thing that had just been done. A closing line that
     // names the next step is read as the next step; one that names a step
     // already taken teaches the reader to skip the footer (2026-09-19).
-    console.log("\nA count is not the verdict. Each differing row needs a class -");
-    console.log("native / rewrite / typed / compat / host / refuse - and with the");
-    console.log(oracle === "hana"
-      ? `HANA column merged, the ${real.length} rows above can be given one.`
-      // and when the oracle is a stand-in, the original warning is the true
-      // one and has to survive: a class assigned against DuckDB is a class
-      // assigned against a guess. Removing it along with the stale half was
-      // the first thing this edit did, and it cost a real warning to fix a
-      // false one -- the over-correction is as much a defect as the lie.
-      : `HANA column absent, so this compares against ${oracle.toUpperCase()}, ` +
-        `a stand-in: merge it before assigning any.`);
+    if (oracle === "hana") {
+      // **The footer names what is not done.** It used to ask for the HANA
+      // column and was printed only where that column was present, so it
+      // asked for the thing that had just happened; then it asked for classes
+      // after the classes existed. A closing line that names a step already
+      // taken teaches the reader to skip the footer, so this one is derived
+      // from the table rather than written under it.
+      const owed = real.map(({one}) => one.id).filter((id) => VERDICTS[id]?.done === false);
+      const unwatched = real.map(({one}) => one.id)
+        .filter((id) => VERDICTS[id]?.done === true && VERDICTS[id]?.measured === undefined);
+      console.log(`\n${real.length} rows differ from the oracle and ${real.length - owed.length} have a treatment.`);
+      if (owed.length > 0) {
+        console.log(`  no treatment anywhere: ${owed.join(", ")} -- this is the work, not the count.`);
+      }
+      if (unwatched.length > 0) {
+        console.log(`  treated, but no suite watches the treatment: ${unwatched.join(", ")}`);
+        console.log("  (the class was read off the dialect; reading and running find different things.)");
+      }
+    } else {
+      console.log("\nA count is not the verdict. Each differing row needs a class -");
+      console.log("native / rewrite / typed / compat / host / refuse - and the");
+      // when the oracle is a stand-in, a class assigned against DuckDB is a
+      // class assigned against a guess
+      console.log(`HANA column is absent, so this compares against ${oracle.toUpperCase()}, ` +
+        "a stand-in: merge it before assigning any.");
+    }
   }
 
 }
