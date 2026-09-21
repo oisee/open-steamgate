@@ -304,3 +304,25 @@ procedural half.
 This order keeps every commit executable and makes the first new language
 feature answer a user-visible question rather than merely increasing parser
 coverage.
+
+## Progress
+
+### 2026-09-21 — P0 device seam
+
+Implemented the initial PostgreSQL lowering and the parameterised native
+channel, including:
+
+- numbered placeholders with explicit PostgreSQL types;
+- packed decimals bound as text rather than rounded through JavaScript;
+- `DUMMY` represented as a one-row source rather than a physical table;
+- native work on the caller's transaction connection, fenced by a savepoint;
+- fail-stop behaviour after a poisoned COMMIT;
+- bounded, collision-resistant relation names and diagnostic cleanup;
+- a live test using a session-local temporary fixture rolled back with the
+  transaction.
+
+The live PostgreSQL run passed 14 tests, including the relational pipeline,
+typed multiplication, concatenation, decimal division, transaction reuse and
+bound values. Functions measured only on the earlier HANA/DuckDB/SQLite
+matrix are explicitly refused on PostgreSQL until PostgreSQL gains its own
+conformance rows. P1 (procedural IR) is next.

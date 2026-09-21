@@ -68,6 +68,48 @@ const DIALECTS = {
     aggName: () => "STRING_AGG",
     dummy: "DUMMY",
   },
+  // PostgreSQL is deliberately a separate dialect rather than an alias for
+  // DuckDB. The two happen to share a lot of spelling, but not their value
+  // rules: INTEGER / INTEGER truncates here and is decimal in HANA, while
+  // placeholders are numbered. Only the operations below are claimed; a
+  // HANA-specific function still reaches the common refusal below.
+  postgres: {
+    // Adding a dialect must not silently widen the three-engine PORTABLE
+    // allowlist. Functions enter this set only after PostgreSQL has a
+    // value-level conformance row. The first AMDP slice needs operators, not
+    // built-ins, so an empty set is the honest initial capability.
+    functions: new Set(),
+    quote: (id) => `"${id.replace(/"/g, '""')}"`,
+    placeholder: (n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      let pg;
+      if (/^[IBS](?:\(|$)/.test(code)) pg = "integer";
+      else if (/^F(?:\(|$)/.test(code)) pg = "double precision";
+      else if (/^P\(\d+,\d+\)$/.test(code)) pg = `numeric${code.slice(1)}`;
+      else if (/^C\(\d+\)$/.test(code)) pg = `varchar${code.slice(1)}`;
+      else if (code === "STRING") pg = "text";
+      else throw new Refused(`the ABAP type ${code || "(missing)"} has no PostgreSQL parameter type`);
+      return `$${n}::${pg}`;
+    },
+    divide: (a, b) => `(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC))`,
+    intDiv: (a, b) => `CAST(TRUNC(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC)) AS INTEGER)`,
+    concat: (args) => args.join(" || "),
+    ifnull: (a, b) => `COALESCE(${a}, ${b})`,
+    substr: (s, from, len) => `SUBSTRING(${s} FROM ${from} FOR ${len})`,
+    // PostgreSQL rounds some numeric-to-integer casts. SQLScript truncates
+    // toward zero, so make that step explicit as for DuckDB.
+    castInt: (e) => `CAST(TRUNC(CAST(${e} AS NUMERIC)) AS INTEGER)`,
+    castChar: (e, n) => `SUBSTRING(CAST(${e} AS VARCHAR) FROM 1 FOR ${n})`,
+    substrBefore: (s, x) =>
+      `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, strpos(${s()}, ${x()}) - 1) ELSE '' END`,
+    substrAfter: (s, x) =>
+      `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, strpos(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
+    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: (s, x) => `strpos(${s()}, ${x()})`,
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    aggName: () => "string_agg",
+    dummy: "(SELECT 1) AS dummy",
+  },
   duckdb: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     placeholder: () => "?",
@@ -241,10 +283,10 @@ export function lower(rel, dialectName, options = {}) {
         // a string literal still goes through a parameter: a literal in the
         // text is the class of defect this contract exists to remove
         params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type)});
-        return d.placeholder(params.length);
+        return d.placeholder(params.length, seamType(e.type));
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
-        return d.placeholder(params.length);
+        return d.placeholder(params.length, seamType(e.type));
       case "bin": {
         const left = expr(e.left);
         const right = expr(e.right);
@@ -307,6 +349,9 @@ export function lower(rel, dialectName, options = {}) {
         return `(CASE ${whens}${other} END)`;
       }
       case "call": {
+        if (d.functions instanceof Set && !d.functions.has(e.fn)) {
+          throw new Refused(`the function ${e.fn} has not been measured on ${dialectName}`);
+        }
         // **Rendering an argument is not free: it pushes that argument's
         // bound values.** So the arguments are rendered exactly as many
         // times as they appear in the text, and never before it is known how
@@ -385,7 +430,7 @@ export function lower(rel, dialectName, options = {}) {
   let alias = 0;
   const from = (r) => {
     if (r.rel === "var") return select(r); // refuses, with the right message
-    if (r.rel === "scan") return d.quote(r.table);
+    if (r.rel === "scan") return String(r.table).toUpperCase() === "DUMMY" ? d.dummy : d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
   };

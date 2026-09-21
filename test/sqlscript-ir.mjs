@@ -39,7 +39,7 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
   });
 
   it("nests rather than sequences, on every dialect we ship", () => {
-    for (const dialect of ["hana", "duckdb", "sqlite"]) {
+    for (const dialect of ["hana", "postgres", "duckdb", "sqlite"]) {
       expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM \(SELECT \* FROM "SRC" WHERE .*\) AS "t0" ORDER BY/);
     }
   });

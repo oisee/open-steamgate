@@ -16,7 +16,7 @@ describe("a SQLScript body, all the way to rows", function () {
   this.timeout(120000);
 
   it("compiles to one statement per engine, with the chain spliced", () => {
-    for (const dialect of ["hana", "duckdb", "sqlite"]) {
+    for (const dialect of ["hana", "postgres", "duckdb", "sqlite"]) {
       const {sql, ir} = compile(BODY, dialect);
       expect(sql, `${dialect} got a statement`).to.be.a("string").and.to.contain("SELECT");
       expect(sql, `${dialect}: one statement, not a script`).to.not.contain(";");
