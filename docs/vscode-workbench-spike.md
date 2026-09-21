@@ -105,6 +105,16 @@ arm64 build and license/content inventory remain before multi-arch readiness.
   honest; unsupported ATC, debugger, CTS, dumps and DDIC editors must not be
   advertised as working.
 
+W1 handshake evidence, 2026-09-21: the unmodified abap-fs 2.9.1 extension
+loaded in code-server, accepted the configured OSD system and added `OSD(ABAP)`
+to Explorer. Its real requests to `/sap/bc/adt/compatibility/graph` and
+`/sap/bc/adt/discovery` returned 200; `/osd/not-served` remained empty. This
+proves startup/discovery only. Package expansion, source open/save, activation
+and ABAP Unit remain W1/W2 work. The run also hardened the container: cache
+and unavoidable `.copilot` state stay in the dedicated cache volume, while
+the Agent UI and code-server port proxy are disabled and rootfs remains
+read-only.
+
 ### W2 — developer loop acceptance
 
 In one Playwright/manual-assisted browser run against a disposable worktree:

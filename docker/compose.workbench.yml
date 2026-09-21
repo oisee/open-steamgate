@@ -19,6 +19,7 @@ services:
       - "..:/workspace"
       - osd-workbench-data:/home/coder/.local/share/code-server
       - osd-workbench-config:/home/coder/.config/code-server
+      - osd-workbench-cache:/home/coder/.cache
     secrets:
       - osd_ide_password
     read_only: true
@@ -41,3 +42,4 @@ secrets:
 volumes:
   osd-workbench-data:
   osd-workbench-config:
+  osd-workbench-cache:

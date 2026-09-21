@@ -44,8 +44,6 @@ cat > "$workspace" <<EOF
       }
     },
     "telemetry.telemetryLevel": "off",
-    "extensions.autoCheckUpdates": false,
-    "extensions.autoUpdate": false,
     "git.autofetch": false,
     "git.confirmSync": true
   }
@@ -57,6 +55,8 @@ exec /usr/bin/code-server \
   --auth password \
   --disable-telemetry \
   --disable-update-check \
+  --disable-proxy \
+  --vscode-option agents=false \
   --extensions-dir /opt/osd-workbench/extensions \
   --user-data-dir /home/coder/.local/share/code-server \
   "$workspace"

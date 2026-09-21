@@ -17,8 +17,9 @@ ADD --checksum=sha256:6a05dd256014e1463941eecb8a6318e996b5feb78d60f4a5657c17e270
 
 RUN chown coder:coder /tmp/vscode-abap.vsix /tmp/cds.vsix /tmp/abap-fs.vsix \
   && chmod 0444 /tmp/vscode-abap.vsix /tmp/cds.vsix /tmp/abap-fs.vsix \
-  && mkdir -p /opt/osd-workbench/extensions \
-  && chown -R coder:coder /opt/osd-workbench
+  && mkdir -p /opt/osd-workbench/extensions /home/coder/.cache/copilot \
+  && chown -R coder:coder /opt/osd-workbench /home/coder/.cache \
+  && ln -s .cache/copilot /home/coder/.copilot
 
 USER coder
 RUN code-server --extensions-dir /opt/osd-workbench/extensions --install-extension /tmp/vscode-abap.vsix \
