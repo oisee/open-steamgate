@@ -163,20 +163,27 @@ open-rfc-go/open-diag-go sidecar remains the known boundary.
 
 ## Order of delivery
 
-1. Finish and review D0.
-2. Prove D1 with the actual extension on amd64, then Raspberry Pi arm64.
-3. Add D2 visibility using VS Code Git first.
-4. Make one D3 ABAP Unit cycle excellent and isolated.
-5. Add the read/test half of D4.
-6. Grow D5 only from captured client failures and useful object families.
+The three-surface decision in
+[`devux-three-surfaces.md`](devux-three-surfaces.md) updates the product order:
+code-server remains a conformance surface, while the primary next slice is the
+Fiori Workbench against a live local/hosted OSD backend.
+
+1. Keep D0 and the real-client D1 acceptance green.
+2. Build the Fiori Workbench vertical slice against the live Object Store.
+3. Add the Pages browser adapter to the same UI and state-machine contract.
+4. Add D2 history and make the D3 ABAP Unit loop excellent in both modes.
+5. Build the desktop OSD supervisor extension on the now-stable runtime API.
+6. Add the read/test half of D4 and grow D5 from captured client failures.
 7. Re-evaluate D6 with measurements after the workbench is in daily use.
 
 Each step stays in a feature branch, has a small real-client acceptance, and
-enters `main` only through PR checks. The richer IDE is optional: the small
-in-system editor remains a recovery surface when extensions or user code fail.
+enters `main` only through PR checks. The compact in-system editor remains a
+recovery surface when a richer frontend or extension fails.
 
 ## Related plans
 
+- [`devux-three-surfaces.md`](devux-three-surfaces.md) — the target split among
+  Fiori Workbench, desktop VS Code, Pages and optional code-server.
 - [`branch-plan-live-workbench.md`](branch-plan-live-workbench.md) — the active
   branch boundary and activation/Git-history slice.
 - [`vscode-workbench-spike.md`](vscode-workbench-spike.md) — container,
