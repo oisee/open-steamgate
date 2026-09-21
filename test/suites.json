@@ -10,6 +10,7 @@
     "test/amdp-sandbox.mjs",
     "test/amdp.mjs",
     "test/analytics.mjs",
+    "test/taxi-import.mjs",
     "test/batch-inserts.mjs",
     "test/bsp-app.mjs",
     "test/cds-cast.mjs",
