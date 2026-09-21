@@ -1496,6 +1496,21 @@ ${objects.map(reference).join("\n")}
 `;
 }
 
+// The repository path which lets a client turn an ADT URI back into the
+// corresponding object in its package tree.  Includes are deliberately not
+// separate steps: abap-fs resolves the class and then selects the requested
+// include from that class's structure.
+export function nodePathDocument(steps) {
+  const link = (step) => `    <objectLinkReference adtcore:uri="${xmlEscape(step.uri)}" adtcore:type="${xmlEscape(step.type)}" adtcore:name="${xmlEscape(step.name)}" projectexplorer:category="${xmlEscape(step.category ?? "")}"/>`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<projectexplorer:nodepath xmlns:projectexplorer="http://www.sap.com/adt/projectexplorer" xmlns:adtcore="http://www.sap.com/adt/core">
+  <projectexplorer:objectLinkReferences>
+${steps.map(link).join("\n")}
+  </projectexplorer:objectLinkReferences>
+</projectexplorer:nodepath>
+`;
+}
+
 // ADT's quick search takes a pattern with `*` as the wildcard, which is not
 // what a substring search does: `ZCL_STG*` means "starts with", and a bare
 // word means "contains" in most clients' usage. Translating here rather than

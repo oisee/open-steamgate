@@ -408,6 +408,39 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
     });
 
+    it("answers the occurrence-marker follow-up without discarding the navigation URI", async () => {
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const res = await call(`/abapsource/occurencemarkers?uri=${encodeURIComponent(uri)}`, {
+        method: "POST",
+        headers: {"content-type": "text/plain", accept: "application/*"},
+        body: "CLASS ltcl DEFINITION FOR TESTING. ENDCLASS.",
+      });
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<occurrenceInfo");
+      expect(xml).to.contain("<occurrences/>");
+    });
+
+    it("maps a test include URI back through its packages to the owning class", async () => {
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`, {method: "POST"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<projectexplorer:nodepath");
+      expect(xml).to.contain('adtcore:name="$STG_TEST"');
+      expect(xml).to.contain('adtcore:name="$STG_TEST_UNIT"');
+      expect(xml).to.contain('adtcore:name="ZCL_STG_SEGW_TEST"');
+      expect(xml).to.contain('adtcore:type="CLAS/OC"');
+      expect(xml).to.not.contain("includes/testclasses");
+    });
+
+    it("refuses an occurrence-marker request without its source URI", async () => {
+      const res = await call("/abapsource/occurencemarkers", {method: "POST", body: "source"});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("uri is required");
+    });
+
     it("a test run that names nothing is refused", async () => {
       const res = await call("/abapunit/testruns", {method: "POST", body: "<aunit:runConfiguration/>"});
       expect(res.status).to.equal(400);

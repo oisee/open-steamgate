@@ -29,7 +29,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 
 export const BASE = "/sap/bc/adt";
@@ -157,11 +157,12 @@ const COMPATIBILITY = {
   "COM.SAP.ADT.OO": ["classModelXmlSchemaConform", "classes", "interfaces",
     "interfacesModelXmlSchemaConform", "startUriAdaptationToMainResource"],
   "COM.SAP.ADT.PROGRAMS": ["includes", "includesXmlSchemaConform", "programs", "programsXmlSchemaConform"],
-  // treePath is deliberately absent: it promises repository/nodepath, which
-  // nothing here answers, and a client that believes the promise asks for it
-  // while expanding a package instead of falling back to nodestructure. The
-  // other three are kept because there is a resource behind each —
-  // nodestructure, informationsystem/search and typestructure.
+  // treePath is deliberately absent. repository/nodepath now resolves an
+  // object's package chain for test-result navigation, but advertising the
+  // feature also makes clients use it while expanding packages; that wider
+  // contract is not implemented and would bypass the working nodestructure
+  // fallback. The other three stay advertised because their full resources
+  // are present: nodestructure, informationsystem/search and typestructure.
   "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData"],
   "COM.SAP.ADT.RIS": ["ris", "search"],
   // The outline of a class or interface is gated here, not at the resource.
@@ -1788,6 +1789,25 @@ export function adtRouter(options = {}) {
     return `application/vnd.sap.adt.abapunit.testruns.${kind}.v${version}+xml`;
   };
 
+  // abap-adt-api follows every unit-test class and method with this request
+  // before it can publish the result into VS Code's Testing tree. OSD already
+  // puts an exact #start=line,column fragment in each navigationUri. Returning
+  // an empty, well-formed marker collection tells the client to keep that
+  // authoritative URI; a missing endpoint aborts the otherwise successful
+  // run and leaves the UI at 0/0.
+  router.post(`${BASE}/abapsource/occurencemarkers`, async (req, res) => {
+    await rawBody(req);
+    if (typeof req.query.uri !== "string" || req.query.uri === "") {
+      res.status(400).type("application/xml")
+        .send(exceptionDocument("ExceptionInvalidRequest", "uri is required"));
+      return;
+    }
+    res.status(200).type("application/xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<occurrenceInfo xmlns="http://www.sap.com/adt/abapsource"><occurrences/></occurrenceInfo>',
+    );
+  });
+
   // The evaluation of a run: the same result for the objects named, which
   // the client asks for after the run to show the report and to navigate
   // from a result to its method (a4h-adt.jsonl:497). Its references carry
@@ -1872,6 +1892,32 @@ export function adtRouter(options = {}) {
   });
 
   advertise("repository/nodestructure");
+  router.post(`${BASE}/repository/nodepath`, async (req, res) => {
+    await rawBody(req);
+    const uri = typeof req.query.uri === "string" ? req.query.uri : "";
+    const parsed = objectFromUri(uri.replace(/\/includes\/.*$/, ""), collections);
+    if (parsed === undefined || parsed.type === "DEVC") {
+      res.status(400).type("application/xml")
+        .send(exceptionDocument("ExceptionInvalidRequest", "an object uri is required"));
+      return;
+    }
+    const entry = store.find(parsed.type, parsed.name);
+    if (entry === undefined) {
+      res.status(404).type("application/xml")
+        .send(exceptionDocument("ExceptionResourceNotFound", `${parsed.type} ${parsed.name} does not exist`));
+      return;
+    }
+    const packages = (entry.packages ?? []).map((name) => ({
+      name,
+      type: ADT_TYPE.DEVC,
+      uri: `${BASE}/packages/${encodeURIComponent(name.toLowerCase())}`,
+    }));
+    const objectUri = uri.split(/[?#]/)[0].replace(/\/includes\/.*$/, "").replace(/\/source\/main$/, "");
+    res.status(200).type("application/xml; charset=utf-8").send(nodePathDocument([
+      ...packages,
+      {name: entry.name, type: ADT_TYPE[entry.type] ?? entry.type, uri: objectUri},
+    ]));
+  });
   router.post(`${BASE}/repository/nodestructure`, async (req, res) => {
     const body = await rawBody(req);
     answer(res, () => {

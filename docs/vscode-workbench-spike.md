@@ -29,6 +29,15 @@ abap-fs declares a Node `main` entry point and no browser entry point.
 - `hudakf.cds` `0.7.3`, VSIX SHA-256
   `c4d8d96629eed392fff3928f0073ae55065b3e8c01cf4e0498914bc9096da0d3`.
 
+The pinned abap-fs bundle needs one explicit compatibility shim under the
+Node runtime bundled with Code 1.138: one bundled dependency selects its
+browser branch merely because Node now defines `navigator`. VS Code strips
+both `NODE_OPTIONS` and `VSCODE_NODE_OPTIONS` before it launches the
+extension host, so the image patches only that dependency's minified feature
+probe. It does not mutate the shared extension-host global. Remove the shim
+when an upstream release completes the Node migration; the VSIX checksum
+above remains the checksum of the reviewed input artifact.
+
 Download and install these during the image build, never at container startup.
 Use Open VSX or the upstream GitHub release assets, not Microsoft's extension
 marketplace. Record licenses, release URLs and hashes in the image.
@@ -105,15 +114,13 @@ arm64 build and license/content inventory remain before multi-arch readiness.
   honest; unsupported ATC, debugger, CTS, dumps and DDIC editors must not be
   advertised as working.
 
-W1 handshake evidence, 2026-09-21: the unmodified abap-fs 2.9.1 extension
-loaded in code-server, accepted the configured OSD system and added `OSD(ABAP)`
-to Explorer. Its real requests to `/sap/bc/adt/compatibility/graph` and
-`/sap/bc/adt/discovery` returned 200; `/osd/not-served` remained empty. This
-proves startup/discovery only. Package expansion, source open/save, activation
-and ABAP Unit remain W1/W2 work. The run also hardened the container: cache
-and unavoidable `.copilot` state stay in the dedicated cache volume, while
-the Agent UI and code-server port proxy are disabled and rootfs remains
-read-only.
+W1/W2 evidence, 2026-09-21: the pinned abap-fs 2.9.1 extension loaded in
+code-server, accepted the configured OSD system, added `OSD(ABAP)` to
+Explorer and expanded `$TMP/$STG/$STG_ICF`. A real browser opened
+`ZCL_STG_ICF_DEMO.clas.abap`, saved through ADT and invoked the extension's
+activation and ABAP Unit commands. The container remains read-only and
+unprivileged; cache and unavoidable `.copilot` state stay in its dedicated
+cache volume, while the Agent UI and code-server port proxy are disabled.
 
 ### W2 — developer loop acceptance
 
@@ -130,6 +137,24 @@ In one Playwright/manual-assisted browser run against a disposable worktree:
 
 Run amd64 first. Run the same acceptance on the Raspberry Pi arm64 before
 calling the image multi-arch-ready.
+
+W2 amd64 evidence, 2026-09-21: `test/e2e/workbench-w2.mjs` completed the
+whole loop against disposable code-server volumes and a dedicated worktree.
+An invalid save appeared in Problems and left both the serving generation and
+`W2-OLD` runtime response unchanged. The corrected source activated a new
+generation and changed the live HTTP response to `W2-NEW`; Testing displayed
+a non-empty two-item ABAP Unit result, Source Control displayed the same
+ADT-written class, and the scenario restored and reactivated `W2-OLD`.
+`Refresh ABAP filesystem` was also found in the real root context menu and
+invoked. The pinned client renders the test result at object-summary level in
+this Code build; exposing class/method rows remains a follow-up, not a claim
+of this milestone.
+
+The harness defaults to the documented ports and accepts
+`OSD_WORKBENCH_URL`, `OSD_RUNTIME_URL` and `OSD_IDE_PASSWORD_FILE` for a
+disposable parallel instance. Start it with
+`npm run e2e:workbench`; it restores and reactivates its `W2-OLD`
+fixture before returning successfully.
 
 ### W3 — product integration
 

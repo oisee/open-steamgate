@@ -33,7 +33,14 @@ RUN code-server --extensions-dir /opt/osd-workbench/extensions --install-extensi
      | grep -Fx 'murbani.vscode-abap-remote-fs@2.9.1'
 
 USER root
-RUN rm -f /tmp/vscode-abap.vsix /tmp/cds.vsix /tmp/abap-fs.vsix
+# One dependency bundled by abap-fs 2.9.1 selects its browser branch merely
+# because Node 22+ defines navigator. Patch that single feature probe instead
+# of deleting the shared extension host's process-global navigator.
+RUN sed -i 's/i="undefined"==typeof navigator,s=/i=!0,s=/' \
+      /opt/osd-workbench/extensions/murbani.vscode-abap-remote-fs-2.9.1/client/dist/extension.js \
+  && grep -qF 'i=!0,s={e:{}}' \
+      /opt/osd-workbench/extensions/murbani.vscode-abap-remote-fs-2.9.1/client/dist/extension.js \
+  && rm -f /tmp/vscode-abap.vsix /tmp/cds.vsix /tmp/abap-fs.vsix
 COPY --chmod=0555 docker/workbench/entrypoint.sh /usr/local/bin/osd-workbench-entrypoint
 
 USER coder

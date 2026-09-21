@@ -33,6 +33,7 @@
     "probe": "node tools/closure-probe.mjs",
     "amdp:oracle": "node tools/amdp-oracle.mjs",
     "e2e": "npm run transpile && playwright test",
+    "e2e:workbench": "node test/e2e/workbench-w2.mjs",
     "e2e:isolated": "node scripts/run-e2e-isolated.mjs",
     "e2e:install": "playwright install chromium",
     "cds": "node tools/cds2ddic.mjs",
