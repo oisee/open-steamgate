@@ -1,7 +1,7 @@
 # Gateway regression contract v1
 
-Status: GW0 local contract complete; authorized A4H characterization partial,
-2026-09-21.
+Status: GW0 local contract and authorized classic-SAP native probe complete;
+correlated classic-SAP wire proof remains open, 2026-09-21.
 
 This document defines the portable data and matching contract. The JavaScript
 reference matcher and synthetic fixtures are a characterization oracle; they
@@ -237,15 +237,14 @@ ZIF_OSG_REGRESSION_RUNNER~RUN(
 ) -> RunResult
 ```
 
-No `/IWFND/*` type, table key or exception may enter this proposed interface.
-On OSG, a thin compatibility facade may reproduce the contract-tested subset of
-`/IWFND/CL_SUTIL_GW_CLIENT_CFG` and
-`/IWFND/CL_SUTIL_GW_CLIENT_EXEC`. It should delegate all behavior to the Z core
-and return an explicit unsupported result for methods outside that subset. It
-is not a claim of complete binary compatibility.
+No platform-owned type, storage key or exception may enter this proposed
+interface.
+On OSG, a thin compatibility facade may reproduce only the contract-tested
+saved-case configuration and execution surface. It delegates behavior to the Z
+core and returns an explicit unsupported result outside that subset. It is not
+a claim of complete binary compatibility.
 
-On A4H the standard names already belong to SAP. The proposed classic Z adapter
-therefore separates two operations:
+On a classic SAP system, a Z adapter separates two operations:
 
 ```text
 IMPORT_SAVED_CASE(group, case) -> immutable RegressionCase
@@ -262,35 +261,27 @@ verdict.
 Imported provenance may record `executor: sap.gateway-client`, the external
 locator and snapshot digest. `case.id` and `case.version` remain authoritative.
 
-## Authorized A4H characterization (partial)
+## Authorized classic-SAP observation (native probe complete; wire unproven)
 
-The following facts were observed read-only on A4H 7.58, client 001, on
-2026-09-21. No repository object, transport or test case was created or
-modified.
+Alice explicitly authorized one disposable probe in a classic SAP sandbox:
+create a uniquely named synthetic saved GET request, execute it through the
+platform's standard saved-request runner, and delete it in the same RFC call.
+No modifying HTTP request, business-table write or transport was used.
 
-- `/IWFND/CL_SUTIL_GW_CLIENT_CFG` exposes saved-case listing and parsing;
-  `/IWFND/CL_SUTIL_GW_CLIENT_EXEC=>EXECUTE_TEST_CASE` accepts a group/case
-  locator and returns status, selected headers and body.
-- The saved V2 GET case `CORE_SAMPLES / sp13 - VOCAN new simple values` targets
-  `/sap/opu/odata/IWBEP/TEA_TEST_APPLICATION/$metadata`. Invoking it through
-  `EXECUTE_TEST_CASE` completed in a transient ABAP session. The ExecuteABAP
-  transport did not expose its export parameters, so no status is invented.
-- A separate external HTTP GET to that URI was observed at the real wire
-  boundary and returned HTTP 403, XML content, 971 bytes. This is evidence for
-  that external session only, not the status of the standard saved-case run.
-- Clean-room observation classifies the selected V2 sample as the ordinary
-  HTTP path. The standard top-level result does not expose dedicated boundary
-  evidence. Bypass conditions remain unverified by a public black-box test and
-  are deliberately not part of this public contract.
-- `EXECUTE_TEST_CASE` loads the saved request through the configuration API,
-  decodes its headers/body, executes it and validates expected HTTP statuses.
-  It does not, in this method, compare response headers/body with a stored
-  expected response. It is therefore a native saved-request/status executor,
-  not a substitute for the portable OSG matcher.
-
-Observed public visibility does not establish that these standard classes are
-released ABAP Cloud APIs. Their use remains confined to the optional classic
-adapter; the portable core does not depend on them.
+- The trusted RFC transport completed with `subrc=0`.
+- The probe observed that its synthetic case was created and found.
+- The native runner returned HTTP 403,
+  `application/xml;charset=utf-8`, a 971-byte body and nonempty native error
+  text. This freezes observable native result semantics without storing or
+  publishing the response body.
+- The same call reported successful cleanup. A separate storage check found no
+  remaining synthetic case.
+- This native result exposes status, content type, body and error signaling. It
+  does not replace the portable OSG semantic matcher.
+- The result did not contain boundary evidence. A separate external request
+  happened to produce the same status and byte length, but matching values are
+  not correlation. A server access record or network trace tied to a future
+  probe is still required before that run can claim evidence level `wire`.
 
 ## Clean-room and authorization boundary
 
@@ -298,10 +289,12 @@ The supplied ZSCR examples inform observable workflows and field meanings.
 Their implementation is not copied. Synthetic fixtures contain no captured
 business data, credentials, host names or proprietary source.
 
-GW0 local is complete: the contract validates and round-trips, its positive
-control passes, and its deliberate business mutation fails at the exact
-pointer. Full GW0 remains open because the saved standard sample was not
-synthetic and the standard call's exported result was unavailable through the
-ephemeral execution transport. A separate authorized write-scoped probe is
-needed to create and observe a disposable synthetic standard case. Synthetic
-or A4H-shaped data must never be reported as observed A4H behavior.
+GW0 local and the authorized classic-SAP native probe are complete: the
+contract validates
+and round-trips, its positive control passes, its deliberate business mutation
+fails at the exact pointer, and the authorized native probe established disposable
+saved-case creation, native result semantics and explicit cleanup. Full GW0
+remains open only for a correlated classic-SAP wire observation. Synthetic or
+platform-shaped data must never be reported as business behavior, and the
+observed
+HTTP 403 is not a pass.

@@ -208,7 +208,7 @@ cannot undo remote HTTP commits that already completed.
 
 ## Delivery waves
 
-### GW0 - characterize and freeze the contract (local complete; A4H partial)
+### GW0 - characterize and freeze the contract (native probe complete; wire open)
 
 - use supplied examples only as clean-room behavioral references;
 - treat A4H as an external sandbox that is exercised only after Alice
@@ -222,11 +222,13 @@ cannot undo remote HTTP commits that already completed.
 Done when the document distinguishes observed, documented and inferred facts,
 and a deliberately changed field makes the fixture fail.
 
-The local gate is complete through the versioned contract and strict synthetic
-oracle. The first authorized A4H characterization is recorded in
-[Gateway regression contract v1](devux-gateway-regression-contract.md), but the
-full gate remains open until a disposable synthetic standard case produces an
-observable result and boundary proof.
+The versioned contract, strict synthetic oracle and authorized disposable A4H
+probe are recorded in
+[Gateway regression contract v1](devux-gateway-regression-contract.md). The
+probe produced observable status/type/body facts through a trusted RFC call and
+left no saved-case row behind. Native probe characterization is complete; the full
+gate remains open only until one run is correlated with server/ICM access
+evidence or a network trace and can honestly claim `wire`.
 
 ### GW1 - kernel and headless runner
 
