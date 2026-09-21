@@ -1446,16 +1446,17 @@ ${(a.stack ?? []).map(stackEntry).join("\n")}
           </stack>
         </alert>`;
 
+  const alerts = (items, indent) => {
+    if ((items ?? []).length === 0) return `${indent}<alerts/>`;
+    return `${indent}<alerts>\n${items.map(alert).join("\n")}\n${indent}</alerts>`;
+  };
+
   const method = (m, include) => `      <testMethod adtcore:name="${xmlEscape(m.name)}" adtcore:uri="${xmlEscape(at(include, m.line, m.column))}" executionTime="${xmlEscape(m.executionTime ?? "0.000")}" unit="${xmlEscape(m.unit ?? "s")}" navigationUri="${xmlEscape(at(include, m.line, m.column))}">
-        <alerts>
-${(m.alerts ?? []).map(alert).join("\n")}
-        </alerts>
+${alerts(m.alerts, "        ")}
       </testMethod>`;
 
   const testClass = (c) => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(at(c.include, c.line, c.column))}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" navigationUri="${xmlEscape(at(c.include, c.line, c.column))}">
-      <alerts>
-${(c.alerts ?? []).map(alert).join("\n")}
-      </alerts>
+${alerts(c.alerts, "      ")}
       <testMethods>
 ${(c.testMethods ?? []).map((m) => method(m, c.include)).join("\n")}
       </testMethods>

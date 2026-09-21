@@ -232,16 +232,16 @@ try {
     throw new Error('successful activation did not publish a new serving generation');
   }
 
+  const allPassed = page.getByText('3/3', { exact: true }).first();
+  if (await allPassed.isVisible()) {
+    await command('Test: Clear All Results');
+    await allPassed.waitFor({ state: 'hidden', timeout: 10_000 });
+  }
   await page.keyboard.press('Control+Shift+F11');
-  // VS Code 1.97's Testing view does not expose these rows as ARIA
-  // treeitems (the Explorer does), so select the Testing-specific label.
+  // Code 1.138 does not expose these Testing rows as ARIA treeitems.
   const unitRoot = page.getByText(/CLAS\/I ZCL_STG_ICF_DEMO\.main/i).first();
   await unitRoot.waitFor({ state: 'visible', timeout: 60_000 });
-  await page.waitForTimeout(1_000);
-  const testingText = await page.locator('body').innerText();
-  if (!/CLAS\/I ZCL_STG_ICF_DEMO\.main/i.test(testingText) || !/\d+\/2/.test(testingText)) {
-    throw new Error('ABAP Unit did not publish its two-item result into Testing');
-  }
+  await allPassed.waitFor({ state: 'visible', timeout: 60_000 });
 
   await page.keyboard.press('Control+Shift+g');
   await page.waitForTimeout(2_000);
@@ -287,7 +287,7 @@ try {
       serving: activated.system.serving,
       marker: activatedRuntime.marker
     },
-    unitSummaryVisible: /CLAS\/I ZCL_STG_ICF_DEMO\.main/i.test(testingText) && /\d+\/2/.test(testingText),
+    unitSummary: '3/3',
     gitVisible: /zcl_stg_icf_demo\.clas\.abap/i.test(gitText),
     refreshInvoked: true,
     restored: {

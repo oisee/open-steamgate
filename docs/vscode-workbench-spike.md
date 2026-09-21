@@ -34,9 +34,12 @@ Node runtime bundled with Code 1.138: one bundled dependency selects its
 browser branch merely because Node now defines `navigator`. VS Code strips
 both `NODE_OPTIONS` and `VSCODE_NODE_OPTIONS` before it launches the
 extension host, so the image patches only that dependency's minified feature
-probe. It does not mutate the shared extension-host global. Remove the shim
-when an upstream release completes the Node migration; the VSIX checksum
-above remains the checksum of the reviewed input artifact.
+probe. It does not mutate the shared extension-host global. The same checked
+patch also terminalizes successful ABAP Unit class/object parents which
+2.9.1 otherwise leaves Running/Queued after their leaf method passes. The
+patch script requires each exact pinned input fragment once and refuses an
+unknown bundle. Remove these shims when upstream releases carry both fixes;
+the VSIX checksum above remains the checksum of the reviewed input artifact.
 
 Download and install these during the image build, never at container startup.
 Use Open VSX or the upstream GitHub release assets, not Microsoft's extension
@@ -142,13 +145,14 @@ W2 amd64 evidence, 2026-09-21: `test/e2e/workbench-w2.mjs` completed the
 whole loop against disposable code-server volumes and a dedicated worktree.
 An invalid save appeared in Problems and left both the serving generation and
 `W2-OLD` runtime response unchanged. The corrected source activated a new
-generation and changed the live HTTP response to `W2-NEW`; Testing displayed
-a non-empty two-item ABAP Unit result, Source Control displayed the same
+generation and changed the live HTTP response to `W2-NEW`; Testing reached
+an all-passed non-zero summary, Source Control displayed the same
 ADT-written class, and the scenario restored and reactivated `W2-OLD`.
+OSD emits empty Unit alert collections as canonical `<alerts/>`; the pinned
+ADT parser otherwise turns formatting whitespace into a synthetic failing
+alert.
 `Refresh ABAP filesystem` was also found in the real root context menu and
-invoked. The pinned client renders the test result at object-summary level in
-this Code build; exposing class/method rows remains a follow-up, not a claim
-of this milestone.
+invoked.
 
 The harness defaults to the documented ports and accepts
 `OSD_WORKBENCH_URL`, `OSD_RUNTIME_URL` and `OSD_IDE_PASSWORD_FILE` for a

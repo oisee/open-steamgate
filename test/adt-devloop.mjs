@@ -396,8 +396,10 @@ describe("tools/adt-facade: the development loop", () => {
     it("a method that passed carries no alert, which is what passing means", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
+      const testClass = xml.match(/<testClass [^>]*>[\s\S]*?<testMethods>/)[0];
+      expect(testClass).to.contain("<alerts/>");
       const method = xml.match(/<testMethod [^>]*>[\s\S]*?<\/testMethod>/)[0];
-      expect(method).to.contain("<alerts>");
+      expect(method).to.contain("<alerts/>");
       expect(method).to.not.contain("<alert ");
     });
 
