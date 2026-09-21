@@ -73,6 +73,7 @@
     "test/osd-xref.mjs",
     "test/preflight.mjs",
     "test/preview-closure.mjs",
+    "test/protocol-ni.mjs",
     "test/replay-compare.mjs",
     "test/rfc-live.mjs",
     "test/rfc-replay.mjs",
