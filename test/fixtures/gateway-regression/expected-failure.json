@@ -1,0 +1,12 @@
+{
+  "outcome": "failed",
+  "findings": [
+    {
+      "kind": "value-mismatch",
+      "scope": "body",
+      "path": "/d/Seats",
+      "expected": 2,
+      "actual": 3
+    }
+  ]
+}

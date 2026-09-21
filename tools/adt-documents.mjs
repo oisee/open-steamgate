@@ -1446,16 +1446,17 @@ ${(a.stack ?? []).map(stackEntry).join("\n")}
           </stack>
         </alert>`;
 
+  const alerts = (items, indent) => {
+    if ((items ?? []).length === 0) return `${indent}<alerts/>`;
+    return `${indent}<alerts>\n${items.map(alert).join("\n")}\n${indent}</alerts>`;
+  };
+
   const method = (m, include) => `      <testMethod adtcore:name="${xmlEscape(m.name)}" adtcore:uri="${xmlEscape(at(include, m.line, m.column))}" executionTime="${xmlEscape(m.executionTime ?? "0.000")}" unit="${xmlEscape(m.unit ?? "s")}" navigationUri="${xmlEscape(at(include, m.line, m.column))}">
-        <alerts>
-${(m.alerts ?? []).map(alert).join("\n")}
-        </alerts>
+${alerts(m.alerts, "        ")}
       </testMethod>`;
 
   const testClass = (c) => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(at(c.include, c.line, c.column))}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" navigationUri="${xmlEscape(at(c.include, c.line, c.column))}">
-      <alerts>
-${(c.alerts ?? []).map(alert).join("\n")}
-      </alerts>
+${alerts(c.alerts, "      ")}
       <testMethods>
 ${(c.testMethods ?? []).map((m) => method(m, c.include)).join("\n")}
       </testMethods>
@@ -1493,6 +1494,21 @@ export function objectReferencesDocument(objects) {
 <adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
 ${objects.map(reference).join("\n")}
 </adtcore:objectReferences>
+`;
+}
+
+// The repository path which lets a client turn an ADT URI back into the
+// corresponding object in its package tree.  Includes are deliberately not
+// separate steps: abap-fs resolves the class and then selects the requested
+// include from that class's structure.
+export function nodePathDocument(steps) {
+  const link = (step) => `    <objectLinkReference adtcore:uri="${xmlEscape(step.uri)}" adtcore:type="${xmlEscape(step.type)}" adtcore:name="${xmlEscape(step.name)}" projectexplorer:category="${xmlEscape(step.category ?? "")}"/>`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<projectexplorer:nodepath xmlns:projectexplorer="http://www.sap.com/adt/projectexplorer" xmlns:adtcore="http://www.sap.com/adt/core">
+  <projectexplorer:objectLinkReferences>
+${steps.map(link).join("\n")}
+  </projectexplorer:objectLinkReferences>
+</projectexplorer:nodepath>
 `;
 }
 

@@ -1,0 +1,45 @@
+# Optional browser IDE for a host OSD checkout. Run together with an OSD
+# process whose cwd is this repository, so ADT writes and VS Code Git see the
+# same files. This is intentionally not part of the ready-image stacks.
+services:
+  workbench:
+    build:
+      context: ..
+      dockerfile: docker/workbench/Dockerfile
+    image: osd-workbench:local
+    init: true
+    environment:
+      OSD_ADT_URL: "${OSD_ADT_URL:-http://host.docker.internal:3030}"
+      OSD_ADT_USER: "${OSD_ADT_USER:-developer}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${OSD_IDE_BIND:-127.0.0.1}:${OSD_IDE_PORT:-8088}:8080"
+    volumes:
+      - "..:/workspace"
+      - osd-workbench-data:/home/coder/.local/share/code-server
+      - osd-workbench-config:/home/coder/.config/code-server
+      - osd-workbench-cache:/home/coder/.cache
+    secrets:
+      - osd_ide_password
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+secrets:
+  osd_ide_password:
+    file: "${OSD_IDE_PASSWORD_FILE:-./workbench/ide-password.txt}"
+
+volumes:
+  osd-workbench-data:
+  osd-workbench-config:
+  osd-workbench-cache:

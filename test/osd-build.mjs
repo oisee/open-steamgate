@@ -1,9 +1,9 @@
 import {expect} from "chai";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {build, hashOf} from "../tools/osd-build.mjs";
+import {build, hashOf, missingLibraries} from "../tools/osd-build.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
@@ -48,6 +48,21 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(hashOf(root)).not.to.equal(first);
   });
 
+  it("hashes library content reached through a symlinked directory", () => {
+    write("src/zcl_one.clas.abap", "");
+    write("library-source/src/if_library.intf.abap", "INTERFACE if_library. ENDINTERFACE.\n");
+    mkdirSync(join(root, ".local/lars/library"), {recursive: true});
+    symlinkSync(join(root, "library-source", "src"), join(root, ".local/lars/library/src"), "dir");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: ["src"],
+      output_folder: "output",
+      libs: [{folder: "/.local/lars/library"}],
+    }));
+    const first = hashOf(root);
+    write("library-source/src/if_library.intf.abap", "INTERFACE if_library. CONSTANTS changed TYPE abap_bool VALUE abap_true. ENDINTERFACE.\n");
+    expect(hashOf(root)).not.to.equal(first);
+  });
+
   it("refuses a name twice inside one input, naming both files, and builds nothing", async () => {
     write("src/a/zcl_two.clas.abap", "");
     write("src/b/zcl_two.clas.abap", "");
@@ -77,6 +92,36 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(refused.message).to.contain("pack theirs fetches upstream from https://example.invalid/theirs at abcdef012345");
     expect(refused.message).to.contain("node tools/osd-fetch.mjs");
     expect(existsSync(join(root, "build"))).to.equal(false);
+  });
+
+  it("refuses an incomplete library closure and leaves the live generation untouched", async () => {
+    write("src/zcl_one.clas.abap", "");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: ["src"],
+      output_folder: "output",
+      libs: [{
+        url: "https://github.com/open-abap/open-abap-core",
+        folder: "/.local/lars/open-abap-core",
+      }],
+    }));
+    write("build/by-input/known-good/output/init.mjs", "export const good = true;\n");
+    symlinkSync(join("by-input", "known-good"), join(root, "build", "live"));
+
+    expect(missingLibraries(root)).to.deep.equal([{
+      url: "https://github.com/open-abap/open-abap-core",
+      folder: "/.local/lars/open-abap-core",
+    }]);
+    let refused;
+    try {
+      await build({root});
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused?.code).to.equal("MISSING_LIBRARIES");
+    expect(refused.message).to.contain("npm run osd:worktree");
+    expect(readlinkSync(join(root, "build", "live"))).to.equal(join("by-input", "known-good"));
+    expect(existsSync(join(root, "build", ".lock"))).to.equal(false);
+    expect(existsSync(join(root, "build", "tmp"))).to.equal(false);
   });
 
   // N3: the transpile is a library call. The CLI is the oracle, run over the
