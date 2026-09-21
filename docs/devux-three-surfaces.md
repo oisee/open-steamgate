@@ -160,6 +160,44 @@ The ABAP and CDS highlighters are presentation helpers, not parsers of record.
 Diagnostics come from the same Check/Activate backend used by ADT. A coloured
 line is never evidence that code activates.
 
+#### First vertical result (2026-09-21)
+
+The first hosted slice uses the pinned UI5 1.120.50
+`sap.ui.codeeditor.CodeEditor` as an interim engine. It already ships an ABAP
+Ace mode and owns input, undo, selection, resize, UI5 theme changes,
+accessibility labelling and destruction. This was a better first integration
+than adding a second editor dependency before the source loop existed. It is
+not yet the final CodeMirror-versus-Monaco decision; that measured comparison
+remains before the editor contract is declared stable.
+
+The integration rules are now executable rather than stylistic advice:
+
+- declare `sap.ui.codeeditor` in `manifest.json` and the XML view; do not
+  construct an editor DOM subtree in a controller;
+- isolate Ace-only annotations and `gotoLine` in one `AbapEditor` adapter.
+  UI5 marks access to the internal editor as restricted, so no controller or
+  application service may depend on it;
+- take the already registered parent renderer from UI5 metadata. This pinned
+  release has no separately loadable `CodeEditorRenderer.js`, while omitting
+  a renderer makes UI5 search for `AbapEditorRenderer.js` by convention;
+- put a custom control's `layoutData` aggregation in the custom XML namespace
+  and give it `FlexItemData(growFactor=1, baseSize=0)` inside a `VBox`. The
+  editor otherwise exists with zero height inside the Splitter;
+- keep the live dirty buffer in the editor engine. Binding every keystroke
+  back into a JSON model caused a render storm and risked returning stale text
+  to the caret. Check and Save read `getCurrentValue()` explicitly;
+- acquire the ADT CSRF token and session cookie before any parallel reads.
+  Two simultaneous first requests can create two sessions and pair one token
+  with the other cookie;
+- derive `/sap/bc/adt` from the component resource root rather than the origin
+  root, so the same application path remains valid below a Pages prefix.
+
+The permanent browser test enters through the Launchpad tile, opens a real
+class in ABAP mode without falsely marking it dirty, refuses an incomplete
+Check, checks it clean, preserves an invalid unsaved buffer across a UI5
+rerender, follows the Problems row to the exact gutter marker, and proves the
+stored source is byte-for-byte unchanged. It also verifies a 412 Save conflict preserves the live buffer and that Activate saves a dirty valid buffer first, carries the resulting ETag into activation, and reports an unswitched serving identity as a warning.
+
 ### Minimum useful feature set
 
 The first product slice should include:

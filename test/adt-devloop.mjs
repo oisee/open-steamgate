@@ -174,6 +174,39 @@ describe("tools/adt-facade: the development loop", () => {
       expect(await back.text()).to.contain("'changed'");
     });
 
+    it("does not overwrite a source changed after the editor read it", async () => {
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const staleTag = opened.headers.get("etag");
+      const {handle} = await lock();
+      const concurrent = SOURCE.replace("'hello'", "'concurrent'");
+      store.write("CLAS", SCRATCH, concurrent);
+      try {
+        const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {
+          method: "PUT", headers: {"if-match": staleTag},
+          body: SOURCE.replace("'hello'", "'editor'"),
+        });
+        expect(res.status).to.equal(412);
+        expect(await res.text()).to.contain("ExceptionResourceIsModified");
+        expect(store.read("CLAS", SCRATCH).source).to.equal(concurrent);
+      } finally {
+        store.write("CLAS", SCRATCH, SOURCE);
+      }
+    });
+
+    it("accepts a write whose If-Match still names the stored source", async () => {
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const tag = opened.headers.get("etag");
+      const {handle} = await lock();
+      const changed = SOURCE.replace("'hello'", "'matched'");
+      const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {
+        method: "PUT", headers: {"if-match": tag}, body: changed,
+      });
+      expect(res.status).to.equal(200);
+      expect(store.read("CLAS", SCRATCH).source).to.equal(changed);
+    });
+
     it("a library object cannot be written", async () => {
       const {handle} = await lock();
       const res = await call(`/oo/classes/CL_ABAP_ZIP/source/main?lockHandle=${handle}`, {method: "PUT", body: "nope"});
@@ -454,8 +487,8 @@ describe("tools/adt-facade: the development loop", () => {
   });
 
   describe("activating", () => {
-    const activate = (name) => call("/activation?method=activate&preauditRequested=true", {
-      method: "POST",
+    const activate = (name, headers = {}) => call("/activation?method=activate&preauditRequested=true", {
+      method: "POST", headers,
       body: `<?xml version="1.0" encoding="UTF-8"?>
 <adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
   <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${String(name).toLowerCase()}" adtcore:name="${name}"/>
@@ -490,14 +523,31 @@ describe("tools/adt-facade: the development loop", () => {
     it("source that holds activates, and says so with its properties", async function () {
       this.timeout(60000);
       const {handle} = await lock();
-      await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      const res = await activate(SCRATCH);
+      const saved = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
+      const res = await activate(SCRATCH, {"if-match": saved.headers.get("etag")});
       expect(res.status).to.equal(200);
       expect(res.headers.get("content-type")).to.contain("application/xml");
       const xml = await res.text();
       expect(xml).to.contain("<chkl:messages ");
       expect(xml).to.match(/<chkl:properties [^>]*activationExecuted="true"/);
       expect(xml, "no messages for a clean activation").to.not.contain("<chkl:msg");
+    });
+
+    it("does not activate bytes that replaced the checked revision", async function () {
+      this.timeout(60000);
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const checkedTag = opened.headers.get("etag");
+      const concurrent = SOURCE.replace("'hello'", "'newer'");
+      store.write("CLAS", SCRATCH, concurrent);
+      try {
+        const res = await activate(SCRATCH, {"if-match": checkedTag});
+        expect(res.status).to.equal(412);
+        expect(await res.text()).to.contain("source changed after it was checked");
+        expect(store.read("CLAS", SCRATCH).source).to.equal(concurrent);
+      } finally {
+        store.write("CLAS", SCRATCH, SOURCE);
+      }
     });
 
     it("source that does not hold comes back as messages, not as an empty success", async function () {

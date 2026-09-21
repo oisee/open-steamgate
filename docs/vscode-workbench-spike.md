@@ -1,6 +1,6 @@
 # Browser VS Code workbench spike
 
-Status: active spike on `feat/live-workbench-activation`, 2026-09-21.
+Status: parked conformance surface after a completed spike on `feat/live-workbench-activation`, 2026-09-21. The Fiori-native Workbench is the active product path.
 
 ## Decision
 

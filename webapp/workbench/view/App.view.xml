@@ -1,0 +1,41 @@
+<mvc:View controllerName="stg.workbench.controller.App" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"
+  xmlns:l="sap.ui.layout" xmlns:wb="stg.workbench.control" displayBlock="true" height="100%">
+  <Page id="page" title="Workbench" showHeader="true" busy="{ui>/busy}" busyIndicatorDelay="0">
+    <headerContent>
+      <Button id="check" text="Check" icon="sap-icon://validate" press=".onCheck" enabled="{= !!${ui>/selected/name}}"/>
+      <Button id="save" text="Save inactive" icon="sap-icon://save" press=".onSave" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/dirty}}"/>
+      <Button id="activate" text="Activate" icon="sap-icon://activate" type="Emphasized" press=".onActivate" enabled="{= !!${ui>/selected/name}}"/>
+    </headerContent>
+    <content><l:Splitter id="splitter" height="100%">
+      <VBox class="sapUiSmallMargin" height="100%">
+        <layoutData><l:SplitterLayoutData size="25%" minSize="240"/></layoutData>
+        <SearchField id="search" width="100%" value="{ui>/query}" search=".onSearch" liveChange=".onSearchLive" placeholder="Class name, e.g. ZCL_OSD*"/>
+        <List id="objects" items="{ui>/objects}" mode="SingleSelectMaster" selectionChange=".onObjectSelect" growing="true" noDataText="No classes found">
+          <StandardListItem title="{ui>name}" description="{ui>description}" info="{ui>packageName}" icon="sap-icon://syntax"/>
+        </List>
+      </VBox>
+      <VBox height="100%" fitContainer="true">
+        <OverflowToolbar>
+          <Title text="{ui>/selected/name}" level="H3"/>
+          <ObjectStatus text="{= ${ui>/dirty} ? 'Modified' : 'Saved'}" state="{= ${ui>/dirty} ? 'Warning' : 'Success'}"/>
+          <ToolbarSpacer/>
+          <ObjectStatus title="Git" text="{ui>/identity/commit}"/>
+          <ObjectStatus title="Source" text="{ui>/identity/source}"/>
+          <ObjectStatus title="Live" text="{ui>/identity/live}"/>
+          <ObjectStatus title="Serving" text="{ui>/identity/serving}" state="{= ${ui>/identity/synchronized} ? 'Success' : 'Warning'}"/>
+        </OverflowToolbar>
+        <MessageStrip id="message" text="{ui>/message/text}" type="{ui>/message/type}" showIcon="true" visible="{= !!${ui>/message/text}}"/>
+        <wb:AbapEditor id="source" type="abap" value="{path: &apos;ui>/source&apos;, mode: &apos;OneWay&apos;}" height="100%" width="100%"
+          editable="{= !!${ui>/selected/name}}" liveChange=".onSourceChange">
+          <wb:layoutData><FlexItemData growFactor="1" baseSize="0"/></wb:layoutData>
+        </wb:AbapEditor>
+        <Table id="problems" items="{ui>/diagnostics}" visible="{= ${ui>/diagnostics}.length > 0}"
+          mode="SingleSelectMaster" selectionChange=".onProblemSelect" sticky="ColumnHeaders">
+          <headerToolbar><Toolbar><Title text="Problems ({= ${ui>/diagnostics}.length})" level="H4"/></Toolbar></headerToolbar>
+          <columns><Column width="5rem"><Text text="Line"/></Column><Column width="5rem"><Text text="Col"/></Column><Column><Text text="Message"/></Column></columns>
+          <items><ColumnListItem><cells><Text text="{ui>line}"/><Text text="{ui>column}"/><Text text="{ui>message}"/></cells></ColumnListItem></items>
+        </Table>
+      </VBox>
+    </l:Splitter></content>
+  </Page>
+</mvc:View>

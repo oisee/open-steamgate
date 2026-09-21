@@ -44,8 +44,13 @@ const xmlEscape = (s) => String(s)
 // the workspace file. Without it the filesystem synchronizer refuses to
 // create the editor part. The tag describes the representation, so properties
 // and source intentionally get different values and change with their body.
+const entityTag = (body) => createHash("sha256")
+  .update(Buffer.from(String(body))).digest("hex").slice(0, 32);
+const normalizedTag = (value) => String(value ?? "").trim()
+  .replace(/^W\//, "").replace(/^"|"$/g, "");
+
 const sendEntity = (req, res, body) => {
-  const tag = createHash("sha256").update(Buffer.from(String(body))).digest("hex").slice(0, 32);
+  const tag = entityTag(body);
   res.set("ETag", tag);
   const candidates = String(req.headers["if-none-match"] ?? "")
     .split(",").map((value) => value.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));
@@ -1517,6 +1522,20 @@ export function adtRouter(options = {}) {
           if (include !== "main") {
             store.read(type, req.params.name, include);
           }
+          // The handle proves this request belongs to the locking session; it
+          // does not exclude Git, a watcher, another session or another
+          // process from changing the file. Compare immediately beside the write: an earlier
+          // preflight GET leaves a race in which the newer source is lost.
+          const expected = req.headers["if-match"];
+          const current = store.read(type, req.params.name, include).source;
+          if (expected !== undefined && normalizedTag(expected) !== "*" &&
+              normalizedTag(expected) !== entityTag(current)) {
+            res.status(412).type("application/xml").send(exceptionDocument(
+              "ExceptionResourceIsModified",
+              "source changed since it was opened; reload before saving",
+            ));
+            return;
+          }
           store.write(type, req.params.name, body.toString("utf8"), include);
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
@@ -1525,7 +1544,7 @@ export function adtRouter(options = {}) {
           // entity tag for the source file" in the log and an editor that
           // showed nothing at all after the save had in fact succeeded.
           const stored = store.read(type, req.params.name, include).source;
-          res.set("ETag", createHash("sha256").update(Buffer.from(String(stored))).digest("hex").slice(0, 32));
+          res.set("ETag", entityTag(stored));
           res.status(200).type("text/plain").send("");
         });
       });
@@ -1704,6 +1723,25 @@ export function adtRouter(options = {}) {
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
+      }
+      // Workbench sends the entity tag of the exact source that passed its
+      // check. Refuse activation if Git or another editor replaced it in the
+      // meantime; otherwise a green Check could activate different bytes.
+      const expected = req.headers["if-match"];
+      if (expected !== undefined) {
+        if (named.length !== 1) {
+          res.status(400).type("application/xml").send(exceptionDocument(
+            "ExceptionInvalidRequest", "If-Match activation requires exactly one object reference"));
+          return;
+        }
+        const current = store.read(named[0].type, named[0].name).source;
+        if (normalizedTag(expected) !== "*" && normalizedTag(expected) !== entityTag(current)) {
+          res.status(412).type("application/xml").send(exceptionDocument(
+            "ExceptionResourceIsModified",
+            "source changed after it was checked; check and activate again",
+          ));
+          return;
+        }
       }
       checked = named.map((o) => store.activate(o.type, o.name));
       const failed = checked.filter((r) => r.active === false);
