@@ -81,6 +81,9 @@ registry. The request path is relative and begins with `/`; an exportable case
 cannot carry an absolute server URL, Authorization, Cookie, a literal CSRF
 token or credentials. Session adapters own those values.
 
+Logical destination names use the bounded uppercase registry grammar
+`[A-Z][A-Z0-9_.-]{0,63}`. An inline URL is never a destination name.
+
 GW0 deliberately accepts only `GET`, no query or request body, and the fixed
 request header `Accept: application/json`. Its only response-header assertion
 is `Content-Type` with the `application/json` media type. It also rejects
@@ -149,6 +152,9 @@ combinations. It never silently falls back to a semantically different mode.
 Outcomes are `passed`, `failed`, `error` or `cancelled`. A timeout,
 unreachable destination, invalid case or unsupported assertion is never a
 pass. Execution errors and business mismatches are distinguishable.
+Malformed response envelopes are errors rather than business mismatches: the
+status is an HTTP integer, headers are a token-to-string map, and bodies are
+explicitly tagged before the matcher sees them.
 
 The response is matched before persistence redaction. Redaction then applies
 consistently to the saved response, findings and trace. Comparison masks and

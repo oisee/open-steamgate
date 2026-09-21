@@ -129,6 +129,12 @@ describe("GW0 Gateway regression contract", () => {
     expect(JSON.stringify(errors)).not.to.contain("synthetic-secret");
   });
 
+  it("requires a logical destination name rather than an inline URL", () => {
+    const c = testCase();
+    c.destination = "https://evil.example";
+    expect(validateCase(c).map((entry) => entry.path)).to.include("/destination");
+  });
+
   it("rejects origin escapes, secret query params, bodies, header injection and unknown fields", () => {
     const c = testCase();
     c.request.path = "/\\evil.example/x?access_token=query-secret";
@@ -231,7 +237,17 @@ describe("GW0 Gateway regression contract", () => {
     }
   });
 
-  it("the headless oracle exits 0 for green, 1 for red, and prints the red pointer", () => {
+  it("classifies malformed response envelopes as errors, not business failures", () => {
+    for (const response of [
+      {...json("response-pass.json"), status: "200"},
+      {...json("response-pass.json"), headers: []},
+      {...json("response-pass.json"), headers: {"content-type": ["application/json"]}},
+    ]) {
+      expect(evaluateCase(testCase(), response).outcome).to.equal("error");
+    }
+  });
+
+  it("the headless oracle exits 0 for green, 1 for red, 2 for error, and prints the red pointer", () => {
     const run = (response) => {
       try {
         return {code: 0, out: execFileSync(process.execPath, [
@@ -248,5 +264,6 @@ describe("GW0 Gateway regression contract", () => {
     expect(red.code).to.equal(1);
     expect(red.out).to.contain('"/d/Seats"');
     expect(red.out).to.contain('"scope": "body"');
+    expect(run("response-error.json").code).to.equal(2);
   });
 });

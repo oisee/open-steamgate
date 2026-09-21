@@ -31,6 +31,7 @@ const MASKED = "__OSG_EXPLICITLY_MASKED__";
 const HTTP_METHODS = new Set(["GET"]);
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 const CONTROL = /[\u0000-\u001f\u007f]/u;
+const DESTINATION_NAME = /^[A-Z][A-Z0-9_.-]{0,63}$/u;
 
 const own = (value, key) =>
   value !== null && typeof value === "object"
@@ -114,6 +115,9 @@ export function validateCase(testCase) {
     if (typeof testCase[field] !== "string" || testCase[field].trim() === "") {
       errors.push(issue(`/${field}`, `${field} must be a nonempty string`));
     }
+  }
+  if (typeof testCase.destination === "string" && !DESTINATION_NAME.test(testCase.destination)) {
+    errors.push(issue("/destination", "destination must be an uppercase logical name, not a URL"));
   }
   const request = testCase.request;
   if (!request || typeof request !== "object") {
@@ -320,6 +324,30 @@ export function evaluateCase(testCase, response) {
     return {
       outcome: "error",
       findings: invalid.map((entry) => ({kind: "invalid-case", scope: "case", ...entry})),
+    };
+  }
+  const responseErrors = [];
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    responseErrors.push(issue("", "response must be an object"));
+  } else {
+    if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
+      responseErrors.push(issue("/status", "response status must be an HTTP status integer"));
+    }
+    if (!response.headers || typeof response.headers !== "object" || Array.isArray(response.headers)) {
+      responseErrors.push(issue("/headers", "response headers must be an object"));
+    } else {
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (!HEADER_NAME.test(name)) responseErrors.push(issue(`/headers/${pointerEscape(name)}`, "response header name must be an RFC token"));
+        if (typeof value !== "string" || CONTROL.test(value)) {
+          responseErrors.push(issue(`/headers/${pointerEscape(name)}`, "response header value must be a control-free string"));
+        }
+      }
+    }
+  }
+  if (responseErrors.length) {
+    return {
+      outcome: "error",
+      findings: responseErrors.map((entry) => ({kind: "invalid-response", scope: "http", ...entry})),
     };
   }
   const findings = [];
