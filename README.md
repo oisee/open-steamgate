@@ -8,7 +8,10 @@
 ## Try it yourself
 
 [**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).
-SQLite, DuckDB and HANA Express options, HTTP/HTTPS, and built-in RFC/DIAG stubs.
+SQLite, DuckDB, HANA Express and PostgreSQL options, HTTP/HTTPS, and built-in
+RFC/DIAG stubs. The ARM64 SQLite image has also run on a 2 GB Raspberry Pi 4;
+the [Pi quick start and upgrade notes](docs/spin.md#raspberry-pi-arm64) use the
+separately tested `arm64-draft` tag.
 
 # open-steamgate
 
