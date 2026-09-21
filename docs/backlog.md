@@ -4521,3 +4521,23 @@ smoke for runtime changes; never publish Pages before its browser check passes.
 Document which file classes trigger each gate and test the filters with sample
 docs-only, UI, ABAP, database and image changes. Recheck billing/runner policy
 if the repository becomes private or uses larger runners.
+
+
+### Desktop VS Code OSD supervisor extension (2026-09-21)
+
+Create an extension for real desktop VS Code, distinct from the browser
+code-server image. Use the desktop Node extension host only as a thin lifecycle
+supervisor for a pinned OSD runtime: `Start`, `Stop`, `Status`, `Open Launchpad`
+and `Connect with abap-fs`. Run against the currently opened Git checkout so
+source, Git diff and ADT object state describe the same files. Require Workspace
+Trust, bind loopback by default, allocate/check instance-derived ports, keep
+database state outside the extension install directory, and terminate children
+on explicit stop or extension shutdown.
+
+Do not perform npm/git downloads or a source build during extension activation.
+Evaluate two explicit distribution modes: a signed/checksummed per-platform OSD
+archive fetched by exact version, and an externally installed `osd` CLI. Show
+the runtime/source revision and mismatch in the status UI. Never auto-commit or
+push. Acceptance must cover Windows x64, macOS arm64, Linux x64 and Raspberry
+Pi arm64, including restart/persistence, port collision, failed startup, stale
+child cleanup and upgrading the runtime without touching the user database.

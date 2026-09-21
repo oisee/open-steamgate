@@ -59,6 +59,23 @@ The first acceptance path is deliberately small and real:
 The reproducible container/security plan is in
 [`vscode-workbench-spike.md`](vscode-workbench-spike.md).
 
+### D1b — desktop VS Code runs local OSD
+
+Build a separate extension for ordinary desktop VS Code. Its Node extension
+host acts as a thin supervisor for a pinned OSD runtime/CLI in the currently
+opened checkout. Commands start, stop and report OSD, open its launchpad, and
+hand the local endpoint to abap-fs. The default bind is loopback on an
+allocated instance/port; Workspace Trust is required before any process starts.
+
+Do not bundle a moving source checkout, run npm installs, or compile OSD at
+extension activation. Choose one explicit delivery contract after measuring
+VSIX size and native dependencies: download a signed platform archive by exact
+version/checksum, or invoke an already installed `osd` CLI. Persist databases
+outside the extension directory, terminate child processes reliably, redact
+secrets from logs, show source/runtime version mismatch, and never commit or
+push. Test Windows x64, macOS arm64, Linux x64 and Raspberry Pi arm64; an
+unsupported platform gets a clear diagnostic rather than a partial startup.
+
 ## D2 — host Git as source history
 
 The host checkout is the history layer; do not invent transports or a second
