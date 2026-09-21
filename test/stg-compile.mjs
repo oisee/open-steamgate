@@ -342,6 +342,24 @@ describe("stg-compile --all sweeps a project no YAML declares", () => {
   });
 });
 
+describe("stg-compile --all treats packs as owned source", () => {
+  it("keeps a hand-written DPC_EXT beside a pack model", () => {
+    const root = mkdtempSync(join(tmpdir(), "stg-pack-src-"));
+    const own = join(root, "src");
+    const pack = join(root, "pack");
+    const out = join(root, "gen");
+    mkdirSync(own, {recursive: true});
+    mkdirSync(pack, {recursive: true});
+    writeFileSync(join(pack, "zpack.stg.yaml"), `project: ZPACK\nservice: ZPACK_SRV\nentities:\n  Item:\n    keys: [Id]\n    properties:\n      Id: String(8)\n`);
+    writeFileSync(join(pack, "zcl_zpack_dpc_ext.clas.abap"), "CLASS zcl_zpack_dpc_ext DEFINITION PUBLIC. ENDCLASS.\n");
+
+    const report = compileAll(own, out, [], [pack]);
+    const built = report.find((r) => r.project === "ZPACK");
+    expect(built.kept).to.include("zcl_zpack_dpc_ext.clas.abap");
+    expect(existsSync(join(out, "zpack", "zcl_zpack_dpc_ext.clas.abap"))).to.equal(false);
+  });
+});
+
 // The hand-written demo MPC against the generated one, FILE AGAINST FILE.
 //
 // The suite above compares the generator with literals written into this

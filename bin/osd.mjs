@@ -77,6 +77,7 @@ const GENERATORS = {
   "amdp-gen.mjs": () => import("../tools/amdp-gen.mjs"),
   "amdp-tablefunc.mjs": () => import("../tools/amdp-tablefunc.mjs"),
   "osd-fm-registry.mjs": () => import("../tools/osd-fm-registry.mjs"),
+  "osd-ddic-binary.mjs": () => import("../tools/osd-ddic-binary.mjs"),
   "osd-bsp-registry.mjs": () => import("../tools/osd-bsp-registry.mjs"),
   "osd-tran-registry.mjs": () => import("../tools/osd-tran-registry.mjs"),
 };

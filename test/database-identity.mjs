@@ -85,6 +85,18 @@ describe("database identity", () => {
     }
   });
 
+  it("names missing DuckDB tables instead of accepting a partial persistent schema", async () => {
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    try {
+      await client.connect();
+      await client.execute(`CREATE TABLE "ZSTG_DEMO" ("ID" INTEGER)`);
+      expect(await client.missingTables(["ZSTG_DEMO", "ZVDB_100_VEC"]))
+        .to.deep.equal(["ZVDB_100_VEC"]);
+    } finally {
+      await client.disconnect();
+    }
+  });
+
   it("tracks the file SQLite connection lifecycle", async () => {
     const root = mkdtempSync(join(tmpdir(), "osd-sqlite-identity-"));
     const before = globalThis.abap;

@@ -1,0 +1,28 @@
+{
+  "name": "zvdb",
+  "description": "Portable 8–1536-bit vector search with an optional native SQL engine",
+  "package": "$ZVDB_100",
+  "ddic": "src",
+  "order": 60,
+  "tiles": [
+    {
+      "id": "zvdb-workbench",
+      "type": "dynamic",
+      "title": "Vector workbench",
+      "subtitle": "Load, inspect and search binary vectors",
+      "info": "current database",
+      "icon": "sap-icon://database",
+      "url": "/app/zvdb/",
+      "serviceUrl": "/sap/opu/odata/sap/ZVDB_100_SRV/VectorSet/$count",
+      "serviceRefreshInterval": 60,
+      "numberUnit": "vectors"
+    },
+    {
+      "id": "zvdb-quality",
+      "title": "Vector quality",
+      "subtitle": "Published benchmark and intent collisions",
+      "icon": "sap-icon://business-objects-experience",
+      "url": "/app/zvdb/quality/"
+    }
+  ]
+}

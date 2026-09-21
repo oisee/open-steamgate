@@ -52,6 +52,22 @@ const OWN_CONFIG = /(^|\/)\.leak-allow\.json$/;
 // base64 block. Both are how a capture reaches a source file.
 const HEX_RUN = /[0-9a-fA-F]{32,}/g;
 const B64_RUN = /[A-Za-z0-9+/]{40,}={0,2}/g;
+// Sign-quantized embeddings are deliberately opaque bytes. Decoding thousands
+// of them as captures inevitably manufactures packed RFC1918 addresses. Skip
+// only the encoded-byte views of valid, generated ZVDB corpus JSON; the
+// surrounding document and its ordinary text still go through every rule.
+const OPAQUE_VECTOR_HEX = /("(?:vectorHex|qbits)"\s*:\s*")[0-9a-fA-F]{32,}(")/gi;
+const ZVDB_VECTOR_JSON = /(^|\/)packs\/zvdb\/(?:data\/zvdb_100_vec\.tabu\.json|fixtures\/corpus\.[^/]+\.json)$/;
+
+function encodedPayloadText(name, text) {
+  if (!ZVDB_VECTOR_JSON.test(name)) return text;
+  try {
+    JSON.parse(text);
+  } catch {
+    return text;
+  }
+  return text.replace(OPAQUE_VECTOR_HEX, "$1$2");
+}
 
 function views(name, text) {
   // Every way these bytes could be read, each one worth matching against.
@@ -59,12 +75,13 @@ function views(name, text) {
   const bytes = Buffer.from(text, "binary");
   out.push({ how: "utf-16le", text: bytes.toString("utf16le") });
 
-  for (const run of text.match(HEX_RUN) ?? []) {
+  const encodedPayloads = encodedPayloadText(name, text);
+  for (const run of encodedPayloads.match(HEX_RUN) ?? []) {
     const b = Buffer.from(run.length % 2 ? run.slice(0, -1) : run, "hex");
     out.push({ how: "hex→ascii", text: b.toString("latin1"), packed: b });
     out.push({ how: "hex→utf-16le", text: b.toString("utf16le") });
   }
-  for (const run of text.match(B64_RUN) ?? []) {
+  for (const run of encodedPayloads.match(B64_RUN) ?? []) {
     const b = Buffer.from(run, "base64");
     if (b.length < 8) continue;
     out.push({ how: "base64→ascii", text: b.toString("latin1"), packed: b });
@@ -231,7 +248,7 @@ function scan(root, sources, names) {
       hits.push({ file, how, what, text: value });
     };
 
-    for (const view of views(file, text)) {
+    for (const view of views(forAllow, text)) {
       for (const m of view.text.match(PRIVATE_V4) ?? []) {
         note(view.how, "частный адрес", m);
       }

@@ -19,6 +19,8 @@ import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSy
 import {basename, join, resolve} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileFile} from "./stg-compile.mjs";
+import {buildApp} from "./osd-bsp-app.mjs";
+import {packAppName} from "./osd-bsp-registry.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {deliveredAt} from "./osd-nodes.mjs";
 
@@ -123,6 +125,78 @@ export function dataFiles(from, into) {
   return {carried, unpaired, dropped};
 }
 
+function filesUnder(root, at = root) {
+  if (!existsSync(at)) return [];
+  return readdirSync(at).sort().flatMap((name) => {
+    const full = join(at, name);
+    return statSync(full).isDirectory() ? filesUnder(root, full) : [full];
+  });
+}
+
+const packManifest = (dir) => join(dir, "osd-pack.json");
+
+/** Turn a content pack into the one flat object folder `layout()` consumes.
+ *
+ * Generated SEGW objects are written first. Authored objects are copied
+ * afterwards, by abapGit filename, so a maintained `_DPC_EXT` (or any other
+ * authored object) wins over the generator's initial version. A pack's
+ * webapp is not copied as loose files: it is serialized as the WAPA + SICF
+ * pair a real system imports, using the same builder as `osd-bsp-app`.
+ */
+export function preparePack(dir, out) {
+  const root = resolve(dir);
+  const manifestFile = packManifest(root);
+  if (!existsSync(manifestFile)) throw new Error(`${dir} is not a pack: osd-pack.json is missing`);
+  const declared = JSON.parse(readFileSync(manifestFile, "utf8"));
+  const name = String(declared.name ?? basename(root)).toLowerCase();
+  const abap = [declared.abap ?? "src"].flat().map((folder) => resolve(root, folder));
+
+  rmSync(out, {recursive: true, force: true});
+  mkdirSync(out, {recursive: true});
+
+  const compiled = [];
+  for (const model of abap.flatMap((folder) => filesUnder(folder)).filter((file) => file.endsWith(".stg.yaml"))) {
+    compiled.push(compileFile(model, out));
+  }
+
+  // Flatten authored source exactly as abapGit's PREFIX layout requires.
+  // The copy happens after compilation deliberately: authored files win.
+  for (const folder of abap) {
+    for (const file of filesUnder(folder)) {
+      if (file.endsWith(".stg.yaml")) continue;
+      cpSync(file, join(out, basename(file)));
+    }
+  }
+
+  const webapp = resolve(root, declared.webapp ?? "webapp");
+  if (existsSync(webapp)) {
+    const app = packAppName(name);
+    const services = [...new Set(compiled.map((result) => result.model.service))];
+    let service = services.length === 1 ? services[0] : undefined;
+    const uiManifest = join(webapp, "manifest.json");
+    if (existsSync(uiManifest)) {
+      const json = JSON.parse(readFileSync(uiManifest, "utf8"));
+      const uris = Object.values(json["sap.app"]?.dataSources ?? {}).map((source) => source?.uri).filter(Boolean);
+      const named = uris.map((uri) => /\/sap\/opu\/odata\/sap\/([^/]+)\/?/i.exec(uri)?.[1]).filter(Boolean);
+      if (named.length > 0) service = named[0].toUpperCase();
+    }
+    buildApp({
+      from: webapp,
+      app,
+      out,
+      text: String(declared.description ?? `pack ${name}`),
+      service,
+    });
+  }
+
+  const data = resolve(root, declared.data ?? "data");
+  return {
+    objects: out,
+    data: existsSync(data) ? data : undefined,
+    models: compiled.map((result) => ({project: result.model.project, service: result.model.service})),
+  };
+}
+
 
 export function layout(from, into, description, data) {
   rmSync(into, {recursive: true, force: true});
@@ -213,19 +287,24 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   const staging = `${out}.dir`;
 
   let objects = input;
+  let data = flag("data");
   if (input.endsWith(".stg.yaml")) {
     // a library call and not a spawn: test/osd-binary.mjs forbids starting
     // another tool by process.execPath and a script path, because in a
     // compiled binary there is no script beside the executable
     objects = `${out}.objects`;
     compileFile(input, objects);
+  } else if (existsSync(packManifest(input))) {
+    objects = `${out}.objects`;
+    const prepared = preparePack(input, objects);
+    data = data ?? prepared.data;
   } else if (!existsSync(input)) {
     console.error(`no such folder: ${input}`);
     process.exit(2);
   }
 
   const description = flag("description", `open-steamgate: ${basename(input).replace(/\..*$/, "")}`);
-  const {files, objects: found, rows} = layout(objects, staging, description, flag("data"));
+  const {files, objects: found, rows} = layout(objects, staging, description, data);
   const size = zip(staging, out);
   rmSync(staging, {recursive: true, force: true});
   if (objects !== input) rmSync(objects, {recursive: true, force: true});

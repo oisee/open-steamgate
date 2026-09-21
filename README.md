@@ -78,6 +78,9 @@ and [`packs/zork`](packs/zork) name [vivid-vibes](https://github.com/oisee/vivid
 and [zork-abap](https://github.com/oisee/zork-abap) at a commit, and the
 deployment fetches them the way you would fetch any pack of your own;
 [`packs/lsd`](packs/lsd) carries its recording ([`docs/lsd-pack.md`](docs/lsd-pack.md)).
+Applications supplied by a pack register their pages, availability and static,
+dynamic or image tiles through `osd-pack.json`; see
+[Applications and tiles in the launchpad](docs/launchpad-apps.md).
 
 First visit installs the worker and takes a moment; after that it works
 offline. It needs a browser that allows service workers — a private window

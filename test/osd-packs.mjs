@@ -64,12 +64,13 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(() => packsOf(root, {})).to.throw(BadPack).with.property("code", "BAD_PACK");
   });
 
-  it("layers after the folders the config lists, so a pack wins a name it shares", () => {
+  it("layers packs after source but before generated rewrites", () => {
     const config = {input_folder: ["src", "gen"]};
     const folders = inputFoldersOf(root, config, {});
-    expect(folders.slice(0, 2)).to.deep.equal(["src", "gen"]);
     expect(folders).to.have.length(3);
-    expect(folders[2].split("/").slice(-3).join("/")).to.equal("packs/vibes/src");
+    expect(folders[0]).to.equal("src");
+    expect(folders[1].split("/").slice(-3).join("/")).to.equal("packs/vibes/src");
+    expect(folders[2]).to.equal("gen");
   });
 
   it("orders by the manifest, then by name", () => {
@@ -95,6 +96,18 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(ddicDirsOf(root, {}).some((d) => d.includes(join("packs", "vibes")))).to.equal(true);
     expect(webappsOf(root, {})).to.have.length(1);
     expect(webappsOf(root, {})[0].name).to.equal("vibes");
+  });
+
+  it("carries FLP tile types, live-number settings and availability without interpreting them", () => {
+    write("packs/vibes/osd-pack.json", JSON.stringify({tiles: [
+      {id: "live", type: "dynamic", title: "Live rows", serviceUrl: "/tile/count", serviceRefreshInterval: 30, numberUnit: "rows"},
+      {id: "picture", type: "image", imageSource: "/tile/image.png"},
+      {id: "hana", requires: "HDB", enabled: false, disabledReason: "needs HANA"}
+    ]}));
+    const tiles = packsOf(root, {})[0].tiles;
+    expect(tiles[0]).to.include({type: "dynamic", serviceUrl: "/tile/count", serviceRefreshInterval: "30", numberUnit: "rows"});
+    expect(tiles[1]).to.include({type: "image", imageSource: "/tile/image.png"});
+    expect(tiles[2]).to.include({type: "static", requires: "HDB", enabled: false, disabledReason: "needs HANA"});
   });
 
   it("a generator reads content, not every layer: the tree's src and each pack", () => {

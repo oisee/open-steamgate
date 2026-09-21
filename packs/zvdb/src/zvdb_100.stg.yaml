@@ -1,0 +1,51 @@
+project: ZVDB_100
+service: ZVDB_100_SRV
+model: ZVDB_100_MDL
+description: "ZVDB 100 portable binary-vector workbench"
+
+entities:
+  Vector:
+    set: VectorSet
+    keys: [Bucket, Id]
+    searchable: true
+    properties:
+      Bucket: {type: String(32), field: BID, label: Bucket}
+      Id: {type: String(32), field: ID, label: Vector ID}
+      Dimensions: {type: Int32, field: DIMS, label: Dimensions}
+      VectorHex: {type: String, field: QBITS, label: Sign bits as hex}
+      Payload: {type: String, field: PAYLOAD, label: Payload}
+      Model: {type: String, field: MODEL, label: Model}
+
+  SearchResult:
+    set: SearchResultSet
+    keys: [Bucket, QueryId, ResultId]
+    creatable: false
+    updatable: false
+    deletable: false
+    pageable: false
+    properties:
+      QueryId: {type: String(32), field: QUERY_ID, readonly: true, label: Query vector}
+      ResultId: {type: String(32), field: RESULT_ID, readonly: true, label: Result vector}
+      Bucket: {type: String(32), field: BID, readonly: true, label: Bucket}
+      Payload: {type: String(255), field: PAYLOAD, readonly: true, label: Payload}
+      Dimensions: {type: Int32, field: DIMS, readonly: true, label: Dimensions}
+      Rank: {type: Int32, field: RANK, readonly: true, label: Rank}
+      Engine: {type: String(8), field: ENGINE, readonly: true, label: Engine}
+
+annotations:
+  Vector:
+    header: {typeName: Vector, typeNamePlural: Vectors, title: Id, description: Payload}
+    selectionFields: [Bucket, Id, Payload]
+    lineItem:
+      - {value: Bucket, label: Bucket}
+      - {value: Id, label: Vector ID}
+      - {value: Payload, label: Payload}
+      - {value: Dimensions, label: Dimensions}
+      - {value: Model, label: Model}
+  SearchResult:
+    header: {typeName: Result, typeNamePlural: Search results, title: ResultId, description: Payload}
+    lineItem:
+      - {value: Rank, label: Rank}
+      - {value: ResultId, label: Result vector}
+      - {value: Payload, label: Payload}
+      - {value: Engine, label: Engine}

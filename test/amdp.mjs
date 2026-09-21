@@ -227,6 +227,13 @@ ENDCLASS.`;
 // (osg-osd-i7, E.5, 2026-09-19), and it is the same family as
 // ANOMALY-2026-09-14, the exception with no message.
 describe("the AMDP destination fails where the calling ABAP can catch it", () => {
+  it("binds its independent HANA session to the system schema", async () => {
+    const {amdpSessionSchema} = await import("../tools/amdp-destination.mjs");
+    expect(amdpSessionSchema("OSD_ZVDB_100")).to.deep.equal([
+      `CREATE SCHEMA "OSD_ZVDB_100"`, `SET SCHEMA "OSD_ZVDB_100"`,
+    ]);
+  });
+
   it("raises an ABAP exception when the runtime has one", async () => {
     const {AmdpDestination} = await import("../tools/amdp-destination.mjs");
     const before = globalThis.abap;

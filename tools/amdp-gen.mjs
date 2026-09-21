@@ -26,6 +26,7 @@ import {readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync}
 import {join, basename, dirname} from "node:path";
 import {createHash} from "node:crypto";
 import {extract, parameterType} from "./amdp-extract.mjs";
+import {contentFoldersOf} from "./osd-packs.mjs";
 
 const DEFAULT_OUT = "gen/amdp";
 
@@ -209,8 +210,7 @@ if (basename(process.argv[1] ?? "") === "amdp-gen.mjs") {
   // Content, not the layer list. A generator that reads every input folder
   // picks up test fixtures and puts them in the build -- CLAUDE.md records
   // that happening once already, with a CDS fixture under test/.
-  const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
-  const folders = config.input_folder.filter((f) => f === "src" || f.startsWith("packs/"));
+  const folders = contentFoldersOf(process.cwd());
   const result = generate(folders, out);
   if (result.procedures.length === 0) {
     console.log("amdp-gen: no AMDP methods found");
