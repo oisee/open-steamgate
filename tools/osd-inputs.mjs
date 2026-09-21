@@ -1,8 +1,8 @@
 // The layers of the system: what the transpiler is given, in what order,
 // and who wins when two folders hold the same object.
 //
-// The order is the input_folder list of abap_transpile.json and nothing
-// else, and the LATER folder wins, the way a layer does. That is what the
+// The order is the input_folder list plus discovered packs immediately
+// before `gen/`, and the LATER folder wins, the way a layer does. That is what the
 // transpiler does on its own when it is handed the same class twice
 // (measured 2026-09-16 over a two-folder tree: the module written last is
 // the later folder's; abaplint's registry in memory files the first as the

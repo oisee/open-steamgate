@@ -56,6 +56,12 @@ export class DuckDBDatabaseClient {
     return Number(rows[0]?.n ?? 0) > 0;
   }
 
+  async missingTables(expected) {
+    const rows = await this.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'");
+    const found = new Set(rows.map((row) => String(row.table_name).toUpperCase()));
+    return expected.filter((name) => found.has(String(name).toUpperCase()) === false);
+  }
+
   async execute(sql) {
     if (Array.isArray(sql)) {
       for (const s of sql) await this.execute(s);

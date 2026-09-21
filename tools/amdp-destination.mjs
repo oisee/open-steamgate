@@ -37,6 +37,11 @@ async function hanaSettings() {
 
 const SCHEMA = process.env.HANA_SCHEMA ?? process.env.HXE_SCHEMA ?? "OSD";
 
+export const amdpSessionSchema = (schema = SCHEMA) => [
+  `CREATE SCHEMA "${schema}"`,
+  `SET SCHEMA "${schema}"`,
+];
+
 
 /**
  * Fail in a way the calling ABAP can catch.
@@ -205,6 +210,14 @@ export class AmdpDestination {
       this.client = undefined;
       await refuse(`AMDP: the configured HANA did not answer: ${String(reason?.message ?? reason).slice(0, 120)}`);
     }
+    // This is a separate HANA session from the system DatabaseClient. An
+    // AMDP body names DDIC tables without a schema, just as it does on ABAP;
+    // SQL SECURITY INVOKER resolves those names in this session's current
+    // schema. Without SET SCHEMA it is the login user's schema (SYSTEM), and
+    // a perfectly deployed procedure cannot see the system's own tables.
+    const [createSchema, setSchema] = amdpSessionSchema();
+    await this.#exec(createSchema).catch(() => undefined);
+    await this.#exec(setSchema);
     // the privileged settings, kept for the restricted-user path below, which
     // runs only after this has succeeded
     this.settings = settings;

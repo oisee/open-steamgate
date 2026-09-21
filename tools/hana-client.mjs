@@ -97,7 +97,10 @@ function foldIdentifiers(sql) {
 function plain(value) {
   if (typeof value === "bigint") return Number(value);
   if (value === null || value === undefined) return value;
-  if (Buffer.isBuffer(value)) return value.toString("utf8");
+  // ABAP's X/XSTRING values cross the DatabaseClient seam as hexadecimal
+  // text. node-hdb returns VARBINARY and BLOB as Buffer; decoding those bytes
+  // as UTF-8 corrupts arbitrary vectors.
+  if (Buffer.isBuffer(value)) return value.toString("hex").toUpperCase();
   if (value instanceof Date) return value;
   if (typeof value === "object" && typeof value.toString === "function") return value.toString();
   return value;
@@ -244,6 +247,16 @@ export class HanaDatabaseClient {
     this.client = undefined;
     this.connected = false;
     this.inTransaction = false;
+    // Seeded from generated DDIC on every process start, then augmented from
+    // DDL. Open SQL writes RAW values as quoted hex; HANA needs X'...'. A
+    // persisted schema executes no CREATE TABLE after restart, so DDL alone
+    // cannot be the source of this runtime type fact.
+    this.binaryColumns = new Set();
+    for (const [table, columns] of Object.entries(input.ddicBinary ?? {})) {
+      for (const column of Object.keys(columns ?? {})) {
+        this.binaryColumns.add(`${table.toUpperCase()}.${column.toUpperCase()}`);
+      }
+    }
   }
 
   /** One statement, and **the statement is in the failure**.
@@ -326,6 +339,13 @@ export class HanaDatabaseClient {
     return Number(rows[0]?.n ?? 0) > 0;
   }
 
+  async missingTables(expected) {
+    const rows = await this.query(
+      `SELECT TABLE_NAME FROM SYS.TABLES WHERE SCHEMA_NAME = '${this.schema}'`);
+    const found = new Set(rows.map((row) => String(row.table_name).toUpperCase()));
+    return expected.filter((name) => found.has(String(name).toUpperCase()) === false);
+  }
+
   async execute(sql) {
     if (Array.isArray(sql)) {
       for (const s of sql) await this.execute(s);
@@ -340,7 +360,9 @@ export class HanaDatabaseClient {
     // second connection reads an empty schema and the suite fails on the
     // seeded rows it cannot see (measured 2026-09-19).
     await this.beginTransaction();
-    const folded = multiRowInsert(foldIdentifiers(sql));
+    const identified = foldIdentifiers(sql);
+    this.#rememberBinaryColumns(identified);
+    const folded = multiRowInsert(binaryLiterals(identified, this.binaryColumns));
     if (this.trace) console.log(folded);
     await this.#run(folded);
   }
@@ -366,7 +388,7 @@ export class HanaDatabaseClient {
   /** one modifying statement; the count of rows it touched */
   async #modifying(sql) {
     await this.beginTransaction();
-    const folded = foldIdentifiers(sql);
+    const folded = binaryLiterals(foldIdentifiers(sql), this.binaryColumns);
     if (this.trace) console.log(folded);
     const affected = await this.#run(folded);
     return typeof affected === "number" ? affected : Number(affected ?? 0);
@@ -381,6 +403,14 @@ export class HanaDatabaseClient {
     } catch (e) {
       if (this.trace) console.error(e);
       return {subrc: 4, dbcnt: 0};
+    }
+  }
+
+  #rememberBinaryColumns(sql) {
+    const table = /^\s*CREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/i.exec(sql)?.[1]?.toUpperCase();
+    if (table === undefined) return;
+    for (const match of sql.matchAll(/"([A-Za-z_][A-Za-z_0-9]*)"\s+(?:VARBINARY|BLOB)\b/gi)) {
+      this.binaryColumns.add(`${table}.${match[1].toUpperCase()}`);
     }
   }
 
@@ -634,8 +664,117 @@ export class HanaDatabaseClient {
  *  - **quoted upper case**: an unquoted reference folds to upper and finds
  *    it, and a reserved word is safe behind its quotes. This one.
  */
-export function hanaSchema(schemas) {
-  return schemas.pg.map((s) => s.replace(/"([A-Za-z_][A-Za-z_0-9]*)"/g, (m, id) => '"' + id.toUpperCase() + '"'));
+export function hanaSchema(schemas, ddic = {}) {
+  const binary = new Map();
+  for (const [table, definition] of Object.entries(ddic ?? {})) {
+    if (definition !== null && typeof definition === "object" && definition.objectType === undefined) {
+      for (const [column, hanaType] of Object.entries(definition)) {
+        binary.set(`${table.toUpperCase()}.${column.toUpperCase()}`, String(hanaType));
+      }
+      continue;
+    }
+    if (definition?.objectType !== "TABL" || typeof definition.type !== "function") continue;
+    let fields;
+    try { fields = definition.type().get(); } catch { continue; }
+    for (const [column, value] of Object.entries(fields ?? {})) {
+      if (value?.constructor?.name === "Hex") {
+        binary.set(`${table.toUpperCase()}.${column.toUpperCase()}`, `VARBINARY(${value.getLength()})`);
+      } else if (value?.constructor?.name === "XString") {
+        binary.set(`${table.toUpperCase()}.${column.toUpperCase()}`, "BLOB");
+      }
+    }
+  }
+  return schemas.pg.map((source) => {
+    let sql = source.replace(/"([A-Za-z_][A-Za-z_0-9]*)"/g, (m, id) => '"' + id.toUpperCase() + '"');
+    const table = /^\s*CREATE\s+TABLE\s+"([A-Z_][A-Z_0-9]*)"/i.exec(sql)?.[1]?.toUpperCase();
+    if (table === undefined) return sql;
+    for (const [key, hanaType] of binary) {
+      const [owner, column] = key.split(".");
+      if (owner !== table) continue;
+      sql = sql.replace(new RegExp(`("${column}"\\s+)(?:N?CHAR\\(\\d+\\)|TEXT)`, "i"), `$1${hanaType}`);
+    }
+    return sql;
+  });
+}
+
+function splitSqlList(source) {
+  const out = [];
+  let start = 0;
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === "'") {
+        if (source[i + 1] === "'") i++;
+        else quoted = false;
+      }
+    } else if (ch === "'") quoted = true;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      out.push(source.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(source.slice(start));
+  return out;
+}
+
+const identifier = (value) => value.trim().replace(/^"|"$/g, "").toUpperCase();
+const asBinary = (value) => {
+  const match = /^\s*'([0-9A-Fa-f]*)'\s*$/.exec(value);
+  return match === null ? value : `X'${match[1].toUpperCase()}'`;
+};
+
+/** Convert only literals assigned to known VARBINARY/BLOB columns. A text
+ * value made solely of hex digits must remain text. */
+export function binaryLiterals(sql, columns) {
+  if (!(columns instanceof Set) || columns.size === 0) return sql;
+  const insert = /^\s*INSERT\s+INTO\s+("?[A-Za-z_][A-Za-z_0-9]*"?)\s*\(([^)]*)\)\s*VALUES\s*/i.exec(sql);
+  if (insert !== null) {
+    const table = identifier(insert[1]);
+    const names = splitSqlList(insert[2]).map(identifier);
+    const tail = sql.slice(insert[0].length);
+    let out = "";
+    let i = 0;
+    while (i < tail.length) {
+      if (tail[i] !== "(") { out += tail[i++]; continue; }
+      let quoted = false;
+      let depth = 1;
+      let j = i + 1;
+      for (; j < tail.length && depth > 0; j++) {
+        const ch = tail[j];
+        if (quoted) {
+          if (ch === "'") {
+            if (tail[j + 1] === "'") j++;
+            else quoted = false;
+          }
+        } else if (ch === "'") quoted = true;
+        else if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+      }
+      if (depth !== 0) return sql;
+      const values = splitSqlList(tail.slice(i + 1, j - 1));
+      const converted = values.map((value, index) =>
+        columns.has(`${table}.${names[index]}`) ? asBinary(value) : value);
+      out += `(${converted.join(",")})`;
+      i = j;
+    }
+    return sql.slice(0, insert[0].length) + out;
+  }
+
+  const update = /^\s*UPDATE\s+("?[A-Za-z_][A-Za-z_0-9]*"?)\s+SET\s+(.+?)(\s+WHERE\s+.+)$/is.exec(sql);
+  if (update !== null) {
+    const table = identifier(update[1]);
+    const assignments = splitSqlList(update[2]).map((assignment) => {
+      const match = /^\s*("?[A-Za-z_][A-Za-z_0-9]*"?)\s*=\s*(.*)$/s.exec(assignment);
+      if (match === null || !columns.has(`${table}.${identifier(match[1])}`)) return assignment;
+      return assignment.slice(0, assignment.indexOf("=") + 1) + asBinary(match[2]);
+    });
+    return `UPDATE ${update[1]} SET ${assignments.join(",")}${update[3]}`;
+  }
+  return sql;
 }
 
 /** The seed INSERTs reach us in two shapes and both need the same treatment

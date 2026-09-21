@@ -9,6 +9,7 @@
     "test/amdp-oracle.mjs",
     "test/amdp-sandbox.mjs",
     "test/amdp.mjs",
+    "test/amdp-pack.mjs",
     "test/analytics.mjs",
     "test/taxi-import.mjs",
     "test/batch-inserts.mjs",

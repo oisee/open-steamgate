@@ -2,6 +2,15 @@ import {expect} from "chai";
 import {readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {seedStatements} from "./seed.mjs";
+import {dataDirsOf} from "../tools/osd-packs.mjs";
+import {schemaTables} from "./setup.mjs";
+
+describe("persistent backend schema guard", () => {
+  it("extracts every generated table name without confusing indexes", () => {
+    expect(schemaTables([`CREATE TABLE "one" ("id" INTEGER)`, `CREATE INDEX x ON "one" ("id")`,
+      `CREATE TABLE two (id INTEGER)`])).to.deep.equal(["ONE", "TWO"]);
+  });
+});
 
 // The seed writes one statement per **batch** of rows rather than one per
 // row. fable-osd's SQL trace over `npm run unit` measured why: 4706 of 6793
@@ -33,15 +42,21 @@ describe("the seed inserts every row it has, in batches", () => {
   let inFiles;
   before(() => {
     statements = seedStatements();
-    inFiles = new Set(readdirSync("data").filter((f) => f.endsWith(".tabu.json"))
-      .filter((f) => JSON.parse(readFileSync(join("data", f), "utf8")).length > 0)
-      .map((f) => f.slice(0, -".tabu.json".length).toLowerCase()));
+    inFiles = new Map();
+    for (const dir of dataDirsOf(process.cwd())) {
+      for (const file of readdirSync(dir).filter((f) => f.endsWith(".tabu.json"))) {
+        const count = JSON.parse(readFileSync(join(dir, file), "utf8")).length;
+        if (count === 0) continue;
+        const table = file.slice(0, -".tabu.json".length).toLowerCase();
+        inFiles.set(table, (inFiles.get(table) ?? 0) + count);
+      }
+    }
   });
 
   it("names every table that has a data file, and no other", () => {
     const inserted = new Set(statements.map((s) => /INSERT INTO "([^"]+)"/.exec(s)?.[1]));
     expect([...inserted].sort(), "a table with rows is seeded and nothing else is")
-      .to.deep.equal([...inFiles].sort());
+      .to.deep.equal([...inFiles.keys()].sort());
   });
 
   it("carries as many rows as the files hold", () => {
@@ -71,8 +86,7 @@ describe("the seed inserts every row it has, in batches", () => {
     }
     // the same list the statements were built from, not a fresh reading of
     // a directory another suite may have written to since
-    for (const table of inFiles) {
-      const count = JSON.parse(readFileSync(join("data", `${table}.tabu.json`), "utf8")).length;
+    for (const [table, count] of inFiles) {
       expect(rows.get(table), `${table}: every row of the file is in a statement`).to.equal(count);
     }
   });
@@ -101,8 +115,7 @@ describe("the seed inserts every row it has, in batches", () => {
     // derived cross-reference tables. A threshold that only a developer's
     // machine can clear is a threshold that fails on a clean checkout and
     // teaches nobody anything.
-    const rows = [...inFiles]
-      .reduce((n, t) => n + JSON.parse(readFileSync(join("data", `${t}.tabu.json`), "utf8")).length, 0);
+    const rows = [...inFiles.values()].reduce((n, count) => n + count, 0);
     expect(rows, "there are rows to batch").to.be.greaterThan(1000);
     expect(statements.length, `${rows} rows in ${statements.length} statements`).to.be.lessThan(rows / 10);
   });

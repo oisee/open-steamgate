@@ -1,0 +1,14 @@
+[
+  {"id":"DOC00000000000000000000000000001","payload":"SAP HANA executes SQLScript procedures close to columnar data."},
+  {"id":"DOC00000000000000000000000000002","payload":"AMDP lets ABAP methods run database procedures on SAP HANA."},
+  {"id":"DOC00000000000000000000000000003","payload":"SQLite persists application rows in a compact local database file."},
+  {"id":"DOC00000000000000000000000000004","payload":"DuckDB is an embedded analytical SQL database for local workloads."},
+  {"id":"DOC00000000000000000000000000005","payload":"OData exposes typed business entities over HTTP."},
+  {"id":"DOC00000000000000000000000000006","payload":"Fiori applications consume OData services and metadata."},
+  {"id":"DOC00000000000000000000000000007","payload":"Векторный поиск находит тексты с похожим смыслом."},
+  {"id":"DOC00000000000000000000000000008","payload":"Бинарное вложение сравнивается расстоянием Хэмминга."},
+  {"id":"DOC00000000000000000000000000009","payload":"A passenger books a flight from Berlin to Copenhagen."},
+  {"id":"DOC00000000000000000000000000010","payload":"The traveller reserves a seat on an international airline."},
+  {"id":"DOC00000000000000000000000000011","payload":"A red fox runs through a quiet winter forest."},
+  {"id":"DOC00000000000000000000000000012","payload":"The database transaction commits all successful changes together."}
+]
