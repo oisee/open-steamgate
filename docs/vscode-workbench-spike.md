@@ -89,6 +89,13 @@ profile mounts only this checkout plus named code-server data/config volumes;
 it drops all capabilities, enables `no-new-privileges`, uses a read-only root
 filesystem and has no Docker socket, host home or SSH mount.
 
+On the first browser login the dedicated profile disables Workspace Trust for
+this one mounted checkout, puts the already-connected `OSD(ABAP)` tree first,
+and the ordinary Git/file workspace second. OSD's current development ADT
+facade does not validate Basic credentials; the container supplies its explicit
+`OSD_ADT_BOOTSTRAP_PASSWORD` (default `any`) to the pinned client without a
+prompt. Do not reuse that shortcut for a real authenticated SAP destination.
+
 W0 has been built and smoke-tested on linux/amd64: all three pinned extensions
 load into Code 1.138, unauthenticated access redirects to login, the health
 endpoint responds, and the process runs as the unprivileged `coder` user. The
@@ -129,7 +136,8 @@ cache volume, while the Agent UI and code-server port proxy are disabled.
 
 In one Playwright/manual-assisted browser run against a disposable worktree:
 
-1. Log into code-server and connect the preconfigured OSD system.
+1. Log into code-server. The dedicated profile must already trust its checkout
+   and connect the preconfigured `OSD(ABAP)` root without a second password.
 2. Expand a package and open a class with the correct source and object state.
 3. Save invalid source: it reads back inactive and the problem names the exact
    ABAP line. Activation fails; the previous runtime response and generation

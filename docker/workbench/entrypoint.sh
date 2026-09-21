@@ -15,6 +15,8 @@ export PASSWORD
 
 adt_url=${OSD_ADT_URL:-http://host.docker.internal:3030}
 adt_user=${OSD_ADT_USER:-developer}
+OSD_ADT_BOOTSTRAP_PASSWORD=${OSD_ADT_BOOTSTRAP_PASSWORD:-any}
+export OSD_ADT_BOOTSTRAP_PASSWORD
 case "$adt_url" in
   http://*) adt_authority=${adt_url#http://} ;;
   https://*) adt_authority=${adt_url#https://} ;;
@@ -33,17 +35,20 @@ esac
 workspace=/tmp/osd.code-workspace
 cat > "$workspace" <<EOF
 {
-  "folders": [{"path": "/workspace", "name": "open-steamgate"}],
+  "folders": [
+    {"uri": "adt://OSD/", "name": "OSD(ABAP)"},
+    {"path": "/workspace", "name": "open-steamgate"}
+  ],
   "settings": {
     "abapfs.remote": {
       "OSD": {
         "url": "$adt_url",
         "username": "$adt_user",
-        "password": "any",
         "allowSelfSigned": true
       }
     },
     "telemetry.telemetryLevel": "off",
+    "workbench.startupEditor": "none",
     "git.autofetch": false,
     "git.confirmSync": true
   }
@@ -55,6 +60,7 @@ exec /usr/bin/code-server \
   --auth password \
   --disable-telemetry \
   --disable-update-check \
+  --disable-workspace-trust \
   --disable-proxy \
   --vscode-option agents=false \
   --extensions-dir /opt/osd-workbench/extensions \

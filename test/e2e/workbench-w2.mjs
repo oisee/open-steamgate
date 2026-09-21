@@ -99,15 +99,7 @@ try {
   fs.writeFileSync('/tmp/osd-w2-before-command.txt', JSON.stringify({ buttons, body: (await page.locator('body').innerText()).slice(0, 8000) }, null, 2));
   const restricted = page.getByText('Restricted Mode', { exact: true }).first();
   if (await restricted.isVisible().catch(() => false)) {
-    await page.getByRole('button', { name: 'Manage', exact: true }).first().click();
-    await page.waitForTimeout(1_000);
-    fs.writeFileSync('/tmp/osd-w2-trust-dialog.txt', JSON.stringify({ buttons: await page.getByRole('button').allTextContents(), body: (await page.locator('body').innerText()).slice(0, 8000) }, null, 2));
-    const trustWorkspace = page.getByRole('button', { name: 'Trust', exact: true });
-    await trustWorkspace.waitFor({ state: 'visible', timeout: 10_000 });
-    await trustWorkspace.click();
-    await page.waitForTimeout(1_000);
-    await page.keyboard.press("Control+W");
-    await page.keyboard.press("Escape");
+    throw new Error('the dedicated workbench opened in Restricted Mode');
   }
   await page.waitForTimeout(15_000);
 
@@ -118,28 +110,10 @@ try {
   }
 
   let root = page.getByRole('treeitem', { name: 'OSD(ABAP)' });
-  // Passwords are intentionally not persisted by abap-fs. Connect explicitly
-  // on every browser run instead of trusting a stale, expanded workspace
-  // root whose decoration may not yet expose its connection error.
-  {
-    if (await root.isVisible().catch(() => false) && await root.getAttribute('aria-expanded') === 'true') {
-      await root.click();
-      await page.keyboard.press('ArrowLeft');
-    }
-    await command('ABAP FS: Connect to an ABAP system');
-    await page.waitForTimeout(1_000);
-    const quick = page.locator('.quick-input-widget');
-    fs.writeFileSync('/tmp/osd-w2-state.txt', await quick.textContent().catch(() => 'no quick input'));
-    if (await quick.isVisible().catch(() => false)) {
-      await quick.locator('input').fill('any');
-      await page.keyboard.press('Enter');
-    }
-    if (await localRoot.isVisible().catch(() => false)) {
-      await localRoot.click();
-      await page.keyboard.press('ArrowLeft');
-    }
-    root = page.getByRole('treeitem', { name: 'OSD(ABAP)' });
-    await root.waitFor({ state: 'visible', timeout: 20_000 });
+  await root.waitFor({ state: 'visible', timeout: 45_000 });
+  const passwordPrompt = page.locator('.quick-input-widget').filter({ hasText: /password/i });
+  if (await passwordPrompt.isVisible().catch(() => false)) {
+    throw new Error('the dedicated workbench asked for an ADT password');
   }
   fs.writeFileSync('/tmp/osd-w2-after-connect.txt', JSON.stringify({
     treeitems: await page.getByRole('treeitem').evaluateAll(items => items.map(item => item.getAttribute('aria-label'))),
@@ -164,12 +138,9 @@ try {
     await page.keyboard.press('ArrowRight');
   }
   await page.waitForTimeout(1_000);
-  const rootPrompt = page.locator('.quick-input-widget');
-  if (await rootPrompt.isVisible().catch(() => false) && /password/i.test(await rootPrompt.innerText())) {
-    await rootPrompt.locator('input').fill('any');
-    await page.keyboard.press('Enter');
-    await root.click();
-    await page.keyboard.press('ArrowRight');
+  const rootPrompt = page.locator('.quick-input-widget').filter({ hasText: /password/i });
+  if (await rootPrompt.isVisible().catch(() => false)) {
+    throw new Error('the dedicated workbench asked for an ADT password');
   }
   const tmp = page.getByRole('treeitem', { name: '$TMP', exact: true });
   await tmp.waitFor({ state: 'visible', timeout: 45_000 });

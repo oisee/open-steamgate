@@ -25,6 +25,16 @@ const replacements = [
     'for(const o of t)T(e,o,n,r);w(n,o),t.every((e=>C(e).passed&&e.testmethods.every((e=>A(e).passed))))?e.passed(n):e.failed(n,[])}',
     'ABAP Unit object terminal state',
   ],
+  [
+    'const n={...g,...t,password:"",name:e,valid:!0};',
+    'const n={...g,...t,password:globalThis.process?.env?.OSD_ADT_BOOTSTRAP_PASSWORD||"",name:e,valid:!0};',
+    'opt-in workbench bootstrap password',
+  ],
+  [
+    'n.password=await this.getPassword(e,n.username)',
+    'n.password||(n.password=await this.getPassword(e,n.username))',
+    'preserve opt-in workbench bootstrap password',
+  ],
 ];
 
 for (const [before, after, label] of replacements) {
