@@ -2,6 +2,11 @@
 
 Status: architecture decision and delivery proposal, 2026-09-21.
 
+Priority addendum: the first implementation wave is now the Gateway regression
+kernel and its thin Fiori client, not the polished source editor. The detailed
+decision, including Draft, ADT and in-process execution boundaries, is in
+[DevUX groundwork: Gateway regression before Draft](devux-gateway-regression.md).
+
 ## Decision in one page
 
 OSD should have two primary developer experiences and one optional reference
@@ -308,7 +313,22 @@ frontend bundle.
 - keep the full W2 test as a real-client gate;
 - name the two primary surfaces Fiori Workbench and OSD for VS Code.
 
-### UX1 — Fiori editor vertical slice
+### GW0/GW1 — regression contract and kernel
+
+- characterize the real A4H Gateway execution boundary;
+- define canonical cases, explicit matchers and immutable results;
+- implement isolated OSG and A4H execution adapters;
+- prove one positive and one intentionally failing case in both headless and
+  wire end-to-end runs.
+
+### GW2 — thin Fiori Gateway Client
+
+- add the Launchpad tile, case list/detail and request editor;
+- Run, cancel and show response plus semantic diff;
+- import and export canonical JSON/ZIP without credentials;
+- keep the same suite runnable headlessly.
+
+### UX1 — Fiori editor vertical slice, after GW2
 
 - create the Launchpad tile and UI5 application;
 - wrap a pinned CodeMirror 6 build;
@@ -374,13 +394,13 @@ valid code changes the runtime; refresh preserves the inactive edit.
 
 ## Recommended next move
 
-Take **UX1: Fiori editor vertical slice** next. It creates the largest usability
-improvement, runs in hosted OSD and can later run on Pages, while reusing the
-activation and ADT work already proven by code-server. In parallel only at the
-design level, keep the desktop extension contract small enough that it remains
-a supervisor rather than another IDE.
+Take **GW0/GW1: Gateway regression contract and kernel** next, followed by its
+thin Fiori client. This builds the instrument that will verify the editor and
+closes the missing `activate -> call -> compare -> keep result` loop. Draft is
+not a prerequisite: explicit Save, ETags and immutable case/run versions are
+the first contract.
 
-The first demo is successful when a user opens the Launchpad, chooses
-**Workbench**, changes one class, sees an invalid edit rejected without harming
-the runtime, fixes it, activates it, runs its tests and sees the Git/runtime
-identity — without a terminal, a second password or knowledge of ADT URLs.
+The first demo is successful when a user opens the Launchpad, selects one saved
+case, runs it against OSG or A4H, sees a useful semantic diff, and can reproduce
+the same verdict headlessly. The next Workbench demo then adds source editing
+and `Activate -> Run selected suite` on top of that proven instrument.
