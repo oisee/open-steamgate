@@ -56,6 +56,9 @@ test("vector quality renders the published report", async ({page}) => {
   await expect(page.getByText("ROC AUC", {exact: true})).toBeVisible();
   await expect(page.getByText("Best threshold F1", {exact: true})).toBeVisible();
   await expect(page.locator("svg[aria-label='Intent confusion matrix'] rect")).toHaveCount(1600);
+  const content = page.locator(".sapMPageEnableScrolling").first();
+  const contentBox = await content.boundingBox();
+  expect(contentBox.height).toBeGreaterThan(500);
 
   await page.evaluate(() => {
     const element = document.querySelector("[id$='--bucketSelect']");

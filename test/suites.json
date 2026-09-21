@@ -30,6 +30,7 @@
     "test/generated-metadata.mjs",
     "test/hana-dialect.mjs",
     "test/journal.mjs",
+    "test/leak-scan.mjs",
     "test/lsd-a4h-011.mjs",
     "test/mocha.mjs",
     "test/naming-scan.mjs",

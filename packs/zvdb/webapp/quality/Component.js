@@ -1,11 +1,11 @@
 sap.ui.define([
   "sap/ui/core/UIComponent", "sap/ui/model/json/JSONModel", "sap/ui/core/Item", "sap/ui/core/HTML",
-  "sap/m/Page", "sap/m/Toolbar", "sap/m/ToolbarSpacer", "sap/m/Label", "sap/m/Select",
+  "sap/m/App", "sap/m/Page", "sap/m/Toolbar", "sap/m/ToolbarSpacer", "sap/m/Label", "sap/m/Select",
   "sap/m/MessageStrip", "sap/m/FlexBox", "sap/m/GenericTile", "sap/m/TileContent",
   "sap/m/NumericContent", "sap/m/Title", "sap/m/Text", "sap/m/ObjectStatus", "sap/m/VBox",
   "sap/viz/ui5/controls/VizFrame", "sap/viz/ui5/data/FlattenedDataset",
   "sap/viz/ui5/data/DimensionDefinition", "sap/viz/ui5/data/MeasureDefinition", "sap/viz/ui5/controls/common/feeds/FeedItem"
-], function (UIComponent, JSONModel, Item, HTML, Page, Toolbar, ToolbarSpacer, Label, Select,
+], function (UIComponent, JSONModel, Item, HTML, App, Page, Toolbar, ToolbarSpacer, Label, Select,
              MessageStrip, FlexBox, GenericTile, TileContent, NumericContent, Title, Text, ObjectStatus, VBox,
              VizFrame, FlattenedDataset, DimensionDefinition, MeasureDefinition, FeedItem) {
   "use strict";
@@ -93,7 +93,7 @@ sap.ui.define([
         render(report.models[0].bucket);
       }).catch(function (error) { state.setProperty("/message", "Cannot load quality report: " + error.message); });
 
-      return new Page({title: "Vector quality", subHeader: new Toolbar({content: [
+      var page = new Page({title: "Vector quality", subHeader: new Toolbar({content: [
         new Label({text: "Bucket"}), select, new ToolbarSpacer(), new Label({text: "Mode"}),
         new ObjectStatus({text: "Published", state: "Success", tooltip: "Committed reproducible report; Live benchmarking is reserved for future asynchronous execution"}),
         new Text({text: "MASSIVE 1.1 · sign-bit quantization"})
@@ -111,6 +111,10 @@ sap.ui.define([
         new Title({text: "Intent confusion matrix", level: "H2"}),
         new Text({text: "Rows are actual intents; columns are nearest-neighbour predictions. Green is correct, red is a collision; hover a cell for its count."}), matrix
       ]})]});
+      // A bare Page gets a zero-height scrolling area when this component is
+      // opened directly. App supplies the UI5 navigation/content sizing
+      // contract; the viewport height also works inside the launchpad iframe.
+      return new App({height: "100vh", pages: [page]});
     }
   });
 });
