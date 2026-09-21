@@ -1,6 +1,18 @@
 # DevUX groundwork: Gateway regression before Draft
 
-Status: architecture decision and delivery plan, 2026-09-21.
+Status: GW0 contract complete and GW1a portable matcher/kernel implemented,
+2026-09-21. Executors, persistence, redaction and the Fiori client remain open.
+
+The first implementation slice lives in `src/regression`. It accepts a typed
+case plus an observed response and produces a deterministic verdict across
+HTTP status, JSON Content-Type and semantic JSON. Object order is ignored,
+array order and JSON types are retained, findings use RFC 6901 pointers, and
+only explicit, resolving, non-overlapping masks are accepted.
+
+JSON parsing uses only AJSON `core` v1.1.13 at pinned commit
+`e5e0fd043f5813ef5a271fcba4b327aa944c3224`, behind OSG-owned public types.
+AJSON's utility diff is deliberately not used: the regression matcher owns
+ordered arrays, empty-container presence, masks and deterministic findings.
 
 The candidate wire/data contract is specified in
 [Gateway regression contract v1](devux-gateway-regression-contract.md).

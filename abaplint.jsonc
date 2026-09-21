@@ -2,7 +2,7 @@
   "global": {
     "files": "/{src,test,gen/bsp,gen/cds,gen/segw,gen/rfc,gen/tran}/**/*.*",
     "errorOnDuplicateFilenames": true,
-    "exclude": ["/test/e2e/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
+    "exclude": ["/test/e2e/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
   },
   "dependencies": [
     {
@@ -33,6 +33,13 @@
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
       "files": "/src/{oo,ddic,exceptions,internal}/**/*.*"
+    },
+    {
+      // Portable, untyped JSON tree used behind OSG's own regression
+      // matcher facade. The public kernel never exposes ZIF_AJSON types.
+      "url": "https://github.com/sbcgua/ajson",
+      "folder": "/.local/lars/ajson",
+      "files": "/src/core/**/*.*"
     },
     {
       // ABAP Push Channels: the SAP-named family a real websocket handler
