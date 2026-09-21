@@ -1,6 +1,7 @@
 # Gateway regression contract v1
 
-Status: GW0 local candidate, 2026-09-21.
+Status: GW0 local contract complete; authorized A4H characterization partial,
+2026-09-21.
 
 This document defines the portable data and matching contract. The JavaScript
 reference matcher and synthetic fixtures are a characterization oracle; they
@@ -224,14 +225,83 @@ The contract extends rather than replaces existing mechanisms:
 - the existing build endpoint remains the authority for source/live/serving
   identities.
 
+## Portable core and SAP compatibility facade
+
+The proposed reusable application contract will be owned by Z namespace code
+and designed for installation in both OSG and a classic ABAP system:
+
+```text
+ZIF_OSG_REGRESSION_RUNNER~RUN(
+  immutable RegressionCase,
+  execution context
+) -> RunResult
+```
+
+No `/IWFND/*` type, table key or exception may enter this proposed interface.
+On OSG, a thin compatibility facade may reproduce the contract-tested subset of
+`/IWFND/CL_SUTIL_GW_CLIENT_CFG` and
+`/IWFND/CL_SUTIL_GW_CLIENT_EXEC`. It should delegate all behavior to the Z core
+and return an explicit unsupported result for methods outside that subset. It
+is not a claim of complete binary compatibility.
+
+On A4H the standard names already belong to SAP. The proposed classic Z adapter
+therefore separates two operations:
+
+```text
+IMPORT_SAVED_CASE(group, case) -> immutable RegressionCase
+RUN_STANDARD_CASE(group, case) -> native execution observation
+```
+
+The pair `(group, case)` is a mutable locator, not a version. Import should
+snapshot the request and supported expectations and compute a new immutable
+version when standard content changes. Native execution may become a canonical
+RunResult only when the adapter can substantiate the executed snapshot, raw
+evidence and execution boundary; a native pass flag alone is not our matcher
+verdict.
+
+Imported provenance may record `executor: sap.gateway-client`, the external
+locator and snapshot digest. `case.id` and `case.version` remain authoritative.
+
+## Authorized A4H characterization (partial)
+
+The following facts were observed read-only on A4H 7.58, client 001, on
+2026-09-21. No repository object, transport or test case was created or
+modified.
+
+- `/IWFND/CL_SUTIL_GW_CLIENT_CFG` exposes saved-case listing and parsing;
+  `/IWFND/CL_SUTIL_GW_CLIENT_EXEC=>EXECUTE_TEST_CASE` accepts a group/case
+  locator and returns status, selected headers and body.
+- The saved V2 GET case `CORE_SAMPLES / sp13 - VOCAN new simple values` targets
+  `/sap/opu/odata/IWBEP/TEA_TEST_APPLICATION/$metadata`. Invoking it through
+  `EXECUTE_TEST_CASE` completed in a transient ABAP session. The ExecuteABAP
+  transport did not expose its export parameters, so no status is invented.
+- A separate external HTTP GET to that URI was observed at the real wire
+  boundary and returned HTTP 403, XML content, 971 bytes. This is evidence for
+  that external session only, not the status of the standard saved-case run.
+- Clean-room observation classifies the selected V2 sample as the ordinary
+  HTTP path. The standard top-level result does not expose dedicated boundary
+  evidence. Bypass conditions remain unverified by a public black-box test and
+  are deliberately not part of this public contract.
+- `EXECUTE_TEST_CASE` loads the saved request through the configuration API,
+  decodes its headers/body, executes it and validates expected HTTP statuses.
+  It does not, in this method, compare response headers/body with a stored
+  expected response. It is therefore a native saved-request/status executor,
+  not a substitute for the portable OSG matcher.
+
+Observed public visibility does not establish that these standard classes are
+released ABAP Cloud APIs. Their use remains confined to the optional classic
+adapter; the portable core does not depend on them.
+
 ## Clean-room and authorization boundary
 
 The supplied ZSCR examples inform observable workflows and field meanings.
 Their implementation is not copied. Synthetic fixtures contain no captured
 business data, credentials, host names or proprietary source.
 
-GW0 local is complete when the contract validates, round-trips, passes its
-positive control and fails its deliberate business mutation with the exact
-finding. Full GW0 additionally requires the separately authorized A4H
-characterization described in the parent plan. Synthetic or A4H-shaped data
-must never be reported as observed A4H behavior.
+GW0 local is complete: the contract validates and round-trips, its positive
+control passes, and its deliberate business mutation fails at the exact
+pointer. Full GW0 remains open because the saved standard sample was not
+synthetic and the standard call's exported result was unavailable through the
+ephemeral execution transport. A separate authorized write-scoped probe is
+needed to create and observe a disposable synthetic standard case. Synthetic
+or A4H-shaped data must never be reported as observed A4H behavior.
