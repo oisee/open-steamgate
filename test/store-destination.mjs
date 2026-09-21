@@ -299,11 +299,32 @@ ENDCLASS.
 
   it("a build that fails leaves the object NOT active, and says why", async () => {
     const store = new ObjectStore({root: process.cwd()});
+    store.write("CLAS", NAME, CLEAN);
     store.publish = async () => ({ok: false, transpile: {ok: false, error: "ENOSPC"}});
     const destination2 = new StoreDestination({store: () => store});
     const answer = await call(destination2, {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
     expect(answer.EV_ACTIVE, "the check held and the system did not get the code").to.equal("");
     expect(answer.EV_NOTE).to.match(/ENOSPC/);
+    expect(store.stateOf(store.find("CLAS", NAME)).version).to.equal("inactive");
+  });
+
+  it("a save during publication cannot activate the later source", async () => {
+    const store = new ObjectStore({root: process.cwd()});
+    store.write("CLAS", NAME, CLEAN);
+    let release;
+    store.publish = () => new Promise((resolve) => { release = resolve; });
+    const running = call(new StoreDestination({store: () => store}),
+      {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
+    for (let i = 0; i < 100 && release === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(release).to.be.a("function");
+    store.write("CLAS", NAME, CLEAN.replace("42", "43"));
+    release({ok: true, recycled: false});
+    const answer = await running;
+    expect(answer.EV_ACTIVE).to.equal("");
+    expect(answer.EV_NOTE).to.match(/source changed during activation/);
+    expect(store.stateOf(store.find("CLAS", NAME)).version).to.equal("inactive");
   });
 
   it("TOKENS answers which words are keywords, and the PARSER decides that", async () => {

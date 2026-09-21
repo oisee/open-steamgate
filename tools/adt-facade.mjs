@@ -1696,6 +1696,7 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/activation`, async (req, res) => {
     const body = await rawBody(req);
     let named = [];
+    let checked = [];
     let published = false;
     answer(res, () => {
       named = objectReferencesIn(body, collections);
@@ -1703,8 +1704,8 @@ export function adtRouter(options = {}) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
       }
-      const results = named.map((o) => store.activate(o.type, o.name));
-      const failed = results.filter((r) => r.active === false);
+      checked = named.map((o) => store.activate(o.type, o.name));
+      const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
         // the object that did not activate, then whatever it broke: an
         // object with no issues of its own still belongs in the list,
@@ -1717,6 +1718,12 @@ export function adtRouter(options = {}) {
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
+        if (!store.completeActivations(checked)) {
+          res.status(200).type("application/xml").send(activationFailureDocument(
+            named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
+          ));
+          return;
+        }
         // A successful activation answers with its properties, not with
         // nothing: checkExecuted, activationExecuted and generationExecuted,
         // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
@@ -1738,6 +1745,12 @@ export function adtRouter(options = {}) {
         const why = result.error ?? result.transpile?.output ?? "the build after activation failed";
         res.status(200).type("application/xml").send(activationFailureDocument(
           named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).slice(-2000), severity: "E", line: 1, column: 1}]})),
+        ));
+        return;
+      }
+      if (!store.completeActivations(checked)) {
+        res.status(200).type("application/xml").send(activationFailureDocument(
+          named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));
         return;
       }

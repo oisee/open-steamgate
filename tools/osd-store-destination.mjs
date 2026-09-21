@@ -290,16 +290,18 @@ export class StoreDestination {
     // nobody opened is hiding the part worth seeing.
     const before = snapshotOf(join(this.store.root, "gen"));
     const published = await this.store.publish();
+    const committed = published?.ok !== false && this.store.completeActivation(result);
     const regenerated = changedSince(before, join(this.store.root, "gen"));
     const objects = [
       ...regenerated.written.map((path) => generatedRow(path, "generated")),
       ...regenerated.removed.map((path) => generatedRow(path, "removed")),
     ];
     return {
-      EV_ACTIVE: published?.ok === false ? "" : "X",
-      EV_LIVE: published?.recycled === true ? "X" : "",
+      EV_ACTIVE: committed ? "X" : "",
+      EV_LIVE: committed && published?.recycled === true ? "X" : "",
       EV_NOTE: published?.ok === false
         ? `the check held and the build did not: ${published?.transpile?.error ?? "no reason given"}`
+        : !committed ? "source changed during activation; check and activate again"
         : `${published?.recycled === true
           ? `built and live (generation ${published?.generation ?? "?"})`
           : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`

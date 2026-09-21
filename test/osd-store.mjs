@@ -337,6 +337,36 @@ ENDCLASS.
     expect(await first).to.include.keys(["ok", "ms", "objects"]);
   });
 
+  it("keeps a saved version inactive until publication succeeds", async () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    const checked = store.activate("CLAS", "ZCL_OSD_PROBE");
+    expect(checked.active).to.equal(true);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("inactive");
+
+    // A failed build must not commit the check verdict as an activation.
+    store.publish = async () => ({ok: false, transpile: {error: "ENOSPC"}});
+    expect((await store.publish()).ok).to.equal(false);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("inactive");
+
+    // If another save arrives during publication, the old verdict must not
+    // activate the newer text, even when the new text is equally valid.
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("'hello'", "'newer'"));
+    expect(store.completeActivation(checked)).to.equal(false);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("inactive");
+    expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_PROBE"))).to.equal(true);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("active");
+  });
+
+  it("completes a multi-object activation all at once", () => {
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    store.write("CLAS", "ZCL_OSD_OTHER", CLASS.replaceAll("zcl_osd_probe", "zcl_osd_other"));
+    const checked = [store.activate("CLAS", "ZCL_OSD_PROBE"), store.activate("CLAS", "ZCL_OSD_OTHER")];
+    store.write("CLAS", "ZCL_OSD_OTHER", CLASS.replaceAll("zcl_osd_probe", "zcl_osd_other").replace("'hello'", "'newer'"));
+    expect(store.completeActivations(checked)).to.equal(false);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("inactive");
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_OTHER")).version).to.equal("inactive");
+  });
+
   it("activation holds or fails on the syntax check, with the line and the rule", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
     expect(store.activate("CLAS", "ZCL_OSD_PROBE").active).to.equal(true);

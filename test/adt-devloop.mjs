@@ -521,6 +521,72 @@ describe("tools/adt-facade: the development loop", () => {
 });
 
 
+describe("tools/adt-facade: publication state", function () {
+  this.timeout(30000);
+  const name = "ZCL_OSD_PUBLICATION";
+  const source = SOURCE.replaceAll("zcl_osd_scratch", "zcl_osd_publication");
+  let root;
+  let store;
+  let server;
+  let token;
+  let context;
+
+  before(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-adt-publish-"));
+    mkdirSync(join(root, "src"), {recursive: true});
+    writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
+    store = new ObjectStore({root, libs: []});
+    store.write("CLAS", name, source);
+    const app = express();
+    app.use(express.raw({type: "*/*", limit: "16mb"}));
+    app.use(adtRouter({store}).router);
+    await new Promise((resolve) => { server = app.listen(0, resolve); });
+    const res = await fetch(`http://localhost:${server.address().port}/sap/bc/adt/core/discovery`,
+      {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+    token = res.headers.get("x-csrf-token");
+    context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+  });
+
+  after(() => {
+    server?.close();
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  const activate = () => fetch(`http://localhost:${server.address().port}/sap/bc/adt/activation?method=activate`, {
+    method: "POST",
+    headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token, "x-sap-adt-sessiontype": "stateful"},
+    body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${name.toLowerCase()}" adtcore:name="${name}"/></adtcore:objectReferences>`,
+  });
+
+  it("keeps the source inactive after a failed publish, then completes a successful retry", async () => {
+    store.publish = async () => ({ok: false, transpile: {error: "ENOSPC"}});
+    const failed = await activate();
+    expect((await failed.text())).to.contain('activationExecuted="false"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
+
+    store.publish = async () => ({ok: true, recycled: false});
+    const passed = await activate();
+    expect((await passed.text())).to.contain('activationExecuted="true"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
+  });
+
+  it("does not activate a source saved while publication is pending", async () => {
+    store.write("CLAS", name, source);
+    let release;
+    store.publish = () => new Promise((resolve) => { release = resolve; });
+    const pending = activate();
+    for (let i = 0; i < 100 && release === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(release).to.be.a("function");
+    store.write("CLAS", name, source.replace("'hello'", "'newer'"));
+    release({ok: true, recycled: false});
+    const response = await pending;
+    expect(await response.text()).to.contain('activationExecuted="false"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
+  });
+});
+
 describe("tools/adt-facade: create and delete over the wire", () => {
   let server;
   let port;
