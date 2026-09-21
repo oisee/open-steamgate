@@ -55,7 +55,7 @@ local/
 
 # what a pack fetches rather than carries (tools/osd-fetch.mjs): the folder
 # named upstream/ by convention, and the marker saying which commit it holds
-packs/*/upstream/
-packs/*/games/
+packs/*/upstream
+packs/*/games
 packs/*/.osd-fetched.json
 docker/workbench/ide-password.txt
