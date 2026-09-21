@@ -1,8 +1,11 @@
 sap.ui.define([
   "sap/ui/core/mvc/Controller",
   "sap/ui/model/json/JSONModel",
-  "sap/m/MessageBox"
-], function (Controller, JSONModel, MessageBox) {
+  "sap/m/MessageBox",
+  "sap/m/Column",
+  "sap/m/Text",
+  "sap/m/ColumnListItem"
+], function (Controller, JSONModel, MessageBox, Column, Text, ColumnListItem) {
   "use strict";
 
   // Absolute `/sap/...` escapes the repository prefix on GitHub Pages.
@@ -15,10 +18,12 @@ sap.ui.define([
   const short = (value) => value ? String(value).slice(0, 8) : "-";
 
   const OBJECT_TYPES = [
-    {key: "CLAS/OC", text: "Classes", query: "ZCL_OSD*", mode: "abap"},
-    {key: "INTF/OI", text: "Interfaces", query: "ZIF*", mode: "abap"},
-    {key: "PROG/P", text: "Programs", query: "Z*", mode: "abap"},
-    {key: "DDLS/DF", text: "CDS definitions", query: "ZC_*", mode: "sql"},
+    {key: "CLAS/OC", text: "Classes", query: "ZCL_OSD*", mode: "abap", edit: true, tests: true},
+    {key: "INTF/OI", text: "Interfaces", query: "ZIF*", mode: "abap", edit: true},
+    {key: "PROG/P", text: "Programs", query: "Z*", mode: "abap", edit: true, tests: true},
+    {key: "DDLS/DF", text: "CDS definitions", query: "ZC_*", mode: "sql", edit: true, preview: "cds"},
+    {key: "TABL/DT", text: "Tables and structures", query: "ZOSD*", mode: "sql", preview: "ddic"},
+    {key: "SRVD/SRV", text: "Service definitions", query: "Z*", mode: "sql"},
   ];
 
   function findings(text) {
@@ -43,12 +48,19 @@ sap.ui.define([
       this._etag = "";
       this._searchTimer = 0;
       this._searchSeq = 0;
+      this._objectSeq = 0;
+      this._testSeq = 0;
+      this._previewSeq = 0;
       this._objectType = OBJECT_TYPES[0].key;
       this.getView().setModel(new JSONModel({
         busy: false, query: OBJECT_TYPES[0].query, objectType: this._objectType,
         objectTypes: OBJECT_TYPES, editorMode: OBJECT_TYPES[0].mode,
         objects: [], selected: {}, source: "", dirty: false,
+        capabilities: {edit: true, preview: "", tests: true},
         diagnostics: [], identity: {},
+        preview: {loading: false, columns: [], rows: [], total: 0, ms: 0, query: "", message: "Run Preview Data to read up to 100 rows."},
+        tests: {loading: false, classes: [], rows: [], selectedClass: "", selectedMethod: "",
+          counts: {classes: 0, methods: 0, passed: 0, failed: 0, classAlerts: 0}, message: "Tests are discovered when a class or program opens."},
         git: {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: "", history: [], selectedRevision: ""},
         message: {text: "Choose an object type, search, and open a source.", type: "Information"}
       }), "ui");
@@ -62,6 +74,11 @@ sap.ui.define([
     _set(path, value) { this._model().setProperty(path, value); },
     _message(text, type = "Information") { this._set("/message", {text, type}); },
     _busy(value) { this._set("/busy", value); },
+    _isSelected(object) {
+      const selected = this._model().getProperty("/selected");
+      return selected?.type === object?.type && selected?.name === object?.name &&
+        selected?.uri === object?.uri;
+    },
 
     async _mayDiscard(text) {
       if (!this._model().getProperty("/dirty")) return true;
@@ -96,12 +113,21 @@ sap.ui.define([
       this._etag = "";
       this._searchSeq += 1;
       this._set("/objectType", config.key);
+      this._objectSeq += 1;
+      this._testSeq += 1;
+      this._previewSeq += 1;
+      this._busy(false);
       this._set("/editorMode", config.mode);
+      this._set("/capabilities", {edit: config.edit === true, preview: config.preview || "", tests: config.tests === true});
       this._set("/query", config.query);
       this._set("/objects", []);
       this._set("/selected", {});
       this._set("/source", "");
       this._set("/dirty", false);
+      this._set("/preview", {loading: false, columns: [], rows: [], total: 0, ms: 0, query: "", message: "Run Preview Data to read up to 100 rows."});
+      this._set("/tests", {loading: false, classes: [], rows: [], selectedClass: "", selectedMethod: "",
+        counts: {classes: 0, methods: 0, passed: 0, failed: 0, classAlerts: 0},
+        message: "Tests are discovered when a class or program opens."});
       this._set("/git", {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: "", history: [], selectedRevision: ""});
       this._showDiagnostics([]);
       this._message("Searching " + config.text + ".", "Information");
@@ -111,6 +137,9 @@ sap.ui.define([
     onExit() {
       clearTimeout(this._searchTimer);
       this._searchSeq += 1;
+      this._objectSeq += 1;
+      this._testSeq += 1;
+      this._previewSeq += 1;
     },
 
     async _session() {
@@ -231,19 +260,185 @@ sap.ui.define([
     async onObjectSelect(event) {
       const object = event.getParameter("listItem").getBindingContext("ui").getObject();
       if (!(await this._mayDiscard("Discard the unsaved editor buffer and open another object?"))) return;
+      const request = ++this._objectSeq;
+      this._testSeq += 1;
+      this._previewSeq += 1;
       this._busy(true);
       try {
+        const config = OBJECT_TYPES.find((item) => item.key === object.type) || {};
+        this._set("/capabilities", {edit: config.edit === true, preview: config.preview || "", tests: config.tests === true});
+        this._set("/preview", {loading: false, columns: [], rows: [], total: 0, ms: 0, query: "", message: "Run Preview Data to read up to 100 rows."});
+        this._set("/tests", {loading: false, classes: [], rows: [], selectedClass: "", selectedMethod: "",
+          counts: {classes: 0, methods: 0, passed: 0, failed: 0, classAlerts: 0},
+          message: config.tests ? "Discovering tests…" : "This object type has no ABAP Unit surface."});
         const response = await this._request(object.uri + "/source/main");
         const source = await response.text();
+        if (request !== this._objectSeq) return;
         this._etag = response.headers.get("etag") || "";
         this._set("/selected", object);
         this._set("/source", source);
         this._set("/dirty", false);
         this._showDiagnostics([]);
         this._message(`${object.name} opened.`, "Success");
-        await this._loadGit(object);
-      } catch (error) { this._fail(error); }
-      finally { this._busy(false); }
+        await Promise.all([this._loadGit(object), config.tests ? this._loadTests(object) : Promise.resolve()]);
+      } catch (error) { if (request === this._objectSeq) this._fail(error); }
+      finally { if (request === this._objectSeq) this._busy(false); }
+    },
+
+    async _loadTests(object) {
+      const request = ++this._testSeq;
+      this._set("/tests/loading", true);
+      try {
+        const response = await this._request("/core/http/unit/object?type=" +
+          encodeURIComponent(object.type) + "&name=" + encodeURIComponent(object.name));
+        const found = await response.json();
+        const rows = found.classes.flatMap((testClass) => testClass.methods.map((method) => ({
+          className: testClass.name,
+          methodName: method.name,
+          riskLevel: testClass.riskLevel,
+          durationCategory: testClass.durationCategory,
+          include: testClass.include,
+          line: method.line,
+          column: method.column,
+          status: "Not run",
+          state: "None",
+          duration: "",
+          details: "",
+        })));
+        if (request !== this._testSeq || !this._isSelected(object)) return;
+        this._set("/tests/classes", found.classes);
+        this._set("/tests/rows", rows);
+        this._set("/tests/message", rows.length === 0
+          ? "No ABAP Unit methods belong to this object."
+          : `${rows.length} method(s) in ${found.classes.length} test class(es).`);
+      } catch (error) {
+        if (request === this._testSeq && this._isSelected(object)) throw error;
+      } finally {
+        if (request === this._testSeq && this._isSelected(object)) this._set("/tests/loading", false);
+      }
+    },
+
+    onTestSelect(event) {
+      const row = event.getParameter("listItem").getBindingContext("ui").getObject();
+      this._set("/tests/selectedClass", row.className);
+      this._set("/tests/selectedMethod", row.methodName);
+    },
+
+    async onRunTests() { await this._runTests(); },
+    async onRunSelectedTest() {
+      await this._runTests({
+        testClass: this._model().getProperty("/tests/selectedClass"),
+        method: this._model().getProperty("/tests/selectedMethod"),
+      });
+    },
+
+    async _runTests(selection = {}) {
+      const object = this._model().getProperty("/selected");
+      if (!object?.name) return;
+      const request = ++this._testSeq;
+      const inScope = (row) =>
+        (!selection.testClass || row.className === selection.testClass) &&
+        (!selection.method || row.methodName === selection.method);
+      this._set("/tests/rows", this._model().getProperty("/tests/rows").map((row) =>
+        inScope(row) ? {...row, status: "Running", state: "Information", duration: "", details: ""} : row
+      ));
+      this._set("/tests/loading", true);
+      try {
+        let path = "/core/http/unit/object/run?type=" + encodeURIComponent(object.type) +
+          "&name=" + encodeURIComponent(object.name);
+        if (selection.testClass) path += "&testClass=" + encodeURIComponent(selection.testClass);
+        if (selection.method) path += "&method=" + encodeURIComponent(selection.method);
+        const run = await (await this._request(path, {method: "POST"})).json();
+        if (request !== this._testSeq || !this._isSelected(object)) return;
+        const results = new Map();
+        for (const testClass of run.testClasses || []) {
+          const classAlerts = testClass.alerts || [];
+          const classDetails = classAlerts.flatMap((alert) =>
+            [alert.title, ...(alert.details || [])]).filter(Boolean).join(" · ");
+          if (classAlerts.length > 0 && (testClass.testMethods || []).length === 0) {
+            for (const row of this._model().getProperty("/tests/rows")) {
+              if (row.className === testClass.name && inScope(row)) {
+                results.set(`${row.className}=>${row.methodName}`, {
+                  status: "Blocked", state: "Error", duration: "", details: classDetails,
+                });
+              }
+            }
+          }
+          for (const method of testClass.testMethods || []) {
+            const alerts = [...classAlerts, ...(method.alerts || [])];
+            results.set(`${testClass.name}=>${method.name}`, {
+              status: alerts.length === 0 ? "Passed" : "Failed",
+              state: alerts.length === 0 ? "Success" : "Error",
+              duration: `${method.executionTime || "0.000"} ${method.unit || "s"}`,
+              details: alerts.flatMap((alert) => [alert.title, ...(alert.details || [])]).filter(Boolean).join(" · "),
+            });
+          }
+        }
+        const rows = this._model().getProperty("/tests/rows").map((row) => {
+          const result = results.get(`${row.className}=>${row.methodName}`);
+          if (result) return {...row, ...result};
+          return inScope(row) ? {...row, status: "Not executed", state: "Warning",
+            duration: "", details: "The runner returned no method result."} : row;
+        });
+        const classFailures = (run.testClasses || []).filter((item) =>
+          (item.alerts || []).length > 0 && (item.testMethods || []).length === 0).length;
+        this._set("/tests/rows", rows);
+        this._set("/tests/counts", run.counts || {});
+        this._set("/tests/message", `${run.counts?.passed || 0} passed, ${run.counts?.failed || 0} failed` +
+          (classFailures ? `, ${classFailures} class-level failure(s)` : "") + ` in ${run.ms || 0} ms.`);
+        this._message(run.ok ? "ABAP Unit passed." : "ABAP Unit reported failures.", run.ok ? "Success" : "Error");
+      } catch (error) {
+        if (request === this._testSeq && this._isSelected(object)) {
+          const detail = error.message || String(error);
+          this._set("/tests/rows", this._model().getProperty("/tests/rows").map((row) =>
+            inScope(row) ? {...row, status: "Run failed", state: "Error", duration: "", details: detail} : row
+          ));
+          this._fail(error);
+        }
+      } finally {
+        if (request === this._testSeq && this._isSelected(object)) this._set("/tests/loading", false);
+      }
+    },
+
+    async onPreviewData() {
+      const object = this._model().getProperty("/selected");
+      const kind = this._model().getProperty("/capabilities/preview");
+      if (!object?.name || !kind) return;
+      const request = ++this._previewSeq;
+      this._set("/preview/loading", true);
+      try {
+        const parameter = kind === "ddic" ? "ddicEntityName" : "ddlSourceName";
+        const response = await this._request(`/datapreview/${kind}?rowNumber=100&${parameter}=` +
+          encodeURIComponent(object.name), {method: "POST", headers: {"content-type": "text/plain"}, body: ""});
+        const doc = xml(await response.text());
+        const columns = nodes(doc, "columns").map((column, index) => ({
+          name: attr(nodes(column, "metadata")[0], "name"), key: `c${index}`,
+          values: nodes(column, "data").map((value) => value.textContent || ""),
+        }));
+        const count = Math.max(0, ...columns.map((column) => column.values.length));
+        const rows = Array.from({length: count}, (_, row) => Object.fromEntries(
+          columns.map((column) => [column.key, column.values[row] || ""])
+        ));
+        if (request !== this._previewSeq || !this._isSelected(object)) return;
+        const table = this.byId("previewTable");
+        table.unbindItems();
+        table.destroyColumns();
+        for (const column of columns) table.addColumn(new Column({header: new Text({text: column.name})}));
+        table.bindItems({path: "ui>/preview/rows", template: new ColumnListItem({
+          cells: columns.map((column) => new Text({text: `{ui>${column.key}}`, wrapping: false})),
+        })});
+        const value = (name) => nodes(doc, name)[0]?.textContent || "";
+        this._set("/preview/columns", columns.map(({name, key}) => ({name, key})));
+        this._set("/preview/rows", rows);
+        this._set("/preview/total", Number(value("totalRows") || rows.length));
+        this._set("/preview/ms", Number(value("queryExecutionTime") || 0));
+        this._set("/preview/query", value("executedQueryString"));
+        this._set("/preview/message", `${rows.length} row(s), ${columns.length} column(s).`);
+      } catch (error) {
+        if (request === this._previewSeq && this._isSelected(object)) this._fail(error);
+      } finally {
+        if (request === this._previewSeq && this._isSelected(object)) this._set("/preview/loading", false);
+      }
     },
 
     onSourceChange(event) {

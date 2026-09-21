@@ -7,10 +7,11 @@
         <core:Item key="{ui>key}" text="{ui>text}"/>
       </Select>
       <ToolbarSpacer/>
-      <Button id="discard" text="Discard edits" icon="sap-icon://undo" press=".onDiscard" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/dirty}}"/>
-      <Button id="check" text="Check" icon="sap-icon://validate" press=".onCheck" enabled="{= !!${ui>/selected/name}}"/>
-      <Button id="save" text="Save inactive" icon="sap-icon://save" press=".onSave" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/dirty}}"/>
-      <Button id="activate" text="Activate" icon="sap-icon://activate" type="Emphasized" press=".onActivate" enabled="{= !!${ui>/selected/name}}"/>
+      <ObjectStatus text="Browse only" icon="sap-icon://display" visible="{= !!${ui>/selected/name} &amp;&amp; !${ui>/capabilities/edit}}"/>
+      <Button id="discard" text="Discard edits" icon="sap-icon://undo" press=".onDiscard" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/capabilities/edit} &amp;&amp; ${ui>/dirty}}"/>
+      <Button id="check" text="Check" icon="sap-icon://validate" press=".onCheck" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/capabilities/edit}}"/>
+      <Button id="save" text="Save inactive" icon="sap-icon://save" press=".onSave" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/capabilities/edit} &amp;&amp; ${ui>/dirty}}"/>
+      <Button id="activate" text="Activate" icon="sap-icon://activate" type="Emphasized" press=".onActivate" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/capabilities/edit}}"/>
     </OverflowToolbar></customHeader>
     <content><l:Splitter id="splitter" height="100%">
       <VBox class="sapUiSmallMargin" height="100%">
@@ -32,9 +33,36 @@
         </OverflowToolbar>
         <MessageStrip id="message" text="{ui>/message/text}" type="{ui>/message/type}" showIcon="true" visible="{= !!${ui>/message/text}}"/>
         <wb:AbapEditor id="source" type="{ui>/editorMode}" value="{path: &apos;ui>/source&apos;, mode: &apos;OneWay&apos;}" height="100%" width="100%"
-          editable="{= !!${ui>/selected/name}}" liveChange=".onSourceChange">
+          editable="{= !!${ui>/selected/name} &amp;&amp; ${ui>/capabilities/edit}}" liveChange=".onSourceChange">
           <wb:layoutData><FlexItemData growFactor="1" baseSize="0"/></wb:layoutData>
         </wb:AbapEditor>
+        <IconTabBar id="objectTools" expandable="true" expanded="false" headerMode="Inline">
+          <items>
+            <IconTabFilter key="data" text="Data" icon="sap-icon://table-view" visible="{= !!${ui>/capabilities/preview}}">
+              <VBox class="sapUiSmallMargin" busy="{ui>/preview/loading}">
+                <OverflowToolbar><Title text="Data Preview" level="H4"/><ObjectStatus text="{ui>/preview/message}"/>
+                  <ToolbarSpacer/><Button text="Preview Data" icon="sap-icon://media-play" type="Emphasized" press=".onPreviewData"/>
+                </OverflowToolbar>
+                <Text text="{ui>/preview/query}" visible="{= !!${ui>/preview/query}}"/>
+                <Table id="previewTable" growing="true" growingThreshold="25" sticky="ColumnHeaders" noDataText="No preview has been run."/>
+              </VBox>
+            </IconTabFilter>
+            <IconTabFilter key="tests" text="Tests" icon="sap-icon://quality-issue" visible="{ui>/capabilities/tests}" count="{= ${ui>/tests/rows}.length}">
+              <VBox class="sapUiSmallMargin" busy="{ui>/tests/loading}">
+                <OverflowToolbar><Title text="ABAP Unit" level="H4"/><ObjectStatus text="{ui>/tests/message}"/>
+                  <ToolbarSpacer/><Button text="Run selected" icon="sap-icon://media-play" press=".onRunSelectedTest" enabled="{= !!${ui>/tests/selectedMethod}}"/>
+                  <Button text="Run class" icon="sap-icon://begin" type="Emphasized" press=".onRunTests" enabled="{= ${ui>/tests/rows}.length > 0}"/>
+                </OverflowToolbar>
+                <Table id="unitTests" items="{ui>/tests/rows}" mode="SingleSelectMaster" selectionChange=".onTestSelect" sticky="ColumnHeaders" noDataText="No ABAP Unit methods belong to this object.">
+                  <columns><Column width="8rem"><Text text="Status"/></Column><Column width="14rem"><Text text="Test class"/></Column>
+                    <Column width="18rem"><Text text="Method"/></Column><Column width="7rem"><Text text="Time"/></Column><Column><Text text="Details"/></Column></columns>
+                  <items><ColumnListItem><cells><ObjectStatus text="{ui>status}" state="{ui>state}"/><Text text="{ui>className}"/>
+                    <Text text="{ui>methodName}"/><Text text="{ui>duration}"/><Text text="{ui>details}"/></cells></ColumnListItem></items>
+                </Table>
+              </VBox>
+            </IconTabFilter>
+          </items>
+        </IconTabBar>
         <Panel id="gitPanel" expandable="true" expanded="false" visible="{= !!${ui>/selected/name}}" busy="{ui>/git/loading}">
           <headerToolbar><OverflowToolbar>
             <Title text="Git history" level="H4"/>
@@ -42,7 +70,7 @@
             <ObjectStatus title="HEAD" text="{ui>/git/headShort}"/>
             <ObjectStatus text="{ui>/git/status}" state="{= ${ui>/git/status} === 'clean' ? 'Success' : ${ui>/git/status} === 'modified' ? 'Warning' : 'Information'}"/>
             <ToolbarSpacer/>
-            <Button text="Restore version" icon="sap-icon://undo" press=".onRestoreRevision" enabled="{= !!${ui>/git/selectedRevision}}"/>
+            <Button text="Restore version" icon="sap-icon://undo" press=".onRestoreRevision" enabled="{= !!${ui>/git/selectedRevision} &amp;&amp; ${ui>/capabilities/edit}}"/>
             <Button text="Refresh" icon="sap-icon://refresh" press=".onGitRefresh"/>
           </OverflowToolbar></headerToolbar>
           <content>

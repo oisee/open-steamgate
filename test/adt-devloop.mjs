@@ -436,6 +436,103 @@ describe("tools/adt-facade: the development loop", () => {
       expect(method).to.not.contain("<alert ");
     });
 
+    it("discovers test classes and methods without running them", async () => {
+      const res = await call("/core/http/unit/object?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.object).to.deep.equal({type: "CLAS", name: "ZCL_STG_SEGW_TEST"});
+      const tree = found.classes.find((item) => item.name === "LTCL_TREE");
+      expect(tree).to.include({riskLevel: "harmless", durationCategory: "short", include: "testclasses"});
+      expect(tree.methods.map((item) => item.name)).to.include("PROPERTIES_IN_FILE_ORDER");
+    });
+
+    it("runs one selected method through the Workbench endpoint", async function () {
+      this.timeout(180000);
+      const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
+        "&testClass=LTCL_TREE&method=PROPERTIES_IN_FILE_ORDER", {method: "POST"});
+      expect(res.status).to.equal(200);
+      const run = await res.json();
+      expect(run.counts).to.include({classes: 1, methods: 1, passed: 1, failed: 0});
+      expect(run.testClasses[0].name).to.equal("LTCL_TREE");
+      expect(run.testClasses[0].testMethods.map((item) => item.name))
+        .to.deep.equal(["PROPERTIES_IN_FILE_ORDER"]);
+    });
+
+    it("passes an ADT testclass/testmethod fragment to the isolated runner", async function () {
+      this.timeout(180000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=LTCL_TREE;testmethod=PROPERTIES_IN_FILE_ORDER"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(200);
+      const answer = await res.text();
+      expect(answer).to.contain('testClass adtcore:name="LTCL_TREE"');
+      expect(answer).to.contain('testMethod adtcore:name="PROPERTIES_IN_FILE_ORDER"');
+      expect(answer.match(/<testMethod /g)).to.have.length(1);
+    });
+
+    it("refuses an ADT-selected test class that does not belong to the object", async function () {
+      this.timeout(180000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=DOES_NOT_EXIST"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(404);
+      expect(await res.text()).to.contain("does not belong");
+    });
+
+    it("reports malformed ADT test selectors as a request error", async () => {
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=%"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("ExceptionInvalidRequest");
+    });
+
+    for (const selector of ["#testclass=", "#testmethod=CHECK", "#testclass=LTCL_TREE;testmethod="]) {
+      it(`refuses incomplete ADT selector ${selector}`, async () => {
+        const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test${selector}"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+        const res = await call("/abapunit/testruns", {method: "POST", body});
+        expect(res.status).to.equal(400);
+        expect(await res.text()).to.contain("ExceptionInvalidRequest");
+      });
+    }
+
+    it("does not attach another object reference's selector to the first object", async () => {
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_zosd_test_demo#testclass=LTCL_DEMO"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("exactly one object reference");
+    });
+
+    it("refuses a selected method that does not belong to the object", async () => {
+      const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
+        "&testClass=LTCL_TREE&method=DOES_NOT_EXIST", {method: "POST"});
+      expect(res.status).to.equal(404);
+      expect(await res.text()).to.contain("does not belong");
+    });
+
     it("every class and method points at the line it is written at", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();

@@ -1167,6 +1167,79 @@ export function adtRouter(options = {}) {
     }
   });
 
+  // Object-scoped ABAP Unit for the Fiori Workbench. This is deliberately a
+  // thin JSON view over the same UnitRun used by the ADT endpoint below: the
+  // UI gets discovery without executing anything, and a run still happens
+  // in the isolated child database rather than in the serving process.
+  const selectedUnitPlan = (plan, testClass, method) => {
+    const selectedClass = testClass === undefined ? undefined
+      : plan.classes.find((item) => item.name === testClass);
+    if (testClass !== undefined && selectedClass === undefined) {
+      const error = new Error(`test class ${testClass} does not belong to ${plan.object.name}`);
+      error.code = "NOT_FOUND";
+      throw error;
+    }
+    if (method !== undefined && selectedClass?.testMethods.some((item) => item.name === method) !== true) {
+      const error = new Error(`test method ${testClass}=>${method} does not belong to ${plan.object.name}`);
+      error.code = "NOT_FOUND";
+      throw error;
+    }
+    return {plan, testClass, method};
+  };
+
+  router.get(`${BASE}/core/http/unit/object`, async (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    if (!["CLAS", "PROG"].includes(type)) {
+      refuse(res, 400, "ExceptionInvalidRequest", `${type || "object"} cannot carry ABAP Unit tests here`);
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const plan = runner.classes(type, name);
+      res.type("application/json; charset=utf-8").send(JSON.stringify({
+        object: {type: plan.object.type, name: plan.object.name},
+        classes: plan.classes.map((testClass) => ({
+          name: testClass.name,
+          riskLevel: testClass.riskLevel,
+          durationCategory: testClass.durationCategory,
+          include: testClass.include,
+          line: testClass.line,
+          column: testClass.column,
+          methods: testClass.testMethods.map((method) => ({
+            name: method.name, line: method.line, column: method.column,
+          })),
+        })),
+      }));
+    } catch (error) {
+      refuse(res, error instanceof NotFound ? 404 : 500,
+        error instanceof NotFound ? "ExceptionResourceNotFound" : "ExceptionTestDiscoveryFailed",
+        error.message ?? String(error));
+    }
+  });
+
+  router.post(`${BASE}/core/http/unit/object/run`, async (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    const testClass = String(req.query.testClass ?? "").toUpperCase() || undefined;
+    const method = String(req.query.method ?? "").toUpperCase() || undefined;
+    if (!["CLAS", "PROG"].includes(type)) {
+      refuse(res, 400, "ExceptionInvalidRequest", `${type || "object"} cannot carry ABAP Unit tests here`);
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const plan = runner.classes(type, name);
+      const run = await runner.runDetached(type, name, selectedUnitPlan(plan, testClass, method));
+      res.type("application/json; charset=utf-8").send(JSON.stringify(run));
+    } catch (error) {
+      const missing = error instanceof NotFound || error?.code === "NOT_FOUND";
+      refuse(res, missing ? 404 : 500,
+        missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
+        error.message ?? String(error));
+    }
+  });
+
   // Ending a session. There is nothing to end — the session is a cookie and a
   // token — but a client that gets 404 here reports a failed logoff.
   router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
@@ -1910,13 +1983,31 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/abapunit/testruns`, async (req, res) => {
     const body = await rawBody(req);
     const named = objectReferencesIn(body, collections);
-    if (named.length === 0) {
-      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+    const references = [...body.toString("utf8").matchAll(
+      /<(?:[\w-]+:)?objectReference\b[^>]*\b(?:[\w-]+:)?uri="([^"]+)"/gi,
+    )].map((match) => match[1]);
+    if (named.length !== 1 || references.length !== 1) {
+      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
+        references.length > 1 ? "exactly one object reference is supported" : "one object reference is required"));
       return;
     }
     try {
+      const fragmentText = references[0].includes("#")
+        ? references[0].slice(references[0].indexOf("#")) : "";
+      const fragment = /^#testclass=([^;"#]+)(?:;testmethod=([^;"#]+))?$/i.exec(fragmentText);
+      if (fragmentText !== "" && fragment === null) {
+        const error = new Error("invalid ABAP Unit testclass/testmethod selector");
+        error.code = "INVALID_REQUEST";
+        throw error;
+      }
+      const selected = fragment === null ? {} : {
+        testClass: decodeURIComponent(fragment[1]).toUpperCase(),
+        method: fragment[2] === undefined ? undefined : decodeURIComponent(fragment[2]).toUpperCase(),
+      };
       const runner = await store.unit();
-      const run = await runner.runDetached(named[0].type, named[0].name);
+      const plan = runner.classes(named[0].type, named[0].name);
+      const run = await runner.runDetached(named[0].type, named[0].name,
+        selectedUnitPlan(plan, selected.testClass, selected.method));
       // The document is the classic aunit:runResult either way; only its
       // name differs by client. Eclipse's ABAP Unit view has a handler for
       // abapunit.testruns.result (v1 and v2 in com.sap.adt.abapunit, no
@@ -1926,8 +2017,12 @@ export function adtRouter(options = {}) {
       res.status(200).type(unitResultType(req, "result"))
         .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
     } catch (e) {
-      res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
-        .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
+      const invalid = e instanceof URIError || e?.code === "INVALID_REQUEST";
+      const missing = e?.code === "NOT_FOUND";
+      res.status(invalid ? 400 : missing ? 404 : 500).type("application/xml")
+        .send(exceptionDocument(invalid ? "ExceptionInvalidRequest" :
+          missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
+        String(e?.message ?? e)));
     }
   });
 

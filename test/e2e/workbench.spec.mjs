@@ -1,5 +1,11 @@
 import {test, expect} from "@playwright/test";
 
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return {promise, resolve};
+};
+
 // The Fiori-native source loop. The broken source exists only in the Ace
 // buffer: this test proves the browser Check path diagnoses it without a
 // repository mutation. The disposable-store suite separately covers the ADT
@@ -265,6 +271,124 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   await expect.poll(currentType).toBe("INTF/OI");
   await expect(page.getByText("ZIF_OSD_LUW", {exact: true})).toBeVisible();
   await expect.poll(() => editor.evaluate((element) => window.ace.edit(element).getValue())).toBe("");
+
+  // Browse-only DDIC objects expose their generated definition and real rows
+  // without pretending that the Workbench can safely rewrite abapGit XML.
+  await chooseType("TABL/DT");
+  const tableObject = page.getByText("ZOSD_TEST_ITEM", {exact: true});
+  await expect(tableObject).toBeVisible({timeout: 60_000});
+  await tableObject.click();
+  await expect(page.getByText("Browse only", {exact: true})).toBeVisible();
+  await expect(page.getByRole("button", {name: "Save inactive", exact: true})).toBeDisabled();
+  await expect.poll(() => editor.evaluate((element) => window.ace.edit(element).getValue()))
+    .toContain("define table zosd_test_item");
+  await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--objectTools"));
+    tabs.setExpanded(true);
+    tabs.setSelectedKey("data");
+  });
+  await page.getByRole("button", {name: "Preview Data", exact: true}).click();
+  await expect(page.getByText("Bearing, 6203-2RS", {exact: true})).toBeVisible({timeout: 60_000});
+  await expect(page.getByText(/6 row\(s\), 6 column\(s\)/)).toBeVisible();
+
+  // A late preview belongs to the object that started it, never to whichever
+  // object happens to be selected when the response arrives.
+  const previewStarted = deferred();
+  const releasePreview = deferred();
+  const previewFinished = deferred();
+  await page.route("**/adt/datapreview/ddic?**", async (route) => {
+    previewStarted.resolve();
+    await releasePreview.promise;
+    await route.fulfill({status: 200, contentType: "application/xml", body:
+      '<result><columns><metadata name="STALE"/><data>STALE-PREVIEW-MUST-NOT-APPEAR</data></columns>' +
+      '<totalRows>1</totalRows><queryExecutionTime>1</queryExecutionTime></result>'});
+    previewFinished.resolve();
+  });
+  await page.getByRole("button", {name: "Preview Data", exact: true}).click();
+  await previewStarted.promise;
+
+  // The Tests tab discovers ownership before execution and can run exactly
+  // one selected method through the same isolated runner as ADT.
+  await chooseType("CLAS/OC");
+  releasePreview.resolve();
+  await previewFinished.promise;
+  await page.unroute("**/adt/datapreview/ddic?**");
+  await expect(page.getByText("STALE-PREVIEW-MUST-NOT-APPEAR", {exact: true})).toHaveCount(0);
+  expect(await page.evaluate(() => [...document.querySelectorAll("[data-sap-ui]")]
+    .map((element) => sap.ui.getCore().byId(element.id))
+    .find((control) => control?.getId?.().endsWith("--page"))
+    ?.getModel("ui").getProperty("/preview/message")))
+    .toBe("Run Preview Data to read up to 100 rows.");
+  await page.evaluate(() => {
+    const search = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--search"));
+    search.setValue("ZCL_ZOSD_TEST_DEMO");
+    search.fireSearch({query: "ZCL_ZOSD_TEST_DEMO"});
+  });
+  const testedClass = page.getByText("ZCL_ZOSD_TEST_DEMO", {exact: true});
+  await expect(testedClass).toBeVisible({timeout: 60_000});
+  await testedClass.click();
+  await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--objectTools"));
+    tabs.setExpanded(true);
+    tabs.setSelectedKey("tests");
+  });
+  await expect(page.getByText("GREETING_PASSES", {exact: true})).toBeVisible({timeout: 60_000});
+  await expect(page.getByText("DELIBERATE_FAILURE", {exact: true})).toBeVisible();
+  await page.getByText("GREETING_PASSES", {exact: true}).click();
+  await page.getByRole("button", {name: "Run selected", exact: true}).click();
+  await expect(page.getByText("ABAP Unit passed.", {exact: true})).toBeVisible({timeout: 180_000});
+  await expect(page.getByText("Passed", {exact: true})).toBeVisible();
+
+  // Setup/transpilation failures can be class-level and contain no method
+  // result. They must clear an old green result and surface the diagnostic.
+  await page.route("**/adt/core/http/unit/object/run?**", async (route) => {
+    const selectedClass = new URL(route.request().url()).searchParams.get("testClass");
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({
+      ok: false, ms: 1, counts: {classes: 1, methods: 0, passed: 0, failed: 0, classAlerts: 1},
+      testClasses: [{name: selectedClass, alerts: [{title: "SETUP-FAILURE-MUST-BE-VISIBLE", details: []}], testMethods: []}],
+    })});
+  });
+  await page.getByRole("button", {name: "Run selected", exact: true}).click();
+  await expect(page.getByText("Blocked", {exact: true})).toBeVisible();
+  await expect(page.getByText("SETUP-FAILURE-MUST-BE-VISIBLE", {exact: true})).toBeVisible();
+  await page.unroute("**/adt/core/http/unit/object/run?**");
+
+  await page.getByText("DELIBERATE_FAILURE", {exact: true}).click();
+  await page.getByRole("button", {name: "Run selected", exact: true}).click();
+  await expect(page.getByText("ABAP Unit reported failures.", {exact: true})).toBeVisible({timeout: 180_000});
+  await expect(page.getByText("Failed", {exact: true})).toBeVisible();
+  await expect(page.getByText(/this assertion fails on purpose/i)).toBeVisible();
+
+  const runStarted = deferred();
+  const releaseRun = deferred();
+  const runFinished = deferred();
+  await page.route("**/adt/core/http/unit/object/run?**", async (route) => {
+    runStarted.resolve();
+    await releaseRun.promise;
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({
+      ok: false, ms: 1, counts: {classes: 1, methods: 0, passed: 0, failed: 0, classAlerts: 1},
+      testClasses: [{name: "LTCL_DEMO", alerts: [{title: "STALE-RUN-MUST-NOT-APPEAR", details: []}], testMethods: []}],
+    })});
+    runFinished.resolve();
+  });
+  await page.getByRole("button", {name: "Run selected", exact: true}).click();
+  await runStarted.promise;
+  await chooseType("INTF/OI");
+  releaseRun.resolve();
+  await runFinished.promise;
+  await page.unroute("**/adt/core/http/unit/object/run?**");
+  await expect(page.getByText("STALE-RUN-MUST-NOT-APPEAR", {exact: true})).toHaveCount(0);
+  await expect(page.getByText("ABAP Unit reported failures.", {exact: true})).toHaveCount(0);
+  expect(await page.evaluate(() => [...document.querySelectorAll("[data-sap-ui]")]
+    .map((element) => sap.ui.getCore().byId(element.id))
+    .find((control) => control?.getId?.().endsWith("--page"))
+    ?.getModel("ui").getProperty("/tests/rows"))).toEqual([]);
 
   const after = await page.evaluate((url) => fetch(url).then((response) => response.text()), sourceUrl);
   expect(after).toBe(before);
