@@ -2,6 +2,10 @@
 
 Branch: `feat/live-workbench-activation` (from `main`, 2026-09-21).
 
+The broader sequence (browser IDE, Git history, tests/execution, SEGW client,
+ADT conformance and later DIAG/RFC research) is tracked in
+[`developer-experience-roadmap.md`](developer-experience-roadmap.md).
+
 The product goal is a short in-system edit loop, not a replica of SE80's UI:
 open code, save an inactive edit, check with line diagnostics, activate, run a
 focused test, and inspect the result. ADT/abap-fs and the OSD editor must use
