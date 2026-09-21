@@ -1,16 +1,22 @@
 <mvc:View controllerName="stg.workbench.controller.App" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"
-  xmlns:l="sap.ui.layout" xmlns:wb="stg.workbench.control" displayBlock="true" height="100%">
-  <Page id="page" title="Workbench" showHeader="true" busy="{ui>/busy}" busyIndicatorDelay="0">
-    <headerContent>
+  xmlns:l="sap.ui.layout" xmlns:core="sap.ui.core" xmlns:wb="stg.workbench.control" displayBlock="true" height="100%">
+  <Page id="page" showHeader="true" busy="{ui>/busy}" busyIndicatorDelay="0">
+    <customHeader><OverflowToolbar>
+      <Title text="Workbench" level="H2"/>
+      <Select id="objectType" width="13rem" selectedKey="{ui>/objectType}" change=".onObjectTypeChange" items="{ui>/objectTypes}" tooltip="Repository object type">
+        <core:Item key="{ui>key}" text="{ui>text}"/>
+      </Select>
+      <ToolbarSpacer/>
+      <Button id="discard" text="Discard edits" icon="sap-icon://undo" press=".onDiscard" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/dirty}}"/>
       <Button id="check" text="Check" icon="sap-icon://validate" press=".onCheck" enabled="{= !!${ui>/selected/name}}"/>
       <Button id="save" text="Save inactive" icon="sap-icon://save" press=".onSave" enabled="{= !!${ui>/selected/name} &amp;&amp; ${ui>/dirty}}"/>
       <Button id="activate" text="Activate" icon="sap-icon://activate" type="Emphasized" press=".onActivate" enabled="{= !!${ui>/selected/name}}"/>
-    </headerContent>
+    </OverflowToolbar></customHeader>
     <content><l:Splitter id="splitter" height="100%">
       <VBox class="sapUiSmallMargin" height="100%">
         <layoutData><l:SplitterLayoutData size="25%" minSize="240"/></layoutData>
-        <SearchField id="search" width="100%" value="{ui>/query}" search=".onSearch" liveChange=".onSearchLive" placeholder="Class name, e.g. ZCL_OSD*"/>
-        <List id="objects" items="{ui>/objects}" mode="SingleSelectMaster" selectionChange=".onObjectSelect" growing="true" noDataText="No classes found">
+        <SearchField id="search" width="100%" value="{ui>/query}" search=".onSearch" liveChange=".onSearchLive" placeholder="Name pattern, e.g. Z*"/>
+        <List id="objects" items="{ui>/objects}" mode="SingleSelectMaster" selectionChange=".onObjectSelect" growing="true" noDataText="No objects found">
           <StandardListItem title="{ui>name}" description="{ui>description}" info="{ui>packageName}" icon="sap-icon://syntax"/>
         </List>
       </VBox>
@@ -25,7 +31,7 @@
           <ObjectStatus title="Serving" text="{ui>/identity/serving}" state="{= ${ui>/identity/synchronized} ? 'Success' : 'Warning'}"/>
         </OverflowToolbar>
         <MessageStrip id="message" text="{ui>/message/text}" type="{ui>/message/type}" showIcon="true" visible="{= !!${ui>/message/text}}"/>
-        <wb:AbapEditor id="source" type="abap" value="{path: &apos;ui>/source&apos;, mode: &apos;OneWay&apos;}" height="100%" width="100%"
+        <wb:AbapEditor id="source" type="{ui>/editorMode}" value="{path: &apos;ui>/source&apos;, mode: &apos;OneWay&apos;}" height="100%" width="100%"
           editable="{= !!${ui>/selected/name}}" liveChange=".onSourceChange">
           <wb:layoutData><FlexItemData growFactor="1" baseSize="0"/></wb:layoutData>
         </wb:AbapEditor>

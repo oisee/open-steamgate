@@ -11,6 +11,7 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
+  await page.setViewportSize({width: 1600, height: 900});
   await page.goto("/app/flp.html");
   const tile = page.getByRole("link", {name: /^Workbench\b/}).or(
     page.locator(".sapMGT, .sapUshellTile", {hasText: "Workbench"})
@@ -19,12 +20,48 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   await tile.click();
   await expect(page).toHaveURL(/#Workbench-edit/);
 
-  const object = page.getByText("ZCL_OSD_EDIT", {exact: true});
-  await expect(object).toBeVisible({timeout: 60_000});
-  await object.click();
+  const application = page.locator("#application-Workbench-edit");
+  await expect(application).not.toHaveClass(/sapUShellApplicationContainerLimitedWidth/);
+  expect((await application.boundingBox()).width).toBeGreaterThan(1500);
+
+  const currentType = () => page.evaluate(() => [...document.querySelectorAll("[data-sap-ui]")]
+    .map((element) => sap.ui.getCore().byId(element.id))
+    .find((control) => control?.getId?.().endsWith("--objectType"))?.getSelectedKey());
+  const chooseType = (key) => page.evaluate((wanted) => {
+    const select = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--objectType"));
+    if (!select) throw new Error("Object type Select not found");
+    select.setSelectedKey(wanted);
+    select.fireChange({selectedItem: select.getSelectedItem()});
+  }, key);
+
+  await page.evaluate(() => {
+    const search = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--search"));
+    search.fireLiveChange({newValue: "DOES_NOT_EXIST*"});
+  });
+  await chooseType("INTF/OI");
+  await expect(page.getByText("ZIF_OSD_LUW", {exact: true})).toBeVisible({timeout: 60_000});
+  await page.waitForTimeout(400);
+  await expect(page.getByText("ZIF_OSD_LUW", {exact: true})).toBeVisible();
+  await chooseType("PROG/P");
+  await expect(page.getByText("ZOSD_TEST_DEMO_PROG", {exact: true})).toBeVisible({timeout: 60_000});
+  await chooseType("DDLS/DF");
+  const cds = page.getByText("ZC_OSD_DATABASE", {exact: true});
+  await expect(cds).toBeVisible({timeout: 60_000});
+  await cds.click();
 
   const editor = page.locator(".ace_editor").first();
   await expect(editor).toBeVisible();
+  await expect.poll(() => editor.evaluate((element) =>
+    window.ace.edit(element).getSession().getMode().$id)).toBe("ace/mode/sql");
+
+  await chooseType("CLAS/OC");
+  const object = page.getByText("ZCL_OSD_EDIT", {exact: true});
+  await expect(object).toBeVisible({timeout: 60_000});
+  await object.click();
   // The shared FLP bootstrap logs its own missing optional flexibility
   // bundles before an application starts. From here onward every error
   // belongs to the Workbench interaction this test owns.
@@ -61,6 +98,14 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   await page.getByRole("button", {name: "Check", exact: true}).focus();
   await expect(page.getByText("Modified", {exact: true})).toBeVisible();
 
+  await chooseType("INTF/OI");
+  let typeDialog = page.getByRole("alertdialog", {name: /Unsaved edits/});
+  await expect(typeDialog).toBeVisible();
+  await typeDialog.getByRole("button", {name: "Cancel", exact: true}).click();
+  await expect.poll(currentType).toBe("CLAS/OC");
+  await expect(page.getByText("Modified", {exact: true})).toBeVisible();
+  expect(await editor.evaluate((element) => window.ace.edit(element).getValue())).toContain("no_such_method");
+
   // A parent layout can invalidate the CodeEditor without changing its value
   // property. The live Ace buffer must survive that lifecycle.
   await editor.evaluate((element) => {
@@ -96,6 +141,21 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   expect(consoleErrors[0]).toContain("412 (Precondition Failed)");
   consoleErrors.length = 0;
   await page.unroute("**/adt/oo/classes/zcl_osd_edit/source/main?**");
+
+  await page.getByRole("button", {name: "Discard edits", exact: true}).click();
+  let discardDialog = page.getByRole("alertdialog", {name: /Unsaved edits/});
+  await expect(discardDialog).toBeVisible();
+  await discardDialog.getByRole("button", {name: "Cancel", exact: true}).click();
+  await expect(page.getByText("Modified", {exact: true})).toBeVisible();
+  expect(await editor.evaluate((element) => window.ace.edit(element).getValue())).toContain("no_such_method");
+
+  await page.getByRole("button", {name: "Discard edits", exact: true}).click();
+  discardDialog = page.getByRole("alertdialog", {name: /Unsaved edits/});
+  await expect(discardDialog).toBeVisible();
+  await discardDialog.getByRole("button", {name: "OK", exact: true}).click();
+  await expect(page.getByText("Unsaved edits discarded. Stored inactive source is unchanged.", {exact: true})).toBeVisible();
+  await expect(page.getByText("Saved", {exact: true})).toBeVisible();
+  expect(await editor.evaluate((element) => window.ace.edit(element).getValue())).not.toContain("no_such_method");
 
   // A successful activation is not proof that the currently serving process
   // switched. Mock only the two replies and verify the identity-aware warning.
@@ -134,6 +194,16 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   await page.unroute("**/adt/oo/classes/zcl_osd_edit/source/main?**");
   await page.unroute("**/adt/activation?**");
   await page.unroute("**/adt/core/http/build");
+
+  await editor.evaluate((element, source) => window.ace.edit(element).setValue(source + "\n* type switch probe\n", -1), before);
+  await expect(page.getByText("Modified", {exact: true})).toBeVisible();
+  await chooseType("INTF/OI");
+  typeDialog = page.getByRole("alertdialog", {name: /Unsaved edits/});
+  await expect(typeDialog).toBeVisible();
+  await typeDialog.getByRole("button", {name: "OK", exact: true}).click();
+  await expect.poll(currentType).toBe("INTF/OI");
+  await expect(page.getByText("ZIF_OSD_LUW", {exact: true})).toBeVisible();
+  await expect.poll(() => editor.evaluate((element) => window.ace.edit(element).getValue())).toBe("");
 
   const after = await page.evaluate((url) => fetch(url).then((response) => response.text()), sourceUrl);
   expect(after).toBe(before);

@@ -15,7 +15,7 @@ highlighting and protocol machinery.
 | Track | State | Result |
 |---|---|---|
 | D0 activation truth | implemented on feature branch | failed publication and a concurrent save remain inactive; previous live generation survives |
-| D1a Fiori Workbench | first vertical implemented on feature branch | Launchpad tile, class search, ABAP highlighting, Check/Problems, ETag-protected inactive Save, Activate and source/live/serving identity |
+| D1a Fiori Workbench | first vertical implemented on feature branch | full-width Launchpad editor; Class, Interface, Program and CDS search; Discard; Check/Problems; guarded inactive Save/Activate; generation identity |
 | D1 browser VS Code + abap-fs | parked conformance surface | authenticated code-server sidecar, real abap-fs client, shared dedicated worktree |
 | D2 host-Git history | designed next | branch/HEAD, diff, blame/history and restore-as-inactive-edit |
 | D3 test and execution loop | partial backend exists | ABAP Unit already has ADT routes; needs isolated data and a useful UI/report |

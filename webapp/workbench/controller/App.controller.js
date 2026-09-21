@@ -14,6 +14,13 @@ sap.ui.define([
   const escapeXml = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const short = (value) => value ? String(value).slice(0, 8) : "-";
 
+  const OBJECT_TYPES = [
+    {key: "CLAS/OC", text: "Classes", query: "ZCL_OSD*", mode: "abap"},
+    {key: "INTF/OI", text: "Interfaces", query: "ZIF*", mode: "abap"},
+    {key: "PROG/P", text: "Programs", query: "Z*", mode: "abap"},
+    {key: "DDLS/DF", text: "CDS definitions", query: "ZC_*", mode: "sql"},
+  ];
+
   function findings(text) {
     const doc = xml(text);
     const checks = nodes(doc, "checkMessage").map((item) => {
@@ -35,14 +42,18 @@ sap.ui.define([
       this._token = "";
       this._etag = "";
       this._searchTimer = 0;
+      this._searchSeq = 0;
+      this._objectType = OBJECT_TYPES[0].key;
       this.getView().setModel(new JSONModel({
-        busy: false, query: "ZCL_OSD*", objects: [], selected: {}, source: "", dirty: false,
+        busy: false, query: OBJECT_TYPES[0].query, objectType: this._objectType,
+        objectTypes: OBJECT_TYPES, editorMode: OBJECT_TYPES[0].mode,
+        objects: [], selected: {}, source: "", dirty: false,
         diagnostics: [], identity: {},
-        message: {text: "Search for a class and open it.", type: "Information"}
+        message: {text: "Choose an object type, search, and open a source.", type: "Information"}
       }), "ui");
       // Token and cookies are one handshake: no parallel first request may
       // create a second session and leave the token paired with its cookie.
-      this._session().then(() => this._loadIdentity()).then(() => this._search("ZCL_OSD*"))
+      this._session().then(() => this._loadIdentity()).then(() => this._search(this._model().getProperty("/query")))
         .catch((error) => this._fail(error));
     },
 
@@ -50,6 +61,55 @@ sap.ui.define([
     _set(path, value) { this._model().setProperty(path, value); },
     _message(text, type = "Information") { this._set("/message", {text, type}); },
     _busy(value) { this._set("/busy", value); },
+
+    async _mayDiscard(text) {
+      if (!this._model().getProperty("/dirty")) return true;
+      const action = await new Promise((resolve) => MessageBox.confirm(text, {
+        title: "Unsaved edits", emphasizedAction: MessageBox.Action.OK, onClose: resolve
+      }));
+      return action === MessageBox.Action.OK;
+    },
+
+    async onDiscard() {
+      if (!(await this._mayDiscard("Discard the unsaved editor buffer?"))) return;
+      this.byId("source").setValue(this._model().getProperty("/source"));
+      this._set("/dirty", false);
+      this._showDiagnostics([]);
+      this._message("Unsaved edits discarded. Stored inactive source is unchanged.", "Information");
+    },
+
+    async onObjectTypeChange(event) {
+      const select = event.getSource();
+      const next = select.getSelectedKey();
+      const previous = this._objectType;
+      if (next === previous) return;
+      if (!(await this._mayDiscard("Discard the unsaved buffer and change object type?"))) {
+        select.setSelectedKey(previous);
+        this._set("/objectType", previous);
+        return;
+      }
+      clearTimeout(this._searchTimer);
+      this._searchTimer = 0;
+      const config = OBJECT_TYPES.find((item) => item.key === next) || OBJECT_TYPES[0];
+      this._objectType = config.key;
+      this._etag = "";
+      this._searchSeq += 1;
+      this._set("/objectType", config.key);
+      this._set("/editorMode", config.mode);
+      this._set("/query", config.query);
+      this._set("/objects", []);
+      this._set("/selected", {});
+      this._set("/source", "");
+      this._set("/dirty", false);
+      this._showDiagnostics([]);
+      this._message("Searching " + config.text + ".", "Information");
+      await this._search(config.query);
+    },
+
+    onExit() {
+      clearTimeout(this._searchTimer);
+      this._searchSeq += 1;
+    },
 
     async _session() {
       const response = await fetch(`${ADT}/core/discovery`, {
@@ -94,27 +154,27 @@ sap.ui.define([
     async _search(query) {
       const wanted = String(query || "").trim();
       if (!wanted) return;
+      const request = ++this._searchSeq;
+      const objectType = this._model().getProperty("/objectType");
       try {
         const response = await this._request(
           `/repository/informationsystem/search?operation=quickSearch&query=${encodeURIComponent(wanted)}` +
-          `&objectType=${encodeURIComponent("CLAS/OC")}&maxResults=100`
+          `&objectType=${encodeURIComponent(objectType)}&maxResults=100`
         );
         const doc = xml(await response.text());
+        if (request !== this._searchSeq || objectType !== this._model().getProperty("/objectType")) return;
         this._set("/objects", nodes(doc, "objectReference").map((item) => ({
           name: attr(item, "name"), uri: attr(item, "uri"), type: attr(item, "type"),
           packageName: attr(item, "packageName"), description: attr(item, "description")
         })));
-      } catch (error) { this._fail(error); }
+      } catch (error) {
+        if (request === this._searchSeq) this._fail(error);
+      }
     },
 
     async onObjectSelect(event) {
       const object = event.getParameter("listItem").getBindingContext("ui").getObject();
-      if (this._model().getProperty("/dirty")) {
-        const action = await new Promise((resolve) => MessageBox.confirm(
-          "Discard the unsaved editor buffer?", {onClose: resolve}
-        ));
-        if (action !== MessageBox.Action.OK) return;
-      }
+      if (!(await this._mayDiscard("Discard the unsaved editor buffer and open another object?"))) return;
       this._busy(true);
       try {
         const response = await this._request(object.uri + "/source/main");

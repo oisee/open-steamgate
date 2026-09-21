@@ -9,7 +9,7 @@
       "signature": {"parameters": {}, "additionalParameters": "allowed"}
     }}}
   },
-  "sap.ui": {"technology": "UI5", "deviceTypes": {"desktop": true, "tablet": true, "phone": true}},
+  "sap.ui": {"technology": "UI5", "fullWidth": true, "deviceTypes": {"desktop": true, "tablet": true, "phone": true}},
   "sap.ui5": {
     "dependencies": {"minUI5Version": "1.120.0", "libs": {
       "sap.m": {}, "sap.ui.core": {}, "sap.ui.layout": {}, "sap.ui.codeeditor": {}

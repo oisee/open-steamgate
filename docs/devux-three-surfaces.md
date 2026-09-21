@@ -186,6 +186,13 @@ The integration rules are now executable rather than stylistic advice:
 - keep the live dirty buffer in the editor engine. Binding every keystroke
   back into a JSON model caused a render storm and risked returning stale text
   to the caret. Check and Save read `getCurrentValue()` explicitly;
+- request full-width rendering through the standard `sap.ui/fullWidth` manifest flag;
+  do not patch FLP container CSS;
+- expose only source types with a real Check contract: classes, interfaces,
+  programs and CDS definitions. Service definitions stay hidden until they
+  have a validator;
+- treat **Discard edits** as a confirmed reset to the last stored inactive
+  source. It does not claim to revert an already saved inactive revision;
 - acquire the ADT CSRF token and session cookie before any parallel reads.
   Two simultaneous first requests can create two sessions and pair one token
   with the other cookie;
@@ -196,7 +203,7 @@ The permanent browser test enters through the Launchpad tile, opens a real
 class in ABAP mode without falsely marking it dirty, refuses an incomplete
 Check, checks it clean, preserves an invalid unsaved buffer across a UI5
 rerender, follows the Problems row to the exact gutter marker, and proves the
-stored source is byte-for-byte unchanged. It also verifies a 412 Save conflict preserves the live buffer and that Activate saves a dirty valid buffer first, carries the resulting ETag into activation, and reports an unswitched serving identity as a warning.
+stored source is byte-for-byte unchanged. It also switches through Interface, Program, CDS and Class searches, verifies full-width rendering and Discard cancel/confirm, exercises a 412 Save conflict without losing the buffer, and proves Activate saves a dirty valid buffer before carrying the resulting ETag into activation.
 
 ### Minimum useful feature set
 
