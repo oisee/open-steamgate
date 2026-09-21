@@ -25,8 +25,9 @@
 // named and the run fails. Nothing here checks whether a test PASSED: the
 // runtime already does that, loudly.
 import {spawn} from "node:child_process";
-import {readdirSync, readFileSync, existsSync, statSync} from "node:fs";
+import {readdirSync, readFileSync, existsSync, statSync, mkdtempSync, openSync, closeSync, rmSync} from "node:fs";
 import {basename, join} from "node:path";
+import {tmpdir} from "node:os";
 
 /** every test class the tree holds, from the files rather than from an index */
 export function testClassesIn(root = process.cwd()) {
@@ -74,13 +75,24 @@ export function missing(inTree, ran) {
 
 if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
   const inTree = testClassesIn();
-  let captured = "";
-  const child = spawn("node", ["--expose-gc", "output/index.mjs"], {stdio: ["inherit", "pipe", "inherit"]});
-  child.stdout.on("data", (chunk) => {
-    captured += chunk;
-    process.stdout.write(chunk);
-  });
-  const code = await new Promise((resolve) => child.on("close", resolve));
+  // The transpiled runner calls process.exit(0) immediately after logging.
+  // Node can discard pending writes to a pipe, producing a false 0-ran report.
+  // A regular file descriptor makes those writes synchronous on all hosts.
+  const captureDir = mkdtempSync(join(tmpdir(), "osd-unit-"));
+  const capturePath = join(captureDir, "stdout.log");
+  const fd = openSync(capturePath, "w");
+  let code;
+  let captured;
+  try {
+    const child = spawn("node", ["--expose-gc", "output/index.mjs"], {stdio: ["inherit", fd, "inherit"]});
+    code = await new Promise((resolve) => child.on("close", resolve));
+    closeSync(fd);
+    captured = readFileSync(capturePath, "utf8");
+    process.stdout.write(captured);
+  } finally {
+    try { closeSync(fd); } catch { /* already closed */ }
+    rmSync(captureDir, {recursive: true, force: true});
+  }
   if (code !== 0) process.exit(code);
 
   const ran = reported(captured);
