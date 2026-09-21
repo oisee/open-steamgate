@@ -1,6 +1,6 @@
 {
   "global": {
-    "files": "/{src,test,gen/bsp,gen/cds,gen/segw,gen/rfc,gen/tran}/**/*.*",
+    "files": "/{src,packs/zvdb/src,test,gen/bsp,gen/cds,gen/segw,gen/rfc,gen/tran}/**/*.*",
     "errorOnDuplicateFilenames": true,
     "exclude": ["/test/e2e/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$"]
   },

@@ -121,14 +121,25 @@ export function packAt(root, dir) {
     // pointing at a URL this system serves (its own page, an app, an ICF
     // path). The launchpad asks for these at start, so a pack appears on it
     // without anybody editing webapp/flp.html.
-    tiles: [declared.tiles ?? []].flat().filter((t) => t !== null && typeof t === "object").map((t, i) => ({
-      id: String(t.id ?? `${name}-${i + 1}`),
-      title: String(t.title ?? name),
-      subtitle: t.subtitle === undefined ? undefined : String(t.subtitle),
-      info: t.info === undefined ? undefined : String(t.info),
-      icon: String(t.icon ?? "sap-icon://product"),
-      url: String(t.url ?? `/app/${name}/`),
-    })),
+    tiles: [declared.tiles ?? []].flat().filter((t) => t !== null && typeof t === "object").map((t, i) => {
+      const type = ["static", "dynamic", "image"].includes(t.type) ? t.type : "static";
+      return {
+        id: String(t.id ?? `${name}-${i + 1}`),
+        type,
+        title: String(t.title ?? name),
+        subtitle: t.subtitle === undefined ? undefined : String(t.subtitle),
+        info: t.info === undefined ? undefined : String(t.info),
+        icon: String(t.icon ?? "sap-icon://product"),
+        url: String(t.url ?? `/app/${name}/`),
+        enabled: t.enabled !== false,
+        disabledReason: t.disabledReason === undefined ? undefined : String(t.disabledReason),
+        requires: t.requires === undefined ? undefined : String(t.requires),
+        serviceUrl: t.serviceUrl === undefined ? undefined : String(t.serviceUrl),
+        serviceRefreshInterval: t.serviceRefreshInterval === undefined ? undefined : String(t.serviceRefreshInterval),
+        numberUnit: t.numberUnit === undefined ? undefined : String(t.numberUnit),
+        imageSource: t.imageSource === undefined ? undefined : String(t.imageSource),
+      };
+    }),
   };
 }
 
@@ -161,11 +172,22 @@ export function folderOf(root, dir) {
   return rel === "" ? "." : rel;
 }
 
-/** the layers: what the config lists, then every pack, later winning */
+/** the layers: source, then every pack, then generated overlays.
+ *
+ * A pack must win over the tree's source when it deliberately replaces an
+ * object, but `gen/` is not ordinary source: it contains rewritten forms of
+ * source objects (notably AMDP bodies). Putting a pack after `gen/` made a
+ * pack-local AMDP class hide its own runnable rewrite and handed raw
+ * SQLScript to the ABAP transpiler. Insert packs immediately before `gen/`;
+ * configs without a generated layer keep the original append behaviour. */
 export function inputFoldersOf(root, config, env = process.env) {
   const listed = config?.input_folder === undefined ? [] : [config.input_folder].flat();
   const packs = packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f)));
-  return [...listed, ...packs.filter((f) => listed.includes(f) === false)];
+  const added = packs.filter((f) => listed.includes(f) === false);
+  const generated = listed.lastIndexOf("gen");
+  return generated === -1
+    ? [...listed, ...added]
+    : [...listed.slice(0, generated), ...added, ...listed.slice(generated)];
 }
 
 /** the roots a pack adds to the object store, with the package each lives in */

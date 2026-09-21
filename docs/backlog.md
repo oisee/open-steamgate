@@ -4508,6 +4508,18 @@ test an additive, non-destructive migration for each backend (including
 restart and data-retention checks), or use an explicitly fresh demo database.
 Until then, keep the previously working container image active.
 
+### ZVDB production continuation (deferred, 2026-09-21)
+
+The `$ZVDB_100` experiment successfully demonstrated an identical Hamming
+rank in portable ABAP and HANA SQLScript over two committed embedding buckets.
+Do not turn it into a production classifier by adding another global threshold.
+If a real consumer appears, use binary vectors as the shortlist index, rerank
+with retained float vectors, calibrate by immutable model/bucket/corpus version,
+and permit an `UNKNOWN` result. A Live quality run must be a bounded,
+asynchronous job with progress and cancellation; Published remains the
+committed deterministic report. Before enabling the pack in persistent images,
+add non-destructive HANA/DuckDB schema migration and restart coverage.
+
 ### CI time and trigger budget (2026-09-21)
 
 Standard GitHub-hosted runners are currently free for this public repository,

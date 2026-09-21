@@ -5,11 +5,23 @@ import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {ddicBinary} from "../gen/osd-ddic-binary.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
  *  (backlog G.10). It is off until the screen turns it on, and the wrapper
  *  costs nothing while it is. */
 export const traceRing = new TraceRing();
+
+export function schemaTables(ddl) {
+  return [ddl].flat().flatMap((statement) =>
+    [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
+}
+
+async function requireCurrentSchema(db, ddl, backend, recovery) {
+  const missing = await db.missingTables(schemaTables(ddl));
+  if (missing.length === 0) return;
+  throw new Error(`Existing ${backend} database is missing generated tables: ${missing.join(", ")}. ${recovery}; automatic migration is not implemented.`);
+}
 
 /** `STG_SQL_TRACE=<file.ndjson>` records every statement the chosen client is
  *  asked for -- the second sieve of backlog W.1, and the cheap half of O.1.
@@ -168,7 +180,7 @@ export async function setup(abap, schemas, insert) {
   // kept between runs unless STG_DB_FRESH=1.
   if (process.env.STG_DB === "hana") {
     const {HanaDatabaseClient, hanaSchema, hanaInserts} = await import("../tools/hana-client.mjs");
-    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1"});
+    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     // Seed once per run, not once per connection. A run opens more than one
@@ -176,9 +188,11 @@ export async function setup(abap, schemas, insert) {
     // used to build the whole schema. The connection that made the schema
     // fresh is the one that seeds it; every other finds it there.
     if (await db.hasSchema() && db.droppedSchema !== true) {
+      await requireCurrentSchema(db, hanaSchema(schemas, ddicBinary), "HANA",
+        "Use a fresh HANA_SCHEMA, or explicitly recreate it with STG_DB_FRESH=1");
       return;
     }
-    await db.execute(hanaSchema(schemas));
+    await db.execute(hanaSchema(schemas, ddicBinary));
     await db.execute(hanaInserts(insert));
     await db.execute(seedStatements());
     await loadScaledData(db, "hana");
@@ -192,6 +206,8 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_PATH && await db.hasSchema()) {
+      await requireCurrentSchema(db, duckdbSchema(schemas), "DuckDB",
+        "Use a new STG_DB_PATH after preserving the old file");
       // A persistent database keeps its business rows, but the generated
       // repository catalog must follow the running generation. Otherwise a
       // new BSP page is in the registry while its WWWPARAMS object is absent.

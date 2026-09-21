@@ -8,7 +8,10 @@
 ## Try it yourself
 
 [**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).
-SQLite, DuckDB and HANA Express options, HTTP/HTTPS, and built-in RFC/DIAG stubs.
+SQLite, DuckDB, HANA Express and PostgreSQL options, HTTP/HTTPS, and built-in
+RFC/DIAG stubs. The ARM64 SQLite image has also run on a 2 GB Raspberry Pi 4;
+the [Pi quick start and upgrade notes](docs/spin.md#raspberry-pi-arm64) use the
+separately tested `arm64-draft` tag.
 
 # open-steamgate
 
@@ -75,6 +78,9 @@ and [`packs/zork`](packs/zork) name [vivid-vibes](https://github.com/oisee/vivid
 and [zork-abap](https://github.com/oisee/zork-abap) at a commit, and the
 deployment fetches them the way you would fetch any pack of your own;
 [`packs/lsd`](packs/lsd) carries its recording ([`docs/lsd-pack.md`](docs/lsd-pack.md)).
+Applications supplied by a pack register their pages, availability and static,
+dynamic or image tiles through `osd-pack.json`; see
+[Applications and tiles in the launchpad](docs/launchpad-apps.md).
 
 First visit installs the worker and takes a moment; after that it works
 offline. It needs a browser that allows service workers — a private window

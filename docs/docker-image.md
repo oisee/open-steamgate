@@ -11,10 +11,13 @@ on a native `ubuntu-24.04-arm` runner. It builds the same Dockerfile for
 uses the existing Compose acceptance suite for SQLite and DuckDB, including
 OData persistence across a whole-stack restart, HTTPS, SAP-TUI on 32nn and
 ADT-over-RFC on 33nn. Only after these pass does it publish `arm64-draft`
-and an immutable `sha-…-arm64` tag. To try it on a 64-bit Raspberry Pi OS
-host, set `OSD_TAG=arm64-draft` in the SQLite or DuckDB Portainer Stack.
-The CI acceptance run is on an ARM64 GitHub runner, not a Raspberry Pi;
-hardware-specific compatibility is still to be verified. HXE is not part
+and an immutable `sha-…-arm64` tag. To try it on a 64-bit Raspberry Pi host,
+set `OSD_TAG=arm64-draft` in the SQLite or DuckDB Portainer Stack; see the
+[Pi quick start and safe upgrade notes](spin.md#raspberry-pi-arm64).
+The CI acceptance run is on an ARM64 GitHub runner. Separately, SQLite ran on
+a Raspberry Pi 4 (2 GB, Debian 13 arm64): the container was healthy, served
+ADT/OData, and reused its persistent database after an image update. Full
+DIAG/RFC client acceptance on that particular Pi was not run. HXE is not part
 of this ARM64 test or Stack; its published Docker image is AMD64-only.
 The existing `docker-draft` tag remains AMD64-only until both variants are
 tested at the same source revision and published as one multi-platform

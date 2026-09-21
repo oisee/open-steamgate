@@ -1,5 +1,7 @@
 import {expect} from "chai";
-import {multiRowInsert} from "../tools/hana-client.mjs";
+import {ABAP} from "@abaplint/runtime";
+import {binaryLiterals, hanaSchema, multiRowInsert} from "../tools/hana-client.mjs";
+import {binaryDdIC} from "../tools/osd-ddic-binary.mjs";
 
 // The rewrite HANA needs, guarded by a test that needs no HANA.
 //
@@ -58,6 +60,62 @@ describe("the HANA dialect rewrite", () => {
     // rather than by position would rewrite the statement around it
     const one = `INSERT INTO "T" ("A") VALUES ('VALUES (1),(2)')`;
     expect(multiRowInsert(one)).to.equal(one);
+  });
+});
+
+describe("DDIC byte strings in the HANA dialect", () => {
+  it("discovers pack RAW columns before runtime DDIC exists", () => {
+    expect(binaryDdIC(process.cwd()).ZVDB_100_VEC).to.deep.equal({QBITS: "VARBINARY(192)"});
+  });
+
+  it("maps RAW and RAWSTRING like a real ABAP system", () => {
+    const abap = new ABAP();
+    const ddic = {
+      ZBIN: {
+        objectType: "TABL",
+        type: () => new abap.types.Structure({
+          id: new abap.types.Character(8),
+          raw: new abap.types.Hex({length: 192}),
+          stream: new abap.types.XString(),
+        }),
+      },
+    };
+    const [ddl] = hanaSchema({pg: [
+      `CREATE TABLE "zbin" ("id" NCHAR(8), "raw" NCHAR(384), "stream" TEXT, PRIMARY KEY("id"));`,
+    ]}, ddic);
+    expect(ddl).to.include(`"RAW" VARBINARY(192)`);
+    expect(ddl).to.include(`"STREAM" BLOB`);
+    expect(ddl).to.include(`"ID" NCHAR(8)`);
+  });
+
+  it("turns hex into bytes only for binary INSERT columns", () => {
+    const binary = new Set(["ZBIN.RAW"]);
+    expect(binaryLiterals(
+      `INSERT INTO "ZBIN" ("ID","RAW") VALUES ('CAFE','00ff'),('BEEF','aa55')`, binary))
+      .to.equal(`INSERT INTO "ZBIN" ("ID","RAW") VALUES ('CAFE',X'00FF'),('BEEF',X'AA55')`);
+  });
+
+  it("turns hex into bytes only for binary UPDATE assignments", () => {
+    const binary = new Set(["ZBIN.RAW"]);
+    expect(binaryLiterals(
+      `UPDATE "ZBIN" SET "ID" = 'CAFE', "RAW" = '00ff' WHERE "ID" = 'A'`, binary))
+      .to.equal(`UPDATE "ZBIN" SET "ID" = 'CAFE', "RAW" =X'00FF' WHERE "ID" = 'A'`);
+  });
+
+  it("knows persisted RAW columns after restart without seeing their DDL", async () => {
+    const {HanaDatabaseClient} = await import("../tools/hana-client.mjs");
+    const statements = [];
+    const db = new HanaDatabaseClient({ddicBinary: {ZBIN: {RAW: "VARBINARY(2)"}}});
+    db.client = {exec: (sql, cb) => { statements.push(sql); cb(undefined, 1); }};
+    await db.insert({table: "ZBIN", columns: ["ID", "RAW"], values: ["'A'", "'00ff'"]});
+    expect(statements).to.deep.equal([`INSERT INTO ZBIN (ID,RAW) VALUES ('A',X'00FF')`]);
+  });
+
+  it("returns VARBINARY bytes as the hex representation ABAP expects", async () => {
+    const {HanaDatabaseClient} = await import("../tools/hana-client.mjs");
+    const db = new HanaDatabaseClient({});
+    db.client = {exec: (_sql, cb) => cb(undefined, [{RAW: Buffer.from([0, 255, 0x80])}])};
+    expect(await db.query(`SELECT "RAW" FROM "ZBIN"`)).to.deep.equal([{raw: "00FF80"}]);
   });
 });
 

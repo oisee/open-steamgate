@@ -43,6 +43,7 @@ import {runsAs} from "./osd-main.mjs";
 const GENERATORS = [
   ["osd-transpiler.mjs"],
   ["osd-inputs.mjs"],
+  ["osd-ddic-binary.mjs"],
   ["cds2ddic.mjs"],
   ["stg-compile.mjs", "--all"],
   ["segw-registry.mjs"],

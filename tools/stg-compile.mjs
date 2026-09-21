@@ -1096,13 +1096,17 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   // services on 2026-09-19, of which `Text` against `status_text` was one.
   // Carrying the path lets a test read both sides off disk instead of
   // trusting a literal somebody transcribed.
-  const existingPaths = new Map(walk(root).map((f) => [objectOf(f), f]));
+  // A pack is source too. Looking only under `src/` made a hand-written
+  // pack-local DPC_EXT invisible, so the empty generated skeleton in gen/
+  // overrode it. Every model root contributes both models and owned objects.
+  const roots = [root, ...extraRoots.filter((d) => existsSync(d))];
+  const existingPaths = new Map(roots.flatMap((dir) => walk(dir)).map((f) => [objectOf(f), f]));
   const existing = new Set(existingPaths.keys());
-  const functionModules = loadFunctionGroups([root, ...libs]);
+  const functionModules = loadFunctionGroups([...roots, ...libs]);
   const report = [];
   // src/ first, then the models another generator wrote (a CDS view published
   // with @OData.publish, gen/cds/*.stg.yaml)
-  const files = [...walk(root), ...extraRoots.filter((d) => existsSync(d)).flatMap((d) => walk(d))];
+  const files = roots.flatMap((d) => walk(d));
   for (const file of files.filter((p) => p.endsWith(".stg.yaml")).sort()) {
     const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules});
     const target = join(out, result.model.project.toLowerCase().replaceAll("/", "#"));
