@@ -4507,3 +4507,17 @@ at startup. Before rolling this code into a persistent stack, provide and
 test an additive, non-destructive migration for each backend (including
 restart and data-retention checks), or use an explicitly fresh demo database.
 Until then, keep the previously working container image active.
+
+### CI time and trigger budget (2026-09-21)
+
+Standard GitHub-hosted runners are currently free for this public repository,
+but repeated full image/browser runs still occupy runner capacity and slow PRs.
+Measure per-workflow wall time, runner time, queue delay and artifact/cache size
+over a representative week before changing gates. Then add explicit path filters
+for genuinely unrelated changes, avoid duplicate branch-push and PR runs, and
+cancel superseded runs of the *same PR* while preserving main/release runs.
+Do not skip lint, ABAP Unit, integration, launchpad/browser or affected image
+smoke for runtime changes; never publish Pages before its browser check passes.
+Document which file classes trigger each gate and test the filters with sample
+docs-only, UI, ABAP, database and image changes. Recheck billing/runner policy
+if the repository becomes private or uses larger runners.
