@@ -50,6 +50,9 @@ cat > "$workspace" <<EOF
 }
 EOF
 
+# abap-fs dependencies still expect navigator to be absent in the Node host.
+export NODE_OPTIONS=--no-experimental-global-navigator
+
 exec /usr/bin/code-server \
   --bind-addr 0.0.0.0:8080 \
   --auth password \
