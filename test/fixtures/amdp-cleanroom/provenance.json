@@ -1,0 +1,28 @@
+{
+  "schema": "amdp-cleanroom-corpus/v1",
+  "construction": "Every fixture, identifier, literal, row, and statement was independently authored from the aggregate observation specification.",
+  "source_exclusions": [
+    "No original archive was opened or copied.",
+    "No restricted source tree was opened or copied.",
+    "No member path, filename, source identifier, comment, domain vocabulary, literal payload, algorithm, or statement sequence was retained.",
+    "No network or external reference was used to construct these fixtures."
+  ],
+  "covered_categories": [
+    "procedure and function headers",
+    "read-only options and dependency declarations",
+    "scalar and table parameters with opaque local types",
+    "select, where, distinct, inner join, left outer join, subquery, exists, in, between",
+    "union and duplicate-eliminating union",
+    "grouping, having, ordering, limit and offset",
+    "case-free conditional branches, casts, aggregates, windows, ranking, text and regular-expression calls",
+    "date/current-value expressions, declarations, local assignment, host references, cursor declaration, block control",
+    "session context and null-bearing synthetic data"
+  ],
+  "omitted_categories": [
+    {"category": "right/full/cross joins", "reason": "The clean-room grammar fixture is intentionally limited to the observed inner and left forms; no unobserved join shape is invented."},
+    {"category": "insert/update/delete/merge/upsert", "reason": "Durable mutation semantics require an isolated runtime transaction and are not represented in a parse-only corpus."},
+    {"category": "loop execution and cursor operations", "reason": "Only cursor declaration is representable by the public grammar; no execution behavior is guessed."},
+    {"category": "dynamic SQL, temporary-table DDL, transaction control, and exception handlers", "reason": "Explicitly unobserved or unsupported in the sanitized specification; omitted."},
+    {"category": "explicit null helper functions and IS NULL predicates", "reason": "The observation marked these absent; nulls remain in the independent seed data for edge probes."}
+  ]
+}

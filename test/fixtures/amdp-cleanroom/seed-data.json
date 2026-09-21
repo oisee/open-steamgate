@@ -1,0 +1,17 @@
+{
+  "description": "Independent synthetic rows for parser and black-box harness setup.",
+  "leftRows": [
+    {"key_id": 4, "group_id": 3, "amount": -2.25, "day_value": "2004-02-29", "note_text": ""},
+    {"key_id": 8, "group_id": 3, "amount": 0, "day_value": "2004-03-01", "note_text": " "},
+    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": null, "note_text": "Q"},
+    {"key_id": null, "group_id": 7, "amount": null, "day_value": "2004-02-29", "note_text": "µ"},
+    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": null, "note_text": "Q"}
+  ],
+  "rightRows": [
+    {"key_id": 4, "code_text": "Q", "factor": 1.125},
+    {"key_id": 4, "code_text": "q", "factor": -2.25},
+    {"key_id": 13, "code_text": "R", "factor": 0},
+    {"key_id": null, "code_text": "Q", "factor": null}
+  ],
+  "edgeCases": ["empty", "singleton", "fan_out", "unmatched", "null_key", "exact_duplicate", "ranking_tie", "leap_day", "blank_text", "multibyte_text"]
+}

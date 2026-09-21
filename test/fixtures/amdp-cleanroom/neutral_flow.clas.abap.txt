@@ -1,0 +1,38 @@
+CLASS cl_neutral_flow DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES:
+      BEGIN OF ty_cell,
+        cell_id TYPE i,
+        bucket_id TYPE i,
+        amount TYPE p LENGTH 8 DECIMALS 2,
+        stamp TYPE d,
+        label_text TYPE c LENGTH 12,
+      END OF ty_cell.
+    TYPES tt_cell TYPE STANDARD TABLE OF ty_cell WITH EMPTY KEY.
+    CLASS-METHODS:
+      transform
+      IMPORTING VALUE(it_cells) TYPE tt_cell
+                VALUE(iv_switch) TYPE i
+      EXPORTING VALUE(et_cells) TYPE tt_cell.
+ENDCLASS.
+
+CLASS cl_neutral_flow IMPLEMENTATION.
+  METHOD transform BY DATABASE PROCEDURE FOR HDB
+                   LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    DECLARE lv_switch INTEGER := :iv_switch;
+    IF (:lv_switch = 0 OR :lv_switch IS NULL) THEN
+      et_cells = SELECT cell_id, bucket_id, amount,
+        stamp, LOWER(label_text) AS label_text FROM :it_cells;
+    ELSEIF (:lv_switch BETWEEN 1 AND 9) THEN
+      et_cells = SELECT cell_id, bucket_id,
+        CAST(amount AS DECIMAL(12, 2)) AS amount,
+        stamp, REGEXP_REPLACE(label_text, 'x', '') AS label_text
+        FROM :it_cells WHERE cell_id NOT IN (SELECT cell_id FROM :it_cells
+                                             WHERE label_text = ' ');
+    ELSE
+      et_cells = SELECT cell_id, bucket_id, amount,
+        stamp, SESSION_CONTEXT('NEUTRAL_MODE') AS label_text
+        FROM :it_cells;
+    END IF;
+  ENDMETHOD.
+ENDCLASS.

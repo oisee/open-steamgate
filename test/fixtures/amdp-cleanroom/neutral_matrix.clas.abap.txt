@@ -1,0 +1,121 @@
+CLASS cl_neutral_matrix DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES:
+      BEGIN OF ty_left,
+        key_id TYPE i,
+        group_id TYPE i,
+        amount TYPE p LENGTH 8 DECIMALS 2,
+        day_value TYPE d,
+        note_text TYPE c LENGTH 12,
+      END OF ty_left.
+    TYPES tt_left TYPE STANDARD TABLE OF ty_left WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_right,
+        key_id TYPE i,
+        code_text TYPE c LENGTH 8,
+        factor TYPE p LENGTH 8 DECIMALS 3,
+      END OF ty_right.
+    TYPES tt_right TYPE STANDARD TABLE OF ty_right WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_mix,
+        key_id TYPE i,
+        group_id TYPE i,
+        amount TYPE p LENGTH 8 DECIMALS 2,
+        day_value TYPE d,
+        note_text TYPE c LENGTH 12,
+        code_text TYPE c LENGTH 8,
+        factor TYPE p LENGTH 8 DECIMALS 3,
+      END OF ty_mix.
+    TYPES tt_mix TYPE STANDARD TABLE OF ty_mix WITH EMPTY KEY.
+    TYPES:
+      BEGIN OF ty_rank,
+        key_id TYPE i,
+        group_id TYPE i,
+        amount TYPE p LENGTH 8 DECIMALS 2,
+        rank_value TYPE i,
+        dense_value TYPE i,
+        row_value TYPE i,
+        note_text TYPE c LENGTH 12,
+      END OF ty_rank.
+    TYPES tt_rank TYPE STANDARD TABLE OF ty_rank WITH EMPTY KEY.
+    CLASS-METHODS:
+      mix_rows
+      IMPORTING VALUE(it_left) TYPE tt_left
+                VALUE(it_right) TYPE tt_right
+                VALUE(iv_limit) TYPE i
+      EXPORTING VALUE(et_mix) TYPE tt_mix,
+      rank_rows
+      IMPORTING VALUE(it_left) TYPE tt_left
+                VALUE(it_right) TYPE tt_right
+      EXPORTING VALUE(et_rank) TYPE tt_rank,
+      control_rows
+      IMPORTING VALUE(it_left) TYPE tt_left
+                VALUE(iv_limit) TYPE i
+      EXPORTING VALUE(et_mix) TYPE tt_mix,
+      scalar_value
+      IMPORTING VALUE(iv_seed) TYPE i
+      RETURNING VALUE(rv_value) TYPE i.
+ENDCLASS.
+
+CLASS cl_neutral_matrix IMPLEMENTATION.
+  METHOD mix_rows BY DATABASE PROCEDURE FOR HDB
+                  LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    DECLARE lv_limit INTEGER := :iv_limit;
+    lt_joined = SELECT DISTINCT
+      l.key_id, l.group_id, l.amount, l.day_value, l.note_text,
+      r.code_text, r.factor
+      FROM :it_left AS l
+      INNER JOIN :it_right AS r ON l.key_id = r.key_id
+      LEFT OUTER JOIN (SELECT key_id FROM :it_right
+                       WHERE code_text IN ('Q', 'q')) AS q
+        ON l.key_id = q.key_id
+      WHERE l.amount BETWEEN 0 AND :lv_limit
+        AND EXISTS (SELECT key_id FROM :it_right WHERE key_id = l.key_id)
+        AND l.note_text NOT IN ('', ' ');
+    et_mix = SELECT key_id, group_id, amount, day_value, note_text,
+      code_text, factor
+      FROM :lt_joined ORDER BY key_id ASC LIMIT :lv_limit OFFSET 0;
+  ENDMETHOD.
+
+  METHOD rank_rows BY DATABASE PROCEDURE FOR HDB
+                   LANGUAGE SQLSCRIPT OPTIONS READ-ONLY
+                   USING cl_neutral_alpha cl_neutral_beta.
+    lt_ranked = SELECT
+      key_id, group_id, amount,
+      ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY amount DESC) AS row_value,
+      RANK() OVER (PARTITION BY group_id ORDER BY amount DESC) AS rank_value,
+      DENSE_RANK() OVER (PARTITION BY group_id ORDER BY amount DESC) AS dense_value,
+      note_text
+      FROM :it_left
+      WHERE key_id IN (SELECT key_id FROM :it_right WHERE code_text = 'Q')
+      GROUP BY key_id, group_id, amount, note_text
+      HAVING COUNT(*) > 0
+      ORDER BY group_id ASC, amount DESC;
+    et_rank = SELECT key_id, group_id, amount, rank_value, dense_value,
+      row_value, note_text FROM :lt_ranked
+      UNION
+      SELECT key_id, group_id, amount, rank_value, dense_value,
+      row_value, note_text FROM :lt_ranked;
+  ENDMETHOD.
+
+  METHOD control_rows BY DATABASE PROCEDURE FOR HDB
+                      LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    DECLARE lv_total INTEGER := 0;
+    DECLARE lc_values CURSOR FOR SELECT key_id, amount FROM :it_left;
+    IF (:iv_limit > 0) THEN
+      lv_total := :iv_limit;
+    ELSE
+      lv_total := 0;
+    END IF;
+    BEGIN SEQUENTIAL EXECUTION
+      et_mix = SELECT key_id, group_id, amount, day_value, note_text,
+        '' AS code_text, 0 AS factor FROM :it_left
+        LIMIT :lv_total;
+    END;
+  ENDMETHOD.
+
+  METHOD scalar_value BY DATABASE FUNCTION FOR HDB
+                     LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    rv_value = :iv_seed + 4;
+  ENDMETHOD.
+ENDCLASS.
