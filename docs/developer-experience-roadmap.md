@@ -163,18 +163,24 @@ open-rfc-go/open-diag-go sidecar remains the known boundary.
 
 ## Order of delivery
 
-The three-surface decision in
-[`devux-three-surfaces.md`](devux-three-surfaces.md) updates the product order:
-code-server remains a conformance surface, while the primary next slice is the
-Fiori Workbench against a live local/hosted OSD backend.
+The three-surface decision and its Gateway addendum in
+[`devux-three-surfaces.md`](devux-three-surfaces.md) update the product order:
+code-server remains a conformance surface. First build the regression
+instrument; after its thin Fiori client, braid the hosted editor with the
+activate-and-run integration.
 
 1. Keep D0 and the real-client D1 acceptance green.
-2. Build the Fiori Workbench vertical slice against the live Object Store.
-3. Add the Pages browser adapter to the same UI and state-machine contract.
-4. Add D2 history and make the D3 ABAP Unit loop excellent in both modes.
-5. Build the desktop OSD supervisor extension on the now-stable runtime API.
-6. Add the read/test half of D4 and grow D5 from captured client failures.
-7. Re-evaluate D6 with measurements after the workbench is in daily use.
+2. Complete GW0/GW1: the clean-room case contract, matchers, isolated
+   executors and headless positive/negative controls.
+3. Complete GW2: a thin Fiori Gateway Client over the same runnable cases.
+4. Braid UX1 with GW3: edit through the live Object Store, activate, then run
+   the selected suite and retain the exact source/live/serving identities.
+5. Add D2 history and make the D3 ABAP Unit loop excellent in hosted mode.
+6. Add a Pages replay/read-only adapter; browser activation remains a separate
+   measured feasibility track, not a prerequisite.
+7. Build the desktop OSD supervisor extension on the stable runtime API and
+   grow D5 from captured client failures.
+8. Re-evaluate D6 with measurements after the workbench is in daily use.
 
 Each step stays in a feature branch, has a small real-client acceptance, and
 enters `main` only through PR checks. The compact in-system editor remains a

@@ -105,9 +105,22 @@ function packedAddresses(bytes) {
 // `.local/` of its own and should not need one to be checked properly.
 function identifierList(root) {
   const here = new URL("..", import.meta.url).pathname;
+  let commonCheckout;
+  try {
+    const commonGit = execFileSync(
+      "git",
+      ["-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    commonCheckout = resolve(commonGit, "..");
+  } catch {
+    // A path outside Git can still be scanned explicitly; it simply has no
+    // main-worktree configuration to inherit.
+  }
   const candidates = [
     join(root, ".local", "leak-identifiers.json"),
     process.env.OSD_LEAK_IDENTIFIERS,
+    commonCheckout && join(commonCheckout, ".local", "leak-identifiers.json"),
     join(here, ".local", "leak-identifiers.json"),
   ];
   return candidates.find((p) => p && existsSync(p)) ?? null;

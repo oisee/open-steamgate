@@ -11,6 +11,7 @@
     "test/amdp.mjs",
     "test/analytics.mjs",
     "test/taxi-import.mjs",
+    "test/telegram-notify.mjs",
     "test/batch-inserts.mjs",
     "test/bsp-app.mjs",
     "test/cds-cast.mjs",

@@ -13,8 +13,9 @@ OSD should have two primary developer experiences and one optional reference
 surface:
 
 1. **Fiori Workbench**, owned by OSD and available wherever OSD UI runs. It is
-   the default in-system experience and the only rich editor that must also
-   work as a safe static GitHub Pages demonstration.
+   the default in-system experience. Its shell and editor control should be
+   reusable in a safe static GitHub Pages demonstration, but browser-side
+   activation is a separately measured capability rather than a promise.
 2. **OSD for desktop VS Code**, a small extension that starts or attaches to an
    OSD runtime and hands editing to VS Code plus `abap-fs`. It is the default
    experience for a developer who already lives in a local Git checkout.
@@ -29,14 +30,48 @@ clients of one object store and one state machine:
 working text
     |
     v
-Save -> inactive revision -> Check -> Build -> Publish -> active generation
-             |                                      |
-             +-------------- failure ---------------+
-                         previous generation stays live
+Save --------> source revision
+                   |
+             Check + Build
+                   |
+                   v
+             live generation
+                   |
+              recycle child
+                   |
+                   v
+            serving generation
+
+status = { source, live, serving, synchronized }
+failure at any step leaves the previous serving generation alive
 ```
 
 Git Commit and Push remain separate, explicit actions. A surface may show Git,
 but it must not invent another source database or silently publish a saved edit.
+
+## Users and ordering
+
+The primary user of the first delivery is an ABAP developer using local or
+hosted OSG to change a service and understand whether it still behaves
+correctly. OSG maintainers are the second primary user because the same suites
+become compatibility and release gates. An A4H developer is a characterization
+and portability user; a GitHub Pages visitor is a demonstration user and must
+not be given the illusion of a production development system.
+
+That ordering is why GW0–GW2 precede the polished editor: the first two users
+need a trustworthy feedback loop more than a new text surface. After GW2, the
+editor and GW3 braid together. Pages reuses the UI only where its browser
+adapter can state its limitations honestly.
+
+These are initial relative uncertainties, not calendar promises:
+
+| Track | Uncertainty | Gate before expansion |
+|---|---:|---|
+| GW0 contract/characterization | medium | synthetic A4H/OSG fixtures and a red negative control |
+| GW1 kernel/headless runner | medium | repeatable semantic and wire results |
+| GW2 thin Fiori client | medium | same case and verdict from UI and headless runner |
+| UX1 hosted editor | high | measured CodeMirror/Monaco spike and conflict test |
+| Pages browser activation | very high | transpiler size, latency and correctness measurements |
 
 ## Why this split
 
@@ -106,11 +141,20 @@ cursor movement, selections, IME input, undo, accessibility and incremental
 highlighting from scratch. The recommended first spike is a pinned open-source
 editor kernel, wrapped as an OSD/UI5 control.
 
-**Recommendation: start with CodeMirror 6.** It is modular, relatively small,
-works well as an embedded editor and allows OSD to ship only the language and
-features it supports. Monaco is a valid fallback if protocol-aware editor
-features require more of VS Code's model, but it is larger and makes the small
-in-system surface resemble a second VS Code distribution.
+**CodeMirror 6 is the leading candidate, not yet the decision.** Before UX1,
+build equivalent CodeMirror 6 and Monaco spikes inside an OpenUI5 application.
+Record added minified/gzipped bytes, cold time-to-editable and browser heap
+while editing a representative large ABAP source. Both spikes must prove
+backend diagnostics and a usable diff; the decision is written beside those
+measurements. Dependencies are pinned and bundled locally, never loaded from a
+CDN.
+
+The selected editor is wrapped as a custom `sap.ui.core.Control`. Its renderer
+owns only a host element; `onAfterRendering` creates the editor and `exit`
+destroys it. The controller owns the local dirty buffer, explicit Save with an
+ETag, Check/Activate calls and navigation. Backend diagnostics enter the editor
+as markers/decorations; syntax colour is not treated as validation. Keystrokes
+must not become OData writes.
 
 The ABAP and CDS highlighters are presentation helpers, not parsers of record.
 Diagnostics come from the same Check/Activate backend used by ADT. A coloured
@@ -147,9 +191,11 @@ Fiori Workbench ----+
 ADT / abap-fs ------+
 ```
 
-This gives both clients the same ETags, locks, inactive source, diagnostics and
-atomic publication rules. A save in one surface is immediately visible in the
-other.
+This gives both clients the same ETags, inactive source, diagnostics and
+publication rules. A saved source revision is immediately readable from the
+other surface; it is not necessarily live or serving until build and recycle
+finish. Cross-surface locking and optimistic-conflict behavior are an explicit
+UX1 acceptance test, not inferred merely from sharing the store.
 
 ## Surface B: OSD for desktop VS Code
 
@@ -190,9 +236,10 @@ changing either side.
 ### Security boundary
 
 Starting a local runtime is code execution. The extension therefore requires
-Workspace Trust, binds loopback by default, never mounts the Docker socket,
-redacts secrets and stops only the child it owns. Windows x64, Linux x64,
-macOS arm64 and Linux arm64 need native lifecycle and persistence tests.
+Workspace Trust, requests a loopback bind and then verifies the actual listener
+addresses before declaring readiness, never mounts the Docker socket, redacts
+secrets and stops only the child it owns. Windows x64, Linux x64, macOS arm64
+and Linux arm64 need native lifecycle and persistence tests.
 
 ## Surface C: optional browser VS Code
 
@@ -220,13 +267,27 @@ is therefore an excellent home for a **safe Fiori Workbench demo**:
 - the Launchpad and editor load in a secure browser context;
 - the OSD browser runtime runs in a Worker;
 - demo source and generated artifacts are immutable application assets;
-- edits live in IndexedDB/OPFS under the Pages origin;
+- edits may persist in IndexedDB/OPFS under the Pages origin when storage is
+  available;
 - a browser database holds demo data;
 - Reset restores the shipped snapshot;
 - Export Patch downloads the user's changes without requiring GitHub access;
 - Playwright can exercise the exact public artifact before Pages promotion.
 
 No production credential belongs in that static bundle.
+
+Browser storage is a cache and working copy, not the only copy of valuable
+source: it may be denied, evicted, cleared, or unavailable in an ephemeral
+profile, and it is scoped to one browser and origin. Export Patch remains
+available and the UI must surface persistence failures. Offline applies first
+to the application shell and precached fixtures; lazily loaded media is not
+claimed offline until an explicit precache policy and size budget exist.
+
+Editing on Pages does not currently imply activation. The preview contains
+ABAP source but not the transpiler. Browser activation is its own feasibility
+track, gated on the added worker size, activation latency and correctness
+against the server build. Until that gate passes, Pages edits export a patch
+and run replay/synthetic cases against the shipped generation.
 
 ### What it cannot do by itself
 
@@ -247,7 +308,7 @@ The same Fiori Workbench should support two explicit adapters:
 
 | Mode | Source/store | Runtime | Git meaning |
 |---|---|---|---|
-| Pages demo | packaged snapshot + IndexedDB/OPFS edits | browser Worker | shipped commit plus downloadable patch |
+| Pages demo | packaged snapshot + optional IndexedDB/OPFS edits | shipped browser generation; activation is a separate spike | shipped commit plus downloadable patch |
 | Connected OSD | server Object Store | active server generation | real checkout branch/HEAD |
 
 The UI must label the mode. A local browser snapshot must never imply that a
@@ -276,7 +337,7 @@ session or production credentials. Its default mode is the browser sandbox.
 
 ## Shared contracts
 
-All surfaces should depend on a small, explicit capability contract:
+All surfaces should depend on a small, explicit capability view:
 
 - discovery: object kinds and operations the runtime actually supports;
 - identity: branch/HEAD, inactive revision and active generation;
@@ -291,13 +352,25 @@ ADT remains the compatibility contract for external tools. OSD-specific UI may
 use a compact endpoint where necessary, but it must call the same store and
 services underneath rather than reimplement semantics.
 
+This view is derived, not a new registry. Object/path availability comes from
+`tools/osd-nodes.mjs`; source/live/serving identity and synchronization come
+from the existing build endpoint; remote targets come from the destination
+registry. The view only joins those facts for a client and must not maintain a
+second list of objects, routes or destinations.
+
+The Workbench itself follows the same rule. In OSG it is a pack `webapp/`,
+whose `/app/<pack>` HOST node is derived by `packNodes()`. On a real SAP
+system it is deployed as its own BSP application and child SICF node under the
+delivered UI5 namespace. It must never claim the delivered namespace node
+itself.
+
 ## Persistence and recovery
 
 | State | Pages demo | Hosted OSD | Desktop VS Code |
 |---|---|---|---|
 | shipped source | static assets | checkout/image | local checkout |
-| inactive edits | IndexedDB/OPFS | Object Store | Object Store + checkout |
-| active runtime | Worker generation | server generation | local generation |
+| inactive edits | optional IndexedDB/OPFS + Export Patch | Object Store | Object Store + checkout |
+| active runtime | shipped Worker generation until the activation spike passes | source/live/serving generations | source/live/serving generations |
 | history | snapshot + exported patch | host Git | native VS Code Git |
 | recovery | Reset / export | previous generation | Git + previous generation |
 
@@ -328,17 +401,31 @@ frontend bundle.
 - import and export canonical JSON/ZIP without credentials;
 - keep the same suite runnable headlessly.
 
-### UX1 — Fiori editor vertical slice, after GW2
+After GW2 the plan becomes a **braided track**, not a monolithic GW0–GW4
+sequence. UX1 supplies source changes; GW3 supplies the test feedback for those
+changes. They advance together in end-to-end slices.
+
+### UX1/GW3a — measured editor and first source loop
 
 - create the Launchpad tile and UI5 application;
-- wrap a pinned CodeMirror 6 build;
+- measure CodeMirror 6 and Monaco in the actual OpenUI5 shell, then pin the
+  winner;
 - browse one package and open one class;
 - Save inactive, Check, Activate and show Problems;
 - display all three version identities;
 - keep the old editor as fallback.
 
 Acceptance: invalid code stays inactive and the old runtime remains live;
-valid code changes the runtime; refresh preserves the inactive edit.
+valid code reaches `source`, then `live`, then `serving` after recycle;
+refresh preserves the inactive edit; two surfaces cannot silently overwrite
+one another.
+
+### UX1/GW3b — join source and service feedback
+
+- associate the edited object/service with a selected regression suite;
+- offer `Activate and Run` without nesting the target request in the save LUW;
+- show the exact source/live/serving identities on the immutable RunResult;
+- keep the same case runnable headlessly.
 
 ### UX2 — Unit, diff and history
 
@@ -375,11 +462,11 @@ valid code changes the runtime; refresh preserves the inactive edit.
 | Behavior | Fiori hosted | Pages demo | Desktop VS Code | code-server |
 |---|---:|---:|---:|---:|
 | browse/open source | required | required | required | conformance |
-| invalid activation preserves runtime | required | required | required | conformance |
-| valid activation changes runtime | required | required | required | conformance |
-| ABAP Unit report | required | required subset | required | conformance |
+| invalid activation preserves runtime | required | deferred browser-activation spike | required | conformance |
+| valid activation changes runtime | required with source/live/serving proof | deferred browser-activation spike | required | conformance |
+| ABAP Unit report | required | replay/read-only subset initially | required | conformance |
 | Git working-tree visibility | server facts | exported patch | native | native |
-| offline startup | optional | required after load/install | required for pinned runtime | deployment-specific |
+| offline startup | optional | shell/precached fixtures only; media measured separately | required for pinned runtime | deployment-specific |
 | no second login | same OSD session | no server login | local trust | hosted proxy target |
 
 ## Explicit non-goals

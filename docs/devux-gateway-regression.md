@@ -134,6 +134,22 @@ orchestration boundary, but not whether the implementation below the standard
 executor uses a local Gateway dispatcher or a socket. The first A4H
 characterization must record that distinction rather than assume it.
 
+## Reuse the existing replay machinery without conflating protocols
+
+`tools/rfc-replay.mjs` already establishes useful system-wide concepts:
+logical destinations, explicit `local | replay | live | record | fallback`
+modes, private captures under `.local/` and deterministic substitutions.
+GW1 must not create a second registry for those concepts.
+
+RFC calls and HTTP requests nevertheless remain different executor contracts.
+RFC replay operates on typed function-module parameters and `sy-subrc`; the
+Gateway runner operates on method, URI, headers and bytes. They should share a
+small target/mode vocabulary, capture provenance, redaction policy and run
+envelope, while retaining protocol-specific matching and execution adapters.
+The HTTP case format does not automatically inherit powerful substitutions
+such as `{{sql:...}}`; each substitution must be explicitly admitted and
+safe for an exportable regression case.
+
 ## Why Draft waits
 
 Wave 1 needs explicit Save, an ETag/version, a local dirty buffer and immutable
@@ -192,6 +208,9 @@ cannot undo remote HTTP commits that already completed.
 ### GW0 - characterize and freeze the contract
 
 - use supplied examples only as clean-room behavioral references;
+- treat A4H as an external sandbox that is exercised only after Alice
+  explicitly authorizes that concrete run; the existence of GW0 is not
+  standing permission;
 - exercise the relevant standard A4H client operations and record observable
   request/result behavior with synthetic data;
 - prove whether each candidate path is wire HTTP or local provider execution;
@@ -231,7 +250,9 @@ same suite remains runnable in CI.
 - export package plus subpackages as an abapGit ZIP.
 
 Only after this seam is stable should the polished Fiori-native source editor
-become the main UX investment.
+become the main UX investment. In delivery terms UX1 starts after GW2 and
+braids with GW3: a source-edit slice and its service-regression slice ship
+together instead of completing all of GW3/GW4 before editor work begins.
 
 ### GW4 - optional expansions
 
@@ -252,4 +273,3 @@ become the main UX investment.
 - embedded VS Code;
 - Draft as a prerequisite for Save or Run;
 - claiming that a provider-level direct call proves HTTP behavior.
-
