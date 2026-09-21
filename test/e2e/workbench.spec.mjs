@@ -79,7 +79,19 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   expect(gitState).toMatchObject({available: true, tracked: true, status: "clean"});
   expect(gitState.head).toMatch(/^[0-9a-f]{40}$/);
   expect(gitState.file).toMatch(/zcl_osd_edit\.clas\.abap$/);
+  expect(gitState.history.length).toBeGreaterThan(0);
+  expect(gitState.history[0]).toEqual(expect.objectContaining({
+    revision: expect.stringMatching(/^[0-9a-f]{40}$/), author: expect.any(String), subject: expect.any(String)
+  }));
+  const committed = await page.evaluate((revision) => fetch("/sap/bc/adt/core/http/git/object/revision?" +
+    "type=CLAS%2FOC&name=ZCL_OSD_EDIT&revision=" + revision).then((response) => response.text()), gitState.history[0].revision);
+  expect(committed).toBe(before);
+  const invalidRevisionStatus = await page.evaluate(() => fetch(
+    "/sap/bc/adt/core/http/git/object/revision?type=CLAS%2FOC&name=ZCL_OSD_EDIT&revision=HEAD"
+  ).then((response) => response.status));
+  expect(invalidRevisionStatus).toBe(400);
   await expect(page.getByText("Git history", {exact: true})).toBeVisible();
+  consoleErrors.length = 0; // the rejected fetch is the expected negative control
   await page.evaluate(() => {
     const panel = [...document.querySelectorAll("[data-sap-ui]")]
       .map((element) => sap.ui.getCore().byId(element.id))
@@ -88,6 +100,39 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   });
   await expect(page.getByText(/Stored inactive source vs HEAD/)).toBeVisible();
   await expect(page.getByText("Stored source matches HEAD.", {exact: true})).toBeVisible();
+
+  await expect(page.getByText(gitState.history[0].subject, {exact: true}).first()).toBeVisible();
+  await page.evaluate((revision) => {
+    const table = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--gitVersions"));
+    const item = table.getItems().find((row) => row.getBindingContext("ui")?.getObject()?.revision === revision);
+    if (!item) throw new Error("Git revision row not found");
+    table.setSelectedItem(item);
+    table.fireSelectionChange({listItem: item});
+  }, gitState.history[0].revision);
+
+  const restore = page.getByRole("button", {name: "Restore version", exact: true});
+  await expect(restore).toBeEnabled();
+  await page.route("**/adt/core/http/git/object/revision?**", async (route) => {
+    await route.fulfill({status: 200, contentType: "text/plain",
+      body: before + "\n* restored from Git\n"});
+  });
+  await restore.click();
+  const restoreDialog = page.getByRole("alertdialog", {name: /Restore Git version/});
+  await expect(restoreDialog).toBeVisible();
+  await restoreDialog.getByRole("button", {name: "OK", exact: true}).click();
+  await expect(page.getByText(/Git version loaded into the editor.*Save inactive.*Check.*Activate/i))
+    .toBeVisible();
+  await expect(page.getByText("Modified", {exact: true})).toBeVisible();
+  expect(await editor.evaluate((element) => window.ace.edit(element).getValue()))
+    .toContain("restored from Git");
+  await page.unroute("**/adt/core/http/git/object/revision?**");
+  await page.getByRole("button", {name: "Discard edits", exact: true}).click();
+  const restoredDiscard = page.getByRole("alertdialog", {name: /Unsaved edits/});
+  await expect(restoredDiscard).toBeVisible();
+  await restoredDiscard.getByRole("button", {name: "OK", exact: true}).click();
+  await expect(page.getByText("Saved", {exact: true})).toBeVisible();
 
   await page.route("**/adt/checkruns?**", async (route) => {
     await route.fulfill({status: 200, contentType: "application/vnd.sap.adt.checkmessages+xml",

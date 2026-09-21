@@ -42,6 +42,7 @@
             <ObjectStatus title="HEAD" text="{ui>/git/headShort}"/>
             <ObjectStatus text="{ui>/git/status}" state="{= ${ui>/git/status} === 'clean' ? 'Success' : ${ui>/git/status} === 'modified' ? 'Warning' : 'Information'}"/>
             <ToolbarSpacer/>
+            <Button text="Restore version" icon="sap-icon://undo" press=".onRestoreRevision" enabled="{= !!${ui>/git/selectedRevision}}"/>
             <Button text="Refresh" icon="sap-icon://refresh" press=".onGitRefresh"/>
           </OverflowToolbar></headerToolbar>
           <content>
@@ -49,6 +50,13 @@
             <Label text="Stored inactive source vs HEAD · {ui>/git/file}" visible="{ui>/git/available}"/>
             <TextArea value="{ui>/git/diff}" editable="false" rows="8" width="100%" wrapping="None" visible="{= !!${ui>/git/diff}}"/>
             <Text text="Stored source matches HEAD." visible="{= ${ui>/git/available} &amp;&amp; !${ui>/git/diff}}"/>
+            <Table id="gitVersions" items="{ui>/git/history}" visible="{= ${ui>/git/history}.length > 0}"
+              mode="SingleSelectMaster" selectionChange=".onGitRevisionSelect" growing="true" growingThreshold="5">
+              <columns><Column width="7rem"><Text text="Commit"/></Column><Column width="10rem"><Text text="Author"/></Column>
+                <Column width="13rem"><Text text="When"/></Column><Column><Text text="Subject"/></Column></columns>
+              <items><ColumnListItem><cells><Text text="{ui>shortRevision}"/><Text text="{ui>author}"/>
+                <Text text="{ui>authoredAt}"/><Text text="{ui>subject}"/></cells></ColumnListItem></items>
+            </Table>
           </content>
         </Panel>
         <Table id="problems" items="{ui>/diagnostics}" visible="{= ${ui>/diagnostics}.length > 0}"

@@ -49,7 +49,7 @@ sap.ui.define([
         objectTypes: OBJECT_TYPES, editorMode: OBJECT_TYPES[0].mode,
         objects: [], selected: {}, source: "", dirty: false,
         diagnostics: [], identity: {},
-        git: {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: ""},
+        git: {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: "", history: [], selectedRevision: ""},
         message: {text: "Choose an object type, search, and open a source.", type: "Information"}
       }), "ui");
       // Token and cookies are one handshake: no parallel first request may
@@ -102,7 +102,7 @@ sap.ui.define([
       this._set("/selected", {});
       this._set("/source", "");
       this._set("/dirty", false);
-      this._set("/git", {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: ""});
+      this._set("/git", {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: "", history: [], selectedRevision: ""});
       this._showDiagnostics([]);
       this._message("Searching " + config.text + ".", "Information");
       await this._search(config.query);
@@ -156,16 +156,48 @@ sap.ui.define([
         const state = await response.json();
         this._set("/git", {...state, loading: false,
           branch: state.branch || "-", headShort: state.headShort || "-",
+          selectedRevision: "",
           reason: state.reason || ""});
       } catch (error) {
         this._set("/git", {available: false, loading: false, branch: "-", headShort: "-",
-          status: "unavailable", diff: "", file: "", reason: error.message || String(error)});
+          status: "unavailable", diff: "", file: "", reason: error.message || String(error), history: [], selectedRevision: ""});
       }
     },
 
     async onGitRefresh() {
       this._busy(true);
       try { await this._loadGit(); }
+      finally { this._busy(false); }
+    },
+
+    onGitRevisionSelect(event) {
+      const revision = event.getParameter("listItem").getBindingContext("ui").getObject().revision;
+      this._set("/git/selectedRevision", revision);
+    },
+
+    async onRestoreRevision() {
+      const object = this._model().getProperty("/selected");
+      const revision = this._model().getProperty("/git/selectedRevision");
+      const picked = this._model().getProperty("/git/history").find((item) => item.revision === revision);
+      if (!object?.name || !picked) return;
+      const action = await new Promise((resolve) => MessageBox.confirm(
+        `Replace the current editor buffer with ${picked.shortRevision} — ${picked.subject}?`, {
+          title: "Restore Git version", emphasizedAction: MessageBox.Action.OK, onClose: resolve
+        }));
+      if (action !== MessageBox.Action.OK) return;
+      this._busy(true);
+      try {
+        const response = await this._request("/core/http/git/object/revision?type=" +
+          encodeURIComponent(object.type) + "&name=" + encodeURIComponent(object.name) +
+          "&revision=" + encodeURIComponent(revision));
+        const restored = await response.text();
+        this.byId("source").setValue(restored);
+        const dirty = restored !== this._model().getProperty("/source");
+        this._set("/dirty", dirty);
+        this._showDiagnostics([]);
+        this._message(dirty ? "Git version loaded into the editor. Save inactive, Check, then Activate when ready."
+          : "The selected Git version already matches the stored source.", "Information");
+      } catch (error) { this._fail(error); }
       finally { this._busy(false); }
     },
 

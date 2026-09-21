@@ -3,7 +3,7 @@ import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {gitObjectState} from "../tools/osd-git-history.mjs";
+import {gitObjectRevision, gitObjectState} from "../tools/osd-git-history.mjs";
 
 describe("tools/osd-git-history: read-only object history", () => {
   let root;
@@ -40,6 +40,28 @@ describe("tools/osd-git-history: read-only object history", () => {
     expect(state.status).to.equal("modified");
     expect(state.diff).to.contain("+  PUBLIC SECTION.");
     expect(git("rev-parse", "HEAD")).to.equal(before);
+  });
+
+  it("lists file commits newest first and restores the exact selected blob", () => {
+    const first = git("rev-parse", "HEAD");
+    const original = "CLASS zcl_demo DEFINITION.\nENDCLASS.\n";
+    writeFileSync(join(root, "src/zcl_demo.clas.abap"),
+      "CLASS zcl_demo DEFINITION.\n  PUBLIC SECTION.\nENDCLASS.\n");
+    git("add", "src/zcl_demo.clas.abap");
+    git("commit", "--quiet", "-m", "add public section");
+
+    const state = gitObjectState(root, "src/zcl_demo.clas.abap");
+    expect(state.history.map((item) => item.subject)).to.deep.equal(["add public section", "initial"]);
+    expect(state.history[0]).to.include.keys("revision", "shortRevision", "author", "authoredAt");
+    expect(gitObjectRevision(root, "src/zcl_demo.clas.abap", first)).to.equal(original);
+    expect(() => gitObjectRevision(root, "src/zcl_demo.clas.abap", first.slice(0, 12)))
+      .to.throw("full 40-character commit SHA");
+    writeFileSync(join(root, "README.md"), "unrelated\n");
+    git("add", "README.md");
+    git("commit", "--quiet", "-m", "unrelated");
+    const unrelated = git("rev-parse", "HEAD");
+    expect(() => gitObjectRevision(root, "src/zcl_demo.clas.abap", unrelated))
+      .to.throw("is not a version");
   });
 
   it("names detached HEAD and renders an untracked file as an added diff", () => {

@@ -17,7 +17,7 @@ highlighting and protocol machinery.
 | D0 activation truth | implemented on feature branch | failed publication and a concurrent save remain inactive; previous live generation survives |
 | D1a Fiori Workbench | first vertical implemented on feature branch | full-width Launchpad editor; Class, Interface, Program and CDS search; Discard; Check/Problems; guarded inactive Save/Activate; generation identity |
 | D1 browser VS Code + abap-fs | parked conformance surface | authenticated code-server sidecar, real abap-fs client, shared dedicated worktree |
-| D2 host-Git history | first read-only vertical implemented | branch/HEAD, per-object status and stored-source diff; log/restore remain |
+| D2 host-Git history | hosted vertical implemented | branch/HEAD, per-object status/diff, 20 file versions and restore-to-buffer; active-generation diff remains |
 | D3 test and execution loop | partial backend exists | ABAP Unit already has ADT routes; needs isolated data and a useful UI/report |
 | D4 SEGW client | planned | browse model, inspect metadata, issue OData requests, then controlled model edits |
 | D5 ADT/abap-fs coverage | continuous | desktop and browser abap-fs are acceptance clients for the same ADT/store contract |
@@ -101,10 +101,14 @@ untracked objects and runtimes without Git are explicit states. The adapter is
 read-only; HTTP parameters are never used directly as Git pathspecs. Unsaved
 browser-buffer edits are intentionally not presented as stored-source diffs.
 
-VS Code's ordinary Git UI is the first implementation. A compact read-only
-history view in the built-in OSD editor can follow, backed by the same host
-Git adapter. `tools/osd-git.mjs` currently clones remote repositories through
-ABAP; it is not this local-history adapter.
+The same panel lists the last 20 versions of the file with commit, author,
+time and subject. Restore reads only a full SHA that belongs to that file's
+history and replaces the browser buffer after confirmation; it does not write
+until the developer follows the normal Save inactive, Check and Activate path.
+
+VS Code's ordinary Git UI remains the rich implementation. The compact hosted
+view is backed by the host Git adapter. `tools/osd-git.mjs` clones remote
+repositories through ABAP; it is not this local-history adapter.
 
 ## D3 — test and execution loop
 

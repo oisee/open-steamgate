@@ -22,6 +22,33 @@ function git(root, args, accepted = [0]) {
   return {status: result.status, text: String(result.stdout || "").replace(/\r\n/g, "\n").trimEnd()};
 }
 
+function rawGit(root, args) {
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: MAX_OUTPUT,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error !== undefined) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(String(result.stderr || result.stdout || `git exited ${result.status}`).trim());
+  }
+  return String(result.stdout || "");
+}
+
+function historyOf(root, file, head) {
+  if (head === "") return [];
+  const format = "%H%x00%h%x00%an%x00%aI%x00%s%x1e";
+  return git(root, ["log", "--diff-filter=AM", "-n", "20", `--format=${format}`, "HEAD", "--", file]).text
+    .split("\x1e")
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [revision, shortRevision, author, authoredAt, subject] = record.split("\x00");
+      return {revision, shortRevision, author, authoredAt, subject};
+    });
+}
+
 function addedFileDiff(file, source) {
   const lines = String(source).replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const body = lines.map((line) => "+" + line).join("\n");
@@ -87,5 +114,21 @@ export function gitObjectState(root, file) {
     tracked,
     status,
     diff,
+    history: tracked ? historyOf(root, file, head) : [],
   };
+}
+
+export function gitObjectRevision(root, file, revision) {
+  const wanted = String(revision ?? "").toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(wanted)) {
+    throw new Error("A Git revision must be a full 40-character commit SHA.");
+  }
+  const touching = git(root, ["log", "--diff-filter=AM", "-n", "1", "--format=%H", wanted, "--", file]).text;
+  if (touching !== wanted) {
+    throw new Error(`Revision ${wanted.slice(0, 12)} is not a version of ${file}.`);
+  }
+  // `<validated full SHA>:<store-resolved file>` is a Git object expression,
+  // not a shell command or a user-controlled pathspec. Preserve the blob's
+  // final newline: restoring a version must be byte-stable.
+  return rawGit(root, ["show", "--no-textconv", `${wanted}:${file}`]);
 }

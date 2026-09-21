@@ -31,7 +31,7 @@ import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
-import {gitObjectState} from "./osd-git-history.mjs";
+import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1146,6 +1146,23 @@ export function adtRouter(options = {}) {
         refuse(res, 404, "ExceptionResourceNotFound", error.message);
       } else {
         refuse(res, 500, "ExceptionGitHistory", error.message ?? String(error));
+      }
+    }
+  });
+
+  router.get(`${BASE}/core/http/git/object/revision`, (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    try {
+      const entry = store.read(type, name);
+      const source = gitObjectRevision(store.root, entry.file,
+        String(req.query.revision ?? ""));
+      res.status(200).type("text/plain; charset=utf-8").send(source);
+    } catch (error) {
+      if (error instanceof NotFound) {
+        refuse(res, 404, "ExceptionResourceNotFound", error.message);
+      } else {
+        refuse(res, 400, "ExceptionGitRevision", error.message ?? String(error));
       }
     }
   });

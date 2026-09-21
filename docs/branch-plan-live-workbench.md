@@ -44,10 +44,12 @@ bottom panel. Detached/unborn heads, untracked/ignored files and a packaged
 runtime without Git receive explicit states. The adapter invokes only Git
 read operations, and Save/Activate still perform no Git write.
 
-Still to add here: stored source vs active generation, per-file log with
-author/time, revision selection and Restore as a new inactive edit. Restore is
-the first Git-derived write and therefore requires its own confirmation and
-optimistic-concurrency test rather than being folded into this read-only step.
+The panel also lists the last 20 file versions with SHA, author, time and
+subject. Restore accepts only a full SHA belonging to that file's history,
+asks for confirmation and loads the exact blob into the editor buffer. It
+does not write, commit or activate; the normal Save inactive path retains its
+ETag concurrency check. Still to add here: stored source vs active generation,
+a dedicated read-only revision preview and optional blame.
 
 After that, make a class + ABAP Unit run pleasant end-to-end in the workbench;
 then add a read/test SEGW client. A full SE80 clone and a DIAG/RFC transport
