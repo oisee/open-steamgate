@@ -78,6 +78,7 @@
     "notify:milestone": "node tools/osd-telegram-notify.mjs milestone",
     "naming": "node tools/osd-naming-scan.mjs",
     "replay": "node tools/osd-replay.mjs",
+    "gateway:fixture": "node tools/osd-regression-fixture.mjs",
     "leak:all": "node tools/osd-leak-scan.mjs . --all",
     "osd:restart": "sh scripts/osd-restart.sh",
     "conformance:sqlscript": "node tools/sqlscript-conformance.mjs",

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "gw0.travel.read",
+  "version": "fixture-v1",
+  "description": "Read one entirely synthetic travel",
+  "destination": "DEMO",
+  "request": {
+    "method": "GET",
+    "path": "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('GW0-001')",
+    "headers": {
+      "accept": "application/json"
+    }
+  },
+  "execution": {
+    "mode": "wire",
+    "timeoutMs": 10000,
+    "session": "isolated"
+  },
+  "redaction": {
+    "body": []
+  },
+  "expect": {
+    "status": 200,
+    "headers": {
+      "content-type": {
+        "mediaType": "application/json"
+      }
+    },
+    "body": {
+      "format": "json",
+      "value": {
+        "d": {
+          "TravelId": "GW0-001",
+          "Seats": 2,
+          "Status": "A",
+          "ObservedAt": "2026-09-21T00:00:00Z"
+        }
+      },
+      "masks": [
+        {
+          "path": "/d/ObservedAt",
+          "reason": "Synthetic response generation timestamp"
+        }
+      ]
+    }
+  }
+}

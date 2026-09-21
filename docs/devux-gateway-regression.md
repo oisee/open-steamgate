@@ -2,6 +2,9 @@
 
 Status: architecture decision and delivery plan, 2026-09-21.
 
+The candidate wire/data contract is specified in
+[Gateway regression contract v1](devux-gateway-regression-contract.md).
+
 ## Decision
 
 Build the Gateway regression kernel and its smallest Fiori client before the
