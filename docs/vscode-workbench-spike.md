@@ -5,10 +5,11 @@ Status: active spike on `feat/live-workbench-activation`, 2026-09-21.
 ## Decision
 
 Use **code-server as a separate, opt-in container**, with a pinned build of
-`vscode_abap_remote_fs` preinstalled. It connects to OSD over the private
-Compose network and opens the same dedicated host Git worktree that OSD uses.
-The first version opens in a separate browser tab/port. It is not embedded in
-an iframe and it is not part of the normal runtime image.
+`vscode_abap_remote_fs` preinstalled. W0 connects through the Docker host
+gateway to an OSD process running from the same dedicated Git worktree; the
+paired deployment profile will put both services on one private network. The
+first version opens in a separate browser tab/port. It is not embedded in an
+iframe and it is not part of the normal runtime image.
 
 This decision followed an independent Astra critique. OpenVSCode Server would
 also provide the required remote Node extension host, but code-server already
@@ -53,12 +54,33 @@ not receive the Docker socket, the host home directory, SSH keys or unrelated
 volumes. Mount only the dedicated worktree and a named settings/extensions
 volume. Drop capabilities, enable `no-new-privileges`, keep Workspace Trust,
 and expose only the authenticated IDE. OSD's current ADT Basic credentials are
-not validated, so its HTTP port remains private to the Compose network for
-this profile. Public deployment additionally requires TLS/reverse-proxy auth.
+not validated, so bind it to localhost or a private network for this profile.
+Public deployment additionally requires TLS/reverse-proxy auth.
 
 Disable abap-fs AI/MCP auto-start, telemetry and broad test automation for the
 first spike. Do not enable Git auto-commit or push: Save creates an inactive
 edit, Activate publishes it, and Commit/Push remain explicit user actions.
+
+## Run the W0 image
+
+Start OSD from this same checkout on port 3030. Then copy
+`docker/workbench/ide-password.example` to the ignored
+`docker/workbench/ide-password.txt`, replace its value, and run:
+
+```sh
+docker compose -f docker/compose.workbench.yml up -d --build
+```
+
+Open `http://127.0.0.1:8088`. Override `OSD_IDE_PORT`, `OSD_ADT_URL` or
+`OSD_ADT_USER` when needed. The default bind is loopback-only. The Compose
+profile mounts only this checkout plus named code-server data/config volumes;
+it drops all capabilities, enables `no-new-privileges`, uses a read-only root
+filesystem and has no Docker socket, host home or SSH mount.
+
+W0 has been built and smoke-tested on linux/amd64: all three pinned extensions
+load into Code 1.138, unauthenticated access redirects to login, the health
+endpoint responds, and the process runs as the unprivileged `coder` user. The
+arm64 build and license/content inventory remain before multi-arch readiness.
 
 ## Milestones
 
@@ -66,10 +88,12 @@ edit, Activate publishes it, and Commit/Push remain explicit user actions.
 
 - Multi-arch image for `linux/amd64` and `linux/arm64`, pinned code-server and
   VSIX hashes, no startup downloads.
-- Preconfigured OSD connection at `http://osd:3030` using a non-secret demo
-  username; the IDE password/token comes from a secret, never the image.
-- Container health checks code-server and verifies all three extensions are
-  installed. Compose config validation and a license/content inventory test.
+- Preconfigured W0 connection through the Docker host gateway using a
+  non-secret demo username; the IDE password/token comes from a secret, never
+  the image.
+- The container health-checks code-server; the image build verifies all three
+  extensions are installed. Compose config validation and a license/content
+  inventory test.
 
 ### W1 — real-client compatibility capture
 

@@ -58,3 +58,4 @@ local/
 packs/*/upstream/
 packs/*/games/
 packs/*/.osd-fetched.json
+docker/workbench/ide-password.txt
