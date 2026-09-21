@@ -31,6 +31,7 @@ import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
+import {gitObjectState} from "./osd-git-history.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1126,6 +1127,27 @@ export function adtRouter(options = {}) {
       started: STARTED,
       identity,
     }));
+  });
+
+  // The host checkout is the Workbench's history layer. This endpoint is
+  // intentionally read-only and resolves type/name through ObjectStore
+  // before Git sees a path. It is OSG-specific, so it is not advertised as
+  // an ADT capability that a standard client might mistake for SAP ADT.
+  router.get(`${BASE}/core/http/git/object`, (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    try {
+      const entry = store.read(type, name);
+      res.type("application/json; charset=utf-8").send(JSON.stringify(
+        gitObjectState(store.root, entry.file),
+      ));
+    } catch (error) {
+      if (error instanceof NotFound) {
+        refuse(res, 404, "ExceptionResourceNotFound", error.message);
+      } else {
+        refuse(res, 500, "ExceptionGitHistory", error.message ?? String(error));
+      }
+    }
   });
 
   // Ending a session. There is nothing to end — the session is a cookie and a
@@ -2232,7 +2254,7 @@ function facadeBuildStamp() {
   }
   const here = dirname(fileURLToPath(import.meta.url));
   const digest = createHash("sha256");
-  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs"]) {
+  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs", "osd-git-history.mjs"]) {
     try {
       digest.update(readFileSync(join(here, file)));
     } catch {

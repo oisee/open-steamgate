@@ -73,6 +73,22 @@ test("Workbench: tile, ABAP editor and a diagnostic over the unsaved buffer", as
   const before = await page.evaluate((url) => fetch(url).then((response) => response.text()), sourceUrl);
   await expect(page.getByText("Saved", {exact: true})).toBeVisible();
 
+  const gitState = await page.evaluate(() => fetch(
+    "/sap/bc/adt/core/http/git/object?type=CLAS%2FOC&name=ZCL_OSD_EDIT"
+  ).then((response) => response.json()));
+  expect(gitState).toMatchObject({available: true, tracked: true, status: "clean"});
+  expect(gitState.head).toMatch(/^[0-9a-f]{40}$/);
+  expect(gitState.file).toMatch(/zcl_osd_edit\.clas\.abap$/);
+  await expect(page.getByText("Git history", {exact: true})).toBeVisible();
+  await page.evaluate(() => {
+    const panel = [...document.querySelectorAll("[data-sap-ui]")]
+      .map((element) => sap.ui.getCore().byId(element.id))
+      .find((control) => control?.getId?.().endsWith("--gitPanel"));
+    panel.setExpanded(true);
+  });
+  await expect(page.getByText(/Stored inactive source vs HEAD/)).toBeVisible();
+  await expect(page.getByText("Stored source matches HEAD.", {exact: true})).toBeVisible();
+
   await page.route("**/adt/checkruns?**", async (route) => {
     await route.fulfill({status: 200, contentType: "application/vnd.sap.adt.checkmessages+xml",
       body: `<?xml version="1.0"?><chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun"><chkrun:checkReport chkrun:status="notProcessed" chkrun:statusText="compiler unavailable"><chkrun:checkMessageList/></chkrun:checkReport></chkrun:checkRunReports>`});

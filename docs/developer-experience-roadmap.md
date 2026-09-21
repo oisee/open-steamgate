@@ -17,7 +17,7 @@ highlighting and protocol machinery.
 | D0 activation truth | implemented on feature branch | failed publication and a concurrent save remain inactive; previous live generation survives |
 | D1a Fiori Workbench | first vertical implemented on feature branch | full-width Launchpad editor; Class, Interface, Program and CDS search; Discard; Check/Problems; guarded inactive Save/Activate; generation identity |
 | D1 browser VS Code + abap-fs | parked conformance surface | authenticated code-server sidecar, real abap-fs client, shared dedicated worktree |
-| D2 host-Git history | designed next | branch/HEAD, diff, blame/history and restore-as-inactive-edit |
+| D2 host-Git history | first read-only vertical implemented | branch/HEAD, per-object status and stored-source diff; log/restore remain |
 | D3 test and execution loop | partial backend exists | ABAP Unit already has ADT routes; needs isolated data and a useful UI/report |
 | D4 SEGW client | planned | browse model, inspect metadata, issue OData requests, then controlled model edits |
 | D5 ADT/abap-fs coverage | continuous | desktop and browser abap-fs are acceptance clients for the same ADT/store contract |
@@ -92,6 +92,14 @@ The workbench should offer diff against active and `HEAD`, file/object log,
 author/time, and restore. Restore writes a new inactive edit and follows the
 normal Check/Activate path. Never auto-commit or auto-push on Save/Activate.
 Handle dirty trees, detached HEAD and images without `.git` explicitly.
+
+The first hosted vertical now resolves the selected Object Store object to its
+actual repository file on the server and shows a collapsible bottom panel with
+branch, exact `HEAD`, clean/modified/untracked/ignored status and a unified
+diff of the stored inactive source against `HEAD`. Detached and unborn heads,
+untracked objects and runtimes without Git are explicit states. The adapter is
+read-only; HTTP parameters are never used directly as Git pathspecs. Unsaved
+browser-buffer edits are intentionally not presented as stored-source diffs.
 
 VS Code's ordinary Git UI is the first implementation. A compact read-only
 history view in the built-in OSD editor can follow, backed by the same host

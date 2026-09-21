@@ -27,7 +27,7 @@ This is not a claim that arbitrary concurrent writes produce a transactionally
 consistent generated build. That needs a separate immutable build-input
 snapshot or write serialization, with a test that changes inputs mid-build.
 
-## Next visible slice: Git-backed history
+## Current visible slice: Git-backed history
 
 The host repository is the source-history layer. Show branch/commit and the
 active build hash separately; expose diff between working/inactive source,
@@ -36,6 +36,18 @@ commit or push. Restore must create an inactive edit and follow the same
 Check/Activate path. Before implementation, define authorization and behavior
 for dirty worktrees, detached HEAD, concurrent editors, and packaged images
 without a `.git` directory.
+
+The first read-only vertical is implemented: selecting an object resolves its
+Object Store entry to the actual repository file, then shows branch, exact
+`HEAD`, file status and stored inactive source vs `HEAD` in a collapsible
+bottom panel. Detached/unborn heads, untracked/ignored files and a packaged
+runtime without Git receive explicit states. The adapter invokes only Git
+read operations, and Save/Activate still perform no Git write.
+
+Still to add here: stored source vs active generation, per-file log with
+author/time, revision selection and Restore as a new inactive edit. Restore is
+the first Git-derived write and therefore requires its own confirmation and
+optimistic-concurrency test rather than being folded into this read-only step.
 
 After that, make a class + ABAP Unit run pleasant end-to-end in the workbench;
 then add a read/test SEGW client. A full SE80 clone and a DIAG/RFC transport

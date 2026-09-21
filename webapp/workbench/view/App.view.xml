@@ -35,6 +35,22 @@
           editable="{= !!${ui>/selected/name}}" liveChange=".onSourceChange">
           <wb:layoutData><FlexItemData growFactor="1" baseSize="0"/></wb:layoutData>
         </wb:AbapEditor>
+        <Panel id="gitPanel" expandable="true" expanded="false" visible="{= !!${ui>/selected/name}}" busy="{ui>/git/loading}">
+          <headerToolbar><OverflowToolbar>
+            <Title text="Git history" level="H4"/>
+            <ObjectStatus title="Branch" text="{ui>/git/branch}"/>
+            <ObjectStatus title="HEAD" text="{ui>/git/headShort}"/>
+            <ObjectStatus text="{ui>/git/status}" state="{= ${ui>/git/status} === 'clean' ? 'Success' : ${ui>/git/status} === 'modified' ? 'Warning' : 'Information'}"/>
+            <ToolbarSpacer/>
+            <Button text="Refresh" icon="sap-icon://refresh" press=".onGitRefresh"/>
+          </OverflowToolbar></headerToolbar>
+          <content>
+            <MessageStrip text="{ui>/git/reason}" type="Information" showIcon="true" visible="{= !${ui>/git/available}}"/>
+            <Label text="Stored inactive source vs HEAD · {ui>/git/file}" visible="{ui>/git/available}"/>
+            <TextArea value="{ui>/git/diff}" editable="false" rows="8" width="100%" wrapping="None" visible="{= !!${ui>/git/diff}}"/>
+            <Text text="Stored source matches HEAD." visible="{= ${ui>/git/available} &amp;&amp; !${ui>/git/diff}}"/>
+          </content>
+        </Panel>
         <Table id="problems" items="{ui>/diagnostics}" visible="{= ${ui>/diagnostics}.length > 0}"
           mode="SingleSelectMaster" selectionChange=".onProblemSelect" sticky="ColumnHeaders">
           <headerToolbar><Toolbar><Title text="Problems ({= ${ui>/diagnostics}.length})" level="H4"/></Toolbar></headerToolbar>

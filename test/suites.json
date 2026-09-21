@@ -48,6 +48,7 @@
     "test/osd-dev.mjs",
     "test/osd-fetch.mjs",
     "test/osd-git.mjs",
+    "test/osd-git-history.mjs",
     "test/osd-host.mjs",
     "test/osd-icf-apply.mjs",
     "test/osd-icf-apc.mjs",

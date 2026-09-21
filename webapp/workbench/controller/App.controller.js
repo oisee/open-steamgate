@@ -49,6 +49,7 @@ sap.ui.define([
         objectTypes: OBJECT_TYPES, editorMode: OBJECT_TYPES[0].mode,
         objects: [], selected: {}, source: "", dirty: false,
         diagnostics: [], identity: {},
+        git: {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: ""},
         message: {text: "Choose an object type, search, and open a source.", type: "Information"}
       }), "ui");
       // Token and cookies are one handshake: no parallel first request may
@@ -101,6 +102,7 @@ sap.ui.define([
       this._set("/selected", {});
       this._set("/source", "");
       this._set("/dirty", false);
+      this._set("/git", {available: false, loading: false, branch: "-", headShort: "-", status: "", diff: "", file: "", reason: ""});
       this._showDiagnostics([]);
       this._message("Searching " + config.text + ".", "Information");
       await this._search(config.query);
@@ -145,6 +147,28 @@ sap.ui.define([
       return identity;
     },
 
+    async _loadGit(object = this._model().getProperty("/selected")) {
+      if (!object?.name) return;
+      this._set("/git/loading", true);
+      try {
+        const response = await this._request("/core/http/git/object?type=" +
+          encodeURIComponent(object.type) + "&name=" + encodeURIComponent(object.name));
+        const state = await response.json();
+        this._set("/git", {...state, loading: false,
+          branch: state.branch || "-", headShort: state.headShort || "-",
+          reason: state.reason || ""});
+      } catch (error) {
+        this._set("/git", {available: false, loading: false, branch: "-", headShort: "-",
+          status: "unavailable", diff: "", file: "", reason: error.message || String(error)});
+      }
+    },
+
+    async onGitRefresh() {
+      this._busy(true);
+      try { await this._loadGit(); }
+      finally { this._busy(false); }
+    },
+
     onSearch(event) { this._search(event.getParameter("query") || event.getSource().getValue()); },
     onSearchLive(event) {
       clearTimeout(this._searchTimer);
@@ -185,6 +209,7 @@ sap.ui.define([
         this._set("/dirty", false);
         this._showDiagnostics([]);
         this._message(`${object.name} opened.`, "Success");
+        await this._loadGit(object);
       } catch (error) { this._fail(error); }
       finally { this._busy(false); }
     },
@@ -252,6 +277,7 @@ sap.ui.define([
         this._set("/source", source);
         this._set("/dirty", false);
         this._message("Saved as inactive source. Runtime is unchanged until Activate.", "Success");
+        await this._loadGit(object);
       } finally {
         await this._request(`${object.uri}?_action=UNLOCK&lockHandle=${encodeURIComponent(handle)}`, {method: "POST"});
       }
