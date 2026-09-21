@@ -192,6 +192,10 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_PATH && await db.hasSchema()) {
+      // A persistent database keeps its business rows, but the generated
+      // repository catalog must follow the running generation. Otherwise a
+      // new BSP page is in the registry while its WWWPARAMS object is absent.
+      await upsertGeneratedMetadata(db, insert);
       return;
     }
     await db.execute(duckdbSchema(schemas));
@@ -332,5 +336,19 @@ async function refreshGenerated(db, insert) {
     await db.execute(`DELETE FROM "${table}";`);
   }
   await db.execute(statements.filter((s) => /^INSERT INTO "/i.test(s.trim())));
+  await db.commit();
+}
+
+/** Refresh generation-owned repository rows without clearing user tables.
+ * DuckDB's persistent mode previously skipped the generated INSERTs entirely
+ * after the first boot. Only the object catalog is upserted: trip facts and
+ * other application data remain untouched. */
+export async function upsertGeneratedMetadata(db, insert) {
+  const statements = Array.isArray(insert) ? insert : String(insert ?? "").split("\n").filter((s) => s.trim() !== "");
+  const owned = statements
+    .filter((s) => /^INSERT INTO "(?:tadir|wwwparams)"/i.test(s.trim()))
+    .map((s) => s.replace(/^INSERT INTO/i, "INSERT OR REPLACE INTO"));
+  if (owned.length === 0) return;
+  await db.execute(owned);
   await db.commit();
 }

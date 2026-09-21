@@ -33,7 +33,7 @@ import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
-import {inputFoldersOf} from "./osd-packs.mjs";
+import {inputFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -129,7 +129,12 @@ function walk(dir, out = []) {
 export function inputsOf(root, config = loadConfig(root)) {
   const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
   const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "").map((f) => join(root, f));
-  return {folders, libs, config: layout(root).config};
+  // BSP pages are generator inputs too. In particular, Component.js lives
+  // outside the ABAP input folders and the ABAP-only filter below excludes
+  // JavaScript. Omitting it reused a generation whose registry named a page
+  // but whose Web Repository object was not in the transpiled runtime.
+  const bspFolders = [join(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
+  return {folders, libs, bspFolders, config: layout(root).config};
 }
 
 // What the transpiler and the generators read, and nothing else: a mocha
@@ -248,6 +253,13 @@ export function hashOf(root, inputs = inputsOf(root)) {
     if (relative(root, dir) === "gen") continue;
     const files = existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : [];
     h.update(`dir ${relative(root, dir)} ${files.length}\0`);
+    for (const f of files) {
+      h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
+    }
+  }
+  for (const dir of inputs.bspFolders ?? []) {
+    const files = walk(dir).sort();
+    h.update(`bsp ${relative(root, dir)} ${files.length}\0`);
     for (const f of files) {
       h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
     }

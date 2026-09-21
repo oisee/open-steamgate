@@ -3,7 +3,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import {execFileSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {build} from "../tools/osd-build.mjs";
+import {build, hashOf} from "../tools/osd-build.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
@@ -38,6 +38,14 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     const known = named("bin/osd.mjs", /"([a-z0-9-]+\.mjs)": \(\) => import/g);
     expect(runs.length, "the build runs generators").to.be.greaterThan(5);
     expect(runs.filter((one) => known.includes(one) === false)).to.deep.equal([]);
+  });
+
+  it("renames a generation when a BSP page changes, including JavaScript", () => {
+    write("src/bsp/apps.json", JSON.stringify({ZOSD_TAXI_ANAL: {folder: "webapp/taxi"}}));
+    write("webapp/taxi/Component.js", "first");
+    const first = hashOf(root);
+    write("webapp/taxi/Component.js", "second");
+    expect(hashOf(root)).not.to.equal(first);
   });
 
   it("refuses a name twice inside one input, naming both files, and builds nothing", async () => {
