@@ -2,7 +2,9 @@
 >
 > The `feat/amdp-portable-ir` branch now runs the original `SQUARES` and the
 > clean-room `mix_rows` and `rank_rows` SQLScript through typed host control
-> flow and ordinary relational SQL on both HANA and DuckDB. Read the milestone report for the
+> flow and ordinary relational SQL on both HANA and DuckDB. The portable
+> branches of `transform` now run through host-side `IF / ELSEIF / ELSE` as
+> well. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 

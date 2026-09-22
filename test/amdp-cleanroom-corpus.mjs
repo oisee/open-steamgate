@@ -122,25 +122,24 @@ describe("independent AMDP clean-room corpus", () => {
     for (const pattern of forbidden) expect(all, pattern.toString()).to.not.match(pattern);
   });
 
-  it("classifies every unsupported synthetic method as a named refusal, never a crash or false success", () => {
+  it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
       search_cells: /inputs support only INTEGER scalars/,
       difference_cells: /EXCEPT is parsed/,
       expand_values: /inputs support only INTEGER scalars/,
       identity_cells: /CURRENT_USER is a session value/,
       optional_value: /not a resolved structured table type/,
-      transform: /If is outside/,
       control_rows: /only scalar DECLARE/,
       scalar_value: /not a resolved structured table type/,
     };
-    const executable = new Set(["mix_rows", "rank_rows"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
       const extracted = extract(source(file), logicalName);
       for (const method of extracted.methods) {
         seen.push(method.name);
-        if (executable.has(method.name)) {
+        if (compilable.has(method.name)) {
           expect(() => compileProcedure(method, extracted.types), method.name).not.to.throw();
         } else {
           expect(() => compileProcedure(method, extracted.types), method.name)
@@ -148,7 +147,7 @@ describe("independent AMDP clean-room corpus", () => {
         }
       }
     }
-    expect(seen.sort()).to.deep.equal([...Object.keys(expected), ...executable].sort());
+    expect(seen.sort()).to.deep.equal([...Object.keys(expected), ...compilable].sort());
   });
 
   it("keeps join qualifiers and the outer reference of the correlated EXISTS", () => {
@@ -300,6 +299,76 @@ describe("independent AMDP clean-room corpus", () => {
       expect(answer.columns.slice(3, 6).map((one) => one.type),
         "the ABAP I output boundary converts the engines' natural BIGINT ranking values").to.deep.equal([4, 4, 4]);
       expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("executes only transform's selected portable IF branch on DuckDB", async () => {
+    const extracted = extract(source("neutral_flow.clas.abap.txt"), "cl_neutral_flow.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "transform");
+    const mixedPrecedence = {...method, body: method.body.replace(
+      ":lv_switch = 0 OR :lv_switch IS NULL",
+      ":lv_switch = 0 OR :lv_switch = 1 AND :lv_switch = 1")};
+    expect(() => compileProcedure(mixedPrecedence, extracted.types))
+      .to.throw(UnsupportedSqlScript, /unparenthesized condition mixing AND and OR/);
+    const leakedBranchScalar = {...method, body: method.body
+      .replace("THEN\n      et_cells", "THEN\n      DECLARE lv_inner INTEGER := 1;\n      et_cells")
+      .replace("ELSEIF (:lv_switch", "ELSEIF (:lv_inner = 1 AND :lv_switch")};
+    expect(() => compileProcedure(leakedBranchScalar, extracted.types))
+      .to.throw(UnsupportedSqlScript, /unknown scalar :lv_inner/);
+    const postIfUse = {...method, body: method.body.replace(
+      "    END IF;",
+      "    END IF;\n    et_cells = SELECT * FROM :et_cells;")};
+    expect(() => compileProcedure(postIfUse, extracted.types))
+      .to.throw(UnsupportedSqlScript, /cannot prove schema assigned to ET_CELLS|unknown table variable/i);
+    const broadRegex = {...method, body: method.body.replace(
+      "REPLACE_REGEXPR('x' IN label_text WITH '' OCCURRENCE ALL)",
+      "REPLACE_REGEXPR('X' IN label_text WITH '' OCCURRENCE ALL)")};
+    expect(() => compileProcedure(broadRegex, extracted.types))
+      .to.throw(UnsupportedSqlScript, /currently measured only for literal 'x'/);
+    const compiled = compileProcedure(method, extracted.types);
+    const schema = compiled.relationParameters[0].schema;
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const input = await materializeRows(client, "FLOW_CELLS", [
+        {cell_id: 1, bucket_id: 4, amount: 2.5, stamp: "20240229", label_text: "MiXeD"},
+        {cell_id: 2, bucket_id: 4, amount: 0, stamp: null, label_text: null},
+        {cell_id: 3, bucket_id: 5, amount: -1.25, stamp: "20240301", label_text: "xaxb"},
+        {cell_id: 4, bucket_id: 5, amount: 7, stamp: "20240302", label_text: " "},
+      ], schema);
+      for (const value of [0, null]) {
+        const answer = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_SWITCH: value},
+          relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+        expect(answer.rows, `iv_switch=${value}`).to.deep.equal([
+          {CELL_ID: 1, BUCKET_ID: 4, AMOUNT: "2.50", STAMP: "20240229", LABEL_TEXT: "mixed"},
+          {CELL_ID: 2, BUCKET_ID: 4, AMOUNT: "0.00", STAMP: null, LABEL_TEXT: null},
+          {CELL_ID: 3, BUCKET_ID: 5, AMOUNT: "-1.25", STAMP: "20240301", LABEL_TEXT: "xaxb"},
+          {CELL_ID: 4, BUCKET_ID: 5, AMOUNT: "7.00", STAMP: "20240302", LABEL_TEXT: " "},
+        ]);
+        expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+      }
+      const changed = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_SWITCH: 1},
+        relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+      expect(changed.rows).to.deep.equal([
+        {CELL_ID: 1, BUCKET_ID: 4, AMOUNT: "2.50", STAMP: "20240229", LABEL_TEXT: "MiXeD"},
+        {CELL_ID: 2, BUCKET_ID: 4, AMOUNT: "0.00", STAMP: null, LABEL_TEXT: null},
+        {CELL_ID: 3, BUCKET_ID: 5, AMOUNT: "-1.25", STAMP: "20240301", LABEL_TEXT: "ab"},
+      ]);
+      expect(changed.columns[2].type,
+        "the AMDP P(8,2) boundary is present after the branch's P(12,2) expression").to.equal(19);
+      let nativeCalls = 0;
+      const native = client.native.bind(client);
+      client.native = async (...args) => { nativeCalls += 1; return native(...args); };
+      let refusal;
+      try {
+        await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_SWITCH: 10},
+          relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+      } catch (error) { refusal = error; }
+      expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+      expect(refusal.message).to.match(/SESSION_CONTEXT has no measured rendering/);
+      expect(nativeCalls, "an unsupported selected branch is refused before database I/O").to.equal(0);
     } finally {
       await client.disconnect();
     }

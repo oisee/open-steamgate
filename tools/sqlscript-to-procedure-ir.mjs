@@ -9,7 +9,7 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
+  ifElse, UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 const children = (node, kind) => (node.children ?? []).filter((one) => one.node === kind);
@@ -74,6 +74,27 @@ export function compileProcedure(method, types) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER scalars");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
+  const snapshotEnvironment = () => ({
+    relations: structuredClone(relationSchemas),
+    scalars: structuredClone(scalarTypes),
+  });
+  const restoreObject = (target, source) => {
+    for (const key of Object.keys(target)) delete target[key];
+    Object.assign(target, structuredClone(source));
+  };
+  const restoreEnvironment = (snapshot) => {
+    restoreObject(relationSchemas, snapshot.relations);
+    restoreObject(scalarTypes, snapshot.scalars);
+  };
+  const mergeEnvironment = (paths) => {
+    const common = (key) => {
+      const first = paths[0][key];
+      return Object.fromEntries(Object.entries(first).filter(([name, value]) =>
+        paths.every((path) => JSON.stringify(path[key][name]) === JSON.stringify(value))));
+    };
+    restoreObject(relationSchemas, common("relations"));
+    restoreObject(scalarTypes, common("scalars"));
+  };
   const bind = (node, fragment) => toIr(node, {
     fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
     signature: method,
@@ -113,6 +134,48 @@ export function compileProcedure(method, types) {
         else result.push(assignScalar(name, bind(child(node, "Expr"), "expression"), node));
       } else if (node.node === "While") {
         result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
+      } else if (node.node === "If") {
+        const before = snapshotEnvironment();
+        const branches = [];
+        const paths = [];
+        let current;
+        let otherwise = [];
+        const finish = () => {
+          if (current === undefined) return;
+          // Each arm begins from the same pre-IF environment. Compiling an
+          // earlier arm must not leak its table/scalar types into a later
+          // arm. Only identical facts on every reachable path survive.
+          restoreEnvironment(before);
+          const body = compileStatements({children: current.statements});
+          paths.push(snapshotEnvironment());
+          if (current.condition === undefined) otherwise = body;
+          else branches.push({condition: current.condition, body});
+        };
+        for (const part of node.children ?? []) {
+          const word = part.node === "word" ? upper(part.value) : undefined;
+          if (word === "IF" || word === "ELSEIF") {
+            finish();
+            current = {condition: null, statements: []};
+          } else if (word === "ELSE") {
+            finish();
+            current = {condition: undefined, statements: []};
+          } else if (word === "END") {
+            finish();
+            current = undefined;
+            break;
+          } else if (part.node === "Condition" && current?.condition === null) {
+            restoreEnvironment(before);
+            current.condition = bind(part, "condition");
+          } else if (part.node === "Statement" && current !== undefined) {
+            current.statements.push(part);
+          }
+        }
+        if (branches.length === 0 || branches.some((branch) => branch.condition == null)) {
+          throw new UnsupportedSqlScript("IF has no complete conditional branch", node);
+        }
+        if (otherwise.length === 0) paths.push(before);
+        mergeEnvironment(paths);
+        result.push(ifElse(branches, otherwise, node));
       } else {
         throw new UnsupportedSqlScript(`${node.node} is outside the initial portable procedural subset`, node);
       }

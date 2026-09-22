@@ -450,3 +450,29 @@ complete tie breaker over the grouped row, while `RANK` and `DENSE_RANK`
 deliberately order only by amount. This matters because the table-variable
 plan is inlined into both UNION branches: a non-deterministic row number could
 otherwise turn two logically identical branches into additional distinct rows.
+
+### 2026-09-22 — P1e selected procedural branches
+
+The tracked `transform` body now compiles to host-side `IF / ELSEIF / ELSE`.
+SQL three-valued conditions treat NULL as not true, only the selected branch
+is rebound into the final relational plan, and an unsupported function in an
+unselected branch cannot poison a portable branch. Selecting it still yields
+a named `UNSUPPORTED_SQLSCRIPT` refusal before database execution.
+
+The zero/NULL branch lowers text with `LOWER`. The 1..9 branch carries the
+exact measured `REPLACE_REGEXPR('x' IN column WITH '' OCCURRENCE ALL)` shape as
+one semantic IR call and renders DuckDB's explicit global flag, preserving
+each dialect's textual bind order. Other patterns, replacements and expression
+subjects are refused: HANA regex and DuckDB regex are not claimed to be
+generally equivalent. Decimal casts and the packed-number output boundary are
+limited to packed-to-packed precision changes at unchanged scale.
+DuckDB value tests cover both branches and NULL/text/filter edges; native and
+portable HANA agree for switches 0, 1 and 9. The session-context ELSE branch
+remains outside the capability set, so the ledger is `2 fully executable / 1
+partially executable / 7 named refusals / 0 crashes`.
+
+Each arm is bound from the same pre-`IF` type environment. Only table/scalar
+facts identical on every reachable path survive after `END IF`; a consumer of
+branch-dependent state is refused rather than typed from whichever arm the
+compiler happened to visit last. At one condition level, mixed unparenthesised
+`AND`/`OR` is likewise refused until precedence is represented explicitly.

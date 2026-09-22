@@ -26,7 +26,7 @@ CLASS cl_neutral_flow IMPLEMENTATION.
     ELSEIF (:lv_switch BETWEEN 1 AND 9) THEN
       et_cells = SELECT cell_id, bucket_id,
         CAST(amount AS DECIMAL(12, 2)) AS amount,
-        stamp, REGEXP_REPLACE(label_text, 'x', '') AS label_text
+        stamp, REPLACE_REGEXPR('x' IN label_text WITH '' OCCURRENCE ALL) AS label_text
         FROM :it_cells WHERE cell_id NOT IN (SELECT cell_id FROM :it_cells
                                              WHERE label_text = ' ');
     ELSE

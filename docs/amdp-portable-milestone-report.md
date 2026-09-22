@@ -147,13 +147,15 @@ It currently contains ten synthetic methods covering these categories:
 | `expand_values` | array/row expansion shape | array input semantics |
 | `identity_cells` | execution identity | session values not implemented |
 | `optional_value` | optional input and scalar return | scalar-return procedure shape |
-| `transform` | `IF`/`ELSEIF`, regex and session context | procedural `IF` |
+| `transform` | `IF`/`ELSEIF`, regex and session context | LOWER/regex branches execute; selected session context refuses |
 | `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
 | `rank_rows` | grouping, windows and ranking | **executable on HANA and DuckDB** |
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | scalar-return procedure shape |
 
-The current ledger is `2 executable / 8 named refusals / 0 crashes`. Parser
+The current ledger is `2 fully executable / 1 partially executable / 7 named
+refusals / 0 crashes`. `transform` is deliberately not promoted while its
+`SESSION_CONTEXT` branch remains a selected-path refusal. Parser
 success is not reported as runtime support: a tracked method body moves only
 after it executes directly, without runtime or harness rewriting, at value
 level on HANA↔HANA and DuckDB.
@@ -208,19 +210,24 @@ that contract and its cross-engine corpus exist.
 - direct-source `rank_rows`: native HANA and portable HANA agree on
   grouped ranking values; DuckDB reproduces `RANK=1,1,3` and
   `DENSE_RANK=1,1,2` for a tie fixture, and the duplicate is collapsed;
-- full SQLScript regression: 360 passing tests, with only explicit live-HANA
+- direct-source `transform`: DuckDB covers the zero/NULL and 1..9 branches;
+  native and portable HANA agree for switches 0, 1 and 9, while selecting the
+  session-context branch produces a named refusal before database I/O. Regex
+  support is intentionally the single measured literal replacement in this
+  fixture, not a claim of general HANA/DuckDB regex equivalence;
+- full SQLScript regression: 363 passing tests, with only explicit live-HANA
   cases skipped in the ordinary offline run;
-- live HANA focused suite: 6 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 7 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Procedural `IF`, targeting the safe branches of `transform`.
-2. Scalar returns and optional INTEGER inputs.
-3. `EXCEPT` as its own relational node and backend lowering.
-4. Session identity, arrays, fuzzy search, dynamic SQL, controlled errors and
+1. Scalar returns and optional INTEGER inputs.
+2. `EXCEPT` as its own relational node and backend lowering.
+3. Session identity (which completes `transform`), arrays, fuzzy search,
+   dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

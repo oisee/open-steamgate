@@ -48,6 +48,18 @@ export class FunctionCall extends Expression {
   }
 }
 
+/** HANA's regex replacement is function-shaped but uses keyword arguments:
+ * `REPLACE_REGEXPR(pattern IN subject WITH replacement OCCURRENCE ALL)`.
+ * Only the all-occurrences form measured for the portable transform branch
+ * is admitted here; flags, offsets and numbered occurrences remain named
+ * future capabilities rather than being silently discarded. */
+export class ReplaceRegexpr extends Expression {
+  getRunnable() {
+    return seq(str("REPLACE_REGEXPR"), "(", new Expr(), str("IN"), new Expr(),
+      str("WITH"), new Expr(), str("OCCURRENCE"), str("ALL"), ")");
+  }
+}
+
 /** `OVER ( PARTITION BY a, b ORDER BY c DESC )`.
  *
  *  Measured on all three engines before it was written: ROW_NUMBER, RANK,
@@ -81,6 +93,7 @@ export class Factor extends Expression {
     return altPrio(
       new Cast(),
       new Case(),
+      new ReplaceRegexpr(),
       new FunctionCall(),
       new Value(),
       seq("(", new Expr(), ")"),

@@ -167,7 +167,17 @@ export function toIr(tree, options = {}) {
       case "Cast": {
         const inner = (node.children ?? []).filter((c) => c.node === "Expr");
         const named = (node.children ?? []).find((c) => c.node === "TypeName");
-        return cast(expression(inner[0]), typeFromName(named));
+        const source = expression(inner[0]);
+        const target = typeFromName(named);
+        // The first measured decimal conversion only widens precision while
+        // preserving scale.  Parsing strings and changing scale introduce
+        // backend-specific error/rounding rules, so keep them named gaps
+        // until differential oracle rows define their semantics.
+        if (target.abap === "P"
+            && (source.type?.abap !== "P" || source.type.dec !== target.dec)) {
+          throw new BindError("decimal CAST currently requires a packed-decimal source with unchanged scale", node);
+        }
+        return cast(source, target);
       }
       case "Case": {
         // The parser keeps the two CASE forms apart; the IR has one, the
@@ -262,6 +272,21 @@ export function toIr(tree, options = {}) {
         if (window !== undefined) built.window = window;
         return built;
       }
+      case "ReplaceRegexpr": {
+        const parts = kids(node, "Expr").map(expression);
+        if (parts.length !== 3 || !hasWord(node, "OCCURRENCE") || !hasWord(node, "ALL")) {
+          throw new BindError("only REPLACE_REGEXPR ... OCCURRENCE ALL is in the measured subset", node);
+        }
+        if (parts[0]?.node !== "lit" || parts[0].value !== "x"
+            || parts[2]?.node !== "lit" || parts[2].value !== ""
+            || parts[1]?.node !== "col") {
+          throw new BindError("portable REPLACE_REGEXPR is currently measured only for literal 'x', empty replacement, and a column subject", node);
+        }
+        // Normalise the keyword spelling to semantic argument order. The
+        // lowering restores each backend's grammar while preserving bound
+        // parameter order: subject, pattern, replacement.
+        return call("REGEXP_REPLACE_ALL", [parts[1], parts[0], parts[2]], T.str);
+      }
       case "ColumnRef": {
         // **`s.k` is the column K, qualified by S -- and `nameOf` took the
         // FIRST name.** So every qualified reference lowered to the
@@ -303,7 +328,10 @@ export function toIr(tree, options = {}) {
         // guarantee the native channel exists for
         {
           const name = String(node.value).slice(1).toUpperCase();
-          return param(name, scalarTypes[name] ?? T.str);
+          if (scalarTypes[name] === undefined) {
+            throw new BindError(`unknown scalar :${name.toLowerCase()}`, node);
+          }
+          return param(name, scalarTypes[name]);
         }
       case "operator":
         if (node.value === "?") return param("p", T.str);
@@ -351,6 +379,17 @@ export function toIr(tree, options = {}) {
 
   function condition(node) {
     if (node === undefined) throw new BindError("a condition was expected here and the tree has none");
+    // The grammar retains an unparenthesised chain as one Condition. Folding
+    // it left-to-right would change SQL's AND-before-OR precedence and can
+    // select the wrong host-side IF branch. Parenthesised groups recurse as
+    // separate Condition nodes, so refusing only a level that mixes both is
+    // precise and still permits an explicit spelling of either meaning.
+    const joiners = new Set((node.children ?? [])
+      .filter((child) => child.node === "word" && ["AND", "OR"].includes(String(child.value).toUpperCase()))
+      .map((child) => String(child.value).toUpperCase()));
+    if (joiners.has("AND") && joiners.has("OR")) {
+      throw new BindError("an unparenthesized condition mixing AND and OR is refused until precedence is represented", node);
+    }
     // Read in order, because NOT binds to the term that FOLLOWS it and a
     // filtered list of children loses which one that was.
     let left;

@@ -6,7 +6,7 @@
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project} from "./sqlscript-ir.mjs";
-import {lower} from "./sqlscript-lower.mjs";
+import {lower, Refused} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
   constructor(message, node) {
@@ -29,6 +29,8 @@ export const assignRelation = (name, rel, source) =>
   ({stmt: "assign-relation", name: upper(name), rel, source});
 export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
+export const ifElse = (branches, otherwise = [], source) =>
+  ({stmt: "if", branches, otherwise, source});
 
 function integer(value, name) {
   const n = Number(value);
@@ -78,6 +80,11 @@ export function evaluateScalar(expr, scalars) {
     const name = upper(expr.name);
     if (!scalars.has(name)) throw new UnsupportedSqlScript(`unknown scalar :${name.toLowerCase()}`, expr);
     return scalars.get(name).value;
+  }
+  if (expr.node === "isnull") return evaluateScalar(expr.expr, scalars) == null;
+  if (expr.node === "not") {
+    const value = booleanOrNull(evaluateScalar(expr.expr, scalars), "NOT operand");
+    return value == null ? null : !value;
   }
   if (expr.node !== "bin") throw new UnsupportedSqlScript(`scalar ${expr.node} is not supported yet`, expr);
   const left = evaluateScalar(expr.left, scalars);
@@ -298,6 +305,15 @@ export async function runProcedure(program, {
           step(statement);
           await execute(statement.body);
         }
+      } else if (statement.stmt === "if") {
+        let selected;
+        for (const branch of statement.branches) {
+          if (booleanOrNull(evaluateScalar(branch.condition, scalars), "IF condition") === true) {
+            selected = branch.body;
+            break;
+          }
+        }
+        await execute(selected ?? statement.otherwise);
       } else {
         throw new UnsupportedSqlScript(`procedure statement ${statement.stmt} is not supported`, statement);
       }
@@ -336,10 +352,22 @@ export async function runProcedure(program, {
     if (expected.abap === "C" && ["C", "STRING"].includes(actual.abap)) {
       return {as: name, expr: cast(source, expected)};
     }
+    if (expected.abap === "P" && actual.abap === "P") {
+      if (actual.dec !== expected.dec) {
+        throw new UnsupportedSqlScript(`output ${name} packed-decimal scale conversion is not measured`);
+      }
+      return {as: name, expr: cast(source, expected)};
+    }
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
-  const compiled = lower(output, dialect, {relationRef: (handle) => client.relationRef(handle)});
+  let compiled;
+  try {
+    compiled = lower(output, dialect, {relationRef: (handle) => client.relationRef(handle)});
+  } catch (error) {
+    if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+    throw error;
+  }
   if (compiled.params.length > maxParameters) {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }

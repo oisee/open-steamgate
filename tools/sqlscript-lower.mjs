@@ -68,6 +68,7 @@ const DIALECTS = {
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
     castChar: (e, n) => `CAST(${e} AS NVARCHAR(${n}))`,
+    castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
     // HANA's own, so they pass through -- they are the reference the two
     // renderings below were measured against
     substrBefore: (s, x) => `SUBSTR_BEFORE(${s()}, ${x()})`,
@@ -111,6 +112,7 @@ const DIALECTS = {
     // toward zero, so make that step explicit as for DuckDB.
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS NUMERIC)) AS INTEGER)`,
     castChar: (e, n) => `SUBSTRING(CAST(${e} AS VARCHAR) FROM 1 FOR ${n})`,
+    castDec: (e, n, s) => `CAST(${e} AS NUMERIC(${n}, ${s}))`,
     substrBefore: (s, x) =>
       `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, strpos(${s()}, ${x()}) - 1) ELSE '' END`,
     substrAfter: (s, x) =>
@@ -141,6 +143,7 @@ const DIALECTS = {
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS DOUBLE)) AS INTEGER)`,
     // CAST to a character type does not truncate here and does on HANA
     castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
     // `SUBSTR_BEFORE` / `SUBSTR_AFTER` are HANA's and exist nowhere else, so
     // they are built out of `instr` and `substr`, which both engines have.
     // The edges were measured rather than assumed: on HANA a miss answers
@@ -337,6 +340,12 @@ export function lower(rel, dialectName, options = {}) {
       case "cast":
         if (e.type?.abap === "I") return d.castInt(expr(e.expr));
         if (e.type?.abap === "C" && e.type.len !== undefined) return d.castChar(expr(e.expr), Number(e.type.len));
+        if (e.type?.abap === "P" && e.type.len !== undefined && e.type.dec !== undefined && d.castDec !== undefined) {
+          if (e.expr?.type?.abap !== "P" || e.expr.type.dec !== e.type.dec) {
+            throw new Refused("decimal cast requires a packed-decimal source with unchanged scale");
+          }
+          return d.castDec(expr(e.expr), Number(e.type.len), Number(e.type.dec));
+        }
         throw new Refused(`cast to ${JSON.stringify(e.type)} not lowered yet`);
       case "isnull": return `(${expr(e.expr)} IS NULL)`;
       case "not": return `(NOT ${expr(e.expr)})`;
@@ -361,6 +370,22 @@ export function lower(rel, dialectName, options = {}) {
         return `(CASE ${whens}${other} END)`;
       }
       case "call": {
+        if (e.fn === "REGEXP_REPLACE_ALL") {
+          if (e.args.length !== 3) throw new Refused("REGEXP_REPLACE_ALL requires subject, pattern and replacement");
+          if (e.args[0]?.node !== "col" || e.args[1]?.node !== "lit" || e.args[1].value !== "x"
+              || e.args[2]?.node !== "lit" || e.args[2].value !== "") {
+            throw new Refused("REGEXP_REPLACE_ALL is measured only for a column subject, literal 'x', and empty replacement");
+          }
+          if (dialectName === "hana") {
+            // HANA's textual order is pattern, subject, replacement, so
+            // render in exactly that order: rendering pushes bound values.
+            return `REPLACE_REGEXPR(${expr(e.args[1])} IN ${expr(e.args[0])} WITH ${expr(e.args[2])} OCCURRENCE ALL)`;
+          }
+          if (dialectName === "duckdb") {
+            return `REGEXP_REPLACE(${expr(e.args[0])}, ${expr(e.args[1])}, ${expr(e.args[2])}, 'g')`;
+          }
+          throw new Refused(`REGEXP_REPLACE_ALL has no measured rendering on ${dialectName}`);
+        }
         if (d.functions instanceof Set && !d.functions.has(e.fn)) {
           throw new Refused(`the function ${e.fn} has not been measured on ${dialectName}`);
         }

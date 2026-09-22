@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {T, lit, param, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+  ifElse, runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 
 const p = (name, type = T.int) => param(name, type);
 
@@ -162,6 +162,19 @@ describe("the typed SQLScript procedural IR", function () {
     try { await runProcedure(invalid, {client, dialect: "duckdb"}); } catch (caught) { error = caught; }
     expect(error).to.be.instanceOf(UnsupportedSqlScript);
     expect(error.message).to.contain("requires a boolean or NULL");
+  });
+
+  it("executes only the first true IF branch and treats NULL as not true", async () => {
+    const row = (id) => assignRelation("OUT", project(scan("DUMMY"), [{as: "ID", expr: lit(id, T.int)}]));
+    const program = procedure({output: "OUT", outputSchema: {ID: T.int}, body: [
+      ifElse([
+        {condition: lit(null, T.bool), body: [row(1)]},
+        {condition: lit(true, T.bool), body: [row(2)]},
+        {condition: lit(true, T.bool), body: [row(3)]},
+      ], [row(4)]),
+    ]});
+    const answer = await runProcedure(program, {client, dialect: "duckdb"});
+    expect(answer.rows).to.deep.equal([{ID: 2}]);
   });
 
   it("validates execution budgets before interpreting the body", async () => {

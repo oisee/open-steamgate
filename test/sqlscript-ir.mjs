@@ -243,6 +243,21 @@ describe("SQLScript IR: what it refuses", () => {
       .to.throw(Refused, /not lowered yet/);
   });
 
+  it("rechecks the measured decimal and regex subset at the public lowering boundary", () => {
+    const changedScale = project(scan("A"), [
+      {as: "D", expr: cast(col("D", T.dec(8, 3)), T.dec(12, 2))},
+    ]);
+    expect(() => lower(changedScale, "duckdb"))
+      .to.throw(Refused, /packed-decimal source with unchanged scale/);
+
+    const broadRegex = project(scan("A"), [
+      {as: "S", expr: call("REGEXP_REPLACE_ALL",
+        [col("S", T.str), lit("[x]", T.char(3)), lit("", T.char(0))], T.str)},
+    ]);
+    expect(() => lower(broadRegex, "duckdb"))
+      .to.throw(Refused, /measured only for a column subject, literal 'x'/);
+  });
+
   it("refuses an unresolved table variable rather than reading a table of that name", async () => {
     const {varRef} = await import("../tools/sqlscript-ir.mjs");
     const rel = filter(varRef("lt1"), bin(">", col("N"), lit(0, T.int), T.bool));
