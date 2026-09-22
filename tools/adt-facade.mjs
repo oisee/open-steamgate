@@ -419,13 +419,15 @@ const TEMPLATE_LINKS = {
     ["http://www.sap.com/adt/categories/datapreview/ddic/colcount", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName,colNumber}"],
     ["http://www.sap.com/adt/categories/datapreview/ddic/launchfreestyle", "/sap/bc/adt/datapreview/freestyle"],
   ],
-  // two of the system's nine: the ones a preview needs. The association
-  // links (list, navigation, follow, refresh) are how the client walks from
-  // a row into a related entity, and none of that is served yet, so none of
-  // it is offered — a template we advertise is a promise.
+  // CDSDataPreviewPage.fetchCount reads associationrefresh's URI template
+  // even for a plain CDS count, before sending the count SELECT. Without
+  // this exact A4H relation it dereferences null inside Eclipse. For the
+  // plain count it fills ddlSourceName and leaves action empty, which is
+  // answered by the existing CDS POST route.
   "datapreview/cds": [
     ["http://www.sap.com/adt/categories/datapreview/cds/metadata", "/sap/bc/adt/datapreview/cds/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/cds", "/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}"],
+    ["http://www.sap.com/adt/categories/datapreview/cds/associationrefresh", "/sap/bc/adt/datapreview/cds{?action,rowNumber,targetType,ddlSourceName}"],
     ["http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle", "/sap/bc/adt/datapreview/cds"],
   ],
   "checkruns": [

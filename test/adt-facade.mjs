@@ -1201,6 +1201,10 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const table = await call("/datapreview/ddic?ddicEntityName=ZSTG_PHOTO&dataAging=false", {method: "POST",
         body: "SELECT COUNT( * ) FROM ZSTG_PHOTO"});
       expect(table.status, "ADT's COUNT( * ) spelling works for TABL too").to.equal(200);
+      const cdsViaRefresh = await call("/datapreview/cds?ddlSourceName=ZC_STG_BOOKING", {method: "POST",
+        body: "SELECT COUNT( * ) FROM ZC_STG_BOOKING"});
+      expect(cdsViaRefresh.status, "CDS count uses the associationrefresh template").to.equal(200);
+      expect(await cdsViaRefresh.text()).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
     });
 
     it("describes a CDS view by its element names, not its columns", async () => {
@@ -1244,6 +1248,8 @@ describe("tools/adt-facade: OSD answers ADT", () => {
         .to.contain('template="/sap/bc/adt/datapreview/freestyle"');
       expect(xml, "the CDS collection carries the system's matching launch relation")
         .to.contain("http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle");
+      expect(xml, "CDS count dereferences the A4H associationrefresh template")
+        .to.contain('rel="http://www.sap.com/adt/categories/datapreview/cds/associationrefresh" template="/sap/bc/adt/datapreview/cds{?action,rowNumber,targetType,ddlSourceName}"');
       expect(xml, "the association walks are not served, so they are not offered")
         .to.not.contain("datapreview/cds/associationlist");
     });
