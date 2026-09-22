@@ -62,6 +62,11 @@ describe("the SQLScript grammar", () => {
     expect(leaves(t, "host")).to.include(":lv_values");
   });
 
+  it("accepts HANA's DECLARE CURSOR name order and rejects the reversed synthetic spelling", () => {
+    expect(() => tree("DECLARE CURSOR c_rows FOR SELECT id FROM :input;")).not.to.throw();
+    expect(() => tree("DECLARE c_rows CURSOR FOR SELECT id FROM :input;")).to.throw(ParseError);
+  });
+
   it("requires balanced parentheses around a WHILE condition", () => {
     expect(() => tree("WHILE (1 = 1 DO END WHILE;")).to.throw(ParseError);
     expect(() => tree("WHILE 1 = 1) DO END WHILE;")).to.throw(ParseError);

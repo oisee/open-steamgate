@@ -250,6 +250,13 @@ describe("SQLScript IR: what it refuses", () => {
     expect(() => lower(changedScale, "duckdb"))
       .to.throw(Refused, /packed-decimal source with unchanged scale/);
 
+    const exactInteger = project(scan("A"), [
+      {as: "D", expr: cast(col("I", T.int), T.dec(8, 3))},
+    ]);
+    expect(lower(exactInteger, "duckdb").sql).to.include('CAST("I" AS DECIMAL(8, 3))');
+    expect(() => lower(exactInteger, "postgres"))
+      .to.throw(Refused, /INTEGER or a packed-decimal source/);
+
     const broadRegex = project(scan("A"), [
       {as: "S", expr: call("REGEXP_REPLACE_ALL",
         [col("S", T.str), lit("[x]", T.char(3)), lit("", T.char(0))], T.str)},

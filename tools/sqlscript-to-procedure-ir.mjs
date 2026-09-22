@@ -104,6 +104,7 @@ export function compileProcedure(method, types) {
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
   const arrayValues = Object.create(null);
+  const cursorNames = new Set();
   if (output.kind === "scalar") scalarTypes[output.name] = output.type;
   const snapshotEnvironment = () => ({
     relations: structuredClone(relationSchemas),
@@ -140,11 +141,49 @@ export function compileProcedure(method, types) {
         : (directStatements.has(wrapper.node) ? wrapper : undefined);
       if (node === undefined) continue;
       if (node.node === "Declare") {
+        if ((node.children ?? []).some((one) => one.node === "word" && upper(one.value) === "CURSOR")) {
+          if (!allowArrayDeclarations) {
+            throw new UnsupportedSqlScript("initial CURSOR declarations must be top-level and unconditional", node);
+          }
+          const name = nameOf(child(node, "Name"));
+          if (scalarTypes[name] !== undefined || relationSchemas[name] !== undefined || cursorNames.has(name)) {
+            throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
+          }
+          const occurrences = terminalLeaves(tree).filter((one) =>
+            one.node === "identifier" && upper(one.value) === name).length;
+          if (occurrences !== 1) {
+            throw new UnsupportedSqlScript("initial CURSOR support is limited to a declared but unused cursor", node);
+          }
+          const query = child(node, "SetOperation");
+          if (query === undefined) throw new UnsupportedSqlScript("CURSOR declaration requires a query", node);
+          const selects = children(query, "Select");
+          const select = selects.length === 1 ? selects[0] : undefined;
+          const items = select === undefined ? [] : children(select, "SelectItem");
+          const sources = select === undefined ? [] : children(select, "Source");
+          const sourceLeaves = sources.length === 1 ? terminalLeaves(sources[0]) : [];
+          const directColumns = items.length > 0 && items.every((item) =>
+            exactWrapped(child(item, "Expr"), "ColumnRef") !== undefined
+            && (item.children ?? []).every((one) => ["Expr", "word"].includes(one.node)));
+          const directSource = sourceLeaves.length === 1 && sourceLeaves[0].node === "host"
+            && relationNames.has(upper(String(sourceLeaves[0].value).slice(1)));
+          const plainSelect = select !== undefined && (select.children ?? []).every((one) =>
+            ["word", "SelectItem", "Source"].includes(one.node));
+          if (!directColumns || !directSource || !plainSelect) {
+            throw new UnsupportedSqlScript(
+              "initial unused CURSOR query requires a direct column projection from one table input", node);
+          }
+          // Binding is still required even though the unopened resource is
+          // erased: every projected column must exist and retain its type.
+          bind(query, "relation");
+          cursorNames.add(name);
+          continue;
+        }
         if ((node.children ?? []).some((one) => one.node === "word" && upper(one.value) === "ARRAY")) {
           if (!allowArrayDeclarations) {
             throw new UnsupportedSqlScript("initial ARRAY declarations must be top-level and unconditional", node);
           }
           const name = nameOf(child(node, "Name"));
+          if (cursorNames.has(name)) throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
           if (Object.keys(arrayValues).length > 0) {
             throw new UnsupportedSqlScript("initial portable subset supports one ARRAY declaration exactly", node);
           }
@@ -178,10 +217,11 @@ export function compileProcedure(method, types) {
           continue;
         }
         if (child(node, "ColumnDef") !== undefined || (node.children ?? []).some((one) =>
-          one.node === "word" && ["TABLE", "CURSOR"].includes(upper(one.value)))) {
+          one.node === "word" && upper(one.value) === "TABLE")) {
           throw new UnsupportedSqlScript("only scalar DECLARE belongs to the initial portable subset", node);
         }
         const name = nameOf(child(node, "Name"));
+        if (cursorNames.has(name)) throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
         const type = bind(child(node, "TypeName"), "type");
         if (type.abap !== "I" || !["INT", "INTEGER"].includes(nameOf(child(node, "TypeName")))) {
           throw new UnsupportedSqlScript("initial portable DECLARE supports only INTEGER exactly", node);
@@ -230,6 +270,20 @@ export function compileProcedure(method, types) {
         }
       } else if (node.node === "While") {
         result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
+      } else if (node.node === "Block") {
+        const mode = (node.children ?? []).filter((one) => one.node === "word")
+          .map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one));
+        const statements = children(node, "Statement");
+        const statement = statements.length === 1
+          ? (statements[0].children ?? []).find((one) => one.node !== "word")
+          : undefined;
+        const assignsOutput = statement?.node === "Assignment"
+          && nameOf(child(statement, "Name")) === output.name;
+        if (JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"]) || !assignsOutput) {
+          throw new UnsupportedSqlScript(
+            "initial block support requires BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output", node);
+        }
+        result.push(...compileStatements({children: statements}));
       } else if (node.node === "If") {
         const before = snapshotEnvironment();
         const branches = [];

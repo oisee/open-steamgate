@@ -343,8 +343,10 @@ export function lower(rel, dialectName, options = {}) {
         if (e.type?.abap === "I") return d.castInt(expr(e.expr));
         if (e.type?.abap === "C" && e.type.len !== undefined) return d.castChar(expr(e.expr), Number(e.type.len));
         if (e.type?.abap === "P" && e.type.len !== undefined && e.type.dec !== undefined && d.castDec !== undefined) {
-          if (e.expr?.type?.abap !== "P" || e.expr.type.dec !== e.type.dec) {
-            throw new Refused("decimal cast requires a packed-decimal source with unchanged scale");
+          const exactInteger = e.expr?.type?.abap === "I" && ["hana", "duckdb"].includes(dialectName);
+          const unchangedPacked = e.expr?.type?.abap === "P" && e.expr.type.dec === e.type.dec;
+          if (!exactInteger && !unchangedPacked) {
+            throw new Refused("decimal cast requires INTEGER or a packed-decimal source with unchanged scale");
           }
           return d.castDec(expr(e.expr), Number(e.type.len), Number(e.type.dec));
         }

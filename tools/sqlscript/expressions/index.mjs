@@ -334,7 +334,7 @@ export class Declare extends Expression {
     return seq(str("DECLARE"),
       altPrio(
         seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
-        seq(new Name(), str("CURSOR"), str("FOR"), new SetOperation()),
+        seq(str("CURSOR"), new Name(), str("FOR"), new SetOperation()),
         seq(new Name(), new TypeName(), opt(str("ARRAY")), opt(seq(altPrio(":=", "="), new Expr())))),
       ";");
   }

@@ -159,6 +159,66 @@ describe("mix_rows: clean-room SQLScript against portable HANA SQL", function ()
   });
 });
 
+describe("control_rows: unused cursor and sequential block on the same HANA", function () {
+  this.timeout(60000);
+
+  liveIt("matches native SQLScript without claiming OPEN or FETCH support", async () => {
+    if (process.env.STG_DB_FRESH === "1") {
+      throw new Error("live AMDP differential refuses STG_DB_FRESH=1 because it must never reset a schema");
+    }
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_matrix.clas.abap.txt", import.meta.url), "utf8");
+    const seed = JSON.parse(readFileSync(new URL("fixtures/amdp-cleanroom/seed-data.json", import.meta.url), "utf8"));
+    const extracted = extract(source, "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "control_rows");
+    const portable = compileProcedure(method, extracted.types);
+    const relationSchema = portable.relationParameters.find((one) => one.name === "IT_LEFT").schema;
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const suffix = randomBytes(6).toString("hex").toUpperCase();
+    const disposableClass = `ZOSD_C_${suffix}`;
+    const procedureName = `"${schema}"."${disposableClass}=>CONTROL_ROWS"`;
+    const tableName = `"${schema}"."ZOSD_CONTROL_${suffix}"`;
+    let procedureCreated = false;
+    let tableCreated = false;
+    const normalized = (rows) => rows.map((row) => Object.fromEntries(Object.entries(row)
+      .map(([key, value]) => [key.toUpperCase(), value == null ? null : String(value)])))
+      .sort((left, right) => Number(left.KEY_ID) - Number(right.KEY_ID));
+
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(disposableClass, method, schema, extracted.types), expect: "none"});
+      procedureCreated = true;
+      const definition = parameterType(method.parameters[0].abapType, extracted.types);
+      const columns = /^TABLE\s*\((.*)\)$/is.exec(definition)?.[1];
+      if (columns === undefined) throw new Error(`${method.parameters[0].abapType} did not resolve to a HANA table type`);
+      await client.native({sql: `CREATE COLUMN TABLE ${tableName} (${columns})`, expect: "none"});
+      tableCreated = true;
+      const fields = Object.entries(relationSchema);
+      for (const row of seed.leftRows) {
+        await client.native({sql: `INSERT INTO ${tableName} VALUES (${fields.map(() => "?").join(", ")})`,
+          params: fields.map(([field, type]) => ({name: field, value: row[field.toLowerCase()] ?? null,
+            type: seamType(type), isNull: row[field.toLowerCase()] == null})), expect: "none"});
+      }
+      const left = refTo({ref: tableName, kind: "materialised", reason: "typed clean-room control fixture"}, relationSchema);
+      for (const value of [0, null, 10]) {
+        const native = await callAmDP(client.client, procedureName, method,
+          {it_left: seed.leftRows, iv_limit: value}, extracted.types);
+        const lowered = await runProcedure(portable, {client, dialect: "hana", inputs: {IV_LIMIT: value},
+          relationInputs: {IT_LEFT: left}, inputCatalogue: {DUMMY: {}}});
+        expect(normalized(lowered.rows), `iv_limit=${value}`).to.deep.equal(normalized(native.et_mix));
+        expect(lowered.trace).to.include({engine: "hana", fallback: false, databaseStatements: 1});
+      }
+    } finally {
+      try {
+        if (procedureCreated) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+        if (tableCreated) await client.native({sql: `DROP TABLE ${tableName}`, expect: "none"}).catch(() => undefined);
+      } finally {
+        await client.disconnect();
+      }
+    }
+  });
+});
+
 describe("rank_rows: clean-room windows against portable HANA SQL", function () {
   this.timeout(60000);
 

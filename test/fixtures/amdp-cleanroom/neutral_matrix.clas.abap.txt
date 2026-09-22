@@ -102,7 +102,7 @@ CLASS cl_neutral_matrix IMPLEMENTATION.
   METHOD control_rows BY DATABASE PROCEDURE FOR HDB
                       LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
     DECLARE lv_total INTEGER := 0;
-    DECLARE lc_values CURSOR FOR SELECT key_id, amount FROM :it_left;
+    DECLARE CURSOR lc_values FOR SELECT key_id, amount FROM :it_left;
     IF (:iv_limit > 0) THEN
       lv_total := :iv_limit;
     ELSE

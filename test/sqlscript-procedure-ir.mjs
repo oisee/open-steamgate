@@ -88,6 +88,15 @@ describe("the typed SQLScript procedural IR", function () {
     expect(answer.outputSchema).to.deep.equal({ID: T.int, LABEL: T.char(20), SQUARE: T.int});
   });
 
+  it("applies the declared packed-decimal type to an exact INTEGER output", async () => {
+    const program = procedure({output: "OUT", outputSchema: {FACTOR: T.dec(8, 3)}, body: [
+      assignRelation("OUT", project(scan("DUMMY"), [{as: "FACTOR", expr: lit(0, T.int)}])),
+    ]});
+    const answer = await runProcedure(program, {client, dialect: "duckdb"});
+    expect(answer.rows).to.deep.equal([{FACTOR: "0.000"}]);
+    expect(answer.outputSchema).to.deep.equal({FACTOR: T.dec(8, 3)});
+  });
+
   it("captures each iteration's scalar and previous relation version", async () => {
     const answer = await runProcedure(squaresProgram(), {client, dialect: "duckdb", inputs: {IV_COUNT: 3}});
     expect(answer.rows.sort((a, b) => Number(a.ID) - Number(b.ID)).map((row) => [row.ID, row.SQUARE]))

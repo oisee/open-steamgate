@@ -184,12 +184,12 @@ It currently contains ten synthetic methods covering these categories:
 | `transform` | `IF`/`ELSEIF`, regex and session context | **all branches executable on HANA and DuckDB** |
 | `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
 | `rank_rows` | grouping, windows and ranking | **executable on HANA and DuckDB** |
-| `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
+| `control_rows` | unused typed cursor declaration, sequential block with one procedure-output assignment and conditional | **executable on HANA and DuckDB; OPEN/FETCH deliberately unsupported** |
 | `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current clean-room ledger is `9 fully executable / 1 named refusal / 0
+The current clean-room ledger is `10 fully executable / 0 named refusals / 0
 crashes`; including the original `SQUARES` showcase, the live demo reads
-`10 executed / 0 partial / 1 refused`. Parser
+`11 executed / 0 partial / 0 refused`. Parser
 success is not reported as runtime support: a tracked method body moves only
 after it executes directly, without body rewriting, at value level. Relational
 methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
@@ -289,20 +289,18 @@ fuzzy-search compatibility claim.
 - direct-source `search_cells`: native and portable HANA agree on exact,
   substring, unrelated, NULL-label, empty-query and NULL-query cases; DuckDB
   returns the same fixed integer scores and mapping values in one statement;
-- full SQLScript/AMDP regression: 394 passing tests and 17 explicit live
+- full SQLScript/AMDP regression: 407 passing tests and 17 explicit live
   integration cases pending in the ordinary offline run;
-- live HANA focused suite: 14 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 15 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Execute the tracked cursor/block/conditional case rather than merely
-   parsing its declaration.
-2. Continue general composition: nested calls, shared caller transaction and
+1. Continue general composition: nested calls, shared caller transaction and
    the unchanged ABAP Unit entry path.
-3. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
+2. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
    separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

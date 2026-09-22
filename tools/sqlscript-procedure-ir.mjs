@@ -476,6 +476,12 @@ export async function runProcedure(program, {
       }
       return {as: name, expr: cast(source, expected)};
     }
+    // INTEGER is exact and has no fractional component. Both measured
+    // backends can therefore apply the declared packed-decimal precision and
+    // scale at the AMDP output boundary without an intermediate float.
+    if (expected.abap === "P" && actual.abap === "I") {
+      return {as: name, expr: cast(source, expected)};
+    }
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);

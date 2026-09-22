@@ -115,9 +115,9 @@
 
   <main class="shell">
     <div class="grid kpis">
-      <article class="card"><div class="number" style="color:var(--mint)">10 / 11</div><div class="label">showcase-методов исполняются</div><div class="note">Оригинальные тела; один честный refusal.</div></article>
-      <article class="card"><div class="number" style="color:var(--cyan)">394</div><div class="label">offline regression tests</div><div class="note">17 live-интеграций пропускаются без HANA.</div></article>
-      <article class="card"><div class="number" style="color:var(--violet)">14 / 14</div><div class="label">live HANA differential</div><div class="note">Native SQLScript против portable ordinary SQL.</div></article>
+      <article class="card"><div class="number" style="color:var(--mint)">11 / 11</div><div class="label">showcase-методов исполняются</div><div class="note">Оригинальные тела; HANA fallback отсутствует.</div></article>
+      <article class="card"><div class="number" style="color:var(--cyan)">407</div><div class="label">offline regression tests</div><div class="note">17 live-интеграций пропускаются без HANA.</div></article>
+      <article class="card"><div class="number" style="color:var(--violet)">15 / 15</div><div class="label">live HANA differential</div><div class="note">Native SQLScript против portable ordinary SQL.</div></article>
       <article class="card"><div class="number" style="color:var(--amber)">4%</div><div class="label">ширина рабочего A4H-корпуса</div><div class="note">16 из 364 тел lower целиком. Это важная честная цифра.</div></article>
     </div>
 
@@ -183,7 +183,7 @@
         <div class="case"><b>difference_cells</b><p>EXCEPT DISTINCT, duplicates и NULL row equality.</p></div>
         <div class="case"><b>search_cells</b><p>Простой исполняемый search baseline; полный fuzzy честно отложен.</p></div>
         <div class="case"><b>optional_value + scalar_value</b><p>RETURNING scalar, optional omission и zero database statements.</p></div>
-        <div class="case"><b>control_rows</b><p><span class="later">Единственный refusal:</span> cursor declaration + sequential block. Cursor не используется — это следующий узкий срез, не заявление о general cursor loops.</p></div>
+        <div class="case"><b>control_rows</b><p><span class="ok">Исполняется:</span> typed unused cursor + sequential block с одним присваиванием в procedure output. Это не заявление о поддержке OPEN, FETCH или cursor loops.</p></div>
       </div>
     </section>
 
@@ -213,7 +213,7 @@
       <div class="eyebrow">Ближайший маршрут</div>
       <h2>От showcase к полезному ядру</h2>
       <div class="roadmap">
-        <div class="mile"><div><h3>Закрыть control_rows</h3><p>Typed cursor declaration как неиспользуемый resource + sequential block semantics. Не притворяться, что OPEN/FETCH уже готовы.</p></div></div>
+        <div class="mile"><div><h3>✓ control_rows закрыт</h3><p>HANA oracle исправил порядок DECLARE CURSOR; typed unused resource и sequential block с одним output-assignment совпали на native и portable paths. OPEN/FETCH по-прежнему вне claim.</p></div></div>
         <div class="mile"><div><h3>Composition</h3><p>Nested AMDP call, shared execution context и одна транзакция между ABAP SQL fixture и AMDP read.</p></div></div>
         <div class="mile"><div><h3>Оригинальный ABAP Unit</h3><p>Неизменённый тест вызывает неизменённый AMDP на DuckDB без доступного HANA fallback.</p></div></div>
         <div class="mile"><div><h3>Ширина по histogram</h3><p>FOR, table functions in FROM, client/session parameters и catalogue closure — в порядке реально разблокируемых тел.</p></div></div>

@@ -18,6 +18,7 @@ describe("the Portable AMDP progress demo", function () {
     const byMethod = new Map(report.cases.map((one) => [one.method, one]));
     expect(report.schema).to.equal("osg-amdp-demo/v1");
     expect(report.cases).to.have.length(11);
+    expect(report.counts).to.deep.equal({executed: 11, partial: 0, refused: 0});
     expect(byMethod.get("squares").portable.status).to.equal("executed");
     expect(byMethod.get("squares").portable.runs[0].rows).to.have.length(4);
     expect(byMethod.get("squares").portable.runs[0].trace).to.include({engine: "duckdb", fallback: false});

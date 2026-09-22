@@ -515,6 +515,32 @@ on HANA. This is not declared a portable linguistic profile. The demo advances
 to `10 executed / 0 partial / 1 refused`; the remaining refusal is
 `control_rows` cursor/block execution.
 
+### 2026-09-22 — P1m complete showcase: unused cursor and sequential block
+
+The original `control_rows` body now moves the demo to `11 executed / 0
+partial / 0 refused`. HANA itself first rejected the synthetic spelling
+`DECLARE name CURSOR FOR`; the oracle established and the grammar now requires
+the canonical `DECLARE CURSOR name FOR`. The old reversed spelling has a
+negative parser test so the portable frontend cannot remain accidentally
+broader than SQLScript.
+
+This is deliberately narrower than general cursor support. The declaration
+must be top-level, unconditional and unused. Its query is limited to a direct
+projection of known columns from one table input and is fully bound and
+type-checked; functions, predicates, joins and set operations refuse before
+the unopened resource is erased. Any reference to the cursor refuses;
+`OPEN`, `FETCH` and cursor loops are not claimed. Likewise,
+the accepted block is exactly `BEGIN SEQUENTIAL EXECUTION` with one assignment
+to the procedure output; parallel, local-declaration, other-target and
+multi-statement blocks remain named refusals.
+
+The case also added an exact AMDP output-boundary conversion from INTEGER to
+packed decimal. It lowers as an explicit DECIMAL cast, never through floating
+point. DuckDB executes the original source for zero, NULL and populated
+limits; native SQLScript and portable ordinary HANA SQL return equal typed
+rows for the same inputs. The full offline SQLScript/AMDP run is 407 passing
+with 17 live cases pending, and the focused live HANA suite is 15 passing.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

@@ -124,10 +124,8 @@ describe("independent AMDP clean-room corpus", () => {
   });
 
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
-    const expected = {
-      control_rows: /only scalar DECLARE/,
-    };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values", "search_cells"]);
+    const expected = {};
+    const compilable = new Set(["mix_rows", "rank_rows", "control_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values", "search_cells"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -143,6 +141,59 @@ describe("independent AMDP clean-room corpus", () => {
       }
     }
     expect(seen.sort()).to.deep.equal([...Object.keys(expected), ...compilable].sort());
+  });
+
+  it("executes the unused cursor and one-statement sequential block case on DuckDB", async () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "control_rows");
+    const compiled = compileProcedure(method, extracted.types);
+    const schema = compiled.relationParameters.find((one) => one.name === "IT_LEFT").schema;
+    const seed = JSON.parse(readFileSync(join(root, "seed-data.json"), "utf8"));
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const left = await materializeRows(client, "CONTROL_LEFT", seed.leftRows, schema);
+      for (const value of [0, null]) {
+        const empty = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: value},
+          relationInputs: {IT_LEFT: left}, inputCatalogue: {DUMMY: {}}});
+        expect(empty.rows, `iv_limit=${value}`).to.deep.equal([]);
+      }
+      const all = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 10},
+        relationInputs: {IT_LEFT: left}, inputCatalogue: {DUMMY: {}}});
+      expect(all.rows).to.have.length(seed.leftRows.length);
+      expect(all.columns.map((one) => one.name)).to.deep.equal([
+        "KEY_ID", "GROUP_ID", "AMOUNT", "DAY_VALUE", "NOTE_TEXT", "CODE_TEXT", "FACTOR",
+      ]);
+      expect(all.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("keeps the cursor and sequential-block support deliberately narrow", () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "control_rows");
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "BEGIN SEQUENTIAL EXECUTION", "BEGIN PARALLEL EXECUTION")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "et_mix = SELECT", "lc_values = SELECT")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /declared but unused cursor/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "LIMIT :lv_total;", "LIMIT :lv_total;\n      lv_total := 1;")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /exactly one assignment to the procedure output/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      /et_mix = SELECT[\s\S]*?LIMIT :lv_total;/,
+      "DECLARE lv_inner INTEGER := 1;")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /exactly one assignment to the procedure output/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "DECLARE CURSOR lc_values FOR SELECT key_id, amount FROM :it_left;",
+      "DECLARE CURSOR lc_values FOR SELECT key_id, amount FROM :it_left;\n    DECLARE lc_values INTEGER;")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /declared but unused cursor|duplicate declaration LC_VALUES/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "SELECT key_id, amount FROM :it_left",
+      "SELECT MYSTERY(key_id) AS key_id, amount FROM :it_left")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /direct column projection from one table input/);
   });
 
   it("keeps join qualifiers and the outer reference of the correlated EXISTS", () => {

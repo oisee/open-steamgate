@@ -49,7 +49,7 @@ const CONSTRUCTS = [
   ["FOR loop", /\bFOR\s+[a-z_][\w]*\s+IN\b/i, "B 6.3"],
   ["WHILE loop", /\bWHILE\b[\s\S]{0,120}?\bDO\b/i, "B 6.3"],
   ["BREAK / CONTINUE", /\b(BREAK|CONTINUE)\b/i, "B 6.3"],
-  ["cursor", /\bDECLARE\s+[a-z_][\w]*\s+CURSOR\b|\bOPEN\s+[a-z_][\w]*\s*;/i, "B 6.4"],
+  ["cursor", /\bDECLARE\s+CURSOR\s+[a-z_][\w]*\b|\bOPEN\s+[a-z_][\w]*\s*;/i, "B 6.4"],
   ["array", /\bARRAY_AGG\s*\(|\bUNNEST\s*\(|\bCARDINALITY\s*\(|\bARRAY\s*\(/i, "B 6.5"],
   ["COMMIT / ROLLBACK", /\b(COMMIT|ROLLBACK)\b/i, "B 6.6"],
   ["dynamic SQL", /\bEXEC\b|\bEXECUTE\s+IMMEDIATE\b|\bAPPLY_FILTER\s*\(/i, "B 6.7"],

@@ -11,7 +11,7 @@
 
 The illustrated report explains the architecture, the HANA/DuckDB proof,
 what already forms a useful read-only analytical core, and the honest gap
-between the deep 10-of-11 showcase and broad A4H corpus coverage. The
+between the complete 11-of-11 showcase and broad A4H corpus coverage. The
 detailed, source-oriented companion is the
 [milestone report](docs/amdp-portable-milestone-report.md).
 
