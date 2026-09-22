@@ -493,6 +493,25 @@ execution still refuses before SQL because approximate score typing and
 matching semantics have not been defined. The demo count intentionally stays
 `9 executed / 0 partial / 2 refused`.
 
+### P1l — Versioned fuzzy-text profiles
+
+[ADR 0002](adr/0002-portable-and-native-fuzzy-text-profiles.md) separates two
+contracts that must not be reported as interchangeable. The first is a small
+`portable-deterministic` profile whose normalisation, score, classification
+and ordering agree exactly across supported backends. The second is
+`native-fuzzy`: backend scores may differ, while a published synthetic corpus
+enforces behavioural invariants, top-K recall, precision, false-positive
+bounds and deterministic OSG-owned tie breaking.
+
+The next implementation slice specifies and measures version 1 of the
+deterministic profile and its normative reference evaluator, represents their
+identity in typed IR, and executes the same conformance matrix on portable
+ordinary HANA SQL and DuckDB. Only after that exact baseline is green will
+backend-qualified native HANA and DuckDB profiles be admitted through frozen
+calibration and held-out quality gates. `search_cells` remains refused until
+it names an executable profile rather than relying on a function-shaped
+placeholder.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

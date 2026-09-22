@@ -210,6 +210,9 @@ zero and date binding as the string `"null"`.
 
 ## Fuzzy search is a capability, not a spelling substitution
 
+The compatibility policy is recorded canonically in
+[ADR 0002](adr/0002-portable-and-native-fuzzy-text-profiles.md).
+
 HANA `CONTAINS(..., FUZZY(...))` combines approximate matching, tokenisation,
 linguistic options and relevance scoring. Other databases expose useful
 neighbours, but their scores are not interchangeable: PostgreSQL `pg_trgm`
@@ -217,20 +220,22 @@ measures trigram similarity, while DuckDB FTS and SQLite FTS5 rank full-text
 matches with BM25-style machinery.
 
 The portable runtime must therefore not translate the HANA spelling directly
-and pretend that an unrelated score has the same meaning. The planned boundary
-is a versioned search capability:
+and pretend that an unrelated score has the same meaning. The boundary is a
+versioned search capability with two deliberately different profiles:
 
-1. define a small deterministic profile (normalisation, tokenizer, similarity
-   rule, threshold, score range and tie ordering);
-2. keep HANA native fuzzy search as the oracle and accelerated implementation
-   only where differential cases prove that profile equivalent;
-3. implement the same profile explicitly for DuckDB, rather than relabelling
-   DuckDB BM25 as a HANA score;
-4. refuse unsupported HANA linguistic/options profiles by name.
+1. `portable-deterministic` defines normalisation, similarity, score range,
+   thresholds and tie ordering exactly; supported backends must agree on every
+   published result and it is the default for ABAP Unit and CI;
+2. `native-fuzzy` permits engine-specific scores but gates each backend on
+   behavioural invariants, top-K recall, precision and false-positive limits;
+3. every result identifies the profile version, backend and native versus
+   compatibility implementation;
+4. unsupported linguistic/options profiles are refused by name.
 
-This makes approximate search reproducible without claiming that all of HANA's
-linguistic engine has been cloned. `search_cells` remains a named refusal until
-that contract and its cross-engine corpus exist.
+This makes portable tests reproducible without claiming that all native
+linguistic engines have identical numbers. `search_cells` remains a named
+refusal until the deterministic profile specification and its cross-engine
+corpus exist.
 
 ## Validation at this milestone
 
