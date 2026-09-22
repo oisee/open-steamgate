@@ -64,7 +64,7 @@ test("vector workbench exposes AMDP only when it can execute it", async ({page})
     expect(capability).toMatchObject({enabled: false, selected: "ANYDB"});
     return;
   }
-  expect(capability).toMatchObject({enabled: true, selected: "ANYDB"});
+  expect(capability).toMatchObject({enabled: true, selected: "AMDP"});
   await page.locator("[id$='--masterList'] .sapMLIB").first().click();
   await page.evaluate(() => {
     const element = document.querySelector("[id$='--engineSelect']");
