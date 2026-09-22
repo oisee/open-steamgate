@@ -214,9 +214,10 @@ CLASS zcl_zvdb_100_dpc_ext IMPLEMENTATION.
       lv_top_k = 10.
     ENDIF.
     IF lv_bucket IS INITIAL OR lv_query_id IS INITIAL OR lv_top_k > 100
-      OR ( lv_engine IS NOT INITIAL AND lv_engine <> 'ANYDB' AND lv_engine <> 'HANA' ).
+      OR ( lv_engine IS NOT INITIAL AND lv_engine <> 'ANYDB' AND lv_engine <> 'HANA'
+           AND lv_engine <> 'AMDP' ).
       RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
-        EXPORTING message = 'Search requires EQ Bucket/QueryId, optional Engine ANYDB/HANA, and $top 1..100'.
+        EXPORTING message = 'Search requires EQ Bucket/QueryId, optional Engine ANYDB/AMDP/HANA, and $top 1..100'.
     ENDIF.
     DATA(lo_engine) = zcl_vdb_100_factory=>create( iv_mode = lv_engine ).
     DATA(lt_result) = lo_engine->search(

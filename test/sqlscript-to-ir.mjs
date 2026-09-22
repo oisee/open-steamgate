@@ -51,6 +51,19 @@ describe("the SQLScript tree into the IR", () => {
     }
   });
 
+  it("types fixed-binary Hamming primitives without degrading them to text", () => {
+    const catalogue = {VECTORS: {A: {abap: "X", len: 96}, B: {abap: "X", len: 96}}};
+    const plan = ir("SELECT BITCOUNT(BITXOR(a, b)) AS distance FROM vectors;", catalogue);
+    const nodes = walk(plan.rel);
+    expect(nodes.find((one) => one.node === "call" && one.fn === "BITXOR").type)
+      .to.deep.equal({abap: "X", len: 96});
+    expect(nodes.find((one) => one.node === "call" && one.fn === "BITCOUNT").type)
+      .to.deep.equal({abap: "I"});
+    expect(() => ir("SELECT BITXOR(a, b) AS bad FROM vectors;", {
+      VECTORS: {A: {abap: "X", len: 96}, B: {abap: "X", len: 95}},
+    })).to.throw(BindError, /same length/);
+  });
+
   it("splices a table variable in place rather than leaving a var node", () => {
     // the measurement that decides this: on HANA an assignment is not an
     // observable barrier, so three assignments are one plan

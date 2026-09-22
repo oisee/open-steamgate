@@ -374,6 +374,31 @@ export function lower(rel, dialectName, options = {}) {
         return `(CASE ${whens}${other} END)`;
       }
       case "call": {
+        if (e.fn === "BITXOR") {
+          if (e.args.length !== 2) throw new Refused("BITXOR requires two arguments");
+          if (dialectName === "hana") return `BITXOR(${expr(e.args[0])}, ${expr(e.args[1])})`;
+          if (dialectName === "duckdb") {
+            // The ABAP database seam stores fixed RAW as its canonical hex
+            // text (the same representation Open SQL reads and writes), not
+            // as a driver-specific Buffer. Decode that physical form before
+            // using DuckDB's exact BIT xor. A nested BITXOR is already BIT.
+            const bit = (arg) => arg.node === "call" && arg.fn === "BITXOR"
+              ? `CAST(${expr(arg)} AS BIT)` : `CAST(from_hex(${expr(arg)}) AS BIT)`;
+            return `xor(${bit(e.args[0])}, ${bit(e.args[1])})`;
+          }
+          throw new Refused(`BITXOR has no measured rendering on ${dialectName}`);
+        }
+        if (e.fn === "BITCOUNT") {
+          if (e.args.length !== 1) throw new Refused("BITCOUNT requires one argument");
+          if (dialectName === "hana") return `BITCOUNT(${expr(e.args[0])})`;
+          if (dialectName === "duckdb") {
+            const arg = e.args[0];
+            const value = arg.node === "call" && arg.fn === "BITXOR"
+              ? expr(arg) : `from_hex(${expr(arg)})`;
+            return `bit_count(CAST(${value} AS BIT))`;
+          }
+          throw new Refused(`BITCOUNT has no measured rendering on ${dialectName}`);
+        }
         if (e.fn === "REGEXP_REPLACE_ALL") {
           if (e.args.length !== 3) throw new Refused("REGEXP_REPLACE_ALL requires subject, pattern and replacement");
           if (e.args[0]?.node !== "col" || e.args[1]?.node !== "lit" || e.args[1].value !== "x"

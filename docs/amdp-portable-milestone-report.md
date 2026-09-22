@@ -223,6 +223,24 @@ and correlated subqueries can refer to an outer source without collapsing
 `inner.key = outer.key` into `key = key`. Join/filter/projection clauses lower
 as one query block wherever an author's alias must remain visible.
 
+The seventh proof crosses the catalogue and transaction boundary. The AMDP
+generator resolves only the DDIC objects named by `USING` into a compact typed
+catalogue and stores that catalogue with the compiled procedure. A real ABAP
+Unit inserts `ZSTG_DEMO` through Open SQL, deliberately performs no `COMMIT`,
+then calls an unchanged AMDP that scans `ZSTG_DEMO`. Portable execution reads
+the row through the caller's `DEFAULT` DuckDB connection. There is no copied
+fixture, second connection or JavaScript row adapter.
+
+Vector Workbench is the first product-level consumer. Its existing
+`ZCL_VDB_100_HANA=>SEARCH_DB` body now compiles unchanged, including the two
+`ZVDB_100_VEC` scans and fixed `RAW(192)` columns. HANA `BITXOR`/`BITCOUNT`
+lower to DuckDB's exact equal-length `BIT` xor and population count after
+decoding the database seam's canonical RAW hex representation. An ABAP Unit
+runs the original AMDP on DuckDB and compares the first seven ids, ranks and
+payloads with the independent existing ANYDB implementation. The Vector UI
+therefore exposes `Portable AMDP (DuckDB)` as a third engine, while native
+HANA remains a distinct choice.
+
 The test inputs are engine-resident tables with declared INTEGER, DECIMAL,
 character and date-storage columns. They are not JavaScript arrays and do not
 rely on annotations over inferred UNION literals. This caught a real null
@@ -310,14 +328,16 @@ fuzzy-search compatibility claim.
 - direct-source `search_cells`: native and portable HANA agree on exact,
   substring, unrelated, NULL-label, empty-query and NULL-query cases; DuckDB
   returns the same fixed integer scores and mapping values in one statement;
-- full SQLScript/AMDP regression: 411 passing tests and 17 explicit live
+- full SQLScript/AMDP regression: 414 passing tests and 17 explicit live
   integration cases pending in the ordinary offline run;
 - live HANA focused suite: 15 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 - production bridge: full ABAP Unit is green on DuckDB, including `SQUARES`,
-  Open-SQL-table → portable-AMDP aggregation and one nested table procedure;
+  Open-SQL-table → portable-AMDP aggregation, one nested table procedure,
+  uncommitted Open SQL → direct AMDP catalogue read, and Vector Workbench
+  portable-AMDP rank equivalence against its ANYDB oracle;
   all four AMDP tests and the complete ABAP Unit suite are green through
   native HANA in an isolated schema. The adapter uses declared result metadata
   to decode `CLOB`/`NCLOB` as text while retaining `BLOB`/`VARBINARY` as the
@@ -325,10 +345,9 @@ fuzzy-search compatibility claim.
 
 ## Next coverage order
 
-1. Continue general composition with a catalogue read that proves visibility
-   of an uncommitted ABAP SQL fixture in the shared caller transaction. The
-   ordinary ABAP Unit entry path, typed table boundary and first nested AMDP
-   call are now proven.
+1. Expand catalogue closure beyond directly declared `USING` tables and use
+   the corpus histogram to choose the next general construct (`FOR` or table
+   functions in `FROM`), without weakening the measured type boundary.
 2. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
    separately measured capabilities.
 

@@ -54,9 +54,10 @@ CLASS zcl_vdb_100_hana IMPLEMENTATION.
     search_db( EXPORTING iv_client = lv_client iv_bucket = lv_bucket
                          iv_query_id = lv_query_id iv_top_k = iv_top_k
                IMPORTING et_result = lt_db ).
+    DATA(lv_engine) = COND string( WHEN sy-dbsys = 'HDB' THEN 'HANA' ELSE 'AMDP' ).
     LOOP AT lt_db INTO DATA(ls_db).
       APPEND VALUE #( query_id = iv_query_id result_id = ls_db-result_id
-        bid = ls_db-bid payload = ls_db-payload dims = ls_db-dims rank = ls_db-rank engine = 'HANA' ) TO rt_result.
+        bid = ls_db-bid payload = ls_db-payload dims = ls_db-dims rank = ls_db-rank engine = lv_engine ) TO rt_result.
     ENDLOOP.
   ENDMETHOD.
 
@@ -68,6 +69,6 @@ CLASS zcl_vdb_100_hana IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_vdb_100_engine~get_impl_type.
-    rv_type = 'HANA'.
+    rv_type = COND string( WHEN sy-dbsys = 'HDB' THEN 'HANA' ELSE 'AMDP' ).
   ENDMETHOD.
 ENDCLASS.

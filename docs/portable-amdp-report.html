@@ -164,7 +164,7 @@
         <article class="cap"><span class="flag ok">Работает</span><h3>Типы и NULL</h3><p>INTEGER, часть packed decimal, fixed character, STRING, date storage, typed empty relations и явный SQL NULL. Непроверенные coercions отказываются.</p></article>
         <article class="cap"><span class="flag ok">Работает</span><h3>Контекст и массив</h3><p>CURRENT_USER, CURRENT_SCHEMA и literal SESSION_CONTEXT приходят из execution context. Fixed INTEGER ARRAY раскрывается с NULL, duplicates и ordinality.</p></article>
         <article class="cap"><span class="flag partial">Узкий baseline</span><h3>Поиск</h3><p>Exact/substring case над измеренным ASCII fixture исполняется на HANA и DuckDB. Настоящие fuzzy profiles вынесены в ADR 0002 и backlog.</p></article>
-        <article class="cap"><span class="flag partial">В работе</span><h3>Composition</h3><p>Настоящий ABAP Unit, typed table boundary и первый nested AMDP call уже проходят на DuckDB и HANA. Следом: прямое чтение незакоммиченного ABAP SQL fixture в общей транзакции.</p></article>
+        <article class="cap"><span class="flag ok">Работает</span><h3>Composition и LUW</h3><p>Настоящий ABAP Unit, typed table boundary, nested AMDP и прямой catalogue read видят одну DuckDB-транзакцию. Незакоммиченная Open SQL строка доступна AMDP без копирования.</p></article>
         <article class="cap"><span class="flag later">Не сейчас</span><h3>Широкий imperative</h3><p>FOR, general cursor OPEN/FETCH, handlers, dynamic SQL, mutation, temporary DDL и широкий набор built-ins.</p></article>
         <article class="cap"><span class="flag later">Явная граница</span><h3>Не portable по природе</h3><p>XMLTABLE, HIERARCHY и часть HANA libraries могут остаться native-only. Refusal лучше похожего, но неверного результата.</p></article>
       </div>
@@ -172,7 +172,7 @@
 
     <section class="section">
       <div class="eyebrow">Доказательства, не чекбоксы</div>
-      <h2>Одиннадцать вертикальных кейсов</h2>
+      <h2>Двенадцать вертикальных кейсов</h2>
       <div class="grid casegrid">
         <div class="case"><b>SQUARES</b><p>Исходный WHILE, scalar snapshots и растущее отношение. Native HANA = portable HANA = DuckDB.</p></div>
         <div class="case"><b>mix_rows</b><p>Два table inputs, joins, correlated EXISTS, DISTINCT, LIMIT и typed result.</p></div>
@@ -184,6 +184,7 @@
         <div class="case"><b>search_cells</b><p>Простой исполняемый search baseline; полный fuzzy честно отложен.</p></div>
         <div class="case"><b>optional_value + scalar_value</b><p>RETURNING scalar, optional omission и zero database statements.</p></div>
         <div class="case"><b>control_rows</b><p><span class="ok">Исполняется:</span> typed unused cursor + sequential block с одним присваиванием в procedure output. Это не заявление о поддержке OPEN, FETCH или cursor loops.</p></div>
+        <div class="case"><b>Vector Workbench</b><p>Исходный AMDP с двумя DDIC scans и RAW(192) BITXOR/BITCOUNT работает на DuckDB; top-7 ids, ranks и payloads совпадают с независимым ANYDB oracle.</p></div>
       </div>
     </section>
 
@@ -216,7 +217,8 @@
         <div class="mile"><div><h3>✓ control_rows закрыт</h3><p>HANA oracle исправил порядок DECLARE CURSOR; typed unused resource и sequential block с одним output-assignment совпали на native и portable paths. OPEN/FETCH по-прежнему вне claim.</p></div></div>
         <div class="mile"><div><h3>✓ ABAP Unit → portable AMDP</h3><p>Generated destination исполняет precompiled IR на системной DuckDB connection. Open SQL rows пересекают typed table boundary; empty input сохраняет schema; HANA fallback отсутствует.</p></div></div>
         <div class="mile"><div><h3>✓ Nested AMDP, узкий честный срез</h3><p>Один typed table IN → один table OUT; дочерний relation plan встраивается в родительский, call depth ограничен, DuckDB получает один финальный statement.</p></div></div>
-        <div class="mile"><div><h3>Shared transaction, следующий срез</h3><p>Одна транзакция между незакоммиченным ABAP SQL fixture и прямым catalogue-read из AMDP.</p></div></div>
+        <div class="mile"><div><h3>✓ Shared transaction и DDIC catalogue</h3><p>Незакоммиченный ABAP SQL fixture виден прямому AMDP catalogue-read на той же системной DuckDB connection.</p></div></div>
+        <div class="mile"><div><h3>✓ Vector Workbench на Portable-AMDP</h3><p>RAW(192), BITXOR/BITCOUNT и реальный top-K search выполняются в DuckDB; результат сверяется с ANYDB engine.</p></div></div>
         <div class="mile"><div><h3>Ширина по histogram</h3><p>FOR, table functions in FROM, client/session parameters и catalogue closure — в порядке реально разблокируемых тел.</p></div></div>
         <div class="mile"><div><h3>После ядра</h3><p>Versioned fuzzy profiles, mutation/handlers, второй embedded backend и clean-room book corpus.</p></div></div>
       </div>

@@ -48,6 +48,22 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
   });
 });
 
+describe("fixed-binary Hamming lowering", () => {
+  const xor = call("BITXOR", [col("A", T.bytes(2)), col("B", T.bytes(2))], T.bytes(2));
+  const distance = call("BITCOUNT", [xor], T.int);
+  const rel = project(scan("VECTORS"), [{as: "DISTANCE", expr: distance}]);
+
+  it("uses native HANA operations and exact DuckDB BIT operations", () => {
+    expect(sqlOf(rel, "hana")).to.contain('BITCOUNT(BITXOR("A", "B"))');
+    const duck = sqlOf(rel, "duckdb");
+    expect(duck).to.contain('bit_count(CAST(xor(CAST(from_hex("A") AS BIT), CAST(from_hex("B") AS BIT)) AS BIT))');
+  });
+
+  it("refuses engines without a measured binary representation", () => {
+    expect(() => sqlOf(rel, "sqlite")).to.throw(Refused, /BITCOUNT has no measured rendering/);
+  });
+});
+
 describe("SQLScript IR: the divergences that were measured, not assumed", () => {
   // The oracle corrected this suite: HANA's `/` over two INTEGERs yields a
   // DECIMAL (0.500000, -3.500000), it does not truncate. So DuckDB already

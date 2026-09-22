@@ -47,6 +47,22 @@ test("vector workbench filters a diverse Master and resizes it", async ({page}) 
   expect(after.x - before.x).toBeGreaterThan(80);
 });
 
+test("vector workbench exposes the original AMDP on DuckDB", async ({page}) => {
+  await page.goto("/app/zvdb/");
+  await expect(page.getByText(/query vectors in EGEMMA768/)).toBeVisible();
+  const database = await page.getByText(/^DB:/).textContent();
+  test.skip(!/duckdb/i.test(database || ""), "Portable AMDP product path is the DuckDB engine");
+  await page.locator("[id$='--masterList'] .sapMLIB").first().click();
+  await page.evaluate(() => {
+    const element = document.querySelector("[id$='--engineSelect']");
+    const control = sap.ui.getCore().byId(element.id);
+    control.setSelectedKey("AMDP");
+    control.fireChange({selectedItem: control.getSelectedItem()});
+  });
+  await expect(page.getByText(/nearest texts, sorted by AMDP rank/)).toBeVisible();
+  await expect(page.locator(".sapMListTblRow", {hasText: "AMDP"}).first()).toBeVisible();
+});
+
 test("vector quality renders the published report", async ({page}) => {
   await page.goto("/app/zvdb/quality/");
   await expect(page.getByText("Published", {exact: true})).toBeVisible();

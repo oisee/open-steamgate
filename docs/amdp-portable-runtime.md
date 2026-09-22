@@ -541,6 +541,24 @@ limits; native SQLScript and portable ordinary HANA SQL return equal typed
 rows for the same inputs. The full offline SQLScript/AMDP run is 411 passing
 with 17 live cases pending, and the focused live HANA suite is 15 passing.
 
+### 2026-09-22 — P2c shared DDIC/LUW and Vector Workbench
+
+The generator now resolves tables declared by AMDP `USING` through the same
+DDIC graph used by the rest of OSG. It embeds only those typed schemas with a
+portable procedure. A DuckDB ABAP Unit inserts an uncommitted Open SQL row and
+an unchanged AMDP reads it directly from the caller's `DEFAULT` connection;
+there is no mirrored fixture or second transaction.
+
+This also closes the first real application path. The unchanged Vector
+Workbench AMDP scans `ZVDB_100_VEC` twice and computes Hamming ranks with
+`BITXOR` and `BITCOUNT` over `RAW(192)`. DuckDB lowers those to equal-length
+`BIT` xor and population count after decoding the seam's RAW hex storage. Its
+top-seven ids, ranks and payloads agree exactly with the existing independent
+ANYDB engine. The workbench exposes that path as `Portable AMDP (DuckDB)`.
+
+After this slice the offline SQLScript/AMDP run is 414 passing with 17 live
+cases pending; full DuckDB ABAP Unit and ABAP lint are green.
+
 ### 2026-09-22 — P2a real ABAP call reaches portable DuckDB
 
 `amdp-gen` now compiles each supported method while the extractor still owns

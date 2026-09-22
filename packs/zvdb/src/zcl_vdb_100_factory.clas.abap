@@ -10,7 +10,7 @@ CLASS zcl_vdb_100_factory IMPLEMENTATION.
     DATA(lv_mode) = to_upper( iv_mode ).
     IF lv_mode = 'ANYDB'.
       ro_engine = NEW zcl_vdb_100_anydb( ).
-    ELSEIF lv_mode = 'HANA'.
+    ELSEIF lv_mode = 'HANA' OR lv_mode = 'AMDP'.
       ro_engine = NEW zcl_vdb_100_hana( ).
     ELSEIF lv_mode IS INITIAL AND sy-dbsys = 'HDB'.
       ro_engine = NEW zcl_vdb_100_hana( ).

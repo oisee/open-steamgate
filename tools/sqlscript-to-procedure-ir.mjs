@@ -81,7 +81,8 @@ function outputFrom(method, types) {
 }
 
 /** Compile one extracted AMDP method without changing its source body. */
-export function compileProcedure(method, types) {
+export function compileProcedure(method, types, options = {}) {
+  const catalogue = options.catalogue ?? {};
   const tree = parse(new Body(), lex(method.body));
   const output = outputFrom(method, types);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
@@ -129,7 +130,7 @@ export function compileProcedure(method, types) {
   };
   const bind = (node, fragment) => toIr(node, {
     fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
-    signature: method, arrayValues,
+    signature: method, arrayValues, catalogue,
   });
 
   const compileStatements = (container, allowArrayDeclarations = false) => {
@@ -258,7 +259,7 @@ export function compileProcedure(method, types) {
         const set = child(node, "SetOperation");
         if (set !== undefined) {
           const rel = bind(set, "relation");
-          try { relationSchemas[name] = schemaOf(rel); }
+          try { relationSchemas[name] = schemaOf(rel, catalogue); }
           catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
           result.push(assignRelation(name, rel, node));
         }
@@ -373,7 +374,8 @@ export function compileProcedure(method, types) {
     }
     return procedure({parameters, relationParameters, body, output: output.name,
       outputSchema: output.kind === "relation" ? output.schema : undefined,
-      outputType: output.kind === "scalar" ? output.type : undefined});
+      outputType: output.kind === "scalar" ? output.type : undefined,
+      catalogue});
   } catch (error) {
     if (error instanceof UnsupportedSqlScript) throw error;
     if (error instanceof BindError) throw new UnsupportedSqlScript(error.message, error);

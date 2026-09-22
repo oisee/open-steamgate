@@ -544,6 +544,7 @@ export class AmdpDestination {
         .map((one) => [`${one.class}=>${one.method}`.toUpperCase(), one.portable]));
       answer = await runProcedure(p.portable, {
         client: database, dialect: "duckdb", inputs, relationInputs, procedures,
+        inputCatalogue: p.portable.catalogue,
       });
     } catch (error) {
       await refuse(`AMDP: portable ${p.class}=>${p.method} refused: ${String(error?.message ?? error)}`, p.module);

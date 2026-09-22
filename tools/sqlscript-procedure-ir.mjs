@@ -19,8 +19,10 @@ export class UnsupportedSqlScript extends Error {
 
 const upper = (name) => String(name).toUpperCase();
 
-export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType}) =>
-  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType});
+export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType,
+  catalogue = {}}) =>
+  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType,
+    catalogue});
 export const declareScalar = (name, type, initial, source) =>
   ({stmt: "declare-scalar", name: upper(name), type, initial, source});
 export const assignScalar = (name, expr, source) =>
@@ -300,7 +302,7 @@ function assertExpandedRelationBudget(rel, {nodes, depth, parameters}) {
 
 /** Interpret control flow, then execute the final relation once. */
 export async function runProcedure(program, {
-  client, dialect, inputs = {}, relationInputs = {}, inputCatalogue = {}, maxSteps = 10000, maxPlanNodes = 10000,
+  client, dialect, inputs = {}, relationInputs = {}, inputCatalogue = program.catalogue ?? {}, maxSteps = 10000, maxPlanNodes = 10000,
   maxPlanDepth = 256, maxParameters = 10000, maxCallDepth = 16, session = {}, procedures = new Map(),
   callDepth = 0, deferRelation = false, closedRelationInputs = false,
 } = {}) {
@@ -453,7 +455,8 @@ export async function runProcedure(program, {
           throw new UnsupportedSqlScript(`nested CALL input :${statement.input.toLowerCase()} is unknown`, statement);
         }
         const called = await runProcedure(child, {
-          client, dialect, relationInputs: {[child.relationParameters[0].name]: input}, inputCatalogue,
+          client, dialect, relationInputs: {[child.relationParameters[0].name]: input},
+          inputCatalogue: {...inputCatalogue, ...(child.catalogue ?? {})},
           maxSteps, maxPlanNodes, maxPlanDepth, maxParameters, maxCallDepth, session, procedures,
           callDepth: callDepth + 1, deferRelation: true, closedRelationInputs: true,
         });

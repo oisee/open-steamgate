@@ -46,6 +46,22 @@ CLASS zcl_osd_amdp_demo DEFINITION
       IMPORTING VALUE(it_amount) TYPE tt_amount
       EXPORTING VALUE(et_total)  TYPE tt_total.
 
+*   A database-table read, unlike the table-parameter examples above.  It is
+*   the shared-LUW proof: on the portable path this SQLScript plan reads the
+*   same DEFAULT connection on which the caller just used Open SQL.
+    TYPES: BEGIN OF ty_travel,
+             travel_id   TYPE c LENGTH 8,
+             description TYPE c LENGTH 40,
+             status      TYPE c LENGTH 1,
+             seats       TYPE i,
+           END OF ty_travel,
+           tt_travel TYPE STANDARD TABLE OF ty_travel WITH EMPTY KEY.
+
+    CLASS-METHODS read_travel
+      IMPORTING VALUE(iv_client)    TYPE string
+                VALUE(iv_travel_id) TYPE string
+      EXPORTING VALUE(et_travel)    TYPE tt_travel.
+
 *   The same computation as a CDS table function: its result is queryable
 *   like a view rather than returned to one caller. The row type has to agree
 *   with the `returns` list of ZTF_OSD_SQUARES field for field -- the CDS
@@ -96,6 +112,16 @@ CLASS zcl_osd_amdp_demo IMPLEMENTATION.
                              OPTIONS READ-ONLY
                              USING zcl_osd_amdp_demo=>total_amount.
     CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(:it_amount, et_total);
+  ENDMETHOD.
+
+  METHOD read_travel BY DATABASE PROCEDURE FOR HDB
+                     LANGUAGE SQLSCRIPT
+                     OPTIONS READ-ONLY
+                     USING zstg_demo.
+    et_travel = SELECT travel_id, description, status, seats
+                  FROM zstg_demo
+                 WHERE mandt = CAST(:iv_client AS NVARCHAR(3))
+                   AND travel_id = CAST(:iv_travel_id AS NVARCHAR(8));
   ENDMETHOD.
 
   METHOD squares_tf BY DATABASE FUNCTION FOR HDB

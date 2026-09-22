@@ -298,6 +298,29 @@ export function toIr(tree, options = {}) {
           }
           resultType = T.int;
         }
+        if (fn === "BITXOR") {
+          if (args.length !== 2 || args.some((arg) => !["X", "XSTRING"].includes(arg?.type?.abap))) {
+            throw new BindError("BITXOR requires exactly two measured binary arguments", node);
+          }
+          if (args[0].type.abap === "X" && args[1].type.abap === "X"
+              && args[0].type.len !== args[1].type.len) {
+            throw new BindError("BITXOR fixed binary arguments must have the same length", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("BITXOR does not accept window, ordering, or star decorations", node);
+          }
+          resultType = args[0].type.abap === "XSTRING" || args[1].type.abap === "XSTRING"
+            ? T.bytes() : args[0].type;
+        }
+        if (fn === "BITCOUNT") {
+          if (args.length !== 1 || !["X", "XSTRING"].includes(args[0]?.type?.abap)) {
+            throw new BindError("BITCOUNT requires exactly one measured binary argument", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("BITCOUNT does not accept window, ordering, or star decorations", node);
+          }
+          resultType = T.int;
+        }
         if (fn === "SESSION_CONTEXT") {
           if (args.length !== 1 || args[0]?.node !== "lit" || typeof args[0].value !== "string") {
             throw new BindError("SESSION_CONTEXT requires one literal string key", node);

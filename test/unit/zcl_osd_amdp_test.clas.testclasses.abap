@@ -6,6 +6,7 @@ CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS squares_are_computed FOR TESTING RAISING cx_static_check.
     METHODS open_sql_rows_cross_the_amdp FOR TESTING RAISING cx_static_check.
     METHODS nested_amdp_stays_relational FOR TESTING RAISING cx_static_check.
+    METHODS open_sql_luw_is_shared FOR TESTING RAISING cx_static_check.
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -92,6 +93,42 @@ CLASS ltcl_amdp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( lt_total ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = ls_total-item_count exp = 2 ).
     cl_abap_unit_assert=>assert_equals( act = ls_total-total exp = 18 ).
+  ENDMETHOD.
+
+  METHOD open_sql_luw_is_shared.
+    DATA ls_row TYPE zstg_demo.
+    DATA lt_travel TYPE zcl_osd_amdp_demo=>tt_travel.
+    DATA lv_client TYPE string.
+    DATA lv_travel_id TYPE string.
+
+*   Native HANA currently uses a deliberately isolated AMDP session, so this
+*   test is specifically the portable shared-connection contract.  A COMMIT
+*   here would make the test pass for the wrong reason.
+    IF sy-dbsys <> 'duckdb'.
+      RETURN.
+    ENDIF.
+
+    DELETE FROM zstg_demo WHERE travel_id = 'AMDP-LUW'.
+    ls_row-mandt = sy-mandt.
+    ls_row-travel_id = 'AMDP-LUW'.
+    ls_row-description = 'uncommitted Open SQL row'.
+    ls_row-status = 'A'.
+    ls_row-seats = 37.
+    INSERT zstg_demo FROM ls_row.
+    lv_client = sy-mandt.
+    lv_travel_id = ls_row-travel_id.
+
+    zcl_osd_amdp_demo=>read_travel(
+      EXPORTING iv_client = lv_client iv_travel_id = lv_travel_id
+      IMPORTING et_travel = lt_travel ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_travel ) exp = 1
+      msg = 'portable AMDP must read the caller Open SQL connection without COMMIT' ).
+    READ TABLE lt_travel INDEX 1 INTO DATA(ls_actual).
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-description exp = ls_row-description ).
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-seats exp = 37 ).
+
+    DELETE FROM zstg_demo WHERE travel_id = 'AMDP-LUW'.
   ENDMETHOD.
 
   METHOD a_table_function_returns_rows.

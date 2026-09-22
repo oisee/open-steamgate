@@ -27,6 +27,7 @@ export const T = {
   int8: {abap: "INT8"},
   dec: (len, dec) => ({abap: "P", len, dec}),
   char: (len) => ({abap: "C", len}),
+  bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
   str: {abap: "STRING"},
   date: {abap: "D"},
   bool: {abap: "BOOL"},
