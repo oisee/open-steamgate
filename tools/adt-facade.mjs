@@ -415,20 +415,27 @@ const TEMPLATE_LINKS = {
   ],
   "datapreview/freestyle": [
     ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
+    ["http://www.sap.com/adt/categories/datapreview/freestyle/check", "/sap/bc/adt/datapreview/freestyle{?action,uniqueURI}"],
   ],
-  // the two of the system's four templates that are answered here; colcount
-  // and hana are not, and are not offered
+  // The data page uses colcount for both TABL and CDS previews. The
+  // launchfreestyle relation is the capability switch for its SQL Pane;
+  // execution itself goes through the freestyle collection below.
   "datapreview/ddic": [
     ["http://www.sap.com/adt/categories/datapreview/ddic/metadata", "/sap/bc/adt/datapreview/ddic/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/ddic", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName}"],
+    ["http://www.sap.com/adt/categories/datapreview/ddic/colcount", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName,colNumber}"],
+    ["http://www.sap.com/adt/categories/datapreview/ddic/launchfreestyle", "/sap/bc/adt/datapreview/freestyle"],
   ],
-  // two of the system's nine: the ones a preview needs. The association
-  // links (list, navigation, follow, refresh) are how the client walks from
-  // a row into a related entity, and none of that is served yet, so none of
-  // it is offered — a template we advertise is a promise.
+  // CDSDataPreviewPage.fetchCount reads associationrefresh's URI template
+  // even for a plain CDS count, before sending the count SELECT. Without
+  // this exact A4H relation it dereferences null inside Eclipse. For the
+  // plain count it fills ddlSourceName and leaves action empty, which is
+  // answered by the existing CDS POST route.
   "datapreview/cds": [
     ["http://www.sap.com/adt/categories/datapreview/cds/metadata", "/sap/bc/adt/datapreview/cds/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/cds", "/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}"],
+    ["http://www.sap.com/adt/categories/datapreview/cds/associationrefresh", "/sap/bc/adt/datapreview/cds{?action,rowNumber,targetType,ddlSourceName}"],
+    ["http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle", "/sap/bc/adt/datapreview/cds"],
   ],
   "checkruns": [
     ["http://www.sap.com/adt/categories/check/relations/reporters", "/sap/bc/adt/checkruns{?reporters}"],
@@ -2172,7 +2179,8 @@ export function adtRouter(options = {}) {
       const entry = store.read("TABL", req.params.name);
       const table = tableFieldsOf(store, entry);
       res.type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
-        .send(tableDataDocument({rows: [], columns: table.fields.map((f) => f.name)}, {fields: table.fields, name: entry.name}));
+        .send(tableDataDocument({rows: [], columns: table.fields.map((f) => f.name)},
+          {fields: table.fields, name: entry.name, maxRowsLink: true}));
     });
   });
   router.post(`${BASE}/datapreview/ddic`, async (req, res) => {
@@ -2182,8 +2190,15 @@ export function adtRouter(options = {}) {
     try {
       table = tableFieldsOf(store, store.read("TABL", name));
     } catch (e) {
-      refuse(res, 404, "ExceptionResourceNotFound", `TABL ${name} does not exist`);
-      return;
+      // The raw-data page deliberately uses the DDIC colcount relation for
+      // both table and CDS previews. Its body still names the CDS entity, so
+      // resolve that entity here instead of making the shared endpoint
+      // table-only after advertising the shared operation.
+      table = cdsEntityOf(store, name);
+      if (table === undefined) {
+        refuse(res, 404, "ExceptionResourceNotFound", `TABL or DDLS ${name} does not exist`);
+        return;
+      }
     }
     const query = asked === "" ? `SELECT * FROM ${name}` : asked;
     const started = Date.now();
@@ -2241,6 +2256,25 @@ export function adtRouter(options = {}) {
   advertise("datapreview/freestyle");
   router.post(`${BASE}/datapreview/freestyle`, async (req, res) => {
     const query = (await rawBody(req)).toString("utf8");
+    if (req.query.action === "checkSyntax") {
+      const uri = String(req.query.uniqueURI ?? `${BASE}/datapreview/freestyle/sqlconsole0`);
+      try {
+        // Prepare through the live backend, but never execute or fetch. It
+        // follows the active DB dialect without maintaining a second SQL
+        // grammar in the façade or materialising a Check button's SELECT.
+        await data.check(query);
+        res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
+          .send(checkReportDocument([{uri, issues: [], statusText: "processed"}], {omitEmptyList: true}));
+      } catch (e) {
+        const message = String(e?.message || e?.cause?.message || e?.code || "SQL syntax check failed");
+        const infrastructure = ["NOT_BUILT", "NOT_SERVING", "CHECK_UNAVAILABLE"].includes(e?.code);
+        res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
+          .send(checkReportDocument([infrastructure
+            ? {uri, issues: [], status: "notProcessed", statusText: message}
+            : {uri, issues: [{line: 1, column: 1, severity: "E", message}]}], {omitEmptyList: true}));
+      }
+      return;
+    }
     const started = Date.now();
     try {
       const result = await data.query(query, {max: Number(req.query.rowNumber ?? 100)});

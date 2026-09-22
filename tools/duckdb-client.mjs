@@ -184,6 +184,11 @@ export class DuckDBDatabaseClient {
     }
   }
 
+  async checkSelect(sql) {
+    const prepared = await this.connection.prepare(this.rewrite(sql));
+    prepared.destroySync();
+  }
+
   // ---------------------------------------------------------------------
   // The native channel (docs/db-seam-native.md), for one caller: the
   // SQLScript splitter's lowering. **Nothing transpiled from ABAP may reach

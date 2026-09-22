@@ -276,6 +276,13 @@ export class FileSqliteClient {
     }
   }
 
+  async checkSelect(sql) {
+    const statement = this.db.prepare(rewriteSelect(sql));
+    // Node 26 can finalize explicitly; Node 22/24 leave it to the database
+    // connection/GC and expose neither close nor Symbol.dispose.
+    statement.close?.();
+  }
+
   // ---------------------------------------------------------------------
   // The native channel (docs/db-seam-native.md), for one caller: the
   // SQLScript splitter's lowering. **Nothing transpiled from ABAP may reach

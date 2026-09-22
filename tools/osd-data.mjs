@@ -29,7 +29,10 @@ export function openSqlToSql(text) {
   const head = /^(select\s+(?:distinct\s+)?)(.+?)(\s+from\s+)/is.exec(out);
   if (head !== null) {
     const [, keyword, list, from] = head;
-    if (!list.includes(",") && list.trim() !== "*" && /\s/.test(list.trim())) {
+    // Only a sequence of plain field names is the old comma-less syntax.
+    // Eclipse's row-count query is COUNT( * ); splitting inside the function
+    // turned it into COUNT(, *, ) and made F8 counts fail on every backend.
+    if (!list.includes(",") && /^[A-Za-z_/$][\w/$~]*(?:\s+[A-Za-z_/$][\w/$~]*)+$/.test(list.trim())) {
       out = keyword + list.trim().split(/\s+/).join(", ") + from + out.slice(head[0].length);
     }
   }
@@ -104,6 +107,56 @@ export class Data {
       count: rows.length,
       truncated: rows.length === max,
     };
+  }
+
+  // Compile a read through the active backend without fetching its rows.
+  // This is deliberately a separate seam: LIMIT 0 is an ABAP Open SQL idiom
+  // that the runtime adapters erase, so query(..., {max: 0}) is not a safe
+  // substitute for prepare-only validation.
+  async check(sql) {
+    if (this.runtime !== undefined) {
+      await this.runtime.ensure();
+      const answer = await fetch(`${this.runtime.url}/osd/sql`, {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({sql: String(sql), check: true}),
+      });
+      const body = await answer.json().catch(() => ({}));
+      if (!answer.ok) {
+        const e = new Error(body?.error?.message ?? `the serving runtime answered ${answer.status}`);
+        e.code = body?.error?.code ?? "FAILED";
+        throw e;
+      }
+      return;
+    }
+    const client = await this.boot();
+    const text = openSqlToSql(String(sql).trim().replace(/;$/, ""));
+    if (/^select\b/i.test(text) === false) {
+      throw new NotAllowed(text.split(/\s+/)[0] ?? "");
+    }
+    if (typeof client.checkSelect === "function") {
+      await client.checkSelect(text);
+      return;
+    }
+    // The browser/in-memory runtime uses the published sql.js adapter. It
+    // predates this optional seam, but exposes SQLite's prepare primitive;
+    // mirror its SELECT rewrites and free the compiled statement immediately.
+    if (client.name === "sqlite" && typeof client.sqlite?.prepare === "function") {
+      const sqlite = text.replace(/ UP TO (\d+) ROWS(.*)/i, "$2 LIMIT $1")
+        .replace(/ ORDER BY PRIMARY KEY/i, "")
+        .replace(/ ASCENDING/ig, " ASC")
+        .replace(/ DESCENDING/ig, " DESC")
+        .replace(/ LIMIT 0/g, "")
+        .replace(/~/g, ".")
+        .replace(/\bLEFT\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)/ig, "substr($1, 1, $2)")
+        .replace(/\bRIGHT\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)/ig, "substr($1, -$2)");
+      const statement = client.sqlite.prepare(sqlite);
+      statement.free?.();
+      return;
+    }
+    const e = new Error("the active database does not expose prepare-only SQL checking");
+    e.code = "CHECK_UNAVAILABLE";
+    throw e;
   }
 
   async #throughTheDoor(sql, max) {

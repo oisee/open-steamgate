@@ -500,6 +500,13 @@ export class HanaDatabaseClient {
     }
   }
 
+  async checkSelect(sql) {
+    const prepared = await new Promise((resolve, reject) =>
+      this.client.prepare(foldIdentifiers(this.rewrite(sql)), (err, stmt) => err ? reject(err) : resolve(stmt)));
+    await new Promise((resolve, reject) =>
+      prepared.drop((err) => err ? reject(err) : resolve()));
+  }
+
   async select(options) {
     options.select = this.rewrite(options.select, options.primaryKey);
     return {rows: await this.query(options.select)};

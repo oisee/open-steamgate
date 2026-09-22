@@ -470,6 +470,30 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<dataPreview:totalRows>3</dataPreview:totalRows>");
     });
 
+    it("advertises and performs the SQL Pane syntax check", async () => {
+      const discovery = await (await call("/discovery")).text();
+      expect(discovery).to.contain("http://www.sap.com/adt/categories/datapreview/freestyle/check");
+      expect(discovery).to.contain("/sap/bc/adt/datapreview/freestyle{?action,uniqueURI}");
+
+      const uri = "/sap/bc/adt/datapreview/freestyle/sqlconsole0";
+      const good = await call(`/datapreview/freestyle?action=checkSyntax&uniqueURI=${encodeURIComponent(uri)}`, {
+        method: "POST", body: "SELECT * FROM zstg_demo",
+      });
+      expect(good.status).to.equal(200);
+      expect(good.headers.get("content-type")).to.contain("application/vnd.sap.adt.checkmessages+xml");
+      const report = await good.text();
+      expect(report).to.contain(`chkrun:triggeringUri="${uri}"`);
+      expect(report).to.contain('chkrun:status="processed"');
+      expect(report).to.not.contain("<chkrun:checkMessage ");
+      expect(report).to.not.contain("<chkrun:checkMessageList>");
+
+      const bad = await call(`/datapreview/freestyle?action=checkSyntax&uniqueURI=${encodeURIComponent(uri)}`, {
+        method: "POST", body: "SELECT definitely_missing FROM zstg_demo",
+      });
+      expect(bad.status, "syntax findings are a successful check report").to.equal(200);
+      expect(await bad.text()).to.contain("<chkrun:checkMessage ");
+    });
+
     it("the row limit is the client's, and it is applied", async () => {
       const res = await call("/datapreview/freestyle?rowNumber=1", {method: "POST", body: "SELECT * FROM zstg_demo"});
       expect(await res.text()).to.contain("<dataPreview:totalRows>1</dataPreview:totalRows>");
@@ -1142,6 +1166,8 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.match(/dataPreview:name="MANDT" dataPreview:type="C" [^/]*dataPreview:colType="CLNT"[^/]*dataPreview:length="3"/);
       expect(xml).to.match(/dataPreview:name="CONTENT" dataPreview:type="y" [^/]*dataPreview:colType="RSTR"/);
       expect(xml, "the metadata carries no rows").to.not.contain("<dataPreview:data>");
+      expect(xml, "the A4H metadata offers the same max-row capability for tables and CDS")
+        .to.contain("datapreview/cds/metadata/maxrows");
     });
 
     it("answers F8 with the rows of the table under the same columns", async () => {
@@ -1154,6 +1180,31 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const whole = await call("/datapreview/ddic?rowNumber=5&ddicEntityName=ZSTG_PHOTO", {method: "POST", body: ""});
       expect(whole.status, "no SELECT means the whole table").to.equal(200);
       expect((await call("/ddic/tables/parser/info")).status, "the system's grammar is not ours to serve").to.equal(404);
+    });
+
+    it("advertises and answers the shared row-count operation Eclipse uses for TABL and CDS", async () => {
+      const discovery = await (await call("/discovery")).text();
+      expect(discovery).to.contain("http://www.sap.com/adt/categories/datapreview/ddic/colcount");
+      expect(discovery).to.contain("/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName,colNumber}");
+
+      const res = await call("/datapreview/ddic?ddicEntityName=ZSTG_PHOTO", {method: "POST",
+        body: "SELECT COUNT(*) FROM ZSTG_PHOTO"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.match(/<dataPreview:totalRows>1<\/dataPreview:totalRows>/);
+      expect(xml).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
+
+      const cds = await call("/datapreview/ddic?ddicEntityName=ZC_STG_BOOKING", {method: "POST",
+        body: "SELECT COUNT( * ) FROM ZC_STG_BOOKING"});
+      expect(cds.status, "CDS count travels through the same DDIC relation").to.equal(200);
+      expect(await cds.text()).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
+      const table = await call("/datapreview/ddic?ddicEntityName=ZSTG_PHOTO&dataAging=false", {method: "POST",
+        body: "SELECT COUNT( * ) FROM ZSTG_PHOTO"});
+      expect(table.status, "ADT's COUNT( * ) spelling works for TABL too").to.equal(200);
+      const cdsViaRefresh = await call("/datapreview/cds?ddlSourceName=ZC_STG_BOOKING", {method: "POST",
+        body: "SELECT COUNT( * ) FROM ZC_STG_BOOKING"});
+      expect(cdsViaRefresh.status, "CDS count uses the associationrefresh template").to.equal(200);
+      expect(await cdsViaRefresh.text()).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
     });
 
     it("describes a CDS view by its element names, not its columns", async () => {
@@ -1191,6 +1242,14 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('href="/sap/bc/adt/datapreview/cds"');
       expect(xml).to.contain('term="DatapreviewCds"');
       expect(xml).to.contain("/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}");
+      expect(xml, "the raw preview enables its SQL Pane from the DDIC relation")
+        .to.contain("http://www.sap.com/adt/categories/datapreview/ddic/launchfreestyle");
+      expect(xml, "the launch template is an endpoint OSD actually serves")
+        .to.contain('template="/sap/bc/adt/datapreview/freestyle"');
+      expect(xml, "the CDS collection carries the system's matching launch relation")
+        .to.contain("http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle");
+      expect(xml, "CDS count dereferences the A4H associationrefresh template")
+        .to.contain('rel="http://www.sap.com/adt/categories/datapreview/cds/associationrefresh" template="/sap/bc/adt/datapreview/cds{?action,rowNumber,targetType,ddlSourceName}"');
       expect(xml, "the association walks are not served, so they are not offered")
         .to.not.contain("datapreview/cds/associationlist");
     });
