@@ -75,6 +75,7 @@
     "test/preview-closure.mjs",
     "test/protocol-diag.mjs",
     "test/protocol-ni.mjs",
+    "test/protocol-rfc.mjs",
     "test/protocol-sap-compress.mjs",
     "test/replay-compare.mjs",
     "test/rfc-live.mjs",
