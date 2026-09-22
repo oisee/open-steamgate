@@ -162,3 +162,12 @@ jobs:
 
       - name: Launchpad, FCL, taxi F4 and APC smoke tests
         run: node scripts/run-e2e-isolated.mjs test/e2e/launchpad-navigation.spec.mjs test/e2e/fcl.spec.mjs test/e2e/listreport.spec.mjs test/e2e/taxi.spec.mjs test/e2e/zork.spec.mjs test/e2e/lsd.spec.mjs --config playwright.config.mjs
+
+      # This is a different product path from the default SQLite browser
+      # smoke: selecting Portable AMDP must execute the original SQLScript
+      # through the DuckDB runtime and paint its result, not merely expose an
+      # option that later returns HTTP 500.
+      - name: Switch Vector Workbench to Portable AMDP on DuckDB
+        run: node scripts/run-e2e-isolated.mjs test/e2e/zvdb.spec.mjs --config playwright.config.mjs
+        env:
+          STG_DB: duckdb

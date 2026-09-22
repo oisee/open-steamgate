@@ -814,6 +814,14 @@ test("pack live data and ANYDB work below the GitHub Pages mount", async () => {
     // project mount even after the tile itself was fixed.
     await page.goto(`${mount}/app/zvdb/`, {waitUntil: "domcontentloaded", timeout: 60000});
     await expect(page.getByText(/2002 query vectors in EGEMMA768/)).toBeVisible({timeout: 60000});
+    await expect(page.getByText(/^DB: sql\.js · memory$/)).toBeVisible({timeout: 60000});
+    const amdp = await page.evaluate(() => {
+      const element = document.querySelector("[id$='--engineSelect']");
+      const select = sap.ui.getCore().byId(element.id);
+      const item = select.getItemByKey("AMDP");
+      return {enabled: item.getEnabled(), selected: select.getSelectedKey()};
+    });
+    expect(amdp).toEqual({enabled: false, selected: "ANYDB"});
     await page.evaluate(() => {
       const element = document.querySelector("[id$='--bucketSelect']");
       const select = sap.ui.getCore().byId(element.id);

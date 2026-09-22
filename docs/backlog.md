@@ -681,12 +681,32 @@ W — what this actually is, and the two things to bet on
 │    own. Eight anomalies in two days came out of the crude version of this
 │    on pictures; the version on statements would find them in handfuls.
 ├─ W.3  AMDP in the browser, by way of DuckDB
-│    Now that AMDP really runs, the funniest thing and the most useful
-│    coincide: teach SQLScript to execute in DuckDB as well as HANA and AMDP
-│    reaches the browser preview -- a Z80 written in SQLScript, playing
-│    something, on a public link with no HANA anywhere. That is the
-│    `FOR DUCKDB` polyglot from B.19, and it turns the demo from "come and
-│    I'll show you" into a URL.
+│    Portable AMDP now executes an unchanged `FOR HDB LANGUAGE SQLSCRIPT`
+│    body through typed IR on native DuckDB; no `FOR DUCKDB` source variant
+│    is needed. The Node/DuckDB Vector Workbench path is covered by a browser
+│    engine-switch test. The Pages runtime still uses sql.js, so its AMDP
+│    choice is deliberately disabled rather than allowed to end in HTTP 500.
+│    The next slice is the official `@duckdb/duckdb-wasm`, pinned and served
+│    from the preview itself (no runtime CDN dependency):
+│    ├─ first prove the `mvp`/`eh` single-thread bundle in the Pages origin;
+│    │  the threaded `coi` flavour needs COOP/COEP headers GitHub Pages does
+│    │  not let this deployment control
+│    ├─ settle the host boundary before changing the database adapter:
+│    │  `Worker()` is unavailable inside a Service Worker, while the official
+│    │  `AsyncDuckDB` owns a Dedicated Worker. Measure a page-owned worker
+│    │  plus MessageChannel bridge against a public same-context binding;
+│    │  do not invent an undocumented synchronous path
+│    ├─ keep one database/LUW contract for ABAP SQL and nested AMDP. A second
+│    │  private DuckDB containing copied rows is not Portable AMDP; it would
+│    │  make fixture writes invisible and repeat the defect the native path
+│    │  has already removed
+│    ├─ start in memory; add OPFS persistence only after restart, checkpoint,
+│    │  single-owner and schema-version behaviour have their own tests
+│    └─ acceptance is a Pages Playwright journey that selects Portable AMDP,
+│       executes the original Vector SQLScript and matches the ANYDB top-7.
+│       Merely loading the WASM module or enabling the option is not done.
+│    The eventual showcase remains the same joke: SQLScript on a public URL,
+│    with no HANA anywhere.
 ├─ W.4  the closure, as a service and as the honest answer
 │    CLAUDE.md said on day one that the long pole is the dependency closure
 │    of real classes, and that it must be measured before architectural

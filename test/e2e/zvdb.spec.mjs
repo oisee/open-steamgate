@@ -47,11 +47,24 @@ test("vector workbench filters a diverse Master and resizes it", async ({page}) 
   expect(after.x - before.x).toBeGreaterThan(80);
 });
 
-test("vector workbench exposes the original AMDP on DuckDB", async ({page}) => {
+test("vector workbench exposes AMDP only when it can execute it", async ({page}) => {
   await page.goto("/app/zvdb/");
   await expect(page.getByText(/query vectors in EGEMMA768/)).toBeVisible();
-  const database = await page.getByText(/^DB:/).textContent();
-  test.skip(!/duckdb/i.test(database || ""), "Portable AMDP product path is the DuckDB engine");
+  await expect(page.getByText(/^DB: (?!detecting)/)).toBeVisible();
+  const capability = await page.evaluate(() => {
+    const element = document.querySelector("[id$='--engineSelect']");
+    const control = sap.ui.getCore().byId(element.id);
+    return {
+      database: control.getModel("state").getProperty("/database"),
+      enabled: control.getItemByKey("AMDP").getEnabled(),
+      selected: control.getSelectedKey(),
+    };
+  });
+  if (!/^duckdb\b/i.test(capability.database)) {
+    expect(capability).toMatchObject({enabled: false, selected: "ANYDB"});
+    return;
+  }
+  expect(capability).toMatchObject({enabled: true, selected: "ANYDB"});
   await page.locator("[id$='--masterList'] .sapMLIB").first().click();
   await page.evaluate(() => {
     const element = document.querySelector("[id$='--engineSelect']");
