@@ -22,6 +22,7 @@ import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
 import * as extractor from "../amdp-extract.mjs";
 import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
+import {parseTableFunction} from "./table-function-ddls.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
@@ -94,6 +95,23 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     ddic.add(join(scratch, pkg));
   }
   const resolveType = ddic.resolver();
+  // A method declared FOR TABLE FUNCTION has its parameters in the DDLS.
+  // Read them once every package is indexed: the DDLS is usually in the
+  // same package as its class, but nothing says it must be.
+  let tableFunctionsRead = 0;
+  const tableFunctionsMissing = new Map();
+  for (const one of [...corpora.teaching, ...corpora.working]) {
+    const name = one.signature?.tableFunction;
+    if (name === undefined) continue;
+    const ddls = ddic.read("DDLS", name);
+    if (ddls === undefined) {
+      tableFunctionsMissing.set(name, (tableFunctionsMissing.get(name) ?? 0) + 1);
+      continue;
+    }
+    const tf = parseTableFunction(ddls.source);
+    one.signature = {...one.signature, parameters: tf.parameters, returns: tf.returns};
+    tableFunctionsRead += 1;
+  }
 
   const report = {};
   for (const [which, all] of Object.entries(corpora)) {
@@ -154,6 +172,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     };
   }
   report.dictionary = ddic;
+  report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.keys()]};
   return report;
 }
 
@@ -171,7 +190,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
@@ -180,6 +199,8 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (!exports.includes(line.split("  (")[0])) console.log(`  ${line}`);
   }
   console.log(`  ${exports.length} package exports  (${exports.reduce((n, f) => n + (dictionary.hits.get(f) ?? 0), 0)} resolved)`);
+  console.log(`table-function signatures read off their DDLS: ${tableFunctions.read}` +
+    (tableFunctions.missing.length === 0 ? "" : `; DDLS not in the export: ${tableFunctions.missing.join(", ")}`));
   for (const [which, r] of Object.entries(corporaReport)) {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);

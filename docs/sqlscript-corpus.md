@@ -456,3 +456,59 @@ This does not make the surrounding point wrong: the language being parsed is
 **SQLScript as ABAP hands it over**, and `*` in column one is a comment
 because ABAP says so and SQLScript does not. The reference for that class of
 question is what reaches the database, not the book.
+
+### The signature was the instrument's, not the corpus's: 18 → 31 lowered
+
+*2026-09-22, branch `feat/amdp-corpus-width`. Measured with
+`tools/sqlscript/coverage.mjs`, which now prints the dictionaries it was
+given, because the numbers below depend on them.*
+
+The top of the "parsed and then refused" list read `unknown scalar
+:p_sapclient` (12), `:p_clnt` (6), `:i_db_schema` (3). Not one of those was
+a property of a body. The coverage instrument handed the binder **no scalar
+types at all**: `toIr` took them only from an option the procedure compiler
+sets, and derived nothing from the signature it was given. So every scalar
+parameter of every method was "unknown" -- the histogram measured the
+instrument again (foreman-dell, reading `coverage.mjs:125` against
+`to-ir.mjs:92`).
+
+Two things were behind the one line, and they came apart on looking:
+
+| | bodies | what it was |
+| --- | ---: | --- |
+| `:p_sapclient`, `:p_clnt` | 24 | methods declared `FOR TABLE FUNCTION x`: the class has no signature, the DDLS has it (`with parameters @Environment.systemField: #CLIENT P_SAPClient : abap.clnt`) |
+| `:i_db_schema`, `:iv_schema_name`, `:ip_client`, ... | 12 | ordinary signatures typed by **data elements** (`db_schema`, `char25`, `mandt`), which need a dictionary |
+
+Both are now read, and the rule for what cannot be read is the one that
+matters: a type no dictionary resolves is a **named refusal** ("data element
+DB_SCHEMA is not in any dictionary this run was given"), never STRING. A
+client field read as text would compare and pad differently on every
+dialect and the body would run and answer something else.
+
+| | before | signature scalars (1a) | + DDLS table functions (1b) |
+| --- | ---: | ---: | ---: |
+| working, lowered | 16 (4%) | 18 (5%) | **31 (9%)** |
+| teaching, lowered | 17 | 17 | 18 |
+
+1a unlocked two bodies (`S_DAAG_PARTITIONING`, `iv_schema_name : char25`,
+resolved through the released DOMA/DTEL dump) and moved the rest into true
+refusals. 1b read 97 table-function signatures off the exports (12 DDLS are
+not in them) and unlocked thirteen. **Lowered is not runnable**: those
+thirteen take a `CLNT` input, and the portable runtime still admits only
+INTEGER and STRING inputs. CHAR inputs wait for a conformance case with
+trailing blanks measured on HXE against DuckDB, because ABAP pads, HANA
+compares without the padding and DuckDB with it; `systemField: CLIENT` is a
+flag on the parameter and binds nothing (`sy-mandt` is 123 here and 001 on
+A4H, ANORMALIES).
+
+The dictionaries are folders of abapGit XML with the `input_folder` rule --
+the later folder wins a shared name and says so: the released dump, then
+`--ddic` folders, then the package's own export, which was taken off the
+system that runs the code. On this machine: 26 names taken over, 21 + 107
+resolutions answered by dump + exports.
+
+What the honest list says next, working corpus: 23 × a table function call
+in `FROM` (the callee's RETURNS is now read off its DDLS, indexed by name
+and by `implemented by method`, which is what that slice needs), 6 + 3 ×
+`IT_CONFIGURATION` (an `IN` table whose type the class does not hold),
+5 × `CURRENT_SCHEMA`, 4 × `CALL`.

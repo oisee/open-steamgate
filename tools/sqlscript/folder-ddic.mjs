@@ -39,7 +39,7 @@ export class FolderDdic {
     for (const folder of folders) this.add(folder);
   }
 
-  /** index every `*.dtel.xml` / `*.doma.xml` under a folder. The rule is the one
+  /** index every `*.dtel.xml` / `*.doma.xml` / `*.ddls.asddls` under a folder. The rule is the one
    *  `abap_transpile.json`'s input_folder list has: **the later folder wins**
    *  a name both hold, and the override is recorded rather than silent. */
   add(folder) {
@@ -50,7 +50,9 @@ export class FolderDdic {
       for (const entry of readdirSync(dir, {withFileTypes: true})) {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) { walk(path); continue; }
-        const m = /^(.+)\.(dtel|doma)\.xml$/i.exec(entry.name);
+        // DTEL and DOMA as abapGit XML; a DDLS as its source, because a
+        // table function's signature is in the source and nowhere else
+        const m = /^(.+)\.(dtel|doma)\.xml$/i.exec(entry.name) ?? /^(.+)\.(ddls)\.asddls$/i.exec(entry.name);
         if (m === null) continue;
         const key = `${m[2].toUpperCase()}:${m[1].toUpperCase().replaceAll("#", "/")}`;
         const was = this.index.get(key);

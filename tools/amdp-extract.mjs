@@ -196,6 +196,17 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
     defs.set(String(m.name).toUpperCase(), params);
   }
 
+  // `CLASS-METHODS get_x FOR TABLE FUNCTION p_x_tf.` -- a method whose
+  // signature is not in the class at all but in the DDLS it names. abaplint
+  // gives such a method no parameters; the name of the DDLS is what the
+  // caller needs to go and read them (tools/sqlscript/table-function-ddls.mjs).
+  const tableFunctions = new Map();
+  for (const st of file.getStatements()) {
+    if (st.get().constructor.name !== "MethodDef") continue;
+    const m = /METHODS\s+([\w~]+)\s+FOR\s+TABLE\s+FUNCTION\s+([\w\/]+)/i.exec(st.concatTokens());
+    if (m !== null) tableFunctions.set(m[1].toUpperCase(), m[2].toUpperCase());
+  }
+
   const out = [];
   let open;
   for (const st of file.getStatements()) {
@@ -219,7 +230,9 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
       const body = lines.slice(from.getRow() - 1, to.getRow())
         .map((l, i, a) => (i === 0 ? l.slice(from.getCol() - 1) : i === a.length - 1 ? l.slice(0, to.getCol() - 1) : l))
         .join("\n").trim();
-      out.push({...open, bodyFrom: undefined, body, parameters: defs.get(open.name.toUpperCase()) ?? []});
+      const tableFunction = tableFunctions.get(open.name.toUpperCase());
+      out.push({...open, bodyFrom: undefined, body, parameters: defs.get(open.name.toUpperCase()) ?? [],
+        ...(tableFunction === undefined ? {} : {tableFunction})});
       open = undefined;
     }
   }
