@@ -4,11 +4,22 @@ Everything open, as a tree, with who owns it and what it waits on.
 Written 2026-09-13. `AGENDA.md` stays the narrative record of what was
 decided and why; this is the list.
 
-Owners: **S** open-steamgate (this session's repository), **T** the
-transpiler session (`src/segw/**`, the ABAP generators, connectivity, APC),
-**V** vsp (the Go bridge, the only thing that touches a real system),
-**R** open-rfc-go (the RFC/CPIC transport and the ADT bridge),
-**A** Alice — a decision nobody else can take.
+Owners: **S** open-steamgate (including the built-in MIT JavaScript DIAG/RFC
+runtime), **T** the transpiler session (`src/segw/**`, the ABAP generators,
+connectivity, APC), **V** vsp and **R** open-rfc-go as historical or external
+oracle/probe repositories, **A** Alice — a decision nobody else can take.
+
+## Current execution plan — 2026-09-22
+
+The next delivery sequence is documented in
+[Preview release and OSD Doctor plan](preview-release-and-doctor.md):
+
+1. publish `v0.1.0-preview.1` from one source revision on AMD64 and ARM64;
+2. build the system-scoped OSD Doctor runner, API and Fiori cockpit;
+3. automate multi-arch promotion only after the manual preview path is proven.
+
+Doctor owns system and infrastructure acceptance. Workbench continues to own
+object-scoped ABAP Unit discovery, execution and navigation.
 
 ---
 

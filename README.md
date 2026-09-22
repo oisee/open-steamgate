@@ -25,8 +25,8 @@ view `/` and `/story.html` from another machine on the local network.
 [**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).
 SQLite, DuckDB, HANA Express and PostgreSQL options, HTTP/HTTPS, and built-in
 RFC/DIAG stubs. The ARM64 SQLite image has also run on a 2 GB Raspberry Pi 4;
-the [Pi quick start and upgrade notes](docs/spin.md#raspberry-pi-arm64) use the
-separately tested `arm64-draft` tag.
+the multi-platform `draft` tag selects the matching AMD64 or ARM64 image
+automatically. See the [Pi quick start and upgrade notes](docs/spin.md#raspberry-pi-arm64).
 
 # open-steamgate
 
@@ -215,11 +215,11 @@ calls that expand the tree, then `ddic/ddl/sources/<name>` and `/source/main`
 that open a CDS view with its source — sixteen 200s and one 304, no errors.
 Unit-test metadata and check runs answer too.
 
-The bridge is Go and lives in the sibling
-[open-rfc-go](https://github.com/oisee/open-rfc-go) (`cmd/adt-rfc-bridge`),
-because that is where the NI / RFC / CPIC transport already was. What it took
-is written down in [`docs/adt-over-rfc.md`](docs/adt-over-rfc.md), and the
-short version is four things that each refuse in silence:
+The bridge is now built-in MIT JavaScript and ships in the same image and Bun
+executable as OSD; no Go sidecar is required. The clean-room protocol work is
+written down in [`docs/js-protocol-bridge.md`](docs/js-protocol-bridge.md) and
+[`docs/adt-over-rfc.md`](docs/adt-over-rfc.md). The short version is four
+things that each refuse in silence:
 
 1. **A dictionary.** Eclipse will not call a function it has not been
    described, so `RFC_GET_FUNCTION_INTERFACE` and `DDIF_FIELDINFO_GET` have to
@@ -269,7 +269,7 @@ and [`docs/retro-2026-09-19.md`](docs/retro-2026-09-19.md).
 | **The instruments (W, O)** | Three sieves over one question. Responses (`tools/osd-compare.mjs`), **SQL at the one seam** (`STG_SQL_TRACE`, `npm run sql:compare`, `npm run sql:summary`), and a branch of a whole system — `npm run branch -- add <name>` gives a worktree its own port and database, `state` prints the object count beside the library checkouts so a number cannot travel without the state it was taken in. An ST05-shaped screen at `/sap/bc/osd/st05/` reads the trace the host holds. | calibrated in **two processes**: 7075 statements identical after one narrow rule. The SQL sieve then measured the seeding: **6793 → 1711 statements, 1563 → 446 ms** across two passes |
 | **SEGW, the long pole** | The project tree read and written the way the transaction does: `tools/segw-gen.mjs` (IWPR → `_MPC`/`_DPC`, RFC/BOR and search-help mappings), `stg-compile` (one YAML → IWPR, IWSV/IWMO, four classes, annotations), `segw-tree` (53 `/IWBEP/I_SB*`-shaped tables derived from real projects, byte-identical export), the generator again in ABAP (`src/segw/`, byte-identical to the Node one by test), and the Service Builder as a Fiori app (`webapp/segw/`, [`docs/segw-editor.md`](docs/segw-editor.md)). | spec derived from 21 real SEGW projects; most commits between 09-12 and 09-15 |
 | **A real system (D.9, new)** | The last mile of the loop, walked: one YAML becomes a SEGW project, a DDIC, seed rows, an activated service **and a Fiori application** on an A4H sandbox that has never seen this repository — carried as abapGit zips, imported by hand. `npm run segw:zip` builds the repository; `tools/osd-bsp-app.mjs` builds the UI5 app as a BSP application **and its ICF node**, which is the piece abapGit does not create and without which the app exists and nothing serves it. The mirror image works too: `tools/osd-remote-service.mjs` answers a service this system does not have out of a destination, so a page OSD serves reads a real Gateway — CSRF token and session cookie carried, `201 Created` measured through it. [`docs/a4h-deploy.md`](docs/a4h-deploy.md) | 2026-09-19, eight numbered attempts in one evening: `$metadata` **8 of 8 kinds identical** with the system's, `TravelSet` and the search help answering there, the page served at `/sap/bc/ui5_ui5/sap/<app>/`; thirteen defects found, seven of them in hand-written files no check compared with anything |
-| **ADT façade (A)** | Eclipse ADT 3.60 and vsp treat OSD as a system: logon, package tree to any depth, open and edit every supported source kind, save, activate, ABAP Unit, F8 data preview on tables and CDS, create and delete — every change lands on the git tree as abapGit files. Over HTTPS as a Cloud Project and over **RFC** as a Custom Application Server through the sibling bridge; the metadata bootstrap proven with a plain RFC client. The contract for clients (abapGit #7880) is [`docs/adt-facade.md`](docs/adt-facade.md), the measured coverage [`docs/adt-surface.md`](docs/adt-surface.md). | milestone 2026-09-15; RFC path 2026-09-16 (sixteen 200s, one 304); every unanswered path is recorded, so the worklist writes itself |
+| **ADT façade (A)** | Eclipse ADT 3.60 and vsp treat OSD as a system: logon, package tree to any depth, open and edit every supported source kind, save, activate, ABAP Unit, F8 data preview on tables and CDS, create and delete — every change lands on the git tree as abapGit files. Over HTTPS as a Cloud Project and over **RFC** as a Custom Application Server through the built-in JavaScript bridge. The contract for clients (abapGit #7880) is [`docs/adt-facade.md`](docs/adt-facade.md), the measured coverage [`docs/adt-surface.md`](docs/adt-surface.md). | milestone 2026-09-15; built-in RFC path accepted by stock Eclipse 2026-09-22; every unanswered path is recorded, so the worklist writes itself |
 | **The runtime underneath (B)** | One database seam ([`docs/db-backends.md`](docs/db-backends.md): sql.js, a SQLite file in WAL, DuckDB, HANA); generations named by content hash with a live pointer and rollback ([`docs/generations.md`](docs/generations.md)); a pool of work processes with a push channel pinned to one for the life of its socket; a base image named by schema and rows; media out of SMW0 through a host hook; APC channels; RFC destinations as local / replay / live / record / fallback. | pool 2026-09-16: 474 → 1646 frames/s on the workstation, 111 → 369 on a second machine, no change to ABAP or page; a 4 MB SMW0 object in 0.3 s |
 | **HANA, and AMDP (B.19)** | `STG_DB=hana` is a fourth backend and a first-class one: the 148 ABAP unit tests and the 22 wire tests pass against a real HANA exactly as against SQLite. On top of it, **an AMDP method runs where it belongs** — the SQLScript body is cut out of the class, deployed and called, and ordinary ABAP calls the method without knowing. CDS table functions too, checked field for field against the method that implements them ([`docs/amdp-in-hana.md`](docs/amdp-in-hana.md)). The front end that reads those bodies has a row of its own below. | 2026-09-18; HANA Express in docker on the i7; nine obstacles to the backend and **eight were not about SQL** — one real dialect rewrite; per statement it costs 52x a single-row SELECT and 3.8x a 200-row one, so it is a mode and never a default |
 | **The demo as an oracle** | The same ABAP on a real system answers the same frames, so a recording is an oracle and a diff is the test with sixty thousand assertions a scene ([`docs/frame-comparison.md`](docs/frame-comparison.md)). Every anomaly measured on the sandbox with a throwaway ABAP Unit probe before a line changed. | 2026-09-16/17: 8 anomalies in two days (5 runtime, 2 core, 1 transpiler design), 3 fixed and merged, 22 of 22 scenes attributed; what still differs everywhere is abaplint #4302 |
@@ -304,8 +304,8 @@ flowchart TB
   BROWSER(["browser · Fiori / UI5 · demo pages"])
   ECLIPSE(["Eclipse ADT · vsp"])
   GUI(["SAP GUI"])
-  BRIDGE["adt-rfc-bridge<br/><i>open-rfc-go</i>"]
-  DIAG["DIAG stub<br/><i>sap-lsd</i>"]
+  BRIDGE["built-in JS RFC→ADT<br/><i>tools/protocols</i>"]
+  DIAG["built-in JS DIAG stub<br/><i>tools/protocols</i>"]
 
   subgraph facade["façade process — test/start.mjs (express), no ABAP"]
     direction TB
@@ -337,11 +337,9 @@ flowchart TB
 
   classDef js fill:#eef3ff,stroke:#3b5bdb,color:#111
   classDef abap fill:#fff7e6,stroke:#e8590c,color:#111
-  classDef go fill:#e6fcf5,stroke:#0ca678,color:#111
   classDef store fill:#fff0f0,stroke:#c92a2a,color:#111
-  class LISTEN,ADT,STATIC,PROXY js
+  class LISTEN,ADT,STATIC,PROXY,BRIDGE,DIAG js
   class ICF,GW,APP,SEAM abap
-  class BRIDGE,DIAG go
   class STORE,DB store
 ```
 
@@ -640,10 +638,8 @@ Public siblings:
   (EXPORT cluster parser) and the `ZADT_VSP` bridge. abapGit deploy-back — the
   last mile into a real system — is already its territory.
 - **[open-rfc-go](https://github.com/oisee/open-rfc-go)** — pure-Go NI / RFC /
-  CPIC transport, sniffer/proxy, RFC client and type-3 server. Now also
-  `cmd/adt-rfc-bridge`, the gateway that lets a Custom Application Server
-  project in Eclipse reach this project over RFC
-  ([`docs/adt-over-rfc.md`](docs/adt-over-rfc.md)).
+  CPIC transport, sniffer/proxy and test client. It remains a useful external
+  oracle; the shipped OSD runtime uses its own MIT JavaScript implementation.
 - **[sap-lsd](https://github.com/oisee/sap-lsd)**, **[sap-tui](https://github.com/oisee/sap-tui)**
   — the rogue DIAG dispatcher that draws a light-show for a real SAP GUI, and
   the terminal viewer whose recorder feeds the LSD tile.

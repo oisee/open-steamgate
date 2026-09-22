@@ -1,13 +1,14 @@
 # Portainer: DuckDB demo, default instance 15 (8015/44315/3215/3315).
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-15}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: duckdb
       OSD_WORKERS: "1"
       TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"

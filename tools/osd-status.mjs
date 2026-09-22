@@ -319,13 +319,9 @@ export async function childDatabaseFacts(runtime, {fetcher = fetch, timeoutMs = 
   }
 }
 
-// The ports this instance has, and the two it has not.
-//
-// RFC and DIAG are the sibling projects' territory (open-rfc-go carries the
-// NI/RFC/CPIC transport; a DIAG sibling carries DIAG). OSD speaks neither,
-// so the row is reported as absent with a note saying who would serve it
-// rather than left out — "no RFC port" is a fact about this system, and a
-// missing row is indistinguishable from a snapshot that forgot to look.
+// The ports this instance has, including the built-in JS protocol listeners.
+// They run beside the HTTP façade so the status probe observes their sockets;
+// an absent row means STG_PROTOCOLS=0 or startup has not completed.
 export async function portsOf(listeners = [], options = {}) {
   const rows = procTcp();
   const out = [];
@@ -347,9 +343,13 @@ export async function portsOf(listeners = [], options = {}) {
   // the SAP-shaped neighbours of this instance's number, the way the TLS
   // port is 44300 + the instance (test/start.mjs)
   const instance = Number(options.instance ?? 0) % 100;
+  const configuredPort = (value, fallback) => {
+    const port = Number(value);
+    return Number.isSafeInteger(port) && port > 0 && port <= 65535 ? port : fallback;
+  };
   const siblings = [
-    {port: 3300 + instance, protocol: "RFC", purpose: "RFC gateway", note: "open-rfc-go speaks NI/RFC/CPIC; OSD does not serve it"},
-    {port: 3200 + instance, protocol: "DIAG", purpose: "DIAG dispatcher", note: "a DIAG sibling project speaks this; OSD does not serve it"},
+    {port: configuredPort(options.rfcPort, 3300 + instance), protocol: "RFC", purpose: "RFC-to-ADT gateway", note: "built-in JS protocol listener is disabled or not ready"},
+    {port: configuredPort(options.diagPort, 3200 + instance), protocol: "DIAG", purpose: "DIAG tape dispatcher", note: "built-in JS protocol listener is disabled or not ready"},
   ];
   for (const one of siblings) {
     if (seen.has(one.port)) {
@@ -432,7 +432,11 @@ export async function snapshot(root = process.cwd(), options = {}) {
       pid: servingPid(runtime, processes),
     },
     processes,
-    ports: await portsOf(options.listeners ?? [], {instance: /^\d{2}$/.test(String(env.INSTANCE ?? "")) ? env.INSTANCE : facadePort}),
+    ports: await portsOf(options.listeners ?? [], {
+      instance: /^\d{2}$/.test(String(env.INSTANCE ?? "")) ? env.INSTANCE : facadePort,
+      diagPort: env.STG_DIAG_PORT,
+      rfcPort: env.STG_RFC_PORT,
+    }),
     services: options.services ?? servicesOf(root, env),
     packs: options.packs ?? packsInfo(root, env),
     database: [...(options.database ?? await childDatabaseFacts(runtime) ?? databaseFacts({client: options.client, env})),

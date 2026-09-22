@@ -176,7 +176,7 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(s.processes[0].role).to.equal("facade");
   });
 
-  it("carries the listeners it was given, and RFC and DIAG as absent with a note", async () => {
+  it("carries the listeners it was given, and reports inactive built-in RFC and DIAG", async () => {
     const s = await take();
     const byPort = new Map(s.ports.map((p) => [p.port, p]));
     expect(byPort.get(3060).protocol).to.equal("HTTP");
@@ -185,8 +185,8 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(byPort.get(3360).protocol).to.equal("RFC");
     expect(byPort.get(3260).protocol).to.equal("DIAG");
     expect(byPort.get(3360).state).to.equal("absent");
-    expect(byPort.get(3360).note).to.include("open-rfc-go");
-    expect(byPort.get(3260).note).to.include("DIAG");
+    expect(byPort.get(3360).note).to.include("built-in JS");
+    expect(byPort.get(3260).note).to.include("built-in JS");
     expect(s.ports.map((p) => p.port)).to.deep.equal([...s.ports.map((p) => p.port)].sort((a, b) => a - b));
   });
 
@@ -195,6 +195,14 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(s.ports.find((p) => p.port === 3211)?.protocol).to.equal("DIAG");
     expect(s.ports.find((p) => p.port === 3311)?.protocol).to.equal("RFC");
     expect(s.ports.find((p) => p.port === 3230)).to.equal(undefined);
+  });
+
+  it("reports explicitly overridden built-in protocol ports", async () => {
+    const s = await take({env: {INSTANCE: "11", STG_DIAG_PORT: "41232", STG_RFC_PORT: "41233"}});
+    expect(s.ports.find((p) => p.port === 41232)?.protocol).to.equal("DIAG");
+    expect(s.ports.find((p) => p.port === 41233)?.protocol).to.equal("RFC");
+    expect(s.ports.find((p) => p.port === 3211)).to.equal(undefined);
+    expect(s.ports.find((p) => p.port === 3311)).to.equal(undefined);
   });
 
   it("distinguishes container OS, optional host OS and Raspberry Pi model without leaking paths", async () => {

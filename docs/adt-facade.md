@@ -235,10 +235,11 @@ HTTP clients use the façade directly, which is what an ABAP Cloud project in
 Eclipse, vsp and a future abapGit adapter do. A Custom Application Server
 project in Eclipse logs on over RFC instead and carries every ADT request
 inside one call to `SADT_REST_RFC_ENDPOINT`; the bridge that accepts that
-conversation and forwards the HTTP exchange inside it is Go and lives in the
-sibling [open-rfc-go](https://github.com/oisee/open-rfc-go)
-(`cmd/adt-rfc-bridge`). The protocol facts, the BXML payload encoding and what
-a working Eclipse session asks for over that wire are in
+conversation and forwards the HTTP exchange inside it is the built-in MIT
+JavaScript listener under `tools/protocols/`. The sibling
+[open-rfc-go](https://github.com/oisee/open-rfc-go) remains an independent
+test oracle. The protocol facts, BXML payload encoding and what a working
+Eclipse session asks for over that wire are in
 [adt-over-rfc.md](adt-over-rfc.md). SOAP does not enter into it: ADT is REST,
 and SOAP-RFC is a transport of the RFC family rather than of this façade.
 

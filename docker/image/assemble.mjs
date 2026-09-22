@@ -7,10 +7,17 @@ mkdirSync(out, {recursive: true});
 // Explicit roots: never copy .env, .git, local credentials, captures or databases.
 const roots = ["src", "gen", "data", "webapp", "test", "tools", "bin", "scripts", "docker/image",
   "abap_transpile.json", "abaplint.jsonc", "package.json", "package-lock.json", "LICENSE", "node_modules"];
+const testOnly = new Set([
+  "tools/adt-vsp-consume.go",
+  "docker/image/rfc-probe.go",
+  "docker/image/Dockerfile.probes",
+  "docker/image/probe-sources.mjs",
+]);
 for (const entry of roots) {
   cpSync(entry, join(out, entry), {recursive: true,
     ...(entry === "node_modules" ? {dereference: true} : {verbatimSymlinks: true}),
-    filter: path => ![".git", "e2e", "test-results", "playwright-report"].includes(basename(path))});
+    filter: path => ![".git", "e2e", "test-results", "playwright-report"].includes(basename(path)) &&
+      !testOnly.has(path.replaceAll("\\", "/"))});
 }
 // One serving generation; the checkout's build/ holds many older generations,
 // binaries, browser previews and temporary files.
@@ -21,7 +28,8 @@ cpSync(join("build", live), join(out, "build", live), {recursive: true, verbatim
 symlinkSync(live, join(out, "build", "live"));
 symlinkSync("build/live/output", join(out, "output"));
 const sources = JSON.parse(readFileSync("docker/image/sources.json", "utf8"));
-const report = {sources, libraries: [], npm: [], blockers: [], assumptions: []};
+const {clients: _clients, probeSources: _probeSources, ...runtimeSources} = sources;
+const report = {sources: runtimeSources, libraries: [], npm: [], blockers: [], assumptions: []};
 for (const source of sources.libraries) {
   const dir = `.local/lars/${source.folder}`;
   cpSync(dir, join(out, dir), {recursive: true, verbatimSymlinks: true, filter: path => ![".git", "node_modules"].includes(basename(path))});

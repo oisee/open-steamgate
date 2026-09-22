@@ -19,13 +19,14 @@ services:
     stop_grace_period: 60s
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
       INSTANCE: "${INSTANCE:-19}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: postgres
       PGHOST: postgres
       PGPORT: "5432"

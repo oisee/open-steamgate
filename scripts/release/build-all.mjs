@@ -1,7 +1,6 @@
 // One quiet command for the four private Bun/SQLite bundles.
 // Usage: node scripts/release/build-all.mjs [--no-native-smoke]
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, readFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -27,25 +26,11 @@ function run(label, command, args, extra = {}) {
     throw error;
   }
 }
-const sources = JSON.parse(readFileSync(join(root, "docker/image/sources.json"), "utf8"));
-for (const {folder, repo, ref} of sources.protocols) {
-  const path = join(root, ".local/protocols", folder);
-  if (!existsSync(path)) {
-    mkdirSync(path, {recursive: true});
-    run(`init ${folder}`, "git", ["-C", path, "init", "-q"]);
-    run(`remote ${folder}`, "git", ["-C", path, "remote", "add", "origin", `https://github.com/${repo}.git`]);
-    run(`fetch ${folder}`, "git", ["-C", path, "fetch", "--depth", "1", "origin", ref]);
-    run(`checkout ${folder}`, "git", ["-C", path, "checkout", "--detach", "FETCH_HEAD"]);
-  }
-  const actual = run(`verify ${folder}`, "git", ["-C", path, "rev-parse", "HEAD"]);
-  if (actual !== ref) throw new Error(`${folder}: expected ${ref}, got ${actual}; existing checkout left intact`);
-}
 run("ABAP build + unit tests", "npm", ["run", "unit"]);
 const native = process.platform === "linux" ? (process.arch === "arm64" ? "linux-arm64" : "linux-amd64")
   : process.platform === "darwin" && process.arch === "arm64" ? "macos-arm64" : undefined;
 for (const [name, bunTarget, executable] of targets) {
   run(`${name} Bun`, "bun", ["scripts/build-binary.mjs", `.local/release-probe/${name}/${executable}`, bunTarget]);
-  run(`${name} DIAG/RFC`, "node", ["scripts/build-protocol-target.mjs", name]);
   const archive = run(`${name} archive`, "node", ["scripts/make-download-bundle.mjs", name]).match(/^([^\n]+\.(?:tar\.gz|zip)) \(/)?.[1];
   if (!archive) throw new Error(`${name}: bundle builder did not report archive path`);
   console.log(`  ${archive}`);

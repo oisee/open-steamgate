@@ -1,0 +1,76 @@
+name: OSD Docker multi-arch draft
+on:
+  workflow_dispatch:
+    inputs:
+      amd64_tag:
+        description: Exact tested linux/amd64 image tag
+        type: string
+        required: true
+      arm64_tag:
+        description: Exact tested linux/arm64 image tag
+        type: string
+        required: true
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: docker-multiarch-draft
+  cancel-in-progress: false
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Verify inputs and publish the manifest
+        env:
+          AMD64_TAG: ${{ inputs.amd64_tag }}
+          ARM64_TAG: ${{ inputs.arm64_tag }}
+        run: |
+          set -eu
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          case "$AMD64_TAG" in sha-*-run-*) ;; *) echo "amd64_tag must be a unique sha-...-run-... publication tag" >&2; exit 2;; esac
+          case "$ARM64_TAG" in sha-*-run-*-arm64) ;; *) echo "arm64_tag must be a unique sha-...-run-...-arm64 publication tag" >&2; exit 2;; esac
+          amd64_revision="${AMD64_TAG#sha-}"
+          amd64_revision="${amd64_revision%%-run-*}"
+          arm64_revision="${ARM64_TAG#sha-}"
+          arm64_revision="${arm64_revision%%-run-*}"
+          test "$amd64_revision" = "$arm64_revision"
+          printf '%s\n' "$amd64_revision" | grep -Eq '^[0-9a-f]{40}$'
+          amd64="$registry:$AMD64_TAG"
+          arm64="$registry:$ARM64_TAG"
+          docker buildx imagetools inspect "$amd64" --format '{{json .Manifest}}' > amd64-manifest.json
+          docker buildx imagetools inspect "$arm64" --format '{{json .Manifest}}' > arm64-manifest.json
+          amd64_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' amd64-manifest.json)"
+          arm64_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' arm64-manifest.json)"
+          amd64="$registry@$amd64_digest"
+          arm64="$registry@$arm64_digest"
+          docker buildx imagetools inspect "$amd64" --format '{{json .Image}}' | tee amd64.json
+          test "$(jq -r '.os + "/" + .architecture' amd64.json)" = linux/amd64
+          test "$(jq -r '.config.Labels["org.opencontainers.image.revision"]' amd64.json)" = "$amd64_revision"
+          docker buildx imagetools inspect "$arm64" --format '{{json .Image}}' | tee arm64.json
+          test "$(jq -r '.os + "/" + .architecture' arm64.json)" = linux/arm64
+          test "$(jq -r '.config.Labels["org.opencontainers.image.revision"]' arm64.json)" = "$amd64_revision"
+          multiarch_tag="sha-$amd64_revision-run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker buildx imagetools create \
+            --tag "$registry:draft" \
+            --tag "$registry:$multiarch_tag" \
+            "$amd64" "$arm64"
+          docker buildx imagetools inspect "$registry:draft" --format '{{json .Manifest}}' | tee draft.json
+          jq -e --arg amd64 "$amd64_digest" --arg arm64 "$arm64_digest" '
+            (.manifests | length) == 2 and
+            any(.manifests[]; .digest == $amd64 and .platform.os == "linux" and .platform.architecture == "amd64") and
+            any(.manifests[]; .digest == $arm64 and .platform.os == "linux" and .platform.architecture == "arm64")
+          ' draft.json
+          multiarch_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' draft.json)"
+          {
+            printf 'MULTIARCH_TAG=%s\n\n' "$registry:draft"
+            printf 'PINNED_MULTIARCH_TAG=%s\n\n' "$registry:$multiarch_tag"
+            printf 'MULTIARCH_DIGEST=%s\n\n' "$registry@$multiarch_digest"
+            printf 'amd64 source: `%s`\n\n' "$amd64"
+            printf 'arm64 source: `%s`\n' "$arm64"
+          } >> "$GITHUB_STEP_SUMMARY"
