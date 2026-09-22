@@ -144,6 +144,24 @@ jobs:
           destination_dir: ${{ env.PREVIEW_DIRECTORY }}
           keep_files: true
           commit_message: "Deploy ${{ env.PREVIEW_DIRECTORY }} from ${{ github.sha }}"
+      - name: Refresh the index of all published previews
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          pages="$RUNNER_TEMP/gh-pages-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          # actions/checkout fetches only the triggering branch. Without an
+          # explicit destination this updates FETCH_HEAD, not origin/gh-pages.
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages
+          git worktree add --detach "$pages" origin/gh-pages
+          node scripts/pages-index.mjs "$pages"
+          git -C "$pages" add index.html
+          if ! git -C "$pages" diff --cached --quiet -- index.html; then
+            git -C "$pages" config user.name "github-actions[bot]"
+            git -C "$pages" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$pages" commit -q -m "Refresh preview index"
+            git -C "$pages" push origin HEAD:gh-pages
+          fi
+          git worktree remove "$pages"
       - name: Preview comment on the pull request
         if: github.event_name == 'pull_request'
         env:
@@ -173,15 +191,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: source
+      - uses: actions/checkout@v4
+        with:
           ref: gh-pages
+          path: pages
       - name: Remove the preview directory
         run: |
           set -euo pipefail
           dir="pr-${{ github.event.pull_request.number }}"
-          if [[ -d "$dir" ]]; then
-            git rm -r -q "$dir"
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -q -m "Remove $dir"
-            git push origin HEAD:gh-pages
+          if [[ -d "pages/$dir" ]]; then
+            git -C pages rm -r -q "$dir"
+            node source/scripts/pages-index.mjs pages
+            git -C pages config user.name "github-actions[bot]"
+            git -C pages config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C pages add index.html
+            git -C pages commit -q -m "Remove $dir"
+            git -C pages push origin HEAD:gh-pages
           fi

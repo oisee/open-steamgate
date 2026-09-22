@@ -776,6 +776,42 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
   }
 });
 
+// GitHub Pages hosts the project below /open-steamgate/<deployment>/, not at
+// the origin root.  A pack used to keep its live-data URL as /sap/...: it
+// worked in this suite at localhost, then asked oisee.github.io/sap/... in
+// public and painted Vector workbench red.  Exercise the real mount shape.
+test("pack live data and ANYDB work below the GitHub Pages mount", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-pages-mount-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    const mount = `${ORIGIN}/open-steamgate/main`;
+    const countRequests = [];
+    page.on("response", (response) => {
+      if (response.url().includes("ZVDB_100_SRV/VectorSet/$count")) {
+        countRequests.push({url: response.url(), status: response.status(), worker: response.fromServiceWorker()});
+      }
+    });
+    await page.goto(`${mount}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${mount}/app/flp.html`, {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.getByLabel("Group Navigation").getByText("Content packs", {exact: true}).click();
+    const tile = page.locator(".sapUshellTile", {hasText: "Vector workbench"}).first();
+    await expect(tile).toBeVisible({timeout: 60000});
+    await expect(tile).toContainText("4004");
+    await expect(tile).toContainText("vectors");
+    await expect(tile).not.toContainText("live data unavailable");
+    expect(countRequests).toContainEqual({
+      url: `${mount}/sap/opu/odata/sap/ZVDB_100_SRV/VectorSet/$count`,
+      status: 200,
+      worker: true,
+    });
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // The system status of a deployment that is a bundle.
 //
 // On a server the facade takes the snapshot, because only it can see the

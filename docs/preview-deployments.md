@@ -12,13 +12,17 @@ CDN and the worker leaves everything but the service path to the network.
 
 | Where | What |
 | --- | --- |
-| `https://oisee.github.io/open-steamgate/main/app/` | the default branch (`app/flp.html` for the launchpad with both apps) |
-| `https://oisee.github.io/open-steamgate/pr-<n>/app/` | every pull request, removed when it closes |
-| `.../screenshots/` next to either | what the deployment looks like |
+| `https://oisee.github.io/open-steamgate/` | index of every currently published preview |
+| `https://oisee.github.io/open-steamgate/main/app/flp.html` | the default branch launchpad |
+| `https://oisee.github.io/open-steamgate/pr-<n>/app/flp.html` | every pull request, removed when it closes |
+| `.../screenshots/*.png` next to either | what the deployment looks like; linked individually from the root index |
 
 `.github/workflows/preview.yml` builds, checks the build in headless Chromium
 (`playwright.preview.config.mjs`), takes the screenshots and publishes into the
 `gh-pages` branch (`peaceiris/actions-gh-pages`, one directory per deployment).
+After publishing or removing a preview, `scripts/pages-index.mjs` rebuilds the
+root index from the directories actually present on that branch. Thus old open
+PR previews remain directly linked and a closed PR leaves no stale link.
 
 ## Packs on the preview
 
