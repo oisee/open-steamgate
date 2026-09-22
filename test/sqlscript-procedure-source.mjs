@@ -101,6 +101,10 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     expect(compiled.body[1].rel.items[0].expr.type).to.deep.equal({abap: "I"});
     expect(() => compileProcedure({...method, body: "et = SELECT id FROM :missing;"}, types))
       .to.throw(UnsupportedSqlScript, /column ID is not present in the typed query scope/);
+    const optionalTable = {...method, parameters: method.parameters.map((one) =>
+      one.name === "it" ? {...one, optional: true} : one)};
+    expect(() => compileProcedure(optionalTable, types))
+      .to.throw(UnsupportedSqlScript, /OPTIONAL support is limited to ABAP INTEGER scalars/);
   });
 
   it("captures a scalar INTEGER LIMIT and accepts only the neutral OFFSET 0", async () => {

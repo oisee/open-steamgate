@@ -132,16 +132,25 @@ function columnsOf(hanaTableType) {
 export async function call(client, name, method, inputs, types) {
   const exec = (sql) => new Promise((resolve, reject) =>
     client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+  if (method.parameters.some((p) => p.direction === "INOUT")) {
+    throw new Error("AMDP oracle call does not support INOUT parameters");
+  }
   const outs = method.parameters.filter((p) => p.direction !== "IN");
+  const scalarOuts = outs.filter((p) => columnsOf(parameterType(p.abapType, types)) === undefined);
+  const scalarOnly = outs.length > 0 && scalarOuts.length === outs.length;
   const temporary = [];
 
   const args = [];
   for (const p of method.parameters) {
-    if (p.direction !== "IN") { args.push("?"); continue; }
+    if (p.direction !== "IN") {
+      args.push(scalarOnly ? `V_${p.name.toUpperCase()}` : "?");
+      continue;
+    }
     const given = inputs[p.name.toLowerCase()] ?? inputs[p.name];
     const columns = columnsOf(parameterType(p.abapType, types));
     if (columns === undefined) {                       // a scalar
-      args.push(typeof given === "number" ? String(given) : `'${String(given ?? "").replace(/'/g, "''")}'`);
+      args.push(given == null ? "NULL" : typeof given === "number" ? String(given)
+        : `'${String(given).replace(/'/g, "''")}'`);
     } else if (typeof given === "string") {            // a table, named
       args.push(given);
     } else {                                           // rows, materialised
@@ -152,7 +161,16 @@ export async function call(client, name, method, inputs, types) {
   }
 
   try {
-    const parts = await exec(`CALL ${name} (${args.join(", ")})`);
+    const sql = scalarOnly
+      ? `DO BEGIN ${scalarOuts.map((p) => `DECLARE V_${p.name.toUpperCase()} ${parameterType(p.abapType, types)};`).join(" ")} ` +
+        `CALL ${name} (${args.join(", ")}); SELECT ${scalarOuts.map((p) =>
+          `:V_${p.name.toUpperCase()} AS "${p.name.toLowerCase()}"`).join(", ")} FROM DUMMY; END;`
+      : `CALL ${name} (${args.join(", ")})`;
+    const parts = await exec(sql);
+    if (scalarOnly) {
+      const row = parts.find(Array.isArray)?.[0] ?? {};
+      return Object.fromEntries(scalarOuts.map((p) => [p.name.toLowerCase(), readable(row[p.name.toLowerCase()])]));
+    }
     const [scalars, ...tables] = parts;
     const result = {};
     for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);

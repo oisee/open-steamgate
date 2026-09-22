@@ -177,6 +177,48 @@ describe("the typed SQLScript procedural IR", function () {
     expect(answer.rows).to.deep.equal([{ID: 2}]);
   });
 
+  it("requires the selected path to assign a scalar RETURNING value", async () => {
+    const scalar = procedure({parameters: [{name: "IV", type: T.int}], output: "RV", outputType: T.int,
+      body: [ifElse([{condition: bin(">", p("IV"), lit(0, T.int), T.bool),
+        body: [assignScalar("RV", p("IV"))]}]) ]});
+    expect((await runProcedure(scalar, {inputs: {IV: 2}})).value).to.equal(2);
+    let failure;
+    try { await runProcedure(scalar, {inputs: {IV: 0}}); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/scalar output RV was not assigned/);
+
+    const wide = procedure({output: "RV", outputType: T.char(3), body: [
+      assignScalar("RV", lit("abcdef", T.char(6))),
+    ]});
+    failure = undefined;
+    try { await runProcedure(wide); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/scalar RETURNING is limited to ABAP INTEGER/);
+
+    const optionalChar = procedure({parameters: [{name: "IV", type: T.char(3), optional: true}],
+      output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    failure = undefined;
+    try { await runProcedure(optionalChar); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/OPTIONAL inputs are limited to ABAP INTEGER/);
+
+    const relationalScalar = procedure({output: "RV", outputType: T.int, body: [
+      assignRelation("TMP", project(scan("DUMMY"), [{as: "ID", expr: lit(1, T.int)}])),
+      assignScalar("RV", lit(1, T.int)),
+    ]});
+    failure = undefined;
+    try { await runProcedure(relationalScalar); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/scalar-only portable functions cannot contain relational/);
+
+    const decorated = procedure({parameters: [{name: "IV", type: T.int}], output: "RV", outputType: T.int,
+      body: [assignScalar("RV", {...call("COALESCE", [p("IV"), lit(0, T.int)], T.int), window: {}})]});
+    failure = undefined;
+    try { await runProcedure(decorated, {inputs: {IV: 1}}); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/COALESCE does not accept window/);
+  });
+
   it("validates execution budgets before interpreting the body", async () => {
     let error;
     try {

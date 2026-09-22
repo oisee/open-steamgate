@@ -146,19 +146,21 @@ It currently contains ten synthetic methods covering these categories:
 | `difference_cells` | set difference | `EXCEPT` absent from relational IR |
 | `expand_values` | array/row expansion shape | array input semantics |
 | `identity_cells` | execution identity | session values not implemented |
-| `optional_value` | optional input and scalar return | scalar-return procedure shape |
+| `optional_value` | optional input and scalar return | **executable in the portable host runtime** |
 | `transform` | `IF`/`ELSEIF`, regex and session context | LOWER/regex branches execute; selected session context refuses |
 | `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
 | `rank_rows` | grouping, windows and ranking | **executable on HANA and DuckDB** |
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
-| `scalar_value` | scalar function return | scalar-return procedure shape |
+| `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current ledger is `2 fully executable / 1 partially executable / 7 named
+The current ledger is `4 fully executable / 1 partially executable / 5 named
 refusals / 0 crashes`. `transform` is deliberately not promoted while its
 `SESSION_CONTEXT` branch remains a selected-path refusal. Parser
 success is not reported as runtime support: a tracked method body moves only
-after it executes directly, without runtime or harness rewriting, at value
-level on HANA↔HANA and DuckDB.
+after it executes directly, without body rewriting, at value level. Relational
+methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
+methods must agree with native HANA and prove that they perform no database
+statement.
 
 That move required more than accepting `LIMIT :value`. Source aliases now
 survive in typed IR, query scopes distinguish unknown and ambiguous columns,
@@ -215,18 +217,21 @@ that contract and its cross-engine corpus exist.
   session-context branch produces a named refusal before database I/O. Regex
   support is intentionally the single measured literal replacement in this
   fixture, not a claim of general HANA/DuckDB regex equivalence;
-- full SQLScript regression: 363 passing tests, with only explicit live-HANA
+- direct-source `scalar_value` and `optional_value`: native HANA SQLScript and
+  portable host evaluation agree for negative, zero, non-default and SQL NULL
+  inputs. An omitted ABAP `OPTIONAL TYPE i` is separately checked as its ABAP
+  type-initial zero; scalar-only execution performs zero database statements;
+- full SQLScript regression: 368 passing tests, with only explicit live-HANA
   cases skipped in the ordinary offline run;
-- live HANA focused suite: 7 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 8 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Scalar returns and optional INTEGER inputs.
-2. `EXCEPT` as its own relational node and backend lowering.
-3. Session identity (which completes `transform`), arrays, fuzzy search,
+1. `EXCEPT` as its own relational node and backend lowering.
+2. Session identity (which completes `transform`), arrays, fuzzy search,
    dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 

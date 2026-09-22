@@ -46,14 +46,19 @@ function structuredTable(abapType, types) {
 function outputFrom(method, types) {
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
-    throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING table parameter");
+    throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
   }
   const parameter = outputs[0];
   const schema = structuredTable(parameter.abapType, types);
-  if (schema === undefined) {
-    throw new UnsupportedSqlScript(`output ${parameter.name} is not a resolved structured table type`);
+  if (schema !== undefined) return {name: upper(parameter.name), kind: "relation", schema};
+  if (parameter.direction === "RETURNING") {
+    const type = irTypeFromAbap(parameter.abapType);
+    if (type.abap !== "I") {
+      throw new UnsupportedSqlScript("initial scalar RETURNING support is limited to ABAP INTEGER exactly");
+    }
+    return {name: upper(parameter.name), kind: "scalar", type};
   }
-  return {name: upper(parameter.name), schema};
+  throw new UnsupportedSqlScript(`output ${parameter.name} is not a resolved structured table type`);
 }
 
 /** Compile one extracted AMDP method without changing its source body. */
@@ -61,19 +66,25 @@ export function compileProcedure(method, types) {
   const tree = parse(new Body(), lex(method.body));
   const output = outputFrom(method, types);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
-  const relationParameters = inputParameters
+  const relationCandidates = inputParameters
     .map((one) => ({one, schema: structuredTable(one.abapType, types)}))
-    .filter(({schema}) => schema !== undefined)
-    .map(({one, schema}) => ({name: upper(one.name), schema}));
+    .filter(({schema}) => schema !== undefined);
+  if (relationCandidates.some(({one}) => one.optional === true)) {
+    throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER scalars");
+  }
+  const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
   const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
   const parameters = inputParameters
     .filter((one) => !relationNames.has(upper(one.name)))
-    .map((one) => ({name: upper(one.name), type: irTypeFromAbap(one.abapType)}));
+    .map((one) => one.optional === true
+      ? {name: upper(one.name), type: irTypeFromAbap(one.abapType), optional: true}
+      : {name: upper(one.name), type: irTypeFromAbap(one.abapType)});
   if (parameters.some((one) => one.type.abap !== "I")) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER scalars");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
+  if (output.kind === "scalar") scalarTypes[output.name] = output.type;
   const snapshotEnvironment = () => ({
     relations: structuredClone(relationSchemas),
     scalars: structuredClone(scalarTypes),
@@ -131,7 +142,12 @@ export function compileProcedure(method, types) {
           catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
           result.push(assignRelation(name, rel, node));
         }
-        else result.push(assignScalar(name, bind(child(node, "Expr"), "expression"), node));
+        else {
+          if (scalarTypes[name] === undefined) {
+            throw new UnsupportedSqlScript(`assignment to undeclared scalar ${name}`, node);
+          }
+          result.push(assignScalar(name, bind(child(node, "Expr"), "expression"), node));
+        }
       } else if (node.node === "While") {
         result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
       } else if (node.node === "If") {
@@ -184,8 +200,19 @@ export function compileProcedure(method, types) {
   };
 
   try {
-    return procedure({parameters, relationParameters, body: compileStatements(tree),
-      output: output.name, outputSchema: output.schema});
+    const body = compileStatements(tree);
+    const containsRelationStatement = (statements) => statements.some((statement) =>
+      statement.stmt === "assign-relation"
+        || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
+        || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
+          containsRelationStatement(branch.body ?? []))
+          || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
+    if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body))) {
+      throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
+    }
+    return procedure({parameters, relationParameters, body, output: output.name,
+      outputSchema: output.kind === "relation" ? output.schema : undefined,
+      outputType: output.kind === "scalar" ? output.type : undefined});
   } catch (error) {
     if (error instanceof UnsupportedSqlScript) throw error;
     if (error instanceof BindError) throw new UnsupportedSqlScript(error.message, error);

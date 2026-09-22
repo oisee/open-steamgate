@@ -128,11 +128,9 @@ describe("independent AMDP clean-room corpus", () => {
       difference_cells: /EXCEPT is parsed/,
       expand_values: /inputs support only INTEGER scalars/,
       identity_cells: /CURRENT_USER is a session value/,
-      optional_value: /not a resolved structured table type/,
       control_rows: /only scalar DECLARE/,
-      scalar_value: /not a resolved structured table type/,
     };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -372,6 +370,40 @@ describe("independent AMDP clean-room corpus", () => {
     } finally {
       await client.disconnect();
     }
+  });
+
+  it("executes scalar RETURNING functions in the portable host runtime", async () => {
+    const additions = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const matrix = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const optional = compileProcedure(additions.methods.find((one) => one.name === "optional_value"), additions.types);
+    const scalarMethod = matrix.methods.find((one) => one.name === "scalar_value");
+    const scalar = compileProcedure(scalarMethod, matrix.types);
+    const charReturning = {...scalarMethod, parameters: scalarMethod.parameters.map((one) =>
+      one.direction === "RETURNING" ? {...one, abapType: "c LENGTH 3"} : one)};
+    expect(() => compileProcedure(charReturning, matrix.types))
+      .to.throw(UnsupportedSqlScript, /scalar RETURNING support is limited to ABAP INTEGER/);
+    const relationalScalar = {...scalarMethod,
+      body: "tmp = SELECT key_id FROM :it_left; rv_value = :iv_seed + 4;",
+      parameters: [
+        {name: "it_left", direction: "IN", abapType: "tt_left", optional: false},
+        ...scalarMethod.parameters,
+      ]};
+    expect(() => compileProcedure(relationalScalar, matrix.types))
+      .to.throw(UnsupportedSqlScript, /scalar-only portable functions cannot contain relational/);
+    const decoratedCoalesce = {...scalarMethod,
+      body: "rv_value = COALESCE(:iv_seed, 0) OVER ();"};
+    expect(() => compileProcedure(decoratedCoalesce, matrix.types))
+      .to.throw(UnsupportedSqlScript, /COALESCE does not accept window/);
+    expect(optional.parameters).to.deep.equal([{name: "IV_SEED", type: {abap: "I"}, optional: true}]);
+    expect((await runProcedure(optional)).value,
+      "omitted OPTIONAL ABAP I has its ABAP initial value before SQLScript sees it").to.equal(0);
+    expect((await runProcedure(optional, {inputs: {IV_SEED: null}})).value,
+      "an explicit SQL NULL exercises COALESCE independently of ABAP omission").to.equal(7);
+    expect((await runProcedure(optional, {inputs: {IV_SEED: 11}})).value).to.equal(11);
+    const answer = await runProcedure(scalar, {inputs: {IV_SEED: -3}});
+    expect(answer.value).to.equal(1);
+    expect(answer.outputType).to.deep.equal({abap: "I"});
+    expect(answer.trace).to.include({engine: "host", fallback: false, databaseStatements: 0});
   });
 
   it("executes a value-level correlated EXISTS where the correlation changes the answer", async () => {

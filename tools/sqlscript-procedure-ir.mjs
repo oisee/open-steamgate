@@ -19,8 +19,8 @@ export class UnsupportedSqlScript extends Error {
 
 const upper = (name) => String(name).toUpperCase();
 
-export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema = {}}) =>
-  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema});
+export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType}) =>
+  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType});
 export const declareScalar = (name, type, initial, source) =>
   ({stmt: "declare-scalar", name: upper(name), type, initial, source});
 export const assignScalar = (name, expr, source) =>
@@ -85,6 +85,14 @@ export function evaluateScalar(expr, scalars) {
   if (expr.node === "not") {
     const value = booleanOrNull(evaluateScalar(expr.expr, scalars), "NOT operand");
     return value == null ? null : !value;
+  }
+  if (expr.node === "call" && expr.fn === "COALESCE") {
+    if (expr.window !== undefined || (expr.orderBy ?? []).length > 0 || expr.star === true) {
+      throw new UnsupportedSqlScript("scalar COALESCE does not accept window, ordering, or star decorations", expr);
+    }
+    if (expr.args.length !== 2) throw new UnsupportedSqlScript("scalar COALESCE currently requires exactly two arguments", expr);
+    const first = evaluateScalar(expr.args[0], scalars);
+    return first == null ? evaluateScalar(expr.args[1], scalars) : first;
   }
   if (expr.node !== "bin") throw new UnsupportedSqlScript(`scalar ${expr.node} is not supported yet`, expr);
   const left = evaluateScalar(expr.left, scalars);
@@ -235,7 +243,22 @@ export async function runProcedure(program, {
   maxPlanDepth = 256, maxParameters = 10000,
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
-  if (client?.supportsNative !== true) throw new UnsupportedSqlScript("the selected database has no native relational channel");
+  if (program.outputType !== undefined && program.outputType?.abap !== "I") {
+    throw new UnsupportedSqlScript("portable scalar RETURNING is limited to ABAP INTEGER exactly");
+  }
+  const containsRelationStatement = (body) => body.some((statement) =>
+    statement.stmt === "assign-relation"
+      || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
+      || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
+        containsRelationStatement(branch.body ?? []))
+        || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
+  if (program.outputType !== undefined
+      && ((program.relationParameters ?? []).length > 0 || containsRelationStatement(program.body ?? []))) {
+    throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
+  }
+  if (program.outputType === undefined && client?.supportsNative !== true) {
+    throw new UnsupportedSqlScript("the selected database has no native relational channel");
+  }
   for (const [name, value] of Object.entries({maxSteps, maxPlanNodes, maxPlanDepth, maxParameters})) {
     if (!Number.isSafeInteger(value) || value <= 0) throw new UnsupportedSqlScript(`${name} must be a positive safe integer`);
   }
@@ -245,9 +268,16 @@ export async function runProcedure(program, {
   const suppliedRelations = new Map(Object.entries(relationInputs).map(([name, value]) => [upper(name), value]));
   for (const parameter of program.parameters) {
     const name = upper(parameter.name);
-    if (!supplied.has(name)) throw new UnsupportedSqlScript(`missing input ${name}`);
-    const value = scalarForType(supplied.get(name), parameter.type, name);
+    if (parameter.optional && parameter.type?.abap !== "I") {
+      throw new UnsupportedSqlScript("portable OPTIONAL inputs are limited to ABAP INTEGER exactly");
+    }
+    if (!supplied.has(name) && !parameter.optional) throw new UnsupportedSqlScript(`missing input ${name}`);
+    const raw = supplied.has(name) ? supplied.get(name) : (parameter.type?.abap === "I" ? 0 : null);
+    const value = scalarForType(raw, parameter.type, name);
     scalars.set(name, {type: parameter.type, value});
+  }
+  if (program.outputType !== undefined) {
+    scalars.set(program.output, {type: program.outputType, value: null});
   }
   for (const parameter of program.relationParameters ?? []) {
     const name = upper(parameter.name);
@@ -271,6 +301,7 @@ export async function runProcedure(program, {
     relations.set(name, value);
   }
   let steps = 0;
+  const assignedScalars = new Set();
   const step = (node) => {
     steps += 1;
     if (steps > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, node);
@@ -288,6 +319,7 @@ export async function runProcedure(program, {
         let value = evaluateScalar(statement.expr, scalars);
         value = scalarForType(value, current.type, statement.name);
         scalars.set(statement.name, {type: current.type, value});
+        assignedScalars.add(statement.name);
       } else if (statement.stmt === "assign-relation") {
         // Reject hostile/deep input before recursive freezing or effects()
         // can exhaust the JavaScript stack. A var reference is cheap here;
@@ -320,6 +352,14 @@ export async function runProcedure(program, {
     }
   };
   await execute(program.body);
+  if (program.outputType !== undefined) {
+    const scalar = scalars.get(program.output);
+    if (scalar === undefined || !assignedScalars.has(program.output)) {
+      throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
+    }
+    return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
+      trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
+  }
   const result = relations.get(program.output);
   if (result === undefined) throw new UnsupportedSqlScript(`output relation ${program.output} was not assigned`);
   // A native AMDP procedure converts the final SELECT into the declared ABAP

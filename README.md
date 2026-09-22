@@ -4,7 +4,8 @@
 > clean-room `mix_rows` and `rank_rows` SQLScript through typed host control
 > flow and ordinary relational SQL on both HANA and DuckDB. The portable
 > branches of `transform` now run through host-side `IF / ELSEIF / ELSE` as
-> well. Read the milestone report for the
+> well, and the two clean-room scalar functions execute without a database
+> round trip. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 

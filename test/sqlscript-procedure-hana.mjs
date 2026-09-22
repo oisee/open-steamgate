@@ -305,3 +305,51 @@ describe("transform: selected IF branches against portable HANA SQL", function (
     }
   });
 });
+
+describe("scalar functions: native SQLScript against portable host evaluation", function () {
+  this.timeout(60000);
+
+  liveIt("matches scalar RETURNING values and keeps omission distinct from SQL NULL", async () => {
+    if (process.env.STG_DB_FRESH === "1") {
+      throw new Error("live AMDP differential refuses STG_DB_FRESH=1 because it must never reset a schema");
+    }
+    const cases = [
+      {file: "fixtures/amdp-cleanroom/neutral_matrix.clas.abap.txt", logical: "cl_neutral_matrix.clas.abap",
+        method: "scalar_value", values: [-4, 0, 7]},
+      {file: "fixtures/amdp-cleanroom/neutral_additions.clas.abap.txt", logical: "cl_neutral_additions.clas.abap",
+        method: "optional_value", values: [null, 0, 11]},
+    ];
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const created = [];
+    await client.connect();
+    try {
+      for (const item of cases) {
+        const source = readFileSync(new URL(item.file, import.meta.url), "utf8");
+        const extracted = extract(source, item.logical);
+        const method = extracted.methods.find((one) => one.name === item.method);
+        const portable = compileProcedure(method, extracted.types);
+        const cls = `ZOSD_S_${randomBytes(6).toString("hex").toUpperCase()}`;
+        const name = `"${schema}"."${cls}=>${method.name.toUpperCase()}"`;
+        await client.native({sql: hanaProcedure(cls, method, schema, extracted.types), expect: "none"});
+        created.push(name);
+        for (const value of item.values) {
+          const native = await callAmDP(client.client, name, method, {iv_seed: value}, extracted.types);
+          const lowered = await runProcedure(portable, {client, dialect: "hana", inputs: {IV_SEED: value}});
+          expect(String(lowered.value), `${item.method}(${value})`).to.equal(String(native.RV_VALUE ?? native.rv_value));
+          expect(lowered.trace).to.include({engine: "host", fallback: false, databaseStatements: 0});
+        }
+        if (item.method === "optional_value") {
+          const omitted = await runProcedure(portable, {client, dialect: "hana"});
+          expect(omitted.value, "ABAP OPTIONAL integer omission supplies type-initial zero").to.equal(0);
+        }
+      }
+    } finally {
+      try {
+        for (const name of created) await client.native({sql: `DROP PROCEDURE ${name}`, expect: "none"}).catch(() => undefined);
+      } finally {
+        await client.disconnect();
+      }
+    }
+  });
+});

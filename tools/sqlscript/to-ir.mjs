@@ -266,6 +266,16 @@ export function toIr(tree, options = {}) {
         // expose the wrong AMDP boundary type even when the SQL itself ran.
         let resultType = T.str;
         if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        if (fn === "COALESCE") {
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar COALESCE does not accept window, ordering, or star decorations", node);
+          }
+          if (args.length !== 2) throw new BindError("COALESCE currently requires exactly two arguments", node);
+          if (JSON.stringify(args[0]?.type) !== JSON.stringify(args[1]?.type)) {
+            throw new BindError("COALESCE arguments require identical measured types", node);
+          }
+          resultType = args[0].type;
+        }
         const built = call(fn, args, resultType);
         if (starArg) built.star = true;
         if (inner.length > 0) built.orderBy = inner;

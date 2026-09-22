@@ -476,3 +476,26 @@ facts identical on every reachable path survive after `END IF`; a consumer of
 branch-dependent state is refused rather than typed from whichever arm the
 compiler happened to visit last. At one condition level, mixed unparenthesised
 `AND`/`OR` is likewise refused until precedence is represented explicitly.
+
+### 2026-09-22 — P1f scalar RETURNING and OPTIONAL
+
+The clean-room `scalar_value` and `optional_value` database functions now use
+the same typed host evaluator as procedural conditions. A scalar `RETURNING`
+signature carries its output type in procedure IR, its selected execution path
+must actually assign the value, and INTEGER overflow remains a named host-side
+failure. The measured scalar `COALESCE` subset is exactly two arguments with
+identical types.
+
+`OPTIONAL` is preserved by extraction rather than inferred later. Omitting an
+ABAP `TYPE i` actual supplies ABAP's type-initial zero before SQLScript sees the
+parameter; an explicit SQL NULL is a distinct direct-runtime case and reaches
+`COALESCE`. Scalar-only bodies require no database client and report zero
+database statements. A disposable HANA procedure wrapper maps ABAP
+`RETURNING` to an equivalent scalar OUT and retrieves it through an anonymous
+block, allowing the original assignment body to remain unchanged for the
+differential oracle. This shortcut is deliberately scalar-only: compiler and
+runtime both refuse table inputs or relational statements rather than report
+an unexecuted query as a zero-statement success. Scalar output and OPTIONAL
+input types are limited to ABAP `I`; table OPTIONAL and INOUT remain named
+unsupported boundaries. The corpus ledger is now `4 fully executable / 1
+partially executable / 5 named refusals / 0 crashes`.
