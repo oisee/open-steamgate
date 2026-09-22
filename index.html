@@ -1,10 +1,27 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>open-steamgate previews</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem}a{color:#0a6ed1}</style>
-<h1>open-steamgate previews</h1>
-<p>Each directory is a build of <a href="https://github.com/oisee/open-steamgate">open-steamgate</a> that runs entirely in your browser: the OData gateway in a service worker, the Fiori Elements demo app on top.</p>
-<ul>
-  <li><a href="main/app/">main</a> (<a href="main/screenshots/">screenshots</a>)</li>
-  <li>pull requests: <code>pr-&lt;number&gt;/app/</code>, linked from the PR</li>
-</ul>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-steamgate previews</title>
+  <style>
+    body { max-width: 52rem; margin: 3rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
+    h1 { line-height: 1.2; }
+    li { margin: .55rem 0; }
+    a { color: #0a6ed1; }
+    code { background: #f3f3f3; padding: .1rem .3rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>open-steamgate previews</h1>
+  <p>Each directory is a build that runs entirely in your browser: the OData gateway in a service worker, with the Fiori apps on top.</p>
+  <p>The stable preview is <a href="main/app/flp.html"><code>main/app/flp.html</code></a>. Pull-request previews are retained while their PR is open.</p>
+  <ul>
+      <li><a href="main/app/flp.html">main — current default branch</a> · screenshots: <a href="main/screenshots/list-report.png">list report</a>, <a href="main/screenshots/metadata.png">metadata</a>, <a href="main/screenshots/sadl-aggregate.png">aggregate</a></li>
+      <li><a href="pr-15/app/flp.html">pull request #15</a> · screenshots: <a href="pr-15/screenshots/list-report.png">list report</a>, <a href="pr-15/screenshots/metadata.png">metadata</a>, <a href="pr-15/screenshots/sadl-aggregate.png">aggregate</a></li>
+      <li><a href="pr-12/app/flp.html">pull request #12</a> · screenshots: <a href="pr-12/screenshots/list-report.png">list report</a>, <a href="pr-12/screenshots/metadata.png">metadata</a>, <a href="pr-12/screenshots/sadl-aggregate.png">aggregate</a></li>
+      <li><a href="pr-7/app/flp.html">pull request #7</a> · screenshots: <a href="pr-7/screenshots/list-report.png">list report</a>, <a href="pr-7/screenshots/metadata.png">metadata</a>, <a href="pr-7/screenshots/sadl-aggregate.png">aggregate</a></li>
+      <li><a href="pr-3/app/flp.html">pull request #3</a> · screenshots: <a href="pr-3/screenshots/list-report.png">list report</a>, <a href="pr-3/screenshots/metadata.png">metadata</a>, <a href="pr-3/screenshots/sadl-aggregate.png">aggregate</a></li>
+  </ul>
+</body>
+</html>
