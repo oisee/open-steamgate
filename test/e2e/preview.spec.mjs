@@ -776,6 +776,63 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
   }
 });
 
+// GitHub Pages hosts the project below /open-steamgate/<deployment>/, not at
+// the origin root.  A pack used to keep its live-data URL as /sap/...: it
+// worked in this suite at localhost, then asked oisee.github.io/sap/... in
+// public and painted Vector workbench red.  Exercise the real mount shape.
+test("pack live data and ANYDB work below the GitHub Pages mount", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-pages-mount-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    const mount = `${ORIGIN}/open-steamgate/main`;
+    const countRequests = [];
+    const escaped = [];
+    page.on("response", (response) => {
+      if (response.url().includes("ZVDB_100_SRV/VectorSet/$count")) {
+        countRequests.push({url: response.url(), status: response.status(), worker: response.fromServiceWorker()});
+      }
+      if (response.url().startsWith(`${ORIGIN}/sap/`)) escaped.push(response.url());
+    });
+    await page.goto(`${mount}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${mount}/app/flp.html`, {waitUntil: "domcontentloaded", timeout: 60000});
+    await page.getByLabel("Group Navigation").getByText("Content packs", {exact: true}).click();
+    const tile = page.locator(".sapUshellTile", {hasText: "Vector workbench"}).first();
+    await expect(tile).toBeVisible({timeout: 60000});
+    await expect(tile).toContainText("4004");
+    await expect(tile).toContainText("vectors");
+    await expect(tile).not.toContainText("live data unavailable");
+    expect(countRequests).toContainEqual({
+      url: `${mount}/sap/opu/odata/sap/ZVDB_100_SRV/VectorSet/$count`,
+      status: 200,
+      worker: true,
+    });
+
+    // The tile being green is not enough: the app has its own manifest and
+    // status request. Both used to start at /sap and therefore escaped the
+    // project mount even after the tile itself was fixed.
+    await page.goto(`${mount}/app/zvdb/`, {waitUntil: "domcontentloaded", timeout: 60000});
+    await expect(page.getByText(/2002 query vectors in EGEMMA768/)).toBeVisible({timeout: 60000});
+    await page.evaluate(() => {
+      const element = document.querySelector("[id$='--bucketSelect']");
+      const select = sap.ui.getCore().byId(element.id);
+      select.setSelectedKey("QWEN31024");
+      select.fireChange({selectedItem: select.getSelectedItem()});
+    });
+    await expect(page.getByText(/2002 query vectors in QWEN31024/)).toBeVisible({timeout: 60000});
+    const rows = await page.evaluate(() => {
+      const element = document.querySelector("[id$='--masterList']");
+      return sap.ui.getCore().byId(element.id).getModel("state").getProperty("/vectors").length;
+    });
+    expect(rows).toBe(2002);
+    expect(escaped, "no app request may escape the Pages deployment mount").toEqual([]);
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // The system status of a deployment that is a bundle.
 //
 // On a server the facade takes the snapshot, because only it can see the
