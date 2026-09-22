@@ -27,4 +27,3 @@ not silently contradict one another.
 No calendar estimates are invented before the spikes. The architecture records
 relative uncertainty and a measurable gate for each track; observed work can
 replace those labels with actual delivery data later.
-
