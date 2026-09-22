@@ -787,10 +787,12 @@ test("pack live data and ANYDB work below the GitHub Pages mount", async () => {
     const page = await context.newPage();
     const mount = `${ORIGIN}/open-steamgate/main`;
     const countRequests = [];
+    const escaped = [];
     page.on("response", (response) => {
       if (response.url().includes("ZVDB_100_SRV/VectorSet/$count")) {
         countRequests.push({url: response.url(), status: response.status(), worker: response.fromServiceWorker()});
       }
+      if (response.url().startsWith(`${ORIGIN}/sap/`)) escaped.push(response.url());
     });
     await page.goto(`${mount}/index.html?stay=1`);
     await controlled(page);
@@ -806,6 +808,25 @@ test("pack live data and ANYDB work below the GitHub Pages mount", async () => {
       status: 200,
       worker: true,
     });
+
+    // The tile being green is not enough: the app has its own manifest and
+    // status request. Both used to start at /sap and therefore escaped the
+    // project mount even after the tile itself was fixed.
+    await page.goto(`${mount}/app/zvdb/`, {waitUntil: "domcontentloaded", timeout: 60000});
+    await expect(page.getByText(/2002 query vectors in EGEMMA768/)).toBeVisible({timeout: 60000});
+    await page.evaluate(() => {
+      const element = document.querySelector("[id$='--bucketSelect']");
+      const select = sap.ui.getCore().byId(element.id);
+      select.setSelectedKey("QWEN31024");
+      select.fireChange({selectedItem: select.getSelectedItem()});
+    });
+    await expect(page.getByText(/2002 query vectors in QWEN31024/)).toBeVisible({timeout: 60000});
+    const rows = await page.evaluate(() => {
+      const element = document.querySelector("[id$='--masterList']");
+      return sap.ui.getCore().byId(element.id).getModel("state").getProperty("/vectors").length;
+    });
+    expect(rows).toBe(2002);
+    expect(escaped, "no app request may escape the Pages deployment mount").toEqual([]);
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});

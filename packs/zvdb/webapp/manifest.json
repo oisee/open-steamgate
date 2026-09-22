@@ -7,7 +7,7 @@
     "description": "Compare portable ABAP and database-native vector search",
     "applicationVersion": {"version": "0.1.0"},
     "dataSources": {
-      "main": {"uri": "/sap/opu/odata/sap/ZVDB_100_SRV/", "type": "OData", "settings": {"odataVersion": "2.0"}}
+      "main": {"uri": "../../sap/opu/odata/sap/ZVDB_100_SRV/", "type": "OData", "settings": {"odataVersion": "2.0"}}
     }
   },
   "sap.ui": {"technology": "UI5", "deviceTypes": {"desktop": true, "tablet": true, "phone": true}},
