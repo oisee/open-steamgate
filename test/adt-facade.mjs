@@ -470,6 +470,29 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain("<dataPreview:totalRows>3</dataPreview:totalRows>");
     });
 
+    it("advertises and performs the SQL Pane syntax check", async () => {
+      const discovery = await (await call("/discovery")).text();
+      expect(discovery).to.contain("http://www.sap.com/adt/categories/datapreview/freestyle/check");
+      expect(discovery).to.contain("/sap/bc/adt/datapreview/freestyle{?action,uniqueURI}");
+
+      const uri = "/sap/bc/adt/datapreview/freestyle/sqlconsole0";
+      const good = await call(`/datapreview/freestyle?action=checkSyntax&uniqueURI=${encodeURIComponent(uri)}`, {
+        method: "POST", body: "SELECT * FROM zstg_demo",
+      });
+      expect(good.status).to.equal(200);
+      expect(good.headers.get("content-type")).to.contain("application/vnd.sap.adt.checkmessages+xml");
+      const report = await good.text();
+      expect(report).to.contain(`chkrun:triggeringUri="${uri}"`);
+      expect(report).to.contain('chkrun:status="processed"');
+      expect(report).to.not.contain("<chkrun:checkMessage ");
+
+      const bad = await call(`/datapreview/freestyle?action=checkSyntax&uniqueURI=${encodeURIComponent(uri)}`, {
+        method: "POST", body: "SELECT definitely_missing FROM zstg_demo",
+      });
+      expect(bad.status, "syntax findings are a successful check report").to.equal(200);
+      expect(await bad.text()).to.contain("<chkrun:checkMessage ");
+    });
+
     it("the row limit is the client's, and it is applied", async () => {
       const res = await call("/datapreview/freestyle?rowNumber=1", {method: "POST", body: "SELECT * FROM zstg_demo"});
       expect(await res.text()).to.contain("<dataPreview:totalRows>1</dataPreview:totalRows>");

@@ -408,6 +408,7 @@ const TEMPLATE_LINKS = {
   ],
   "datapreview/freestyle": [
     ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
+    ["http://www.sap.com/adt/categories/datapreview/freestyle/check", "/sap/bc/adt/datapreview/freestyle{?action,uniqueURI}"],
   ],
   // The data page uses colcount for both TABL and CDS previews. The
   // launchfreestyle relation is the capability switch for its SQL Pane;
@@ -2022,6 +2023,25 @@ export function adtRouter(options = {}) {
   advertise("datapreview/freestyle");
   router.post(`${BASE}/datapreview/freestyle`, async (req, res) => {
     const query = (await rawBody(req)).toString("utf8");
+    if (req.query.action === "checkSyntax") {
+      const uri = String(req.query.uniqueURI ?? `${BASE}/datapreview/freestyle/sqlconsole0`);
+      try {
+        // Prepare through the live backend, but never execute or fetch. It
+        // follows the active DB dialect without maintaining a second SQL
+        // grammar in the façade or materialising a Check button's SELECT.
+        await data.check(query);
+        res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
+          .send(checkReportDocument([{uri, issues: []}]));
+      } catch (e) {
+        const message = String(e?.message || e?.cause?.message || e?.code || "SQL syntax check failed");
+        const infrastructure = ["NOT_BUILT", "NOT_SERVING", "CHECK_UNAVAILABLE"].includes(e?.code);
+        res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
+          .send(checkReportDocument([infrastructure
+            ? {uri, issues: [], status: "notProcessed", statusText: message}
+            : {uri, issues: [{line: 1, column: 1, severity: "E", message}]}]));
+      }
+      return;
+    }
     const started = Date.now();
     try {
       const result = await data.query(query, {max: Number(req.query.rowNumber ?? 100)});

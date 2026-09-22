@@ -153,7 +153,12 @@ hostNodes.sql = (a, node) => a.post(node.path, async function (req, res) {
     return;
   }
   try {
-    res.json(await data.query(String(asked.sql ?? ""), {max: Number(asked.max ?? 100)}));
+    if (asked.check === true) {
+      await data.check(String(asked.sql ?? ""));
+      res.json({ok: true});
+    } else {
+      res.json(await data.query(String(asked.sql ?? ""), {max: Number(asked.max ?? 100)}));
+    }
   } catch (e) {
     res.status(e?.code === "NOT_BUILT" ? 503 : 400).json({error: {code: e?.code ?? "FAILED", message: String(e?.message ?? e)}});
   }

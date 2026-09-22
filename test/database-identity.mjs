@@ -26,6 +26,22 @@ describe("database identity", () => {
       await client.disconnect();
     }
   });
+  it("checks PostgreSQL on an isolated session, never the active LUW", async () => {
+    const client = new OsdPostgresClient({password: "test"});
+    let activeCalls = 0;
+    let released = false;
+    const statements = [];
+    client.client = {query: async () => { activeCalls += 1; }};
+    client.pool = {connect: async () => ({
+      query: async (sql) => { statements.push(sql); },
+      release: () => { released = true; },
+    })};
+    await client.checkSelect("SELECT 1");
+    expect(activeCalls).to.equal(0);
+    expect(statements[0]).to.match(/^PREPARE osd_check_[a-z0-9_]+ AS SELECT 1$/);
+    expect(statements[1]).to.match(/^DEALLOCATE osd_check_[a-z0-9_]+$/);
+    expect(released).to.equal(true);
+  });
   it("preserves the HDB identifier after a mocked HANA connection (no network)", async () => {
     const hdb = createRequire(import.meta.url)("hdb");
     const originalCreate = hdb.createClient;

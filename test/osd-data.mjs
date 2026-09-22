@@ -80,6 +80,19 @@ describe("tools/osd-data: the rows of the local system", function () {
     expect((await data.table("zstg_demo")).rows.length).to.be.greaterThan(2);
   });
 
+  it("checks a SELECT by preparing it without fetching rows", async () => {
+    await data.check("SELECT travel_id FROM zstg_demo");
+    await data.check("SELECT travel_id FROM zstg_demo ORDER BY travel_id DESCENDING");
+    await data.check("SELECT travel_id FROM zstg_demo ORDER BY PRIMARY KEY");
+    let error;
+    try {
+      await data.check("SELECT definitely_missing FROM zstg_demo");
+    } catch (e) {
+      error = e;
+    }
+    expect(error).to.be.instanceOf(Error);
+  });
+
   it("the store hands out the same data layer, so the façade has one door", async () => {
     const store = new ObjectStore();
     expect(store.data()).to.equal(store.data());

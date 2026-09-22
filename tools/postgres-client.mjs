@@ -34,6 +34,26 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
     finally { this.connected = false; }
   }
 
+  async checkSelect(sql) {
+    const text = sql.replace(/ UP TO (\d+) ROWS(.*)/i, "$2 LIMIT $1")
+      .replace(/ ORDER BY PRIMARY KEY/i, "")
+      .replace(/ ASCENDING/ig, " ASC")
+      .replace(/ DESCENDING/ig, " DESC")
+      .replace(/ LIMIT 0/g, "")
+      .replace(/~/g, ".");
+    // PREPARE parses and resolves the SELECT without running it. Always use
+    // a separate physical session: a bad editor query must not abort an ABAP
+    // LUW that happens to be open on this.client at the same time.
+    const session = await this.pool.connect();
+    const name = `osd_check_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    try {
+      await session.query(`PREPARE ${name} AS ${text}`);
+    } finally {
+      await session.query(`DEALLOCATE ${name}`).catch(() => undefined);
+      session.release();
+    }
+  }
+
   async hasSchema(schema) {
     const wanted = fingerprintOf(schema);
     const stamp = await this.select({select: "SELECT to_regclass('osd_schema') AS name"});
