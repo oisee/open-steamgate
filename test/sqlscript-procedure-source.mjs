@@ -4,6 +4,7 @@ import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
 import {compileProcedure, irTypeFromAbap} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+import {T} from "../tools/sqlscript-ir.mjs";
 
 describe("the original SQUARES AMDP through the portable runtime", function () {
   this.timeout(30000);
@@ -104,7 +105,7 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     const optionalTable = {...method, parameters: method.parameters.map((one) =>
       one.name === "it" ? {...one, optional: true} : one)};
     expect(() => compileProcedure(optionalTable, types))
-      .to.throw(UnsupportedSqlScript, /OPTIONAL support is limited to ABAP INTEGER scalars/);
+      .to.throw(UnsupportedSqlScript, /OPTIONAL support is limited to ABAP INTEGER or STRING scalars/);
   });
 
   it("captures a scalar INTEGER LIMIT and accepts only the neutral OFFSET 0", async () => {
@@ -137,5 +138,43 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     expect(() => compileProcedure({...method,
       body: "et = SELECT id FROM :it ORDER BY id LIMIT :iv_limit OFFSET 1;"}, types))
       .to.throw(UnsupportedSqlScript, /only the semantics-neutral literal OFFSET 0/);
+  });
+
+  it("carries required and OPTIONAL ABAP STRING inputs as typed bound values", async () => {
+    const types = new Map([
+      ["TY_TEXT", {kind: "structure", components: [{name: "text", abapType: "c LENGTH 20"}]}],
+      ["TT_TEXT", {kind: "table", of: "TY_TEXT"}],
+    ]);
+    const method = {body: "et = SELECT :iv_text AS text FROM DUMMY;", parameters: [
+      {name: "iv_text", direction: "IN", abapType: "string", optional: true},
+      {name: "et", direction: "OUT", abapType: "tt_text"},
+    ]};
+    const stringInput = compileProcedure(method, types);
+    expect(stringInput.parameters).to.deep.equal([{name: "IV_TEXT", type: T.str, optional: true}]);
+    const omitted = await runProcedure(stringInput, {client, dialect: "duckdb", inputCatalogue: {DUMMY: {}}});
+    expect(omitted.rows).to.deep.equal([{TEXT: ""}]);
+    const supplied = await runProcedure(stringInput, {client, dialect: "duckdb", inputs: {IV_TEXT: "portable"},
+      inputCatalogue: {DUMMY: {}}});
+    expect(supplied.rows).to.deep.equal([{TEXT: "portable"}]);
+    const explicitNull = await runProcedure(stringInput, {client, dialect: "duckdb", inputs: {IV_TEXT: null},
+      inputCatalogue: {DUMMY: {}}});
+    expect(explicitNull.rows).to.deep.equal([{TEXT: null}]);
+    let refusal;
+    try {
+      await runProcedure(stringInput, {client, dialect: "duckdb", inputs: {IV_TEXT: 7}, inputCatalogue: {DUMMY: {}}});
+    } catch (error) { refusal = error; }
+    expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+    expect(refusal.message).to.match(/IV_TEXT is not a SQLScript string/);
+
+    const coercion = compileProcedure({body: "rv = :iv_text;", parameters: [
+      {name: "iv_text", direction: "IN", abapType: "string", optional: true},
+      {name: "rv", direction: "RETURNING", abapType: "i"},
+    ]}, new Map());
+    for (const inputs of [{}, {IV_TEXT: "7.0"}]) {
+      refusal = undefined;
+      try { await runProcedure(coercion, {inputs}); } catch (error) { refusal = error; }
+      expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+      expect(refusal.message).to.match(/scalar assignment RV requires an identical measured type/);
+    }
   });
 });

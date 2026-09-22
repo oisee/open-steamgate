@@ -218,7 +218,48 @@ describe("the typed SQLScript procedural IR", function () {
     failure = undefined;
     try { await runProcedure(optionalChar); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/OPTIONAL inputs are limited to ABAP INTEGER/);
+    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
+
+    const malformedOptional = procedure({parameters: [{name: "IV", type: T.str, optional: "false"}],
+      output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    failure = undefined;
+    try { await runProcedure(malformedOptional); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/IV has a malformed OPTIONAL flag/);
+
+    const stringCondition = procedure({parameters: [{name: "IV", type: T.str}],
+      output: "RV", outputType: T.int, body: [
+        ifElse([{condition: bin("=", p("IV", T.str), lit("x", T.str), T.bool),
+          body: [assignScalar("RV", lit(1, T.int))]}], [assignScalar("RV", lit(0, T.int))]),
+      ]});
+    failure = undefined;
+    try { await runProcedure(stringCondition, {inputs: {IV: "x"}}); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/IF condition cannot evaluate STRING on the portable host yet/);
+
+    const forgedStringCondition = procedure({parameters: [{name: "IV", type: T.str}],
+      output: "RV", outputType: T.int, body: [
+        ifElse([{condition: bin("=", p("IV", T.int), lit(7, T.int), T.bool),
+          body: [assignScalar("RV", lit(1, T.int))]}], [assignScalar("RV", lit(0, T.int))]),
+      ]});
+    failure = undefined;
+    try { await runProcedure(forgedStringCondition, {inputs: {IV: "7"}}); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/parameter :iv changes its measured type/);
+
+    const malformedString = procedure({parameters: [{name: "IV", type: {abap: "STRING", len: 3}, optional: true}],
+      output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    failure = undefined;
+    try { await runProcedure(malformedString); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
+
+    const requiredChar = procedure({parameters: [{name: "IV", type: T.char(3)}],
+      output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    failure = undefined;
+    try { await runProcedure(requiredChar, {inputs: {IV: "bad"}}); } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
+    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
 
     const relationalScalar = procedure({output: "RV", outputType: T.int, body: [
       assignRelation("TMP", project(scan("DUMMY"), [{as: "ID", expr: lit(1, T.int)}])),

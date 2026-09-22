@@ -424,6 +424,33 @@ refused at the dialect boundary, preventing an adapter from silently using
 its own database identity. The generated demo, including original `SQUARES`,
 therefore reports `8 executed / 0 partial / 3 refused`.
 
+### 2026-09-22 — Typed STRING inputs
+
+ABAP `STRING` input parameters now retain an exact typed scalar across source
+extraction, procedural IR, host capture and database binding. An omitted
+`OPTIONAL STRING` becomes the ABAP type-initial empty string before SQLScript
+execution; an explicitly supplied SQL NULL remains NULL, and a non-string
+runtime value is refused before database I/O. A disposable native HANA
+procedure and portable plain-HANA execution agree for explicit empty,
+non-empty and NULL values, while DuckDB exercises the same source and binding
+path. The omitted portable argument is separately proven to become the ABAP
+initial empty string; the SQL procedure oracle receives that initial value
+explicitly because it cannot model ABAP call-site omission.
+
+The supported use is intentionally narrower than “all host string
+semantics”: STRING may be captured into a relational expression, but the host
+interpreter refuses STRING-dependent assignment, comparison and control flow.
+It also accepts only the exact scalar type shapes `{abap: "I"}` and
+`{abap: "STRING"}` from public hand-built IR. This prevents JavaScript number
+coercion or ordering from silently defining SQLScript behaviour.
+
+This is deliberately an input-boundary milestone, not an array claim. It
+advances `search_cells` to its measured `COALESCE`/fuzzy-search boundary and
+`expand_values` to its table-function boundary. The next array slice will use
+the actual SQLScript `ARRAY` declaration and `UNNEST ... WITH ORDINALITY`
+surface; the synthetic `array_expand` spelling will not be presented as a
+native HANA feature.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

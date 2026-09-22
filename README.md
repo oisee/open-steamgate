@@ -8,7 +8,9 @@
 > round trip. Typed `EXCEPT` now runs on HANA and DuckDB too. Explicit session
 > identity and context make `CURRENT_USER`, `CURRENT_SCHEMA` and the final
 > `transform` branch portable without borrowing the selected database's
-> identity. Read the milestone report for the
+> identity. Typed ABAP `STRING` inputs now cross the same boundary too;
+> omitting an `OPTIONAL STRING` supplies the ABAP initial empty string, while
+> SQL `NULL` remains distinct. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 >

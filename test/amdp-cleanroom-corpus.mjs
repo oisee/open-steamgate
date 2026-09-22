@@ -124,8 +124,8 @@ describe("independent AMDP clean-room corpus", () => {
 
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
-      search_cells: /inputs support only INTEGER scalars/,
-      expand_values: /inputs support only INTEGER scalars/,
+      search_cells: /COALESCE arguments require identical measured types/,
+      expand_values: /table function call in FROM is parsed but not lowered/,
       control_rows: /only scalar DECLARE/,
     };
     const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells"]);

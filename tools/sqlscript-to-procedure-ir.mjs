@@ -70,7 +70,7 @@ export function compileProcedure(method, types) {
     .map((one) => ({one, schema: structuredTable(one.abapType, types)}))
     .filter(({schema}) => schema !== undefined);
   if (relationCandidates.some(({one}) => one.optional === true)) {
-    throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER scalars");
+    throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER or STRING scalars");
   }
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
@@ -80,8 +80,8 @@ export function compileProcedure(method, types) {
     .map((one) => one.optional === true
       ? {name: upper(one.name), type: irTypeFromAbap(one.abapType), optional: true}
       : {name: upper(one.name), type: irTypeFromAbap(one.abapType)});
-  if (parameters.some((one) => one.type.abap !== "I")) {
-    throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER scalars");
+  if (parameters.some((one) => !["I", "STRING"].includes(one.type.abap))) {
+    throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
   if (output.kind === "scalar") scalarTypes[output.name] = output.type;

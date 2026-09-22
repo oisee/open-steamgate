@@ -45,6 +45,9 @@ function scalarForType(value, type, name) {
   // particularly dangerous accidental answer for an INTEGER parameter.
   if (value == null) return null;
   if (type?.abap === "I") return integer(value, name);
+  if (type?.abap === "STRING" && typeof value !== "string") {
+    throw new UnsupportedSqlScript(`${name} is not a SQLScript string`);
+  }
   if (type?.abap === "BOOL" && typeof value !== "boolean") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript boolean`);
   }
@@ -114,6 +117,32 @@ export function evaluateScalar(expr, scalars) {
   if (expr.op === "-") return integer(integer(left, "left operand") - integer(right, "right operand"), "difference");
   if (expr.op === "*") return integer(integer(left, "left operand") * integer(right, "right operand"), "product");
   throw new UnsupportedSqlScript(`scalar operator ${expr.op} is not supported yet`, expr);
+}
+
+function assertPortableHostExpression(expr, context, scalars) {
+  if (expr == null) return;
+  if (expr.node === "param") {
+    const declared = scalars.get(upper(expr.name));
+    if (declared === undefined) throw new UnsupportedSqlScript(`unknown scalar :${upper(expr.name).toLowerCase()}`, expr);
+    if (JSON.stringify(expr.type) !== JSON.stringify(declared.type)) {
+      throw new UnsupportedSqlScript(`${context} parameter :${upper(expr.name).toLowerCase()} changes its measured type`, expr);
+    }
+    if (declared.type?.abap === "STRING") {
+      throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
+    }
+  }
+  if (expr.type?.abap === "STRING") {
+    throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
+  }
+  for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
+    assertPortableHostExpression(expr[key], context, scalars);
+  }
+  for (const item of expr.args ?? []) assertPortableHostExpression(item, context, scalars);
+  for (const item of expr.values ?? []) assertPortableHostExpression(item, context, scalars);
+  for (const item of expr.whens ?? []) {
+    assertPortableHostExpression(item.when, context, scalars);
+    assertPortableHostExpression(item.then, context, scalars);
+  }
 }
 
 function freezeExpr(expr, scalars, freezeRel, session) {
@@ -305,11 +334,16 @@ export async function runProcedure(program, {
   const suppliedRelations = new Map(Object.entries(relationInputs).map(([name, value]) => [upper(name), value]));
   for (const parameter of program.parameters) {
     const name = upper(parameter.name);
-    if (parameter.optional && parameter.type?.abap !== "I") {
-      throw new UnsupportedSqlScript("portable OPTIONAL inputs are limited to ABAP INTEGER exactly");
+    if (parameter.optional !== undefined && typeof parameter.optional !== "boolean") {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} has a malformed OPTIONAL flag`);
     }
-    if (!supplied.has(name) && !parameter.optional) throw new UnsupportedSqlScript(`missing input ${name}`);
-    const raw = supplied.has(name) ? supplied.get(name) : (parameter.type?.abap === "I" ? 0 : null);
+    const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type) : [];
+    if (typeKeys.length !== 1 || typeKeys[0] !== "abap" || !["I", "STRING"].includes(parameter.type.abap)) {
+      throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER or STRING type");
+    }
+    if (!supplied.has(name) && parameter.optional !== true) throw new UnsupportedSqlScript(`missing input ${name}`);
+    const initial = parameter.type?.abap === "I" ? 0 : parameter.type?.abap === "STRING" ? "" : null;
+    const raw = supplied.has(name) ? supplied.get(name) : initial;
     const value = scalarForType(raw, parameter.type, name);
     scalars.set(name, {type: parameter.type, value});
   }
@@ -347,12 +381,17 @@ export async function runProcedure(program, {
     for (const statement of body) {
       step(statement);
       if (statement.stmt === "declare-scalar") {
+        assertPortableHostExpression(statement.initial, "scalar declaration", scalars);
         const raw = statement.initial === undefined ? null : evaluateScalar(statement.initial, scalars);
         const value = scalarForType(raw, statement.type, statement.name);
         scalars.set(statement.name, {type: statement.type, value});
       } else if (statement.stmt === "assign-scalar") {
         const current = scalars.get(statement.name);
         if (current === undefined) throw new UnsupportedSqlScript(`assignment to undeclared scalar ${statement.name}`, statement);
+        if (JSON.stringify(statement.expr?.type) !== JSON.stringify(current.type)) {
+          throw new UnsupportedSqlScript(`scalar assignment ${statement.name} requires an identical measured type`, statement);
+        }
+        assertPortableHostExpression(statement.expr, "scalar assignment", scalars);
         let value = evaluateScalar(statement.expr, scalars);
         value = scalarForType(value, current.type, statement.name);
         scalars.set(statement.name, {type: current.type, value});
@@ -370,6 +409,7 @@ export async function runProcedure(program, {
         }
         relations.set(statement.name, value);
       } else if (statement.stmt === "while") {
+        assertPortableHostExpression(statement.condition, "WHILE condition", scalars);
         while (booleanOrNull(evaluateScalar(statement.condition, scalars), "WHILE condition") === true) {
           step(statement);
           await execute(statement.body);
@@ -377,6 +417,7 @@ export async function runProcedure(program, {
       } else if (statement.stmt === "if") {
         let selected;
         for (const branch of statement.branches) {
+          assertPortableHostExpression(branch.condition, "IF condition", scalars);
           if (booleanOrNull(evaluateScalar(branch.condition, scalars), "IF condition") === true) {
             selected = branch.body;
             break;

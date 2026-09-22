@@ -176,9 +176,9 @@ It currently contains ten synthetic methods covering these categories:
 
 | synthetic method | represented surface | current honest boundary |
 | --- | --- | --- |
-| `search_cells` | approximate scoring, null substitution, mapping, hint | non-INTEGER scalar input |
+| `search_cells` | approximate scoring, null substitution, mapping, hint | measured mixed-type `COALESCE`, then fuzzy-search capability |
 | `difference_cells` | set difference | **executable on HANA and DuckDB** |
-| `expand_values` | array/row expansion shape | array input semantics |
+| `expand_values` | array/row expansion shape | table-function/array semantics |
 | `identity_cells` | execution identity | **executable on HANA and DuckDB with an explicit session** |
 | `optional_value` | optional input and scalar return | **executable in the portable host runtime** |
 | `transform` | `IF`/`ELSEIF`, regex and session context | **all branches executable on HANA and DuckDB** |
@@ -260,16 +260,22 @@ that contract and its cross-engine corpus exist.
   type-initial zero; scalar-only execution performs zero database statements;
 - direct-source `difference_cells`: native and portable HANA agree, and
   DuckDB matches `EXCEPT DISTINCT` duplicate elimination and NULL row equality;
-- full SQLScript/AMDP regression: 385 passing tests and 13 explicit live
+- typed ABAP `STRING` input: DuckDB and portable HANA preserve supplied text;
+  omitting a portable `OPTIONAL STRING` supplies the ABAP initial empty string,
+  which matches native SQLScript given that explicit initial value. A
+  non-string value is refused, while an explicit SQL NULL remains distinct.
+  STRING-dependent host assignment/control flow remains refused until its
+  conversion and collation semantics are measured;
+- full SQLScript/AMDP regression: 386 passing tests and 14 explicit live
   integration cases pending in the ordinary offline run;
-- live HANA focused suite: 10 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 11 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Arrays, fuzzy search, dynamic SQL, controlled errors and
+1. Native array declaration/expansion, then fuzzy search, dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and
