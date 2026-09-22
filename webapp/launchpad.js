@@ -8,6 +8,14 @@ sap.ui.define([], function () {
   var config = window["sap-ushell-config"] || {};
   var launchPage = config.services && config.services.LaunchPage && config.services.LaunchPage.adapter && config.services.LaunchPage.adapter.config;
   var dynamicTiles = {};
+  // A served OSD lives at /, while a static preview lives below a Pages
+  // directory such as /open-steamgate/main/.  Paths declared by packs are
+  // system paths (/app, /sap), so resolve them from the app to the preview
+  // mount rather than from the host name.  The latter silently asks
+  // oisee.github.io/sap/... and turns a perfectly usable ANYDB tile red.
+  function atMount(value) {
+    return value && value.charAt(0) === "/" ? ".." + value : value;
+  }
   if (launchPage) {
     launchPage.groups = window["stg-launchpad-groups"] || [];
     launchPage.catalogs = [];
@@ -37,20 +45,20 @@ sap.ui.define([], function () {
           subtitle: tile.subtitle || "",
           info: tile.info || tile.pack,
           icon: tile.icon,
-          targetURL: tile.url.charAt(0) === "/" ? ".." + tile.url : tile.url
+          targetURL: atMount(tile.url)
         };
         if (tile.type === "dynamic") {
           properties.numberUnit = tile.numberUnit || "";
           properties.numberValue = "…";
           var refresh = Number(tile.serviceRefreshInterval || 60);
           dynamicTiles[tile.id] = {
-            url: tile.serviceUrl,
+            url: atMount(tile.serviceUrl),
             refresh: Number.isFinite(refresh) ? Math.max(10, refresh) : 60,
             numberUnit: tile.numberUnit || ""
           };
         }
         if (tile.type === "image") {
-          properties.imageSource = tile.imageSource;
+          properties.imageSource = atMount(tile.imageSource);
         }
         if (tile.enabled === false) {
           properties.subtitle = tile.disabledReason || properties.subtitle || "not available here";
@@ -78,7 +86,7 @@ sap.ui.define([], function () {
   // worse than a grey one, and this is the same screen that refuses to draw
   // a menu entry for a transaction it cannot start.
   function greyAmdpWithoutEngine() {
-    return fetch("../sap/bc/osd/amdp/engine").then(function (r) {
+    return fetch(atMount("/sap/bc/osd/amdp/engine")).then(function (r) {
       return r.ok ? r.json() : {engine: "none"};
     }).then(function (answer) {
       if (!launchPage || (answer && answer.engine === "HDB")) {

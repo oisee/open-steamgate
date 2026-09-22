@@ -15,7 +15,12 @@ import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} f
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.static(fileURLToPath(new URL("../build/preview", import.meta.url))));
+const build = fileURLToPath(new URL("../build/preview", import.meta.url));
+// The second mount is not decoration: GitHub Pages serves this project below
+// /open-steamgate/<deployment>/.  Testing only at / lets an accidental
+// absolute fetch("/sap/...") pass locally and fail after publication.
+app.use("/open-steamgate/main", express.static(build));
+app.use(express.static(build));
 
 const port = Number(process.env.STG_PREVIEW_PORT ?? 3031);
 const tlsPort = Number(process.env.STG_PREVIEW_TLS_PORT ?? port + 1);

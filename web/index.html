@@ -19,7 +19,7 @@
     <p id="detail">The OData gateway is installing itself in your browser: a service worker
       runs the transpiled ABAP DPC over SQLite. This takes a moment the first time.</p>
     <p>OData v2 services live under <code>sap/opu/odata/sap/</code>, the Fiori Elements
-      demo app under <a href="app/">app/</a>.</p>
+      demo app under <a href="app/flp.html">the launchpad</a>.</p>
   </main>
   <script>
     (async () => {
@@ -57,7 +57,7 @@
         detail.textContent = "The gateway is answering in this browser. Open the app below, or any service path directly.";
         return;
       }
-      location.replace("app/");
+      location.replace("app/flp.html");
     })();
   </script>
 </body>
