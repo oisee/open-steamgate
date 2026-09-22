@@ -11,7 +11,7 @@
 // missing** in the most bodies -- the cheapest unlock at this moment, which
 // changes after every construct added.
 //
-//   node tools/sqlscript/coverage.mjs [.local/a4h-export]
+//   node tools/sqlscript/coverage.mjs [.local/a4h-export] [--ddic <folder>]...
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, join} from "node:path";
@@ -21,6 +21,7 @@ import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
 import * as extractor from "../amdp-extract.mjs";
+import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
@@ -72,16 +73,27 @@ export function reasonOf(error, tokens) {
   return `parse: at ${word}`;
 }
 
-export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-coverage") {
+export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-coverage", options = {}) {
   const zips = readdirSync(root).filter((f) => f.endsWith(".zip"));
   const corpora = {teaching: [], working: []};
+  // The dictionary the scalar typer resolves data elements against: the
+  // packages' own DTEL/DOMA (an export carries them beside the classes),
+  // then whatever `--ddic` names, then the released dump if it is cloned.
+  // A parameter typed by an element none of them holds is a **named**
+  // refusal below, not "unknown scalar" -- and not STRING.
+  // Later folder wins, as in `abap_transpile.json`: the released dump is
+  // the oldest and most general, `--ddic` more specific, and a package's own
+  // export -- taken off the system that runs it -- the most specific of all.
+  const ddic = new FolderDdic(existingFolders([RELEASED_DDIC, ...(options.ddic ?? [])]));
   for (const zip of zips) {
     const pkg = zip.replace(/\.zip$/, "");
     const which = TEACHING.test(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
       for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push(one);
     }
+    ddic.add(join(scratch, pkg));
   }
+  const resolveType = ddic.resolver();
 
   const report = {};
   for (const [which, all] of Object.entries(corpora)) {
@@ -122,7 +134,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         continue;
       }
       try {
-        const ir = toIr(tree, {catalogue: {}, signature});
+        const ir = toIr(tree, {catalogue: {}, signature, resolveType});
         lower(ir.rel, "hana");
         loweredCount += 1;
       } catch (error) {
@@ -141,6 +153,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       parsedButNotLowered: [...afterParse.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
     };
   }
+  report.dictionary = ddic;
   return report;
 }
 
@@ -150,8 +163,24 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
 // ends in "coverage.mjs". Same family as everything else caught today -- a
 // test that is wider than the thing it has in mind.
 if (basename(process.argv[1] ?? "") === "coverage.mjs") {
-  const report = measure(process.argv[2]);
-  for (const [which, r] of Object.entries(report)) {
+  // coverage.mjs [root] [--ddic <folder>]...   the folders hold *.dtel.xml / *.doma.xml
+  const args = process.argv.slice(2);
+  const ddic = [];
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--ddic") ddic.push(args[++i]);
+    else rest.push(args[i]);
+  }
+  const {dictionary, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  // the numbers below depend on which dictionaries this machine holds, so
+  // the header says which, and how much each one answered
+  console.log("dictionaries given to the scalar typer (later wins a shared name):");
+  const exports = dictionary.folders.filter((f) => f.startsWith("/tmp/sqlscript-coverage"));
+  for (const line of dictionary.describe()) {
+    if (!exports.includes(line.split("  (")[0])) console.log(`  ${line}`);
+  }
+  console.log(`  ${exports.length} package exports  (${exports.reduce((n, f) => n + (dictionary.hits.get(f) ?? 0), 0)} resolved)`);
+  for (const [which, r] of Object.entries(corporaReport)) {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);

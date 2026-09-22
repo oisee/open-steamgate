@@ -5,6 +5,7 @@
 // implementation of SQLScript typing and one list of explicit refusals.
 import {T, lit, scan, project, union, schemaOf} from "./sqlscript-ir.mjs";
 import {toIr, BindError} from "./sqlscript/to-ir.mjs";
+import {scalarTypeOf, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
 import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
@@ -42,36 +43,32 @@ const isBareNull = (node) => {
   return leaves.length === 1 && leaves[0].node === "identifier" && upper(leaves[0].value) === "NULL";
 };
 
-export function irTypeFromAbap(type) {
-  const text = upper(type).trim();
-  if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
-  if (["STRING", "SSTRING"].includes(text)) return T.str;
-  if (["D", "DATS"].includes(text)) return T.char(8);
-  if (["T", "TIMS"].includes(text)) return T.char(6);
-  const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
-  if (length !== undefined) return T.char(Number(length));
-  const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
-  if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
-  throw new UnsupportedSqlScript(`ABAP type ${type || "<empty>"} has no portable SQLScript mapping`);
+export function irTypeFromAbap(type, resolve) {
+  try {
+    return scalarTypeOf(type, resolve);
+  } catch (error) {
+    if (error instanceof UnresolvedScalarType) throw new UnsupportedSqlScript(error.message);
+    throw error;
+  }
 }
 
-function structuredTable(abapType, types) {
+function structuredTable(abapType, types, resolve) {
   const table = types.get(upper(abapType));
   const row = table?.kind === "table" ? types.get(table.of) : undefined;
   if (row?.kind !== "structure") return undefined;
-  return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType)]));
+  return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType, resolve)]));
 }
 
-function outputFrom(method, types) {
+function outputFrom(method, types, resolve) {
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
   }
   const parameter = outputs[0];
-  const schema = structuredTable(parameter.abapType, types);
+  const schema = structuredTable(parameter.abapType, types, resolve);
   if (schema !== undefined) return {name: upper(parameter.name), kind: "relation", schema};
   if (parameter.direction === "RETURNING") {
-    const type = irTypeFromAbap(parameter.abapType);
+    const type = irTypeFromAbap(parameter.abapType, resolve);
     if (type.abap !== "I") {
       throw new UnsupportedSqlScript("initial scalar RETURNING support is limited to ABAP INTEGER exactly");
     }
@@ -83,11 +80,12 @@ function outputFrom(method, types) {
 /** Compile one extracted AMDP method without changing its source body. */
 export function compileProcedure(method, types, options = {}) {
   const catalogue = options.catalogue ?? {};
+  const resolve = options.resolveType;
   const tree = parse(new Body(), lex(method.body));
-  const output = outputFrom(method, types);
+  const output = outputFrom(method, types, resolve);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
   const relationCandidates = inputParameters
-    .map((one) => ({one, schema: structuredTable(one.abapType, types)}))
+    .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve)}))
     .filter(({schema}) => schema !== undefined);
   if (relationCandidates.some(({one}) => one.optional === true)) {
     throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER or STRING scalars");
@@ -98,8 +96,8 @@ export function compileProcedure(method, types, options = {}) {
   const parameters = inputParameters
     .filter((one) => !relationNames.has(upper(one.name)))
     .map((one) => one.optional === true
-      ? {name: upper(one.name), type: irTypeFromAbap(one.abapType), optional: true}
-      : {name: upper(one.name), type: irTypeFromAbap(one.abapType)});
+      ? {name: upper(one.name), type: irTypeFromAbap(one.abapType, resolve), optional: true}
+      : {name: upper(one.name), type: irTypeFromAbap(one.abapType, resolve)});
   if (parameters.some((one) => !["I", "STRING"].includes(one.type.abap))) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
   }

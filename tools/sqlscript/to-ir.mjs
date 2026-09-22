@@ -25,6 +25,7 @@
 import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
+import {isTableParameter, signatureScalars} from "./scalar-types.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -89,7 +90,6 @@ const mergedTextType = (left, right) => {
 
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
-  const scalarTypes = options.scalarTypes ?? {};
   const relationSchemas = options.relationSchemas ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
@@ -98,8 +98,15 @@ export function toIr(tree, options = {}) {
   // from the caller. Without the signature both look like defects in the
   // body, and neither is.
   const signature = options.signature ?? {parameters: []};
-  const tableParams = (signature.parameters ?? []).filter((p) => /^(tt_|.*_tab$|.*TABLE.*)/i.test(String(p.abapType ?? ""))
-    || /^(it|et|ct)_/i.test(String(p.name ?? "")));
+  const tableParams = (signature.parameters ?? []).filter(isTableParameter);
+  // The scalar IN parameters come from the same signature. A caller that
+  // already typed them (the procedure compiler) passes `scalarTypes`; the
+  // others get them derived here, so that "unknown scalar :p_clnt" means the
+  // body and not the instrument (docs/sqlscript-corpus.md). One that the
+  // dictionary at hand cannot type is refused **when referenced**, by name.
+  const derived = options.scalarTypes === undefined ? signatureScalars(signature, options.resolveType) : {types: {}, unresolved: {}};
+  const scalarTypes = options.scalarTypes ?? derived.types;
+  const unresolvedScalars = derived.unresolved;
   const outParam = tableParams.find((p) => p.direction === "OUT" || p.direction === "RETURNING");
   /** table variables assigned so far: name -> {rel} or {handle} */
   const bound = new Map();
@@ -415,6 +422,9 @@ export function toIr(tree, options = {}) {
         {
           const name = String(node.value).slice(1).toUpperCase();
           if (scalarTypes[name] === undefined) {
+            if (unresolvedScalars[name] !== undefined) {
+              throw new BindError(`scalar :${name.toLowerCase()} has a type this run cannot resolve (${unresolvedScalars[name]})`, node);
+            }
             throw new BindError(`unknown scalar :${name.toLowerCase()}`, node);
           }
           return param(name, scalarTypes[name]);
