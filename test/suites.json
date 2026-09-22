@@ -6,6 +6,8 @@
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
     "test/adt-session.mjs",
+    "test/amdp-cleanroom-corpus.mjs",
+    "test/amdp-demo.mjs",
     "test/amdp-oracle.mjs",
     "test/amdp-sandbox.mjs",
     "test/amdp.mjs",
