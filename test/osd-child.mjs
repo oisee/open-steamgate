@@ -3,7 +3,9 @@
 // client reaches must still be there — through a proxy or a door.
 import {expect} from "chai";
 import {spawn} from "node:child_process";
-import {mkdtempSync} from "node:fs";
+import {randomUUID} from "node:crypto";
+import {once} from "node:events";
+import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
@@ -17,12 +19,19 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
   let child;
   let token;
   let cookie;
+  let databaseDir;
+  let testIdentity;
   const log = [];
 
   before(async () => {
+    databaseDir = mkdtempSync(join(tmpdir(), "osd-child-"));
+    testIdentity = `osd-child-${randomUUID()}`;
+    const backend = process.env.STG_DB === "duckdb" ? "duckdb" : "file";
     child = spawn(process.execPath, ["test/run.mjs"], {
-      // its own database file, never the tree's default one
-      env: {...process.env, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined, STG_DB_PATH: join(mkdtempSync(join(tmpdir(), "osd-child-")), "osd.sqlite")},
+      // Always use a private file, never an inherited HANA connection.
+      env: {...process.env, STG_DB: backend, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
+        OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
+        STG_DB_PATH: join(databaseDir, backend === "duckdb" ? "osd.duckdb" : "osd.sqlite")},
       stdio: ["ignore", "pipe", "pipe"],
     });
     delete child.spawnargs; // keep the env clean: STG_SERVE unset means run.mjs picks child
@@ -42,9 +51,20 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
       await new Promise((r) => setTimeout(r, 500));
     }
     expect(token, `the façade came up: ${log.join("").slice(-800)}`).to.be.a("string");
+    // A fixed test port can already belong to another OSD. Never send the
+    // write below until this listener proves it is the process we spawned.
+    const build = await (await call("/core/http/build")).json();
+    expect(build.identity?.userFullName, `port ${PORT} belongs to this test process`)
+      .to.equal(testIdentity);
+    expect(child.exitCode, "the spawned façade is still running").to.equal(null);
   });
-  after(() => {
-    child?.kill("SIGTERM");
+  after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const stopped = once(child, "exit");
+      child.kill("SIGTERM");
+      await stopped;
+    }
+    if (databaseDir) rmSync(databaseDir, {recursive: true, force: true});
   });
 
   const call = (path, options = {}) => fetch(ADT + path, {...options, headers: {cookie, "x-csrf-token": token, ...(options.headers ?? {})}});
@@ -75,6 +95,60 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect((xml.match(/<dataPreview:data>/g) ?? []).length, "rows through the door").to.be.greaterThan(0);
     const wrong = await call("/datapreview/freestyle", {method: "POST", body: "DROP TABLE zstg_demo"});
     expect(wrong.status, "a refusal keeps its code across the door").to.equal(400);
+  });
+
+  it("an OData write is immediately visible in F8 and the SQL Pane without a restart", async () => {
+    const id = "T0898";
+    const description = "Live OData to ADT";
+    const odata = `${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`;
+    const sql = `SELECT travel_id, description FROM zstg_demo WHERE travel_id = '${id}'`;
+    const preview = (path, query) => call(path, {method: "POST", body: query});
+    const before = await preview("/datapreview/freestyle?rowNumber=2", sql);
+    expect(before.status).to.equal(200);
+    expect(await before.text(), "the isolated database has no test row yet")
+      .to.contain("<dataPreview:totalRows>0</dataPreview:totalRows>");
+
+    const buildBefore = await (await call("/core/http/build")).json();
+    expect(buildBefore.identity?.userFullName, "the write target is still our isolated OSD").to.equal(testIdentity);
+    const generation = buildBefore.system?.serving;
+    expect(generation).to.match(/^[0-9a-f]{16}$/);
+    const workProcess = async () => {
+      const response = await fetch(`${BASE}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ProcessSet?$format=json`);
+      expect(response.status, await response.clone().text()).to.equal(200);
+      const work = (await response.json()).d.results.find((row) => row.Role === "work");
+      expect(work, "the live runtime is in the status snapshot").to.include.keys("Pid", "Since");
+      return {pid: work.Pid, since: work.Since};
+    };
+    const workerBefore = await workProcess();
+    const created = await fetch(odata, {
+      method: "POST",
+      headers: {"content-type": "application/json", "x-csrf-token": "open-steamgate"},
+      body: JSON.stringify({Project: "ZSTG_MAPPED", TravelId: id, Description: description, Status: "O", Seats: 2}),
+    });
+    expect(created.status, await created.text()).to.equal(201);
+
+    const read = await fetch(`${odata}('${id}')?$format=json`);
+    expect(read.status).to.equal(200);
+    expect((await read.json()).d.Description).to.equal(description);
+
+    const f8 = await preview("/datapreview/ddic?rowNumber=2&ddicEntityName=ZSTG_DEMO",
+      `SELECT ZSTG_DEMO~TRAVEL_ID, ZSTG_DEMO~DESCRIPTION FROM ZSTG_DEMO WHERE ZSTG_DEMO~TRAVEL_ID = '${id}'`);
+    expect(f8.status, await f8.clone().text()).to.equal(200);
+    const f8Xml = await f8.text();
+    expect(f8Xml).to.contain("<dataPreview:totalRows>1</dataPreview:totalRows>");
+    expect(f8Xml).to.contain(`<dataPreview:data>${id}</dataPreview:data>`);
+    expect(f8Xml).to.contain(`<dataPreview:data>${description}</dataPreview:data>`);
+
+    const pane = await preview("/datapreview/freestyle?rowNumber=2", sql);
+    expect(pane.status, await pane.clone().text()).to.equal(200);
+    const paneXml = await pane.text();
+    expect(paneXml).to.contain("<dataPreview:totalRows>1</dataPreview:totalRows>");
+    expect(paneXml).to.contain(`<dataPreview:data>${id}</dataPreview:data>`);
+    expect(paneXml).to.contain(`<dataPreview:data>${description}</dataPreview:data>`);
+    expect(pane.headers.get("x-osd-generation"), "the same build answered after the write").to.equal(generation);
+    const buildAfter = await (await call("/core/http/build")).json();
+    expect(buildAfter.started, "the façade did not restart").to.equal(buildBefore.started);
+    expect(await workProcess(), "the work process did not restart").to.deep.equal(workerBefore);
   });
 
   it("every ICF service the tree declares is reachable through the parent", async () => {
