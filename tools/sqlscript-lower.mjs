@@ -560,7 +560,19 @@ export function lower(rel, dialectName, options = {}) {
         return `SELECT * FROM ${joinFrom(r)}`;
       }
       case "union":
+        if (r.inputs.some((one) => one?.rel === "except" || (one?.rel === "union" && one.all !== r.all))) {
+          throw new Refused("nested set operations require measured parenthesized lowering");
+        }
         return r.inputs.map(select).join(r.all ? " UNION ALL " : " UNION ");
+      case "except":
+        if (!["hana", "duckdb"].includes(dialectName)) {
+          throw new Refused(`EXCEPT has no measured rendering on ${dialectName}`);
+        }
+        if (r.inputs?.length !== 2) throw new Refused("EXCEPT requires exactly two branches");
+        if (r.inputs.some((one) => one?.rel === "union" || one?.rel === "except")) {
+          throw new Refused("nested set operations require measured parenthesized lowering");
+        }
+        return `${select(r.inputs[0])} EXCEPT ${select(r.inputs[1])}`;
       case "aggregate": {
         const keys = r.groupBy.map((c) => d.quote(c));
         const aggs = r.aggs.map((a) => `${expr(a.expr)} AS ${d.quote(a.as)}`);

@@ -11,7 +11,7 @@
 // bodies), IFNULL, CONCAT, SUBSTR and TO_INTEGER - plus the two divergences
 // that were measured on the engines themselves, integer division and CAST.
 import {expect} from "chai";
-import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
+import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, except, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
@@ -266,6 +266,18 @@ describe("SQLScript IR: what it refuses", () => {
 
   it("refuses an unknown dialect instead of guessing one", () => {
     expect(() => lower(scan("A"), "oracle")).to.throw(Refused, /no dialect/);
+  });
+
+  it("refuses nested set trees until parenthesized lowering is measured", () => {
+    const a = scan("A"), b = scan("B"), c = scan("C");
+    for (const rel of [
+      except(union([a, b], false), c),
+      union([a, except(b, c)], false),
+      except(except(a, b), c),
+    ]) {
+      expect(() => lower(rel, "duckdb")).to.throw(Refused, /nested set operations/);
+      expect(() => schemaOf(rel, {A: {}, B: {}, C: {}})).to.throw(/nested set operations/);
+    }
   });
 
   it("marks a non-deterministic source, because reading it twice is observable", () => {

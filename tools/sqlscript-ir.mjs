@@ -119,6 +119,7 @@ export const filter = (input, pred) => ({rel: "filter", input, pred});
 export const project = (input, items) => ({rel: "project", input, items});
 export const join = (left, right, on, kind = "inner") => ({rel: "join", left, right, on, kind});
 export const union = (inputs, all = true) => ({rel: "union", inputs, all});
+export const except = (left, right) => ({rel: "except", inputs: [left, right]});
 export const aggregate = (input, groupBy, aggs) => ({rel: "aggregate", input, groupBy, aggs});
 export const order = (input, keys) => ({rel: "order", input, keys});
 export const limit = (input, n) => ({rel: "limit", input,
@@ -258,6 +259,9 @@ export function schemaOf(rel, catalogue = {}) {
       return {...left, ...right};
     }
     case "union": {
+      if (rel.inputs.some((one) => one?.rel === "except" || (one?.rel === "union" && one.all !== rel.all))) {
+        throw new Error("schemaOf: nested set operations are outside the measured subset");
+      }
       const all = rel.inputs.map(need);
       const first = Object.keys(all[0]);
       const merged = {...all[0]};
@@ -280,6 +284,17 @@ export function schemaOf(rel, catalogue = {}) {
         }
       }
       return merged;
+    }
+    case "except": {
+      if (rel.inputs?.length !== 2) throw new Error("schemaOf: EXCEPT requires exactly two branches");
+      if (rel.inputs.some((one) => one?.rel === "union" || one?.rel === "except")) {
+        throw new Error("schemaOf: nested set operations are outside the measured subset");
+      }
+      const left = need(rel.inputs[0]), right = need(rel.inputs[1]);
+      if (JSON.stringify(left) !== JSON.stringify(right)) {
+        throw new Error("schemaOf: EXCEPT branches must have identical columns and measured types");
+      }
+      return left;
     }
     case "aggregate": {
       const input = need(rel.input);

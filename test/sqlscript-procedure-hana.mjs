@@ -353,3 +353,54 @@ describe("scalar functions: native SQLScript against portable host evaluation", 
     }
   });
 });
+
+describe("difference_cells: native SQLScript against portable HANA EXCEPT", function () {
+  this.timeout(60000);
+
+  liveIt("matches duplicate elimination and NULL row equality", async () => {
+    if (process.env.STG_DB_FRESH === "1") throw new Error("live AMDP differential refuses STG_DB_FRESH=1");
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_additions.clas.abap.txt", import.meta.url), "utf8");
+    const extracted = extract(source, "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "difference_cells");
+    const portable = compileProcedure(method, extracted.types);
+    const schemas = Object.fromEntries(portable.relationParameters.map((one) => [one.name, one.schema]));
+    const repeated = {cell_id: 1, label_text: "same", code_text: "A"};
+    const nullable = {cell_id: 2, label_text: null, code_text: "B"};
+    const leftRows = [repeated, repeated, nullable, {cell_id: 3, label_text: "left", code_text: "C"}];
+    const rightRows = [repeated, nullable];
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const suffix = randomBytes(6).toString("hex").toUpperCase();
+    const cls = `ZOSD_D_${suffix}`;
+    const name = `"${schema}"."${cls}=>DIFFERENCE_CELLS"`;
+    const tables = [];
+    const materialize = async (logical, parameter, rows, relationSchema) => {
+      const table = `"${schema}"."ZOSD_${logical}_${suffix}"`;
+      const columns = /^TABLE\s*\((.*)\)$/is.exec(parameterType(parameter.abapType, extracted.types))?.[1];
+      if (columns === undefined) throw new Error("difference input did not resolve to a HANA table type");
+      await client.native({sql: `CREATE COLUMN TABLE ${table} (${columns})`, expect: "none"});
+      tables.push(table);
+      const fields = Object.entries(relationSchema);
+      for (const row of rows) await client.native({sql: `INSERT INTO ${table} VALUES (${fields.map(() => "?").join(", ")})`,
+        params: fields.map(([field, type]) => ({name: field, value: row[field.toLowerCase()] ?? null,
+          type: seamType(type), isNull: row[field.toLowerCase()] == null})), expect: "none"});
+      return refTo({ref: table, kind: "materialised", reason: "typed EXCEPT fixture"}, relationSchema);
+    };
+    await client.connect();
+    let created = false;
+    try {
+      await client.native({sql: hanaProcedure(cls, method, schema, extracted.types), expect: "none"});
+      created = true;
+      const left = await materialize("DIFF_LEFT", method.parameters[0], leftRows, schemas.IT_LEFT);
+      const right = await materialize("DIFF_RIGHT", method.parameters[1], rightRows, schemas.IT_RIGHT);
+      const native = await callAmDP(client.client, name, method, {it_left: leftRows, it_right: rightRows}, extracted.types);
+      const lowered = await runProcedure(portable, {client, dialect: "hana",
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      expect(lowered.rows).to.deep.equal(native.et_diff);
+    } finally {
+      if (created) await client.native({sql: `DROP PROCEDURE ${name}`, expect: "none"}).catch(() => undefined);
+      for (const table of tables) await client.native({sql: `DROP TABLE ${table}`, expect: "none"}).catch(() => undefined);
+      await client.disconnect();
+    }
+  });
+});

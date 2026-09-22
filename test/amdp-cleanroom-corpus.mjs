@@ -125,12 +125,11 @@ describe("independent AMDP clean-room corpus", () => {
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
       search_cells: /inputs support only INTEGER scalars/,
-      difference_cells: /EXCEPT is parsed/,
       expand_values: /inputs support only INTEGER scalars/,
       identity_cells: /CURRENT_USER is a session value/,
       control_rows: /only scalar DECLARE/,
     };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -404,6 +403,28 @@ describe("independent AMDP clean-room corpus", () => {
     expect(answer.value).to.equal(1);
     expect(answer.outputType).to.deep.equal({abap: "I"});
     expect(answer.trace).to.include({engine: "host", fallback: false, databaseStatements: 0});
+  });
+
+  it("executes difference_cells with DISTINCT and NULL set semantics on DuckDB", async () => {
+    const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "difference_cells");
+    const compiled = compileProcedure(method, extracted.types);
+    const schemas = Object.fromEntries(compiled.relationParameters.map((one) => [one.name, one.schema]));
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const repeated = {cell_id: 1, label_text: "same", code_text: "A"};
+      const nullable = {cell_id: 2, label_text: null, code_text: "B"};
+      const left = await materializeRows(client, "DIFF_LEFT", [repeated, repeated, nullable,
+        {cell_id: 3, label_text: "left", code_text: "C"}], schemas.IT_LEFT);
+      const right = await materializeRows(client, "DIFF_RIGHT", [repeated, nullable], schemas.IT_RIGHT);
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb",
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      expect(answer.rows).to.deep.equal([{CELL_ID: 3, LABEL_TEXT: "left", CODE_TEXT: "C"}]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
   });
 
   it("executes a value-level correlated EXISTS where the correlation changes the answer", async () => {

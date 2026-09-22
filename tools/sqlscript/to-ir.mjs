@@ -23,7 +23,7 @@
 // point of the IR is that the lowering can trust the node names.
 
 import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
-  subquery, scan, alias, refTo, filter, project, join, union, order, limit, aggregate,
+  subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
@@ -898,11 +898,14 @@ export function toIr(tree, options = {}) {
     //
     // The IR carries one set operation. Until it carries three, the other two
     // are refused by name.
-    for (const word of ["INTERSECT", "EXCEPT"]) {
-      if (hasWord(node, word)) {
-        throw new BindError(`${word} is parsed and the IR has only UNION, so this body would lower to the ` +
-          `opposite set; it is refused until the IR carries ${word}`, node);
+    if (hasWord(node, "INTERSECT")) {
+      throw new BindError("INTERSECT is parsed but has no measured portable IR/lowering", node);
+    }
+    if (hasWord(node, "EXCEPT")) {
+      if (hasWord(node, "UNION") || selects.length !== 2) {
+        throw new BindError("mixed or multi-branch EXCEPT is outside the measured portable subset", node);
       }
+      return finishSet(except(select(selects[0]), select(selects[1])));
     }
     const all = hasWord(node, "ALL");
     return finishSet(union(selects.map(select), all));

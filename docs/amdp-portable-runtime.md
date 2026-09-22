@@ -499,3 +499,14 @@ an unexecuted query as a zero-statement success. Scalar output and OPTIONAL
 input types are limited to ABAP `I`; table OPTIONAL and INOUT remain named
 unsupported boundaries. The corpus ledger is now `4 fully executable / 1
 partially executable / 5 named refusals / 0 crashes`.
+
+### 2026-09-22 — P1g typed set difference
+
+`difference_cells` now carries `EXCEPT` as its own two-input relational node;
+it can no longer be mistaken for `UNION`. Both branches must have identical
+column order and measured types. Mixed/multi-branch set expressions,
+`INTERSECT`, and unmeasured backends remain named refusals. DuckDB fixtures
+prove DISTINCT duplicate removal and NULL row equality, while native HANA
+SQLScript and portable ordinary HANA SQL agree on the same edge rows. The
+ledger is `5 fully executable / 1 partially executable / 4 named refusals / 0
+crashes`.

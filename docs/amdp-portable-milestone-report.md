@@ -143,7 +143,7 @@ It currently contains ten synthetic methods covering these categories:
 | synthetic method | represented surface | current honest boundary |
 | --- | --- | --- |
 | `search_cells` | approximate scoring, null substitution, mapping, hint | non-INTEGER scalar input |
-| `difference_cells` | set difference | `EXCEPT` absent from relational IR |
+| `difference_cells` | set difference | **executable on HANA and DuckDB** |
 | `expand_values` | array/row expansion shape | array input semantics |
 | `identity_cells` | execution identity | session values not implemented |
 | `optional_value` | optional input and scalar return | **executable in the portable host runtime** |
@@ -153,7 +153,7 @@ It currently contains ten synthetic methods covering these categories:
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current ledger is `4 fully executable / 1 partially executable / 5 named
+The current ledger is `5 fully executable / 1 partially executable / 4 named
 refusals / 0 crashes`. `transform` is deliberately not promoted while its
 `SESSION_CONTEXT` branch remains a selected-path refusal. Parser
 success is not reported as runtime support: a tracked method body moves only
@@ -221,17 +221,18 @@ that contract and its cross-engine corpus exist.
   portable host evaluation agree for negative, zero, non-default and SQL NULL
   inputs. An omitted ABAP `OPTIONAL TYPE i` is separately checked as its ABAP
   type-initial zero; scalar-only execution performs zero database statements;
-- full SQLScript regression: 368 passing tests, with only explicit live-HANA
+- direct-source `difference_cells`: native and portable HANA agree, and
+  DuckDB matches `EXCEPT DISTINCT` duplicate elimination and NULL row equality;
+- full SQLScript regression: 370 passing tests, with only explicit live-HANA
   cases skipped in the ordinary offline run;
-- live HANA focused suite: 8 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 9 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. `EXCEPT` as its own relational node and backend lowering.
-2. Session identity (which completes `transform`), arrays, fuzzy search,
+1. Session identity (which completes `transform`), arrays, fuzzy search,
    dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 

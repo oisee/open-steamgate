@@ -5,7 +5,7 @@
 > flow and ordinary relational SQL on both HANA and DuckDB. The portable
 > branches of `transform` now run through host-side `IF / ELSEIF / ELSE` as
 > well, and the two clean-room scalar functions execute without a database
-> round trip. Read the milestone report for the
+> round trip. Typed `EXCEPT` now runs on HANA and DuckDB too. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 
