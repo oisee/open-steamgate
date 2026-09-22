@@ -153,6 +153,13 @@ not a valid passing test. Committing to make it visible would also be wrong.
 The first slice is read-only from the AMDP point of view, but it still shares
 the caller's connection and transaction.
 
+Session identity is explicit data in this context. `CURRENT_USER`,
+`CURRENT_SCHEMA` and literal-key `SESSION_CONTEXT` are captured into bound
+parameters before relational lowering. They never inherit the user or schema
+of DuckDB/HANA merely because that engine executes the final statement. A
+missing fact refuses before database I/O; current date/time remain reserved
+until a deterministic clock contract is measured.
+
 ## Backend contract
 
 A backend capability has three honest outcomes:
@@ -406,6 +413,16 @@ support. Typed table inputs are represented as relation bindings rather than
 JavaScript arrays, and their schemas reach the existing relational binder.
 The next corpus slices remove refusals one semantic capability at a time;
 unknown session tokens and every unimplemented feature remain loud refusals.
+
+### 2026-09-22 — Explicit session identity and context
+
+The ledger reaches `7 executable / 3 named refusals / 0 crashes`.
+`identity_cells` and every branch of `transform` execute on DuckDB and agree
+with native SQLScript versus portable ordinary SQL on HANA. Session values
+are typed IR nodes captured from the AMDP execution context; a raw node is
+refused at the dialect boundary, preventing an adapter from silently using
+its own database identity. The generated demo, including original `SQUARES`,
+therefore reports `8 executed / 0 partial / 3 refused`.
 
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 

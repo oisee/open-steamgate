@@ -57,6 +57,14 @@ and `UNION DISTINCT`. A tie fixture distinguishes rank-with-gap from dense
 rank. `ROW_NUMBER` has a complete tie breaker over the grouped row, so its
 two independently inlined UNION branches cannot manufacture distinct rows.
 
+The fourth proof makes session identity part of the execution contract rather
+than an accidental property of whichever database happens to run the final
+query. `CURRENT_USER`, `CURRENT_SCHEMA` and literal-key `SESSION_CONTEXT`
+become typed IR nodes and are captured as bound values from an explicit AMDP
+session. Missing facts refuse before database I/O. Native HANA and portable
+HANA now agree for the identity method and for every `transform` branch; the
+same bodies execute on DuckDB with deliberately supplied portable facts.
+
 ## How it works under the hood
 
 ```text
@@ -130,6 +138,9 @@ retain a JavaScript closure that later reads the final counter value.
 - unsupported outputs, INOUT parameters, narrow scalar declarations,
   trailing result sets and unresolved types are loud
   `UNSUPPORTED_SQLSCRIPT` results.
+- session identity/context never falls through to the backend connection:
+  its user, schema and values must be supplied explicitly and travel as bound
+  parameters; clock values remain unsupported.
 
 ## Typed table inputs
 
@@ -168,17 +179,17 @@ It currently contains ten synthetic methods covering these categories:
 | `search_cells` | approximate scoring, null substitution, mapping, hint | non-INTEGER scalar input |
 | `difference_cells` | set difference | **executable on HANA and DuckDB** |
 | `expand_values` | array/row expansion shape | array input semantics |
-| `identity_cells` | execution identity | session values not implemented |
+| `identity_cells` | execution identity | **executable on HANA and DuckDB with an explicit session** |
 | `optional_value` | optional input and scalar return | **executable in the portable host runtime** |
-| `transform` | `IF`/`ELSEIF`, regex and session context | LOWER/regex branches execute; selected session context refuses |
+| `transform` | `IF`/`ELSEIF`, regex and session context | **all branches executable on HANA and DuckDB** |
 | `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
 | `rank_rows` | grouping, windows and ranking | **executable on HANA and DuckDB** |
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current ledger is `5 fully executable / 1 partially executable / 4 named
-refusals / 0 crashes`. `transform` is deliberately not promoted while its
-`SESSION_CONTEXT` branch remains a selected-path refusal. Parser
+The current clean-room ledger is `7 fully executable / 3 named refusals / 0
+crashes`; including the original `SQUARES` showcase, the live demo reads
+`8 executed / 0 partial / 3 refused`. Parser
 success is not reported as runtime support: a tracked method body moves only
 after it executes directly, without body rewriting, at value level. Relational
 methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
@@ -235,28 +246,30 @@ that contract and its cross-engine corpus exist.
 - direct-source `rank_rows`: native HANA and portable HANA agree on
   grouped ranking values; DuckDB reproduces `RANK=1,1,3` and
   `DENSE_RANK=1,1,2` for a tie fixture, and the duplicate is collapsed;
-- direct-source `transform`: DuckDB covers the zero/NULL and 1..9 branches;
-  native and portable HANA agree for switches 0, 1 and 9, while selecting the
-  session-context branch produces a named refusal before database I/O. Regex
+- direct-source `transform`: DuckDB covers the zero/NULL, 1..9 and explicit
+  session-context branches; native and portable HANA agree for switches 0, 1,
+  9 and 10. Missing explicit context refuses before database I/O. Regex
   support is intentionally the single measured literal replacement in this
   fixture, not a claim of general HANA/DuckDB regex equivalence;
+- direct-source `identity_cells`: native and portable HANA agree on
+  `CURRENT_USER` and `CURRENT_SCHEMA`; DuckDB receives the same semantic
+  values from its explicit AMDP session rather than reporting DuckDB facts;
 - direct-source `scalar_value` and `optional_value`: native HANA SQLScript and
   portable host evaluation agree for negative, zero, non-default and SQL NULL
   inputs. An omitted ABAP `OPTIONAL TYPE i` is separately checked as its ABAP
   type-initial zero; scalar-only execution performs zero database statements;
 - direct-source `difference_cells`: native and portable HANA agree, and
   DuckDB matches `EXCEPT DISTINCT` duplicate elimination and NULL row equality;
-- full SQLScript regression: 370 passing tests, with only explicit live-HANA
-  cases skipped in the ordinary offline run;
-- live HANA focused suite: 9 passing, including the positive `LIMIT ?` and
+- full SQLScript/AMDP regression: 385 passing tests and 13 explicit live
+  integration cases pending in the ordinary offline run;
+- live HANA focused suite: 10 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Session identity (which completes `transform`), arrays, fuzzy search,
-   dynamic SQL, controlled errors and
+1. Arrays, fuzzy search, dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

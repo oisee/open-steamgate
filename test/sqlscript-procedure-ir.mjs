@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
-import {T, lit, param, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
+import {T, lit, param, sessionValue, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
   ifElse, runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 
@@ -59,6 +59,24 @@ describe("the typed SQLScript procedural IR", function () {
     expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
     expect(invocations).to.equal(1);
     expect(answer.trace.boundParameters).to.be.greaterThan(4);
+  });
+
+  it("refuses a hand-built session node that changes the measured STRING type", async () => {
+    const bad = procedure({output: "OUT", outputSchema: {VALUE: T.int}, body: [
+      assignRelation("OUT", project(scan("DUMMY"), [
+        {as: "VALUE", expr: sessionValue("user", "CURRENT_USER", T.int)},
+      ])),
+    ]});
+    let invocations = 0;
+    const native = client.native.bind(client);
+    client.native = async (...args) => { invocations += 1; return native(...args); };
+    let refusal;
+    try {
+      await runProcedure(bad, {client, dialect: "duckdb", session: {currentUser: "123"}});
+    } catch (error) { refusal = error; }
+    expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+    expect(refusal.message).to.match(/must have the measured STRING type/);
+    expect(invocations).to.equal(0);
   });
 
   it("keeps the declared schema when zero iterations return no rows", async () => {

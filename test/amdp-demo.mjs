@@ -12,7 +12,8 @@ describe("the Portable AMDP progress demo", function () {
     expect(byMethod.get("squares").portable.status).to.equal("executed");
     expect(byMethod.get("squares").portable.runs[0].rows).to.have.length(4);
     expect(byMethod.get("squares").portable.runs[0].trace).to.include({engine: "duckdb", fallback: false});
-    expect(byMethod.get("transform").portable.status).to.equal("partial");
+    expect(byMethod.get("transform").portable.status).to.equal("executed");
+    expect(byMethod.get("identity_cells").portable.status).to.equal("executed");
     expect(byMethod.get("search_cells").portable.status).to.equal("refused");
     expect(report.counts.executed + report.counts.partial + report.counts.refused).to.equal(11);
   });
@@ -24,6 +25,6 @@ describe("the Portable AMDP progress demo", function () {
     expect(html).to.include("Original SQLScript body");
     expect(html).to.include("ZCL_OSD_AMDP_DEMO=>squares");
     expect(html).to.not.include("<script src=");
-    expect(terminalSummary(report)).to.include("partial  CL_NEUTRAL_FLOW=>transform");
+    expect(terminalSummary(report)).to.include("executed CL_NEUTRAL_FLOW=>transform");
   });
 });

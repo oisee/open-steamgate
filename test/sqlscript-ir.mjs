@@ -11,7 +11,7 @@
 // bodies), IFNULL, CONCAT, SUBSTR and TO_INTEGER - plus the two divergences
 // that were measured on the engines themselves, integer division and CAST.
 import {expect} from "chai";
-import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, except, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
+import {T, col, lit, param, sessionValue, bin, call, cast, like, scan, ref, filter, project, join, union, except, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
@@ -405,7 +405,7 @@ describe("SQLScript IR: the tables a body needs, invented from the body", () => 
 
 // A function name that reaches another engine unchanged is the same class of
 // defect as a cast that reaches it unchanged, and the corpus made it visible:
-// SUBSTR_BEFORE, SUBSTR_AFTER, MAP, TO_NVARCHAR and SESSION_CONTEXT are
+// SUBSTR_BEFORE, SUBSTR_AFTER, MAP and TO_NVARCHAR are
 // HANA's, and DuckDB answers "Scalar Function ... does not exist". Raising is
 // the lucky half; the other half is a name that exists on both engines and
 // means something slightly different.
@@ -432,10 +432,15 @@ describe("SQLScript IR: a function is rendered only where it has been measured",
     // the list is of functions whose MEANING was measured, not of functions
     // that exist; ROUND and LOCATE left it by being measured, not by being
     // common
-    for (const fn of ["SESSION_CONTEXT", "TO_DATE", "ESCAPE_SINGLE_QUOTES"]) {
+    for (const fn of ["TO_DATE", "ESCAPE_SINGLE_QUOTES"]) {
       const rel = project(scan("SRC"), [{as: "V", expr: call(fn, [col("A")], T.str)}]);
       expect(() => lower(rel, "duckdb"), fn).to.throw(Refused, /has no measured rendering/);
     }
+  });
+
+  it("refuses an uncaptured session node at the dialect boundary", () => {
+    const rel = project(scan("SRC"), [{as: "V", expr: sessionValue("user", "CURRENT_USER")}]);
+    expect(() => lower(rel, "duckdb")).to.throw(Refused, /was not captured by the procedure runtime/);
   });
 
   it("still translates the ones that were measured and differ", () => {

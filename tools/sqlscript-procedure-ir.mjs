@@ -116,7 +116,7 @@ export function evaluateScalar(expr, scalars) {
   throw new UnsupportedSqlScript(`scalar operator ${expr.op} is not supported yet`, expr);
 }
 
-function freezeExpr(expr, scalars, freezeRel) {
+function freezeExpr(expr, scalars, freezeRel, session) {
   if (expr === undefined || expr === null) return expr;
   if (expr.node === "param") {
     const name = upper(expr.name);
@@ -124,25 +124,55 @@ function freezeExpr(expr, scalars, freezeRel) {
     if (scalar === undefined) throw new UnsupportedSqlScript(`unknown scalar :${name.toLowerCase()}`, expr);
     return {...expr, type: scalar.type ?? expr.type, value: scalar.value, isNull: scalar.value == null};
   }
+  if (expr.node === "session") {
+    if (!["user", "schema", "context"].includes(expr.kind)
+        || typeof expr.name !== "string" || expr.name.length === 0) {
+      throw new UnsupportedSqlScript("SQLScript session node has an unknown kind or name");
+    }
+    if (expr.type?.abap !== "STRING" || Object.keys(expr.type).length !== 1) {
+      throw new UnsupportedSqlScript(`SQLScript session ${expr.kind} ${expr.name} must have the measured STRING type`);
+    }
+    let present = false;
+    let value;
+    if (expr.kind === "user") {
+      present = Object.hasOwn(session, "currentUser");
+      value = session.currentUser;
+    } else if (expr.kind === "schema") {
+      present = Object.hasOwn(session, "currentSchema");
+      value = session.currentSchema;
+    } else if (expr.kind === "context") {
+      present = Object.hasOwn(session.values ?? {}, expr.name);
+      value = session.values?.[expr.name];
+    }
+    if (!present) throw new UnsupportedSqlScript(`missing explicit SQLScript session ${expr.kind} ${expr.name}`);
+    if (value !== null && typeof value !== "string") {
+      throw new UnsupportedSqlScript(`SQLScript session ${expr.kind} ${expr.name} must be a string or NULL`);
+    }
+    if (expr.kind !== "context" && value === null) {
+      throw new UnsupportedSqlScript(`SQLScript session ${expr.kind} ${expr.name} cannot be NULL`);
+    }
+    return {node: "param", name: `SESSION_${expr.kind.toUpperCase()}_${expr.name}`,
+      type: expr.type, value, isNull: value == null};
+  }
   const copy = {...expr};
   for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
-    if (copy[key] !== undefined) copy[key] = freezeExpr(copy[key], scalars, freezeRel);
+    if (copy[key] !== undefined) copy[key] = freezeExpr(copy[key], scalars, freezeRel, session);
   }
   for (const key of ["args", "values"]) {
-    if (copy[key] !== undefined) copy[key] = copy[key].map((one) => freezeExpr(one, scalars, freezeRel));
+    if (copy[key] !== undefined) copy[key] = copy[key].map((one) => freezeExpr(one, scalars, freezeRel, session));
   }
   if (copy.whens !== undefined) {
     copy.whens = copy.whens.map((one) => ({
-      when: freezeExpr(one.when, scalars, freezeRel),
-      then: freezeExpr(one.then, scalars, freezeRel),
+      when: freezeExpr(one.when, scalars, freezeRel, session),
+      then: freezeExpr(one.then, scalars, freezeRel, session),
     }));
   }
   if (copy.window !== undefined) {
     copy.window = {
       ...copy.window,
-      partitionBy: (copy.window.partitionBy ?? []).map((one) => freezeExpr(one, scalars, freezeRel)),
+      partitionBy: (copy.window.partitionBy ?? []).map((one) => freezeExpr(one, scalars, freezeRel, session)),
       orderBy: (copy.window.orderBy ?? []).map((one) => one.expr === undefined ? one : ({
-        ...one, expr: freezeExpr(one.expr, scalars, freezeRel),
+        ...one, expr: freezeExpr(one.expr, scalars, freezeRel, session),
       })),
     };
   }
@@ -157,7 +187,7 @@ function freezeExpr(expr, scalars, freezeRel) {
  * `t = SELECT ... FROM :t` points at the previous version and a loop's
  * `:i` points at that iteration's value.
  */
-export function freezeRelation(rel, relations, scalars) {
+export function freezeRelation(rel, relations, scalars, session = {}) {
   const freeze = (node) => {
     if (node === undefined || node === null || node.rel === undefined) {
       throw new UnsupportedSqlScript("a relational assignment has no relation");
@@ -177,7 +207,7 @@ export function freezeRelation(rel, relations, scalars) {
     }
     if (copy.inputs !== undefined) copy.inputs = copy.inputs.map(freeze);
     for (const key of ["pred", "on", "n"]) {
-      if (copy[key] !== undefined) copy[key] = freezeExpr(copy[key], scalars, freeze);
+      if (copy[key] !== undefined) copy[key] = freezeExpr(copy[key], scalars, freeze, session);
     }
     if (copy.rel === "limit") {
       const count = copy.n?.value;
@@ -186,10 +216,10 @@ export function freezeRelation(rel, relations, scalars) {
       }
     }
     if (copy.items !== undefined) {
-      copy.items = copy.items.map((item) => ({...item, expr: freezeExpr(item.expr, scalars, freeze)}));
+      copy.items = copy.items.map((item) => ({...item, expr: freezeExpr(item.expr, scalars, freeze, session)}));
     }
     if (copy.aggs !== undefined) {
-      copy.aggs = copy.aggs.map((item) => ({...item, expr: freezeExpr(item.expr, scalars, freeze)}));
+      copy.aggs = copy.aggs.map((item) => ({...item, expr: freezeExpr(item.expr, scalars, freeze, session)}));
     }
     return copy;
   };
@@ -240,9 +270,16 @@ function assertExpandedRelationBudget(rel, {nodes, depth, parameters}) {
 /** Interpret control flow, then execute the final relation once. */
 export async function runProcedure(program, {
   client, dialect, inputs = {}, relationInputs = {}, inputCatalogue = {}, maxSteps = 10000, maxPlanNodes = 10000,
-  maxPlanDepth = 256, maxParameters = 10000,
+  maxPlanDepth = 256, maxParameters = 10000, session = {},
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
+  session = session ?? {};
+  if (typeof session !== "object" || Array.isArray(session)) {
+    throw new UnsupportedSqlScript("SQLScript session must be an object");
+  }
+  if (session.values != null && (typeof session.values !== "object" || Array.isArray(session.values))) {
+    throw new UnsupportedSqlScript("SQLScript session values must be an object");
+  }
   if (program.outputType !== undefined && program.outputType?.abap !== "I") {
     throw new UnsupportedSqlScript("portable scalar RETURNING is limited to ABAP INTEGER exactly");
   }
@@ -326,7 +363,7 @@ export async function runProcedure(program, {
         // the expanded previous version is checked again after substitution.
         const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
         assertExpandedRelationBudget(statement.rel, budget);
-        const value = freezeRelation(statement.rel, relations, scalars);
+        const value = freezeRelation(statement.rel, relations, scalars, session);
         assertExpandedRelationBudget(value, budget);
         if (effects(value).nonDeterministic) {
           throw new UnsupportedSqlScript("non-deterministic relational execution is outside the P1a subset", statement);

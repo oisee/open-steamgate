@@ -126,10 +126,9 @@ describe("independent AMDP clean-room corpus", () => {
     const expected = {
       search_cells: /inputs support only INTEGER scalars/,
       expand_values: /inputs support only INTEGER scalars/,
-      identity_cells: /CURRENT_USER is a session value/,
       control_rows: /only scalar DECLARE/,
     };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -301,7 +300,7 @@ describe("independent AMDP clean-room corpus", () => {
     }
   });
 
-  it("executes only transform's selected portable IF branch on DuckDB", async () => {
+  it("executes every transform branch from an explicit portable session on DuckDB", async () => {
     const extracted = extract(source("neutral_flow.clas.abap.txt"), "cl_neutral_flow.clas.abap");
     const method = extracted.methods.find((one) => one.name === "transform");
     const mixedPrecedence = {...method, body: method.body.replace(
@@ -364,8 +363,49 @@ describe("independent AMDP clean-room corpus", () => {
           relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
       } catch (error) { refusal = error; }
       expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
-      expect(refusal.message).to.match(/SESSION_CONTEXT has no measured rendering/);
+      expect(refusal.message).to.match(/missing explicit SQLScript session context NEUTRAL_MODE/);
       expect(nativeCalls, "an unsupported selected branch is refused before database I/O").to.equal(0);
+      const sessionBranch = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_SWITCH: 10},
+        relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}},
+        session: {values: {NEUTRAL_MODE: "portable"}}});
+      expect(sessionBranch.rows.map((one) => one.LABEL_TEXT)).to.deep.equal([
+        "portable", "portable", "portable", "portable",
+      ]);
+      expect(sessionBranch.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("executes identity values from an explicit portable session", async () => {
+    const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "identity_cells");
+    const compiled = compileProcedure(method, extracted.types);
+    const schema = compiled.relationParameters[0].schema;
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const input = await materializeRows(client, "IDENTITY_CELLS", [
+        {cell_id: 1, label_text: "A", code_text: "X"},
+        {cell_id: 2, label_text: null, code_text: "Y"},
+      ], schema);
+      let refusal;
+      let nativeCalls = 0;
+      const native = client.native.bind(client);
+      client.native = async (...args) => { nativeCalls += 1; return native(...args); };
+      try {
+        await runProcedure(compiled, {client, dialect: "duckdb", relationInputs: {IT_CELLS: input}, session: null});
+      } catch (error) { refusal = error; }
+      expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+      expect(refusal.message).to.match(/missing explicit SQLScript session user CURRENT_USER/);
+      expect(nativeCalls, "a null/missing session refuses before database I/O").to.equal(0);
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb", relationInputs: {IT_CELLS: input},
+        session: {currentUser: "UNIT_USER", currentSchema: "UNIT_SCHEMA"}});
+      expect(answer.rows).to.deep.equal([
+        {CELL_ID: 1, EXECUTION_USER: "UNIT_USER", EXECUTION_SCHEMA: "UNIT_SCHEMA"},
+        {CELL_ID: 2, EXECUTION_USER: "UNIT_USER", EXECUTION_SCHEMA: "UNIT_SCHEMA"},
+      ]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
     } finally {
       await client.disconnect();
     }

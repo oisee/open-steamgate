@@ -39,6 +39,11 @@ export const col = (name, type, source) => source === undefined
 export const lit = (value, type) => ({node: "lit", value, type});
 /** a host value: bound by the driver, never rendered into the text */
 export const param = (name, type, isNull = false) => ({node: "param", name, type, isNull});
+/** A value owned by the AMDP execution context rather than by the database
+ *  connection chosen to execute a relational plan. It must be captured into
+ *  a bound parameter before lowering; no backend is allowed to substitute
+ *  its own user, schema, or session setting. */
+export const sessionValue = (kind, name, type = T.str) => ({node: "session", kind, name, type});
 
 /**
  * An arithmetic or comparison node. `type` is the type HANA gives the RESULT,
@@ -326,6 +331,7 @@ export function typeOfExpr(expr, schema = {}) {
     }
     case "lit":
     case "param":
+    case "session":
       return expr.type;
     case "isnull":
     case "not":

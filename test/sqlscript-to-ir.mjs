@@ -99,11 +99,31 @@ describe("the SQLScript tree into the IR", () => {
     expect(column.type).to.deep.equal({abap: "C", len: 8});
   });
 
-  it("refuses unimplemented session values instead of reading same-named columns", () => {
-    for (const name of ["CURRENT_USER", "CURRENT_SCHEMA", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"]) {
-      expect(() => ir(`SELECT ${name} AS v FROM src;`, {SRC: {[name]: {abap: "C", len: 20}}}), name)
-        .to.throw(BindError, /session value, not a column/);
+  it("keeps identity values distinct from columns and refuses the unmodelled clock", () => {
+    for (const [name, kind] of [["CURRENT_USER", "user"], ["CURRENT_SCHEMA", "schema"]]) {
+      const plan = ir(`SELECT ${name} AS v FROM src;`, {SRC: {[name]: {abap: "C", len: 20}}});
+      const value = walk(plan.rel).find((one) => one.node === "session");
+      expect(value, name).to.deep.include({node: "session", kind, name});
+      expect(walk(plan.rel).some((one) => one.node === "col" && one.name === name), name).to.equal(false);
     }
+    for (const expression of ["s.CURRENT_USER", "s.\"CURRENT_USER\"", "\"CURRENT_USER\""]) {
+      const plan = ir(`SELECT ${expression} AS v FROM src AS s;`,
+        {SRC: {CURRENT_USER: {abap: "C", len: 20}}});
+      expect(walk(plan.rel).some((one) => one.node === "session"), expression).to.equal(false);
+      expect(walk(plan.rel).some((one) => one.node === "col" && one.name === "CURRENT_USER"), expression).to.equal(true);
+    }
+    for (const name of ["CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"]) {
+      expect(() => ir(`SELECT ${name} AS v FROM src;`), name)
+        .to.throw(BindError, /portable clock semantics are not implemented/);
+    }
+  });
+
+  it("models only literal-key SESSION_CONTEXT calls", () => {
+    const plan = ir("SELECT SESSION_CONTEXT('NEUTRAL_MODE') AS v FROM src;");
+    expect(walk(plan.rel).find((one) => one.node === "session"))
+      .to.deep.include({node: "session", kind: "context", name: "NEUTRAL_MODE"});
+    expect(() => ir("SELECT SESSION_CONTEXT(k) AS v FROM src;"))
+      .to.throw(BindError, /requires one literal string key/);
   });
 
   // The `str()` trap, third occurrence, as a table rather than an example:

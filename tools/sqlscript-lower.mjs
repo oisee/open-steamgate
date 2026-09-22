@@ -302,6 +302,8 @@ export function lower(rel, dialectName, options = {}) {
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
         return d.placeholder(params.length, seamType(e.type));
+      case "session":
+        throw new Refused(`session value ${e.kind} ${e.name} was not captured by the procedure runtime`);
       case "bin": {
         const left = expr(e.left);
         const right = expr(e.right);

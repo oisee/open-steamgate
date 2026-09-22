@@ -22,7 +22,7 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
+import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 
@@ -266,6 +266,15 @@ export function toIr(tree, options = {}) {
         // expose the wrong AMDP boundary type even when the SQL itself ran.
         let resultType = T.str;
         if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        if (fn === "SESSION_CONTEXT") {
+          if (args.length !== 1 || args[0]?.node !== "lit" || typeof args[0].value !== "string") {
+            throw new BindError("SESSION_CONTEXT requires one literal string key", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("SESSION_CONTEXT does not accept window, ordering, or star decorations", node);
+          }
+          return sessionValue("context", args[0].value, T.str);
+        }
         if (fn === "COALESCE") {
           if (over !== undefined || inner.length > 0 || starArg) {
             throw new BindError("scalar COALESCE does not accept window, ordering, or star decorations", node);
@@ -316,8 +325,14 @@ export function toIr(tree, options = {}) {
         const names = kids(node, "Name");
         const name = names.length > 1 ? nameOf(names[names.length - 1]) : nameOf(node);
         const sourceName = names.length > 1 ? nameOf(names[0]) : undefined;
-        if (SESSION_VALUE_NAMES.has(name)) {
-          throw new BindError(`${name} is a session value, not a column; its portable semantics are not implemented`, node);
+        // Only the exact, unqualified, unquoted keyword spelling is a
+        // session value. `s.CURRENT_USER` and `"CURRENT_USER"` are ordinary
+        // columns; treating them as identity silently replaces row data.
+        const sessionKeyword = names.length === 1 && leaf(names[0])?.node === "identifier";
+        if (sessionKeyword && SESSION_VALUE_NAMES.has(name)) {
+          if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
+          if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
+          throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
         }
         return col(name, typeOfColumn(name, sourceName), sourceName);
       }
@@ -325,7 +340,9 @@ export function toIr(tree, options = {}) {
       case "quoted": {
         const name = String(node.value).toUpperCase();
         if (node.node === "identifier" && SESSION_VALUE_NAMES.has(name)) {
-          throw new BindError(`${name} is a session value, not a column; its portable semantics are not implemented`, node);
+          if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
+          if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
+          throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
         }
         return col(name, typeOfColumn(name));
       }

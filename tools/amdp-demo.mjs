@@ -53,13 +53,15 @@ const scenarios = {
   })}],
   transform: [
     {label: "portable branch", inputs: {IV_SWITCH: 0}, relations: () => ({IT_CELLS: flowCells})},
-    {label: "session branch", inputs: {IV_SWITCH: 10}, relations: () => ({IT_CELLS: flowCells})},
+    {label: "session branch", inputs: {IV_SWITCH: 10}, session: {values: {NEUTRAL_MODE: "portable"}},
+      relations: () => ({IT_CELLS: flowCells})},
   ],
   difference_cells: [{relations: () => ({
     IT_LEFT: [simpleCells[0], simpleCells[0], simpleCells[1], simpleCells[2]],
     IT_RIGHT: [simpleCells[0], simpleCells[1]],
   })}],
-  identity_cells: [{relations: () => ({IT_CELLS: simpleCells})}],
+  identity_cells: [{session: {currentUser: "DEMO_USER", currentSchema: "DEMO_SCHEMA"},
+    relations: () => ({IT_CELLS: simpleCells})}],
   search_cells: [{inputs: {IV_QUERY: "amber"}, relations: () => ({IT_CELLS: simpleCells})}],
   expand_values: [{inputs: {IV_ARRAY: "[2,5]"}}],
   optional_value: [{inputs: {IV_SEED: 11}}],
@@ -136,6 +138,7 @@ async function executeScenario(compiled, spec, index) {
     }
     const answer = await runProcedure(compiled, {
       client, dialect: "duckdb", inputs: spec.inputs ?? {}, relationInputs, inputCatalogue: {DUMMY: {}},
+      session: spec.session ?? {},
     });
     return {
       label: spec.label ?? `scenario ${index + 1}`,
