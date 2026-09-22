@@ -134,10 +134,20 @@ jobs:
       # the manifests say and look complete.
       - name: Fetch the pack sources
         run: node tools/osd-fetch.mjs
+      # Keep the existing sql.js regression suite: the public Pages build
+      # changes database, but it must not silently lose coverage of the
+      # original browser runtime.
       - run: npm run web:preview
       - run: npx playwright install --with-deps chromium
-      - name: Check the build in a browser
+      - name: Check the sql.js build in a browser
         run: npx playwright test --config playwright.preview.config.mjs
+      # The build directory is replaced here. Only the DuckDB-Wasm build below
+      # is published, and only if its own browser check passes. The previous
+      # gh-pages/main stays active if either build or check fails.
+      - name: Build Pages with DuckDB-Wasm and Portable AMDP
+        run: OSD_PREVIEW_DB=duckdb node scripts/build-preview.mjs
+      - name: Check Portable AMDP in the Pages build
+        run: OSD_PREVIEW_DB=duckdb npx playwright test --config playwright.preview.config.mjs
       - name: Screenshots
         run: node scripts/capture-screenshots.mjs
       - name: Publish to gh-pages

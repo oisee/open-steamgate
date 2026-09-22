@@ -269,6 +269,11 @@ test("object page: Create on the bookings table posts to TravelSet('T0001')/to_B
   await page.getByRole("button", {name: "Create"}).last().focus();
   await page.keyboard.press("Enter");
 
+  // ODataModel submits its changeset asynchronously after the UI event.
+  // Observe the completed navigation before inspecting the captured request;
+  // reading the array immediately races the $batch dispatch on CI runners.
+  await expect(page.getByRole("heading", {name: "Alan Turing"})).toBeVisible();
+
   // created below the travel: the POST goes through the navigation property,
   // the parent key travels in the URL, not in the payload
   // (inside a $batch changeset, hence the search by payload)
@@ -276,8 +281,6 @@ test("object page: Create on the bookings table posts to TravelSet('T0001')/to_B
   expect(post, requests.join("\n")).toBeDefined();
   expect(post).toMatch(/POST TravelSet\('T0001'\)\/to_Bookings/);
   expect(post).toContain('"BookingId":"B009"');
-  // the app moves on to the created booking's page
-  await expect(page.getByRole("heading", {name: "Alan Turing"})).toBeVisible();
 
   // Close the nested FCL column: the parent table shows the new booking.
   await page.locator(".sapFFCLColumnEnd").getByRole("button", {name: "Close", exact: true}).click();

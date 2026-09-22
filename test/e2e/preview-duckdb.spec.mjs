@@ -38,16 +38,28 @@ test("one DuckDB-Wasm connection serves OData and Portable AMDP in Pages", async
     expect(facts.status).toBe(200);
     expect(facts.rows.find((row) => row.Section === "Database" && row.Name === "Engine")?.Value).toBe("duckdb");
 
+    await expect.poll(() => page.evaluate(() => {
+      const element = document.querySelector("[id$='--engineSelect']");
+      return sap.ui.getCore().byId(element.id).getSelectedKey();
+    })).toBe("AMDP");
     await page.locator("[id$='--masterList'] .sapMLIB").first().click();
+    await expect(page.getByText(/nearest texts, sorted by AMDP rank/)).toBeVisible({timeout: 120000});
+    const firstSeven = async () => page.evaluate(() => {
+      const element = document.querySelector("[id$='--engineSelect']");
+      const state = sap.ui.getCore().byId(element.id).getModel("state");
+      return state.getProperty("/results").slice(0, 7).map(({ResultId, Rank, Payload}) => ({ResultId, Rank, Payload}));
+    });
+    const amdp = await firstSeven();
+    expect(amdp).toHaveLength(7);
     await page.evaluate(() => {
       const element = document.querySelector("[id$='--engineSelect']");
       const control = sap.ui.getCore().byId(element.id);
       if (!control.getItemByKey("AMDP").getEnabled()) throw new Error("Portable AMDP is disabled on DuckDB-Wasm");
-      control.setSelectedKey("AMDP");
+      control.setSelectedKey("ANYDB");
       control.fireChange({selectedItem: control.getSelectedItem()});
     });
-    await expect(page.getByText(/nearest texts, sorted by AMDP rank/)).toBeVisible({timeout: 120000});
-    await expect(page.locator(".sapMListTblRow", {hasText: "AMDP"}).first()).toBeVisible();
+    await expect(page.getByText(/nearest texts, sorted by ANYDB rank/)).toBeVisible({timeout: 120000});
+    expect(await firstSeven()).toEqual(amdp);
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});
