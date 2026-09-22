@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-steamgate preview</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 36rem; padding: 2rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+    p { margin: 0 0 .75rem; color: #555; }
+    pre { white-space: pre-wrap; padding: 1rem; background: #f3f3f3; border-radius: 6px; }
+    a { color: #0a6ed1; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="heading">Starting open-steamgate</h1>
+    <p id="detail">The OData gateway is installing itself in your browser: a service worker
+      runs the transpiled ABAP DPC over SQLite. This takes a moment the first time.</p>
+    <p>OData v2 services live under <code>sap/opu/odata/sap/</code>, the Fiori Elements
+      demo app under <a href="app/">app/</a>.</p>
+  </main>
+  <script>
+    (async () => {
+      const heading = document.querySelector("#heading");
+      const detail = document.querySelector("#detail");
+      const fail = (title, message) => {
+        heading.textContent = title;
+        detail.textContent = "";
+        const pre = document.createElement("pre");
+        pre.textContent = message;
+        detail.after(pre);
+      };
+      if (!("serviceWorker" in navigator)) {
+        fail("This browser cannot run the preview",
+          "The preview runs the gateway in a service worker; this browser does not support them or has them turned off (some private windows).");
+        return;
+      }
+      try {
+        await navigator.serviceWorker.register("./sw.js", {scope: "./"});
+        await navigator.serviceWorker.ready;
+      } catch (error) {
+        fail("The preview could not be installed", String(error));
+        return;
+      }
+      // Install and stay put, on request.
+      //
+      // This page's whole job is to register the worker and get out of the
+      // way, and the redirect is what a visitor wants. It is also a second
+      // navigation racing whatever the opener does next: a test that waits
+      // for the controller and then goes somewhere collides with it, and the
+      // collision surfaces as "execution context was destroyed" on an
+      // unrelated line. So a caller can ask to be left here.
+      if (new URLSearchParams(location.search).has("stay")) {
+        heading.textContent = "open-steamgate is installed";
+        detail.textContent = "The gateway is answering in this browser. Open the app below, or any service path directly.";
+        return;
+      }
+      location.replace("app/");
+    })();
+  </script>
+</body>
+</html>
