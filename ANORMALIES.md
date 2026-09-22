@@ -1192,3 +1192,24 @@ for `zosd_status_app`, which has been deployed for a day.
   the 404 assertion and names this entry. When this is fixed, delete the
   exclusion; if the exclusion outlives the defect, the assertion has
   stopped testing what it says.
+
+### NOTE-2026-09-22-packed-length-is-bytes — `P LENGTH n` is n bytes, and the portable IR reads it as n digits
+
+- `tools/sqlscript-to-procedure-ir.mjs` (`irTypeFromAbap`) maps
+  `P LENGTH n DECIMALS m` to `T.dec(n, m)`, and bare `P` to `dec(16, 2)`.
+  In ABAP the length of a packed number is in **bytes**: `n` bytes hold
+  `2n - 1` digits, and the default is 8 bytes = 15 digits. So a parameter
+  `TYPE p LENGTH 8 DECIMALS 2` -- 15 digits -- becomes a `DECIMAL(8,2)` on
+  the way to the database, which holds 8 digits: an amount above 999999.99
+  overflows or is refused by the engine, depending on the dialect.
+- Found by foreman-dell reading `c12329b..ddde7d7`, not by a test: no
+  conformance case sends a packed parameter of more than six digits.
+- Not changed in that branch, because it is the runtime's type boundary and
+  a change there needs its conformance case (a `P LENGTH 8 DECIMALS 2`
+  input of 15 digits through the destination, on HXE and DuckDB) before it
+  is trusted. Until then, the mapping is wrong in a known direction --
+  **narrower** than the ABAP type -- which fails loudly rather than
+  silently for a value that does not fit.
+- Where the fix goes: `irTypeFromAbap` and the DDIC catalogue's `DEC`
+  mapping (`LENG` of a DEC field in DD03P is already digits, not bytes, so
+  only the literal `P LENGTH n` form is affected).

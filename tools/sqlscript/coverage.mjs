@@ -111,7 +111,18 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       tableFunctionsMissing.set(name, (tableFunctionsMissing.get(name) ?? 0) + 1);
       continue;
     }
-    const tf = parseTableFunction(ddls.source);
+    let tf;
+    try {
+      tf = parseTableFunction(ddls.source);
+    } catch (error) {
+      tableFunctionsMissing.set(`${name} (${String(error.message).slice(0, 40)})`, 1);
+      continue;
+    }
+    if (tf === undefined) {
+      // the DDLS of that name is a view, not a table function
+      tableFunctionsMissing.set(`${name} (not a table function)`, 1);
+      continue;
+    }
     one.signature = {...one.signature, parameters: tf.parameters, returns: tf.returns};
     tableFunctionsRead += 1;
   }
@@ -142,6 +153,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const afterParse = new Map();
     let parsed = 0;
     let loweredCount = 0;
+    let loweredHana = 0;
     for (const {body, signature} of bodies) {
       let tokens = [];
       let tree;
@@ -154,13 +166,26 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
         continue;
       }
+      // Lowered is counted **per dialect**: a body whose FROM names a HANA
+      // procedure lowers on hana by printing the name and on duckdb not at
+      // all, and one number for both would call a HANA passthrough progress
+      // (foreman-dell). The headline is the portable one.
+      let ir;
       try {
-        const ir = toIr(tree, {catalogue: {}, signature, resolveType});
-        lower(ir.rel, "hana");
+        ir = toIr(tree, {catalogue: {}, signature, resolveType});
+        lower(ir.rel, "duckdb");
         loweredCount += 1;
       } catch (error) {
         const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
         afterParse.set(why, (afterParse.get(why) ?? 0) + 1);
+      }
+      if (ir !== undefined) {
+        try {
+          lower(ir.rel, "hana");
+          loweredHana += 1;
+        } catch {
+          // counted by its absence from the hana column; the duckdb reason above names it
+        }
       }
     }
     report[which] = {
@@ -169,6 +194,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       bodies: bodies.length,
       parsed,
       lowered: loweredCount,
+      loweredHana,
       share: bodies.length === 0 ? 0 : Math.round((loweredCount / bodies.length) * 100),
       stoppedBy: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
       parsedButNotLowered: [...afterParse.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
@@ -209,7 +235,8 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
-    console.log(`  lowered  ${r.lowered}  (${r.share}% -- the only one worth quoting)`);
+    console.log(`  lowered  ${r.lowered}  (${r.share}% -- on duckdb, the portable one, the only number worth quoting)`);
+    if (r.loweredHana !== r.lowered) console.log(`           ${r.loweredHana} on hana (the difference is a name only HANA can answer)`);
     console.log("  stopped in the grammar:");
     for (const [reason, count] of r.stoppedBy) {
       console.log(`  ${String(count).padStart(5)}  ${reason}`);

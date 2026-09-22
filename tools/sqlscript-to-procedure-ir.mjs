@@ -54,7 +54,10 @@ const isBareNull = (node) => {
  * a dictionary -- is admitted when it resolves to one of the same datatypes.
  * Everything else is the refusal it always was.
  */
-const MEASURED_DATATYPES = new Set(["CHAR", "CLNT", "CUKY", "LANG", "UNIT", "DATS", "TIMS", "INT4", "INT2", "INT1", "STRG", "SSTR", "DEC", "CURR", "QUAN"]);
+// exactly the datatypes the literal forms above map to, nothing wider: CLNT,
+// CUKY, CURR and the rest wait for the CHAR-input conformance case (trailing
+// blanks on HXE against DuckDB) before a data element of theirs is admitted
+const MEASURED_DATATYPES = new Set(["CHAR", "DATS", "TIMS", "INT4", "STRG", "DEC"]);
 export function irTypeFromAbap(type, resolve) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;

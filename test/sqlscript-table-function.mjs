@@ -45,6 +45,20 @@ describe("a CDS table function, read off its DDLS", () => {
     expect(tf.implementedBy).to.deep.equal({class: "CL_X_IMPL", method: "GET_VERSIONS"});
   });
 
+  it("keeps a quoted annotation value with // in it, and a record-valued annotation inside RETURNS", () => {
+    const tf = parseTableFunction(`define table function P_Q
+      with parameters
+        @EndUserText.label: 'see http://help.example/x' // the docs
+        p_a : abap.char(2)
+      returns {
+        @ObjectModel.text: { element: 'txt' }
+        key a : abap.char(2); /* the key */
+        txt   : abap.char(40);
+      }`);
+    expect(tf.parameters).to.deep.equal([{name: "p_a", direction: "IN", abapType: "abap.char(2)"}]);
+    expect(tf.returns.map((c) => c.name)).to.deep.equal(["a", "txt"]);
+  });
+
   it("reads one without parameters, and says no to a source that is not a table function", () => {
     const tf = parseTableFunction("define table function P_PLAIN returns { key a : abap.char(1); }");
     expect(tf.parameters).to.deep.equal([]);

@@ -189,9 +189,12 @@ describe("the procedure compiler admits only the measured types, dictionary or n
   });
 
   it("admits a data element only with a dictionary, and only when it resolves to a measured datatype", () => {
-    const resolve = (name) => ({MANDT: {DATATYPE: "CLNT", LENG: 3, DECIMALS: 0}, ZNUM: {DATATYPE: "NUMC", LENG: 5, DECIMALS: 0}})[name];
-    expect(irTypeFromAbap("mandt", resolve)).to.deep.equal({abap: "C", len: 3});
-    expect(() => irTypeFromAbap("mandt")).to.throw(UnsupportedSqlScript);
+    const resolve = (name) => ({TABNAME: {DATATYPE: "CHAR", LENG: 30, DECIMALS: 0}, MANDT: {DATATYPE: "CLNT", LENG: 3, DECIMALS: 0}, ZNUM: {DATATYPE: "NUMC", LENG: 5, DECIMALS: 0}})[name];
+    expect(irTypeFromAbap("tabname", resolve)).to.deep.equal({abap: "C", len: 30});
+    expect(() => irTypeFromAbap("tabname")).to.throw(UnsupportedSqlScript);
+    // CLNT is CHAR(3) everywhere we have looked, and it is still not admitted
+    // until the CHAR-input conformance case has measured trailing blanks
+    expect(() => irTypeFromAbap("mandt", resolve)).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
     expect(() => irTypeFromAbap("znum", resolve)).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
   });
 });

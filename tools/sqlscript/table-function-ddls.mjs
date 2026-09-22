@@ -23,17 +23,59 @@
 // nothing more: which client a portable run binds there is a runtime
 // decision with a measured trap behind it (sy-mandt is 123 here and 001 on
 // A4H), and it is not made by a parser.
-const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+/** comments out, quote-aware: `'see http://x'` in an annotation is not a comment */
+function stripComments(text) {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'") {
+      const end = text.indexOf("'", i + 1);
+      const stop = end < 0 ? text.length : end + 1;
+      out += text.slice(i, stop);
+      i = stop;
+    } else if (ch === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      out += " ";
+    } else if (ch === "/" && text[i + 1] === "/") {
+      const end = text.indexOf("\n", i);
+      i = end < 0 ? text.length : end;
+      out += " ";
+    } else {
+      out += ch;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** the text inside the first `{ ... }` from `at`, braces matched by depth */
+function braced(text, at) {
+  const open = text.indexOf("{", at);
+  if (open < 0) return undefined;
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === "{") depth += 1;
+    if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return undefined;
+}
 
 /** split on commas or semicolons that are not inside parentheses */
 function splitTopLevel(text, separator) {
   const out = [];
   let depth = 0;
+  let quoted = false;
   let current = "";
   for (const ch of text) {
-    if (ch === "(") depth += 1;
-    if (ch === ")") depth -= 1;
-    if (ch === separator && depth === 0) {
+    if (ch === "'") quoted = !quoted;
+    if (!quoted && (ch === "(" || ch === "{" || ch === "[")) depth += 1;
+    if (!quoted && (ch === ")" || ch === "}" || ch === "]")) depth -= 1;
+    if (ch === separator && depth === 0 && !quoted) {
       out.push(current);
       current = "";
     } else {
@@ -85,10 +127,10 @@ export function parseTableFunction(source) {
         ...(systemField === undefined ? {} : {systemField: systemField.replace(/^#/, "").toUpperCase()})});
     }
   }
-  const body = /\{([\s\S]*?)\}/.exec(after.slice(returnsAt));
-  if (body === null) throw new Error(`table function ${head[1]}: RETURNS without a { } list`);
+  const body = braced(after, returnsAt);
+  if (body === undefined) throw new Error(`table function ${head[1]}: RETURNS without a { } list`);
   const returns = [];
-  for (const one of splitTopLevel(body[1], ";")) {
+  for (const one of splitTopLevel(body, ";")) {
     const column = entry(one);
     if (column === undefined) throw new Error(`table function ${head[1]}: cannot read column "${one.trim()}"`);
     returns.push({name: column.name, abapType: column.abapType, key: column.key});
