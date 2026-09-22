@@ -1,7 +1,7 @@
 # Portainer: SQLite demo, default instance 11 (8011/44311/3211/3311).
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:

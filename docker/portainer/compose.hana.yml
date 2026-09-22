@@ -3,7 +3,7 @@
 # outside an isolated test network. HXE's SQL port is not published to host.
 services:
   hana-init:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     user: "0:0"
     entrypoint: ["node", "docker/image/hana-init.mjs"]
@@ -40,7 +40,7 @@ services:
     stop_grace_period: 5m
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
