@@ -2,6 +2,29 @@
 
 Status of `feat/amdp-portable-ir` on 2026-09-22.
 
+## Live progress demo
+
+The milestone is visible without HANA or a server:
+
+```sh
+npm run amdp:demo
+```
+
+This executes the original `SQUARES` body and every tracked clean-room method
+through the real compiler and DuckDB runtime. It writes a self-contained
+master-detail report to `.local/amdp-demo/index.html`; the terminal shows the
+same `executed / partial / refused` ledger. A refusal is part of the result,
+not a hidden skipped test. To make the report reachable on the local network:
+
+```sh
+npm run amdp:demo -- --serve 3037
+```
+
+The page is deliberately a generated report rather than a second execution
+API. Native HANA comparison will occupy the already reserved Native column in
+the same report contract when explicitly enabled; DuckDB remains sufficient
+to open and regenerate the progress surface.
+
 ## The result
 
 The repository's original

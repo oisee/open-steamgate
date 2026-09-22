@@ -8,6 +8,10 @@
 > round trip. Typed `EXCEPT` now runs on HANA and DuckDB too. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
+>
+> Run `npm run amdp:demo` for the live DuckDB ledger and a self-contained
+> master-detail report at `.local/amdp-demo/index.html`; add `-- --serve 3037`
+> to view that generated report from another machine on the local network.
 
 > ## ▶ [Run a whole ABAP application server in a browser tab](https://oisee.github.io/open-steamgate/main/app/flp.html)
 >

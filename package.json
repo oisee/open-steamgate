@@ -36,6 +36,7 @@
     "conformance": "node test/conformance/run.mjs",
     "probe": "node tools/closure-probe.mjs",
     "amdp:oracle": "node tools/amdp-oracle.mjs",
+    "amdp:demo": "node tools/amdp-demo.mjs",
     "e2e": "npm run transpile && playwright test",
     "e2e:workbench": "node test/e2e/workbench-w2.mjs",
     "e2e:isolated": "node scripts/run-e2e-isolated.mjs",
