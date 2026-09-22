@@ -124,7 +124,7 @@ describe("independent AMDP clean-room corpus", () => {
 
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
-      search_cells: /COALESCE arguments require identical measured types/,
+      search_cells: /hint NEUTRAL_PLAN has not been looked at/,
       control_rows: /only scalar DECLARE/,
     };
     const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values"]);

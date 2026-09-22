@@ -202,4 +202,23 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     ]);
     expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
   });
+
+  it("widens textual COALESCE without changing NULL selection semantics", async () => {
+    const types = new Map([
+      ["TY_TEXT", {kind: "structure", components: [{name: "text", abapType: "c LENGTH 20"}]}],
+      ["TT_TEXT", {kind: "table", of: "TY_TEXT"}],
+    ]);
+    const method = {body: "et = SELECT COALESCE(:iv_text, 'none') AS text FROM DUMMY;", parameters: [
+      {name: "iv_text", direction: "IN", abapType: "string"},
+      {name: "et", direction: "OUT", abapType: "tt_text"},
+    ]};
+    const compiled = compileProcedure(method, types);
+    expect((await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_TEXT: null}})).rows)
+      .to.deep.equal([{TEXT: "none"}]);
+    expect((await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_TEXT: "portable"}})).rows)
+      .to.deep.equal([{TEXT: "portable"}]);
+    expect(() => compileProcedure({...method,
+      body: "et = SELECT COALESCE(:iv_text, 7) AS text FROM DUMMY;"}, types))
+      .to.throw(UnsupportedSqlScript, /COALESCE arguments require identical measured types/);
+  });
 });

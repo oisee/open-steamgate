@@ -449,6 +449,45 @@ describe("INTEGER ARRAY: native UNNEST against a portable relation", function ()
   });
 });
 
+describe("textual COALESCE: native SQLScript against portable widening", function () {
+  this.timeout(60000);
+
+  liveIt("matches NULL fallback and a supplied STRING", async () => {
+    if (process.env.STG_DB_FRESH === "1") throw new Error("live AMDP differential refuses STG_DB_FRESH=1");
+    const types = new Map([
+      ["TY_TEXT", {kind: "structure", components: [{name: "text", abapType: "c LENGTH 20"}]}],
+      ["TT_TEXT", {kind: "table", of: "TY_TEXT"}],
+    ]);
+    const method = {name: "text_default", language: "SQLSCRIPT", readOnly: true,
+      body: "et = SELECT COALESCE(:iv_text, 'none') AS text FROM DUMMY;", parameters: [
+        {name: "iv_text", direction: "IN", abapType: "string"},
+        {name: "et", direction: "OUT", abapType: "tt_text"},
+      ]};
+    const portable = compileProcedure(method, types);
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const disposableClass = `ZOSD_C_${randomBytes(6).toString("hex").toUpperCase()}`;
+    const procedureName = `"${schema}"."${disposableClass}=>TEXT_DEFAULT"`;
+    let created = false;
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(disposableClass, method, schema, types), expect: "none"});
+      created = true;
+      for (const value of [null, "portable"]) {
+        const native = await callAmDP(client.client, procedureName, method, {iv_text: value}, types);
+        const answer = await runProcedure(portable, {client, dialect: "hana", inputs: {IV_TEXT: value}});
+        expect(answer.rows.map((row) => row.TEXT)).to.deep.equal(native.et.map((row) => row.TEXT));
+      }
+    } finally {
+      try {
+        if (created) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+      } finally {
+        await client.disconnect();
+      }
+    }
+  });
+});
+
 describe("scalar functions: native SQLScript against portable host evaluation", function () {
   this.timeout(60000);
 

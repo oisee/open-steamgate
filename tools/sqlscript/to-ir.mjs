@@ -75,6 +75,17 @@ function literalType(token) {
   return T.char(String(token.value).length);
 }
 
+const mergedTextType = (left, right) => {
+  const text = (type) => {
+    if (type?.abap === "STRING") return Object.keys(type).length === 1;
+    return type?.abap === "C" && Object.keys(type).length === 2
+      && Number.isSafeInteger(type.len) && type.len >= 0;
+  };
+  if (!text(left) || !text(right)) return undefined;
+  if (left.abap === "STRING" || right.abap === "STRING") return T.str;
+  return T.char(Math.max(Number(left.len), Number(right.len)));
+};
+
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
   const scalarTypes = options.scalarTypes ?? {};
@@ -280,10 +291,14 @@ export function toIr(tree, options = {}) {
             throw new BindError("scalar COALESCE does not accept window, ordering, or star decorations", node);
           }
           if (args.length !== 2) throw new BindError("COALESCE currently requires exactly two arguments", node);
-          if (JSON.stringify(args[0]?.type) !== JSON.stringify(args[1]?.type)) {
+          const mentionsText = [args[0]?.type, args[1]?.type]
+            .some((type) => type?.abap === "C" || type?.abap === "STRING");
+          const merged = JSON.stringify(args[0]?.type) === JSON.stringify(args[1]?.type) && !mentionsText
+            ? args[0].type : mergedTextType(args[0]?.type, args[1]?.type);
+          if (merged === undefined) {
             throw new BindError("COALESCE arguments require identical measured types", node);
           }
-          resultType = args[0].type;
+          resultType = merged;
         }
         const built = call(fn, args, resultType);
         if (starArg) built.star = true;

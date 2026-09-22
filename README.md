@@ -16,6 +16,9 @@
 > positions on HANA and DuckDB. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
+> Textual `COALESCE` now also preserves NULL selection while widening fixed
+> character operands deterministically; mixed text/numeric coercion remains
+> refused.
 >
 > Run `npm run amdp:demo` for the live DuckDB ledger and a self-contained
 > master-detail report at `.local/amdp-demo/index.html`; add `-- --serve 3037`

@@ -469,6 +469,19 @@ arrays, conditional declarations, multiple arrays, mutation, concatenation
 and `ARRAY_AGG` remain named boundaries. The demo advances to `9 executed / 0
 partial / 2 refused`.
 
+### 2026-09-22 — P1j measured textual COALESCE widening
+
+`COALESCE` no longer requires byte-for-byte identical text type descriptors.
+Two fixed character operands produce the greater declared length; if either
+operand is ABAP STRING, the measured result remains STRING. This is a narrow
+text rule, not generic implicit conversion: text/numeric mixing, extra
+arguments and decorated/windowed calls remain named refusals.
+
+A disposable native HANA procedure, portable ordinary HANA SQL and DuckDB
+agree for a NULL fallback and a supplied non-empty STRING. This advances the
+tracked `search_cells` body past null substitution to its optimizer-hint
+policy boundary; mapping and approximate scoring remain separate milestones.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

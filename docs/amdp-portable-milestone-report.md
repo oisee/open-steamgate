@@ -176,7 +176,7 @@ It currently contains ten synthetic methods covering these categories:
 
 | synthetic method | represented surface | current honest boundary |
 | --- | --- | --- |
-| `search_cells` | approximate scoring, null substitution, mapping, hint | measured mixed-type `COALESCE`, then fuzzy-search capability |
+| `search_cells` | approximate scoring, null substitution, mapping, hint | optimizer-hint policy, mapping, then fuzzy-search capability |
 | `difference_cells` | set difference | **executable on HANA and DuckDB** |
 | `expand_values` | fixed INTEGER array and ordered row expansion | **executable on HANA and DuckDB** |
 | `identity_cells` | execution identity | **executable on HANA and DuckDB with an explicit session** |
@@ -269,9 +269,12 @@ that contract and its cross-engine corpus exist.
 - direct-source `expand_values`: native HANA `INTEGER ARRAY` and `UNNEST WITH
   ORDINALITY` agree with portable ordinary HANA SQL; DuckDB preserves a
   duplicate, a NULL element and one-based positions in one statement;
-- full SQLScript/AMDP regression: 389 passing tests and 15 explicit live
+- textual `COALESCE`: native SQLScript, portable HANA and DuckDB agree for
+  NULL fallback and supplied STRING values; fixed character operands widen
+  to the longer length, STRING dominates text, and text/numeric mixing refuses;
+- full SQLScript/AMDP regression: 391 passing tests and 16 explicit live
   integration cases pending in the ordinary offline run;
-- live HANA focused suite: 12 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 13 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.

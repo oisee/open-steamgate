@@ -22,6 +22,20 @@ const walk = (node, found = []) => {
 
 describe("the SQLScript tree into the IR", () => {
 
+  it("widens textual COALESCE to the longer fixed character operand", () => {
+    expect(schemaOf(ir("SELECT COALESCE(txt, 'x') AS value FROM src;").rel, CATALOGUE).VALUE)
+      .to.deep.equal({abap: "C", len: 10});
+    expect(schemaOf(ir("SELECT COALESCE(txt, 'abcdefghijkl') AS value FROM src;").rel, CATALOGUE).VALUE)
+      .to.deep.equal({abap: "C", len: 12});
+    expect(() => ir("SELECT COALESCE(txt, 'x') AS value FROM src;", {SRC: {TXT: {abap: "C"}}}))
+      .to.throw(BindError, /COALESCE arguments require identical measured types/);
+    expect(() => ir("SELECT COALESCE(a, b) AS value FROM src;", {SRC: {A: {abap: "C"}, B: {abap: "C"}}}))
+      .to.throw(BindError, /COALESCE arguments require identical measured types/);
+    expect(() => ir("SELECT COALESCE(a, b) AS value FROM src;", {
+      SRC: {A: {abap: "STRING", len: 3}, B: {abap: "STRING", len: 3}},
+    })).to.throw(BindError, /COALESCE arguments require identical measured types/);
+  });
+
   it("splices a table variable in place rather than leaving a var node", () => {
     // the measurement that decides this: on HANA an assignment is not an
     // observable barrier, so three assignments are one plan
