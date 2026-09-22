@@ -8,6 +8,11 @@ import {irTypeOfDdic} from "./sqlscript/scalar-types.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 
 function irType(field, table) {
+  if (field.INCLUDE !== undefined) {
+    // a missing include is a missing *set* of columns whose names nobody
+    // knows, so the table is refused rather than served in part
+    throw new Error(`DDIC ${table}: include ${field.INCLUDE} did not resolve (${field.REASON}), so the table's schema would be partial`);
+  }
   const type = field.TYPE ?? field;
   return irTypeOfDdic(type, `DDIC ${table}.${field.NAME}`);
 }

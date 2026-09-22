@@ -2,6 +2,10 @@ import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {resolveType, typeGraph} from "../tools/osd-type-graph.mjs";
 import {ddicCatalogue} from "../tools/sqlscript-ddic-catalogue.mjs";
+import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
+import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 
 // D.3, the signature → metadata graph. `/sap/bc/osd/rfc/functions/<NAME>`
 // answers a module's parameters with the **names** of their DDIC types, and a
@@ -136,5 +140,70 @@ describe("a table field typed by a data element gets the domain's type", () => {
     // the letter is what a codec encodes with; `C` is the dictionary's own
     // default for a kind it does not know, and "" is not a default at all
     expect(resolveType(store, "ZOSD_TEST_STATUS").LETTER).to.equal("C");
+  });
+});
+
+// The include rows of a table. 340 of the 1980 tables in one A4H export
+// carry one, and the walk used to skip every row whose name begins with a
+// dot -- so those tables were partial schemas, and a column that is not in
+// the schema is read as STRING by the non-strict binder. Fixtures are
+// written here rather than taken from src/, which has no include.
+describe("a table's include rows are its fields too", () => {
+  const dtel = (name, datatype, leng) => `<abapGit><asx:abap><asx:values><DD04V><ROLLNAME>${name}</ROLLNAME><DATATYPE>${datatype}</DATATYPE><LENG>${String(leng).padStart(6, "0")}</LENG><DECIMALS>000000</DECIMALS></DD04V></asx:values></asx:abap></abapGit>`;
+  const field = (name, element) => `<DD03P><FIELDNAME>${name}</FIELDNAME><ROLLNAME>${element}</ROLLNAME></DD03P>`;
+  const include = (row, structure) => `<DD03P><FIELDNAME>${row}</FIELDNAME><PRECFIELD>${structure}</PRECFIELD><COMPTYPE>S</COMPTYPE></DD03P>`;
+  const tabl = (name, rows) => `<abapGit><asx:abap><asx:values><DD02V><TABNAME>${name}</TABNAME><TABCLASS>INTTAB</TABCLASS></DD02V><DD03P_TABLE>${rows.join("")}</DD03P_TABLE></asx:values></asx:abap></abapGit>`;
+  let dir;
+  let store;
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "osd-type-graph-include-"));
+    writeFileSync(join(dir, "zflag.dtel.xml"), dtel("ZFLAG", "CHAR", 1));
+    writeFileSync(join(dir, "zday.tabl.xml"), tabl("ZDAY", [field("WORK", "ZFLAG"), field("FREE", "ZFLAG")]));
+    writeFileSync(join(dir, "zkey.tabl.xml"), tabl("ZKEY", [field("ID", "ZFLAG")]));
+    writeFileSync(join(dir, "zplain.tabl.xml"), tabl("ZPLAIN", [field("A", "ZFLAG"), include(".INCLUDE", "ZKEY"), field("B", "ZFLAG")]));
+    writeFileSync(join(dir, "zweek.tabl.xml"), tabl("ZWEEK", [include(".INCLU-_MO", "ZDAY"), include(".INCLU-_TU", "ZDAY")]));
+    writeFileSync(join(dir, "zappend.tabl.xml"), tabl("ZAPPEND", [field("A", "ZFLAG"), include(".INCLU--AP", "ZKEY")]));
+    writeFileSync(join(dir, "zbroken.tabl.xml"), tabl("ZBROKEN", [field("A", "ZFLAG"), include(".INCLUDE", "ZNOWHERE")]));
+    writeFileSync(join(dir, "zself.tabl.xml"), tabl("ZSELF", [include(".INCLUDE", "ZSELF")]));
+    store = new FolderDdic([dir]);
+  });
+  after(() => rmSync(dir, {recursive: true, force: true}));
+
+  it("splices an .INCLUDE where the row stands, in order", () => {
+    expect(resolveType(store, "ZPLAIN").FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);
+  });
+
+  it("appends the suffix of an .INCLU-XXX to every included field, as the export shows (DEMO_WEEK: WORK_MO, FREE_MO)", () => {
+    expect(resolveType(store, "ZWEEK").FIELDS.map((f) => f.NAME)).to.deep.equal(["WORK_MO", "FREE_MO", "WORK_TU", "FREE_TU"]);
+  });
+
+  it("brings an append structure (.INCLU--AP) in under its own names", () => {
+    expect(resolveType(store, "ZAPPEND").FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID"]);
+  });
+
+  it("marks an include it cannot resolve, and the catalogue refuses the table rather than serving part of it", () => {
+    const t = resolveType(store, "ZBROKEN");
+    expect(t.FIELDS.map((f) => f.NAME)).to.deep.equal(["A", ".INCLUDE"]);
+    expect(t.FIELDS[1].INCLUDE).to.equal("ZNOWHERE");
+    expect(() => ddicCatalogue(store, ["ZBROKEN"])).to.throw(/include ZNOWHERE did not resolve/);
+    expect(ddicCatalogue(store, ["ZPLAIN"]).ZPLAIN).to.have.keys(["A", "ID", "B"]);
+  });
+
+  it("resolves a data element used by two fields for both of them: a cycle is a name on its own path, not a name seen before", () => {
+    const t = resolveType(store, "ZDAY");
+    expect(t.FIELDS.map((f) => f.TYPE?.DATATYPE)).to.deep.equal(["CHAR", "CHAR"]);
+  });
+
+  it("does not loop on a table that includes itself", () => {
+    const t = resolveType(store, "ZSELF");
+    expect(t.KIND).to.equal("STRUCTURE");
+    expect(t.FIELDS[0].INCLUDE).to.equal("ZSELF");
+  });
+
+  it("looks a name up as a table when no data element of that name exists", () => {
+    // a store that answers undefined for a missing object used to make every
+    // name a DTEL of no type, so a table was never resolved as one
+    expect(resolveType(store, "ZKEY").KIND).to.equal("STRUCTURE");
+    expect(resolveType(store, "ZNOWHERE").KIND).to.equal("UNRESOLVED");
   });
 });

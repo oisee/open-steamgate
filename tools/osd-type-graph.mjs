@@ -40,7 +40,12 @@ const int = (xml, name) => Number.parseInt(tag(xml, name) || "0", 10);
 
 const read = (store, type, name) => {
   try {
-    return String(store.read(type, name)?.source ?? "");
+    // an ObjectStore throws for an object that is not there; a lighter
+    // store answers undefined. Both mean "not there" -- turning undefined
+    // into "" here made every name a DTEL with no type, and a table was
+    // never looked up as a table (found with the folder dictionary, 2026-09-22)
+    const source = store.read(type, name)?.source;
+    return source === undefined ? undefined : String(source);
   } catch {
     return undefined;
   }
@@ -92,13 +97,44 @@ export function resolveType(store, name, seen = new Set()) {
     if (kind === "TABLE") {
       const row = tag(xml, "ROWTYPE");
       return {NAME: key, KIND: "TABLE", ROWTYPE: row,
-        ROW: row === "" ? undefined : resolveType(store, row, seen)};
+        ROW: row === "" ? undefined : resolveType(store, row, new Set(seen))};
     }
     const fields = [];
     for (const block of xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)) {
       const f = block[1];
       const fieldName = tag(f, "FIELDNAME");
-      if (fieldName === "" || fieldName.startsWith(".")) continue;
+      if (fieldName === "") continue;
+      if (fieldName.startsWith(".")) {
+        // `.INCLUDE` / `.INCLU--AP` / `.APPEND`: a row that is not a field
+        // but a structure whose fields sit here. 340 of 1980 tables in one
+        // export have one, and skipping the row silently made every such
+        // table a partial schema -- and a column that is not in the schema
+        // is read as STRING by the non-strict binder (2026-09-22). The
+        // included structure's fields are spliced in; one that cannot be
+        // resolved leaves a marked row so a catalogue refuses the table
+        // rather than serving the part of it that resolved.
+        const included = tag(f, "PRECFIELD");
+        if (included === "") continue;
+        // `.INCLUDE` and `.INCLU--AP` (an append structure) bring the
+        // fields in under their own names; `.INCLU-XXX` brings them in
+        // with XXX appended to every name -- measured on an export: a
+        // `.INCLU-_WE` row is followed by `NAME_WE`, not `NAME`. Expanding
+        // that one without the suffix would give column names that look
+        // right and are not, so the suffix is applied, never dropped.
+        const suffix = fieldName === ".INCLUDE" || fieldName === ".INCLU--AP" || fieldName === ".APPEND"
+          ? "" : fieldName.replace(/^\.INCLU-/, "");
+        // `seen` is the path, not the run: the same structure included twice
+        // under two suffixes is two expansions, and a data element used by
+        // two fields is two fields. Only a name on its own path is a cycle.
+        const inner = resolveType(store, included, new Set(seen));
+        if (inner.KIND === "STRUCTURE") {
+          fields.push(...inner.FIELDS.map((one) => (suffix === "" ? one : {...one, NAME: `${one.NAME}${suffix}`})));
+        } else {
+          fields.push({NAME: fieldName, INCLUDE: included, DATATYPE: "", LENG: 0, DECIMALS: 0, LETTER: "",
+            REASON: inner.REASON ?? `${included} is ${inner.KIND}, not a structure`});
+        }
+        continue;
+      }
       const element = tag(f, "ROLLNAME");
       const inline = tag(f, "DATATYPE");
       fields.push({
@@ -107,7 +143,7 @@ export function resolveType(store, name, seen = new Set()) {
         // a field types itself either by a data element or inline; the first
         // is a type of its own and is resolved as one
         ...(element !== "" && inline === ""
-          ? {ELEMENT: element, TYPE: resolveType(store, element, seen)}
+          ? {ELEMENT: element, TYPE: resolveType(store, element, new Set(seen))}
           : {DATATYPE: inline, LENG: int(f, "LENG"), DECIMALS: int(f, "DECIMALS"),
              LETTER: ABAP_TYPE_LETTER[inline] ?? "C"}),
       });
