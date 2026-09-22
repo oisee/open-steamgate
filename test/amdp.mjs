@@ -111,6 +111,10 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(hanaType("i")).to.equal("INTEGER");
     expect(hanaType("int8")).to.equal("BIGINT");
     expect(hanaType("string")).to.equal("NCLOB");
+    expect(hanaType("d")).to.equal("NVARCHAR(8)");
+    expect(hanaType("dats")).to.equal("NVARCHAR(8)");
+    expect(hanaType("t")).to.equal("NVARCHAR(6)");
+    expect(hanaType("tims")).to.equal("NVARCHAR(6)");
     expect(hanaType("c LENGTH 20")).to.equal("NVARCHAR(20)");
     expect(hanaType("p LENGTH 8 DECIMALS 2")).to.equal("DECIMAL(8, 2)");
     // an unknown type is undefined rather than guessed at, so the caller can

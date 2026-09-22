@@ -20,7 +20,10 @@ import {runsAs} from "./osd-main.mjs";
 const HANA_TYPE = {
   I: "INTEGER", INT4: "INTEGER", INT8: "BIGINT", INT2: "SMALLINT", INT1: "SMALLINT",
   F: "DOUBLE", STRING: "NCLOB", XSTRING: "BLOB",
-  D: "DATS", T: "TIMS", DATS: "DATS", TIMS: "TIMS",
+  // ABAP dates/times cross an AMDP signature in their character storage
+  // form. DATS/TIMS are DDIC names, not scalar SQL types accepted by HANA's
+  // CREATE PROCEDURE grammar.
+  D: "NVARCHAR(8)", T: "NVARCHAR(6)", DATS: "NVARCHAR(8)", TIMS: "NVARCHAR(6)",
 };
 
 /** the HANA type of one ABAP-typed component */

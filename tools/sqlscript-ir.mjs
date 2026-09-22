@@ -33,7 +33,8 @@ export const T = {
 
 // ---------------------------------------------------------------- expressions
 
-export const col = (name, type) => ({node: "col", name, type});
+export const col = (name, type, source) => source === undefined
+  ? ({node: "col", name, type}) : ({node: "col", name, type, source});
 export const lit = (value, type) => ({node: "lit", value, type});
 /** a host value: bound by the driver, never rendered into the text */
 export const param = (name, type, isNull = false) => ({node: "param", name, type, isNull});
@@ -78,6 +79,9 @@ export const caseWhen = (whens, otherwise, type) =>
 // ------------------------------------------------------------------ relations
 
 export const scan = (table) => ({rel: "scan", table});
+/** A source alias is semantic: qualified columns and correlated subqueries
+ * must keep the author's scope name until SQL rendering. */
+export const alias = (input, name) => ({rel: "alias", input, name});
 /**
  * `FROM :lt` - a reference to a table variable, as the PARSER sees it.
  *
@@ -116,7 +120,8 @@ export const join = (left, right, on, kind = "inner") => ({rel: "join", left, ri
 export const union = (inputs, all = true) => ({rel: "union", inputs, all});
 export const aggregate = (input, groupBy, aggs) => ({rel: "aggregate", input, groupBy, aggs});
 export const order = (input, keys) => ({rel: "order", input, keys});
-export const limit = (input, n) => ({rel: "limit", input, n});
+export const limit = (input, n) => ({rel: "limit", input,
+  n: typeof n === "number" ? lit(n, T.int) : n});
 
 /**
  * The effects of a relational subtree, which is what decides whether a chain
@@ -164,6 +169,7 @@ export function effects(rel) {
     for (const item of r.items ?? []) walkExpr(item.expr);
     for (const agg of r.aggs ?? []) walkExpr(agg.expr);
     walkExpr(r.on);
+    walkExpr(r.n);
     for (const key of ["input", "left", "right"]) walk(r[key]);
     for (const one of r.inputs ?? []) walk(one);
   };
@@ -228,6 +234,8 @@ export function schemaOf(rel, catalogue = {}) {
       if (table === undefined) throw new Error(`schemaOf: the catalogue does not describe ${rel.table}`);
       return {...table};
     }
+    case "alias":
+      return need(rel.input);
     case "var":
       if (rel.schema !== undefined) return {...rel.schema};
       throw new Error(`schemaOf: :${rel.name} has no schema until the binder resolves it`);
@@ -291,6 +299,11 @@ export function typeOfExpr(expr, schema = {}) {
   }
   switch (expr.node) {
     case "col": {
+      // Once the binder has resolved a qualified (or otherwise ambiguous)
+      // column it carries the authoritative type on the expression. Looking
+      // it up again in a flattened JOIN schema can select the other side's
+      // same-named column because object keys cannot represent both.
+      if (expr.type !== undefined) return expr.type;
       const type = schema[expr.name] ?? schema[expr.name?.toUpperCase?.()];
       if (type === undefined) throw new Error(`typeOfExpr: ${expr.name} is not in the input schema`);
       return type;

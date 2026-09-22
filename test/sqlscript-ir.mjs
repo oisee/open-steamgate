@@ -11,7 +11,7 @@
 // bodies), IFNULL, CONCAT, SUBSTR and TO_INTEGER - plus the two divergences
 // that were measured on the engines themselves, integer division and CAST.
 import {expect} from "chai";
-import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, aggregate, order, limit, effects} from "../tools/sqlscript-ir.mjs";
+import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
@@ -29,18 +29,17 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
 
   it("lowers to a single statement, because HANA says an assignment is not a barrier", () => {
     const {sql} = lower(chain, "duckdb");
-    // two SELECTs, not three: ORDER BY is a clause of the projection's own
-    // select rather than a wrapper around it (a wrapper made `ORDER BY k`
-    // illegal whenever the projection did not carry `k`). One statement
-    // either way, which is what this test is actually about.
-    expect(sql.match(/SELECT/g), sql).to.have.length(2);
+    // The filter and projection are clauses of one query block; an earlier
+    // lowering kept a redundant subquery here. One statement either way is
+    // the semantic promise, but one SELECT is also the simpler faithful SQL.
+    expect(sql.match(/SELECT/g), sql).to.have.length(1);
     expect(sql).to.not.contain(";");
     expect(statementCount(chain)).to.equal(1);
   });
 
   it("nests rather than sequences, on every dialect we ship", () => {
     for (const dialect of ["hana", "postgres", "duckdb", "sqlite"]) {
-      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM \(SELECT \* FROM "SRC" WHERE .*\) AS "t0" ORDER BY/);
+      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM "SRC" WHERE .* ORDER BY/);
     }
   });
 
@@ -111,6 +110,14 @@ describe("SQLScript IR: the divergences that were measured, not assumed", () => 
 });
 
 describe("SQLScript IR: values are bound, identifiers are generated", () => {
+  it("keeps JOIN parameters in SQL placeholder order: left, right, then ON", () => {
+    const left = project(scan("DUMMY"), [{as: "L", expr: lit("left", T.str)}]);
+    const right = project(scan("DUMMY"), [{as: "R", expr: lit("right", T.str)}]);
+    const rel = join(left, right, bin("=", col("L"), lit("on", T.str), T.bool));
+    const compiled = lower(rel, "duckdb");
+    expect(compiled.params.map((one) => one.value)).to.deep.equal(["left", "right", "on"]);
+  });
+
   it("a parameter never reaches the text", () => {
     const rel = filter(scan("SRC"), bin("=", col("K"), param("lv_key", T.char(3)), T.bool));
     const {sql, params} = lower(rel, "duckdb");
@@ -130,6 +137,14 @@ describe("SQLScript IR: values are bound, identifiers are generated", () => {
   it("NULL is said explicitly, because ABAP has no NULL", () => {
     const rel = filter(scan("SRC"), bin("=", col("K"), param("lv_key", T.char(3), true), T.bool));
     expect(lower(rel, "duckdb").params[0].isNull).to.equal(true);
+    const literals = lower(project(scan("DUMMY"), [
+      {as: "N", expr: lit(null, T.int)},
+      {as: "D", expr: lit(null, T.date)},
+    ]), "duckdb").params;
+    expect(literals.map(({value, isNull}) => ({value, isNull}))).to.deep.equal([
+      {value: null, isNull: true},
+      {value: null, isNull: true},
+    ]);
   });
 
   it("a relation the seam already knows is spliced by the seam's own name", () => {
@@ -148,6 +163,24 @@ describe("SQLScript IR: the shapes the corpus actually contains", () => {
   it("inner join", () => {
     const rel = join(scan("A"), scan("B"), bin("=", col("K"), col("K2"), T.bool));
     expect(sqlOf(rel, "hana")).to.contain("INNER JOIN");
+  });
+
+  it("keeps JOIN aliases in scope for a qualified projection without WHERE", () => {
+    const rel = project(
+      join(alias(scan("A"), "L"), alias(scan("B"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.char(3), "R"), T.bool)),
+      [{as: "LK", expr: col("K", T.int, "L")}]);
+    const sql = sqlOf(rel, "duckdb");
+    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K")');
+  });
+
+  it("keeps those aliases in scope through ORDER BY and LIMIT", () => {
+    const selected = project(
+      join(alias(scan("A"), "L"), alias(scan("B"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.int, "R"), T.bool)),
+      [{as: "LK", expr: col("K", T.int, "L")}]);
+    const sql = sqlOf(limit(order(selected, [{col: "LK"}]), 2), "duckdb");
+    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K") ORDER BY "LK" ASC LIMIT 2');
   });
 
   it("group by with an aggregate", () => {
@@ -238,6 +271,15 @@ describe("SQLScript IR: the schema a typer reads, and where it comes from", () =
     const rel = project(filter(scan("SRC"), bin(">", col("N"), lit(1, T.int), T.bool)),
                         [{as: "KK", expr: col("K")}]);
     expect(schemaOf(rel, catalogue)).to.deep.equal({KK: T.char(3)});
+  });
+
+  it("uses the resolved column type when JOIN sides have the same name", () => {
+    const rel = project(
+      join(alias(scan("LEFT_T"), "L"), alias(scan("RIGHT_T"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.char(3), "R"), T.bool)),
+      [{as: "OUT", expr: col("K", T.int, "L")}]);
+    const catalogue = {LEFT_T: {K: T.int}, RIGHT_T: {K: T.char(3)}};
+    expect(schemaOf(rel, catalogue)).to.deep.equal({OUT: T.int});
   });
 
   it("an aggregate keeps its keys and types its aggregates", () => {

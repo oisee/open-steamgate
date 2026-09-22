@@ -1,11 +1,11 @@
 {
   "description": "Independent synthetic rows for parser and black-box harness setup.",
   "leftRows": [
-    {"key_id": 4, "group_id": 3, "amount": -2.25, "day_value": "2004-02-29", "note_text": ""},
-    {"key_id": 8, "group_id": 3, "amount": 0, "day_value": "2004-03-01", "note_text": " "},
-    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": null, "note_text": "Q"},
-    {"key_id": null, "group_id": 7, "amount": null, "day_value": "2004-02-29", "note_text": "µ"},
-    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": null, "note_text": "Q"}
+    {"key_id": 4, "group_id": 3, "amount": -2.25, "day_value": "20040229", "note_text": ""},
+    {"key_id": 8, "group_id": 3, "amount": 0, "day_value": null, "note_text": " "},
+    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": "20240229", "note_text": "Q"},
+    {"key_id": null, "group_id": 7, "amount": null, "day_value": "20040229", "note_text": "µ"},
+    {"key_id": 13, "group_id": 7, "amount": 4.5, "day_value": "20240229", "note_text": "Q"}
   ],
   "rightRows": [
     {"key_id": 4, "code_text": "Q", "factor": 1.125},

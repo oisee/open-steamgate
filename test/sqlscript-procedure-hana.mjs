@@ -2,12 +2,12 @@ import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {randomBytes} from "node:crypto";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
-import {extract, procedure as hanaProcedure} from "../tools/amdp-extract.mjs";
+import {extract, parameterType, procedure as hanaProcedure} from "../tools/amdp-extract.mjs";
 import {call as callAmDP, connection} from "../tools/amdp-run.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure} from "../tools/sqlscript-procedure-ir.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
-import {T, param, project, scan} from "../tools/sqlscript-ir.mjs";
+import {T, limit, param, project, refTo, scan, seamType} from "../tools/sqlscript-ir.mjs";
 
 const live = process.env.OSD_HANA_LIVE === "1";
 const liveIt = live ? it : it.skip;
@@ -60,5 +60,101 @@ describe("typed HANA placeholders", () => {
     const compiled = lower(rel, "hana");
     expect(compiled.sql).to.contain("CAST(? AS INTEGER)");
     expect(compiled.params).to.deep.equal([{name: "N", value: undefined, type: "I", isNull: false}]);
+  });
+
+  it("use HANA's bound-value grammar in LIMIT without an illegal CAST wrapper", () => {
+    const compiled = lower(limit(scan("DUMMY"), param("N", T.int)), "hana");
+    expect(compiled.sql).to.match(/LIMIT \?$/);
+    expect(compiled.sql).to.not.contain("LIMIT CAST");
+    expect(compiled.params).to.deep.equal([{name: "N", value: undefined, type: "I", isNull: false}]);
+  });
+
+  liveIt("records that HANA rejects a cast-wrapped LIMIT placeholder", async function () {
+    this.timeout(60000);
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    await client.connect();
+    try {
+      let failure;
+      try {
+        await client.native({sql: "SELECT * FROM DUMMY LIMIT CAST(? AS INTEGER)",
+          params: [{name: "N", value: 1, type: "I", isNull: false}], expect: "rows"});
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure, "the negative oracle query must be rejected by HANA").to.be.instanceOf(Error);
+    } finally {
+      await client.disconnect();
+    }
+  });
+});
+
+describe("mix_rows: clean-room SQLScript against portable HANA SQL", function () {
+  this.timeout(60000);
+
+  liveIt("returns the same typed values and accepts the bound INTEGER LIMIT", async () => {
+    if (process.env.STG_DB_FRESH === "1") {
+      throw new Error("live AMDP differential refuses STG_DB_FRESH=1 because it must never reset a schema");
+    }
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_matrix.clas.abap.txt", import.meta.url), "utf8");
+    const seed = JSON.parse(readFileSync(new URL("fixtures/amdp-cleanroom/seed-data.json", import.meta.url), "utf8"));
+    const extracted = extract(source, "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "mix_rows");
+    const portable = compileProcedure(method, extracted.types);
+    const schemas = Object.fromEntries(portable.relationParameters.map((one) => [one.name, one.schema]));
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const suffix = randomBytes(6).toString("hex").toUpperCase();
+    const disposableClass = `ZOSD_M_${suffix}`;
+    const procedureName = `"${schema}"."${disposableClass}=>MIX_ROWS"`;
+    const tables = [];
+    let created = false;
+
+    const table = async (logical, parameter, rows, relationSchema) => {
+      const name = `"${schema}"."ZOSD_${logical}_${suffix}"`;
+      const definition = parameterType(parameter.abapType, extracted.types);
+      const columns = /^TABLE\s*\((.*)\)$/is.exec(definition)?.[1];
+      if (columns === undefined) throw new Error(`${parameter.abapType} did not resolve to a HANA table type`);
+      await client.native({sql: `CREATE COLUMN TABLE ${name} (${columns})`, expect: "none"});
+      tables.push(name);
+      const fields = Object.entries(relationSchema);
+      for (const row of rows) {
+        await client.native({sql: `INSERT INTO ${name} VALUES (${fields.map(() => "?").join(", ")})`,
+          params: fields.map(([field, type]) => ({name: field, value: row[field.toLowerCase()] ?? null,
+            type: seamType(type), isNull: row[field.toLowerCase()] == null})), expect: "none"});
+      }
+      return refTo({ref: name, kind: "materialised", reason: "typed clean-room fixture"}, relationSchema);
+    };
+    const normalized = (rows) => rows.map((row) => Object.fromEntries(Object.entries(row)
+      .map(([key, value]) => [key.toUpperCase(), value == null ? null : String(value)])))
+      .sort((left, right) => Number(left.KEY_ID) - Number(right.KEY_ID));
+
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(disposableClass, method, schema, extracted.types), expect: "none"});
+      created = true;
+      const left = await table("LEFT", method.parameters[0], seed.leftRows, schemas.IT_LEFT);
+      const right = await table("RIGHT", method.parameters[1], seed.rightRows, schemas.IT_RIGHT);
+      for (const count of [0, 10]) {
+        const native = await callAmDP(client.client, procedureName, method,
+          {it_left: seed.leftRows, it_right: seed.rightRows, iv_limit: count}, extracted.types);
+        const lowered = await runProcedure(portable, {client, dialect: "hana", inputs: {IV_LIMIT: count},
+          relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+        expect(normalized(lowered.rows), `iv_limit=${count}`).to.deep.equal(normalized(native.et_mix));
+        expect(lowered.columns.map((one) => one.name)).to.deep.equal([
+          "KEY_ID", "GROUP_ID", "AMOUNT", "DAY_VALUE", "NOTE_TEXT", "CODE_TEXT", "FACTOR",
+        ]);
+        expect(lowered.trace).to.include({engine: "hana", fallback: false, databaseStatements: 1});
+      }
+    } finally {
+      try {
+        if (created) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+        for (const name of tables.reverse()) {
+          await client.native({sql: `DROP TABLE ${name}`, expect: "none"}).catch(() => undefined);
+        }
+      } finally {
+        await client.disconnect();
+      }
+    }
   });
 });

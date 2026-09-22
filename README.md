@@ -1,9 +1,10 @@
 > ## 🧪 [Portable AMDP: live HANA oracle, DuckDB execution, and clean-room corpus](docs/amdp-portable-milestone-report.md)
 >
-> The `feat/amdp-portable-ir` branch now runs the original `SQUARES`
-> SQLScript through typed host control flow and ordinary relational SQL on
-> both HANA and DuckDB. Read the milestone report for the architecture,
-> safety boundaries, ten-method synthetic corpus and next coverage steps.
+> The `feat/amdp-portable-ir` branch now runs the original `SQUARES` and the
+> clean-room `mix_rows` SQLScript through typed host control flow and ordinary
+> relational SQL on both HANA and DuckDB. Read the milestone report for the
+> architecture, safety boundaries, ten-method synthetic corpus and next
+> coverage steps.
 
 > ## ▶ [Run a whole ABAP application server in a browser tab](https://oisee.github.io/open-steamgate/main/app/flp.html)
 >

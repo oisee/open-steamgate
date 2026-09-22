@@ -100,6 +100,38 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     expect(compiled.body[0].rel.items[0].expr.type).to.deep.equal({abap: "I"});
     expect(compiled.body[1].rel.items[0].expr.type).to.deep.equal({abap: "I"});
     expect(() => compileProcedure({...method, body: "et = SELECT id FROM :missing;"}, types))
-      .to.throw(UnsupportedSqlScript, /cannot prove schema assigned to ET/);
+      .to.throw(UnsupportedSqlScript, /column ID is not present in the typed query scope/);
+  });
+
+  it("captures a scalar INTEGER LIMIT and accepts only the neutral OFFSET 0", async () => {
+    const types = new Map([
+      ["TY_ROW", {kind: "structure", components: [{name: "id", abapType: "i"}]}],
+      ["TT_ROW", {kind: "table", of: "TY_ROW"}],
+    ]);
+    const method = {body: "et = SELECT id FROM :it ORDER BY id LIMIT :iv_limit OFFSET 0;", parameters: [
+      {name: "it", direction: "IN", abapType: "tt_row"},
+      {name: "iv_limit", direction: "IN", abapType: "i"},
+      {name: "et", direction: "OUT", abapType: "tt_row"},
+    ]};
+    const limited = compileProcedure(method, types);
+    const fixture = {rel: "union", all: true, inputs: [1, 2, 3].map((id) => ({
+      rel: "project", input: {rel: "scan", table: "DUMMY"},
+      items: [{as: "ID", expr: {node: "lit", value: id, type: {abap: "I"}}}],
+    }))};
+    const answer = await runProcedure(limited, {client, dialect: "duckdb", inputs: {IV_LIMIT: 2},
+      relationInputs: {IT: fixture}, inputCatalogue: {DUMMY: {}}});
+    expect(answer.rows).to.deep.equal([{ID: 1}, {ID: 2}]);
+    for (const invalid of [-1, null]) {
+      let error;
+      try {
+        await runProcedure(limited, {client, dialect: "duckdb", inputs: {IV_LIMIT: invalid},
+          relationInputs: {IT: fixture}, inputCatalogue: {DUMMY: {}}});
+      } catch (caught) { error = caught; }
+      expect(error, String(invalid)).to.be.instanceOf(UnsupportedSqlScript);
+      expect(error.message).to.contain("non-negative SQLScript INTEGER");
+    }
+    expect(() => compileProcedure({...method,
+      body: "et = SELECT id FROM :it ORDER BY id LIMIT :iv_limit OFFSET 1;"}, types))
+      .to.throw(UnsupportedSqlScript, /only the semantics-neutral literal OFFSET 0/);
   });
 });

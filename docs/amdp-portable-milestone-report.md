@@ -20,6 +20,13 @@ oracle, not a hidden dependency of the DuckDB result.
 This is the first end-to-end proof. It is deliberately not a claim that all
 SQLScript is implemented.
 
+The second vertical proof is now the unchanged clean-room `mix_rows` method.
+It carries two typed table inputs, scalar state, inner and left joins, a
+derived table, a correlated `EXISTS`, `DISTINCT`, ordering and a bound limit.
+Native SQLScript and portable-on-HANA return the same values for zero and a
+populated fixture; the identical portable program also passes empty, zero,
+bounded and full-result cases on DuckDB.
+
 ## How it works under the hood
 
 ```text
@@ -134,15 +141,26 @@ It currently contains ten synthetic methods covering these categories:
 | `identity_cells` | execution identity | session values not implemented |
 | `optional_value` | optional input and scalar return | scalar-return procedure shape |
 | `transform` | `IF`/`ELSEIF`, regex and session context | procedural `IF` |
-| `mix_rows` | table inputs, joins, subqueries, dynamic limit | parameterised `LIMIT` |
+| `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
 | `rank_rows` | grouping, windows and ranking | grouped/window typing rule |
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | scalar-return procedure shape |
 
-The current ledger is intentionally `0 executable / 10 named refusals / 0
-crashes`. Parser success is not reported as runtime support. This baseline is
-useful because each later capability must move a named row from refusal to a
-value-level HANA↔HANA and DuckDB test.
+The current ledger is `1 executable / 9 named refusals / 0 crashes`. Parser
+success is not reported as runtime support: `mix_rows` moved only after its
+unchanged source ran at value level on HANA↔HANA and DuckDB.
+
+That move required more than accepting `LIMIT :value`. Source aliases now
+survive in typed IR, query scopes distinguish unknown and ambiguous columns,
+and correlated subqueries can refer to an outer source without collapsing
+`inner.key = outer.key` into `key = key`. Join/filter/projection clauses lower
+as one query block wherever an author's alias must remain visible.
+
+The test inputs are engine-resident tables with declared INTEGER, DECIMAL,
+character and date-storage columns. They are not JavaScript arrays and do not
+rely on annotations over inferred UNION literals. This caught a real null
+binding defect: a typed null literal previously reached numeric binding as
+zero and date binding as the string `"null"`.
 
 ## Fuzzy search is a capability, not a spelling substitution
 
@@ -174,19 +192,25 @@ that contract and its cross-engine corpus exist.
   and four iterations;
 - original-source DuckDB execution: four expected rows, typed empty result,
   `fallback=false`;
-- full SQLScript regression: more than 320 passing tests, with only explicit
-  live-HANA cases skipped in the ordinary offline run;
+- live HANA `mix_rows`: native SQLScript equals portable ordinary HANA SQL;
+  this also measures that HANA accepts `LIMIT ?` but rejects a cast-wrapped
+  placeholder in that grammar slot;
+- DuckDB `mix_rows`: empty, zero, bounded and full-result cases, physical
+  result metadata, plus a separate value-level correlated-`EXISTS` case;
+- full SQLScript regression: 358 passing tests, with only explicit live-HANA
+  cases skipped in the ordinary offline run;
+- live HANA focused suite: 5 passing, including the positive `LIMIT ?` and
+  negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Parameterised `LIMIT` and typed table fixtures, targeting `mix_rows`.
-2. Correct grouped/window typing, targeting `rank_rows`.
-3. Procedural `IF`, targeting the safe branches of `transform`.
-4. Scalar returns and optional INTEGER inputs.
-5. `EXCEPT` as its own relational node and backend lowering.
-6. Session identity, arrays, fuzzy search, dynamic SQL, controlled errors and
+1. Correct grouped/window typing, targeting `rank_rows`.
+2. Procedural `IF`, targeting the safe branches of `transform`.
+3. Scalar returns and optional INTEGER inputs.
+4. `EXCEPT` as its own relational node and backend lowering.
+5. Session identity, arrays, fuzzy search, dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

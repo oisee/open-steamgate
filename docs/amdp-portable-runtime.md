@@ -400,10 +400,33 @@ of table parameters, joins, subqueries, grouping/windows, control flow,
 set difference, approximate search, arrays, session values and optional or
 scalar returns.
 
-The first executable ledger intentionally reports `0 supported / 10 named
-refusals / 0 crashes`: it prevents parser coverage from being mistaken for
-runtime support. Typed table inputs are now represented as relation bindings
-rather than JavaScript arrays, and their schemas reach the existing
-relational binder. The next corpus slices remove refusals one semantic
-capability at a time; unknown session tokens and every unimplemented feature
-remain loud refusals.
+The baseline initially reported `0 supported / 10 named refusals / 0
+crashes`: it prevents parser coverage from being mistaken for runtime
+support. Typed table inputs are represented as relation bindings rather than
+JavaScript arrays, and their schemas reach the existing relational binder.
+The next corpus slices remove refusals one semantic capability at a time;
+unknown session tokens and every unimplemented feature remain loud refusals.
+
+### 2026-09-22 — P1c first corpus method on HANA and DuckDB
+
+The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /
+9 named refusals / 0 crashes`. It executes typed table inputs, scoped inner
+and left joins, a derived table, a correlated `EXISTS`, `DISTINCT`, ordering
+and a scalar INTEGER `LIMIT`.
+
+Source aliases are now first-class IR facts. Query scopes type qualified
+columns from the correct input, retain outer aliases for correlation, and
+refuse unknown or ambiguous columns rather than assigning STRING by default.
+Lowering keeps joins, filtering and projection in one query block when a
+source alias must remain visible.
+
+Fixtures are materialised as physically typed engine tables. DuckDB covers
+empty, zero, bounded and full results plus an independent correlation case.
+On live HANA, native SQLScript and portable plain HANA SQL return the same
+values. The oracle also established two boundary rules:
+
+- ABAP `D/DATS` and `T/TIMS` procedure fields use their character storage
+  forms (`NVARCHAR(8)` and `NVARCHAR(6)`), not SQL types named DATS/TIMS;
+- HANA's LIMIT grammar accepts a typed bound `?` and rejects
+  `CAST(? AS INTEGER)` in that position, while ordinary numeric expression
+  placeholders retain their explicit casts.

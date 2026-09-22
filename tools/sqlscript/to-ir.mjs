@@ -23,7 +23,7 @@
 // point of the IR is that the lowering can trust the node names.
 
 import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
-  subquery, scan, refTo, filter, project, join, union, order, limit, aggregate,
+  subquery, scan, alias, refTo, filter, project, join, union, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
@@ -93,8 +93,42 @@ export function toIr(tree, options = {}) {
   const bound = new Map();
   /** the table a bare column belongs to, while a SELECT is being read */
   let columns = {};
+  let ambiguousColumns = new Set();
+  let qualifiedColumns = Object.create(null);
 
-  const typeOfColumn = (name) => columns[name] ?? T.str;
+  const typeOfColumn = (name, sourceName) => {
+    if (sourceName !== undefined) {
+      const type = qualifiedColumns[sourceName]?.[name];
+      if (type === undefined && options.strictColumns === true) {
+        throw new BindError(`column ${sourceName}.${name} is not present in the typed query scope`);
+      }
+      return type ?? T.str;
+    }
+    if (ambiguousColumns.has(name)) throw new BindError(`column ${name} is ambiguous without a source qualifier`);
+    if (columns[name] === undefined && options.strictColumns === true) {
+      throw new BindError(`column ${name} is not present in the typed query scope`);
+    }
+    return columns[name] ?? T.str;
+  };
+
+  const sourceAlias = (node) => {
+    const children = node.children ?? [];
+    const at = children.findIndex((one) => one.node === "word" && String(one.value).toUpperCase() === "AS");
+    if (at < 0) return undefined;
+    return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+  };
+
+  const registerSource = (schema, sourceName) => {
+    for (const [name, type] of Object.entries(schema ?? {})) {
+      if (columns[name] !== undefined || ambiguousColumns.has(name)) {
+        delete columns[name];
+        ambiguousColumns.add(name);
+      } else {
+        columns[name] = type;
+      }
+    }
+    if (sourceName !== undefined) qualifiedColumns[sourceName] = schema ?? {};
+  };
 
   function expression(node) {
     if (node === undefined) {
@@ -240,10 +274,11 @@ export function toIr(tree, options = {}) {
         // having; a quiet wrong is what this was.
         const names = kids(node, "Name");
         const name = names.length > 1 ? nameOf(names[names.length - 1]) : nameOf(node);
+        const sourceName = names.length > 1 ? nameOf(names[0]) : undefined;
         if (SESSION_VALUE_NAMES.has(name)) {
           throw new BindError(`${name} is a session value, not a column; its portable semantics are not implemented`, node);
         }
-        return col(name, typeOfColumn(name));
+        return col(name, typeOfColumn(name, sourceName), sourceName);
       }
       case "identifier":
       case "quoted": {
@@ -394,6 +429,11 @@ export function toIr(tree, options = {}) {
 
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
+    const sourceName = sourceAlias(node);
+    const finish = (rel, schema) => {
+      registerSource(schema, sourceName);
+      return sourceName === undefined ? rel : alias(rel, sourceName);
+    };
     // **A table function call is not a table.** The grammar parses
     // `FROM my_func(:p)` into a `TableFunctionCall`, and nothing here
     // mentioned that name, so it fell through to the wrapper-unwrapping
@@ -411,14 +451,15 @@ export function toIr(tree, options = {}) {
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
       if (options.deferTableVariables === true) {
-        columns = relationSchemas[name] ?? columns;
-        return varRef(name, relationSchemas[name]);
+        const schema = relationSchemas[name] ?? {};
+        return finish(varRef(name, relationSchemas[name]), schema);
       }
       const known = bound.get(name);
       if (known === undefined && tableParams.some((p) => String(p.name).toUpperCase() === name)) {
         // an IN table parameter: a relation the caller supplies. It is
         // scanned by its own name, which is what the bridge binds it to.
-        return scan(name);
+        const schema = relationSchemas[name] ?? catalogue[name] ?? {};
+        return finish(scan(name), schema);
       }
       if (known === undefined) {
         // named, not guessed: a table called like a variable is ordinary, so
@@ -428,22 +469,28 @@ export function toIr(tree, options = {}) {
       if (known.handle === undefined) {
         // the ordinary case: an assignment is not an observable barrier on
         // HANA, so the plan goes in where the FROM stands
-        return known.rel;
+        return finish(known.rel, schemaOf(known.rel, catalogue));
       }
       // a barrier materialised it. `ref` is the one node whose columns cannot
       // be derived from what is under it, because nothing is; the schema has
       // to be carried, and the moment it is known is the moment the barrier
       // was made. refTo() puts it there -- a bare ref is refused by
       // schemaOf, so the right path is also the shorter one (fable-osd).
-      return refTo(known.handle, schemaOf(known.rel, catalogue));
+      const schema = schemaOf(known.rel, catalogue);
+      return finish(refTo(known.handle, schema), schema);
     }
     const sub = kid(node, "SetOperation");
-    if (sub !== undefined) return relation(sub);
+    if (sub !== undefined) {
+      const rel = relation(sub);
+      return finish(rel, schemaOf(rel, catalogue));
+    }
     const temp = (node.children ?? []).find((c) => c.node === "temp");
-    if (temp !== undefined) return scan(String(temp.value).toUpperCase());
+    if (temp !== undefined) {
+      const table = String(temp.value).toUpperCase();
+      return finish(scan(table), catalogue[table] ?? {});
+    }
     const table = nameOf(node);
-    columns = catalogue[table] ?? columns;
-    return scan(table);
+    return finish(scan(table), catalogue[table] ?? {});
   }
 
   /** Hints, which are a request to one engine rather than part of the meaning.
@@ -510,10 +557,27 @@ export function toIr(tree, options = {}) {
   }
 
   function select(node) {
+    const outerColumns = columns;
+    const outerAmbiguous = ambiguousColumns;
+    const outerQualified = qualifiedColumns;
+    columns = {};
+    ambiguousColumns = new Set();
+    qualifiedColumns = Object.create(outerQualified);
+    try {
+      return selectInScope(node);
+    } finally {
+      columns = outerColumns;
+      ambiguousColumns = outerAmbiguous;
+      qualifiedColumns = outerQualified;
+    }
+  }
+
+  function selectInScope(node) {
     if (node === undefined) throw new BindError("a SELECT was expected here and the tree has none");
     let rel;
     const from = kid(node, "Source");
     if (from !== undefined) rel = source(from);
+    else rel = scan("DUMMY");
     // `FROM a, b` -- a cross join written with a comma
     for (const extra of kids(node, "Source").slice(1)) {
       rel = join(rel, source(extra), undefined, "cross");
@@ -672,13 +736,18 @@ export function toIr(tree, options = {}) {
       const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
       const count = after.slice(at + 1).find((c) => c.node === "Expr");
       const value = count === undefined ? undefined : expression(count);
-      if (value?.node !== "lit" || typeof value.value !== "number") {
-        throw new BindError("LIMIT over anything but a literal count is not lowered yet", node);
+      if (value?.type?.abap !== "I" || !["lit", "param"].includes(value?.node)) {
+        throw new BindError("LIMIT requires a literal or scalar INTEGER count", node);
       }
       if (hasWord(node, "OFFSET")) {
-        throw new BindError("LIMIT with an OFFSET is not lowered yet", node);
+        const offsetAt = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "OFFSET");
+        const offsetNode = after.slice(offsetAt + 1).find((c) => c.node === "Expr");
+        const offset = offsetNode === undefined ? undefined : expression(offsetNode);
+        if (offset?.node !== "lit" || offset.value !== 0) {
+          throw new BindError("LIMIT supports only the semantics-neutral literal OFFSET 0", node);
+        }
       }
-      rel = limit(rel, value.value);
+      rel = limit(rel, value);
     }
     return rel;
   }
@@ -688,9 +757,23 @@ export function toIr(tree, options = {}) {
       throw new BindError("a relation was expected here and the tree has none");
     }
     const selects = kids(node, "Select");
+    const finishSet = (rel) => {
+      const outerWords = new Set((node.children ?? []).filter((one) => one.node === "word")
+        .map((one) => String(one.value).toUpperCase()));
+      if (kids(node, "OrderKey").length === 0 && !outerWords.has("LIMIT")) return rel;
+      const outerColumns = columns;
+      const outerAmbiguous = ambiguousColumns;
+      columns = schemaOf(rel, catalogue);
+      ambiguousColumns = new Set();
+      try { return orderAndLimit(node, rel); }
+      finally {
+        columns = outerColumns;
+        ambiguousColumns = outerAmbiguous;
+      }
+    };
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
-    if (selects.length === 1) return orderAndLimit(node, select(selects[0]));
+    if (selects.length === 1) return finishSet(select(selects[0]));
     // **Which set operation it was is a word, and the word was never read.**
     //
     // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were
@@ -710,7 +793,7 @@ export function toIr(tree, options = {}) {
       }
     }
     const all = hasWord(node, "ALL");
-    return orderAndLimit(node, union(selects.map(select), all));
+    return finishSet(union(selects.map(select), all));
   }
 
   // The procedural compiler owns statement order and control flow, but it

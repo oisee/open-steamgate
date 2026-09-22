@@ -27,7 +27,8 @@ export function irTypeFromAbap(type) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
   if (["STRING", "SSTRING"].includes(text)) return T.str;
-  if (["D", "DATS"].includes(text)) return T.date;
+  if (["D", "DATS"].includes(text)) return T.char(8);
+  if (["T", "TIMS"].includes(text)) return T.char(6);
   const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
@@ -74,7 +75,7 @@ export function compileProcedure(method, types) {
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
   const bind = (node, fragment) => toIr(node, {
-    fragment, scalarTypes, relationSchemas, deferTableVariables: true,
+    fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
     signature: method,
   });
 

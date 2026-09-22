@@ -161,8 +161,14 @@ export function freezeRelation(rel, relations, scalars) {
       if (copy[key] !== undefined) copy[key] = freeze(copy[key]);
     }
     if (copy.inputs !== undefined) copy.inputs = copy.inputs.map(freeze);
-    for (const key of ["pred", "on"]) {
+    for (const key of ["pred", "on", "n"]) {
       if (copy[key] !== undefined) copy[key] = freezeExpr(copy[key], scalars, freeze);
+    }
+    if (copy.rel === "limit") {
+      const count = copy.n?.value;
+      if (copy.n?.type?.abap !== "I" || !Number.isInteger(count) || count < 0) {
+        throw new UnsupportedSqlScript("LIMIT count must be a non-negative SQLScript INTEGER", copy.n ?? copy);
+      }
     }
     if (copy.items !== undefined) {
       copy.items = copy.items.map((item) => ({...item, expr: freezeExpr(item.expr, scalars, freeze)}));
@@ -207,6 +213,7 @@ function assertExpandedRelationBudget(rel, {nodes, depth, parameters}) {
     visit(level, node);
     expression(node.pred, level + 1);
     expression(node.on, level + 1);
+    expression(node.n, level + 1);
     for (const one of node.items ?? []) expression(one.expr, level + 1);
     for (const one of node.aggs ?? []) expression(one.expr, level + 1);
     for (const key of ["input", "left", "right"]) if (node[key] !== undefined) relation(node[key], level + 1);

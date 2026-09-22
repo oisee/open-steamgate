@@ -7,11 +7,43 @@ import {lex} from "../tools/sqlscript/lexer.mjs";
 import {parse} from "../tools/sqlscript/combi.mjs";
 import {Body} from "../tools/sqlscript/expressions/index.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
-import {UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+import {runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+import {refTo, seamType} from "../tools/sqlscript-ir.mjs";
+import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 
 const root = fileURLToPath(new URL("fixtures/amdp-cleanroom/", import.meta.url));
 const fixtureFiles = readdirSync(root).filter((name) => name.endsWith(".clas.abap.txt")).sort();
 const source = (name) => readFileSync(join(root, name), "utf8");
+const walk = (node, found = []) => {
+  if (node !== null && typeof node === "object") {
+    if (node.node !== undefined || node.rel !== undefined) found.push(node);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach((one) => walk(one, found));
+      else walk(value, found);
+    }
+  }
+  return found;
+};
+const duckType = (type) => {
+  if (type.abap === "I") return "INTEGER";
+  if (type.abap === "P") return `DECIMAL(${type.len},${type.dec ?? 0})`;
+  if (type.abap === "D") return "DATE";
+  if (type.abap === "C") return `VARCHAR(${type.len})`;
+  if (type.abap === "STRING") return "VARCHAR";
+  throw new Error(`test fixture has no DuckDB type for ${JSON.stringify(type)}`);
+};
+const materializeRows = async (client, name, rows, schema) => {
+  const columns = Object.entries(schema);
+  const quoted = `"${name}"`;
+  await client.execute(`CREATE TABLE ${quoted} (` +
+    columns.map(([column, type]) => `"${column}" ${duckType(type)}`).join(", ") + ")");
+  for (const row of rows) {
+    await client.native({sql: `INSERT INTO ${quoted} VALUES (${columns.map(() => "?").join(", ")})`,
+      params: columns.map(([column, type]) => ({name: column, value: row[column.toLowerCase()] ?? null,
+        type: seamType(type), isNull: row[column.toLowerCase()] == null})), expect: "none"});
+  }
+  return refTo({ref: quoted, kind: "materialised", reason: "typed clean-room fixture"}, schema);
+};
 
 describe("independent AMDP clean-room corpus", () => {
   it("has a provenance manifest that records exclusions and omissions", () => {
@@ -90,7 +122,7 @@ describe("independent AMDP clean-room corpus", () => {
     for (const pattern of forbidden) expect(all, pattern.toString()).to.not.match(pattern);
   });
 
-  it("classifies every synthetic method as a named refusal, never a crash or false success", () => {
+  it("classifies every unsupported synthetic method as a named refusal, never a crash or false success", () => {
     const expected = {
       search_cells: /inputs support only INTEGER scalars/,
       difference_cells: /EXCEPT is parsed/,
@@ -98,21 +130,131 @@ describe("independent AMDP clean-room corpus", () => {
       identity_cells: /CURRENT_USER is a session value/,
       optional_value: /not a resolved structured table type/,
       transform: /If is outside/,
-      mix_rows: /LIMIT over anything but a literal/,
       rank_rows: /neither an aggregate nor one of the GROUP BY columns/,
       control_rows: /only scalar DECLARE/,
       scalar_value: /not a resolved structured table type/,
     };
+    const executable = new Set(["mix_rows"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
       const extracted = extract(source(file), logicalName);
       for (const method of extracted.methods) {
         seen.push(method.name);
-        expect(() => compileProcedure(method, extracted.types), method.name)
-          .to.throw(UnsupportedSqlScript, expected[method.name]);
+        if (executable.has(method.name)) {
+          expect(() => compileProcedure(method, extracted.types), method.name).not.to.throw();
+        } else {
+          expect(() => compileProcedure(method, extracted.types), method.name)
+            .to.throw(UnsupportedSqlScript, expected[method.name]);
+        }
       }
     }
-    expect(seen.sort()).to.deep.equal(Object.keys(expected).sort());
+    expect(seen.sort()).to.deep.equal([...Object.keys(expected), ...executable].sort());
+  });
+
+  it("keeps join qualifiers and the outer reference of the correlated EXISTS", () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "mix_rows");
+    const compiled = compileProcedure(method, extracted.types);
+    const nodes = walk(compiled.body[1].rel);
+    const qualified = nodes.filter((one) => one.node === "col" && one.source !== undefined)
+      .map((one) => `${one.source}.${one.name}`);
+    expect(qualified).to.include.members(["L.KEY_ID", "R.KEY_ID", "Q.KEY_ID", "L.AMOUNT", "L.NOTE_TEXT"]);
+    expect(nodes.find((one) => one.node === "col" && one.source === "L" && one.name === "AMOUNT").type)
+      .to.deep.equal({abap: "P", len: 8, dec: 2});
+    const correlated = nodes.find((one) => one.node === "sub" && one.kind === "exists");
+    expect(correlated).to.not.equal(undefined);
+    expect(walk(correlated).some((one) => one.node === "col" && one.source === "L" && one.name === "KEY_ID"))
+      .to.equal(true);
+
+    expect(() => compileProcedure({...method,
+      body: method.body.replace("l.key_id = r.key_id", "key_id = key_id")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ambiguous without a source qualifier/);
+    expect(() => compileProcedure({...method,
+      body: method.body.replace("l.amount BETWEEN", "l.unknown_amount BETWEEN")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /L.UNKNOWN_AMOUNT is not present/);
+  });
+
+  it("executes mix_rows from its original synthetic source on DuckDB", async () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "mix_rows");
+    const compiled = compileProcedure(method, extracted.types);
+    const seed = JSON.parse(readFileSync(join(root, "seed-data.json"), "utf8"));
+    const schemas = Object.fromEntries(compiled.relationParameters.map((one) => [one.name, one.schema]));
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const left = await materializeRows(client, "MIX_LEFT", seed.leftRows, schemas.IT_LEFT);
+      const right = await materializeRows(client, "MIX_RIGHT", seed.rightRows, schemas.IT_RIGHT);
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 10},
+        relationInputs: {
+          IT_LEFT: left,
+          IT_RIGHT: right,
+        }, inputCatalogue: {DUMMY: {}}});
+      expect(answer.rows).to.deep.equal([{
+        KEY_ID: 13, GROUP_ID: 7, AMOUNT: "4.50", DAY_VALUE: "20240229",
+        NOTE_TEXT: "Q", CODE_TEXT: "R", FACTOR: "0.000",
+      }]);
+      expect(answer.columns).to.deep.equal([
+        {name: "KEY_ID", type: 4}, {name: "GROUP_ID", type: 4}, {name: "AMOUNT", type: 19},
+        {name: "DAY_VALUE", type: 17}, {name: "NOTE_TEXT", type: 17}, {name: "CODE_TEXT", type: 17},
+        {name: "FACTOR", type: 19},
+      ]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+
+      const zero = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 0},
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      expect(zero.rows).to.deep.equal([]);
+
+      const boundedLeft = [1, 2, 3].map((key_id) => ({
+        key_id, group_id: 1, amount: 1, day_value: null, note_text: `N${key_id}`,
+      }));
+      const boundedRight = [1, 2, 3].map((key_id) => ({key_id, code_text: `R${key_id}`, factor: key_id}));
+      const leftMany = await materializeRows(client, "MIX_LEFT_MANY", boundedLeft, schemas.IT_LEFT);
+      const rightMany = await materializeRows(client, "MIX_RIGHT_MANY", boundedRight, schemas.IT_RIGHT);
+      const bounded = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 2},
+        relationInputs: {IT_LEFT: leftMany, IT_RIGHT: rightMany}, inputCatalogue: {DUMMY: {}}});
+      expect(bounded.rows.map((one) => one.KEY_ID)).to.deep.equal([1, 2]);
+      const full = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 10},
+        relationInputs: {IT_LEFT: leftMany, IT_RIGHT: rightMany}, inputCatalogue: {DUMMY: {}}});
+      expect(full.rows.map((one) => one.KEY_ID)).to.deep.equal([1, 2, 3]);
+
+      const emptyLeft = await materializeRows(client, "MIX_LEFT_EMPTY", [], schemas.IT_LEFT);
+      const emptyRight = await materializeRows(client, "MIX_RIGHT_EMPTY", [], schemas.IT_RIGHT);
+      const empty = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 10},
+        relationInputs: {IT_LEFT: emptyLeft, IT_RIGHT: emptyRight}, inputCatalogue: {DUMMY: {}}});
+      expect(empty.rows).to.deep.equal([]);
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("executes a value-level correlated EXISTS where the correlation changes the answer", async () => {
+    const types = new Map([
+      ["TY_ID", {kind: "structure", components: [{name: "id", abapType: "i"}]}],
+      ["TT_ID", {kind: "table", of: "TY_ID"}],
+    ]);
+    const method = {
+      body: "et = SELECT l.id FROM :it_left AS l " +
+        "WHERE EXISTS (SELECT id FROM :it_right WHERE id = l.id);",
+      parameters: [
+        {name: "it_left", direction: "IN", abapType: "tt_id"},
+        {name: "it_right", direction: "IN", abapType: "tt_id"},
+        {name: "et", direction: "OUT", abapType: "tt_id"},
+      ],
+    };
+    const compiled = compileProcedure(method, types);
+    const schema = compiled.relationParameters[0].schema;
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const left = await materializeRows(client, "CORR_LEFT", [{id: 1}, {id: 2}], schema);
+      const right = await materializeRows(client, "CORR_RIGHT", [{id: 2}], schema);
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb",
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      expect(answer.rows).to.deep.equal([{ID: 2}]);
+    } finally {
+      await client.disconnect();
+    }
   });
 });

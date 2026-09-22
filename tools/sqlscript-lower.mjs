@@ -288,12 +288,13 @@ export function lower(rel, dialectName, options = {}) {
       throw new Refused(`an expression arrived without a node kind: ${JSON.stringify(e)?.slice(0, 60)}`);
     }
     switch (e.node) {
-      case "col": return d.quote(e.name);
+      case "col": return e.source === undefined
+        ? d.quote(e.name) : `${d.quote(e.source)}.${d.quote(e.name)}`;
       case "lit":
         if (typeof e.value === "number") return String(e.value);
         // a string literal still goes through a parameter: a literal in the
         // text is the class of defect this contract exists to remove
-        params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type)});
+        params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type), isNull: e.value == null});
         return d.placeholder(params.length, seamType(e.type));
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
@@ -441,9 +442,37 @@ export function lower(rel, dialectName, options = {}) {
   let alias = 0;
   const from = (r) => {
     if (r.rel === "var") return select(r); // refuses, with the right message
+    if (r.rel === "alias") return `(${select(r.input)}) AS ${d.quote(r.name)}`;
     if (r.rel === "scan") return String(r.table).toUpperCase() === "DUMMY" ? d.dummy : d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
+  };
+
+  const joinFrom = (r) => {
+    const kind = r.kind.toUpperCase();
+    if (kind === "CROSS" && r.on !== undefined) throw new Refused("a CROSS JOIN carries no ON condition");
+    if (kind !== "CROSS" && r.on === undefined) {
+      throw new Refused(`a ${kind} JOIN without an ON condition is a cross join written by accident, not a join`);
+    }
+    const left = r.left?.rel === "join" ? joinFrom(r.left) : from(r.left);
+    const right = r.right?.rel === "join" ? `(${joinFrom(r.right)})` : from(r.right);
+    // Render in textual order. Expressions append their bound values while
+    // rendering, so doing ON before the two sources would put its values at
+    // the front of the parameter array although its placeholders occur last.
+    const on = r.on === undefined ? "" : ` ON ${expr(r.on)}`;
+    return `${left} ${kind} JOIN ${right}${on}`;
+  };
+
+  const projectionItems = (r) => r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ");
+  const limitCount = (value) => {
+    if (dialectName === "hana" && value?.node === "param") {
+      // HANA accepts a bound scalar in LIMIT but rejects CAST(? AS INTEGER)
+      // in this grammar slot. The driver still receives the IR's INTEGER
+      // type; only the SQL spelling is context-specific.
+      params.push({name: value.name, value: value.value, type: seamType(value.type), isNull: value.isNull});
+      return "?";
+    }
+    return typeof value === "number" ? String(value) : expr(value);
   };
 
   const select = (r) => {
@@ -469,6 +498,7 @@ export function lower(rel, dialectName, options = {}) {
         throw new Refused(`the table variable :${r.name} reached the lowering unresolved - the binder must inline it or point it at a materialised relation`);
       case "scan":
       case "ref":
+      case "alias":
         return `SELECT * FROM ${from(r)}`;
       case "filter":
         // **A filter over an aggregate is a HAVING, and has to be rendered
@@ -480,23 +510,29 @@ export function lower(rel, dialectName, options = {}) {
         if (r.input?.rel === "aggregate") {
           return `${select(r.input)} HAVING ${expr(r.pred)}`;
         }
+        if (r.input?.rel === "join") {
+          return `SELECT * FROM ${joinFrom(r.input)} WHERE ${expr(r.pred)}`;
+        }
         return `SELECT * FROM ${from(r.input)} WHERE ${expr(r.pred)}`;
       case "project":
+        if (r.input?.rel === "filter") {
+          const items = projectionItems(r);
+          const source = r.input.input?.rel === "join" ? joinFrom(r.input.input) : from(r.input.input);
+          return `SELECT ${r.distinct === true ? "DISTINCT " : ""}${items} ` +
+            `FROM ${source} WHERE ${expr(r.input.pred)}`;
+        }
+        // A qualified projection belongs to the same query block as its
+        // JOIN. Wrapping the JOIN first would hide its source aliases and
+        // turn an ordinary `SELECT L.K FROM A L JOIN B R ...` into an outer
+        // query that still refers to L although L is no longer in scope.
+        if (r.input?.rel === "join") {
+          const items = projectionItems(r);
+          return `SELECT ${r.distinct === true ? "DISTINCT " : ""}${items} FROM ${joinFrom(r.input)}`;
+        }
         return `SELECT ${r.distinct === true ? "DISTINCT " : ""}` +
-          `${r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ")} FROM ${from(r.input)}`;
+          `${projectionItems(r)} FROM ${from(r.input)}`;
       case "join": {
-        // A cross join has no ON, and asking for one crashed rather than
-        // refused: `FROM a, b` binds to exactly this node, and every engine
-        // spells it `CROSS JOIN`.
-        const kind = r.kind.toUpperCase();
-        const on = r.on === undefined ? "" : ` ON ${expr(r.on)}`;
-        if (kind === "CROSS" && r.on !== undefined) {
-          throw new Refused("a CROSS JOIN carries no ON condition");
-        }
-        if (kind !== "CROSS" && r.on === undefined) {
-          throw new Refused(`a ${kind} JOIN without an ON condition is a cross join written by accident, not a join`);
-        }
-        return `SELECT * FROM ${from(r.left)} ${kind} JOIN ${from(r.right)}${on}`;
+        return `SELECT * FROM ${joinFrom(r)}`;
       }
       case "union":
         return r.inputs.map(select).join(r.all ? " UNION ALL " : " UNION ");
@@ -523,8 +559,11 @@ export function lower(rel, dialectName, options = {}) {
         const keys = r.keys.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ");
         const inner = r.input;
         if (inner?.rel === "project") {
-          const items = inner.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ");
-          return `SELECT ${items} FROM ${from(inner.input)} ORDER BY ${keys}`;
+          // Reuse the projection's whole query block. Reconstructing its
+          // FROM here used to wrap a JOIN and hide L/R while the SELECT list
+          // still named L.K; LIMIT above this ORDER inherited the same bad
+          // SQL. ORDER BY can be appended directly to the SELECT it orders.
+          return `${select(inner)} ORDER BY ${keys}`;
         }
         return `SELECT * FROM ${from(inner)} ORDER BY ${keys}`;
       }
@@ -532,10 +571,16 @@ export function lower(rel, dialectName, options = {}) {
         // the same reason: LIMIT belongs to the select it limits, and
         // wrapping an ordered select in an unordered one is a second defect
         // of the same family waiting to be found
-        if (r.input?.rel === "order" || r.input?.rel === "project") {
-          return `${select(r.input)} LIMIT ${Number(r.n)}`;
+        {
+          if (r.input?.rel === "order" || r.input?.rel === "project") {
+            const input = select(r.input);
+            const count = limitCount(r.n);
+            return `${input} LIMIT ${count}`;
+          }
+          const input = from(r.input);
+          const count = limitCount(r.n);
+          return `SELECT * FROM ${input} LIMIT ${count}`;
         }
-        return `SELECT * FROM ${from(r.input)} LIMIT ${Number(r.n)}`;
       default: throw new Refused(`relation ${r.rel} not lowered`);
     }
   };
