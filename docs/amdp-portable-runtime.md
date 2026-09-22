@@ -167,21 +167,20 @@ The minimum portability proof deliberately uses two complementary tracks:
 
 1. native HANA SQLScript versus the portable procedural runtime using plain
    relational SQL on that same HANA database;
-2. the same typed procedural IR on SQLite, called by the unchanged ABAP Unit
+2. the same typed procedural IR on DuckDB, called by the unchanged ABAP Unit
    while no HANA fallback is available.
 
 The first isolates our parser/control/runtime from database-dialect changes.
-The second is the cheapest proof that the architecture really crosses a
-database boundary and can later run in the browser. Passing both does not
-claim that every function is portable: each additional backend still has to
-implement or explicitly refuse every capability through the conformance
-layer.
+The second is an embedded but strongly typed proof that the architecture
+really crosses a database boundary. Passing both does not claim that every
+function is portable: each additional backend still has to implement or
+explicitly refuse every capability through the conformance layer.
 
-PostgreSQL remains the first strict server backend because it gives strong
-numeric types and is already an OSG database option. DuckDB then tests the
-analytical path and helps expose assumptions accidentally tied to either
-SQLite or PostgreSQL. SQLite is not the semantic authority for fixed
-decimals, casts or database-specific error behaviour.
+SQLite/browser execution and further PostgreSQL integration are explicitly
+parked until both minimum tracks are green. The existing PostgreSQL seam is
+retained as finished infrastructure, but it is not on this milestone's
+critical path. SQLite is not the semantic authority for fixed decimals,
+casts or database-specific error behaviour.
 
 The current inventory shows one prerequisite: PostgreSQL is an OSG runtime
 client, but SQLScript lowering currently has only `hana`, `duckdb` and
@@ -222,9 +221,9 @@ declared character width (and can incorrectly invent `C(0)`).
 
 Acceptance is two-stage: parsing and interpreting the original `SQUARES`
 body first agrees with native SQLScript while its relational work uses plain
-HANA SQL, then yields the same four typed rows on SQLite for `iv_count = 4`
-with no HANA code path loaded. PostgreSQL runs the identical IR afterward;
-it is no longer on the critical path to the first end-to-end proof.
+HANA SQL, then yields the same four typed rows on DuckDB for `iv_count = 4`
+with no HANA code path loaded. SQLite and PostgreSQL follow only after both
+of these tracks are green.
 
 ### P2 — AMDP dispatch and ABAP Unit
 
@@ -316,7 +315,7 @@ procedural half.
 3. Introduce procedural IR types independently of execution.
 4. Lower and interpret only the constructs present in `SQUARES`.
 5. Compare native HANA SQLScript with portable control plus plain HANA SQL.
-6. Connect the existing `AMDP` destination to the portable SQLite executor.
+6. Connect the existing `AMDP` destination to the portable DuckDB executor.
 7. Run the ABAP Unit with HANA disabled and publish the trace beside the test
    result.
 
