@@ -19,7 +19,7 @@ services:
     stop_grace_period: 60s
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:

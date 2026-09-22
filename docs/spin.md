@@ -3,8 +3,8 @@
 Want to try it without installing anything? Open the [browser demo](https://oisee.github.io/open-steamgate/main/app/flp.html).
 For your own server, the fastest route is one ready Docker image containing
 OSD and the DIAG/RFC stubs. The examples below are complete Portainer stacks:
-copy one block and deploy. `docker-draft` is currently **Linux amd64**;
-`arm64-draft` is a separately tested **Linux arm64** build for SQLite and DuckDB.
+copy one block and deploy. The multi-platform `draft` tag supports
+**Linux amd64** and **Linux arm64**; Docker selects the matching image.
 
 ## Portainer: paste one short stack
 
@@ -24,16 +24,16 @@ the first start if clients use that hostname. The certificate and, for SQLite
 or DuckDB, the database persist in named volumes. Keep each database variant
 in a different Stack; don't switch engines on an existing data volume.
 
-`docker-draft` tracks the newest published draft. For a repeatable test, set
-`OSD_TAG` to the exact value in the [successful image workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker-image.yml).
+`draft` tracks the newest published multi-platform draft. For a repeatable
+cross-platform test, set `OSD_TAG` to the unique `sha-…-run-…` tag from the successful
+[multi-arch workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker-multiarch.yml).
 The stacks request the OSD image from GHCR on each deployment, so an older
-locally cached `docker-draft` is not silently reused. If a stack was already
+locally cached `draft` is not silently reused. If a stack was already
 pasted into Portainer, update its Web editor YAML or set `OSD_TAG` to a new
 immutable tag before redeploying; changing this document does not update an
 existing Portainer stack.
 The single image is public on GHCR; no registry credentials are needed.
-On a 64-bit ARM host, use the SQLite or DuckDB block and set the Portainer
-Stack variable `OSD_TAG=arm64-draft`. Do not use the HANA Express block there:
+On a 64-bit ARM host, use the SQLite or DuckDB block unchanged. Do not use the HANA Express block there:
 its SAP image is pinned to `linux/amd64`. PostgreSQL is not yet part of the
 ARM64 acceptance suite. See [Raspberry Pi](#raspberry-pi-arm64) below.
 
@@ -64,7 +64,7 @@ Source: [docker/compose.sqlite.yml](../docker/compose.sqlite.yml).
 # Portainer: SQLite demo, default instance 11 (8011/44311/3211/3311).
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
@@ -97,7 +97,7 @@ Source: [docker/compose.duckdb.yml](../docker/compose.duckdb.yml).
 # Portainer: DuckDB demo, default instance 15 (8015/44315/3215/3315).
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
@@ -133,7 +133,7 @@ Source: [docker/compose.hana.yml](../docker/compose.hana.yml).
 # outside an isolated test network. HXE's SQL port is not published to host.
 services:
   hana-init:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     user: "0:0"
     entrypoint: ["node", "docker/image/hana-init.mjs"]
@@ -170,7 +170,7 @@ services:
     stop_grace_period: 5m
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
@@ -229,7 +229,7 @@ services:
     stop_grace_period: 60s
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-docker-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
     pull_policy: always
     init: true
     environment:
@@ -286,17 +286,16 @@ the container became healthy and served ADT/OData with its existing database
 after an image update. HANA Express is not supported by this ARM64 recipe.
 
 On the Pi, check `uname -m` reports `aarch64` and `getconf LONG_BIT` reports
-`64`. In Portainer, paste the complete SQLite or DuckDB Stack above and set
-`OSD_TAG=arm64-draft` under **Stack variables**. The default instances are 11
-and 15. For a repeatable deployment, use an immutable `sha-…-arm64` tag from
+`64`. In Portainer, paste the complete SQLite or DuckDB Stack above; `draft`
+selects ARM64 automatically. The default instances are 11 and 15. For a
+repeatable deployment, use an immutable `sha-…-arm64` tag from
 the [successful ARM64 workflow](https://github.com/oisee/open-steamgate/actions/workflows/docker-arm64.yml)
-instead of `arm64-draft`. No QEMU or host-wide emulator registration is needed
+instead of `draft`. No QEMU or host-wide emulator registration is needed
 on the Pi.
 
 Without Portainer, from a checkout of this repository on the Pi:
 
 ```sh
-export OSD_TAG=arm64-draft
 docker compose -p osd11 -f docker/compose.sqlite.yml up -d --wait
 docker compose -p osd11 -f docker/compose.sqlite.yml ps
 curl -fsS http://localhost:8011/sap/bc/adt/core/http/build
@@ -371,7 +370,7 @@ For an existing PostgreSQL database, set `STG_DB=postgres`, `PGHOST`, `PGPORT`,
 PostgreSQL-capable image published from commit `0d816d8` or newer; images
 published before it reject `STG_DB=postgres`. In Portainer, set `OSD_TAG` to
 the immutable tag from the successful Docker workflow run if you want to pin
-the exact tested image instead of tracking `docker-draft`.
+the exact tested image instead of tracking `draft`.
 See [database backends](db-backends.md) for details.
 
 Leave `STG_PORT=8000 STG_TLS_PORT=44300 node test/run.mjs` running in the first

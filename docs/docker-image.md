@@ -1,9 +1,10 @@
 # OSD image draft
 
 One Node 24 image supports native SQLite (`STG_DB=file`), DuckDB,
-HANA/HANA Express and PostgreSQL, and includes the DIAG/RFC stub binary. The HANA Stack
-starts a separate SAP HANA Express container under SAP's terms. The
-`docker-draft` tag currently targets `linux/amd64`.
+HANA/HANA Express and PostgreSQL, and includes the JavaScript DIAG/RFC
+listeners. The HANA Stack starts a separate SAP HANA Express container under
+SAP's terms. The `draft` tag is a multi-platform manifest for `linux/amd64`
+and `linux/arm64`; Docker selects the matching tested image automatically.
 
 An experimental ARM64 build runs in the separate **OSD ARM64 draft** workflow
 on a native `ubuntu-24.04-arm` runner. It builds the same Dockerfile for
@@ -11,17 +12,16 @@ on a native `ubuntu-24.04-arm` runner. It builds the same Dockerfile for
 uses the existing Compose acceptance suite for SQLite and DuckDB, including
 OData persistence across a whole-stack restart, HTTPS, SAP-TUI on 32nn and
 ADT-over-RFC on 33nn. Only after these pass does it publish `arm64-draft`
-and an immutable `sha-…-arm64` tag. To try it on a 64-bit Raspberry Pi host,
-set `OSD_TAG=arm64-draft` in the SQLite or DuckDB Portainer Stack; see the
+and an immutable `sha-…-arm64` tag. The separate multi-arch workflow verifies
+the platform of exact successful AMD64 and ARM64 tags before combining them as
+`draft`; it does not rebuild either image. To try it on a 64-bit Raspberry Pi
+host, use the normal SQLite or DuckDB Stack; see the
 [Pi quick start and safe upgrade notes](spin.md#raspberry-pi-arm64).
 The CI acceptance run is on an ARM64 GitHub runner. Separately, SQLite ran on
 a Raspberry Pi 4 (2 GB, Debian 13 arm64): the container was healthy, served
 ADT/OData, and reused its persistent database after an image update. Full
 DIAG/RFC client acceptance on that particular Pi was not run. HXE is not part
 of this ARM64 test or Stack; its published Docker image is AMD64-only.
-The existing `docker-draft` tag remains AMD64-only until both variants are
-tested at the same source revision and published as one multi-platform
-manifest. Do not assume an ARM64 run by itself makes `docker-draft` portable.
 
 Short, complete Portainer stacks: [SQLite](../docker/compose.sqlite.yml),
 [DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml),
@@ -75,15 +75,19 @@ default branch. A security update can use the manual publish path.
 
 The GHCR name is `ghcr.io/oisee/open-steamgate`. Each publication has a unique
 `sha-<commit>-run-<run-id>-<attempt>` tag and updates the convenience tag
-`docker-draft`. The workflow retains an SPDX SBOM and a source/run provenance
+`docker-draft` for AMD64 or `arm64-draft` for ARM64. After both architectures
+pass at the same revision, **OSD Docker multi-arch draft** resolves their
+unique publication tags to digests and combines those digests under `draft`
+and a unique `sha-<commit>-run-<run-id>-<attempt>` multi-platform tag. The
+workflow retains an SPDX SBOM and a source/run provenance
 record as artifacts. It transfers the exact smoke-tested image to a separate
 publish job and verifies its ID; publication never rebuilds it. The action summary
 prints `OSD_TAG`. The GHCR package must be public for anonymous Portainer pulls;
 otherwise add GHCR credentials in Portainer. No Docker Hub account is needed.
 The ready-image stacks set `pull_policy: always` for OSD, including the HXE
 initializer, so a redeployment checks GHCR instead of reusing a stale local
-`docker-draft`. Existing Portainer stacks need their pasted YAML updated, or
-their `OSD_TAG` set to a newer immutable tag.
+`draft`. Existing Portainer stacks need their pasted YAML updated, or their
+`OSD_TAG` set to `draft` or a newer immutable architecture-specific tag.
 The older `open-steamgate-protocols` GHCR package remains a historical
 artifact; these stacks neither pull it nor update it.
 
