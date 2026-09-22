@@ -15,7 +15,7 @@ const PORT = Number(process.env.STG_PREVIEW_PORT ?? 3031);
 
 export default defineConfig({
   testDir: "test/e2e",
-  testMatch: /preview\.spec\.mjs/,
+  testMatch: process.env.OSD_PREVIEW_DB === "duckdb" ? /preview-duckdb\.spec\.mjs/ : /preview\.spec\.mjs/,
   timeout: 120_000,
   expect: {timeout: 45_000},
   retries: 0,

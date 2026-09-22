@@ -184,7 +184,7 @@ export class AmdpDestination {
   constructor(options = {}) {
     this.folder = options.folder ?? "gen/amdp";
     this.trace = options.trace === true;
-    this.procedures = loadProcedures(this.folder);
+    this.procedures = options.procedures ?? loadProcedures(this.folder);
     this.client = undefined;
     // The application database is looked up at call time: setup installs the
     // destination before every backend branch has connected. Keeping this a

@@ -49,8 +49,10 @@
     "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",
     "start:hana": "npm run transpile && STG_DB=hana node test/run.mjs",
     "web:preview": "npm run transpile && node scripts/build-preview.mjs",
+    "web:preview:duckdb": "npm run transpile && OSD_PREVIEW_DB=duckdb node scripts/build-preview.mjs",
     "web:serve": "node scripts/serve-build.mjs",
     "e2e:preview": "npm run web:preview && playwright test --config playwright.preview.config.mjs",
+    "e2e:preview:duckdb": "npm run web:preview:duckdb && OSD_PREVIEW_DB=duckdb playwright test --config playwright.preview.config.mjs",
     "segw": "node tools/segw-registry.mjs",
     "segw:gen": "node tools/segw-gen.mjs",
     "segw:zip": "node tools/osd-abapgit-zip.mjs",
@@ -131,6 +133,7 @@
     "webpack": "^5.110.3"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "1.32.0",
     "open-rfc": "^0.2.3"
   },
   "optionalDependencies": {
