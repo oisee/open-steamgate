@@ -130,7 +130,7 @@ export function resolveType(store, name, seen = new Set()) {
         if (inner.KIND === "STRUCTURE") {
           fields.push(...inner.FIELDS.map((one) => (suffix === "" ? one : {...one, NAME: `${one.NAME}${suffix}`})));
         } else {
-          fields.push({NAME: fieldName, INCLUDE: included, DATATYPE: "", LENG: 0, DECIMALS: 0, LETTER: "",
+          fields.push({NAME: `${fieldName} ${included}`, INCLUDE: included, DATATYPE: "", LENG: 0, DECIMALS: 0, LETTER: "",
             REASON: inner.REASON ?? `${included} is ${inner.KIND}, not a structure`});
         }
         continue;
@@ -148,7 +148,23 @@ export function resolveType(store, name, seen = new Set()) {
              LETTER: ABAP_TYPE_LETTER[inline] ?? "C"}),
       });
     }
-    return {NAME: key, KIND: "STRUCTURE", TEXT: tag(xml.split("<DD03P_TABLE>")[0], "DDTEXT"), FIELDS: fields};
+    // An exporter that keeps the included fields as rows of their own (the
+    // A4H exports do not: ADMINFIELD is 0 on every row, measured over 349
+    // tables) would name a field twice, once spliced and once plain. The
+    // first wins and the second is recorded, not dropped in silence. A real
+    // duplicate through two includes cannot exist: DDIC does not activate it.
+    const seenNames = new Set();
+    const duplicates = [];
+    const unique = fields.filter((one) => {
+      if (seenNames.has(one.NAME)) {
+        duplicates.push(one.NAME);
+        return false;
+      }
+      seenNames.add(one.NAME);
+      return true;
+    });
+    return {NAME: key, KIND: "STRUCTURE", TEXT: tag(xml.split("<DD03P_TABLE>")[0], "DDTEXT"), FIELDS: unique,
+      ...(duplicates.length === 0 ? {} : {DUPLICATES: duplicates})};
   }
 
   return {NAME: key, KIND: "UNRESOLVED", REASON: "no DTEL, TABL or TTYP of that name in this tree"};

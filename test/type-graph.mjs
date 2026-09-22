@@ -183,7 +183,7 @@ describe("a table's include rows are its fields too", () => {
 
   it("marks an include it cannot resolve, and the catalogue refuses the table rather than serving part of it", () => {
     const t = resolveType(store, "ZBROKEN");
-    expect(t.FIELDS.map((f) => f.NAME)).to.deep.equal(["A", ".INCLUDE"]);
+    expect(t.FIELDS.map((f) => f.NAME)).to.deep.equal(["A", ".INCLUDE ZNOWHERE"]);
     expect(t.FIELDS[1].INCLUDE).to.equal("ZNOWHERE");
     expect(() => ddicCatalogue(store, ["ZBROKEN"])).to.throw(/include ZNOWHERE did not resolve/);
     expect(ddicCatalogue(store, ["ZPLAIN"]).ZPLAIN).to.have.keys(["A", "ID", "B"]);
@@ -192,6 +192,14 @@ describe("a table's include rows are its fields too", () => {
   it("resolves a data element used by two fields for both of them: a cycle is a name on its own path, not a name seen before", () => {
     const t = resolveType(store, "ZDAY");
     expect(t.FIELDS.map((f) => f.TYPE?.DATATYPE)).to.deep.equal(["CHAR", "CHAR"]);
+  });
+
+  it("keeps the first of a field an exporter wrote twice, and records the second", () => {
+    writeFileSync(join(dir, "zexpanded.tabl.xml"), tabl("ZEXPANDED", [field("A", "ZFLAG"), include(".INCLUDE", "ZKEY"), field("ID", "ZFLAG"), field("B", "ZFLAG")]));
+    const t = resolveType(new FolderDdic([dir]), "ZEXPANDED");
+    expect(t.FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);
+    expect(t.DUPLICATES).to.deep.equal(["ID"]);
+    expect(resolveType(store, "ZPLAIN").DUPLICATES).to.equal(undefined);
   });
 
   it("does not loop on a table that includes itself", () => {

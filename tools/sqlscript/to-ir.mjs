@@ -115,8 +115,30 @@ export function toIr(tree, options = {}) {
   let ambiguousColumns = new Set();
   let qualifiedColumns = Object.create(null);
 
+  const terminalLeaves = (n, found = []) => {
+    if (n?.value !== undefined) found.push(n);
+    else for (const one of n?.children ?? []) terminalLeaves(one, found);
+    return found;
+  };
+  /** an untyped NULL beside a typed operand takes that type */
+  const adopt = (left, right) => {
+    if (left?.untyped === true && right?.untyped !== true && right?.type !== undefined) return [{...left, type: right.type, untyped: undefined}, right];
+    if (right?.untyped === true && left?.untyped !== true && left?.type !== undefined) return [left, {...right, type: left.type, untyped: undefined}];
+    return [left, right];
+  };
+  /** CASE / MAP branches: an untyped NULL branch takes the type of the first typed one; all-NULL is refused */
+  const typedBranches = (whens, otherwise) => {
+    const typed = [...whens.map((w) => w.then), otherwise].find((e) => e !== undefined && e.untyped !== true);
+    if (typed === undefined) throw new BindError("a CASE whose every branch is NULL has no type");
+    const give = (e) => (e?.untyped === true ? {...e, type: typed.type, untyped: undefined} : e);
+    return [whens.map((w) => ({...w, then: give(w.then)})), give(otherwise), typed.type];
+  };
+
   const typeOfColumn = (name, sourceName) => {
     if (sourceName !== undefined) {
+      if (ambiguousSources.has(sourceName)) {
+        throw new BindError(`source ${sourceName} appears more than once without an alias, so ${sourceName}.${name} is ambiguous`);
+      }
       const type = qualifiedColumns[sourceName]?.[name];
       if (type === undefined && options.strictColumns === true) {
         throw new BindError(`column ${sourceName}.${name} is not present in the typed query scope`);
@@ -137,9 +159,17 @@ export function toIr(tree, options = {}) {
   const sourceAlias = (node) => {
     const children = node.children ?? [];
     const at = children.findIndex((one) => one.node === "word" && String(one.value).toUpperCase() === "AS");
-    if (at < 0) return undefined;
-    return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+    if (at >= 0) return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+    // `FROM :it_guid a` -- the AS is optional, and the corpus leaves it out
+    // (`from :it_parent_guid a inner join rsanaummtrmodel b`, 2026-09-22):
+    // an identifier after the source term, on its own, is the alias
+    const last = children[children.length - 1];
+    if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
+    return undefined;
   };
+  /** table names used as qualifiers without an alias; a name used twice is ambiguous and stays so */
+  const implicitSources = new Set();
+  const ambiguousSources = new Set();
 
   const registerSource = (schema, sourceName) => {
     for (const [name, type] of Object.entries(schema ?? {})) {
@@ -192,6 +222,7 @@ export function toIr(tree, options = {}) {
         const named = (node.children ?? []).find((c) => c.node === "TypeName");
         const source = expression(inner[0]);
         const target = typeFromName(named);
+        if (source.untyped === true) return cast({...source, type: target, untyped: undefined}, target);
         // The first measured decimal conversion only widens precision while
         // preserving scale.  Parsing strings and changing scale introduce
         // backend-specific error/rounding rules, so keep them named gaps
@@ -234,7 +265,7 @@ export function toIr(tree, options = {}) {
           whens.push({when: left, then: expression(pairs[i + 1])});
         }
         if (whens.length === 0) throw new BindError("a CASE with no WHEN", node);
-        return caseWhen(whens, otherwise, whens[0].then.type);
+        return caseWhen(...typedBranches(whens, otherwise));
       }
       case "FunctionCall": {
         const fn = String(leaf(node).value).toUpperCase();
@@ -269,7 +300,7 @@ export function toIr(tree, options = {}) {
           }
           // an odd argument left over is the default; none means NULL
           const otherwise = i < args.length ? args[i] : undefined;
-          return caseWhen(whens, otherwise, whens[0].then.type);
+          return caseWhen(...typedBranches(whens, otherwise));
         }
         if (fn === "CAST" || fn === "TO_INTEGER") {
           return cast(args[0] ?? lit(null, T.str), fn === "TO_INTEGER" ? T.int : T.str);
@@ -404,6 +435,12 @@ export function toIr(tree, options = {}) {
           if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
           throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
         }
+        // the same three words arrive here as a Name when they stand in an
+        // expression position; the identifier case below has the reasons
+        if (sessionKeyword && name === "NULL") return {...lit(null, undefined), untyped: true};
+        if (sessionKeyword && (name === "TRUE" || name === "FALSE")) {
+          throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
+        }
         return col(name, typeOfColumn(name, sourceName), sourceName);
       }
       case "identifier":
@@ -413,6 +450,16 @@ export function toIr(tree, options = {}) {
           if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
           if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
           throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
+        }
+        if (node.node === "identifier" && name === "NULL") {
+          // `NULL AS context`, `map(x, '', null, ...)`: a literal, not a column
+          // called NULL (six corpus bodies read it as one, 2026-09-22). It has
+          // no type of its own; a CAST, a CASE branch or a comparison gives it
+          // one, and a bare projection of it is refused rather than typed STRING.
+          return {...lit(null, undefined), untyped: true};
+        }
+        if (node.node === "identifier" && (name === "TRUE" || name === "FALSE")) {
+          throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
         }
         return col(name, typeOfColumn(name));
       }
@@ -569,14 +616,26 @@ export function toIr(tree, options = {}) {
     if (ops.length === 0) {
       throw new BindError("a comparison without an operator", node);
     }
-    return bin(ops[0], expression(sides[0]), expression(sides[1]), T.bool);
+    return bin(ops[0], ...adopt(expression(sides[0]), expression(sides[1])), T.bool);
   }
 
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
     const sourceName = sourceAlias(node);
-    const finish = (rel, schema) => {
+    const finish = (rel, schema, tableName) => {
       registerSource(schema, sourceName);
+      if (sourceName === undefined && tableName !== undefined) {
+        // `SELECT src.k FROM src` -- a table without an alias is qualified
+        // by its own name, but only while that name is one source: a
+        // self-join without aliases stays ambiguous and says so
+        if (implicitSources.has(tableName) || qualifiedColumns[tableName] !== undefined) {
+          ambiguousSources.add(tableName);
+          delete qualifiedColumns[tableName];
+        } else {
+          implicitSources.add(tableName);
+          qualifiedColumns[tableName] = schema ?? {};
+        }
+      }
       return sourceName === undefined ? rel : alias(rel, sourceName);
     };
     // **A table function call is not a table.** The grammar parses
@@ -635,7 +694,7 @@ export function toIr(tree, options = {}) {
       return finish(scan(table), catalogue[table] ?? {});
     }
     const table = nameOf(node);
-    return finish(scan(table), catalogue[table] ?? {});
+    return finish(scan(table), catalogue[table] ?? {}, table);
   }
 
   /** Hints, which are a request to one engine rather than part of the meaning.
@@ -797,6 +856,12 @@ export function toIr(tree, options = {}) {
       // list, so nothing covered it.
       const star = (item.children ?? []).some((c) =>
         (c.node === "operator" || c.node === "word") && c.value === "*");
+      const projected = (expr, as, at) => {
+        if (expr?.untyped === true) {
+          throw new BindError(`NULL AS ${String(as).toLowerCase()} has no type here: CAST(NULL AS <type>) says which`, at);
+        }
+        return expr;
+      };
       if (star) {
         // `SELECT *` reads every column of the scope, the marked ones included
         const dark = Object.entries(columns).find(([, type]) => isUnresolved(type));
@@ -807,7 +872,8 @@ export function toIr(tree, options = {}) {
       }
       const alias = kids(item, "Name")[0];
       const expr = expression((item.children ?? []).find((c) => c.node !== "word" && c !== alias));
-      return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};
+      const as = alias === undefined ? (expr.name ?? "V") : nameOf(alias);
+      return {as, expr: projected(expr, as, item)};
     });
     // **`SELECT *` is not a projection, it is the absence of one.**
     //
@@ -932,7 +998,20 @@ export function toIr(tree, options = {}) {
       // near-miss here would have created exactly the translation layer we
       // agreed not to build -- and it would have been found at run time, on
       // an engine, rather than here.
+      // a key may name a column of the projection rather than of the
+      // sources: `... row_number() OVER (...) AS row_nr ... ORDER BY row_nr`
+      // (two corpus bodies, 2026-09-22). The projection's aliases are in
+      // scope for ORDER BY, and only there.
+      const projection = input.rel === "project" ? input : undefined;
+      const aliasOf = (k) => {
+        // the key is a bare name when the whole key is one ColumnRef of one Name
+        const leaves = terminalLeaves(k);
+        const single = leaves.length === 1 && leaves[0].node === "identifier" ? String(leaves[0].value).toUpperCase() : undefined;
+        return projection?.items.some((item) => item.as === single) ? single : undefined;
+      };
       rel = order(rel, keys.map((k) => {
+        const projected = aliasOf(k);
+        if (projected !== undefined) return {col: projected, desc: hasWord(k, "DESC")};
         const e = expression(k);
         if (e.node !== "col") {
           throw new BindError("ORDER BY over an expression is not lowered yet", k);

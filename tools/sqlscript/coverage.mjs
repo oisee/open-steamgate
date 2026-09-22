@@ -95,7 +95,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const pkg = zip.replace(/\.zip$/, "");
     const which = TEACHING.test(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
-      for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push(one);
+      for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push({...one, pkg});
     }
     ddic.add(join(scratch, pkg));
   }
@@ -203,7 +203,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const strictOnly = new Map();
     const wanted = new Map();
     let wantsSeveral = 0;
-    for (const {body, signature, catalogue, relationSchemas, absentUsings} of bodies) {
+    const wantedByPackage = new Map();
+    for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg} of bodies) {
       let tokens = [];
       let tree;
       try {
@@ -249,6 +250,14 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
           // flagged, because one table alone moves nothing for it.
           for (const table of absentUsings ?? []) wanted.set(table, (wanted.get(table) ?? 0) + 1);
           if ((absentUsings ?? []).length >= 2) wantsSeveral += 1;
+          if ((absentUsings ?? []).length > 0) {
+            // and by package, because an export is asked for per package and
+            // eight tables for eight bodies of one package is one decision
+            const entry = wantedByPackage.get(pkg) ?? {bodies: 0, tables: new Set()};
+            entry.bodies += 1;
+            for (const table of absentUsings) entry.tables.add(table);
+            wantedByPackage.set(pkg, entry);
+          }
         }
       }
     }
@@ -263,6 +272,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       strictRefusals: [...strictOnly.entries()].sort((a, b) => b[1] - a[1]),
       wanted: [...wanted.entries()].sort((a, b) => b[1] - a[1]),
       wantsSeveral,
+      wantedByPackage: [...wantedByPackage.entries()].map(([name, e]) => [name, e.bodies, e.tables.size]).sort((a, b) => b[1] - a[1]),
       share: bodies.length === 0 ? 0 : Math.round((loweredCount / bodies.length) * 100),
       shareStrict: bodies.length === 0 ? 0 : Math.round((loweredStrict / bodies.length) * 100),
       stoppedBy: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
@@ -270,6 +280,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     };
   }
   report.dictionary = ddic;
+  report.bodies = corpora;
   report.catalogueFailures = {using: [...usingFailures.keys()], parameters: [...parameterFailures.keys()]};
   report.scratch = scratch;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
@@ -290,7 +301,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, scratch, catalogueFailures, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, scratch, catalogueFailures, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
@@ -313,6 +324,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (r.wanted.length > 0) {
       console.log(`  wanted: tables in no dictionary here, by the bodies that lower only by guessing and name them (${r.wantsSeveral} of those need two or more):`);
       console.log(`    ${r.wanted.slice(0, 15).map(([table, n]) => `${table} ${n}`).join(", ")}`);
+      console.log(`    by package (bodies / tables to export): ${r.wantedByPackage.slice(0, 8).map(([name, b, t]) => `${name} ${b}/${t}`).join(", ")}`);
     }
     console.log("  stopped in the grammar:");
     for (const [reason, count] of r.stoppedBy) {
