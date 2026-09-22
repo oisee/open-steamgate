@@ -24,7 +24,7 @@
 
 import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, refTo, filter, project, join, union, order, limit, aggregate,
-  schemaOf} from "../sqlscript-ir.mjs";
+  varRef, schemaOf} from "../sqlscript-ir.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -74,6 +74,7 @@ function literalType(token) {
 
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
+  const scalarTypes = options.scalarTypes ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
   // OUT table parameter -- it assigns and never selects at the end -- and
@@ -249,7 +250,10 @@ export function toIr(tree, options = {}) {
       case "host":
         // a host variable is a **bound parameter**, never text: that is the
         // guarantee the native channel exists for
-        return param(String(node.value).slice(1).toUpperCase(), T.str);
+        {
+          const name = String(node.value).slice(1).toUpperCase();
+          return param(name, scalarTypes[name] ?? T.str);
+        }
       case "operator":
         if (node.value === "?") return param("p", T.str);
         break;
@@ -396,6 +400,7 @@ export function toIr(tree, options = {}) {
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
+      if (options.deferTableVariables === true) return varRef(name);
       const known = bound.get(name);
       if (known === undefined && tableParams.some((p) => String(p.name).toUpperCase() === name)) {
         // an IN table parameter: a relation the caller supplies. It is
@@ -695,6 +700,15 @@ export function toIr(tree, options = {}) {
     return orderAndLimit(node, union(selects.map(select), all));
   }
 
+  // The procedural compiler owns statement order and control flow, but it
+  // must use this exact binder for the expressions and relations inside
+  // those statements. Fragment entry points avoid both a second binder and
+  // reparsing source substrings with regular expressions.
+  if (options.fragment === "expression") return expression(tree);
+  if (options.fragment === "condition") return condition(tree);
+  if (options.fragment === "relation") return relation(tree);
+  if (options.fragment === "type") return typeFromName(tree);
+
   // The body, statement by statement and **in order**, because an assignment
   // binds a name the statements after it may use. The grammar wraps each one
   // in a `Statement`, so the list is flattened one level -- and not deeper:
@@ -791,6 +805,7 @@ export function toIr(tree, options = {}) {
     const assigned = bound.get(String(outParam.name).toUpperCase());
     if (assigned !== undefined) return {statements, rel: assigned.rel};
   }
+  if (last === undefined && options.allowNoResult === true) return {statements};
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
   return {statements, rel: relation(last)};
 }

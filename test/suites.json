@@ -106,6 +106,8 @@
     "test/sqlscript-portable.mjs",
     "test/sqlscript-postgres.mjs",
     "test/sqlscript-procedure-ir.mjs",
+    "test/sqlscript-procedure-hana.mjs",
+    "test/sqlscript-procedure-source.mjs",
     "test/sqlscript-refusals.mjs",
     "test/sqlscript-to-ir.mjs",
     "test/sqlscript-treatments.mjs",

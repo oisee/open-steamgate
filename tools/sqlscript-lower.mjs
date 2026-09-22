@@ -47,7 +47,18 @@
 const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
-    placeholder: () => "?",
+    // HANA infers a bare `?` from its immediate context. In `? || ?` that
+    // makes an INTEGER host value a string parameter, while the same value
+    // in `? * ?` is numeric; node-hdb then rejects the number before HANA can
+    // apply SQLScript's implicit conversion. Carry the IR type into numeric
+    // placeholders so one captured scalar keeps one meaning in every use.
+    placeholder: (_n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      if (/^[IBS](?:\(|$)/.test(code)) return "CAST(? AS INTEGER)";
+      if (/^F(?:\(|$)/.test(code)) return "CAST(? AS DOUBLE)";
+      if (/^P\(\d+,\d+\)$/.test(code)) return `CAST(? AS DECIMAL${code.slice(1)})`;
+      return "?";
+    },
     // `/` yields a decimal even over two INTEGERs - measured, not assumed
     divide: (a, b) => `(${a} / ${b})`,
     // and when the source asked for integer division, it says so

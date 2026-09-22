@@ -367,3 +367,25 @@ grammar retains a nested, balanced `WHILE` tree and the old relational binder
 refuses it by name instead of flattening it. P1 is not complete yet: the next
 slice maps the parser tree and extracted AMDP signature into these nodes,
 then runs the original body on PostgreSQL.
+
+### 2026-09-22 — P1b original source on HANA and DuckDB
+
+The source of `ZCL_OSD_AMDP_DEMO=>SQUARES` now travels unchanged through
+AMDP extraction, the SQLScript parser, the shared expression/relational
+binder and the procedural IR. The same compiled program has two green paths:
+
+- native HANA SQLScript and portable host control plus plain HANA SQL return
+  the same values for zero and four iterations;
+- DuckDB returns the four expected rows and the correctly shaped empty
+  result while the trace states `engine=duckdb` and `fallback=false`.
+
+The live HANA probe uses a collision-resistant disposable procedure, removes
+only an object created by that run, and refuses to start if
+`STG_DB_FRESH=1` could reset a schema. Numeric HANA placeholders now carry
+explicit casts so that one INTEGER scalar is not reinterpreted as text merely
+because it appears in concatenation.
+
+This remains a deliberately narrow semantic claim: exactly one structured
+OUT/RETURNING table, INTEGER scalar inputs and locals, assignments and
+`WHILE`. Extra outputs, INOUT, narrower scalar declarations, trailing result
+sets and unresolved named types are refused rather than widened or dropped.
