@@ -1,0 +1,13 @@
+{
+  "description": "Independent synthetic edge labels for additive categories; no executable filter or error text is stored.",
+  "textStates": ["", " ", "amber field", "amber fld", "AMBER-FIELD", "é", "é", null],
+  "arrayStates": [null, [], [2], [2, 2], [2, null, 5]],
+  "filterStateLabels": ["empty", "bound_predicate", "type_mismatch", "malformed", "inert_injection_shape"],
+  "errorStateLabels": ["validation_failure", "shape_mismatch"],
+  "identityStates": [
+    {"user": "runner_a", "schema": "zone_a"},
+    {"user": "runner_b", "schema": "zone_b"},
+    {"user": null, "schema": null}
+  ],
+  "optionalCallStates": ["omitted", "initial", "null", "non_default"]
+}

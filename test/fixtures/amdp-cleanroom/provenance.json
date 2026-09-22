@@ -1,5 +1,5 @@
 {
-  "schema": "amdp-cleanroom-corpus/v1",
+  "schema": "amdp-cleanroom-corpus/v2",
   "construction": "Every fixture, identifier, literal, row, and statement was independently authored from the aggregate observation specification.",
   "source_exclusions": [
     "No original archive was opened or copied.",
@@ -16,13 +16,21 @@
     "grouping, having, ordering, limit and offset",
     "case-free conditional branches, casts, aggregates, windows, ranking, text and regular-expression calls",
     "date/current-value expressions, declarations, local assignment, host references, cursor declaration, block control",
-    "session context and null-bearing synthetic data"
+    "session context and null-bearing synthetic data",
+    "approximate-match and score-shaped calls as parse-only placeholders",
+    "array-expansion-shaped table function call as a parse-only placeholder",
+    "set difference, null substitution, mapping/default-shaped calls, and null predicates",
+    "optimizer-hint syntax, execution identity tokens, and optional/returning declaration shapes"
   ],
   "omitted_categories": [
     {"category": "right/full/cross joins", "reason": "The clean-room grammar fixture is intentionally limited to the observed inner and left forms; no unobserved join shape is invented."},
     {"category": "insert/update/delete/merge/upsert", "reason": "Durable mutation semantics require an isolated runtime transaction and are not represented in a parse-only corpus."},
     {"category": "loop execution and cursor operations", "reason": "Only cursor declaration is representable by the public grammar; no execution behavior is guessed."},
     {"category": "dynamic SQL, temporary-table DDL, transaction control, and exception handlers", "reason": "Explicitly unobserved or unsupported in the sanitized specification; omitted."},
-    {"category": "explicit null helper functions and IS NULL predicates", "reason": "The observation marked these absent; nulls remain in the independent seed data for edge probes."}
+    {"category": "explicit null helper functions and IS NULL predicates", "reason": "Covered by the later additive observation as syntax-only placeholders; no runtime result is asserted here."},
+    {"category": "runtime filtering and dynamically executed SQL", "reason": "No safe public grammar or runtime harness exists for dynamic text execution; omitted rather than inventing statement fragments."},
+    {"category": "controlled SQL errors and native error codes", "reason": "Explicit error statements and source-specific codes are not represented by the public grammar; omitted rather than guessing error text."},
+    {"category": "loop continuation", "reason": "The public grammar models conditional branches but no loop or continuation statement; omitted rather than simulating control flow."},
+    {"category": "table constructors and array runtime semantics", "reason": "The fixture retains parse-only function/table-function shapes; constructor typing, element order, and null-array behavior require an isolated runtime."}
   ]
 }

@@ -28,6 +28,15 @@ describe("independent AMDP clean-room corpus", () => {
     expect(seed.edgeCases).to.include.members(["empty", "ranking_tie", "multibyte_text"]);
   });
 
+  it("keeps additive edge states synthetic and non-executable", () => {
+    const seed = JSON.parse(readFileSync(join(root, "additive-seed.json"), "utf8"));
+    expect(seed.arrayStates).to.deep.equal([null, [], [2], [2, 2], [2, null, 5]]);
+    expect(seed.textStates).to.include.members(["amber field", "amber fld", "é", "é", null]);
+    expect(seed.filterStateLabels).to.include.members(["empty", "bound_predicate", "malformed", "inert_injection_shape"]);
+    expect(seed.errorStateLabels).to.deep.equal(["validation_failure", "shape_mismatch"]);
+    expect(seed.optionalCallStates).to.deep.equal(["omitted", "initial", "null", "non_default"]);
+  });
+
   for (const file of fixtureFiles) {
     it(`extracts and parses ${file}`, () => {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -52,9 +61,22 @@ describe("independent AMDP clean-room corpus", () => {
       .to.deep.equal(["IN", "IN", "IN", "OUT"]);
   });
 
+  it("recognizes the additive syntax categories without asserting runtime meaning", () => {
+    const result = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const byName = new Map(result.methods.map((method) => [method.name, method]));
+    expect(byName.get("difference_cells").body).to.match(/\bEXCEPT\b/i);
+    expect(byName.get("search_cells").body).to.match(/APPROX_MATCH|MATCH_SCORE|COALESCE|MAP_DEFAULT|WITH HINT/i);
+    expect(byName.get("expand_values").body).to.match(/array_expand/i);
+    expect(byName.get("identity_cells").body).to.match(/CURRENT_USER|CURRENT_SCHEMA/i);
+    expect(source("neutral_additions.clas.abap.txt")).to.match(/iv_seed\) TYPE i OPTIONAL/i);
+    expect(byName.get("optional_value").parameters.map((p) => p.direction)).to.deep.equal(["IN", "RETURNING"]);
+    expect(byName.get("optional_value").parameters[0].abapType).to.equal("i");
+  });
+
   it("contains no path markers, archive markers, or business identifiers", () => {
     const all = fixtureFiles.map(source).concat(
       readFileSync(join(root, "seed-data.json"), "utf8"),
+      readFileSync(join(root, "additive-seed.json"), "utf8"),
       readFileSync(join(root, "provenance.json"), "utf8"),
     ).join("\n");
     const forbidden = [
