@@ -9,7 +9,7 @@
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
-import {seed, buildId} from "./generated/seed.mjs";
+import {seed, buildId, database} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 import {registry as icfRegistry} from "./generated/icf.mjs";
 import {servicesFromRows, serviceForPath} from "../tools/osd-icf-routing.mjs";
@@ -22,7 +22,7 @@ import {currentRows} from "../tools/osd-icf-apply.mjs";
 // sy-sysid / sy-mandt / sy-uname from it through tools/osd-identity.mjs, so
 // the ABAP in a service worker knows which system it is exactly as the ABAP
 // in a work process does (backlog G.1b).
-const preview = {seed, buildId, stored: undefined, db: undefined, env: {OSD_SID: SID}};
+const preview = {seed, buildId, database, stored: undefined, db: undefined, env: {OSD_SID: SID}};
 globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
@@ -330,8 +330,10 @@ function statusSnapshot() {
     packs: packRows,
     database: [
       {section: "Platform", name: "Architecture", value: "browser", note: "service worker; device details not collected"},
-      {section: "Database", name: "Engine", value: "sql.js", note: "browser SQLite-compatible backend"},
-      {section: "Database", name: "Storage", value: "memory", note: "service-worker database; rebuilt with the preview"},
+      {section: "Database", name: "Engine", value: database === "duckdb" ? "duckdb" : "sql.js",
+        note: database === "duckdb" ? "DuckDB-Wasm in the service worker" : "browser SQLite-compatible backend"},
+      {section: "Database", name: "Storage", value: "memory",
+        note: database === "duckdb" ? "volatile; reseeded when the service worker restarts" : "service-worker database; rebuilt with the preview"},
     ],
   };
 }
@@ -390,6 +392,7 @@ export function handleRequest(request) {
 // is rebuilt through the same setup that opened it.
 export function resetBackend() {
   return serialized(async () => {
+    if (preview.database === "duckdb") await preview.db?.disconnect();
     preview.stored = undefined;
     const setup = await import("../test/setup.mjs");
     await setup.setup(globalThis.abap, preview.schemas, preview.insert);
@@ -403,7 +406,7 @@ export function resetBackend() {
 }
 
 export function exportDatabase() {
-  return serialized(() => preview.db.export());
+  return serialized(() => preview.database === "duckdb" ? undefined : preview.db.export());
 }
 
-export {buildId};
+export {buildId, database};

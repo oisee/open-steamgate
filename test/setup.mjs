@@ -108,13 +108,23 @@ export async function setup(abap, schemas, insert) {
   if (preview !== undefined) {
     preview.schemas = schemas;
     preview.insert = insert;
-    db = installTrim(new SQLiteDatabaseClient());
-    abap.context.databaseConnections["DEFAULT"] = traced(db);
-    await db.connect(preview.stored);
-    if (preview.stored === undefined) {
-      await db.execute(schemas.sqlite);
-      await db.execute(insert);
+    if (preview.database === "duckdb") {
+      const {DuckDBWasmClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-wasm-client.mjs");
+      db = installTrim(new DuckDBWasmClient());
+      abap.context.databaseConnections["DEFAULT"] = traced(db);
+      await db.connect();
+      await db.execute(duckdbSchema(schemas));
+      await db.execute(duckdbInserts(insert));
       await db.execute(preview.seed);
+    } else {
+      db = installTrim(new SQLiteDatabaseClient());
+      abap.context.databaseConnections["DEFAULT"] = traced(db);
+      await db.connect(preview.stored);
+      if (preview.stored === undefined) {
+        await db.execute(schemas.sqlite);
+        await db.execute(insert);
+        await db.execute(preview.seed);
+      }
     }
     preview.db = db;
     // The AMDP destination belongs here too. Three lines below the early
@@ -127,7 +137,10 @@ export async function setup(abap, schemas, insert) {
     // (E.5, 2026-09-19).
     const {AmdpDestination: PreviewAmdp} = await import("../tools/amdp-destination.mjs");
     abap.context.RFCDestinations ??= {};
-    abap.context.RFCDestinations["AMDP"] = new PreviewAmdp({});
+    const procedures = preview.database === "duckdb"
+      ? new Map((await import("../web/generated/amdp.mjs")).procedures.map((one) => [one.module.toUpperCase(), one]))
+      : undefined;
+    abap.context.RFCDestinations["AMDP"] = new PreviewAmdp({procedures});
     installTraceDestination(abap);
     installStoreDestination(abap);
     return;

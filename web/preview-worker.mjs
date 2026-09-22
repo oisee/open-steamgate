@@ -200,12 +200,12 @@ function start() {
 
 async function load() {
   const backend = await import("./preview-backend.mjs");
-  const stored = await readDatabase(backend.buildId);
+  const stored = backend.database === "duckdb" ? undefined : await readDatabase(backend.buildId);
   // the worker's own identity, for the status service: the stamp is the
   // generation this bundle is (there is no other), the mount says which
   // deployment it is (main, pr-7) and nothing more than that
   await backend.startBackend(stored, {stamp: BUILD_STAMP, mount: MOUNT});
-  if (stored === undefined) {
+  if (stored === undefined && backend.database !== "duckdb") {
     await storeDatabase(backend);
   }
   return backend;
@@ -228,6 +228,7 @@ async function readDatabase(buildId) {
 
 async function storeDatabase(backend) {
   try {
+    if (backend.database === "duckdb") return;
     const cache = await caches.open(DATABASE_CACHE);
     await cache.put(DATABASE_KEY, new Response(await backend.exportDatabase(), {
       headers: {"content-type": "application/octet-stream", "x-build-id": backend.buildId},

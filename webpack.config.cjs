@@ -43,6 +43,11 @@ module.exports = {
     symlinks: false,
     extensions: [".mjs", ".js"],
     alias: {
+      // @duckdb/duckdb-wasm 1.32.0 publishes the browser blocking bundle,
+      // but its ./blocking export accidentally points to duckdb-node-blocking.mjs
+      // (not present in the package). Bind that public specifier to the
+      // shipped browser file for this webworker build only.
+      "@duckdb/duckdb-wasm/blocking$": path.resolve(__dirname, "node_modules/@duckdb/duckdb-wasm/dist/duckdb-browser-blocking.mjs"),
       // the asm.js build needs no separate .wasm file to deploy and route
       "sql.js$": require.resolve("sql.js/dist/sql-asm.js"),
     },
@@ -72,6 +77,10 @@ module.exports = {
     rules: [{test: /\.m?js$/, resolve: {fullySpecified: false}}],
   },
   plugins: [
+    // The published browser blocking bundle references __filename while
+    // initialising its Emscripten module. In a service worker there is no
+    // Node wrapper; give it the script URL, from which it can resolve assets.
+    new webpack.DefinePlugin({__filename: "self.location.href"}),
     // A module specifier is a URL, so a percent in a file name is written as
     // %25 and Node decodes it before resolving. webpack does not decode, and
     // looks for a file whose name really contains "%25". Both are defensible
