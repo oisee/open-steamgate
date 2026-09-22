@@ -1142,6 +1142,8 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.match(/dataPreview:name="MANDT" dataPreview:type="C" [^/]*dataPreview:colType="CLNT"[^/]*dataPreview:length="3"/);
       expect(xml).to.match(/dataPreview:name="CONTENT" dataPreview:type="y" [^/]*dataPreview:colType="RSTR"/);
       expect(xml, "the metadata carries no rows").to.not.contain("<dataPreview:data>");
+      expect(xml, "the A4H metadata offers the same max-row capability for tables and CDS")
+        .to.contain("datapreview/cds/metadata/maxrows");
     });
 
     it("answers F8 with the rows of the table under the same columns", async () => {
@@ -1154,6 +1156,24 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const whole = await call("/datapreview/ddic?rowNumber=5&ddicEntityName=ZSTG_PHOTO", {method: "POST", body: ""});
       expect(whole.status, "no SELECT means the whole table").to.equal(200);
       expect((await call("/ddic/tables/parser/info")).status, "the system's grammar is not ours to serve").to.equal(404);
+    });
+
+    it("advertises and answers the shared row-count operation Eclipse uses for TABL and CDS", async () => {
+      const discovery = await (await call("/discovery")).text();
+      expect(discovery).to.contain("http://www.sap.com/adt/categories/datapreview/ddic/colcount");
+      expect(discovery).to.contain("/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName,colNumber}");
+
+      const res = await call("/datapreview/ddic?ddicEntityName=ZSTG_PHOTO", {method: "POST",
+        body: "SELECT COUNT(*) FROM ZSTG_PHOTO"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.match(/<dataPreview:totalRows>1<\/dataPreview:totalRows>/);
+      expect(xml).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
+
+      const cds = await call("/datapreview/ddic?ddicEntityName=ZC_STG_BOOKING", {method: "POST",
+        body: "SELECT COUNT(*) FROM ZC_STG_BOOKING"});
+      expect(cds.status, "CDS count travels through the same DDIC relation").to.equal(200);
+      expect(await cds.text()).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
     });
 
     it("describes a CDS view by its element names, not its columns", async () => {
@@ -1191,6 +1211,12 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('href="/sap/bc/adt/datapreview/cds"');
       expect(xml).to.contain('term="DatapreviewCds"');
       expect(xml).to.contain("/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}");
+      expect(xml, "the raw preview enables its SQL Pane from the DDIC relation")
+        .to.contain("http://www.sap.com/adt/categories/datapreview/ddic/launchfreestyle");
+      expect(xml, "the launch template is an endpoint OSD actually serves")
+        .to.contain('template="/sap/bc/adt/datapreview/freestyle"');
+      expect(xml, "the CDS collection carries the system's matching launch relation")
+        .to.contain("http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle");
       expect(xml, "the association walks are not served, so they are not offered")
         .to.not.contain("datapreview/cds/associationlist");
     });

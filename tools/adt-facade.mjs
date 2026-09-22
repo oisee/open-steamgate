@@ -409,11 +409,14 @@ const TEMPLATE_LINKS = {
   "datapreview/freestyle": [
     ["http://www.sap.com/adt/categories/datapreview/freestyle", "/sap/bc/adt/datapreview/freestyle{?rowNumber}"],
   ],
-  // the two of the system's four templates that are answered here; colcount
-  // and hana are not, and are not offered
+  // The data page uses colcount for both TABL and CDS previews. The
+  // launchfreestyle relation is the capability switch for its SQL Pane;
+  // execution itself goes through the freestyle collection below.
   "datapreview/ddic": [
     ["http://www.sap.com/adt/categories/datapreview/ddic/metadata", "/sap/bc/adt/datapreview/ddic/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/ddic", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName}"],
+    ["http://www.sap.com/adt/categories/datapreview/ddic/colcount", "/sap/bc/adt/datapreview/ddic{?rowNumber,ddicEntityName,colNumber}"],
+    ["http://www.sap.com/adt/categories/datapreview/ddic/launchfreestyle", "/sap/bc/adt/datapreview/freestyle"],
   ],
   // two of the system's nine: the ones a preview needs. The association
   // links (list, navigation, follow, refresh) are how the client walks from
@@ -422,6 +425,7 @@ const TEMPLATE_LINKS = {
   "datapreview/cds": [
     ["http://www.sap.com/adt/categories/datapreview/cds/metadata", "/sap/bc/adt/datapreview/cds/{object_name}/metadata"],
     ["http://www.sap.com/adt/categories/datapreview/cds", "/sap/bc/adt/datapreview/cds{?rowNumber,ddlSourceName}"],
+    ["http://www.sap.com/adt/categories/datapreview/cds/launchfreestyle", "/sap/bc/adt/datapreview/cds"],
   ],
   "checkruns": [
     ["http://www.sap.com/adt/categories/check/relations/reporters", "/sap/bc/adt/checkruns{?reporters}"],
@@ -1941,7 +1945,8 @@ export function adtRouter(options = {}) {
       const entry = store.read("TABL", req.params.name);
       const table = tableFieldsOf(store, entry);
       res.type("application/vnd.sap.adt.datapreview.table.v1+xml; charset=utf-8")
-        .send(tableDataDocument({rows: [], columns: table.fields.map((f) => f.name)}, {fields: table.fields, name: entry.name}));
+        .send(tableDataDocument({rows: [], columns: table.fields.map((f) => f.name)},
+          {fields: table.fields, name: entry.name, maxRowsLink: true}));
     });
   });
   router.post(`${BASE}/datapreview/ddic`, async (req, res) => {
@@ -1951,8 +1956,15 @@ export function adtRouter(options = {}) {
     try {
       table = tableFieldsOf(store, store.read("TABL", name));
     } catch (e) {
-      refuse(res, 404, "ExceptionResourceNotFound", `TABL ${name} does not exist`);
-      return;
+      // The raw-data page deliberately uses the DDIC colcount relation for
+      // both table and CDS previews. Its body still names the CDS entity, so
+      // resolve that entity here instead of making the shared endpoint
+      // table-only after advertising the shared operation.
+      table = cdsEntityOf(store, name);
+      if (table === undefined) {
+        refuse(res, 404, "ExceptionResourceNotFound", `TABL or DDLS ${name} does not exist`);
+        return;
+      }
     }
     const query = asked === "" ? `SELECT * FROM ${name}` : asked;
     const started = Date.now();
