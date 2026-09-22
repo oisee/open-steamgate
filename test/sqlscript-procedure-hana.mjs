@@ -371,6 +371,67 @@ describe("identity values: native SQLScript against an explicit portable session
   });
 });
 
+describe("simple search: native SQLScript against portable HANA SQL", function () {
+  this.timeout(60000);
+
+  liveIt("matches the exact-or-substring baseline without claiming fuzzy equivalence", async () => {
+    if (process.env.STG_DB_FRESH === "1") throw new Error("live AMDP differential refuses STG_DB_FRESH=1");
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_additions.clas.abap.txt", import.meta.url), "utf8");
+    const extracted = extract(source, "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "search_cells");
+    const portable = compileProcedure(method, extracted.types);
+    const relationSchema = portable.relationParameters[0].schema;
+    const rows = [
+      {cell_id: 1, label_text: "amber field", code_text: "A"},
+      {cell_id: 2, label_text: "AMBER", code_text: "B"},
+      {cell_id: 3, label_text: "cobalt plain", code_text: "C"},
+      {cell_id: 4, label_text: null, code_text: null},
+    ];
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const suffix = randomBytes(6).toString("hex").toUpperCase();
+    const cls = `ZOSD_Q_${suffix}`;
+    const procedureName = `"${schema}"."${cls}=>SEARCH_CELLS"`;
+    const tableName = `"${schema}"."ZOSD_SEARCH_${suffix}"`;
+    let procedureCreated = false;
+    let tableCreated = false;
+    const normalized = (value) => value.map((row) => ({
+      CELL_ID: Number(row.CELL_ID ?? row.cell_id),
+      SCORE_VALUE: Number(row.SCORE_VALUE ?? row.score_value),
+      LABEL_TEXT: String(row.LABEL_TEXT ?? row.label_text),
+      MAPPED_TEXT: String(row.MAPPED_TEXT ?? row.mapped_text),
+    })).sort((left, right) => left.CELL_ID - right.CELL_ID);
+
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(cls, method, schema, extracted.types), expect: "none"});
+      procedureCreated = true;
+      const columns = /^TABLE\s*\((.*)\)$/is.exec(parameterType(method.parameters[0].abapType, extracted.types))?.[1];
+      if (columns === undefined) throw new Error("search input did not resolve to a HANA table type");
+      await client.native({sql: `CREATE COLUMN TABLE ${tableName} (${columns})`, expect: "none"});
+      tableCreated = true;
+      const fields = Object.entries(relationSchema);
+      for (const row of rows) await client.native({sql: `INSERT INTO ${tableName} VALUES (${fields.map(() => "?").join(", ")})`,
+        params: fields.map(([field, type]) => ({name: field, value: row[field.toLowerCase()] ?? null,
+          type: seamType(type), isNull: row[field.toLowerCase()] == null})), expect: "none"});
+      const input = refTo({ref: tableName, kind: "materialised", reason: "simple-search fixture"}, relationSchema);
+      for (const query of ["amber", "", null]) {
+        const native = await callAmDP(client.client, procedureName, method,
+          {it_cells: rows, iv_query: query}, extracted.types);
+        const inputs = query === "" ? {} : {IV_QUERY: query};
+        const answer = await runProcedure(portable, {client, dialect: "hana", inputs,
+          relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+        expect(normalized(answer.rows), `query=${JSON.stringify(query)}`).to.deep.equal(normalized(native.et_search));
+        expect(answer.trace).to.include({engine: "hana", fallback: false, databaseStatements: 1});
+      }
+    } finally {
+      if (procedureCreated) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+      if (tableCreated) await client.native({sql: `DROP TABLE ${tableName}`, expect: "none"}).catch(() => undefined);
+      await client.disconnect();
+    }
+  });
+});
+
 describe("STRING inputs: native SQLScript against portable bound values", function () {
   this.timeout(60000);
 

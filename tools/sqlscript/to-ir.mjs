@@ -75,13 +75,14 @@ function literalType(token) {
   return T.char(String(token.value).length);
 }
 
+const measuredTextType = (type) => {
+  if (type?.abap === "STRING") return Object.keys(type).length === 1;
+  return type?.abap === "C" && Object.keys(type).length === 2
+    && Number.isSafeInteger(type.len) && type.len >= 0;
+};
+
 const mergedTextType = (left, right) => {
-  const text = (type) => {
-    if (type?.abap === "STRING") return Object.keys(type).length === 1;
-    return type?.abap === "C" && Object.keys(type).length === 2
-      && Number.isSafeInteger(type.len) && type.len >= 0;
-  };
-  if (!text(left) || !text(right)) return undefined;
+  if (!measuredTextType(left) || !measuredTextType(right)) return undefined;
   if (left.abap === "STRING" || right.abap === "STRING") return T.str;
   return T.char(Math.max(Number(left.len), Number(right.len)));
 };
@@ -277,6 +278,26 @@ export function toIr(tree, options = {}) {
         // expose the wrong AMDP boundary type even when the SQL itself ran.
         let resultType = T.str;
         if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        if (fn === "LOWER") {
+          if (args.length !== 1 || !measuredTextType(args[0]?.type)) {
+            throw new BindError("LOWER requires exactly one measured text argument", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar LOWER does not accept window, ordering, or star decorations", node);
+          }
+          // Measured for the current HANA/DuckDB text surface: case folding
+          // does not turn a fixed-width ABAP field into an unbounded STRING.
+          resultType = args[0].type;
+        }
+        if (fn === "LOCATE") {
+          if (args.length !== 2 || args.some((arg) => !measuredTextType(arg?.type))) {
+            throw new BindError("LOCATE requires exactly two measured text arguments", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar LOCATE does not accept window, ordering, or star decorations", node);
+          }
+          resultType = T.int;
+        }
         if (fn === "SESSION_CONTEXT") {
           if (args.length !== 1 || args[0]?.node !== "lit" || typeof args[0].value !== "string") {
             throw new BindError("SESSION_CONTEXT requires one literal string key", node);

@@ -493,7 +493,7 @@ execution still refuses before SQL because approximate score typing and
 matching semantics have not been defined. The demo count intentionally stays
 `9 executed / 0 partial / 2 refused`.
 
-### P1l — Versioned fuzzy-text profiles
+### 2026-09-22 — P1l simple search baseline; fuzzy profiles deferred
 
 [ADR 0002](adr/0002-portable-and-native-fuzzy-text-profiles.md) separates two
 contracts that must not be reported as interchangeable. The first is a small
@@ -501,16 +501,19 @@ contracts that must not be reported as interchangeable. The first is a small
 and ordering agree exactly across supported backends. The second is
 `native-fuzzy`: backend scores may differ, while a published synthetic corpus
 enforces behavioural invariants, top-K recall, precision, false-positive
-bounds and deterministic OSG-owned tie breaking.
+bounds and deterministic OSG-owned tie breaking. Implementing those profiles
+is now explicitly deferred in `docs/backlog.md` until the remaining general
+corpus milestones are complete.
 
-The next implementation slice specifies and measures version 1 of the
-deterministic profile and its normative reference evaluator, represents their
-identity in typed IR, and executes the same conformance matrix on portable
-ordinary HANA SQL and DuckDB. Only after that exact baseline is green will
-backend-qualified native HANA and DuckDB profiles be admitted through frozen
-calibration and held-out quality gates. `search_cells` remains refused until
-it names an executable profile rather than relying on a function-shaped
-placeholder.
+To avoid making specialised fuzzy work a gate, the synthetic `search_cells`
+body now uses an honest `simple-search-v0`: over its measured ASCII fixture,
+`LOWER` plus `LOCATE`, a CASE score of 1000 for equality and 700 for
+containment, with NULL rows retained at zero. Empty and NULL queries select no
+non-null rows. The original tracked body executes in one statement on DuckDB
+and agrees value-for-value between native SQLScript and portable ordinary SQL
+on HANA. This is not declared a portable linguistic profile. The demo advances
+to `10 executed / 0 partial / 1 refused`; the remaining refusal is
+`control_rows` cursor/block execution.
 
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 

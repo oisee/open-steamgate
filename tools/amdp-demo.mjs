@@ -39,6 +39,12 @@ const simpleCells = [
   {cell_id: 2, label_text: null, code_text: "B"},
   {cell_id: 3, label_text: "left", code_text: "C"},
 ];
+const searchCells = [
+  {cell_id: 10, label_text: "AMBER", code_text: "A"},
+  {cell_id: 11, label_text: "amber field", code_text: "B"},
+  {cell_id: 12, label_text: "cobalt plain", code_text: "C"},
+  {cell_id: 13, label_text: null, code_text: null},
+];
 
 // Inputs are demonstration data, not expected answers.  The compiler and
 // runtime decide whether a case is executable; this registry only gives a
@@ -62,7 +68,7 @@ const scenarios = {
   })}],
   identity_cells: [{session: {currentUser: "DEMO_USER", currentSchema: "DEMO_SCHEMA"},
     relations: () => ({IT_CELLS: simpleCells})}],
-  search_cells: [{inputs: {IV_QUERY: "amber"}, relations: () => ({IT_CELLS: simpleCells})}],
+  search_cells: [{inputs: {IV_QUERY: "amber"}, relations: () => ({IT_CELLS: searchCells})}],
   expand_values: [{}],
   optional_value: [{inputs: {IV_SEED: 11}}],
   scalar_value: [{inputs: {IV_SEED: -3}}],

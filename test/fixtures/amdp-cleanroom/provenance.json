@@ -17,7 +17,7 @@
     "case-free conditional branches, casts, aggregates, windows, ranking, text and regular-expression calls",
     "date/current-value expressions, declarations, local assignment, host references, cursor declaration, block control",
     "session context and null-bearing synthetic data",
-    "approximate-match and score-shaped calls as parse-only placeholders",
+    "a deliberately simple exact-or-substring search score expressed with ordinary SQLScript",
     "a synthetic fixed INTEGER ARRAY expanded through the public UNNEST WITH ORDINALITY syntax",
     "set difference, null substitution, mapping/default-shaped calls, and null predicates",
     "optimizer-hint syntax, execution identity tokens, and optional/returning declaration shapes"

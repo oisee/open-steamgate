@@ -4520,6 +4520,23 @@ asynchronous job with progress and cancellation; Published remains the
 committed deterministic report. Before enabling the pack in persistent images,
 add non-destructive HANA/DuckDB schema migration and restart coverage.
 
+### Portable and native fuzzy-text profiles (deferred, 2026-09-22)
+
+The AMDP corpus now uses a deliberately modest `simple-search-v0`: exact or
+substring matching with fixed integer scores, measured only over the current
+ASCII fixture. Empty and NULL queries return no non-null matches. This exists
+to keep the general SQLScript milestones moving and must not be presented as
+a portable linguistic profile or HANA fuzzy compatibility.
+
+After the remaining general corpus milestones, implement ADR 0002. Specify a
+small normative `portable-deterministic` evaluator and prove exact ordinary-SQL
+lowerings on HANA and DuckDB. Qualify native HANA/DuckDB matchers separately on
+a frozen synthetic observation-catalogue corpus with held-out precision,
+recall, top-K and false-positive gates. Every native result must retain exact
+engine/build/configuration identity. Do not block cursor/control-flow, nested
+calls, shared transactions or the original ABAP Unit path on this specialised
+search work.
+
 ### CI time and trigger budget (2026-09-21)
 
 Standard GitHub-hosted runners are currently free for this public repository,

@@ -21,7 +21,12 @@ describe("the Portable AMDP progress demo", function () {
       {ELEMENT_VALUE: null, POSITION_VALUE: 3},
       {ELEMENT_VALUE: 5, POSITION_VALUE: 4},
     ]);
-    expect(byMethod.get("search_cells").portable.status).to.equal("refused");
+    expect(byMethod.get("search_cells").portable.status).to.equal("executed");
+    expect(byMethod.get("search_cells").portable.runs[0].rows).to.deep.include.members([
+      {CELL_ID: 10, SCORE_VALUE: 1000, LABEL_TEXT: "AMBER", MAPPED_TEXT: "group-one"},
+      {CELL_ID: 11, SCORE_VALUE: 700, LABEL_TEXT: "amber field", MAPPED_TEXT: "group-two"},
+      {CELL_ID: 13, SCORE_VALUE: 0, LABEL_TEXT: "none", MAPPED_TEXT: "fallback"},
+    ]);
     expect(report.counts.executed + report.counts.partial + report.counts.refused).to.equal(11);
   });
 

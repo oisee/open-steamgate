@@ -36,6 +36,21 @@ describe("the SQLScript tree into the IR", () => {
     })).to.throw(BindError, /COALESCE arguments require identical measured types/);
   });
 
+  it("types LOWER and LOCATE only for exact measured text descriptors", () => {
+    const plan = ir("SELECT LOWER(txt) AS folded, LOCATE(txt, k) AS position FROM src;");
+    const nodes = walk(plan.rel);
+    expect(nodes.find((one) => one.node === "call" && one.fn === "LOWER").type)
+      .to.deep.equal({abap: "C", len: 10});
+    expect(nodes.find((one) => one.node === "call" && one.fn === "LOCATE").type)
+      .to.deep.equal({abap: "I"});
+    for (const malformed of [{abap: "C"}, {abap: "STRING", len: 3}]) {
+      expect(() => ir("SELECT LOWER(a) AS value FROM src;", {SRC: {A: malformed}}), JSON.stringify(malformed))
+        .to.throw(BindError, /LOWER requires exactly one measured text argument/);
+      expect(() => ir("SELECT LOCATE(a, b) AS value FROM src;", {SRC: {A: malformed, B: malformed}}),
+        JSON.stringify(malformed)).to.throw(BindError, /LOCATE requires exactly two measured text arguments/);
+    }
+  });
+
   it("splices a table variable in place rather than leaving a var node", () => {
     // the measurement that decides this: on HANA an assignment is not an
     // observable barrier, so three assignments are one plan

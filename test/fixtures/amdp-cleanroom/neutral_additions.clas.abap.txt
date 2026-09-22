@@ -10,7 +10,7 @@ CLASS cl_neutral_additions DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES:
       BEGIN OF ty_search,
         cell_id TYPE i,
-        score_value TYPE p LENGTH 8 DECIMALS 3,
+        score_value TYPE i,
         label_text TYPE c LENGTH 60,
         mapped_text TYPE c LENGTH 60,
       END OF ty_search.
@@ -51,11 +51,18 @@ CLASS cl_neutral_additions IMPLEMENTATION.
   METHOD search_cells BY DATABASE PROCEDURE FOR HDB
                       LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
     et_search = SELECT cell_id,
-      MATCH_SCORE(label_text, :iv_query) AS score_value,
+      CASE
+        WHEN label_text IS NULL THEN 0
+        WHEN COALESCE(:iv_query, '') = '' THEN 0
+        WHEN LOWER(label_text) = LOWER(:iv_query) THEN 1000
+        WHEN LOCATE(LOWER(label_text), LOWER(:iv_query)) > 0 THEN 700
+        ELSE 0
+      END AS score_value,
       COALESCE(label_text, 'none') AS label_text,
       MAP(code_text, 'A', 'group-one', 'B', 'group-two', 'fallback') AS mapped_text
       FROM :it_cells
-      WHERE APPROX_MATCH(label_text, :iv_query) = 1
+      WHERE (COALESCE(:iv_query, '') <> ''
+        AND LOCATE(LOWER(label_text), LOWER(:iv_query)) > 0)
         OR label_text IS NULL
       WITH HINT (NO_USE_HEX_PLAN);
   ENDMETHOD.

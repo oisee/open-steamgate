@@ -99,7 +99,7 @@ describe("independent AMDP clean-room corpus", () => {
     const result = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
     const byName = new Map(result.methods.map((method) => [method.name, method]));
     expect(byName.get("difference_cells").body).to.match(/\bEXCEPT\b/i);
-    expect(byName.get("search_cells").body).to.match(/APPROX_MATCH|MATCH_SCORE|COALESCE|\bMAP\s*\(|WITH HINT/i);
+    expect(byName.get("search_cells").body).to.match(/CASE|LOWER|LOCATE|COALESCE|\bMAP\s*\(|WITH HINT/i);
     expect(byName.get("search_cells").body).to.not.match(/MAP_DEFAULT/i);
     expect(byName.get("expand_values").body).to.match(/INTEGER ARRAY|UNNEST|WITH ORDINALITY/i);
     expect(byName.get("identity_cells").body).to.match(/CURRENT_USER|CURRENT_SCHEMA/i);
@@ -166,6 +166,18 @@ describe("independent AMDP clean-room corpus", () => {
     expect(() => compileProcedure({...method,
       body: method.body.replace("l.amount BETWEEN", "l.unknown_amount BETWEEN")}, extracted.types))
       .to.throw(UnsupportedSqlScript, /L.UNKNOWN_AMOUNT is not present/);
+  });
+
+  it("keeps simple-search text and position calls typed", () => {
+    const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "search_cells");
+    const nodes = walk(compileProcedure(method, extracted.types));
+    const locateCalls = nodes.filter((one) => one.node === "call" && one.fn === "LOCATE");
+    const lowerCalls = nodes.filter((one) => one.node === "call" && one.fn === "LOWER");
+    expect(locateCalls).to.have.length.greaterThan(0);
+    expect(locateCalls.every((one) => one.type?.abap === "I")).to.equal(true);
+    expect(lowerCalls.some((one) => one.type?.abap === "C" && one.type?.len === 60)).to.equal(true);
+    expect(lowerCalls.some((one) => one.type?.abap === "STRING")).to.equal(true);
   });
 
   it("refuses a grouped window that reads a column outside the GROUP BY", () => {
@@ -410,7 +422,7 @@ describe("independent AMDP clean-room corpus", () => {
     }
   });
 
-  it("keeps search scoring as an exact pre-database refusal", async () => {
+  it("executes the simple exact-or-substring search baseline", async () => {
     const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
     const method = extracted.methods.find((one) => one.name === "search_cells");
     const compiled = compileProcedure(method, extracted.types);
@@ -420,18 +432,29 @@ describe("independent AMDP clean-room corpus", () => {
     try {
       const input = await materializeRows(client, "SEARCH_CELLS", [
         {cell_id: 1, label_text: "amber field", code_text: "A"},
+        {cell_id: 2, label_text: "AMBER", code_text: "B"},
+        {cell_id: 3, label_text: "cobalt plain", code_text: "C"},
+        {cell_id: 4, label_text: null, code_text: null},
       ], schema);
       let nativeCalls = 0;
       const native = client.native.bind(client);
       client.native = async (...args) => { nativeCalls += 1; return native(...args); };
-      let refusal;
-      try {
-        await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_QUERY: "amber"},
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_QUERY: "amber"},
+        relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+      expect(answer.rows.sort((left, right) => left.CELL_ID - right.CELL_ID)).to.deep.equal([
+        {CELL_ID: 1, SCORE_VALUE: 700, LABEL_TEXT: "amber field", MAPPED_TEXT: "group-one"},
+        {CELL_ID: 2, SCORE_VALUE: 1000, LABEL_TEXT: "AMBER", MAPPED_TEXT: "group-two"},
+        {CELL_ID: 4, SCORE_VALUE: 0, LABEL_TEXT: "none", MAPPED_TEXT: "fallback"},
+      ]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+      for (const inputs of [{}, {IV_QUERY: null}]) {
+        const empty = await runProcedure(compiled, {client, dialect: "duckdb", inputs,
           relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
-      } catch (error) { refusal = error; }
-      expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
-      expect(refusal.message).to.match(/output SCORE_VALUE conversion from STRING to P is not measured/);
-      expect(nativeCalls, "unmeasured scoring must refuse before database execution").to.equal(0);
+        expect(empty.rows).to.deep.equal([
+          {CELL_ID: 4, SCORE_VALUE: 0, LABEL_TEXT: "none", MAPPED_TEXT: "fallback"},
+        ]);
+      }
+      expect(nativeCalls).to.equal(3);
     } finally {
       await client.disconnect();
     }

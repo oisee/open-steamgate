@@ -176,7 +176,7 @@ It currently contains ten synthetic methods covering these categories:
 
 | synthetic method | represented surface | current honest boundary |
 | --- | --- | --- |
-| `search_cells` | approximate scoring, null substitution, mapping, hint | compiled; runtime stops at unmeasured score typing/fuzzy capability |
+| `search_cells` | simple exact/substring score, null substitution, mapping, hint | **executable on HANA and DuckDB; full fuzzy profiles deferred** |
 | `difference_cells` | set difference | **executable on HANA and DuckDB** |
 | `expand_values` | fixed INTEGER array and ordered row expansion | **executable on HANA and DuckDB** |
 | `identity_cells` | execution identity | **executable on HANA and DuckDB with an explicit session** |
@@ -187,9 +187,9 @@ It currently contains ten synthetic methods covering these categories:
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current clean-room ledger is `8 fully executable / 2 named refusals / 0
+The current clean-room ledger is `9 fully executable / 1 named refusal / 0
 crashes`; including the original `SQUARES` showcase, the live demo reads
-`9 executed / 0 partial / 2 refused`. Parser
+`10 executed / 0 partial / 1 refused`. Parser
 success is not reported as runtime support: a tracked method body moves only
 after it executes directly, without body rewriting, at value level. Relational
 methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
@@ -233,9 +233,18 @@ versioned search capability with two deliberately different profiles:
 4. unsupported linguistic/options profiles are refused by name.
 
 This makes portable tests reproducible without claiming that all native
-linguistic engines have identical numbers. `search_cells` remains a named
-refusal until the deterministic profile specification and its cross-engine
-corpus exist.
+linguistic engines have identical numbers. Full profile implementation is
+deferred in `docs/backlog.md` until the remaining general SQLScript milestones
+are complete.
+
+The tracked `search_cells` case no longer blocks that sequence. It now uses a
+deliberately modest `simple-search-v0` expressed entirely in ordinary
+SQLScript: over its measured ASCII fixture, case-folded equality scores 1000,
+substring containment scores 700, and null rows remain visible with score 0.
+Empty and NULL queries return no non-null matches. Native SQLScript and
+portable ordinary SQL agree on HANA, and DuckDB produces the same published
+rows. This is an executable baseline, not a portable linguistic profile or a
+fuzzy-search compatibility claim.
 
 ## Validation at this milestone
 
@@ -277,17 +286,24 @@ corpus exist.
 - textual `COALESCE`: native SQLScript, portable HANA and DuckDB agree for
   NULL fallback and supplied STRING values; fixed character operands widen
   to the longer length, STRING dominates text, and text/numeric mixing refuses;
-- full SQLScript/AMDP regression: 392 passing tests and 16 explicit live
+- direct-source `search_cells`: native and portable HANA agree on exact,
+  substring, unrelated, NULL-label, empty-query and NULL-query cases; DuckDB
+  returns the same fixed integer scores and mapping values in one statement;
+- full SQLScript/AMDP regression: 394 passing tests and 17 explicit live
   integration cases pending in the ordinary offline run;
-- live HANA focused suite: 13 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 14 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Fuzzy search, dynamic SQL, controlled errors and
-   cursor execution only as separately measured capabilities.
+1. Execute the tracked cursor/block/conditional case rather than merely
+   parsing its declaration.
+2. Continue general composition: nested calls, shared caller transaction and
+   the unchanged ABAP Unit entry path.
+3. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
+   separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and
 DuckDB corpus paths are useful and stable. The already completed PostgreSQL
