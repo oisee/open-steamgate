@@ -130,11 +130,10 @@ describe("independent AMDP clean-room corpus", () => {
       identity_cells: /CURRENT_USER is a session value/,
       optional_value: /not a resolved structured table type/,
       transform: /If is outside/,
-      rank_rows: /neither an aggregate nor one of the GROUP BY columns/,
       control_rows: /only scalar DECLARE/,
       scalar_value: /not a resolved structured table type/,
     };
-    const executable = new Set(["mix_rows"]);
+    const executable = new Set(["mix_rows", "rank_rows"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -173,6 +172,37 @@ describe("independent AMDP clean-room corpus", () => {
     expect(() => compileProcedure({...method,
       body: method.body.replace("l.amount BETWEEN", "l.unknown_amount BETWEEN")}, extracted.types))
       .to.throw(UnsupportedSqlScript, /L.UNKNOWN_AMOUNT is not present/);
+  });
+
+  it("refuses a grouped window that reads a column outside the GROUP BY", () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "rank_rows");
+    const changed = {...method,
+      body: method.body.replace("ORDER BY amount DESC, key_id ASC, note_text ASC) AS row_value",
+        "ORDER BY amount DESC, key_id ASC, day_value ASC) AS row_value")};
+    expect(() => compileProcedure(changed, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ROW_VALUE window reads DAY_VALUE outside the GROUP BY/);
+    const aggregateWindow = {...method,
+      body: method.body.replace("ROW_NUMBER() OVER", "SUM(day_value + 1) OVER")};
+    expect(() => compileProcedure(aggregateWindow, extracted.types))
+      .to.throw(UnsupportedSqlScript, /grouped window must be a top-level/);
+    const nestedAggregateWindow = {...method,
+      body: method.body.replace("ROW_NUMBER() OVER", "SUM(SUM(amount)) OVER")};
+    expect(() => compileProcedure(nestedAggregateWindow, extracted.types))
+      .to.throw(UnsupportedSqlScript, /grouped window must be a top-level/);
+    const wrappedWindow = {...method,
+      body: method.body.replace("ROW_NUMBER() OVER (PARTITION BY group_id\n                         ORDER BY amount DESC, key_id ASC, note_text ASC)",
+        "MAX(ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY amount DESC))")};
+    expect(() => compileProcedure(wrappedWindow, extracted.types))
+      .to.throw(UnsupportedSqlScript, /grouped window must be a top-level/);
+    const partitionExpression = {...method,
+      body: method.body.replace("PARTITION BY group_id", "PARTITION BY day_value + 1")};
+    expect(() => compileProcedure(partitionExpression, extracted.types))
+      .to.throw(UnsupportedSqlScript, /PARTITION BY expressions are outside the measured grouped ranking subset/);
+    const windowInHaving = {...method,
+      body: method.body.replace("HAVING COUNT(*) > 0", "HAVING ROW_NUMBER() OVER (ORDER BY amount) > 0")};
+    expect(() => compileProcedure(windowInHaving, extracted.types))
+      .to.throw(UnsupportedSqlScript, /window function is not legal in HAVING/);
   });
 
   it("executes mix_rows from its original synthetic source on DuckDB", async () => {
@@ -224,6 +254,52 @@ describe("independent AMDP clean-room corpus", () => {
       const empty = await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_LIMIT: 10},
         relationInputs: {IT_LEFT: emptyLeft, IT_RIGHT: emptyRight}, inputCatalogue: {DUMMY: {}}});
       expect(empty.rows).to.deep.equal([]);
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("executes rank_rows with ranking ties from its original source on DuckDB", async () => {
+    const extracted = extract(source("neutral_matrix.clas.abap.txt"), "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "rank_rows");
+    const compiled = compileProcedure(method, extracted.types);
+    const schemas = Object.fromEntries(compiled.relationParameters.map((one) => [one.name, one.schema]));
+    const leftRows = [
+      {key_id: 1, group_id: 9, amount: 5, day_value: "20240101", note_text: "A"},
+      {key_id: 2, group_id: 9, amount: 5, day_value: "20240102", note_text: "B"},
+      {key_id: 3, group_id: 9, amount: 3, day_value: null, note_text: "C"},
+      {key_id: 4, group_id: 10, amount: 8, day_value: "20240229", note_text: "D"},
+      // GROUP BY must collapse the exact duplicate before the window runs.
+      {key_id: 4, group_id: 10, amount: 8, day_value: "20240229", note_text: "D"},
+    ];
+    const rightRows = [1, 2, 3, 4].map((key_id) => ({key_id, code_text: "Q", factor: 1}));
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const left = await materializeRows(client, "RANK_LEFT", leftRows, schemas.IT_LEFT);
+      const right = await materializeRows(client, "RANK_RIGHT", rightRows, schemas.IT_RIGHT);
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb",
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      const rows = [...answer.rows].sort((a, b) => a.KEY_ID - b.KEY_ID);
+      expect(rows.map(({KEY_ID, RANK_VALUE, DENSE_VALUE}) => ({KEY_ID, RANK_VALUE, DENSE_VALUE})))
+        .to.deep.equal([
+          {KEY_ID: 1, RANK_VALUE: 1, DENSE_VALUE: 1},
+          {KEY_ID: 2, RANK_VALUE: 1, DENSE_VALUE: 1},
+          {KEY_ID: 3, RANK_VALUE: 3, DENSE_VALUE: 2},
+          {KEY_ID: 4, RANK_VALUE: 1, DENSE_VALUE: 1},
+        ]);
+      expect(rows.map(({KEY_ID, ROW_VALUE}) => ({KEY_ID, ROW_VALUE}))).to.deep.equal([
+        {KEY_ID: 1, ROW_VALUE: 1},
+        {KEY_ID: 2, ROW_VALUE: 2},
+        {KEY_ID: 3, ROW_VALUE: 3},
+        {KEY_ID: 4, ROW_VALUE: 1},
+      ]);
+      expect(answer.columns.map((one) => one.name)).to.deep.equal([
+        "KEY_ID", "GROUP_ID", "AMOUNT", "RANK_VALUE", "DENSE_VALUE", "ROW_VALUE", "NOTE_TEXT",
+      ]);
+      expect(answer.columns.slice(3, 6).map((one) => one.type),
+        "the ABAP I output boundary converts the engines' natural BIGINT ranking values").to.deep.equal([4, 4, 4]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
     } finally {
       await client.disconnect();
     }

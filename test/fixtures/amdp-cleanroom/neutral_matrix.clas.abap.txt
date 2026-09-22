@@ -82,7 +82,8 @@ CLASS cl_neutral_matrix IMPLEMENTATION.
                    USING cl_neutral_alpha cl_neutral_beta.
     lt_ranked = SELECT
       key_id, group_id, amount,
-      ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY amount DESC) AS row_value,
+      ROW_NUMBER() OVER (PARTITION BY group_id
+                         ORDER BY amount DESC, key_id ASC, note_text ASC) AS row_value,
       RANK() OVER (PARTITION BY group_id ORDER BY amount DESC) AS rank_value,
       DENSE_RANK() OVER (PARTITION BY group_id ORDER BY amount DESC) AS dense_value,
       note_text

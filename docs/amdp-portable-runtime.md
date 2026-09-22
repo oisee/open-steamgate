@@ -430,3 +430,23 @@ values. The oracle also established two boundary rules:
 - HANA's LIMIT grammar accepts a typed bound `?` and rejects
   `CAST(? AS INTEGER)` in that position, while ordinary numeric expression
   placeholders retain their explicit casts.
+
+### 2026-09-22 — P1d grouped windows and ranking
+
+The tracked synthetic `rank_rows` body executes directly, without runtime or
+test-harness rewriting, and moves the ledger to `2 executable / 8 named
+refusals / 0 crashes`. A grouped SELECT now permits a ranking-window output
+only when every column read by its partition and ordering is a GROUP BY key;
+an ungrouped dependency is refused before reaching a database. Ranking calls
+carry their measured natural BIGINT type rather than the old STRING default;
+the procedure boundary converts ranking columns to the declared ABAP `I`, as
+native AMDP does.
+
+The method exercises an `IN` subquery, GROUP BY, HAVING, `ROW_NUMBER`, `RANK`,
+`DENSE_RANK`, window partitions and ordering, a table-variable re-read and
+`UNION DISTINCT`. A physical tie fixture proves the gap between `RANK` and
+`DENSE_RANK` on DuckDB and in the live HANA differential. `ROW_NUMBER` uses a
+complete tie breaker over the grouped row, while `RANK` and `DENSE_RANK`
+deliberately order only by amount. This matters because the table-variable
+plan is inlined into both UNION branches: a non-deterministic row number could
+otherwise turn two logically identical branches into additional distinct rows.

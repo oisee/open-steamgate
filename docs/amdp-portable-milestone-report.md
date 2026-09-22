@@ -27,6 +27,13 @@ Native SQLScript and portable-on-HANA return the same values for zero and a
 populated fixture; the identical portable program also passes empty, zero,
 bounded and full-result cases on DuckDB.
 
+The third proof executes the tracked `rank_rows` method body directly, without
+runtime or test-harness rewriting: grouping and `HAVING`,
+`ROW_NUMBER`, `RANK`, `DENSE_RANK`, window partition/order, a subquery filter
+and `UNION DISTINCT`. A tie fixture distinguishes rank-with-gap from dense
+rank. `ROW_NUMBER` has a complete tie breaker over the grouped row, so its
+two independently inlined UNION branches cannot manufacture distinct rows.
+
 ## How it works under the hood
 
 ```text
@@ -142,13 +149,14 @@ It currently contains ten synthetic methods covering these categories:
 | `optional_value` | optional input and scalar return | scalar-return procedure shape |
 | `transform` | `IF`/`ELSEIF`, regex and session context | procedural `IF` |
 | `mix_rows` | table inputs, scoped joins, correlated subquery, dynamic limit | **executable on HANA and DuckDB** |
-| `rank_rows` | grouping, windows and ranking | grouped/window typing rule |
+| `rank_rows` | grouping, windows and ranking | **executable on HANA and DuckDB** |
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | scalar-return procedure shape |
 
-The current ledger is `1 executable / 9 named refusals / 0 crashes`. Parser
-success is not reported as runtime support: `mix_rows` moved only after its
-unchanged source ran at value level on HANA↔HANA and DuckDB.
+The current ledger is `2 executable / 8 named refusals / 0 crashes`. Parser
+success is not reported as runtime support: a tracked method body moves only
+after it executes directly, without runtime or harness rewriting, at value
+level on HANA↔HANA and DuckDB.
 
 That move required more than accepting `LIMIT :value`. Source aliases now
 survive in typed IR, query scopes distinguish unknown and ambiguous columns,
@@ -197,20 +205,22 @@ that contract and its cross-engine corpus exist.
   placeholder in that grammar slot;
 - DuckDB `mix_rows`: empty, zero, bounded and full-result cases, physical
   result metadata, plus a separate value-level correlated-`EXISTS` case;
-- full SQLScript regression: 358 passing tests, with only explicit live-HANA
+- direct-source `rank_rows`: native HANA and portable HANA agree on
+  grouped ranking values; DuckDB reproduces `RANK=1,1,3` and
+  `DENSE_RANK=1,1,2` for a tie fixture, and the duplicate is collapsed;
+- full SQLScript regression: 360 passing tests, with only explicit live-HANA
   cases skipped in the ordinary offline run;
-- live HANA focused suite: 5 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 6 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Correct grouped/window typing, targeting `rank_rows`.
-2. Procedural `IF`, targeting the safe branches of `transform`.
-3. Scalar returns and optional INTEGER inputs.
-4. `EXCEPT` as its own relational node and backend lowering.
-5. Session identity, arrays, fuzzy search, dynamic SQL, controlled errors and
+1. Procedural `IF`, targeting the safe branches of `transform`.
+2. Scalar returns and optional INTEGER inputs.
+3. `EXCEPT` as its own relational node and backend lowering.
+4. Session identity, arrays, fuzzy search, dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

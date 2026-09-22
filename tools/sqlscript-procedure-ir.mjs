@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project} from "./sqlscript-ir.mjs";
 import {lower} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -306,7 +306,40 @@ export async function runProcedure(program, {
   await execute(program.body);
   const result = relations.get(program.output);
   if (result === undefined) throw new UnsupportedSqlScript(`output relation ${program.output} was not assigned`);
-  const compiled = lower(result, dialect, {relationRef: (handle) => client.relationRef(handle)});
+  // A native AMDP procedure converts the final SELECT into the declared ABAP
+  // OUT-table types. Window ranking is the first place this is observable:
+  // both HANA and DuckDB naturally produce BIGINT, while the method declares
+  // ABAP I. Preserve the natural type inside the plan, then reproduce the
+  // signature conversion exactly once at the procedure boundary.
+  let output = result;
+  let actualOutput;
+  try { actualOutput = schemaOf(result, inputCatalogue); }
+  catch (error) { throw new UnsupportedSqlScript(`cannot prove output schema: ${error.message}`); }
+  const expectedNames = Object.keys(program.outputSchema);
+  if (JSON.stringify(Object.keys(actualOutput)) !== JSON.stringify(expectedNames)) {
+    throw new UnsupportedSqlScript("output relation columns do not match the AMDP signature");
+  }
+  const converted = expectedNames.map((name) => {
+    const actual = actualOutput[name];
+    const expected = program.outputSchema[name];
+    const source = col(name, actual);
+    if (JSON.stringify(actual) === JSON.stringify(expected)) return {as: name, expr: source};
+    // A CHAR expression already satisfies an ABAP STRING output without a
+    // narrowing conversion. The inverse does not: an ABAP C boundary has a
+    // length and therefore must use the measured truncating cast.
+    if (expected.abap === "STRING" && ["C", "STRING"].includes(actual.abap)) {
+      return {as: name, expr: source};
+    }
+    if (expected.abap === "I" && actual.abap === "INT8") {
+      return {as: name, expr: cast(source, expected)};
+    }
+    if (expected.abap === "C" && ["C", "STRING"].includes(actual.abap)) {
+      return {as: name, expr: cast(source, expected)};
+    }
+    throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
+  });
+  if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
+  const compiled = lower(output, dialect, {relationRef: (handle) => client.relationRef(handle)});
   if (compiled.params.length > maxParameters) {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }

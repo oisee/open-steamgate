@@ -158,3 +158,85 @@ describe("mix_rows: clean-room SQLScript against portable HANA SQL", function ()
     }
   });
 });
+
+describe("rank_rows: clean-room windows against portable HANA SQL", function () {
+  this.timeout(60000);
+
+  liveIt("matches grouped ranking values with a deterministic ROW_NUMBER", async () => {
+    if (process.env.STG_DB_FRESH === "1") {
+      throw new Error("live AMDP differential refuses STG_DB_FRESH=1 because it must never reset a schema");
+    }
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_matrix.clas.abap.txt", import.meta.url), "utf8");
+    const extracted = extract(source, "cl_neutral_matrix.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "rank_rows");
+    const portable = compileProcedure(method, extracted.types);
+    const schemas = Object.fromEntries(portable.relationParameters.map((one) => [one.name, one.schema]));
+    const leftRows = [
+      {key_id: 1, group_id: 9, amount: 5, day_value: "20240101", note_text: "A"},
+      {key_id: 2, group_id: 9, amount: 5, day_value: "20240102", note_text: "B"},
+      {key_id: 3, group_id: 9, amount: 3, day_value: null, note_text: "C"},
+      {key_id: 4, group_id: 10, amount: 8, day_value: "20240229", note_text: "D"},
+      {key_id: 4, group_id: 10, amount: 8, day_value: "20240229", note_text: "D"},
+    ];
+    const rightRows = [1, 2, 3, 4].map((key_id) => ({key_id, code_text: "Q", factor: 1}));
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const suffix = randomBytes(6).toString("hex").toUpperCase();
+    const disposableClass = `ZOSD_R_${suffix}`;
+    const procedureName = `"${schema}"."${disposableClass}=>RANK_ROWS"`;
+    const tables = [];
+    let created = false;
+
+    const table = async (logical, parameter, rows, relationSchema) => {
+      const name = `"${schema}"."ZOSD_${logical}_${suffix}"`;
+      const definition = parameterType(parameter.abapType, extracted.types);
+      const columns = /^TABLE\s*\((.*)\)$/is.exec(definition)?.[1];
+      if (columns === undefined) throw new Error(`${parameter.abapType} did not resolve to a HANA table type`);
+      await client.native({sql: `CREATE COLUMN TABLE ${name} (${columns})`, expect: "none"});
+      tables.push(name);
+      const fields = Object.entries(relationSchema);
+      for (const row of rows) {
+        await client.native({sql: `INSERT INTO ${name} VALUES (${fields.map(() => "?").join(", ")})`,
+          params: fields.map(([field, type]) => ({name: field, value: row[field.toLowerCase()] ?? null,
+            type: seamType(type), isNull: row[field.toLowerCase()] == null})), expect: "none"});
+      }
+      return refTo({ref: name, kind: "materialised", reason: "typed clean-room ranking fixture"}, relationSchema);
+    };
+    const semantic = (rows) => rows.map((row) => ({
+      KEY_ID: Number(row.KEY_ID ?? row.key_id),
+      GROUP_ID: Number(row.GROUP_ID ?? row.group_id),
+      AMOUNT: String(row.AMOUNT ?? row.amount),
+      RANK_VALUE: Number(row.RANK_VALUE ?? row.rank_value),
+      DENSE_VALUE: Number(row.DENSE_VALUE ?? row.dense_value),
+      ROW_VALUE: Number(row.ROW_VALUE ?? row.row_value),
+      NOTE_TEXT: String(row.NOTE_TEXT ?? row.note_text),
+    })).sort((a, b) => a.KEY_ID - b.KEY_ID);
+
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(disposableClass, method, schema, extracted.types), expect: "none"});
+      created = true;
+      const left = await table("RANK_LEFT", method.parameters[0], leftRows, schemas.IT_LEFT);
+      const right = await table("RANK_RIGHT", method.parameters[1], rightRows, schemas.IT_RIGHT);
+      const native = await callAmDP(client.client, procedureName, method,
+        {it_left: leftRows, it_right: rightRows}, extracted.types);
+      const lowered = await runProcedure(portable, {client, dialect: "hana",
+        relationInputs: {IT_LEFT: left, IT_RIGHT: right}, inputCatalogue: {DUMMY: {}}});
+      expect(semantic(lowered.rows)).to.deep.equal(semantic(native.et_rank));
+      expect(lowered.rows).to.have.length(4);
+      expect(lowered.columns.map((one) => one.name)).to.deep.equal([
+        "KEY_ID", "GROUP_ID", "AMOUNT", "RANK_VALUE", "DENSE_VALUE", "ROW_VALUE", "NOTE_TEXT",
+      ]);
+      expect(lowered.trace).to.include({engine: "hana", fallback: false, databaseStatements: 1});
+    } finally {
+      try {
+        if (created) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+        for (const name of tables.reverse()) {
+          await client.native({sql: `DROP TABLE ${name}`, expect: "none"}).catch(() => undefined);
+        }
+      } finally {
+        await client.disconnect();
+      }
+    }
+  });
+});

@@ -250,7 +250,13 @@ export function toIr(tree, options = {}) {
             return {col: e.name, desc: hasWord(k, "DESC")};
           }),
         };
-        const built = call(fn, args, T.str);
+        // Types that have been measured rather than guessed. Ranking calls
+        // return BIGINT values on HANA and DuckDB; carrying STRING
+        // here made an otherwise valid UNION fail schema proof and would
+        // expose the wrong AMDP boundary type even when the SQL itself ran.
+        let resultType = T.str;
+        if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        const built = call(fn, args, resultType);
         if (starArg) built.star = true;
         if (inner.length > 0) built.orderBy = inner;
         if (window !== undefined) built.window = window;
@@ -556,6 +562,37 @@ export function toIr(tree, options = {}) {
     return false;
   }
 
+  /** Columns a window expression reads after grouping.
+   *
+   * SQL evaluates windows after GROUP BY/HAVING. Therefore a window in a
+   * grouped SELECT may read group keys (or aggregates, once that surface is
+   * added), but it may not smuggle an arbitrary row column past grouping.
+   * The current corpus uses ranking over group keys only, so that exact rule
+   * is enforced instead of widening it speculatively. */
+  function windowColumns(e, out = new Set()) {
+    if (e === undefined || e === null || typeof e !== "object") return out;
+    if (e.node === "col") out.add(String(e.name).toUpperCase());
+    for (const one of e.args ?? []) windowColumns(one, out);
+    for (const one of e.window?.partitionBy ?? []) windowColumns(one, out);
+    for (const one of e.window?.orderBy ?? []) out.add(String(one.col).toUpperCase());
+    return out;
+  }
+
+  function containsWindow(e) {
+    if (e === undefined || e === null || typeof e !== "object") return false;
+    if (e.window !== undefined) return true;
+    for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
+      if (containsWindow(e[key])) return true;
+    }
+    for (const key of ["args", "values"]) {
+      for (const one of e[key] ?? []) if (containsWindow(one)) return true;
+    }
+    for (const one of e.whens ?? []) {
+      if (containsWindow(one.when) || containsWindow(one.then)) return true;
+    }
+    return false;
+  }
+
   function select(node) {
     const outerColumns = columns;
     const outerAmbiguous = ambiguousColumns;
@@ -607,7 +644,11 @@ export function toIr(tree, options = {}) {
     // well, filtering rows by an aggregate before the aggregate existed. Two
     // clauses, one of them invented.
     const where = hasWord(node, "WHERE") ? kid(node, "Condition") : undefined;
-    if (where !== undefined) rel = filter(rel, condition(where));
+    if (where !== undefined) {
+      const predicate = condition(where);
+      if (containsWindow(predicate)) throw new BindError("a window function is not legal in WHERE", where);
+      rel = filter(rel, predicate);
+    }
     const items = kids(node, "SelectItem").map((item) => {
       // `*` arrives as a **word**, because the grammar matches it with
       // str(): the third time this trap has been paid for in this front end
@@ -673,7 +714,27 @@ export function toIr(tree, options = {}) {
         if (item.expr?.node === "star") {
           throw new BindError("`*` with a GROUP BY is not lowered: which columns it stands for is a question about the dictionary, not about this body", node);
         }
-        if (isAggregate(item.expr)) aggs.push(item);
+        if (containsWindow(item.expr)) {
+          if (item.expr?.node !== "call" || item.expr.window === undefined
+              || !["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(item.expr.fn)) {
+            throw new BindError("a grouped window must be a top-level ROW_NUMBER, RANK or DENSE_RANK call", node);
+          }
+          if ((item.expr.args ?? []).length > 0) {
+            throw new BindError(`${item.expr.fn} with arguments is not a measured grouped window`, node);
+          }
+          if ((item.expr.window.partitionBy ?? []).some((one) => one.node !== "col")) {
+            throw new BindError(`${item.expr.fn} PARTITION BY expressions are outside the measured grouped ranking subset`, node);
+          }
+          const outside = [...windowColumns(item.expr)].filter((name) => !keyNames.has(name));
+          if (outside.length > 0) {
+            throw new BindError(`${item.as} window reads ${outside.join(", ")} outside the GROUP BY`, node);
+          }
+          // The relation calls these `aggs`, but they are more precisely the
+          // computed outputs of the grouped SELECT. Keeping the window in
+          // this query block preserves SQL's group -> having -> window order.
+          aggs.push(item);
+        }
+        else if (isAggregate(item.expr)) aggs.push(item);
         else if (item.expr?.node === "col" && keyNames.has(String(item.expr.name).toUpperCase())) keys.push(item);
         else {
           throw new BindError(`${item.as} is neither an aggregate nor one of the GROUP BY columns`, node);
@@ -683,9 +744,11 @@ export function toIr(tree, options = {}) {
       const having = kids(node, "Condition")[hasWord(node, "WHERE") ? 1 : 0];
       if (hasWord(node, "HAVING")) {
         if (having === undefined) throw new BindError("a HAVING with no condition in it", node);
+        const predicate = condition(having);
+        if (containsWindow(predicate)) throw new BindError("a window function is not legal in HAVING", having);
         // above the aggregate, which is what HAVING means and where the
         // lowering already puts a filter
-        rel = filter(rel, condition(having));
+        rel = filter(rel, predicate);
       }
       const hinted = hintsOf(node);
       return orderAndLimit(node, hinted === undefined ? rel : {...rel, hints: hinted});

@@ -24,6 +24,7 @@
 /** ABAP-ish type letters, because that is what the caller and the seam speak */
 export const T = {
   int: {abap: "I"},
+  int8: {abap: "INT8"},
   dec: (len, dec) => ({abap: "P", len, dec}),
   char: (len) => ({abap: "C", len}),
   str: {abap: "STRING"},

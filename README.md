@@ -1,8 +1,8 @@
 > ## 🧪 [Portable AMDP: live HANA oracle, DuckDB execution, and clean-room corpus](docs/amdp-portable-milestone-report.md)
 >
 > The `feat/amdp-portable-ir` branch now runs the original `SQUARES` and the
-> clean-room `mix_rows` SQLScript through typed host control flow and ordinary
-> relational SQL on both HANA and DuckDB. Read the milestone report for the
+> clean-room `mix_rows` and `rank_rows` SQLScript through typed host control
+> flow and ordinary relational SQL on both HANA and DuckDB. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 
