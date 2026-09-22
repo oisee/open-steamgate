@@ -192,7 +192,7 @@ sap.ui.define([
       // opened directly: the UIArea has no explicit CSS height to inherit.
       // A viewport height works both directly and inside the launchpad iframe.
       var split = new Splitter(this.createId("splitter"), {height: "100vh", contentAreas: [master, detail]});
-      fetch("/sap/opu/odata/sap/ZOSD_STATUS_SRV/DatabaseSet?$format=json").then(function (response) {
+      fetch("../../sap/opu/odata/sap/ZOSD_STATUS_SRV/DatabaseSet?$format=json").then(function (response) {
         return response.json();
       }).then(function (body) {
         var facts = body.d && body.d.results || [];
