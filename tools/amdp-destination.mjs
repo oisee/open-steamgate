@@ -120,6 +120,21 @@ function statement(p) {
     .filter((x) => x !== "").join("\n");
 }
 
+function nestedProcedures(program, found = new Set()) {
+  const visit = (body) => {
+    for (const one of body ?? []) {
+      if (one.stmt === "call-procedure") found.add(String(one.procedure).toUpperCase());
+      if (one.stmt === "while") visit(one.body);
+      if (one.stmt === "if") {
+        for (const branch of one.branches ?? []) visit(branch.body);
+        visit(one.otherwise);
+      }
+    }
+  };
+  visit(program?.body);
+  return found;
+}
+
 /** lines the sandbox wrapper puts in front of a typed body (see #sandbox) */
 const SANDBOX_OFFSET = 1;
 
@@ -234,7 +249,19 @@ export class AmdpDestination {
       this.client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
   }
 
-  async #deploy(p) {
+  async #deploy(p, stack = new Set()) {
+    const identity = `${p.class}=>${p.method}`.toUpperCase();
+    if (stack.has(identity)) throw new Error(`AMDP: cyclic native dependency at ${identity}`);
+    const next = new Set(stack).add(identity);
+    // A parent can remain byte-identical while a child changes. Check and
+    // deploy dependencies before the parent's own hash fast-path, otherwise
+    // invoking only the parent would keep calling a stale HANA procedure.
+    for (const dependency of nestedProcedures(p.portable)) {
+      const child = [...this.procedures.values()].find((one) =>
+        `${one.class}=>${one.method}`.toUpperCase() === dependency);
+      if (child === undefined) throw new Error(`AMDP: native dependency ${dependency} is absent from the manifest`);
+      await this.#deploy(child, next);
+    }
     if (this.deployed.get(p.module) === p.hash) return;
     const name = `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`;
     await this.#exec(`CREATE SCHEMA "${SCHEMA}"`).catch(() => undefined);
@@ -512,7 +539,12 @@ export class AmdpDestination {
     const {runProcedure} = await import("./sqlscript-procedure-ir.mjs");
     let answer;
     try {
-      answer = await runProcedure(p.portable, {client: database, dialect: "duckdb", inputs, relationInputs});
+      const procedures = new Map([...this.procedures.values()]
+        .filter((one) => one.portable !== undefined)
+        .map((one) => [`${one.class}=>${one.method}`.toUpperCase(), one.portable]));
+      answer = await runProcedure(p.portable, {
+        client: database, dialect: "duckdb", inputs, relationInputs, procedures,
+      });
     } catch (error) {
       await refuse(`AMDP: portable ${p.class}=>${p.method} refused: ${String(error?.message ?? error)}`, p.module);
     }

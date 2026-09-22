@@ -538,7 +538,7 @@ The case also added an exact AMDP output-boundary conversion from INTEGER to
 packed decimal. It lowers as an explicit DECIMAL cast, never through floating
 point. DuckDB executes the original source for zero, NULL and populated
 limits; native SQLScript and portable ordinary HANA SQL return equal typed
-rows for the same inputs. The full offline SQLScript/AMDP run is 407 passing
+rows for the same inputs. The full offline SQLScript/AMDP run is 411 passing
 with 17 live cases pending, and the focused live HANA suite is 15 passing.
 
 ### 2026-09-22 — P2a real ABAP call reaches portable DuckDB
@@ -562,6 +562,26 @@ method. Full ABAP Unit passes on DuckDB with no HANA fallback. Both AMDP tests
 also completed natively on HANA; the wider HANA suite later stopped on the
 independent `ZCL_OSD_TRAN_SESSION` xstring/text mismatch. That later failure
 is not counted as an AMDP result.
+
+### 2026-09-22 — P2b first nested AMDP remains relational
+
+The SQLScript frontend now retains an internal `CALL` as a procedural node.
+The deliberately narrow first contract is one typed table input and one typed
+table output; scalar, `INOUT`, multiple-output and dynamic calls remain named
+refusals. At runtime the child receives the parent's already-frozen relation
+and returns a relation plan. DuckDB therefore executes one final statement for
+the whole parent/child composition: no intermediate JavaScript row array and
+no second connection appear at the call boundary. Captured parent scalars are
+covered explicitly, and a configurable call-depth limit stops recursion before
+the database is touched.
+
+`ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT_NESTED` is unchanged native SQLScript using
+`CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(...)`. The generated destination
+resolves the child from the same precompiled manifest. Native HANA deployment
+walks the same dependency first, even when the parent hash itself is unchanged.
+The ordinary ABAP Unit call is green on DuckDB and on HANA; the isolated HANA
+run again reached the later, unrelated transaction-session xstring assertion
+only after all four AMDP tests had completed.
 
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 

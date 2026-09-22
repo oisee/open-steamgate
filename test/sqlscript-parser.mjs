@@ -93,6 +93,14 @@ describe("the SQLScript grammar", () => {
     expect(names(t).filter((n) => n === "FunctionCall")).to.have.length(2);
   });
 
+  it("keeps an internal procedure call and its input/output roles visible", () => {
+    const t = tree('CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(:it_amount, et_total);');
+    expect(names(t)).to.include("ProcedureCall");
+    expect(leaves(t, "quoted")).to.deep.equal(["ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"]);
+    expect(leaves(t, "host")).to.deep.equal([":it_amount"]);
+    expect(leaves(t, "identifier")).to.include("et_total");
+  });
+
   it("refuses what it cannot parse, and says where -- the way the engine does", () => {
     try {
       tree("SELECT FROM;", new Select());

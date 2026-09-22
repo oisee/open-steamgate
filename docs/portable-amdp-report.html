@@ -116,7 +116,7 @@
   <main class="shell">
     <div class="grid kpis">
       <article class="card"><div class="number" style="color:var(--mint)">11 / 11</div><div class="label">showcase-методов исполняются</div><div class="note">Оригинальные тела; HANA fallback отсутствует.</div></article>
-      <article class="card"><div class="number" style="color:var(--cyan)">407</div><div class="label">offline regression tests</div><div class="note">17 live-интеграций пропускаются без HANA.</div></article>
+      <article class="card"><div class="number" style="color:var(--cyan)">411</div><div class="label">offline regression tests</div><div class="note">17 live-интеграций пропускаются без HANA.</div></article>
       <article class="card"><div class="number" style="color:var(--violet)">15 / 15</div><div class="label">live HANA differential</div><div class="note">Native SQLScript против portable ordinary SQL.</div></article>
       <article class="card"><div class="number" style="color:var(--amber)">4%</div><div class="label">ширина рабочего A4H-корпуса</div><div class="note">16 из 364 тел lower целиком. Это важная честная цифра.</div></article>
     </div>
@@ -164,7 +164,7 @@
         <article class="cap"><span class="flag ok">Работает</span><h3>Типы и NULL</h3><p>INTEGER, часть packed decimal, fixed character, STRING, date storage, typed empty relations и явный SQL NULL. Непроверенные coercions отказываются.</p></article>
         <article class="cap"><span class="flag ok">Работает</span><h3>Контекст и массив</h3><p>CURRENT_USER, CURRENT_SCHEMA и literal SESSION_CONTEXT приходят из execution context. Fixed INTEGER ARRAY раскрывается с NULL, duplicates и ordinality.</p></article>
         <article class="cap"><span class="flag partial">Узкий baseline</span><h3>Поиск</h3><p>Exact/substring case над измеренным ASCII fixture исполняется на HANA и DuckDB. Настоящие fuzzy profiles вынесены в ADR 0002 и backlog.</p></article>
-        <article class="cap"><span class="flag partial">В работе</span><h3>Composition</h3><p>Настоящий ABAP Unit и typed table boundary уже проходят на DuckDB и HANA. Следом: nested AMDP call и прямое чтение незакоммиченного ABAP SQL fixture в общей транзакции.</p></article>
+        <article class="cap"><span class="flag partial">В работе</span><h3>Composition</h3><p>Настоящий ABAP Unit, typed table boundary и первый nested AMDP call уже проходят на DuckDB и HANA. Следом: прямое чтение незакоммиченного ABAP SQL fixture в общей транзакции.</p></article>
         <article class="cap"><span class="flag later">Не сейчас</span><h3>Широкий imperative</h3><p>FOR, general cursor OPEN/FETCH, handlers, dynamic SQL, mutation, temporary DDL и широкий набор built-ins.</p></article>
         <article class="cap"><span class="flag later">Явная граница</span><h3>Не portable по природе</h3><p>XMLTABLE, HIERARCHY и часть HANA libraries могут остаться native-only. Refusal лучше похожего, но неверного результата.</p></article>
       </div>
@@ -215,7 +215,8 @@
       <div class="roadmap">
         <div class="mile"><div><h3>✓ control_rows закрыт</h3><p>HANA oracle исправил порядок DECLARE CURSOR; typed unused resource и sequential block с одним output-assignment совпали на native и portable paths. OPEN/FETCH по-прежнему вне claim.</p></div></div>
         <div class="mile"><div><h3>✓ ABAP Unit → portable AMDP</h3><p>Generated destination исполняет precompiled IR на системной DuckDB connection. Open SQL rows пересекают typed table boundary; empty input сохраняет schema; HANA fallback отсутствует.</p></div></div>
-        <div class="mile"><div><h3>Composition, следующий срез</h3><p>Nested AMDP call и одна транзакция между незакоммиченным ABAP SQL fixture и прямым catalogue-read из AMDP.</p></div></div>
+        <div class="mile"><div><h3>✓ Nested AMDP, узкий честный срез</h3><p>Один typed table IN → один table OUT; дочерний relation plan встраивается в родительский, call depth ограничен, DuckDB получает один финальный statement.</p></div></div>
+        <div class="mile"><div><h3>Shared transaction, следующий срез</h3><p>Одна транзакция между незакоммиченным ABAP SQL fixture и прямым catalogue-read из AMDP.</p></div></div>
         <div class="mile"><div><h3>Ширина по histogram</h3><p>FOR, table functions in FROM, client/session parameters и catalogue closure — в порядке реально разблокируемых тел.</p></div></div>
         <div class="mile"><div><h3>После ядра</h3><p>Versioned fuzzy profiles, mutation/handlers, второй embedded backend и clean-room book corpus.</p></div></div>
       </div>

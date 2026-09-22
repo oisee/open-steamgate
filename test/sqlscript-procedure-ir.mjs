@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {T, lit, param, sessionValue, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  ifElse, runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 
 const p = (name, type = T.int) => param(name, type);
 
@@ -384,5 +384,59 @@ describe("the typed SQLScript procedural IR", function () {
     } catch (caught) { error = caught; }
     expect(error).to.be.instanceOf(UnsupportedSqlScript);
     expect(error.message).to.contain("plan depth limit 16");
+  });
+
+  it("composes a nested table procedure into one final database statement", async () => {
+    const child = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [assignRelation("ET_ROWS", varRef("IT_ROWS"))],
+    });
+    const parent = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [
+        declareScalar("N", T.int, lit(7, T.int)),
+        assignRelation("LOCAL", union([varRef("IT_ROWS"),
+          project(scan("DUMMY"), [{as: "ID", expr: p("N")}])], true)),
+        callProcedure("ZCL_DEMO=>CHILD", "LOCAL", "ET_ROWS"),
+      ],
+    });
+    const supplied = union([
+      project(scan("DUMMY"), [{as: "ID", expr: lit(2, T.int)}]),
+      project(scan("DUMMY"), [{as: "ID", expr: lit(5, T.int)}]),
+    ], true);
+    let invocations = 0;
+    const native = client.native.bind(client);
+    client.native = async (...args) => { invocations += 1; return native(...args); };
+    const answer = await runProcedure(parent, {
+      client, dialect: "duckdb", relationInputs: {IT_ROWS: supplied}, inputCatalogue: {DUMMY: {}},
+      procedures: new Map([["ZCL_DEMO=>CHILD", child]]),
+    });
+    expect(answer.rows.map((one) => one.ID).sort()).to.deep.equal([2, 5, 7]);
+    expect(answer.trace).to.include({nestedCalls: 1, databaseStatements: 1});
+    expect(invocations).to.equal(1);
+  });
+
+  it("bounds recursive nested calls before touching the database", async () => {
+    const recursive = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [callProcedure("ZCL_DEMO=>RECURSE", "IT_ROWS", "ET_ROWS")],
+    });
+    const supplied = project(scan("DUMMY"), [{as: "ID", expr: lit(1, T.int)}]);
+    let invocations = 0;
+    const native = client.native.bind(client);
+    client.native = async (...args) => { invocations += 1; return native(...args); };
+    let error;
+    try {
+      await runProcedure(recursive, {
+        client, dialect: "duckdb", relationInputs: {IT_ROWS: supplied}, inputCatalogue: {DUMMY: {}},
+        procedures: new Map([["ZCL_DEMO=>RECURSE", recursive]]), maxCallDepth: 3,
+      });
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("nested call depth limit 3");
+    expect(invocations).to.equal(0);
   });
 });

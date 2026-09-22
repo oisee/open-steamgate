@@ -39,6 +39,7 @@ export const NOT_NAMED = {
   Body: "the root the parser is started on: `toIr` walks its children and never dispatches on it",
   Declare: "reaches the statement switch's default, which refuses it with its own name at run time -- pinned by test/sqlscript-cover.mjs, which runs a DECLARE and reads what comes back",
   UnnestCall: "owned by the procedural compiler as an assignment RHS; it is converted to a typed relation before the relational binder is called",
+  ProcedureCall: "owned by the procedural compiler as a statement; it becomes a bounded call-procedure node before the relational binder is called",
   If: "the same, and listed for the same reason: refused by the default rather than by a literal in the source, so the claim is pinned by a run. A reason nobody re-checks stops being true quietly",
   ColumnDef: "only ever a child of Declare, which is refused before anything looks inside it",
   AbapType: "only ever a child of ColumnDef, same reason",

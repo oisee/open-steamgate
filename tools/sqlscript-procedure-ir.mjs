@@ -31,6 +31,8 @@ export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
 export const ifElse = (branches, otherwise = [], source) =>
   ({stmt: "if", branches, otherwise, source});
+export const callProcedure = (name, input, output, source) =>
+  ({stmt: "call-procedure", procedure: upper(name), input: upper(input), output: upper(output), source});
 
 function integer(value, name) {
   const n = Number(value);
@@ -299,7 +301,8 @@ function assertExpandedRelationBudget(rel, {nodes, depth, parameters}) {
 /** Interpret control flow, then execute the final relation once. */
 export async function runProcedure(program, {
   client, dialect, inputs = {}, relationInputs = {}, inputCatalogue = {}, maxSteps = 10000, maxPlanNodes = 10000,
-  maxPlanDepth = 256, maxParameters = 10000, session = {},
+  maxPlanDepth = 256, maxParameters = 10000, maxCallDepth = 16, session = {}, procedures = new Map(),
+  callDepth = 0, deferRelation = false, closedRelationInputs = false,
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
   session = session ?? {};
@@ -314,6 +317,7 @@ export async function runProcedure(program, {
   }
   const containsRelationStatement = (body) => body.some((statement) =>
     statement.stmt === "assign-relation"
+      || statement.stmt === "call-procedure"
       || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
       || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
         containsRelationStatement(branch.body ?? []))
@@ -325,8 +329,11 @@ export async function runProcedure(program, {
   if (program.outputType === undefined && client?.supportsNative !== true) {
     throw new UnsupportedSqlScript("the selected database has no native relational channel");
   }
-  for (const [name, value] of Object.entries({maxSteps, maxPlanNodes, maxPlanDepth, maxParameters})) {
+  for (const [name, value] of Object.entries({maxSteps, maxPlanNodes, maxPlanDepth, maxParameters, maxCallDepth})) {
     if (!Number.isSafeInteger(value) || value <= 0) throw new UnsupportedSqlScript(`${name} must be a positive safe integer`);
+  }
+  if (!Number.isSafeInteger(callDepth) || callDepth < 0 || callDepth > maxCallDepth) {
+    throw new UnsupportedSqlScript(`SQLScript nested call depth limit ${maxCallDepth} exceeded`);
   }
   const scalars = new Map();
   const relations = new Map();
@@ -360,7 +367,10 @@ export async function runProcedure(program, {
     // as an assignment inside the body.
     const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
     assertExpandedRelationBudget(supplied, budget);
-    const value = freezeRelation(supplied, new Map(), new Map());
+    // External relation inputs must be closed here. A nested CALL passes a
+    // plan already frozen by its parent; freezing it again with an empty
+    // scalar scope would reject the deliberately captured parameter values.
+    const value = closedRelationInputs ? supplied : freezeRelation(supplied, new Map(), new Map());
     assertExpandedRelationBudget(value, budget);
     let actual;
     try { actual = schemaOf(value, inputCatalogue); }
@@ -372,6 +382,8 @@ export async function runProcedure(program, {
     relations.set(name, value);
   }
   let steps = 0;
+  let nestedSteps = 0;
+  let nestedCalls = 0;
   const assignedScalars = new Set();
   const step = (node) => {
     steps += 1;
@@ -424,6 +436,30 @@ export async function runProcedure(program, {
           }
         }
         await execute(selected ?? statement.otherwise);
+      } else if (statement.stmt === "call-procedure") {
+        const child = procedures instanceof Map
+          ? procedures.get(upper(statement.procedure))
+          : procedures?.[upper(statement.procedure)];
+        if (child?.ir !== "sqlscript-procedure") {
+          throw new UnsupportedSqlScript(`nested procedure ${statement.procedure} is not in the portable registry`, statement);
+        }
+        if ((child.parameters ?? []).length !== 0 || (child.relationParameters ?? []).length !== 1
+            || child.outputType !== undefined) {
+          throw new UnsupportedSqlScript(
+            "initial nested CALL requires exactly one table IN and one table OUT parameter", statement);
+        }
+        const input = relations.get(statement.input);
+        if (input === undefined) {
+          throw new UnsupportedSqlScript(`nested CALL input :${statement.input.toLowerCase()} is unknown`, statement);
+        }
+        const called = await runProcedure(child, {
+          client, dialect, relationInputs: {[child.relationParameters[0].name]: input}, inputCatalogue,
+          maxSteps, maxPlanNodes, maxPlanDepth, maxParameters, maxCallDepth, session, procedures,
+          callDepth: callDepth + 1, deferRelation: true, closedRelationInputs: true,
+        });
+        relations.set(statement.output, called.relation);
+        nestedSteps += called.trace.hostSteps;
+        nestedCalls += 1 + (called.trace.nestedCalls ?? 0);
       } else {
         throw new UnsupportedSqlScript(`procedure statement ${statement.stmt} is not supported`, statement);
       }
@@ -485,6 +521,11 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
+  if (deferRelation) {
+    return {relation: output, outputSchema: program.outputSchema,
+      trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
+        nestedCalls, databaseStatements: 0, boundParameters: 0}};
+  }
   let compiled;
   try {
     compiled = lower(output, dialect, {relationRef: (handle) => client.relationRef(handle)});
@@ -500,7 +541,7 @@ export async function runProcedure(program, {
     rows: answer.rows,
     columns: answer.columns,
     outputSchema: program.outputSchema,
-    trace: {engine: dialect, fallback: false, hostSteps: steps, databaseStatements: 1,
-      boundParameters: compiled.params.length},
+    trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
+      databaseStatements: 1, boundParameters: compiled.params.length},
   };
 }

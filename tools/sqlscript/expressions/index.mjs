@@ -312,6 +312,20 @@ export class Assignment extends Expression {
   }
 }
 
+/** `CALL proc(:input, output);` -- an internal SQLScript procedure call.
+ *
+ * A host token remains distinguishable from a bare output variable. That is
+ * load-bearing for table parameters: `:rows` reads the caller's current
+ * relation, while `result` names the relation the callee assigns.
+ */
+export class ProcedureCall extends Expression {
+  getRunnable() {
+    const argument = altPrio(tok(TokenKind.host), new Expr());
+    return seq(str("CALL"), new ColumnRef(), "(",
+      opt(seq(argument, star(seq(",", argument)))), ")", ";");
+  }
+}
+
 /** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
 export class TypeName extends Expression {
   getRunnable() {
@@ -356,7 +370,7 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new If(), new While(), new Block(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new While(), new Block(), new ProcedureCall(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }

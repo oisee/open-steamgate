@@ -5,6 +5,7 @@ CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS squares_are_computed FOR TESTING RAISING cx_static_check.
     METHODS open_sql_rows_cross_the_amdp FOR TESTING RAISING cx_static_check.
+    METHODS nested_amdp_stays_relational FOR TESTING RAISING cx_static_check.
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -71,6 +72,26 @@ CLASS ltcl_amdp IMPLEMENTATION.
     READ TABLE lt_total INDEX 1 INTO ls_actual.
     cl_abap_unit_assert=>assert_equals( act = ls_actual-item_count exp = 0 ).
     cl_abap_unit_assert=>assert_equals( act = ls_actual-total exp = 0 ).
+  ENDMETHOD.
+
+  METHOD nested_amdp_stays_relational.
+    DATA lt_amount TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lt_total TYPE zcl_osd_amdp_demo=>tt_total.
+
+    IF sy-dbsys <> 'HDB' AND sy-dbsys <> 'duckdb'.
+      RETURN.
+    ENDIF.
+
+    APPEND VALUE #( amount = 7 ) TO lt_amount.
+    APPEND VALUE #( amount = 11 ) TO lt_amount.
+    zcl_osd_amdp_demo=>total_amount_nested(
+      EXPORTING it_amount = lt_amount
+      IMPORTING et_total  = lt_total ).
+
+    READ TABLE lt_total INDEX 1 INTO DATA(ls_total).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_total ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_total-item_count exp = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_total-total exp = 18 ).
   ENDMETHOD.
 
   METHOD a_table_function_returns_rows.

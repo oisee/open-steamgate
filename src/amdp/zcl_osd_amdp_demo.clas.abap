@@ -42,6 +42,10 @@ CLASS zcl_osd_amdp_demo DEFINITION
       IMPORTING VALUE(it_amount) TYPE tt_amount
       EXPORTING VALUE(et_total)  TYPE tt_total.
 
+    CLASS-METHODS total_amount_nested
+      IMPORTING VALUE(it_amount) TYPE tt_amount
+      EXPORTING VALUE(et_total)  TYPE tt_total.
+
 *   The same computation as a CDS table function: its result is queryable
 *   like a view rather than returned to one caller. The row type has to agree
 *   with the `returns` list of ZTF_OSD_SQUARES field for field -- the CDS
@@ -85,6 +89,13 @@ CLASS zcl_osd_amdp_demo IMPLEMENTATION.
     et_total = SELECT CAST(COUNT(*) AS INTEGER) AS item_count,
                       COALESCE(CAST(SUM(amount) AS INTEGER), 0) AS total
                FROM :it_amount;
+  ENDMETHOD.
+
+  METHOD total_amount_nested BY DATABASE PROCEDURE FOR HDB
+                             LANGUAGE SQLSCRIPT
+                             OPTIONS READ-ONLY
+                             USING zcl_osd_amdp_demo=>total_amount.
+    CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(:it_amount, et_total);
   ENDMETHOD.
 
   METHOD squares_tf BY DATABASE FUNCTION FOR HDB

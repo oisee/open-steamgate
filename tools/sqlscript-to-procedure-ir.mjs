@@ -9,7 +9,7 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  ifElse, UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 const children = (node, kind) => (node.children ?? []).filter((one) => one.node === kind);
@@ -134,7 +134,7 @@ export function compileProcedure(method, types) {
 
   const compileStatements = (container, allowArrayDeclarations = false) => {
     const result = [];
-    const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "Return", "SetOperation"]);
+    const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation"]);
     for (const wrapper of container.children ?? []) {
       const node = wrapper.node === "Statement"
         ? (wrapper.children ?? []).find((one) => one.node !== "word")
@@ -268,6 +268,32 @@ export function compileProcedure(method, types) {
           }
           result.push(assignScalar(name, bind(child(node, "Expr"), "expression"), node));
         }
+      } else if (node.node === "ProcedureCall") {
+        if (output.kind !== "relation") {
+          throw new UnsupportedSqlScript("initial nested CALL requires a table output", node);
+        }
+        const procedureNode = child(node, "ColumnRef");
+        const procedureLeaves = terminalLeaves(procedureNode);
+        const hosts = children(node, "host");
+        const expressions = children(node, "Expr");
+        if (procedureLeaves.length !== 1 || !["quoted", "identifier"].includes(procedureLeaves[0]?.node)
+            || hosts.length !== 1 || expressions.length !== 1) {
+          throw new UnsupportedSqlScript(
+            "initial nested CALL requires one unqualified procedure, one table input and one table output", node);
+        }
+        const input = upper(String(hosts[0].value).slice(1));
+        const outputExpr = exactWrapped(expressions[0], "ColumnRef");
+        const outputLeaves = terminalLeaves(outputExpr);
+        const calledOutput = outputLeaves.length === 1 ? upper(outputLeaves[0].value) : "";
+        if (relationSchemas[input] === undefined) {
+          throw new UnsupportedSqlScript(`nested CALL input :${input.toLowerCase()} is not a typed relation`, node);
+        }
+        if (calledOutput !== output.name) {
+          throw new UnsupportedSqlScript(
+            "initial nested CALL must write directly to the enclosing procedure output", node);
+        }
+        relationSchemas[calledOutput] = structuredClone(output.schema);
+        result.push(callProcedure(procedureLeaves[0].value, input, calledOutput, node));
       } else if (node.node === "While") {
         result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
       } else if (node.node === "Block") {
@@ -337,6 +363,7 @@ export function compileProcedure(method, types) {
     const body = compileStatements(tree, true);
     const containsRelationStatement = (statements) => statements.some((statement) =>
       statement.stmt === "assign-relation"
+        || statement.stmt === "call-procedure"
         || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
         || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
           containsRelationStatement(branch.body ?? []))

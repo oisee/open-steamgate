@@ -207,6 +207,15 @@ and checks its database aggregation. A typed empty input is checked separately.
 The same ABAP call and SQLScript body completed natively on HANA before an
 unrelated later HANA unit exposed a pre-existing binary/text mismatch.
 
+The sixth proof composes two unchanged AMDP methods. The parent contains a
+real SQLScript `CALL`; the portable runtime resolves its child from the
+precompiled manifest, hands it the already-frozen typed relation and receives
+a relation plan back. A captured parent scalar stays captured across this
+boundary. The complete parent/child graph reaches DuckDB as one final database
+statement, while a bounded call depth refuses recursion before any statement
+is sent. The generated destination also deploys native HANA dependencies
+before their callers, so the same ABAP Unit completed on both paths.
+
 That move required more than accepting `LIMIT :value`. Source aliases now
 survive in typed IR, query scopes distinguish unknown and ambiguous columns,
 and correlated subqueries can refer to an outer source without collapsing
@@ -300,25 +309,26 @@ fuzzy-search compatibility claim.
 - direct-source `search_cells`: native and portable HANA agree on exact,
   substring, unrelated, NULL-label, empty-query and NULL-query cases; DuckDB
   returns the same fixed integer scores and mapping values in one statement;
-- full SQLScript/AMDP regression: 407 passing tests and 17 explicit live
+- full SQLScript/AMDP regression: 411 passing tests and 17 explicit live
   integration cases pending in the ordinary offline run;
 - live HANA focused suite: 15 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
-- production bridge: full ABAP Unit is green on DuckDB, including `SQUARES`
-  and Open-SQL-table → portable-AMDP aggregation; the corresponding two AMDP
-  tests are green through native HANA in an isolated schema. The whole HANA
+- production bridge: full ABAP Unit is green on DuckDB, including `SQUARES`,
+  Open-SQL-table → portable-AMDP aggregation and one nested table procedure;
+  all four AMDP tests are green through native HANA in an isolated schema.
+  The whole HANA
   unit run remains red later in `ZCL_OSD_TRAN_SESSION`, where an xstring is
   returned as hex text (`7B22...`) instead of JSON. That is recorded as an
   unrelated existing backend boundary, not hidden as an AMDP failure.
 
 ## Next coverage order
 
-1. Continue general composition: nested AMDP calls and a catalogue read that
-   proves visibility of an uncommitted ABAP SQL fixture in the shared caller
-   transaction. The ordinary ABAP Unit entry path and typed table boundary
-   are now proven.
+1. Continue general composition with a catalogue read that proves visibility
+   of an uncommitted ABAP SQL fixture in the shared caller transaction. The
+   ordinary ABAP Unit entry path, typed table boundary and first nested AMDP
+   call are now proven.
 2. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
    separately measured capabilities.
 
