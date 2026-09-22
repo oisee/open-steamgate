@@ -230,25 +230,46 @@ export function terminalSummary(report) {
   return lines.join("\n");
 }
 
+export function writeDemoArtifacts(report, outFile) {
+  const out = resolve(outFile);
+  const story = join(dirname(out), "story.html");
+  if (out === story) throw new Error("--out must not resolve to the companion story.html");
+  mkdirSync(dirname(out), {recursive: true});
+  writeFileSync(out, renderDemoHtml(report));
+  copyFileSync(join(root, "docs/portable-amdp-report.html"), story);
+  return {out, story};
+}
+
+export function resolveDemoRequest(requestUrl, artifacts) {
+  const pathname = new URL(requestUrl ?? "/", "http://127.0.0.1").pathname;
+  if (pathname === "/" || pathname === "/index.html") return {status: 200, file: artifacts.out};
+  if (pathname === "/story.html") return {status: 200, file: artifacts.story};
+  return {status: 404};
+}
+
 async function main(argv) {
   const report = await buildDemoReport();
   const json = argv.includes("--json");
   const outAt = argv.indexOf("--out");
-  const out = outAt >= 0 ? resolve(argv[outAt + 1]) : join(root, ".local/amdp-demo/index.html");
-  mkdirSync(dirname(out), {recursive: true});
-  writeFileSync(out, renderDemoHtml(report));
-  const story = join(dirname(out), "story.html");
-  copyFileSync(join(root, "docs/portable-amdp-report.html"), story);
+  const outFile = outAt >= 0 ? argv[outAt + 1] : join(root, ".local/amdp-demo/index.html");
+  if (!outFile) throw new Error("--out needs a file path");
+  const artifacts = writeDemoArtifacts(report, outFile);
   console.log(json ? JSON.stringify(report, null, 2) : terminalSummary(report));
-  console.log(`\nLive ledger: ${out}`);
-  console.log(`Story: ${story}`);
+  console.log(`\nLive ledger: ${artifacts.out}`);
+  console.log(`Story: ${artifacts.story}`);
   const serveAt = argv.indexOf("--serve");
   if (serveAt >= 0) {
     const port = Number(argv[serveAt + 1] ?? 3037);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("--serve needs a TCP port");
     createServer((request, response) => {
+      const resolved = resolveDemoRequest(request.url, artifacts);
+      if (resolved.status === 404) {
+        response.writeHead(404, {"content-type": "text/plain; charset=utf-8", "cache-control": "no-store"});
+        response.end("Not found\n");
+        return;
+      }
       response.writeHead(200, {"content-type": "text/html; charset=utf-8", "cache-control": "no-store"});
-      response.end(readFileSync(request.url === "/story.html" ? story : out));
+      response.end(readFileSync(resolved.file));
     }).listen(port, "0.0.0.0", () => console.log(`Serving http://0.0.0.0:${port}/`));
   }
 }

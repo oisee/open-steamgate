@@ -1,6 +1,14 @@
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
-import {buildDemoReport, renderDemoHtml, terminalSummary} from "../tools/amdp-demo.mjs";
+import {mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {
+  buildDemoReport,
+  renderDemoHtml,
+  resolveDemoRequest,
+  terminalSummary,
+  writeDemoArtifacts,
+} from "../tools/amdp-demo.mjs";
 
 describe("the Portable AMDP progress demo", function () {
   this.timeout(30000);
@@ -48,5 +56,19 @@ describe("the Portable AMDP progress demo", function () {
     expect(story).to.include("16 / 364");
     expect(story).to.include("npm run amdp:demo");
     expect(story).to.not.match(/<script\b/i);
+  });
+
+  it("writes non-colliding artifacts and refuses unknown routes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "osg-amdp-demo-"));
+    try {
+      const artifacts = writeDemoArtifacts(await buildDemoReport(), join(directory, "index.html"));
+      expect(readFileSync(artifacts.out, "utf8")).to.include("Portable AMDP progress");
+      expect(readFileSync(artifacts.story, "utf8")).to.include("AMDP без");
+      expect(resolveDemoRequest("/story.html?fresh=1", artifacts)).to.deep.equal({status: 200, file: artifacts.story});
+      expect(resolveDemoRequest("/missing.md", artifacts)).to.deep.equal({status: 404});
+      expect(() => writeDemoArtifacts({}, join(directory, "story.html"))).to.throw("must not resolve");
+    } finally {
+      rmSync(directory, {recursive: true, force: true});
+    }
   });
 });
