@@ -111,8 +111,8 @@ export function createDiagTapeServer({
 }
 
 export async function listenDiagTape({port, host = "0.0.0.0", logger} = {}) {
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-    throw new RangeError(`DIAG port must be an integer from 1 to 65535, got ${port}`);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65535) {
+    throw new RangeError(`DIAG port must be an integer from 0 to 65535, got ${port}`);
   }
   const server = createDiagTapeServer({logger});
   await new Promise((resolve, reject) => {

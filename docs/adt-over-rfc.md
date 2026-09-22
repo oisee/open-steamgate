@@ -11,11 +11,12 @@ open-steamgate answers the first kind directly (`docs/adt-surface.md`). This
 document is the second kind: the protocol facts that let a bridge accept the
 RFC conversation, unwrap the HTTP exchange inside it, and answer.
 
-The bridge itself is Go and lives in the sibling
-[open-rfc-go](https://github.com/oisee/open-rfc-go) (`cmd/adt-rfc-bridge`),
-because that is where the NI / RFC / CPIC transport already was. Everything
-below is protocol, not code, and was measured against a developer sandbox
-through a passive tap. No captures are in this repository and none should be.
+The shipping bridge is the MIT JavaScript implementation under
+`tools/protocols/`. The earlier Go implementation in the sibling
+[open-rfc-go](https://github.com/oisee/open-rfc-go) remains a test oracle, not
+a runtime dependency. Everything below is protocol, and was measured against
+a developer sandbox through a passive tap. No captures are in this repository
+and none should be.
 
 ---
 

@@ -47,6 +47,7 @@ services:
       INSTANCE: "${INSTANCE:-17}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: hana
       HANA_HOST: hxe
       HANA_PORT: "39017"

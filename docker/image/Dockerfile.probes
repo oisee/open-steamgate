@@ -2,8 +2,8 @@
 # Test clients only. This image is never published as the OSD runtime.
 FROM node:24-bookworm AS sources
 COPY docker/image/sources.json /sources.json
-COPY docker/image/protocol-sources.mjs /fetch.mjs
-RUN node /fetch.mjs && node /fetch.mjs --clients
+COPY docker/image/probe-sources.mjs /fetch.mjs
+RUN node /fetch.mjs --probes && node /fetch.mjs --clients
 
 FROM golang:1.26-bookworm AS clients
 COPY --from=sources /src /src

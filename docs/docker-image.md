@@ -87,17 +87,17 @@ their `OSD_TAG` set to a newer immutable tag.
 The older `open-steamgate-protocols` GHCR package remains a historical
 artifact; these stacks neither pull it nor update it.
 
-Library and protocol revisions are in `docker/image/sources.json`.
-Node/Go/Debian base tags and the transpiler's npm install can resolve newer
+Library and test-client revisions are in `docker/image/sources.json`.
+Node/Debian base tags and the transpiler's npm install can resolve newer
 patches; immutable published image digests, rather than a promise of
 bit-identical rebuilds, identify deployed artifacts. This first draft keeps
 the JavaScript tooling that ADT needs for parsing and activation; it is not
 yet a size-optimized runtime. There are no OS compilers or git in the final
 OSD stage, and no build happens during normal startup.
 
-The image's `/opt/osd/image-licenses.json` and `/opt/protocols/licenses.json`
-record source pins, installed npm/Go licenses, review blockers and explicit
-assumptions; original library licenses remain beside the library files. The
+The image's `/opt/osd/image-licenses.json` records source pins, installed npm
+licenses, review blockers and explicit assumptions; original library licenses
+remain beside the library files. The
 repository owner authorized a temporary
 MIT assumption for the pinned `oisee/open-abap-odata` and
 `oisee/open-abap-gui` forks on 2026-09-20. Their original `LICENSE` files still

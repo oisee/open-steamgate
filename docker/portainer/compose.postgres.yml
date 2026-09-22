@@ -26,6 +26,7 @@ services:
       INSTANCE: "${INSTANCE:-19}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: postgres
       PGHOST: postgres
       PGPORT: "5432"

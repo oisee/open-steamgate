@@ -5,7 +5,7 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$here"
 instance=${INSTANCE:-11}
 case "$instance" in [0-9][0-9]) ;; *) echo 'INSTANCE must be two digits' >&2; exit 2;; esac
-decimal=${instance#0}
+export INSTANCE="$instance"
 export OSD_ROOT="$here"
 export OSD_PACKS="$here/packs"
 export STG_DB=file
@@ -33,12 +33,12 @@ ready=0
 count=0
 while [ "$count" -lt 120 ]; do
   if ! kill -0 "$osd_pid" 2>/dev/null; then echo 'OSD exited before ready' >&2; exit 1; fi
-  if curl -fsS "http://127.0.0.1:$STG_PORT/sap/bc/adt/core/http/build" 2>/dev/null | grep -Eq '"serving":"[^"]+"'; then ready=1; break; fi
+  if ./osd ready; then ready=1; break; fi
   count=$((count + 1))
   sleep 1
 done
 [ "$ready" -eq 1 ] || { echo 'OSD did not become ready in 120 seconds' >&2; exit 1; }
-./osd-up -instance "$decimal" -attach "http://127.0.0.1:$STG_PORT" -stub tape &
+./osd protocols &
 bridge_pid=$!
 echo "OSD on http://127.0.0.1:$STG_PORT/; DIAG 32$instance; RFC 33$instance; SQLite $STG_DB_PATH"
 while kill -0 "$osd_pid" 2>/dev/null && kill -0 "$bridge_pid" 2>/dev/null; do sleep 2; done

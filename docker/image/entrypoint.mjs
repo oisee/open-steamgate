@@ -51,10 +51,11 @@ osd.on("exit", (code, signal) => {
 });
 if (env.STG_PROTOCOLS !== "0") {
   let ready = false;
+  const localHttp = `http://127.0.0.1:${env.STG_PORT ?? 3030}`;
   for (let attempt = 0; attempt < 300 && !stopping; attempt++) {
     if (osd.exitCode !== null || osd.signalCode !== null) break;
     try {
-      const response = await fetch("http://127.0.0.1:3030/sap/bc/adt/core/http/build", {signal: AbortSignal.timeout(3000)});
+      const response = await fetch(`${localHttp}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(3000)});
       if (response.ok && (await response.json()).system?.serving) { ready = true; break; }
     } catch { /* startup still in progress */ }
     await delay(2000);
@@ -65,17 +66,16 @@ if (env.STG_PROTOCOLS !== "0") {
     stop("SIGTERM");
   }
   if (ready && !stopping) {
-    for (const script of ["tools/protocols/diag-server.mjs", "tools/protocols/rfc-server.mjs"]) {
-      const child = spawn(process.execPath, [script], {stdio: "inherit", env});
-      protocols.push(child);
-      child.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
-      child.on("exit", (code, signal) => {
+    const script = "tools/protocols/server.mjs";
+    const child = spawn(process.execPath, [script], {stdio: "inherit", env});
+    protocols.push(child);
+    child.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
+    child.on("exit", (code, signal) => {
       if (!stopping) {
         console.error(`${script} exited (${signal ?? code})`);
         process.exitCode = code || 1;
         stop("SIGTERM");
       }
-      });
-    }
+    });
   }
 }

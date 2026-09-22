@@ -8,6 +8,7 @@ services:
       INSTANCE: "${INSTANCE:-11}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: file
       TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
     ports:

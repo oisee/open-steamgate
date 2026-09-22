@@ -13,9 +13,7 @@
   "clients": [
     {"folder": "sap-tui", "repo": "oisee/sap-tui", "ref": "fbea19a611c8218aa7a10824dd5b12845d7db35a"}
   ],
-  "protocols": [
-    {"folder": "open-rfc-go", "repo": "oisee/open-rfc-go", "ref": "274c0c912ddb93ebbf07b2b5768bbdf97d4104cf"},
-    {"folder": "vsp", "repo": "oisee/vibing-steampunk", "ref": "9886d2727f47506368b0a3c2f1c1766f1200f747"},
-    {"folder": "open-diag-go", "repo": "oisee/open-diag-go", "ref": "dd36ebe2d1b4c4fe3c9d61c6468cc44981b20e7b"}
+  "probeSources": [
+    {"folder": "open-rfc-go", "repo": "oisee/open-rfc-go", "ref": "274c0c912ddb93ebbf07b2b5768bbdf97d4104cf"}
   ]
 }

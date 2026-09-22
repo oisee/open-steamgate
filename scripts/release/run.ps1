@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $instance = if ($env:INSTANCE) { $env:INSTANCE } else { '11' }
 if ($instance -notmatch '^\d{2}$') { throw 'INSTANCE must be two digits' }
+$env:INSTANCE = $instance
 $port = if ($env:STG_PORT) { $env:STG_PORT } else { "80$instance" }
 $dataDir = if ($env:OSD_DATA_DIR) { $env:OSD_DATA_DIR } else { Join-Path $env:LOCALAPPDATA 'open-steamgate' }
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
@@ -26,7 +27,7 @@ try {
     } catch { Start-Sleep -Seconds 1 }
   }
   if (-not $ready) { throw 'OSD did not become ready in 120 seconds' }
-  $bridge = Start-Process -FilePath (Join-Path $PSScriptRoot 'osd-up.exe') -ArgumentList @('-instance', [string][int]$instance, '-attach', "http://127.0.0.1:$port", '-stub', 'tape') -NoNewWindow -PassThru
+  $bridge = Start-Process -FilePath (Join-Path $PSScriptRoot 'osd.exe') -ArgumentList 'protocols' -NoNewWindow -PassThru
   Write-Host "OSD on http://127.0.0.1:$port/; DIAG 32$instance; RFC 33$instance; SQLite $env:STG_DB_PATH"
   while (-not $osd.HasExited -and -not $bridge.HasExited) { Start-Sleep -Seconds 2 }
   if ($bridge.HasExited -and -not $osd.HasExited) { throw 'DIAG/RFC bridge exited' }

@@ -5,17 +5,16 @@
 ## Goal
 
 Remove the architecture-specific Go protocol sidecar from the OSD runtime.
-One Node.js/Bun process should serve HTTP, HTTPS, DIAG on 32nn and the ADT RFC
-bridge on 33nn. The implementation in this repository is MIT-licensed and
+One Node.js/Bun distribution should serve HTTP, HTTPS, DIAG on 32nn and the ADT
+RFC bridge on 33nn without an architecture-specific sidecar. The implementation in this repository is MIT-licensed and
 uses no SAP SDK, proprietary library or redistributed SAP server component.
 
 The first RFC profile is intentionally the Eclipse/ADT subset already used by
-OSD:
+OSD (three function modules):
 
 - `SADT_REST_RFC_ENDPOINT`;
 - `RFC_GET_FUNCTION_INTERFACE`;
 - `DDIF_FIELDINFO_GET`;
-- `RFC_GET_STRUCTURE_DEFINITION`.
 
 The dispatcher is a registry so later function modules can be added without
 changing NI, CPIC or RFC record handling. The first merge does not claim to be
@@ -75,12 +74,12 @@ and must pass the repository leak scanner.
    `STG_ADT_CLIENT` and `STG_ADT_LANGUAGE` identify the bridge to HTTP/ADT.
    Caller authorization and cookies never cross that boundary. Modifying calls
    obtain, retain and rotate the backend CSRF token and retry once when the
-   backend reports a stale token. The three metadata handlers required by a
-   fresh stock Eclipse workspace remain the next slice; Eclipse acceptance
-   follows them.
-5. **Runtime integration:** OSD opens 32nn/33nn itself; Docker and Bun stop
-   requiring the Go sidecar, while an explicit fallback remains for one
-   release.
+   backend reports a stale token. On 2026-09-22 a fresh stock Eclipse workspace
+   accepted the generated function and nested DDIC metadata, then used the JS
+   bridge for discovery, repository trees, source reads, data preview and
+   check runs.
+5. **Runtime integration:** one built-in protocol host opens 32nn/33nn. Docker
+   and Bun no longer build, ship or start the Go sidecar.
 6. **JS SAP-TUI:** client parser, screen model and ANSI renderer are ported
    after the runtime no longer depends on Go.
 

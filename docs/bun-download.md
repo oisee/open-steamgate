@@ -1,16 +1,17 @@
 # Bun SQLite download bundles (private test draft)
 
-This draft packages one Bun executable (`osd`/`osd.exe`), the Go DIAG/RFC bridge
-(`osd-up`/`osd-up.exe`), a prebuilt OSD generation and the LSD, ZO4D and
+This draft packages one Bun executable (`osd`/`osd.exe`) with the built-in MIT
+JavaScript DIAG/RFC bridge, a prebuilt OSD generation and the LSD, ZO4D and
 Mini-Zork packs. No Node, Go, Bun or Docker installation is needed to run it.
-Extract the archive once; `run.sh` or `run.ps1` starts both executables. The
-launcher does not self-extract the archive. It keeps SQLite data outside the
+Extract the archive once; `run.sh` or `run.ps1` starts the runtime and its
+protocol mode from the same executable. The launcher does not self-extract
+the archive. It keeps SQLite data outside the
 extracted tree so replacing the tree does not delete the database.
 
 The four targets are Linux x86-64 baseline, Linux arm64, Windows x64 baseline,
-and macOS arm64. From a prepared checkout, one command verifies/pins the Go
-sources, runs the ABAP build and unit tests, builds all eight executables,
-assembles four archives, checks SHA-256, and smoke-tests the host's native
+and macOS arm64. From a prepared checkout, one command runs the ABAP build and
+unit tests, builds four executables, assembles four archives, checks SHA-256,
+and smoke-tests the host's native
 Unix bundle (including an OData write across restart):
 
 ```sh
@@ -35,5 +36,5 @@ Private-test status is intentional. The [Z-Machine Standards Document](https://w
 describes Mini-Zork as public domain, but this is not the MIT grant for the
 full Zork I–III source. Complete transitive dependency notices and binary
 provenance need review before a public GitHub release. The archives carry
-`release.json`, SHA-256 checksum files, the project license, and direct
-protocol-source license notices. The macOS binary is not signed or notarized.
+`release.json`, SHA-256 checksum files and the project license. The macOS
+binary is not signed or notarized.

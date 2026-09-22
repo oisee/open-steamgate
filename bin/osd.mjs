@@ -7,6 +7,8 @@
 //   osd fetch         the folders the packs declare as sources
 //   osd gen <tool>    one generator, as the builder starts it
 //   osd unit ...      a detached ABAP Unit run, as the façade starts it
+//   osd protocols     built-in DIAG 32nn and RFC-to-ADT 33nn listeners
+//   osd ready         one-shot readiness check for launchers
 //
 // Two things a binary has to do that a checkout gets for free. First, code
 // generated after the binary was built imports "@abaplint/runtime" by name
@@ -123,6 +125,23 @@ switch (mode) {
     process.exit(await main(rest));
     break;
   }
+  case "protocols": {
+    process.argv = [process.argv[0], "osd-protocols", ...rest];
+    const {main} = await import("../tools/protocols/server.mjs");
+    await main();
+    break;
+  }
+  case "ready": {
+    try {
+      const port = process.env.STG_PORT ?? "3030";
+      const response = await fetch(`http://127.0.0.1:${port}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(2000)});
+      const body = response.ok ? await response.json() : undefined;
+      process.exit(body?.system?.serving ? 0 : 1);
+    } catch {
+      process.exit(1);
+    }
+    break;
+  }
   case "doctor": {
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
@@ -141,6 +160,6 @@ switch (mode) {
     break;
   }
   default:
-    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, doctor`);
+    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, protocols, ready, doctor`);
     process.exit(2);
 }

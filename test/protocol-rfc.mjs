@@ -17,6 +17,7 @@ import {createRfcAdtServer} from "../tools/protocols/rfc-server.mjs";
 import {encodeNIFrame, NIFrameDecoder} from "../tools/protocols/ni.mjs";
 import {bxmlPayload, decodeBxml, encodeAdtBxmlResponse, encodeBxml, parseAdtBxmlRequest} from "../tools/protocols/bxml.mjs";
 import {fieldInfoResponse} from "../tools/protocols/rfc-metadata.mjs";
+import {closeProtocols, listenProtocols} from "../tools/protocols/server.mjs";
 
 function cutRequest(xml, functionName = "SADT_REST_RFC_ENDPOINT") {
   const fields = [
@@ -125,6 +126,18 @@ function responseXml(frame) {
 }
 
 describe("the built-in MIT RFC-to-ADT bridge", () => {
+  it("starts DIAG and RFC together without an external sidecar", async () => {
+    const servers = await listenProtocols({INSTANCE: "11", STG_DIAG_PORT: "0", STG_RFC_PORT: "0", STG_PORT: "3030"});
+    expect(servers.diag.address().port).to.be.greaterThan(0);
+    expect(servers.rfc.address().port).to.be.greaterThan(0);
+    const held = connect(servers.diag.address().port, "127.0.0.1");
+    await new Promise((resolve, reject) => held.once("connect", resolve).once("error", reject));
+    const heldClosed = new Promise((resolve) => held.once("close", resolve));
+    await closeProtocols(servers, {graceMs: 10});
+    await heldClosed;
+    expect(held.destroyed).to.equal(true);
+  });
+
   it("closes SADT DDIC metadata over IHTTPNVP_TAB when ALL_TYPES is requested", () => {
     const cut = fieldInfoResponse({
       requestedOutputs: ["DDOBJTYPE"],
