@@ -215,8 +215,14 @@ sap.ui.define([
         var storageFact = facts.find(function (fact) { return fact.Section === "Database" && fact.Name === "Storage"; });
         var backend = engineFact ? String(engineFact.Value) : "unknown backend";
         state.setProperty("/database", backend + (storageFact ? " · " + storageFact.Value : ""));
-        state.setProperty("/amdpEnabled", backend.toLowerCase() === "duckdb");
+        var portable = backend.toLowerCase() === "duckdb";
+        state.setProperty("/amdpEnabled", portable);
         state.setProperty("/hanaEnabled", backend.toUpperCase() === "HDB");
+        // On a DuckDB deployment, show the engine this demo exists to prove.
+        // Do not switch beneath someone who has already chosen a query/engine.
+        if (portable && !state.getProperty("/queryId") && state.getProperty("/engine") === "ANYDB") {
+          state.setProperty("/engine", "AMDP");
+        }
       }).catch(function () {
         state.setProperty("/database", "unknown backend");
         state.setProperty("/amdpEnabled", false);
