@@ -89,6 +89,14 @@
         "/src/exceptions/**",
         "/src/internal/**"
       ]
+    },
+    {
+      "url": "https://github.com/sbcgua/ajson",
+      "folder": "/.local/lars/ajson",
+      "ref": "e5e0fd043f5813ef5a271fcba4b327aa944c3224",
+      "files": [
+        "/src/core/**"
+      ]
     }
   ],
   "options": {

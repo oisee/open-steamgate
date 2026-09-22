@@ -3,7 +3,7 @@ import {lex} from "../tools/sqlscript/lexer.mjs";
 import {parse} from "../tools/sqlscript/combi.mjs";
 import {Body} from "../tools/sqlscript/expressions/index.mjs";
 import {toIr} from "../tools/sqlscript/to-ir.mjs";
-import {lower} from "../tools/sqlscript-lower.mjs";
+import {lower, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, adversarialRows, tableShapesPerTable, effects} from "../tools/sqlscript-ir.mjs";
 
 // **Every refusal has to be a refusal, not a crash.**
@@ -140,9 +140,17 @@ describe("the three clauses are carried now, and what is still refused is named"
 describe("a set operation the IR cannot express is refused, not turned into another one", () => {
   const plan = (body) => toIr(parse(new Body(), lex(body)), {catalogue: {}}).rel;
 
-  it("EXCEPT is refused, because lowering it as UNION returns the OPPOSITE set", () => {
-    expect(() => plan("RETURN SELECT k FROM src EXCEPT SELECT k FROM other;"))
-      .to.throw(/EXCEPT is parsed and the IR has only UNION/);
+  it("EXCEPT has its own IR and never lowers as UNION", () => {
+    const rel = plan("RETURN SELECT k FROM src EXCEPT SELECT k FROM other;");
+    expect(rel.rel).to.equal("except");
+    expect(lower(rel, "hana").sql).to.equal('SELECT "K" AS "K" FROM "SRC" EXCEPT SELECT "K" AS "K" FROM "OTHER"');
+    expect(() => lower(rel, "sqlite")).to.throw(Refused, /no measured rendering on sqlite/);
+    for (const body of [
+      "RETURN SELECT k FROM src EXCEPT SELECT k FROM other EXCEPT SELECT k FROM third;",
+      "RETURN SELECT k FROM src UNION SELECT k FROM other EXCEPT SELECT k FROM third;",
+    ]) {
+      expect(() => plan(body)).to.throw(/mixed or multi-branch EXCEPT/);
+    }
   });
 
   it("INTERSECT likewise", () => {

@@ -24,8 +24,10 @@
 /** ABAP-ish type letters, because that is what the caller and the seam speak */
 export const T = {
   int: {abap: "I"},
+  int8: {abap: "INT8"},
   dec: (len, dec) => ({abap: "P", len, dec}),
   char: (len) => ({abap: "C", len}),
+  bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
   str: {abap: "STRING"},
   date: {abap: "D"},
   bool: {abap: "BOOL"},
@@ -33,10 +35,16 @@ export const T = {
 
 // ---------------------------------------------------------------- expressions
 
-export const col = (name, type) => ({node: "col", name, type});
+export const col = (name, type, source) => source === undefined
+  ? ({node: "col", name, type}) : ({node: "col", name, type, source});
 export const lit = (value, type) => ({node: "lit", value, type});
 /** a host value: bound by the driver, never rendered into the text */
 export const param = (name, type, isNull = false) => ({node: "param", name, type, isNull});
+/** A value owned by the AMDP execution context rather than by the database
+ *  connection chosen to execute a relational plan. It must be captured into
+ *  a bound parameter before lowering; no backend is allowed to substitute
+ *  its own user, schema, or session setting. */
+export const sessionValue = (kind, name, type = T.str) => ({node: "session", kind, name, type});
 
 /**
  * An arithmetic or comparison node. `type` is the type HANA gives the RESULT,
@@ -78,6 +86,9 @@ export const caseWhen = (whens, otherwise, type) =>
 // ------------------------------------------------------------------ relations
 
 export const scan = (table) => ({rel: "scan", table});
+/** A source alias is semantic: qualified columns and correlated subqueries
+ * must keep the author's scope name until SQL rendering. */
+export const alias = (input, name) => ({rel: "alias", input, name});
 /**
  * `FROM :lt` - a reference to a table variable, as the PARSER sees it.
  *
@@ -95,7 +106,7 @@ export const scan = (table) => ({rel: "scan", table});
  * and shadowing a real table name is ordinary. Losing the colon here would
  * read one and mean the other.
  */
-export const varRef = (name) => ({rel: "var", name});
+export const varRef = (name, schema) => schema === undefined ? ({rel: "var", name}) : ({rel: "var", name, schema});
 /** a relation the seam already knows by name (a barrier materialised it) */
 export const ref = (handle) => ({rel: "ref", handle});
 
@@ -114,9 +125,11 @@ export const filter = (input, pred) => ({rel: "filter", input, pred});
 export const project = (input, items) => ({rel: "project", input, items});
 export const join = (left, right, on, kind = "inner") => ({rel: "join", left, right, on, kind});
 export const union = (inputs, all = true) => ({rel: "union", inputs, all});
+export const except = (left, right) => ({rel: "except", inputs: [left, right]});
 export const aggregate = (input, groupBy, aggs) => ({rel: "aggregate", input, groupBy, aggs});
 export const order = (input, keys) => ({rel: "order", input, keys});
-export const limit = (input, n) => ({rel: "limit", input, n});
+export const limit = (input, n) => ({rel: "limit", input,
+  n: typeof n === "number" ? lit(n, T.int) : n});
 
 /**
  * The effects of a relational subtree, which is what decides whether a chain
@@ -164,6 +177,7 @@ export function effects(rel) {
     for (const item of r.items ?? []) walkExpr(item.expr);
     for (const agg of r.aggs ?? []) walkExpr(agg.expr);
     walkExpr(r.on);
+    walkExpr(r.n);
     for (const key of ["input", "left", "right"]) walk(r[key]);
     for (const one of r.inputs ?? []) walk(one);
   };
@@ -221,11 +235,17 @@ export function schemaOf(rel, catalogue = {}) {
   const need = (r) => schemaOf(r, catalogue);
   switch (rel.rel) {
     case "scan": {
+      // DUMMY is the engine's one-row, zero-domain source. Its projection
+      // defines every output column, so no dictionary entry is required.
+      if (String(rel.table).toUpperCase() === "DUMMY") return {};
       const table = catalogue[rel.table] ?? catalogue[rel.table?.toUpperCase?.()];
       if (table === undefined) throw new Error(`schemaOf: the catalogue does not describe ${rel.table}`);
       return {...table};
     }
+    case "alias":
+      return need(rel.input);
     case "var":
+      if (rel.schema !== undefined) return {...rel.schema};
       throw new Error(`schemaOf: :${rel.name} has no schema until the binder resolves it`);
     case "ref":
       // a materialised relation: its schema is the plan's that made it, and
@@ -245,16 +265,42 @@ export function schemaOf(rel, catalogue = {}) {
       return {...left, ...right};
     }
     case "union": {
+      if (rel.inputs.some((one) => one?.rel === "except" || (one?.rel === "union" && one.all !== rel.all))) {
+        throw new Error("schemaOf: nested set operations are outside the measured subset");
+      }
       const all = rel.inputs.map(need);
       const first = Object.keys(all[0]);
+      const merged = {...all[0]};
       for (const one of all.slice(1)) {
         // SQLScript lets a UNION of mismatched shapes through only by
         // position; refusing here is cheaper than a wrong column later
         if (JSON.stringify(Object.keys(one)) !== JSON.stringify(first)) {
           throw new Error("schemaOf: the branches of a UNION do not have the same columns");
         }
+        for (const name of first) {
+          const left = merged[name], right = one[name];
+          if (JSON.stringify(left) === JSON.stringify(right)) continue;
+          const text = (type) => type?.abap === "C" || type?.abap === "STRING";
+          if (text(left) && text(right)) {
+            merged[name] = left.abap === "STRING" || right.abap === "STRING"
+              ? T.str : T.char(Math.max(Number(left.len ?? 0), Number(right.len ?? 0)));
+            continue;
+          }
+          throw new Error(`schemaOf: UNION column ${name} differs in type`);
+        }
       }
-      return {...all[0]};
+      return merged;
+    }
+    case "except": {
+      if (rel.inputs?.length !== 2) throw new Error("schemaOf: EXCEPT requires exactly two branches");
+      if (rel.inputs.some((one) => one?.rel === "union" || one?.rel === "except")) {
+        throw new Error("schemaOf: nested set operations are outside the measured subset");
+      }
+      const left = need(rel.inputs[0]), right = need(rel.inputs[1]);
+      if (JSON.stringify(left) !== JSON.stringify(right)) {
+        throw new Error("schemaOf: EXCEPT branches must have identical columns and measured types");
+      }
+      return left;
     }
     case "aggregate": {
       const input = need(rel.input);
@@ -275,12 +321,18 @@ export function typeOfExpr(expr, schema = {}) {
   }
   switch (expr.node) {
     case "col": {
+      // Once the binder has resolved a qualified (or otherwise ambiguous)
+      // column it carries the authoritative type on the expression. Looking
+      // it up again in a flattened JOIN schema can select the other side's
+      // same-named column because object keys cannot represent both.
+      if (expr.type !== undefined) return expr.type;
       const type = schema[expr.name] ?? schema[expr.name?.toUpperCase?.()];
       if (type === undefined) throw new Error(`typeOfExpr: ${expr.name} is not in the input schema`);
       return type;
     }
     case "lit":
     case "param":
+    case "session":
       return expr.type;
     case "isnull":
     case "not":

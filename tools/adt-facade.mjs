@@ -29,8 +29,9 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
+import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -44,8 +45,13 @@ const xmlEscape = (s) => String(s)
 // the workspace file. Without it the filesystem synchronizer refuses to
 // create the editor part. The tag describes the representation, so properties
 // and source intentionally get different values and change with their body.
+const entityTag = (body) => createHash("sha256")
+  .update(Buffer.from(String(body))).digest("hex").slice(0, 32);
+const normalizedTag = (value) => String(value ?? "").trim()
+  .replace(/^W\//, "").replace(/^"|"$/g, "");
+
 const sendEntity = (req, res, body) => {
-  const tag = createHash("sha256").update(Buffer.from(String(body))).digest("hex").slice(0, 32);
+  const tag = entityTag(body);
   res.set("ETag", tag);
   const candidates = String(req.headers["if-none-match"] ?? "")
     .split(",").map((value) => value.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));
@@ -157,11 +163,12 @@ const COMPATIBILITY = {
   "COM.SAP.ADT.OO": ["classModelXmlSchemaConform", "classes", "interfaces",
     "interfacesModelXmlSchemaConform", "startUriAdaptationToMainResource"],
   "COM.SAP.ADT.PROGRAMS": ["includes", "includesXmlSchemaConform", "programs", "programsXmlSchemaConform"],
-  // treePath is deliberately absent: it promises repository/nodepath, which
-  // nothing here answers, and a client that believes the promise asks for it
-  // while expanding a package instead of falling back to nodestructure. The
-  // other three are kept because there is a resource behind each —
-  // nodestructure, informationsystem/search and typestructure.
+  // treePath is deliberately absent. repository/nodepath now resolves an
+  // object's package chain for test-result navigation, but advertising the
+  // feature also makes clients use it while expanding packages; that wider
+  // contract is not implemented and would bypass the working nodestructure
+  // fallback. The other three stay advertised because their full resources
+  // are present: nodestructure, informationsystem/search and typestructure.
   "COM.SAP.ADT.PROJECTEXPLORER": ["fullRepositoryTree", "repositoryQueryService", "typeMetaData"],
   "COM.SAP.ADT.RIS": ["ris", "search"],
   // The outline of a class or interface is gated here, not at the resource.
@@ -1122,6 +1129,117 @@ export function adtRouter(options = {}) {
     }));
   });
 
+  // The host checkout is the Workbench's history layer. This endpoint is
+  // intentionally read-only and resolves type/name through ObjectStore
+  // before Git sees a path. It is OSG-specific, so it is not advertised as
+  // an ADT capability that a standard client might mistake for SAP ADT.
+  router.get(`${BASE}/core/http/git/object`, (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    try {
+      const entry = store.read(type, name);
+      res.type("application/json; charset=utf-8").send(JSON.stringify(
+        gitObjectState(store.root, entry.file),
+      ));
+    } catch (error) {
+      if (error instanceof NotFound) {
+        refuse(res, 404, "ExceptionResourceNotFound", error.message);
+      } else {
+        refuse(res, 500, "ExceptionGitHistory", error.message ?? String(error));
+      }
+    }
+  });
+
+  router.get(`${BASE}/core/http/git/object/revision`, (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    try {
+      const entry = store.read(type, name);
+      const source = gitObjectRevision(store.root, entry.file,
+        String(req.query.revision ?? ""));
+      res.status(200).type("text/plain; charset=utf-8").send(source);
+    } catch (error) {
+      if (error instanceof NotFound) {
+        refuse(res, 404, "ExceptionResourceNotFound", error.message);
+      } else {
+        refuse(res, 400, "ExceptionGitRevision", error.message ?? String(error));
+      }
+    }
+  });
+
+  // Object-scoped ABAP Unit for the Fiori Workbench. This is deliberately a
+  // thin JSON view over the same UnitRun used by the ADT endpoint below: the
+  // UI gets discovery without executing anything, and a run still happens
+  // in the isolated child database rather than in the serving process.
+  const selectedUnitPlan = (plan, testClass, method) => {
+    const selectedClass = testClass === undefined ? undefined
+      : plan.classes.find((item) => item.name === testClass);
+    if (testClass !== undefined && selectedClass === undefined) {
+      const error = new Error(`test class ${testClass} does not belong to ${plan.object.name}`);
+      error.code = "NOT_FOUND";
+      throw error;
+    }
+    if (method !== undefined && selectedClass?.testMethods.some((item) => item.name === method) !== true) {
+      const error = new Error(`test method ${testClass}=>${method} does not belong to ${plan.object.name}`);
+      error.code = "NOT_FOUND";
+      throw error;
+    }
+    return {plan, testClass, method};
+  };
+
+  router.get(`${BASE}/core/http/unit/object`, async (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    if (!["CLAS", "PROG"].includes(type)) {
+      refuse(res, 400, "ExceptionInvalidRequest", `${type || "object"} cannot carry ABAP Unit tests here`);
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const plan = runner.classes(type, name);
+      res.type("application/json; charset=utf-8").send(JSON.stringify({
+        object: {type: plan.object.type, name: plan.object.name},
+        classes: plan.classes.map((testClass) => ({
+          name: testClass.name,
+          riskLevel: testClass.riskLevel,
+          durationCategory: testClass.durationCategory,
+          include: testClass.include,
+          line: testClass.line,
+          column: testClass.column,
+          methods: testClass.testMethods.map((method) => ({
+            name: method.name, line: method.line, column: method.column,
+          })),
+        })),
+      }));
+    } catch (error) {
+      refuse(res, error instanceof NotFound ? 404 : 500,
+        error instanceof NotFound ? "ExceptionResourceNotFound" : "ExceptionTestDiscoveryFailed",
+        error.message ?? String(error));
+    }
+  });
+
+  router.post(`${BASE}/core/http/unit/object/run`, async (req, res) => {
+    const type = String(req.query.type ?? "").split("/")[0].toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    const testClass = String(req.query.testClass ?? "").toUpperCase() || undefined;
+    const method = String(req.query.method ?? "").toUpperCase() || undefined;
+    if (!["CLAS", "PROG"].includes(type)) {
+      refuse(res, 400, "ExceptionInvalidRequest", `${type || "object"} cannot carry ABAP Unit tests here`);
+      return;
+    }
+    try {
+      const runner = await store.unit();
+      const plan = runner.classes(type, name);
+      const run = await runner.runDetached(type, name, selectedUnitPlan(plan, testClass, method));
+      res.type("application/json; charset=utf-8").send(JSON.stringify(run));
+    } catch (error) {
+      const missing = error instanceof NotFound || error?.code === "NOT_FOUND";
+      refuse(res, missing ? 404 : 500,
+        missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
+        error.message ?? String(error));
+    }
+  });
+
   // Ending a session. There is nothing to end — the session is a cookie and a
   // token — but a client that gets 404 here reports a failed logoff.
   router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
@@ -1516,6 +1634,20 @@ export function adtRouter(options = {}) {
           if (include !== "main") {
             store.read(type, req.params.name, include);
           }
+          // The handle proves this request belongs to the locking session; it
+          // does not exclude Git, a watcher, another session or another
+          // process from changing the file. Compare immediately beside the write: an earlier
+          // preflight GET leaves a race in which the newer source is lost.
+          const expected = req.headers["if-match"];
+          const current = store.read(type, req.params.name, include).source;
+          if (expected !== undefined && normalizedTag(expected) !== "*" &&
+              normalizedTag(expected) !== entityTag(current)) {
+            res.status(412).type("application/xml").send(exceptionDocument(
+              "ExceptionResourceIsModified",
+              "source changed since it was opened; reload before saving",
+            ));
+            return;
+          }
           store.write(type, req.params.name, body.toString("utf8"), include);
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
@@ -1524,7 +1656,7 @@ export function adtRouter(options = {}) {
           // entity tag for the source file" in the log and an editor that
           // showed nothing at all after the save had in fact succeeded.
           const stored = store.read(type, req.params.name, include).source;
-          res.set("ETag", createHash("sha256").update(Buffer.from(String(stored))).digest("hex").slice(0, 32));
+          res.set("ETag", entityTag(stored));
           res.status(200).type("text/plain").send("");
         });
       });
@@ -1696,6 +1828,7 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/activation`, async (req, res) => {
     const body = await rawBody(req);
     let named = [];
+    let checked = [];
     let published = false;
     answer(res, () => {
       named = objectReferencesIn(body, collections);
@@ -1703,8 +1836,27 @@ export function adtRouter(options = {}) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
       }
-      const results = named.map((o) => store.activate(o.type, o.name));
-      const failed = results.filter((r) => r.active === false);
+      // Workbench sends the entity tag of the exact source that passed its
+      // check. Refuse activation if Git or another editor replaced it in the
+      // meantime; otherwise a green Check could activate different bytes.
+      const expected = req.headers["if-match"];
+      if (expected !== undefined) {
+        if (named.length !== 1) {
+          res.status(400).type("application/xml").send(exceptionDocument(
+            "ExceptionInvalidRequest", "If-Match activation requires exactly one object reference"));
+          return;
+        }
+        const current = store.read(named[0].type, named[0].name).source;
+        if (normalizedTag(expected) !== "*" && normalizedTag(expected) !== entityTag(current)) {
+          res.status(412).type("application/xml").send(exceptionDocument(
+            "ExceptionResourceIsModified",
+            "source changed after it was checked; check and activate again",
+          ));
+          return;
+        }
+      }
+      checked = named.map((o) => store.activate(o.type, o.name));
+      const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
         // the object that did not activate, then whatever it broke: an
         // object with no issues of its own still belongs in the list,
@@ -1717,6 +1869,12 @@ export function adtRouter(options = {}) {
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
+        if (!store.completeActivations(checked)) {
+          res.status(200).type("application/xml").send(activationFailureDocument(
+            named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
+          ));
+          return;
+        }
         // A successful activation answers with its properties, not with
         // nothing: checkExecuted, activationExecuted and generationExecuted,
         // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
@@ -1738,6 +1896,12 @@ export function adtRouter(options = {}) {
         const why = result.error ?? result.transpile?.output ?? "the build after activation failed";
         res.status(200).type("application/xml").send(activationFailureDocument(
           named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).slice(-2000), severity: "E", line: 1, column: 1}]})),
+        ));
+        return;
+      }
+      if (!store.completeActivations(checked)) {
+        res.status(200).type("application/xml").send(activationFailureDocument(
+          named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));
         return;
       }
@@ -1775,6 +1939,25 @@ export function adtRouter(options = {}) {
     return `application/vnd.sap.adt.abapunit.testruns.${kind}.v${version}+xml`;
   };
 
+  // abap-adt-api follows every unit-test class and method with this request
+  // before it can publish the result into VS Code's Testing tree. OSD already
+  // puts an exact #start=line,column fragment in each navigationUri. Returning
+  // an empty, well-formed marker collection tells the client to keep that
+  // authoritative URI; a missing endpoint aborts the otherwise successful
+  // run and leaves the UI at 0/0.
+  router.post(`${BASE}/abapsource/occurencemarkers`, async (req, res) => {
+    await rawBody(req);
+    if (typeof req.query.uri !== "string" || req.query.uri === "") {
+      res.status(400).type("application/xml")
+        .send(exceptionDocument("ExceptionInvalidRequest", "uri is required"));
+      return;
+    }
+    res.status(200).type("application/xml; charset=utf-8").send(
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<occurrenceInfo xmlns="http://www.sap.com/adt/abapsource"><occurrences/></occurrenceInfo>',
+    );
+  });
+
   // The evaluation of a run: the same result for the objects named, which
   // the client asks for after the run to show the report and to navigate
   // from a result to its method (a4h-adt.jsonl:497). Its references carry
@@ -1800,13 +1983,31 @@ export function adtRouter(options = {}) {
   router.post(`${BASE}/abapunit/testruns`, async (req, res) => {
     const body = await rawBody(req);
     const named = objectReferencesIn(body, collections);
-    if (named.length === 0) {
-      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+    const references = [...body.toString("utf8").matchAll(
+      /<(?:[\w-]+:)?objectReference\b[^>]*\b(?:[\w-]+:)?uri="([^"]+)"/gi,
+    )].map((match) => match[1]);
+    if (named.length !== 1 || references.length !== 1) {
+      res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
+        references.length > 1 ? "exactly one object reference is supported" : "one object reference is required"));
       return;
     }
     try {
+      const fragmentText = references[0].includes("#")
+        ? references[0].slice(references[0].indexOf("#")) : "";
+      const fragment = /^#testclass=([^;"#]+)(?:;testmethod=([^;"#]+))?$/i.exec(fragmentText);
+      if (fragmentText !== "" && fragment === null) {
+        const error = new Error("invalid ABAP Unit testclass/testmethod selector");
+        error.code = "INVALID_REQUEST";
+        throw error;
+      }
+      const selected = fragment === null ? {} : {
+        testClass: decodeURIComponent(fragment[1]).toUpperCase(),
+        method: fragment[2] === undefined ? undefined : decodeURIComponent(fragment[2]).toUpperCase(),
+      };
       const runner = await store.unit();
-      const run = await runner.runDetached(named[0].type, named[0].name);
+      const plan = runner.classes(named[0].type, named[0].name);
+      const run = await runner.runDetached(named[0].type, named[0].name,
+        selectedUnitPlan(plan, selected.testClass, selected.method));
       // The document is the classic aunit:runResult either way; only its
       // name differs by client. Eclipse's ABAP Unit view has a handler for
       // abapunit.testruns.result (v1 and v2 in com.sap.adt.abapunit, no
@@ -1816,8 +2017,12 @@ export function adtRouter(options = {}) {
       res.status(200).type(unitResultType(req, "result"))
         .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
     } catch (e) {
-      res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
-        .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
+      const invalid = e instanceof URIError || e?.code === "INVALID_REQUEST";
+      const missing = e?.code === "NOT_FOUND";
+      res.status(invalid ? 400 : missing ? 404 : 500).type("application/xml")
+        .send(exceptionDocument(invalid ? "ExceptionInvalidRequest" :
+          missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
+        String(e?.message ?? e)));
     }
   });
 
@@ -1859,6 +2064,32 @@ export function adtRouter(options = {}) {
   });
 
   advertise("repository/nodestructure");
+  router.post(`${BASE}/repository/nodepath`, async (req, res) => {
+    await rawBody(req);
+    const uri = typeof req.query.uri === "string" ? req.query.uri : "";
+    const parsed = objectFromUri(uri.replace(/\/includes\/.*$/, ""), collections);
+    if (parsed === undefined || parsed.type === "DEVC") {
+      res.status(400).type("application/xml")
+        .send(exceptionDocument("ExceptionInvalidRequest", "an object uri is required"));
+      return;
+    }
+    const entry = store.find(parsed.type, parsed.name);
+    if (entry === undefined) {
+      res.status(404).type("application/xml")
+        .send(exceptionDocument("ExceptionResourceNotFound", `${parsed.type} ${parsed.name} does not exist`));
+      return;
+    }
+    const packages = (entry.packages ?? []).map((name) => ({
+      name,
+      type: ADT_TYPE.DEVC,
+      uri: `${BASE}/packages/${encodeURIComponent(name.toLowerCase())}`,
+    }));
+    const objectUri = uri.split(/[?#]/)[0].replace(/\/includes\/.*$/, "").replace(/\/source\/main$/, "");
+    res.status(200).type("application/xml; charset=utf-8").send(nodePathDocument([
+      ...packages,
+      {name: entry.name, type: ADT_TYPE[entry.type] ?? entry.type, uri: objectUri},
+    ]));
+  });
   router.post(`${BASE}/repository/nodestructure`, async (req, res) => {
     const body = await rawBody(req);
     answer(res, () => {
@@ -2135,7 +2366,7 @@ function facadeBuildStamp() {
   }
   const here = dirname(fileURLToPath(import.meta.url));
   const digest = createHash("sha256");
-  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs"]) {
+  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs", "osd-git-history.mjs"]) {
     try {
       digest.update(readFileSync(join(here, file)));
     } catch {

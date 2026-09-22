@@ -34,6 +34,7 @@ export function libraries(root = ".") {
   const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   return (config.libs ?? []).map((lib) => ({
     url: lib.url,
+    ref: lib.ref,
     folder: lib.folder,
     at: lib.folder === undefined || lib.folder === "" ? undefined : join(root, lib.folder.replace(/^\//, "")),
   }));
@@ -54,8 +55,14 @@ export function materialise(root = ".", say = () => {}) {
         + `either clone it by hand or add a url in abap_transpile.json`);
     }
     mkdirSync(dirname(lib.at), {recursive: true});
-    say(`osd-libs: ${lib.folder} <- ${lib.url}`);
-    execFileSync("git", ["clone", "--quiet", "--depth", "1", "--", lib.url, lib.at], {stdio: "pipe"});
+    say(`osd-libs: ${lib.folder} <- ${lib.url}${lib.ref ? ` @ ${lib.ref}` : ""}`);
+    if (lib.ref) {
+      execFileSync("git", ["clone", "--quiet", "--filter=blob:none", "--no-checkout", "--", lib.url, lib.at], {stdio: "pipe"});
+      execFileSync("git", ["-C", lib.at, "checkout", "--quiet", lib.ref], {stdio: "pipe"});
+    }
+    else {
+      execFileSync("git", ["clone", "--quiet", "--depth", "1", "--", lib.url, lib.at], {stdio: "pipe"});
+    }
     cloned.push(lib.folder);
   }
   return cloned;

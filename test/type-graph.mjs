@@ -1,6 +1,7 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {resolveType, typeGraph} from "../tools/osd-type-graph.mjs";
+import {ddicCatalogue} from "../tools/sqlscript-ddic-catalogue.mjs";
 
 // D.3, the signature → metadata graph. `/sap/bc/osd/rfc/functions/<NAME>`
 // answers a module's parameters with the **names** of their DDIC types, and a
@@ -58,6 +59,22 @@ describe("a DDIC type name, resolved to what it is", () => {
     ]);
     expect(Object.keys(graph).sort()).to.deep.equal(["STRING", "ZOSD_TEST_STATUS"]);
     expect(graph.ZOSD_TEST_STATUS.LENG).to.equal(1);
+  });
+});
+
+describe("the typed catalogue at the Portable-AMDP boundary", () => {
+  const store = new ObjectStore();
+
+  it("carries only requested USING tables and preserves fixed RAW", () => {
+    const catalogue = ddicCatalogue(store, ["ZVDB_100_VEC"]);
+    expect(Object.keys(catalogue)).to.deep.equal(["ZVDB_100_VEC"]);
+    expect(catalogue.ZVDB_100_VEC.MANDT).to.deep.equal({abap: "C", len: 3});
+    expect(catalogue.ZVDB_100_VEC.DIMS).to.deep.equal({abap: "I"});
+    expect(catalogue.ZVDB_100_VEC.QBITS).to.deep.equal({abap: "X", len: 192});
+  });
+
+  it("ignores a called procedure in USING rather than mistaking it for DDIC", () => {
+    expect(ddicCatalogue(store, ["ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"])).to.deep.equal({});
   });
 });
 

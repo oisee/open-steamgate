@@ -3,6 +3,17 @@
 // schema and never drops or rewrites a pre-existing schema.
 import {PostgresDatabaseClient} from "@abaplint/database-pg";
 import {fingerprintOf} from "./osd-persist.mjs";
+import {abapTypeLetter, bindValue} from "./abap-types.mjs";
+import {randomBytes} from "node:crypto";
+
+function bindNativeValue(parameter) {
+  if (parameter.isNull === true) return null;
+  // node-postgres accepts a decimal as text and lets the target expression
+  // give it a NUMERIC type. Passing through Number here would lose decimal
+  // digits before PostgreSQL ever sees them.
+  if (abapTypeLetter(parameter.type) === "P") return String(parameter.value);
+  return bindValue(parameter, {hex: (value) => Buffer.from(value, "hex")});
+}
 
 export class OsdPostgresClient extends PostgresDatabaseClient {
   constructor(input = {}) {
@@ -15,6 +26,11 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
       trace: input.trace === true,
     });
     this.connected = false;
+    // A persistent relation can outlive a crashed process. PID + counter can
+    // then collide after a container restart, so give every client a short
+    // random namespace. Twelve hex characters keep the complete identifier
+    // below PostgreSQL's 63-byte identifier limit.
+    this.relationScope = randomBytes(6).toString("hex").toUpperCase();
   }
 
   async connect() {
@@ -60,6 +76,86 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
   async stamp(schema) {
     await this.execute('CREATE TABLE osd_schema (fingerprint CHAR(16) NOT NULL)');
     await this.execute(`INSERT INTO osd_schema (fingerprint) VALUES ('${fingerprintOf(schema)}')`);
+  }
+
+  // ---------------------------------------------------------------------
+  // Parameterised native SQL for the SQLScript relational lowering. Open
+  // SQL keeps using the upstream select/insert/update/delete surface.
+  // ---------------------------------------------------------------------
+
+  get supportsNative() {
+    return true;
+  }
+
+  async native({sql, params = [], expect = "rows"}) {
+    // Upstream poisons the client after a failed COMMIT because that LUW was
+    // lost. The native path is part of the same LUW and must not bypass that
+    // fail-stop state.
+    this.checkFatal();
+    const connection = this.client ?? this.pool;
+    if (connection === undefined) throw new Error("PostgreSQL native: database connection not established");
+    if (this.trace === true) console.log("native:", sql, params.length ? JSON.stringify(params) : "");
+    const request = {text: sql, values: params.map(bindNativeValue)};
+    let answer;
+    if (this.client === undefined) {
+      answer = await connection.query(request);
+    } else {
+      // PostgreSQL aborts the complete transaction after any statement
+      // error. An ABAP caller may catch an AMDP exception and continue its
+      // LUW, so fence a native statement exactly as upstream fences Open SQL.
+      await this.client.query("SAVEPOINT osd_native");
+      try {
+        answer = await this.client.query(request);
+        await this.client.query("RELEASE SAVEPOINT osd_native");
+      } catch (error) {
+        await this.client.query("ROLLBACK TO SAVEPOINT osd_native; RELEASE SAVEPOINT osd_native;");
+        throw error;
+      }
+    }
+    if (expect === "none") return {rowCount: answer.rowCount};
+    const columns = (answer.fields ?? []).map((field) => ({name: field.name, type: field.dataTypeID}));
+    const rows = answer.rows ?? [];
+    if (expect === "scalar") {
+      const first = rows[0];
+      return {value: first === undefined ? undefined : first[Object.keys(first)[0]], columns};
+    }
+    return {rows, columns, rowCount: answer.rowCount ?? rows.length};
+  }
+
+  async defineRelation({name = "rel", sql, params = [], materialise}) {
+    if (params.length > 0 && materialise === undefined) {
+      throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
+    }
+    this.relationCount = (this.relationCount ?? 0) + 1;
+    const stem = String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase().slice(0, 24);
+    const ident = `OSD_${stem}_${this.relationScope}_${this.relationCount}`;
+    const handle = {ident, ref: `"${ident}"`,
+      kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
+    if (materialise === undefined) {
+      await this.native({sql: `CREATE VIEW ${handle.ref} AS ${sql}`, expect: "none"});
+    } else {
+      await this.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
+    }
+    return handle;
+  }
+
+  relationRef(handle) {
+    return handle.ref;
+  }
+
+  relationKind(handle) {
+    return {kind: handle.kind, reason: handle.reason};
+  }
+
+  async dropRelation(handle) {
+    try {
+      await this.native({sql: `DROP ${handle.kind === "definition" ? "VIEW" : "TABLE"} ${handle.ref}`,
+        expect: "none"});
+    } catch (error) {
+      // Idempotent cleanup may ignore only "undefined table/object". A
+      // permission, connection or aborted-LUW failure is part of the result.
+      if (!["42P01", "42704"].includes(error?.code)) throw error;
+    }
   }
 }
 

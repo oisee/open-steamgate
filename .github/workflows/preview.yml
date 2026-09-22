@@ -117,6 +117,15 @@ jobs:
           git -C .local/lars/open-abap-core checkout -q "$OSD_CORE_REF"
           git clone --filter=blob:none https://github.com/oisee/open-abap-gui.git .local/lars/open-abap-gui
           git -C .local/lars/open-abap-gui checkout -q "$OSD_GUI_REF"
+      # A preview is built in a clean checkout. The two patched libraries
+      # above are only part of the closure in abap_transpile.json; materialise
+      # every remaining pinned folder before the fail-fast build validates
+      # its inputs. Keep the list in the config rather than duplicating it in
+      # this workflow (the test job follows the same contract).
+      - name: The library folders the preview reads
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-libs.mjs --check
       # The packs: the demo and Zork are not in this repository, they are
       # fetched from theirs at the commit each pack's manifest pins
       # (tools/osd-fetch.mjs), and the pack's own folder layers over that.

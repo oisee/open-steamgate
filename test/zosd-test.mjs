@@ -542,7 +542,7 @@ ${objects.map(([uri, name]) => `  <adtcore:objectReference adtcore:uri="${uri}" 
     // one of each.
     it("one method passes, which is an empty alerts element", () => {
       const method = /<testMethod adtcore:name="GREETING_PASSES"[\s\S]*?<\/testMethod>/.exec(xml)[0];
-      expect(method).to.contain("<alerts>");
+      expect(method).to.contain("<alerts/>");
       expect(method).to.not.contain("<alert ");
     });
 

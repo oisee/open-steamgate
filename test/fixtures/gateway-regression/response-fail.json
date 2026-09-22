@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8"
+  },
+  "body": {
+    "format": "json",
+    "value": {
+      "d": {
+        "ObservedAt": "2026-09-21T15:00:00Z",
+        "Status": "A",
+        "Seats": 3,
+        "TravelId": "GW0-001"
+      }
+    }
+  }
+}

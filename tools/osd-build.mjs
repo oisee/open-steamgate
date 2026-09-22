@@ -27,7 +27,7 @@
 import {createHash} from "node:crypto";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
@@ -105,9 +105,12 @@ export function loadConfig(root) {
   };
 }
 
-function walk(dir, out = []) {
+function walk(dir, out = [], seen = new Set()) {
   let entries;
   try {
+    const real = realpathSync(dir);
+    if (seen.has(real)) return out;
+    seen.add(real);
     entries = readdirSync(dir, {withFileTypes: true});
   } catch {
     return out;
@@ -117,8 +120,16 @@ function walk(dir, out = []) {
       continue;
     }
     const p = join(dir, e.name);
-    if (e.isDirectory()) {
-      walk(p, out);
+    let directory = e.isDirectory();
+    if (e.isSymbolicLink()) {
+      try {
+        directory = statSync(p).isDirectory();
+      } catch {
+        directory = false;
+      }
+    }
+    if (directory) {
+      walk(p, out, seen);
     } else if (e.isFile()) {
       out.push(p);
     }
@@ -136,6 +147,31 @@ export function inputsOf(root, config = loadConfig(root)) {
   // but whose Web Repository object was not in the transpiled runtime.
   const bspFolders = [join(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
   return {folders, libs, bspFolders, config: layout(root).config};
+}
+
+/**
+ * Libraries named by the transpiler config are mandatory build inputs, not
+ * optional search paths. The transpiler tolerates an absent folder and then
+ * builds a smaller system; that is useful for a generic CLI and fatal for an
+ * addressed OSD generation. Refuse before taking the lock (and, especially,
+ * before switching `live`) when a checkout/worktree has not inherited its
+ * pinned library closure.
+ */
+export function missingLibraries(root, config = loadConfig(root)) {
+  return (config.libs ?? [])
+    .filter((lib) => typeof lib.folder === "string" && lib.folder !== "")
+    .map((lib) => ({...lib, path: join(root, lib.folder)}))
+    .filter((lib) => !existsSync(lib.path) || readdirSync(lib.path).length === 0)
+    .map(({url, folder, ref}) => ({url, folder, ...(ref === undefined ? {} : {ref})}));
+}
+
+export function describeMissingLibraries(missing) {
+  const names = missing
+    .map((lib) => `${lib.folder}${lib.ref ? ` at ${lib.ref.slice(0, 12)}` : ""}`)
+    .join(", ");
+  return `configured ABAP libraries are absent or empty: ${names}. ` +
+    "For a development worktree create or repair it with `npm run osd:worktree -- <name>`; " +
+    "for a standalone checkout fetch the pinned libraries before building";
 }
 
 // What the transpiler and the generators read, and nothing else: a mocha
@@ -456,6 +492,13 @@ export async function build(options = {}) {
   const paths = layout(root);
   const started = Date.now();
   const config = loadConfig(root);
+  const missingLibs = missingLibraries(root, config);
+  if (missingLibs.length > 0) {
+    const e = new Error(`the build refuses: ${describeMissingLibraries(missingLibs)}`);
+    e.code = "MISSING_LIBRARIES";
+    e.missing = missingLibs;
+    throw e;
+  }
   // the layers, resolved before anything else (tools/osd-inputs.mjs): the
   // same file name twice inside one folder is a refusal naming both files,
   // never a guess, and it is refused before a lock is taken or a generator

@@ -49,10 +49,13 @@ export function devLoop(options = {}) {
     // unchanged fourth are caught here, in seconds, before a build
     const started = Date.now();
     const broken = [];
+    const checked = [];
     for (const {type, name} of objects.values()) {
       const result = store.activate(type, name);
       if (result.active !== true) {
         broken.push(result, ...(result.dependents ?? []));
+      } else {
+        checked.push(result);
       }
     }
     if (broken.length > 0) {
@@ -74,6 +77,10 @@ export function devLoop(options = {}) {
         log(String(t.output).trimEnd().split("\n").slice(-12).join("\n"));
       }
       return {ok: false, stage: "build", result};
+    }
+    if (!store.completeActivations(checked)) {
+      log("source changed during build; leaving the new edit inactive for the next pass");
+      return {ok: false, stage: "changed", result};
     }
     const how = t.cached ? "reused" : "built";
     const live = result.recycled ? `, recycled in ${result.ms} ms` : ", nothing serving to recycle";

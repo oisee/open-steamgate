@@ -5,6 +5,21 @@
 > runtime and the database are all in a service worker on your own machine,
 > and every app on the launchpad is answered there.
 
+## 🔥 Hot Off Press
+
+### [Portable AMDP: illustrated engineering report](docs/portable-amdp-report.html)
+
+The illustrated report explains the architecture, the HANA/DuckDB proof,
+what already forms a useful read-only analytical core, and the honest gap
+between the complete 11-of-11 showcase and broad A4H corpus coverage. The
+detailed, source-oriented companion is the
+[milestone report](docs/amdp-portable-milestone-report.md).
+
+Run `npm run amdp:demo` for the live DuckDB ledger and a self-contained
+master-detail report at `.local/amdp-demo/index.html`; the narrative is
+copied beside it as `.local/amdp-demo/story.html`. Add `-- --serve 3037` to
+view `/` and `/story.html` from another machine on the local network.
+
 ## Try it yourself
 
 [**Spin up your own OSD — locally, with Docker, or by pasting a Portainer Stack**](docs/spin.md).

@@ -27,6 +27,9 @@ import {join, basename, dirname} from "node:path";
 import {createHash} from "node:crypto";
 import {extract, parameterType} from "./amdp-extract.mjs";
 import {contentFoldersOf} from "./osd-packs.mjs";
+import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
+import {ObjectStore} from "./osd-store.mjs";
+import {ddicCatalogue} from "./sqlscript-ddic-catalogue.mjs";
 
 const DEFAULT_OUT = "gen/amdp";
 
@@ -145,6 +148,7 @@ const progXml = (name) => `<?xml version="1.0" encoding="utf-8"?>
 
 export function generate(folders, out = DEFAULT_OUT) {
   const extras = typeSources(folders);
+  const store = new ObjectStore({root: process.cwd()});
   const procedures = [];
   const written = [];
   rmSync(out, {recursive: true, force: true});
@@ -180,6 +184,26 @@ export function generate(folders, out = DEFAULT_OUT) {
     for (const {m, fm} of entries) {
       writeFileSync(join(out, `${group.toLowerCase()}.fugr.${fm.toLowerCase()}.abap`),
         `FUNCTION ${fm.toLowerCase()}.\n* never runs: DESTINATION 'AMDP' routes the call to HANA before it gets here\n  RAISE EXCEPTION TYPE cx_sy_dyn_call_illegal_func.\nENDFUNCTION.\n`);
+      // Compile the portable form while the extractor's full local type map
+      // is still present. The runtime artefact deliberately carries IR, not
+      // a parser: a normal application process should not have to load the
+      // SQLScript frontend merely because one AMDP method is called. A
+      // method outside the measured subset remains deployable on HANA and
+      // carries its exact portable refusal beside it.
+      let portable;
+      let portableRefusal;
+      try {
+        // USING is the AMDP declaration of database objects this body may
+        // read.  Carry only those schemas: a procedure must not silently
+        // acquire access to the entire system catalogue, and the generated
+        // browser artefact should not contain a system-sized DDIC dump.
+        portable = compileProcedure(m, parsed.types, {catalogue: ddicCatalogue(store, m.usings)});
+      } catch (error) {
+        portableRefusal = {
+          code: error?.code ?? "UNSUPPORTED_SQLSCRIPT",
+          message: String(error?.message ?? error),
+        };
+      }
       procedures.push({
         module: fm,
         class: cls,
@@ -193,6 +217,7 @@ export function generate(folders, out = DEFAULT_OUT) {
         })),
         body: m.body,
         hash: createHash("sha1").update(m.body).digest("hex").slice(0, 16),
+        ...(portable === undefined ? {portableRefusal} : {portable}),
       });
     }
   }

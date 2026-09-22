@@ -85,12 +85,12 @@ describe("the binder carries what the grammar reads, or refuses it by name", () 
   });
 
   it("and a clause the IR does not carry refuses by name rather than lowering to something else", () => {
-    for (const body of ["RETURN SELECT k FROM src EXCEPT SELECT k FROM other;",
-                        "RETURN SELECT k FROM src INTERSECT SELECT k FROM other;"]) {
+    for (const body of ["RETURN SELECT k FROM src INTERSECT SELECT k FROM other;"]) {
       const answer = sqlOf(body);
       expect(answer.sql, `${body} must not lower as a UNION`).to.equal(undefined);
       expect(answer.refused, `${body} must refuse by name`).to.be.a("string");
     }
+    expect(sqlOf("RETURN SELECT k FROM src EXCEPT SELECT k FROM other;").sql).to.contain(" EXCEPT ");
   });
 
   it("and an ordinary body still lowers, so the refusals are narrow", () => {

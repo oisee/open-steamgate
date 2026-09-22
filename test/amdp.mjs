@@ -43,6 +43,81 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(parameterType(p[1].abapType, r.types)).to.equal("TABLE(id INTEGER, value NCLOB, square INTEGER)");
   });
 
+  it("does not leak OPTIONAL backward across parameters on the same line", () => {
+    const source = `CLASS zcl_optional_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+      PUBLIC SECTION.
+        CLASS-METHODS f IMPORTING VALUE(iv_required) TYPE i VALUE(iv_optional) TYPE i OPTIONAL
+          RETURNING VALUE(rv_value) TYPE i.
+        CLASS-METHODS g IMPORTING VALUE(iv_comment) TYPE i. " not OPTIONAL
+        CLASS-METHODS h IMPORTING VALUE(iv_named) TYPE /ns/optional.
+        CLASS-METHODS f_iv_target IMPORTING VALUE(iv_other) TYPE i OPTIONAL VALUE(iv_target) TYPE i
+          RETURNING VALUE(rv_other) TYPE i.
+      ENDCLASS.
+      CLASS zcl_optional_probe IMPLEMENTATION.
+        METHOD f BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+          rv_value = :iv_required + COALESCE(:iv_optional, 0);
+        ENDMETHOD.
+        METHOD g BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+          x = :iv_comment;
+        ENDMETHOD.
+        METHOD h BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+          x = :iv_named;
+        ENDMETHOD.
+        METHOD f_iv_target BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+          rv_other = COALESCE(:iv_other, 0) + :iv_target;
+        ENDMETHOD.
+      ENDCLASS.`;
+    const methods = extract(source, "zcl_optional_probe.clas.abap").methods;
+    const method = methods.find((one) => one.name === "f");
+    expect(method.parameters.map(({name, optional}) => ({name, optional}))).to.deep.equal([
+      {name: "iv_required", optional: false},
+      {name: "iv_optional", optional: true},
+      {name: "rv_value", optional: false},
+    ]);
+    const secondary = methods.filter((one) => one.name !== "f").flatMap((one) => one.parameters);
+    expect(secondary)
+      .to.include.deep.members([
+        {name: "iv_comment", direction: "IN", abapType: "i", optional: false},
+        {name: "iv_named", direction: "IN", abapType: "/ns/optional", optional: false},
+      ]);
+    expect(methods.find((one) => one.name === "g").parameters)
+      .to.deep.equal([{name: "iv_comment", direction: "IN", abapType: "i", optional: false}]);
+    expect(methods.find((one) => one.name === "f_iv_target").parameters.map(({name, optional}) => ({name, optional})))
+      .to.deep.equal([
+        {name: "iv_other", optional: true},
+        {name: "iv_target", optional: false},
+        {name: "rv_other", optional: false},
+      ]);
+  });
+
+  it("refuses INOUT in the scalar oracle helper instead of dropping its input value", async () => {
+    const {call} = await import("../tools/amdp-run.mjs");
+    let failure;
+    try {
+      await call({}, '"S"."P"', {parameters: [{name: "cv", direction: "INOUT", abapType: "i"}]}, {cv: 3}, new Map());
+    } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(Error);
+    expect(failure.message).to.match(/does not support INOUT/);
+  });
+
+  it("uses the resolved manifest TABLE type when the source type map is no longer present", async () => {
+    const {call} = await import("../tools/amdp-run.mjs");
+    const sql = [];
+    const client = {exec(statement, callback) {
+      sql.push(statement);
+      if (/^CALL\b/.test(statement)) callback(undefined, {}, []);
+      else callback(undefined);
+    }};
+    const method = {parameters: [
+      {name: "it_amount", direction: "IN", abapType: "TT_AMOUNT", hanaType: "TABLE(amount INTEGER)"},
+      {name: "et_total", direction: "OUT", abapType: "TT_TOTAL", hanaType: "TABLE(item_count INTEGER, total INTEGER)"},
+    ]};
+    await call(client, '"S"."P"', method, {it_amount: []}, undefined);
+    expect(sql).to.include("CREATE LOCAL TEMPORARY COLUMN TABLE #AMDP_IN_IT_AMOUNT (amount INTEGER)");
+    expect(sql.find((one) => /^CALL\b/.test(one))).to.equal('CALL "S"."P" (#AMDP_IN_IT_AMOUNT, ?)');
+    expect(sql.join("\n")).to.not.contain("UNDEFINED");
+  });
+
   it("builds a CREATE PROCEDURE that carries the body unchanged", () => {
     const r = extract(fixture("zcl_vsp_00_amdp_test.clas.abap"), "zcl_vsp_00_amdp_test.clas.abap");
     const sql = procedure(r.className, r.methods[0], "OSD", r.types);
@@ -51,6 +126,17 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(sql).to.contain("OUT et_result TABLE(id INTEGER, value NCLOB, square INTEGER)");
     expect(sql).to.contain("READS SQL DATA");
     expect(sql).to.contain(r.methods[0].body);
+  });
+
+  it("does not relabel a table-function RETURNING signature as a procedure OUT", () => {
+    const method = {name: "f", language: "SQLSCRIPT", readOnly: true, body: "RETURN SELECT 1 AS id FROM DUMMY;",
+      parameters: [{name: "rt", direction: "RETURNING", abapType: "tt_result"}]};
+    const types = new Map([
+      ["TY_RESULT", {kind: "structure", components: [{name: "id", abapType: "i"}]}],
+      ["TT_RESULT", {kind: "table", of: "TY_RESULT"}],
+    ]);
+    expect(() => procedure("ZCL_X", method, "OSD", types))
+      .to.throw(/disposable procedure oracle supports scalar RETURNING only/);
   });
 
   it("takes the types from another object when the class does not declare them", () => {
@@ -111,6 +197,10 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(hanaType("i")).to.equal("INTEGER");
     expect(hanaType("int8")).to.equal("BIGINT");
     expect(hanaType("string")).to.equal("NCLOB");
+    expect(hanaType("d")).to.equal("NVARCHAR(8)");
+    expect(hanaType("dats")).to.equal("NVARCHAR(8)");
+    expect(hanaType("t")).to.equal("NVARCHAR(6)");
+    expect(hanaType("tims")).to.equal("NVARCHAR(6)");
     expect(hanaType("c LENGTH 20")).to.equal("NVARCHAR(20)");
     expect(hanaType("p LENGTH 8 DECIMALS 2")).to.equal("DECIMAL(8, 2)");
     // an unknown type is undefined rather than guessed at, so the caller can

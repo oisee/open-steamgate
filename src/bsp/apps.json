@@ -29,6 +29,10 @@
     "text": "ICF services: the service tree as an application",
     "service": "ZOSD_ICF_SRV"
   },
+  "ZOSG_WORKBENCH": {
+    "folder": "webapp/workbench",
+    "text": "Workbench: edit, check and activate ABAP sources"
+  },
   "ZOSD_TRAVEL_APP": {
     "folder": "webapp",
     "files": [

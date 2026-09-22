@@ -66,7 +66,7 @@ describe("what the binder refuses, it refuses by name", () => {
     expect(refusal("lt = SELECT k, n FROM src;\nRETURN :lt;"), "a plain table still binds").to.equal(undefined);
   });
 
-  it("DECLARE and IF, which NOT_NAMED claims are refused by the default branch", () => {
+  it("DECLARE and IF are refused until their procedural lowering owns them", () => {
     // The allowance says so and the source cannot show it, so it is run.
     for (const [construct, body] of [
       ["Declare", "DECLARE x INT;\nlt = SELECT k, n FROM src;\nRETURN :lt;"],
@@ -77,5 +77,10 @@ describe("what the binder refuses, it refuses by name", () => {
       expect(message, `${construct} is refused`).to.be.a("string");
       expect(message, `${construct} is refused BY NAME`).to.contain(construct);
     }
+  });
+
+  it("WHILE is refused explicitly by the relational binder", () => {
+    const message = refusal("WHILE 1 = 1 DO\n  lt = SELECT k, n FROM src;\nEND WHILE;\nRETURN :lt;");
+    expect(message).to.contain("While").and.to.contain("procedural IR");
   });
 });

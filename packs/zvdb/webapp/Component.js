@@ -131,7 +131,8 @@ sap.ui.define([
           state.setProperty("/message", mapped.length + " nearest texts, sorted by " + engine + " rank.");
         }, error: function (error) {
           state.setProperty("/results", []);
-          var hint = engine === "HANA" ? " HANA AMDP is available only when OSD itself uses HANA." : "";
+          var hint = engine === "HANA" ? " Native HANA AMDP is available only when OSD itself uses HANA."
+            : engine === "AMDP" ? " The original SQLScript runs through Portable-AMDP on DuckDB." : "";
           state.setProperty("/message", engine + " failed: " + errorText(error) + hint);
         }});
       };
@@ -171,6 +172,7 @@ sap.ui.define([
       }});
       var engine = new Select(this.createId("engineSelect"), {selectedKey: "{state>/engine}", items: [
         new Item({key: "ANYDB", text: "Portable ABAP (ANYDB)"}),
+        new Item({key: "AMDP", text: "Portable AMDP (DuckDB)"}),
         new Item({key: "HANA", text: "SAP HANA AMDP (HANA only)"})
       ], change: runSearch});
 

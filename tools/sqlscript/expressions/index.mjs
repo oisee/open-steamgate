@@ -48,6 +48,18 @@ export class FunctionCall extends Expression {
   }
 }
 
+/** HANA's regex replacement is function-shaped but uses keyword arguments:
+ * `REPLACE_REGEXPR(pattern IN subject WITH replacement OCCURRENCE ALL)`.
+ * Only the all-occurrences form measured for the portable transform branch
+ * is admitted here; flags, offsets and numbered occurrences remain named
+ * future capabilities rather than being silently discarded. */
+export class ReplaceRegexpr extends Expression {
+  getRunnable() {
+    return seq(str("REPLACE_REGEXPR"), "(", new Expr(), str("IN"), new Expr(),
+      str("WITH"), new Expr(), str("OCCURRENCE"), str("ALL"), ")");
+  }
+}
+
 /** `OVER ( PARTITION BY a, b ORDER BY c DESC )`.
  *
  *  Measured on all three engines before it was written: ROW_NUMBER, RANK,
@@ -81,6 +93,7 @@ export class Factor extends Expression {
     return altPrio(
       new Cast(),
       new Case(),
+      new ReplaceRegexpr(),
       new FunctionCall(),
       new Value(),
       seq("(", new Expr(), ")"),
@@ -185,6 +198,19 @@ export class Source extends Expression {
   }
 }
 
+/** The first measured SQLScript array-to-relation form.
+ *
+ * `UNNEST(:a) WITH ORDINALITY AS ("VALUE", "POSITION")` deliberately has
+ * its own node: treating it as a generic table function would lose both the
+ * array binding and HANA's one-based ordinal column. */
+export class UnnestCall extends Expression {
+  getRunnable() {
+    return seq(str("UNNEST"), "(", tok(TokenKind.host), ")",
+      str("WITH"), str("ORDINALITY"), str("AS"),
+      "(", new Name(), ",", new Name(), ")");
+  }
+}
+
 /** `FROM "CL_X=>GET_ROWS"( :iv_a, 1 )` -- one AMDP table function calling
  *  another. The name arrives as a **quoted identifier** because that is how
  *  the generated procedure is named, which is why this is not an ordinary
@@ -282,7 +308,21 @@ export class Assignment extends Expression {
     // have it: 27 bodies, named by the corpus once failures pointed at the
     // right token
     return seq(new Name(), altPrio(":=", "="),
-      altPrio(new SetOperation(), new Expr()), ";");
+      altPrio(new UnnestCall(), new SetOperation(), new Expr()), ";");
+  }
+}
+
+/** `CALL proc(:input, output);` -- an internal SQLScript procedure call.
+ *
+ * A host token remains distinguishable from a bare output variable. That is
+ * load-bearing for table parameters: `:rows` reads the caller's current
+ * relation, while `result` names the relation the callee assigns.
+ */
+export class ProcedureCall extends Expression {
+  getRunnable() {
+    const argument = altPrio(tok(TokenKind.host), new Expr());
+    return seq(str("CALL"), new ColumnRef(), "(",
+      opt(seq(argument, star(seq(",", argument)))), ")", ";");
   }
 }
 
@@ -308,8 +348,8 @@ export class Declare extends Expression {
     return seq(str("DECLARE"),
       altPrio(
         seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
-        seq(new Name(), str("CURSOR"), str("FOR"), new SetOperation()),
-        seq(new Name(), new TypeName(), opt(seq(altPrio(":=", "="), new Expr())))),
+        seq(str("CURSOR"), new Name(), str("FOR"), new SetOperation()),
+        seq(new Name(), new TypeName(), opt(str("ARRAY")), opt(seq(altPrio(":=", "="), new Expr())))),
       ";");
   }
 }
@@ -330,7 +370,7 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new If(), new Block(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new While(), new Block(), new ProcedureCall(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }
@@ -357,6 +397,19 @@ export class If extends Expression {
       star(seq(str("ELSEIF"), opt("("), new Condition(), opt(")"), str("THEN"), star(new Statement()))),
       opt(seq(str("ELSE"), star(new Statement()))),
       str("END"), str("IF"), ";");
+  }
+}
+
+/** `WHILE condition DO ... END WHILE;` -- the smallest imperative loop and
+ *  the one used by the portable AMDP acceptance method. Its body contains
+ *  Statements, not a second special grammar: nesting and later BREAK /
+ *  CONTINUE support therefore have one place to live. */
+export class While extends Expression {
+  getRunnable() {
+    // Condition already owns balanced parenthesised groups. Independent
+    // optional opening/closing tokens accepted both half-open spellings.
+    return seq(str("WHILE"), new Condition(), str("DO"),
+      star(new Statement()), str("END"), str("WHILE"), ";");
   }
 }
 

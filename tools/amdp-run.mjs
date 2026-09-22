@@ -132,16 +132,32 @@ function columnsOf(hanaTableType) {
 export async function call(client, name, method, inputs, types) {
   const exec = (sql) => new Promise((resolve, reject) =>
     client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+  if (method.parameters.some((p) => p.direction === "INOUT")) {
+    throw new Error("AMDP oracle call does not support INOUT parameters");
+  }
   const outs = method.parameters.filter((p) => p.direction !== "IN");
+  // A generated runtime manifest has already resolved class-local ABAP types
+  // and carries their exact HANA spelling. The source-level CLI instead has
+  // the extractor's type map. Prefer the resolved fact when it exists; trying
+  // to resolve `TABLE(...)` as though it were an ABAP type produced
+  // `schema.UNDEFINED` on the first table-input call through the real ABAP
+  // destination.
+  const databaseType = (p) => p.hanaType ?? parameterType(p.abapType, types);
+  const scalarOuts = outs.filter((p) => columnsOf(databaseType(p)) === undefined);
+  const scalarOnly = outs.length > 0 && scalarOuts.length === outs.length;
   const temporary = [];
 
   const args = [];
   for (const p of method.parameters) {
-    if (p.direction !== "IN") { args.push("?"); continue; }
+    if (p.direction !== "IN") {
+      args.push(scalarOnly ? `V_${p.name.toUpperCase()}` : "?");
+      continue;
+    }
     const given = inputs[p.name.toLowerCase()] ?? inputs[p.name];
-    const columns = columnsOf(parameterType(p.abapType, types));
+    const columns = columnsOf(databaseType(p));
     if (columns === undefined) {                       // a scalar
-      args.push(typeof given === "number" ? String(given) : `'${String(given ?? "").replace(/'/g, "''")}'`);
+      args.push(given == null ? "NULL" : typeof given === "number" ? String(given)
+        : `'${String(given).replace(/'/g, "''")}'`);
     } else if (typeof given === "string") {            // a table, named
       args.push(given);
     } else {                                           // rows, materialised
@@ -152,7 +168,16 @@ export async function call(client, name, method, inputs, types) {
   }
 
   try {
-    const parts = await exec(`CALL ${name} (${args.join(", ")})`);
+    const sql = scalarOnly
+      ? `DO BEGIN ${scalarOuts.map((p) => `DECLARE V_${p.name.toUpperCase()} ${databaseType(p)};`).join(" ")} ` +
+        `CALL ${name} (${args.join(", ")}); SELECT ${scalarOuts.map((p) =>
+          `:V_${p.name.toUpperCase()} AS "${p.name.toLowerCase()}"`).join(", ")} FROM DUMMY; END;`
+      : `CALL ${name} (${args.join(", ")})`;
+    const parts = await exec(sql);
+    if (scalarOnly) {
+      const row = parts.find(Array.isArray)?.[0] ?? {};
+      return Object.fromEntries(scalarOuts.map((p) => [p.name.toLowerCase(), readable(row[p.name.toLowerCase()])]));
+    }
     const [scalars, ...tables] = parts;
     const result = {};
     for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);

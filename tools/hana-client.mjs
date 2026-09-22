@@ -94,13 +94,19 @@ function foldIdentifiers(sql) {
 }
 
 /** a row of the seam is flat: number | string | Uint8Array | null */
-function plain(value) {
+function plain(value, dataType) {
   if (typeof value === "bigint") return Number(value);
   if (value === null || value === undefined) return value;
-  // ABAP's X/XSTRING values cross the DatabaseClient seam as hexadecimal
-  // text. node-hdb returns VARBINARY and BLOB as Buffer; decoding those bytes
-  // as UTF-8 corrupts arbitrary vectors.
-  if (Buffer.isBuffer(value)) return value.toString("hex").toUpperCase();
+  // node-hdb returns both binary LOBs and character LOBs as Buffer. The
+  // value alone cannot distinguish them: RAW/XSTRING must cross the ABAP
+  // DatabaseClient seam as hexadecimal text, while CLOB/NCLOB are ordinary
+  // text and must be decoded. Use HANA's declared result metadata, never a
+  // payload guess. Without metadata we retain the conservative binary rule.
+  if (Buffer.isBuffer(value)) {
+    return [25, 26, 29, 30].includes(dataType)
+      ? value.toString("utf8")
+      : value.toString("hex").toUpperCase();
+  }
   if (value instanceof Date) return value;
   if (typeof value === "object" && typeof value.toString === "function") return value.toString();
   return value;
@@ -451,8 +457,25 @@ export class HanaDatabaseClient {
   async query(sql) {
     const folded = foldIdentifiers(sql);
     if (this.trace) console.log(folded);
+    let stmt;
     try {
-      const rows = await this.#run(folded);
+      let rows;
+      let metadata = [];
+      if (typeof this.client.prepare === "function") {
+        stmt = await new Promise((resolve, reject) =>
+          this.client.prepare(folded, (err, prepared) =>
+            (err ? reject(this.#explain(err, folded)) : resolve(prepared))));
+        rows = await new Promise((resolve, reject) =>
+          stmt.exec([], (err, result) =>
+            (err ? reject(this.#explain(err, folded)) : resolve(result))));
+        metadata = stmt.resultSetMetadata ?? [];
+      } else {
+        // Small test doubles written before metadata-aware LOB handling.
+        rows = await this.#run(folded);
+      }
+      const types = new Map(metadata.map((column) => [
+        String(column.columnDisplayName ?? column.columnName).toUpperCase(), column.dataType,
+      ]));
       // The names come back the way HANA holds them, which is upper case,
       // and the runtime looks a column up by the lower-case name it asked
       // for -- `rowsToTarget` reads row[field] and calls set() on what it
@@ -461,7 +484,7 @@ export class HanaDatabaseClient {
       // on the way out and down on the way back is one rule, applied twice.
       return (rows ?? []).map((r) => {
         const row = {};
-        for (const k of Object.keys(r)) row[k.toLowerCase()] = plain(r[k]);
+        for (const k of Object.keys(r)) row[k.toLowerCase()] = plain(r[k], types.get(k.toUpperCase()));
         return row;
       });
     } catch (error) {
@@ -470,6 +493,10 @@ export class HanaDatabaseClient {
           .constructor_({sqlmsg: error.message || ""});
       }
       throw error;
+    } finally {
+      // A prepared SELECT owns a server-side statement even after its rows
+      // have been collected. Do not leak one per Open SQL read.
+      stmt?.drop?.(() => undefined);
     }
   }
 
@@ -523,7 +550,10 @@ export class HanaDatabaseClient {
       }));
       const plainRows = (rows ?? []).map((r) => {
         const row = {};
-        for (const k of Object.keys(r)) row[k] = plain(r[k]);
+        const types = new Map((stmt.resultSetMetadata ?? []).map((column) => [
+          String(column.columnDisplayName ?? column.columnName).toUpperCase(), column.dataType,
+        ]));
+        for (const k of Object.keys(r)) row[k] = plain(r[k], types.get(k.toUpperCase()));
         return row;
       });
       if (expect === "scalar") {

@@ -47,7 +47,18 @@
 const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
-    placeholder: () => "?",
+    // HANA infers a bare `?` from its immediate context. In `? || ?` that
+    // makes an INTEGER host value a string parameter, while the same value
+    // in `? * ?` is numeric; node-hdb then rejects the number before HANA can
+    // apply SQLScript's implicit conversion. Carry the IR type into numeric
+    // placeholders so one captured scalar keeps one meaning in every use.
+    placeholder: (_n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      if (/^[IBS](?:\(|$)/.test(code)) return "CAST(? AS INTEGER)";
+      if (/^F(?:\(|$)/.test(code)) return "CAST(? AS DOUBLE)";
+      if (/^P\(\d+,\d+\)$/.test(code)) return `CAST(? AS DECIMAL${code.slice(1)})`;
+      return "?";
+    },
     // `/` yields a decimal even over two INTEGERs - measured, not assumed
     divide: (a, b) => `(${a} / ${b})`,
     // and when the source asked for integer division, it says so
@@ -57,6 +68,7 @@ const DIALECTS = {
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
     castChar: (e, n) => `CAST(${e} AS NVARCHAR(${n}))`,
+    castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
     // HANA's own, so they pass through -- they are the reference the two
     // renderings below were measured against
     substrBefore: (s, x) => `SUBSTR_BEFORE(${s()}, ${x()})`,
@@ -67,6 +79,49 @@ const DIALECTS = {
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     aggName: () => "STRING_AGG",
     dummy: "DUMMY",
+  },
+  // PostgreSQL is deliberately a separate dialect rather than an alias for
+  // DuckDB. The two happen to share a lot of spelling, but not their value
+  // rules: INTEGER / INTEGER truncates here and is decimal in HANA, while
+  // placeholders are numbered. Only the operations below are claimed; a
+  // HANA-specific function still reaches the common refusal below.
+  postgres: {
+    // Adding a dialect must not silently widen the three-engine PORTABLE
+    // allowlist. Functions enter this set only after PostgreSQL has a
+    // value-level conformance row. The first AMDP slice needs operators, not
+    // built-ins, so an empty set is the honest initial capability.
+    functions: new Set(),
+    quote: (id) => `"${id.replace(/"/g, '""')}"`,
+    placeholder: (n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      let pg;
+      if (/^[IBS](?:\(|$)/.test(code)) pg = "integer";
+      else if (/^F(?:\(|$)/.test(code)) pg = "double precision";
+      else if (/^P\(\d+,\d+\)$/.test(code)) pg = `numeric${code.slice(1)}`;
+      else if (/^C\(\d+\)$/.test(code)) pg = `varchar${code.slice(1)}`;
+      else if (code === "STRING") pg = "text";
+      else throw new Refused(`the ABAP type ${code || "(missing)"} has no PostgreSQL parameter type`);
+      return `$${n}::${pg}`;
+    },
+    divide: (a, b) => `(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC))`,
+    intDiv: (a, b) => `CAST(TRUNC(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC)) AS INTEGER)`,
+    concat: (args) => args.join(" || "),
+    ifnull: (a, b) => `COALESCE(${a}, ${b})`,
+    substr: (s, from, len) => `SUBSTRING(${s} FROM ${from} FOR ${len})`,
+    // PostgreSQL rounds some numeric-to-integer casts. SQLScript truncates
+    // toward zero, so make that step explicit as for DuckDB.
+    castInt: (e) => `CAST(TRUNC(CAST(${e} AS NUMERIC)) AS INTEGER)`,
+    castChar: (e, n) => `SUBSTRING(CAST(${e} AS VARCHAR) FROM 1 FOR ${n})`,
+    castDec: (e, n, s) => `CAST(${e} AS NUMERIC(${n}, ${s}))`,
+    substrBefore: (s, x) =>
+      `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, strpos(${s()}, ${x()}) - 1) ELSE '' END`,
+    substrAfter: (s, x) =>
+      `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, strpos(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
+    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: (s, x) => `strpos(${s()}, ${x()})`,
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    aggName: () => "string_agg",
+    dummy: "(SELECT 1) AS dummy",
   },
   duckdb: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
@@ -88,6 +143,7 @@ const DIALECTS = {
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS DOUBLE)) AS INTEGER)`,
     // CAST to a character type does not truncate here and does on HANA
     castChar: (e, n) => `SUBSTR(CAST(${e} AS VARCHAR), 1, ${n})`,
+    castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
     // `SUBSTR_BEFORE` / `SUBSTR_AFTER` are HANA's and exist nowhere else, so
     // they are built out of `instr` and `substr`, which both engines have.
     // The edges were measured rather than assumed: on HANA a miss answers
@@ -235,16 +291,19 @@ export function lower(rel, dialectName, options = {}) {
       throw new Refused(`an expression arrived without a node kind: ${JSON.stringify(e)?.slice(0, 60)}`);
     }
     switch (e.node) {
-      case "col": return d.quote(e.name);
+      case "col": return e.source === undefined
+        ? d.quote(e.name) : `${d.quote(e.source)}.${d.quote(e.name)}`;
       case "lit":
         if (typeof e.value === "number") return String(e.value);
         // a string literal still goes through a parameter: a literal in the
         // text is the class of defect this contract exists to remove
-        params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type)});
-        return d.placeholder(params.length);
+        params.push({name: `p${params.length}`, value: e.value, type: seamType(e.type), isNull: e.value == null});
+        return d.placeholder(params.length, seamType(e.type));
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
-        return d.placeholder(params.length);
+        return d.placeholder(params.length, seamType(e.type));
+      case "session":
+        throw new Refused(`session value ${e.kind} ${e.name} was not captured by the procedure runtime`);
       case "bin": {
         const left = expr(e.left);
         const right = expr(e.right);
@@ -283,6 +342,14 @@ export function lower(rel, dialectName, options = {}) {
       case "cast":
         if (e.type?.abap === "I") return d.castInt(expr(e.expr));
         if (e.type?.abap === "C" && e.type.len !== undefined) return d.castChar(expr(e.expr), Number(e.type.len));
+        if (e.type?.abap === "P" && e.type.len !== undefined && e.type.dec !== undefined && d.castDec !== undefined) {
+          const exactInteger = e.expr?.type?.abap === "I" && ["hana", "duckdb"].includes(dialectName);
+          const unchangedPacked = e.expr?.type?.abap === "P" && e.expr.type.dec === e.type.dec;
+          if (!exactInteger && !unchangedPacked) {
+            throw new Refused("decimal cast requires INTEGER or a packed-decimal source with unchanged scale");
+          }
+          return d.castDec(expr(e.expr), Number(e.type.len), Number(e.type.dec));
+        }
         throw new Refused(`cast to ${JSON.stringify(e.type)} not lowered yet`);
       case "isnull": return `(${expr(e.expr)} IS NULL)`;
       case "not": return `(NOT ${expr(e.expr)})`;
@@ -307,6 +374,50 @@ export function lower(rel, dialectName, options = {}) {
         return `(CASE ${whens}${other} END)`;
       }
       case "call": {
+        if (e.fn === "BITXOR") {
+          if (e.args.length !== 2) throw new Refused("BITXOR requires two arguments");
+          if (dialectName === "hana") return `BITXOR(${expr(e.args[0])}, ${expr(e.args[1])})`;
+          if (dialectName === "duckdb") {
+            // The ABAP database seam stores fixed RAW as its canonical hex
+            // text (the same representation Open SQL reads and writes), not
+            // as a driver-specific Buffer. Decode that physical form before
+            // using DuckDB's exact BIT xor. A nested BITXOR is already BIT.
+            const bit = (arg) => arg.node === "call" && arg.fn === "BITXOR"
+              ? `CAST(${expr(arg)} AS BIT)` : `CAST(from_hex(${expr(arg)}) AS BIT)`;
+            return `xor(${bit(e.args[0])}, ${bit(e.args[1])})`;
+          }
+          throw new Refused(`BITXOR has no measured rendering on ${dialectName}`);
+        }
+        if (e.fn === "BITCOUNT") {
+          if (e.args.length !== 1) throw new Refused("BITCOUNT requires one argument");
+          if (dialectName === "hana") return `BITCOUNT(${expr(e.args[0])})`;
+          if (dialectName === "duckdb") {
+            const arg = e.args[0];
+            const value = arg.node === "call" && arg.fn === "BITXOR"
+              ? expr(arg) : `from_hex(${expr(arg)})`;
+            return `bit_count(CAST(${value} AS BIT))`;
+          }
+          throw new Refused(`BITCOUNT has no measured rendering on ${dialectName}`);
+        }
+        if (e.fn === "REGEXP_REPLACE_ALL") {
+          if (e.args.length !== 3) throw new Refused("REGEXP_REPLACE_ALL requires subject, pattern and replacement");
+          if (e.args[0]?.node !== "col" || e.args[1]?.node !== "lit" || e.args[1].value !== "x"
+              || e.args[2]?.node !== "lit" || e.args[2].value !== "") {
+            throw new Refused("REGEXP_REPLACE_ALL is measured only for a column subject, literal 'x', and empty replacement");
+          }
+          if (dialectName === "hana") {
+            // HANA's textual order is pattern, subject, replacement, so
+            // render in exactly that order: rendering pushes bound values.
+            return `REPLACE_REGEXPR(${expr(e.args[1])} IN ${expr(e.args[0])} WITH ${expr(e.args[2])} OCCURRENCE ALL)`;
+          }
+          if (dialectName === "duckdb") {
+            return `REGEXP_REPLACE(${expr(e.args[0])}, ${expr(e.args[1])}, ${expr(e.args[2])}, 'g')`;
+          }
+          throw new Refused(`REGEXP_REPLACE_ALL has no measured rendering on ${dialectName}`);
+        }
+        if (d.functions instanceof Set && !d.functions.has(e.fn)) {
+          throw new Refused(`the function ${e.fn} has not been measured on ${dialectName}`);
+        }
         // **Rendering an argument is not free: it pushes that argument's
         // bound values.** So the arguments are rendered exactly as many
         // times as they appear in the text, and never before it is known how
@@ -385,9 +496,37 @@ export function lower(rel, dialectName, options = {}) {
   let alias = 0;
   const from = (r) => {
     if (r.rel === "var") return select(r); // refuses, with the right message
-    if (r.rel === "scan") return d.quote(r.table);
+    if (r.rel === "alias") return `(${select(r.input)}) AS ${d.quote(r.name)}`;
+    if (r.rel === "scan") return String(r.table).toUpperCase() === "DUMMY" ? d.dummy : d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
+  };
+
+  const joinFrom = (r) => {
+    const kind = r.kind.toUpperCase();
+    if (kind === "CROSS" && r.on !== undefined) throw new Refused("a CROSS JOIN carries no ON condition");
+    if (kind !== "CROSS" && r.on === undefined) {
+      throw new Refused(`a ${kind} JOIN without an ON condition is a cross join written by accident, not a join`);
+    }
+    const left = r.left?.rel === "join" ? joinFrom(r.left) : from(r.left);
+    const right = r.right?.rel === "join" ? `(${joinFrom(r.right)})` : from(r.right);
+    // Render in textual order. Expressions append their bound values while
+    // rendering, so doing ON before the two sources would put its values at
+    // the front of the parameter array although its placeholders occur last.
+    const on = r.on === undefined ? "" : ` ON ${expr(r.on)}`;
+    return `${left} ${kind} JOIN ${right}${on}`;
+  };
+
+  const projectionItems = (r) => r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ");
+  const limitCount = (value) => {
+    if (dialectName === "hana" && value?.node === "param") {
+      // HANA accepts a bound scalar in LIMIT but rejects CAST(? AS INTEGER)
+      // in this grammar slot. The driver still receives the IR's INTEGER
+      // type; only the SQL spelling is context-specific.
+      params.push({name: value.name, value: value.value, type: seamType(value.type), isNull: value.isNull});
+      return "?";
+    }
+    return typeof value === "number" ? String(value) : expr(value);
   };
 
   const select = (r) => {
@@ -413,6 +552,7 @@ export function lower(rel, dialectName, options = {}) {
         throw new Refused(`the table variable :${r.name} reached the lowering unresolved - the binder must inline it or point it at a materialised relation`);
       case "scan":
       case "ref":
+      case "alias":
         return `SELECT * FROM ${from(r)}`;
       case "filter":
         // **A filter over an aggregate is a HAVING, and has to be rendered
@@ -424,26 +564,44 @@ export function lower(rel, dialectName, options = {}) {
         if (r.input?.rel === "aggregate") {
           return `${select(r.input)} HAVING ${expr(r.pred)}`;
         }
+        if (r.input?.rel === "join") {
+          return `SELECT * FROM ${joinFrom(r.input)} WHERE ${expr(r.pred)}`;
+        }
         return `SELECT * FROM ${from(r.input)} WHERE ${expr(r.pred)}`;
       case "project":
+        if (r.input?.rel === "filter") {
+          const items = projectionItems(r);
+          const source = r.input.input?.rel === "join" ? joinFrom(r.input.input) : from(r.input.input);
+          return `SELECT ${r.distinct === true ? "DISTINCT " : ""}${items} ` +
+            `FROM ${source} WHERE ${expr(r.input.pred)}`;
+        }
+        // A qualified projection belongs to the same query block as its
+        // JOIN. Wrapping the JOIN first would hide its source aliases and
+        // turn an ordinary `SELECT L.K FROM A L JOIN B R ...` into an outer
+        // query that still refers to L although L is no longer in scope.
+        if (r.input?.rel === "join") {
+          const items = projectionItems(r);
+          return `SELECT ${r.distinct === true ? "DISTINCT " : ""}${items} FROM ${joinFrom(r.input)}`;
+        }
         return `SELECT ${r.distinct === true ? "DISTINCT " : ""}` +
-          `${r.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ")} FROM ${from(r.input)}`;
+          `${projectionItems(r)} FROM ${from(r.input)}`;
       case "join": {
-        // A cross join has no ON, and asking for one crashed rather than
-        // refused: `FROM a, b` binds to exactly this node, and every engine
-        // spells it `CROSS JOIN`.
-        const kind = r.kind.toUpperCase();
-        const on = r.on === undefined ? "" : ` ON ${expr(r.on)}`;
-        if (kind === "CROSS" && r.on !== undefined) {
-          throw new Refused("a CROSS JOIN carries no ON condition");
-        }
-        if (kind !== "CROSS" && r.on === undefined) {
-          throw new Refused(`a ${kind} JOIN without an ON condition is a cross join written by accident, not a join`);
-        }
-        return `SELECT * FROM ${from(r.left)} ${kind} JOIN ${from(r.right)}${on}`;
+        return `SELECT * FROM ${joinFrom(r)}`;
       }
       case "union":
+        if (r.inputs.some((one) => one?.rel === "except" || (one?.rel === "union" && one.all !== r.all))) {
+          throw new Refused("nested set operations require measured parenthesized lowering");
+        }
         return r.inputs.map(select).join(r.all ? " UNION ALL " : " UNION ");
+      case "except":
+        if (!["hana", "duckdb"].includes(dialectName)) {
+          throw new Refused(`EXCEPT has no measured rendering on ${dialectName}`);
+        }
+        if (r.inputs?.length !== 2) throw new Refused("EXCEPT requires exactly two branches");
+        if (r.inputs.some((one) => one?.rel === "union" || one?.rel === "except")) {
+          throw new Refused("nested set operations require measured parenthesized lowering");
+        }
+        return `${select(r.inputs[0])} EXCEPT ${select(r.inputs[1])}`;
       case "aggregate": {
         const keys = r.groupBy.map((c) => d.quote(c));
         const aggs = r.aggs.map((a) => `${expr(a.expr)} AS ${d.quote(a.as)}`);
@@ -467,8 +625,11 @@ export function lower(rel, dialectName, options = {}) {
         const keys = r.keys.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ");
         const inner = r.input;
         if (inner?.rel === "project") {
-          const items = inner.items.map((i) => `${expr(i.expr)} AS ${d.quote(i.as)}`).join(", ");
-          return `SELECT ${items} FROM ${from(inner.input)} ORDER BY ${keys}`;
+          // Reuse the projection's whole query block. Reconstructing its
+          // FROM here used to wrap a JOIN and hide L/R while the SELECT list
+          // still named L.K; LIMIT above this ORDER inherited the same bad
+          // SQL. ORDER BY can be appended directly to the SELECT it orders.
+          return `${select(inner)} ORDER BY ${keys}`;
         }
         return `SELECT * FROM ${from(inner)} ORDER BY ${keys}`;
       }
@@ -476,10 +637,16 @@ export function lower(rel, dialectName, options = {}) {
         // the same reason: LIMIT belongs to the select it limits, and
         // wrapping an ordered select in an unordered one is a second defect
         // of the same family waiting to be found
-        if (r.input?.rel === "order" || r.input?.rel === "project") {
-          return `${select(r.input)} LIMIT ${Number(r.n)}`;
+        {
+          if (r.input?.rel === "order" || r.input?.rel === "project") {
+            const input = select(r.input);
+            const count = limitCount(r.n);
+            return `${input} LIMIT ${count}`;
+          }
+          const input = from(r.input);
+          const count = limitCount(r.n);
+          return `SELECT * FROM ${input} LIMIT ${count}`;
         }
-        return `SELECT * FROM ${from(r.input)} LIMIT ${Number(r.n)}`;
       default: throw new Refused(`relation ${r.rel} not lowered`);
     }
   };

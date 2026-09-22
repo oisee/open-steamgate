@@ -22,9 +22,9 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
-  subquery, scan, refTo, filter, project, join, union, order, limit, aggregate,
-  schemaOf} from "../sqlscript-ir.mjs";
+import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
+  subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
+  varRef, schemaOf} from "../sqlscript-ir.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -32,6 +32,9 @@ import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
  *  GROUP BY would be a different statement. */
 const AGGREGATE_FUNCTIONS = new Set([
   "COUNT", "SUM", "MIN", "MAX", "AVG", "STRING_AGG", "GROUP_CONCAT",
+]);
+const SESSION_VALUE_NAMES = new Set([
+  "CURRENT_USER", "CURRENT_SCHEMA", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP",
 ]);
 
 export class BindError extends Error {
@@ -72,8 +75,22 @@ function literalType(token) {
   return T.char(String(token.value).length);
 }
 
+const measuredTextType = (type) => {
+  if (type?.abap === "STRING") return Object.keys(type).length === 1;
+  return type?.abap === "C" && Object.keys(type).length === 2
+    && Number.isSafeInteger(type.len) && type.len >= 0;
+};
+
+const mergedTextType = (left, right) => {
+  if (!measuredTextType(left) || !measuredTextType(right)) return undefined;
+  if (left.abap === "STRING" || right.abap === "STRING") return T.str;
+  return T.char(Math.max(Number(left.len), Number(right.len)));
+};
+
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
+  const scalarTypes = options.scalarTypes ?? {};
+  const relationSchemas = options.relationSchemas ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
   // OUT table parameter -- it assigns and never selects at the end -- and
@@ -88,8 +105,42 @@ export function toIr(tree, options = {}) {
   const bound = new Map();
   /** the table a bare column belongs to, while a SELECT is being read */
   let columns = {};
+  let ambiguousColumns = new Set();
+  let qualifiedColumns = Object.create(null);
 
-  const typeOfColumn = (name) => columns[name] ?? T.str;
+  const typeOfColumn = (name, sourceName) => {
+    if (sourceName !== undefined) {
+      const type = qualifiedColumns[sourceName]?.[name];
+      if (type === undefined && options.strictColumns === true) {
+        throw new BindError(`column ${sourceName}.${name} is not present in the typed query scope`);
+      }
+      return type ?? T.str;
+    }
+    if (ambiguousColumns.has(name)) throw new BindError(`column ${name} is ambiguous without a source qualifier`);
+    if (columns[name] === undefined && options.strictColumns === true) {
+      throw new BindError(`column ${name} is not present in the typed query scope`);
+    }
+    return columns[name] ?? T.str;
+  };
+
+  const sourceAlias = (node) => {
+    const children = node.children ?? [];
+    const at = children.findIndex((one) => one.node === "word" && String(one.value).toUpperCase() === "AS");
+    if (at < 0) return undefined;
+    return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+  };
+
+  const registerSource = (schema, sourceName) => {
+    for (const [name, type] of Object.entries(schema ?? {})) {
+      if (columns[name] !== undefined || ambiguousColumns.has(name)) {
+        delete columns[name];
+        ambiguousColumns.add(name);
+      } else {
+        columns[name] = type;
+      }
+    }
+    if (sourceName !== undefined) qualifiedColumns[sourceName] = schema ?? {};
+  };
 
   function expression(node) {
     if (node === undefined) {
@@ -128,7 +179,17 @@ export function toIr(tree, options = {}) {
       case "Cast": {
         const inner = (node.children ?? []).filter((c) => c.node === "Expr");
         const named = (node.children ?? []).find((c) => c.node === "TypeName");
-        return cast(expression(inner[0]), typeFromName(named));
+        const source = expression(inner[0]);
+        const target = typeFromName(named);
+        // The first measured decimal conversion only widens precision while
+        // preserving scale.  Parsing strings and changing scale introduce
+        // backend-specific error/rounding rules, so keep them named gaps
+        // until differential oracle rows define their semantics.
+        if (target.abap === "P"
+            && (source.type?.abap !== "P" || source.type.dec !== target.dec)) {
+          throw new BindError("decimal CAST currently requires a packed-decimal source with unchanged scale", node);
+        }
+        return cast(source, target);
       }
       case "Case": {
         // The parser keeps the two CASE forms apart; the IR has one, the
@@ -211,11 +272,98 @@ export function toIr(tree, options = {}) {
             return {col: e.name, desc: hasWord(k, "DESC")};
           }),
         };
-        const built = call(fn, args, T.str);
+        // Types that have been measured rather than guessed. Ranking calls
+        // return BIGINT values on HANA and DuckDB; carrying STRING
+        // here made an otherwise valid UNION fail schema proof and would
+        // expose the wrong AMDP boundary type even when the SQL itself ran.
+        let resultType = T.str;
+        if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        if (fn === "LOWER") {
+          if (args.length !== 1 || !measuredTextType(args[0]?.type)) {
+            throw new BindError("LOWER requires exactly one measured text argument", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar LOWER does not accept window, ordering, or star decorations", node);
+          }
+          // Measured for the current HANA/DuckDB text surface: case folding
+          // does not turn a fixed-width ABAP field into an unbounded STRING.
+          resultType = args[0].type;
+        }
+        if (fn === "LOCATE") {
+          if (args.length !== 2 || args.some((arg) => !measuredTextType(arg?.type))) {
+            throw new BindError("LOCATE requires exactly two measured text arguments", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar LOCATE does not accept window, ordering, or star decorations", node);
+          }
+          resultType = T.int;
+        }
+        if (fn === "BITXOR") {
+          if (args.length !== 2 || args.some((arg) => !["X", "XSTRING"].includes(arg?.type?.abap))) {
+            throw new BindError("BITXOR requires exactly two measured binary arguments", node);
+          }
+          if (args[0].type.abap === "X" && args[1].type.abap === "X"
+              && args[0].type.len !== args[1].type.len) {
+            throw new BindError("BITXOR fixed binary arguments must have the same length", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("BITXOR does not accept window, ordering, or star decorations", node);
+          }
+          resultType = args[0].type.abap === "XSTRING" || args[1].type.abap === "XSTRING"
+            ? T.bytes() : args[0].type;
+        }
+        if (fn === "BITCOUNT") {
+          if (args.length !== 1 || !["X", "XSTRING"].includes(args[0]?.type?.abap)) {
+            throw new BindError("BITCOUNT requires exactly one measured binary argument", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("BITCOUNT does not accept window, ordering, or star decorations", node);
+          }
+          resultType = T.int;
+        }
+        if (fn === "SESSION_CONTEXT") {
+          if (args.length !== 1 || args[0]?.node !== "lit" || typeof args[0].value !== "string") {
+            throw new BindError("SESSION_CONTEXT requires one literal string key", node);
+          }
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("SESSION_CONTEXT does not accept window, ordering, or star decorations", node);
+          }
+          return sessionValue("context", args[0].value, T.str);
+        }
+        if (fn === "COALESCE") {
+          if (over !== undefined || inner.length > 0 || starArg) {
+            throw new BindError("scalar COALESCE does not accept window, ordering, or star decorations", node);
+          }
+          if (args.length !== 2) throw new BindError("COALESCE currently requires exactly two arguments", node);
+          const mentionsText = [args[0]?.type, args[1]?.type]
+            .some((type) => type?.abap === "C" || type?.abap === "STRING");
+          const merged = JSON.stringify(args[0]?.type) === JSON.stringify(args[1]?.type) && !mentionsText
+            ? args[0].type : mergedTextType(args[0]?.type, args[1]?.type);
+          if (merged === undefined) {
+            throw new BindError("COALESCE arguments require identical measured types", node);
+          }
+          resultType = merged;
+        }
+        const built = call(fn, args, resultType);
         if (starArg) built.star = true;
         if (inner.length > 0) built.orderBy = inner;
         if (window !== undefined) built.window = window;
         return built;
+      }
+      case "ReplaceRegexpr": {
+        const parts = kids(node, "Expr").map(expression);
+        if (parts.length !== 3 || !hasWord(node, "OCCURRENCE") || !hasWord(node, "ALL")) {
+          throw new BindError("only REPLACE_REGEXPR ... OCCURRENCE ALL is in the measured subset", node);
+        }
+        if (parts[0]?.node !== "lit" || parts[0].value !== "x"
+            || parts[2]?.node !== "lit" || parts[2].value !== ""
+            || parts[1]?.node !== "col") {
+          throw new BindError("portable REPLACE_REGEXPR is currently measured only for literal 'x', empty replacement, and a column subject", node);
+        }
+        // Normalise the keyword spelling to semantic argument order. The
+        // lowering restores each backend's grammar while preserving bound
+        // parameter order: subject, pattern, replacement.
+        return call("REGEXP_REPLACE_ALL", [parts[1], parts[0], parts[2]], T.str);
       }
       case "ColumnRef": {
         // **`s.k` is the column K, qualified by S -- and `nameOf` took the
@@ -235,11 +383,26 @@ export function toIr(tree, options = {}) {
         // having; a quiet wrong is what this was.
         const names = kids(node, "Name");
         const name = names.length > 1 ? nameOf(names[names.length - 1]) : nameOf(node);
-        return col(name, typeOfColumn(name));
+        const sourceName = names.length > 1 ? nameOf(names[0]) : undefined;
+        // Only the exact, unqualified, unquoted keyword spelling is a
+        // session value. `s.CURRENT_USER` and `"CURRENT_USER"` are ordinary
+        // columns; treating them as identity silently replaces row data.
+        const sessionKeyword = names.length === 1 && leaf(names[0])?.node === "identifier";
+        if (sessionKeyword && SESSION_VALUE_NAMES.has(name)) {
+          if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
+          if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
+          throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
+        }
+        return col(name, typeOfColumn(name, sourceName), sourceName);
       }
       case "identifier":
       case "quoted": {
         const name = String(node.value).toUpperCase();
+        if (node.node === "identifier" && SESSION_VALUE_NAMES.has(name)) {
+          if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
+          if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
+          throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
+        }
         return col(name, typeOfColumn(name));
       }
       case "string":
@@ -249,7 +412,13 @@ export function toIr(tree, options = {}) {
       case "host":
         // a host variable is a **bound parameter**, never text: that is the
         // guarantee the native channel exists for
-        return param(String(node.value).slice(1).toUpperCase(), T.str);
+        {
+          const name = String(node.value).slice(1).toUpperCase();
+          if (scalarTypes[name] === undefined) {
+            throw new BindError(`unknown scalar :${name.toLowerCase()}`, node);
+          }
+          return param(name, scalarTypes[name]);
+        }
       case "operator":
         if (node.value === "?") return param("p", T.str);
         break;
@@ -296,6 +465,17 @@ export function toIr(tree, options = {}) {
 
   function condition(node) {
     if (node === undefined) throw new BindError("a condition was expected here and the tree has none");
+    // The grammar retains an unparenthesised chain as one Condition. Folding
+    // it left-to-right would change SQL's AND-before-OR precedence and can
+    // select the wrong host-side IF branch. Parenthesised groups recurse as
+    // separate Condition nodes, so refusing only a level that mixes both is
+    // precise and still permits an explicit spelling of either meaning.
+    const joiners = new Set((node.children ?? [])
+      .filter((child) => child.node === "word" && ["AND", "OR"].includes(String(child.value).toUpperCase()))
+      .map((child) => String(child.value).toUpperCase()));
+    if (joiners.has("AND") && joiners.has("OR")) {
+      throw new BindError("an unparenthesized condition mixing AND and OR is refused until precedence is represented", node);
+    }
     // Read in order, because NOT binds to the term that FOLLOWS it and a
     // filtered list of children loses which one that was.
     let left;
@@ -380,6 +560,11 @@ export function toIr(tree, options = {}) {
 
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
+    const sourceName = sourceAlias(node);
+    const finish = (rel, schema) => {
+      registerSource(schema, sourceName);
+      return sourceName === undefined ? rel : alias(rel, sourceName);
+    };
     // **A table function call is not a table.** The grammar parses
     // `FROM my_func(:p)` into a `TableFunctionCall`, and nothing here
     // mentioned that name, so it fell through to the wrapper-unwrapping
@@ -396,11 +581,16 @@ export function toIr(tree, options = {}) {
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
+      if (options.deferTableVariables === true) {
+        const schema = relationSchemas[name] ?? {};
+        return finish(varRef(name, relationSchemas[name]), schema);
+      }
       const known = bound.get(name);
       if (known === undefined && tableParams.some((p) => String(p.name).toUpperCase() === name)) {
         // an IN table parameter: a relation the caller supplies. It is
         // scanned by its own name, which is what the bridge binds it to.
-        return scan(name);
+        const schema = relationSchemas[name] ?? catalogue[name] ?? {};
+        return finish(scan(name), schema);
       }
       if (known === undefined) {
         // named, not guessed: a table called like a variable is ordinary, so
@@ -410,22 +600,28 @@ export function toIr(tree, options = {}) {
       if (known.handle === undefined) {
         // the ordinary case: an assignment is not an observable barrier on
         // HANA, so the plan goes in where the FROM stands
-        return known.rel;
+        return finish(known.rel, schemaOf(known.rel, catalogue));
       }
       // a barrier materialised it. `ref` is the one node whose columns cannot
       // be derived from what is under it, because nothing is; the schema has
       // to be carried, and the moment it is known is the moment the barrier
       // was made. refTo() puts it there -- a bare ref is refused by
       // schemaOf, so the right path is also the shorter one (fable-osd).
-      return refTo(known.handle, schemaOf(known.rel, catalogue));
+      const schema = schemaOf(known.rel, catalogue);
+      return finish(refTo(known.handle, schema), schema);
     }
     const sub = kid(node, "SetOperation");
-    if (sub !== undefined) return relation(sub);
+    if (sub !== undefined) {
+      const rel = relation(sub);
+      return finish(rel, schemaOf(rel, catalogue));
+    }
     const temp = (node.children ?? []).find((c) => c.node === "temp");
-    if (temp !== undefined) return scan(String(temp.value).toUpperCase());
+    if (temp !== undefined) {
+      const table = String(temp.value).toUpperCase();
+      return finish(scan(table), catalogue[table] ?? {});
+    }
     const table = nameOf(node);
-    columns = catalogue[table] ?? columns;
-    return scan(table);
+    return finish(scan(table), catalogue[table] ?? {});
   }
 
   /** Hints, which are a request to one engine rather than part of the meaning.
@@ -491,11 +687,59 @@ export function toIr(tree, options = {}) {
     return false;
   }
 
+  /** Columns a window expression reads after grouping.
+   *
+   * SQL evaluates windows after GROUP BY/HAVING. Therefore a window in a
+   * grouped SELECT may read group keys (or aggregates, once that surface is
+   * added), but it may not smuggle an arbitrary row column past grouping.
+   * The current corpus uses ranking over group keys only, so that exact rule
+   * is enforced instead of widening it speculatively. */
+  function windowColumns(e, out = new Set()) {
+    if (e === undefined || e === null || typeof e !== "object") return out;
+    if (e.node === "col") out.add(String(e.name).toUpperCase());
+    for (const one of e.args ?? []) windowColumns(one, out);
+    for (const one of e.window?.partitionBy ?? []) windowColumns(one, out);
+    for (const one of e.window?.orderBy ?? []) out.add(String(one.col).toUpperCase());
+    return out;
+  }
+
+  function containsWindow(e) {
+    if (e === undefined || e === null || typeof e !== "object") return false;
+    if (e.window !== undefined) return true;
+    for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
+      if (containsWindow(e[key])) return true;
+    }
+    for (const key of ["args", "values"]) {
+      for (const one of e[key] ?? []) if (containsWindow(one)) return true;
+    }
+    for (const one of e.whens ?? []) {
+      if (containsWindow(one.when) || containsWindow(one.then)) return true;
+    }
+    return false;
+  }
+
   function select(node) {
+    const outerColumns = columns;
+    const outerAmbiguous = ambiguousColumns;
+    const outerQualified = qualifiedColumns;
+    columns = {};
+    ambiguousColumns = new Set();
+    qualifiedColumns = Object.create(outerQualified);
+    try {
+      return selectInScope(node);
+    } finally {
+      columns = outerColumns;
+      ambiguousColumns = outerAmbiguous;
+      qualifiedColumns = outerQualified;
+    }
+  }
+
+  function selectInScope(node) {
     if (node === undefined) throw new BindError("a SELECT was expected here and the tree has none");
     let rel;
     const from = kid(node, "Source");
     if (from !== undefined) rel = source(from);
+    else rel = scan("DUMMY");
     // `FROM a, b` -- a cross join written with a comma
     for (const extra of kids(node, "Source").slice(1)) {
       rel = join(rel, source(extra), undefined, "cross");
@@ -525,7 +769,11 @@ export function toIr(tree, options = {}) {
     // well, filtering rows by an aggregate before the aggregate existed. Two
     // clauses, one of them invented.
     const where = hasWord(node, "WHERE") ? kid(node, "Condition") : undefined;
-    if (where !== undefined) rel = filter(rel, condition(where));
+    if (where !== undefined) {
+      const predicate = condition(where);
+      if (containsWindow(predicate)) throw new BindError("a window function is not legal in WHERE", where);
+      rel = filter(rel, predicate);
+    }
     const items = kids(node, "SelectItem").map((item) => {
       // `*` arrives as a **word**, because the grammar matches it with
       // str(): the third time this trap has been paid for in this front end
@@ -591,7 +839,27 @@ export function toIr(tree, options = {}) {
         if (item.expr?.node === "star") {
           throw new BindError("`*` with a GROUP BY is not lowered: which columns it stands for is a question about the dictionary, not about this body", node);
         }
-        if (isAggregate(item.expr)) aggs.push(item);
+        if (containsWindow(item.expr)) {
+          if (item.expr?.node !== "call" || item.expr.window === undefined
+              || !["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(item.expr.fn)) {
+            throw new BindError("a grouped window must be a top-level ROW_NUMBER, RANK or DENSE_RANK call", node);
+          }
+          if ((item.expr.args ?? []).length > 0) {
+            throw new BindError(`${item.expr.fn} with arguments is not a measured grouped window`, node);
+          }
+          if ((item.expr.window.partitionBy ?? []).some((one) => one.node !== "col")) {
+            throw new BindError(`${item.expr.fn} PARTITION BY expressions are outside the measured grouped ranking subset`, node);
+          }
+          const outside = [...windowColumns(item.expr)].filter((name) => !keyNames.has(name));
+          if (outside.length > 0) {
+            throw new BindError(`${item.as} window reads ${outside.join(", ")} outside the GROUP BY`, node);
+          }
+          // The relation calls these `aggs`, but they are more precisely the
+          // computed outputs of the grouped SELECT. Keeping the window in
+          // this query block preserves SQL's group -> having -> window order.
+          aggs.push(item);
+        }
+        else if (isAggregate(item.expr)) aggs.push(item);
         else if (item.expr?.node === "col" && keyNames.has(String(item.expr.name).toUpperCase())) keys.push(item);
         else {
           throw new BindError(`${item.as} is neither an aggregate nor one of the GROUP BY columns`, node);
@@ -601,9 +869,11 @@ export function toIr(tree, options = {}) {
       const having = kids(node, "Condition")[hasWord(node, "WHERE") ? 1 : 0];
       if (hasWord(node, "HAVING")) {
         if (having === undefined) throw new BindError("a HAVING with no condition in it", node);
+        const predicate = condition(having);
+        if (containsWindow(predicate)) throw new BindError("a window function is not legal in HAVING", having);
         // above the aggregate, which is what HAVING means and where the
         // lowering already puts a filter
-        rel = filter(rel, condition(having));
+        rel = filter(rel, predicate);
       }
       const hinted = hintsOf(node);
       return orderAndLimit(node, hinted === undefined ? rel : {...rel, hints: hinted});
@@ -654,13 +924,18 @@ export function toIr(tree, options = {}) {
       const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
       const count = after.slice(at + 1).find((c) => c.node === "Expr");
       const value = count === undefined ? undefined : expression(count);
-      if (value?.node !== "lit" || typeof value.value !== "number") {
-        throw new BindError("LIMIT over anything but a literal count is not lowered yet", node);
+      if (value?.type?.abap !== "I" || !["lit", "param"].includes(value?.node)) {
+        throw new BindError("LIMIT requires a literal or scalar INTEGER count", node);
       }
       if (hasWord(node, "OFFSET")) {
-        throw new BindError("LIMIT with an OFFSET is not lowered yet", node);
+        const offsetAt = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "OFFSET");
+        const offsetNode = after.slice(offsetAt + 1).find((c) => c.node === "Expr");
+        const offset = offsetNode === undefined ? undefined : expression(offsetNode);
+        if (offset?.node !== "lit" || offset.value !== 0) {
+          throw new BindError("LIMIT supports only the semantics-neutral literal OFFSET 0", node);
+        }
       }
-      rel = limit(rel, value.value);
+      rel = limit(rel, value);
     }
     return rel;
   }
@@ -670,9 +945,23 @@ export function toIr(tree, options = {}) {
       throw new BindError("a relation was expected here and the tree has none");
     }
     const selects = kids(node, "Select");
+    const finishSet = (rel) => {
+      const outerWords = new Set((node.children ?? []).filter((one) => one.node === "word")
+        .map((one) => String(one.value).toUpperCase()));
+      if (kids(node, "OrderKey").length === 0 && !outerWords.has("LIMIT")) return rel;
+      const outerColumns = columns;
+      const outerAmbiguous = ambiguousColumns;
+      columns = schemaOf(rel, catalogue);
+      ambiguousColumns = new Set();
+      try { return orderAndLimit(node, rel); }
+      finally {
+        columns = outerColumns;
+        ambiguousColumns = outerAmbiguous;
+      }
+    };
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
-    if (selects.length === 1) return orderAndLimit(node, select(selects[0]));
+    if (selects.length === 1) return finishSet(select(selects[0]));
     // **Which set operation it was is a word, and the word was never read.**
     //
     // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were
@@ -685,15 +974,27 @@ export function toIr(tree, options = {}) {
     //
     // The IR carries one set operation. Until it carries three, the other two
     // are refused by name.
-    for (const word of ["INTERSECT", "EXCEPT"]) {
-      if (hasWord(node, word)) {
-        throw new BindError(`${word} is parsed and the IR has only UNION, so this body would lower to the ` +
-          `opposite set; it is refused until the IR carries ${word}`, node);
+    if (hasWord(node, "INTERSECT")) {
+      throw new BindError("INTERSECT is parsed but has no measured portable IR/lowering", node);
+    }
+    if (hasWord(node, "EXCEPT")) {
+      if (hasWord(node, "UNION") || selects.length !== 2) {
+        throw new BindError("mixed or multi-branch EXCEPT is outside the measured portable subset", node);
       }
+      return finishSet(except(select(selects[0]), select(selects[1])));
     }
     const all = hasWord(node, "ALL");
-    return orderAndLimit(node, union(selects.map(select), all));
+    return finishSet(union(selects.map(select), all));
   }
+
+  // The procedural compiler owns statement order and control flow, but it
+  // must use this exact binder for the expressions and relations inside
+  // those statements. Fragment entry points avoid both a second binder and
+  // reparsing source substrings with regular expressions.
+  if (options.fragment === "expression") return expression(tree);
+  if (options.fragment === "condition") return condition(tree);
+  if (options.fragment === "relation") return relation(tree);
+  if (options.fragment === "type") return typeFromName(tree);
 
   // The body, statement by statement and **in order**, because an assignment
   // binds a name the statements after it may use. The grammar wraps each one
@@ -767,6 +1068,11 @@ export function toIr(tree, options = {}) {
         returnedRel = known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue));
         break;
       }
+      case "While":
+        // The relational binder deliberately does not flatten a loop. The
+        // procedural compiler consumes this node and invokes this binder for
+        // each relational assignment with the current immutable bindings.
+        throw new BindError("While is parsed but belongs to the procedural IR, not the relational IR", node);
       case "word":
       case "operator":
         break;
@@ -786,6 +1092,7 @@ export function toIr(tree, options = {}) {
     const assigned = bound.get(String(outParam.name).toUpperCase());
     if (assigned !== undefined) return {statements, rel: assigned.rel};
   }
+  if (last === undefined && options.allowNoResult === true) return {statements};
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
   return {statements, rel: relation(last)};
 }

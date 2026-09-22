@@ -22,6 +22,48 @@ const walk = (node, found = []) => {
 
 describe("the SQLScript tree into the IR", () => {
 
+  it("widens textual COALESCE to the longer fixed character operand", () => {
+    expect(schemaOf(ir("SELECT COALESCE(txt, 'x') AS value FROM src;").rel, CATALOGUE).VALUE)
+      .to.deep.equal({abap: "C", len: 10});
+    expect(schemaOf(ir("SELECT COALESCE(txt, 'abcdefghijkl') AS value FROM src;").rel, CATALOGUE).VALUE)
+      .to.deep.equal({abap: "C", len: 12});
+    expect(() => ir("SELECT COALESCE(txt, 'x') AS value FROM src;", {SRC: {TXT: {abap: "C"}}}))
+      .to.throw(BindError, /COALESCE arguments require identical measured types/);
+    expect(() => ir("SELECT COALESCE(a, b) AS value FROM src;", {SRC: {A: {abap: "C"}, B: {abap: "C"}}}))
+      .to.throw(BindError, /COALESCE arguments require identical measured types/);
+    expect(() => ir("SELECT COALESCE(a, b) AS value FROM src;", {
+      SRC: {A: {abap: "STRING", len: 3}, B: {abap: "STRING", len: 3}},
+    })).to.throw(BindError, /COALESCE arguments require identical measured types/);
+  });
+
+  it("types LOWER and LOCATE only for exact measured text descriptors", () => {
+    const plan = ir("SELECT LOWER(txt) AS folded, LOCATE(txt, k) AS position FROM src;");
+    const nodes = walk(plan.rel);
+    expect(nodes.find((one) => one.node === "call" && one.fn === "LOWER").type)
+      .to.deep.equal({abap: "C", len: 10});
+    expect(nodes.find((one) => one.node === "call" && one.fn === "LOCATE").type)
+      .to.deep.equal({abap: "I"});
+    for (const malformed of [{abap: "C"}, {abap: "STRING", len: 3}]) {
+      expect(() => ir("SELECT LOWER(a) AS value FROM src;", {SRC: {A: malformed}}), JSON.stringify(malformed))
+        .to.throw(BindError, /LOWER requires exactly one measured text argument/);
+      expect(() => ir("SELECT LOCATE(a, b) AS value FROM src;", {SRC: {A: malformed, B: malformed}}),
+        JSON.stringify(malformed)).to.throw(BindError, /LOCATE requires exactly two measured text arguments/);
+    }
+  });
+
+  it("types fixed-binary Hamming primitives without degrading them to text", () => {
+    const catalogue = {VECTORS: {A: {abap: "X", len: 96}, B: {abap: "X", len: 96}}};
+    const plan = ir("SELECT BITCOUNT(BITXOR(a, b)) AS distance FROM vectors;", catalogue);
+    const nodes = walk(plan.rel);
+    expect(nodes.find((one) => one.node === "call" && one.fn === "BITXOR").type)
+      .to.deep.equal({abap: "X", len: 96});
+    expect(nodes.find((one) => one.node === "call" && one.fn === "BITCOUNT").type)
+      .to.deep.equal({abap: "I"});
+    expect(() => ir("SELECT BITXOR(a, b) AS bad FROM vectors;", {
+      VECTORS: {A: {abap: "X", len: 96}, B: {abap: "X", len: 95}},
+    })).to.throw(BindError, /same length/);
+  });
+
   it("splices a table variable in place rather than leaving a var node", () => {
     // the measurement that decides this: on HANA an assignment is not an
     // observable barrier, so three assignments are one plan
@@ -97,6 +139,33 @@ describe("the SQLScript tree into the IR", () => {
     const own = ir("SELECT k FROM other WHERE k = 'x';", {OTHER: {K: {abap: "C", len: 8}}});
     const column = walk(own.rel).find((n) => n.node === "col" && n.name === "K");
     expect(column.type).to.deep.equal({abap: "C", len: 8});
+  });
+
+  it("keeps identity values distinct from columns and refuses the unmodelled clock", () => {
+    for (const [name, kind] of [["CURRENT_USER", "user"], ["CURRENT_SCHEMA", "schema"]]) {
+      const plan = ir(`SELECT ${name} AS v FROM src;`, {SRC: {[name]: {abap: "C", len: 20}}});
+      const value = walk(plan.rel).find((one) => one.node === "session");
+      expect(value, name).to.deep.include({node: "session", kind, name});
+      expect(walk(plan.rel).some((one) => one.node === "col" && one.name === name), name).to.equal(false);
+    }
+    for (const expression of ["s.CURRENT_USER", "s.\"CURRENT_USER\"", "\"CURRENT_USER\""]) {
+      const plan = ir(`SELECT ${expression} AS v FROM src AS s;`,
+        {SRC: {CURRENT_USER: {abap: "C", len: 20}}});
+      expect(walk(plan.rel).some((one) => one.node === "session"), expression).to.equal(false);
+      expect(walk(plan.rel).some((one) => one.node === "col" && one.name === "CURRENT_USER"), expression).to.equal(true);
+    }
+    for (const name of ["CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"]) {
+      expect(() => ir(`SELECT ${name} AS v FROM src;`), name)
+        .to.throw(BindError, /portable clock semantics are not implemented/);
+    }
+  });
+
+  it("models only literal-key SESSION_CONTEXT calls", () => {
+    const plan = ir("SELECT SESSION_CONTEXT('NEUTRAL_MODE') AS v FROM src;");
+    expect(walk(plan.rel).find((one) => one.node === "session"))
+      .to.deep.include({node: "session", kind: "context", name: "NEUTRAL_MODE"});
+    expect(() => ir("SELECT SESSION_CONTEXT(k) AS v FROM src;"))
+      .to.throw(BindError, /requires one literal string key/);
   });
 
   // The `str()` trap, third occurrence, as a table rather than an example:

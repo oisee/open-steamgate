@@ -20,7 +20,10 @@ import {runsAs} from "./osd-main.mjs";
 const HANA_TYPE = {
   I: "INTEGER", INT4: "INTEGER", INT8: "BIGINT", INT2: "SMALLINT", INT1: "SMALLINT",
   F: "DOUBLE", STRING: "NCLOB", XSTRING: "BLOB",
-  D: "DATS", T: "TIMS", DATS: "DATS", TIMS: "TIMS",
+  // ABAP dates/times cross an AMDP signature in their character storage
+  // form. DATS/TIMS are DDIC names, not scalar SQL types accepted by HANA's
+  // CREATE PROCEDURE grammar.
+  D: "NVARCHAR(8)", T: "NVARCHAR(6)", DATS: "NVARCHAR(8)", TIMS: "NVARCHAR(6)",
 };
 
 /** the HANA type of one ABAP-typed component */
@@ -168,12 +171,27 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
   for (const m of obj.getClassDefinition?.()?.methods ?? []) {
     const params = [];
-    for (const p of m.parameters ?? []) {
+    const methodParameters = m.parameters ?? [];
+    for (const [index, p] of methodParameters.entries()) {
       const row = p.identifier?.token?.start?.row;
       const line = row === undefined ? "" : (lines[row - 1] ?? "");
-      const after = line.slice(line.toUpperCase().indexOf(String(p.name).toUpperCase()));
-      const abapType = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(after)?.[1] ?? "";
-      params.push({name: p.name, direction: direction[p.direction] ?? "IN", abapType: abapType.trim()});
+      // The token position is authoritative. Searching the line for the
+      // parameter text can hit the same spelling inside the method name.
+      const start = Math.max(0, Number(p.identifier?.token?.start?.col ?? 1) - 1);
+      const next = methodParameters[index + 1]?.identifier?.token?.start;
+      // `OPTIONAL` belongs to this parameter only. Method declarations may
+      // put several VALUE(...) parameters on one line, so scanning to EOL
+      // lets a later OPTIONAL silently relax every earlier required input.
+      const end = next?.row === row ? Math.max(start, Number(next.col) - 1) : undefined;
+      const after = line.slice(start, end);
+      // A double quote starts an ABAP comment. Words in that prose are not
+      // declaration modifiers (`" not OPTIONAL` must stay required).
+      const declaration = after.split('"', 1)[0];
+      const typeMatch = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(declaration);
+      const abapType = typeMatch?.[1] ?? "";
+      const modifiers = typeMatch === null ? "" : declaration.slice(typeMatch.index + typeMatch[0].length);
+      params.push({name: p.name, direction: direction[p.direction] ?? "IN", abapType: abapType.trim(),
+        optional: /\bOPTIONAL\b/i.test(modifiers)});
     }
     defs.set(String(m.name).toUpperCase(), params);
   }
@@ -218,7 +236,15 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
 export function procedure(cls, m, schema, types) {
   const args = m.parameters.map((p) => {
     const t = parameterType(p.abapType, types);
-    return `${p.direction} ${p.name.toLowerCase()} ${t ?? `/* unmapped: ${p.abapType} */`}`;
+    // The disposable oracle wrapper is always a procedure. An ABAP database
+    // function's scalar RETURNING value is therefore represented as the
+    // equivalent OUT parameter; its tracked body remains byte-for-byte the
+    // same assignment.
+    if (p.direction === "RETURNING" && /^TABLE\s*\(/i.test(t ?? "")) {
+      throw new Error("the disposable procedure oracle supports scalar RETURNING only");
+    }
+    const direction = p.direction === "RETURNING" ? "OUT" : p.direction;
+    return `${direction} ${p.name.toLowerCase()} ${t ?? `/* unmapped: ${p.abapType} */`}`;
   });
   const name = `"${schema}"."${cls}=>${m.name.toUpperCase()}"`;
   return [

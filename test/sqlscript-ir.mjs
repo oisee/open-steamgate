@@ -11,7 +11,7 @@
 // bodies), IFNULL, CONCAT, SUBSTR and TO_INTEGER - plus the two divergences
 // that were measured on the engines themselves, integer division and CAST.
 import {expect} from "chai";
-import {T, col, lit, param, bin, call, cast, like, scan, ref, filter, project, join, union, aggregate, order, limit, effects} from "../tools/sqlscript-ir.mjs";
+import {T, col, lit, param, sessionValue, bin, call, cast, like, scan, ref, filter, project, join, union, except, aggregate, order, limit, effects, alias} from "../tools/sqlscript-ir.mjs";
 import {lower, statementCount, Refused} from "../tools/sqlscript-lower.mjs";
 import {schemaOf, typeOfExpr, varRef} from "../tools/sqlscript-ir.mjs";
 
@@ -29,23 +29,38 @@ describe("SQLScript IR: a chain of assignments is one plan", () => {
 
   it("lowers to a single statement, because HANA says an assignment is not a barrier", () => {
     const {sql} = lower(chain, "duckdb");
-    // two SELECTs, not three: ORDER BY is a clause of the projection's own
-    // select rather than a wrapper around it (a wrapper made `ORDER BY k`
-    // illegal whenever the projection did not carry `k`). One statement
-    // either way, which is what this test is actually about.
-    expect(sql.match(/SELECT/g), sql).to.have.length(2);
+    // The filter and projection are clauses of one query block; an earlier
+    // lowering kept a redundant subquery here. One statement either way is
+    // the semantic promise, but one SELECT is also the simpler faithful SQL.
+    expect(sql.match(/SELECT/g), sql).to.have.length(1);
     expect(sql).to.not.contain(";");
     expect(statementCount(chain)).to.equal(1);
   });
 
   it("nests rather than sequences, on every dialect we ship", () => {
-    for (const dialect of ["hana", "duckdb", "sqlite"]) {
-      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM \(SELECT \* FROM "SRC" WHERE .*\) AS "t0" ORDER BY/);
+    for (const dialect of ["hana", "postgres", "duckdb", "sqlite"]) {
+      expect(sqlOf(chain, dialect), dialect).to.match(/^SELECT "K" AS "K" FROM "SRC" WHERE .* ORDER BY/);
     }
   });
 
   it("knows the chain can raise nothing, so nothing has to be materialised", () => {
     expect(effects(chain).mayThrow).to.equal(false);
+  });
+});
+
+describe("fixed-binary Hamming lowering", () => {
+  const xor = call("BITXOR", [col("A", T.bytes(2)), col("B", T.bytes(2))], T.bytes(2));
+  const distance = call("BITCOUNT", [xor], T.int);
+  const rel = project(scan("VECTORS"), [{as: "DISTANCE", expr: distance}]);
+
+  it("uses native HANA operations and exact DuckDB BIT operations", () => {
+    expect(sqlOf(rel, "hana")).to.contain('BITCOUNT(BITXOR("A", "B"))');
+    const duck = sqlOf(rel, "duckdb");
+    expect(duck).to.contain('bit_count(CAST(xor(CAST(from_hex("A") AS BIT), CAST(from_hex("B") AS BIT)) AS BIT))');
+  });
+
+  it("refuses engines without a measured binary representation", () => {
+    expect(() => sqlOf(rel, "sqlite")).to.throw(Refused, /BITCOUNT has no measured rendering/);
   });
 });
 
@@ -111,6 +126,14 @@ describe("SQLScript IR: the divergences that were measured, not assumed", () => 
 });
 
 describe("SQLScript IR: values are bound, identifiers are generated", () => {
+  it("keeps JOIN parameters in SQL placeholder order: left, right, then ON", () => {
+    const left = project(scan("DUMMY"), [{as: "L", expr: lit("left", T.str)}]);
+    const right = project(scan("DUMMY"), [{as: "R", expr: lit("right", T.str)}]);
+    const rel = join(left, right, bin("=", col("L"), lit("on", T.str), T.bool));
+    const compiled = lower(rel, "duckdb");
+    expect(compiled.params.map((one) => one.value)).to.deep.equal(["left", "right", "on"]);
+  });
+
   it("a parameter never reaches the text", () => {
     const rel = filter(scan("SRC"), bin("=", col("K"), param("lv_key", T.char(3)), T.bool));
     const {sql, params} = lower(rel, "duckdb");
@@ -130,6 +153,14 @@ describe("SQLScript IR: values are bound, identifiers are generated", () => {
   it("NULL is said explicitly, because ABAP has no NULL", () => {
     const rel = filter(scan("SRC"), bin("=", col("K"), param("lv_key", T.char(3), true), T.bool));
     expect(lower(rel, "duckdb").params[0].isNull).to.equal(true);
+    const literals = lower(project(scan("DUMMY"), [
+      {as: "N", expr: lit(null, T.int)},
+      {as: "D", expr: lit(null, T.date)},
+    ]), "duckdb").params;
+    expect(literals.map(({value, isNull}) => ({value, isNull}))).to.deep.equal([
+      {value: null, isNull: true},
+      {value: null, isNull: true},
+    ]);
   });
 
   it("a relation the seam already knows is spliced by the seam's own name", () => {
@@ -148,6 +179,24 @@ describe("SQLScript IR: the shapes the corpus actually contains", () => {
   it("inner join", () => {
     const rel = join(scan("A"), scan("B"), bin("=", col("K"), col("K2"), T.bool));
     expect(sqlOf(rel, "hana")).to.contain("INNER JOIN");
+  });
+
+  it("keeps JOIN aliases in scope for a qualified projection without WHERE", () => {
+    const rel = project(
+      join(alias(scan("A"), "L"), alias(scan("B"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.char(3), "R"), T.bool)),
+      [{as: "LK", expr: col("K", T.int, "L")}]);
+    const sql = sqlOf(rel, "duckdb");
+    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K")');
+  });
+
+  it("keeps those aliases in scope through ORDER BY and LIMIT", () => {
+    const selected = project(
+      join(alias(scan("A"), "L"), alias(scan("B"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.int, "R"), T.bool)),
+      [{as: "LK", expr: col("K", T.int, "L")}]);
+    const sql = sqlOf(limit(order(selected, [{col: "LK"}]), 2), "duckdb");
+    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K") ORDER BY "LK" ASC LIMIT 2');
   });
 
   it("group by with an aggregate", () => {
@@ -210,6 +259,28 @@ describe("SQLScript IR: what it refuses", () => {
       .to.throw(Refused, /not lowered yet/);
   });
 
+  it("rechecks the measured decimal and regex subset at the public lowering boundary", () => {
+    const changedScale = project(scan("A"), [
+      {as: "D", expr: cast(col("D", T.dec(8, 3)), T.dec(12, 2))},
+    ]);
+    expect(() => lower(changedScale, "duckdb"))
+      .to.throw(Refused, /packed-decimal source with unchanged scale/);
+
+    const exactInteger = project(scan("A"), [
+      {as: "D", expr: cast(col("I", T.int), T.dec(8, 3))},
+    ]);
+    expect(lower(exactInteger, "duckdb").sql).to.include('CAST("I" AS DECIMAL(8, 3))');
+    expect(() => lower(exactInteger, "postgres"))
+      .to.throw(Refused, /INTEGER or a packed-decimal source/);
+
+    const broadRegex = project(scan("A"), [
+      {as: "S", expr: call("REGEXP_REPLACE_ALL",
+        [col("S", T.str), lit("[x]", T.char(3)), lit("", T.char(0))], T.str)},
+    ]);
+    expect(() => lower(broadRegex, "duckdb"))
+      .to.throw(Refused, /measured only for a column subject, literal 'x'/);
+  });
+
   it("refuses an unresolved table variable rather than reading a table of that name", async () => {
     const {varRef} = await import("../tools/sqlscript-ir.mjs");
     const rel = filter(varRef("lt1"), bin(">", col("N"), lit(0, T.int), T.bool));
@@ -218,6 +289,18 @@ describe("SQLScript IR: what it refuses", () => {
 
   it("refuses an unknown dialect instead of guessing one", () => {
     expect(() => lower(scan("A"), "oracle")).to.throw(Refused, /no dialect/);
+  });
+
+  it("refuses nested set trees until parenthesized lowering is measured", () => {
+    const a = scan("A"), b = scan("B"), c = scan("C");
+    for (const rel of [
+      except(union([a, b], false), c),
+      union([a, except(b, c)], false),
+      except(except(a, b), c),
+    ]) {
+      expect(() => lower(rel, "duckdb")).to.throw(Refused, /nested set operations/);
+      expect(() => schemaOf(rel, {A: {}, B: {}, C: {}})).to.throw(/nested set operations/);
+    }
   });
 
   it("marks a non-deterministic source, because reading it twice is observable", () => {
@@ -238,6 +321,15 @@ describe("SQLScript IR: the schema a typer reads, and where it comes from", () =
     const rel = project(filter(scan("SRC"), bin(">", col("N"), lit(1, T.int), T.bool)),
                         [{as: "KK", expr: col("K")}]);
     expect(schemaOf(rel, catalogue)).to.deep.equal({KK: T.char(3)});
+  });
+
+  it("uses the resolved column type when JOIN sides have the same name", () => {
+    const rel = project(
+      join(alias(scan("LEFT_T"), "L"), alias(scan("RIGHT_T"), "R"),
+           bin("=", col("K", T.int, "L"), col("K", T.char(3), "R"), T.bool)),
+      [{as: "OUT", expr: col("K", T.int, "L")}]);
+    const catalogue = {LEFT_T: {K: T.int}, RIGHT_T: {K: T.char(3)}};
+    expect(schemaOf(rel, catalogue)).to.deep.equal({OUT: T.int});
   });
 
   it("an aggregate keeps its keys and types its aggregates", () => {
@@ -336,7 +428,7 @@ describe("SQLScript IR: the tables a body needs, invented from the body", () => 
 
 // A function name that reaches another engine unchanged is the same class of
 // defect as a cast that reaches it unchanged, and the corpus made it visible:
-// SUBSTR_BEFORE, SUBSTR_AFTER, MAP, TO_NVARCHAR and SESSION_CONTEXT are
+// SUBSTR_BEFORE, SUBSTR_AFTER, MAP and TO_NVARCHAR are
 // HANA's, and DuckDB answers "Scalar Function ... does not exist". Raising is
 // the lucky half; the other half is a name that exists on both engines and
 // means something slightly different.
@@ -363,10 +455,15 @@ describe("SQLScript IR: a function is rendered only where it has been measured",
     // the list is of functions whose MEANING was measured, not of functions
     // that exist; ROUND and LOCATE left it by being measured, not by being
     // common
-    for (const fn of ["SESSION_CONTEXT", "TO_DATE", "ESCAPE_SINGLE_QUOTES"]) {
+    for (const fn of ["TO_DATE", "ESCAPE_SINGLE_QUOTES"]) {
       const rel = project(scan("SRC"), [{as: "V", expr: call(fn, [col("A")], T.str)}]);
       expect(() => lower(rel, "duckdb"), fn).to.throw(Refused, /has no measured rendering/);
     }
+  });
+
+  it("refuses an uncaptured session node at the dialect boundary", () => {
+    const rel = project(scan("SRC"), [{as: "V", expr: sessionValue("user", "CURRENT_USER")}]);
+    expect(() => lower(rel, "duckdb")).to.throw(Refused, /was not captured by the procedure runtime/);
   });
 
   it("still translates the ones that were measured and differ", () => {

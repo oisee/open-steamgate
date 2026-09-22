@@ -35,6 +35,44 @@ describe("the SQLScript grammar", () => {
     expect(assignments).to.have.length(3);
   });
 
+  it("keeps a WHILE body nested instead of flattening its assignments", () => {
+    const source = `DECLARE lv_i INTEGER;
+      lv_i = 1;
+      WHILE :lv_i <= :iv_count DO
+        et_rows = SELECT * FROM :et_rows UNION ALL SELECT :lv_i AS id FROM DUMMY;
+        lv_i = :lv_i + 1;
+      END WHILE;`;
+    const t = tree(source);
+    expect(names(t).filter((name) => name === "While")).to.have.length(1);
+    const loop = (function find(node) {
+      if (node.node === "While") return node;
+      for (const child of node.children ?? []) {
+        const found = find(child);
+        if (found !== undefined) return found;
+      }
+    })(t);
+    expect(names(loop).filter((name) => name === "Assignment")).to.have.length(2);
+  });
+
+  it("keeps a measured ARRAY constructor and UNNEST WITH ORDINALITY visible", () => {
+    const t = tree(`DECLARE lv_values INTEGER ARRAY = ARRAY(2, 5, NULL);
+      lt = UNNEST(:lv_values) WITH ORDINALITY AS (element_value, position_value);
+      et = SELECT element_value, position_value FROM :lt;`);
+    expect(names(t)).to.include("Declare").and.to.include("UnnestCall");
+    expect(leaves(t, "host")).to.include(":lv_values");
+  });
+
+  it("accepts HANA's DECLARE CURSOR name order and rejects the reversed synthetic spelling", () => {
+    expect(() => tree("DECLARE CURSOR c_rows FOR SELECT id FROM :input;")).not.to.throw();
+    expect(() => tree("DECLARE c_rows CURSOR FOR SELECT id FROM :input;")).to.throw(ParseError);
+  });
+
+  it("requires balanced parentheses around a WHILE condition", () => {
+    expect(() => tree("WHILE (1 = 1 DO END WHILE;")).to.throw(ParseError);
+    expect(() => tree("WHILE 1 = 1) DO END WHILE;")).to.throw(ParseError);
+    expect(() => tree("WHILE (1 = 1) DO END WHILE;")).not.to.throw();
+  });
+
   it("keeps a quoted name a name and a quoted value a value", () => {
     const t = tree(`SELECT "K" FROM t WHERE v = '{"draft":"kept"}';`);
     expect(leaves(t, "quoted"), "the name").to.deep.equal(["K"]);
@@ -53,6 +91,14 @@ describe("the SQLScript grammar", () => {
   it("parses a function call, a cast-shaped one included", () => {
     const t = tree("SELECT TO_INTEGER(txt) AS n, LENGTH(ch) FROM t;");
     expect(names(t).filter((n) => n === "FunctionCall")).to.have.length(2);
+  });
+
+  it("keeps an internal procedure call and its input/output roles visible", () => {
+    const t = tree('CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(:it_amount, et_total);');
+    expect(names(t)).to.include("ProcedureCall");
+    expect(leaves(t, "quoted")).to.deep.equal(["ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"]);
+    expect(leaves(t, "host")).to.deep.equal([":it_amount"]);
+    expect(leaves(t, "identifier")).to.include("et_total");
   });
 
   it("refuses what it cannot parse, and says where -- the way the engine does", () => {

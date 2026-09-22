@@ -174,6 +174,39 @@ describe("tools/adt-facade: the development loop", () => {
       expect(await back.text()).to.contain("'changed'");
     });
 
+    it("does not overwrite a source changed after the editor read it", async () => {
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const staleTag = opened.headers.get("etag");
+      const {handle} = await lock();
+      const concurrent = SOURCE.replace("'hello'", "'concurrent'");
+      store.write("CLAS", SCRATCH, concurrent);
+      try {
+        const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {
+          method: "PUT", headers: {"if-match": staleTag},
+          body: SOURCE.replace("'hello'", "'editor'"),
+        });
+        expect(res.status).to.equal(412);
+        expect(await res.text()).to.contain("ExceptionResourceIsModified");
+        expect(store.read("CLAS", SCRATCH).source).to.equal(concurrent);
+      } finally {
+        store.write("CLAS", SCRATCH, SOURCE);
+      }
+    });
+
+    it("accepts a write whose If-Match still names the stored source", async () => {
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const tag = opened.headers.get("etag");
+      const {handle} = await lock();
+      const changed = SOURCE.replace("'hello'", "'matched'");
+      const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {
+        method: "PUT", headers: {"if-match": tag}, body: changed,
+      });
+      expect(res.status).to.equal(200);
+      expect(store.read("CLAS", SCRATCH).source).to.equal(changed);
+    });
+
     it("a library object cannot be written", async () => {
       const {handle} = await lock();
       const res = await call(`/oo/classes/CL_ABAP_ZIP/source/main?lockHandle=${handle}`, {method: "PUT", body: "nope"});
@@ -396,9 +429,108 @@ describe("tools/adt-facade: the development loop", () => {
     it("a method that passed carries no alert, which is what passing means", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
+      const testClass = xml.match(/<testClass [^>]*>[\s\S]*?<testMethods>/)[0];
+      expect(testClass).to.contain("<alerts/>");
       const method = xml.match(/<testMethod [^>]*>[\s\S]*?<\/testMethod>/)[0];
-      expect(method).to.contain("<alerts>");
+      expect(method).to.contain("<alerts/>");
       expect(method).to.not.contain("<alert ");
+    });
+
+    it("discovers test classes and methods without running them", async () => {
+      const res = await call("/core/http/unit/object?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.object).to.deep.equal({type: "CLAS", name: "ZCL_STG_SEGW_TEST"});
+      const tree = found.classes.find((item) => item.name === "LTCL_TREE");
+      expect(tree).to.include({riskLevel: "harmless", durationCategory: "short", include: "testclasses"});
+      expect(tree.methods.map((item) => item.name)).to.include("PROPERTIES_IN_FILE_ORDER");
+    });
+
+    it("runs one selected method through the Workbench endpoint", async function () {
+      this.timeout(180000);
+      const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
+        "&testClass=LTCL_TREE&method=PROPERTIES_IN_FILE_ORDER", {method: "POST"});
+      expect(res.status).to.equal(200);
+      const run = await res.json();
+      expect(run.counts).to.include({classes: 1, methods: 1, passed: 1, failed: 0});
+      expect(run.testClasses[0].name).to.equal("LTCL_TREE");
+      expect(run.testClasses[0].testMethods.map((item) => item.name))
+        .to.deep.equal(["PROPERTIES_IN_FILE_ORDER"]);
+    });
+
+    it("passes an ADT testclass/testmethod fragment to the isolated runner", async function () {
+      this.timeout(180000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=LTCL_TREE;testmethod=PROPERTIES_IN_FILE_ORDER"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(200);
+      const answer = await res.text();
+      expect(answer).to.contain('testClass adtcore:name="LTCL_TREE"');
+      expect(answer).to.contain('testMethod adtcore:name="PROPERTIES_IN_FILE_ORDER"');
+      expect(answer.match(/<testMethod /g)).to.have.length(1);
+    });
+
+    it("refuses an ADT-selected test class that does not belong to the object", async function () {
+      this.timeout(180000);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=DOES_NOT_EXIST"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(404);
+      expect(await res.text()).to.contain("does not belong");
+    });
+
+    it("reports malformed ADT test selectors as a request error", async () => {
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test#testclass=%"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("ExceptionInvalidRequest");
+    });
+
+    for (const selector of ["#testclass=", "#testmethod=CHECK", "#testclass=LTCL_TREE;testmethod="]) {
+      it(`refuses incomplete ADT selector ${selector}`, async () => {
+        const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test${selector}"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+        const res = await call("/abapunit/testruns", {method: "POST", body});
+        expect(res.status).to.equal(400);
+        expect(await res.text()).to.contain("ExceptionInvalidRequest");
+      });
+    }
+
+    it("does not attach another object reference's selector to the first object", async () => {
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<aunit:runConfiguration xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReferences>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_stg_segw_test"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_zosd_test_demo#testclass=LTCL_DEMO"/>
+  </adtcore:objectReferences>
+</aunit:runConfiguration>`;
+      const res = await call("/abapunit/testruns", {method: "POST", body});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("exactly one object reference");
+    });
+
+    it("refuses a selected method that does not belong to the object", async () => {
+      const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
+        "&testClass=LTCL_TREE&method=DOES_NOT_EXIST", {method: "POST"});
+      expect(res.status).to.equal(404);
+      expect(await res.text()).to.contain("does not belong");
     });
 
     it("every class and method points at the line it is written at", async function () {
@@ -406,6 +538,39 @@ describe("tools/adt-facade: the development loop", () => {
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
       // a client jumps to a failure instead of opening a file and searching
       expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
+    });
+
+    it("answers the occurrence-marker follow-up without discarding the navigation URI", async () => {
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const res = await call(`/abapsource/occurencemarkers?uri=${encodeURIComponent(uri)}`, {
+        method: "POST",
+        headers: {"content-type": "text/plain", accept: "application/*"},
+        body: "CLASS ltcl DEFINITION FOR TESTING. ENDCLASS.",
+      });
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("application/xml");
+      const xml = await res.text();
+      expect(xml).to.contain("<occurrenceInfo");
+      expect(xml).to.contain("<occurrences/>");
+    });
+
+    it("maps a test include URI back through its packages to the owning class", async () => {
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`, {method: "POST"});
+      expect(res.status).to.equal(200);
+      const xml = await res.text();
+      expect(xml).to.contain("<projectexplorer:nodepath");
+      expect(xml).to.contain('adtcore:name="$STG_TEST"');
+      expect(xml).to.contain('adtcore:name="$STG_TEST_UNIT"');
+      expect(xml).to.contain('adtcore:name="ZCL_STG_SEGW_TEST"');
+      expect(xml).to.contain('adtcore:type="CLAS/OC"');
+      expect(xml).to.not.contain("includes/testclasses");
+    });
+
+    it("refuses an occurrence-marker request without its source URI", async () => {
+      const res = await call("/abapsource/occurencemarkers", {method: "POST", body: "source"});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("uri is required");
     });
 
     it("a test run that names nothing is refused", async () => {
@@ -419,8 +584,8 @@ describe("tools/adt-facade: the development loop", () => {
   });
 
   describe("activating", () => {
-    const activate = (name) => call("/activation?method=activate&preauditRequested=true", {
-      method: "POST",
+    const activate = (name, headers = {}) => call("/activation?method=activate&preauditRequested=true", {
+      method: "POST", headers,
       body: `<?xml version="1.0" encoding="UTF-8"?>
 <adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
   <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${String(name).toLowerCase()}" adtcore:name="${name}"/>
@@ -455,14 +620,31 @@ describe("tools/adt-facade: the development loop", () => {
     it("source that holds activates, and says so with its properties", async function () {
       this.timeout(60000);
       const {handle} = await lock();
-      await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      const res = await activate(SCRATCH);
+      const saved = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
+      const res = await activate(SCRATCH, {"if-match": saved.headers.get("etag")});
       expect(res.status).to.equal(200);
       expect(res.headers.get("content-type")).to.contain("application/xml");
       const xml = await res.text();
       expect(xml).to.contain("<chkl:messages ");
       expect(xml).to.match(/<chkl:properties [^>]*activationExecuted="true"/);
       expect(xml, "no messages for a clean activation").to.not.contain("<chkl:msg");
+    });
+
+    it("does not activate bytes that replaced the checked revision", async function () {
+      this.timeout(60000);
+      store.write("CLAS", SCRATCH, SOURCE);
+      const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
+      const checkedTag = opened.headers.get("etag");
+      const concurrent = SOURCE.replace("'hello'", "'newer'");
+      store.write("CLAS", SCRATCH, concurrent);
+      try {
+        const res = await activate(SCRATCH, {"if-match": checkedTag});
+        expect(res.status).to.equal(412);
+        expect(await res.text()).to.contain("source changed after it was checked");
+        expect(store.read("CLAS", SCRATCH).source).to.equal(concurrent);
+      } finally {
+        store.write("CLAS", SCRATCH, SOURCE);
+      }
     });
 
     it("source that does not hold comes back as messages, not as an empty success", async function () {
@@ -520,6 +702,72 @@ describe("tools/adt-facade: the development loop", () => {
   });
 });
 
+
+describe("tools/adt-facade: publication state", function () {
+  this.timeout(30000);
+  const name = "ZCL_OSD_PUBLICATION";
+  const source = SOURCE.replaceAll("zcl_osd_scratch", "zcl_osd_publication");
+  let root;
+  let store;
+  let server;
+  let token;
+  let context;
+
+  before(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-adt-publish-"));
+    mkdirSync(join(root, "src"), {recursive: true});
+    writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
+    store = new ObjectStore({root, libs: []});
+    store.write("CLAS", name, source);
+    const app = express();
+    app.use(express.raw({type: "*/*", limit: "16mb"}));
+    app.use(adtRouter({store}).router);
+    await new Promise((resolve) => { server = app.listen(0, resolve); });
+    const res = await fetch(`http://localhost:${server.address().port}/sap/bc/adt/core/discovery`,
+      {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+    token = res.headers.get("x-csrf-token");
+    context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+  });
+
+  after(() => {
+    server?.close();
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  const activate = () => fetch(`http://localhost:${server.address().port}/sap/bc/adt/activation?method=activate`, {
+    method: "POST",
+    headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token, "x-sap-adt-sessiontype": "stateful"},
+    body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${name.toLowerCase()}" adtcore:name="${name}"/></adtcore:objectReferences>`,
+  });
+
+  it("keeps the source inactive after a failed publish, then completes a successful retry", async () => {
+    store.publish = async () => ({ok: false, transpile: {error: "ENOSPC"}});
+    const failed = await activate();
+    expect((await failed.text())).to.contain('activationExecuted="false"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
+
+    store.publish = async () => ({ok: true, recycled: false});
+    const passed = await activate();
+    expect((await passed.text())).to.contain('activationExecuted="true"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
+  });
+
+  it("does not activate a source saved while publication is pending", async () => {
+    store.write("CLAS", name, source);
+    let release;
+    store.publish = () => new Promise((resolve) => { release = resolve; });
+    const pending = activate();
+    for (let i = 0; i < 100 && release === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(release).to.be.a("function");
+    store.write("CLAS", name, source.replace("'hello'", "'newer'"));
+    release({ok: true, recycled: false});
+    const response = await pending;
+    expect(await response.text()).to.contain('activationExecuted="false"');
+    expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
+  });
+});
 
 describe("tools/adt-facade: create and delete over the wire", () => {
   let server;

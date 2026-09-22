@@ -13,6 +13,7 @@
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {parseDDLS} from "./cds2ddic.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
@@ -320,6 +321,23 @@ export class ObjectStore {
       changedAt = undefined;
     }
     return {changedAt, version: this.inactive.has(`${entry.type} ${entry.name}`) ? "inactive" : "active"};
+  }
+
+  // An activation checks one source revision. A save can arrive while the
+  // build is running, including from another editor writing to the worktree.
+  #sourceRevision(type, name) {
+    const entry = this.find(type, name);
+    if (entry === undefined) return undefined;
+    const files = type === "CLAS"
+      ? Object.values(INCLUDES).map((suffix) => entry.file.replace(/\.clas\.abap$/, suffix))
+      : [entry.file];
+    const hash = createHash("sha256");
+    for (const file of files) {
+      hash.update(file).update("\0");
+      if (existsSync(join(this.root, file))) hash.update(readFileSync(join(this.root, file)));
+      hash.update("\0");
+    }
+    return hash.digest("hex");
   }
 
   // ---------------------------------------------------------------- index
@@ -1098,9 +1116,8 @@ export class ObjectStore {
   // while the system it lives in no longer compiles. A real system refuses
   // that activation, so this one does too, and it says which caller broke.
   //
-  // The verdict comes back at once and the modules are written afterwards,
-  // because the façade answers the client with the verdict and the next
-  // request is what needs the output.
+  // This is only the check verdict. The inactive mark is cleared separately,
+  // after publication succeeds; a failed build is not an activation.
   activate(type, name) {
     const result = this.check(type, name);
     if (result.issues.length > 0) {
@@ -1121,10 +1138,25 @@ export class ObjectStore {
         broken.push(checked);
       }
     }
-    if (broken.length === 0) {
-      this.inactive.delete(`${type} ${String(name).toUpperCase()}`);
+    return {...result, active: broken.length === 0, dependents: broken,
+      revision: broken.length === 0 ? this.#sourceRevision(type, name) : undefined};
+  }
+
+  // Complete only the exact revision that passed the check. An editor may
+  // save again while publish() awaits its build or runtime recycle.
+  completeActivation(result) {
+    return this.completeActivations([result]);
+  }
+
+  completeActivations(results) {
+    // An ADT request may activate several objects. Do not mark the first
+    // active if a later one was saved again during the same build.
+    if (results.some((result) => result.active !== true || result.revision === undefined ||
+        result.revision !== this.#sourceRevision(result.type, result.name))) return false;
+    for (const result of results) {
+      this.inactive.delete(`${result.type} ${String(result.name).toUpperCase()}`);
     }
-    return {...result, active: broken.length === 0, dependents: broken};
+    return true;
   }
 
   // the transpile behind an activation: the modules the runtime loads.
