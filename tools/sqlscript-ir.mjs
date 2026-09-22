@@ -201,6 +201,7 @@ export function seamType(type) {
   if (type === undefined || type === null) return "STRING";
   if (typeof type === "string") return type;
   const {abap, len, dec} = type;
+  if (abap === "UNRESOLVED") throw new Error(`a column with no resolved type reached the seam (${type.reason})`);
   if (abap === "P" && len !== undefined) return `P(${len},${dec ?? 0})`;
   if (len !== undefined) return `${abap}(${len})`;
   return abap;

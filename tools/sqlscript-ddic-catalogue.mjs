@@ -4,17 +4,24 @@
 // knows neither ObjectStore nor abapGit XML; it only needs
 // `{TABLE: {COLUMN: type}}`.  Conversely, DDIC resolution already exists in
 // osd-type-graph.mjs and must not be reimplemented by the AMDP generator.
-import {irTypeOfDdic} from "./sqlscript/scalar-types.mjs";
+import {irTypeOfDdic, unresolvedType, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 
 function irType(field, table) {
   if (field.INCLUDE !== undefined) {
     // a missing include is a missing *set* of columns whose names nobody
-    // knows, so the table is refused rather than served in part
+    // knows, so refusing on reference cannot work: the table is refused
     throw new Error(`DDIC ${table}: include ${field.INCLUDE} did not resolve (${field.REASON}), so the table's schema would be partial`);
   }
   const type = field.TYPE ?? field;
-  return irTypeOfDdic(type, `DDIC ${table}.${field.NAME}`);
+  try {
+    return irTypeOfDdic(type, `DDIC ${table}.${field.NAME}`);
+  } catch (error) {
+    if (!(error instanceof UnresolvedScalarType)) throw error;
+    // one column's element is not in this dictionary: the column is carried
+    // marked, and a body is refused by its name when it reads it
+    return unresolvedType(`${table}.${field.NAME}: ${type.REASON ?? error.message}`);
+  }
 }
 
 /** All transparent/structure TABL objects visible through an ObjectStore.

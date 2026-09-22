@@ -25,7 +25,7 @@
 import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
-import {isTableParameter, signatureScalars} from "./scalar-types.mjs";
+import {isTableParameter, signatureScalars, isUnresolved} from "./scalar-types.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -121,12 +121,16 @@ export function toIr(tree, options = {}) {
       if (type === undefined && options.strictColumns === true) {
         throw new BindError(`column ${sourceName}.${name} is not present in the typed query scope`);
       }
+      if (isUnresolved(type)) throw new BindError(`column ${sourceName}.${name} has no resolved type (${type.reason})`);
       return type ?? T.str;
     }
     if (ambiguousColumns.has(name)) throw new BindError(`column ${name} is ambiguous without a source qualifier`);
     if (columns[name] === undefined && options.strictColumns === true) {
       throw new BindError(`column ${name} is not present in the typed query scope`);
     }
+    // a column the dictionary could not type is refused when it is read,
+    // by name, the way an unresolved scalar parameter is
+    if (isUnresolved(columns[name])) throw new BindError(`column ${name} has no resolved type (${columns[name].reason})`);
     return columns[name] ?? T.str;
   };
 
@@ -793,7 +797,14 @@ export function toIr(tree, options = {}) {
       // list, so nothing covered it.
       const star = (item.children ?? []).some((c) =>
         (c.node === "operator" || c.node === "word") && c.value === "*");
-      if (star) return {as: "*", expr: {node: "star"}};
+      if (star) {
+        // `SELECT *` reads every column of the scope, the marked ones included
+        const dark = Object.entries(columns).find(([, type]) => isUnresolved(type));
+        if (dark !== undefined) {
+          throw new BindError(`SELECT * would carry column ${dark[0]}, which has no resolved type (${dark[1].reason})`, item);
+        }
+        return {as: "*", expr: {node: "star"}};
+      }
       const alias = kids(item, "Name")[0];
       const expr = expression((item.children ?? []).find((c) => c.node !== "word" && c !== alias));
       return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};

@@ -512,3 +512,62 @@ in `FROM` (the callee's RETURNS is now read off its DDLS, indexed by name
 and by `implemented by method`, which is what that slice needs), 6 + 3 ×
 `IT_CONFIGURATION` (an `IN` table whose type the class does not hold),
 5 × `CURRENT_SCHEMA`, 4 × `CALL`.
+
+### The catalogue, closed over the dictionary: 31 → 41 lowered, and 7 of them honestly
+
+*2026-09-22, later. Same branch, same instrument, one more column in it.*
+
+The bodies read three things the instrument described with nothing: the
+tables their `USING` names, their table parameters, and through both every
+data element and include. The exports carry 1980 `TABL` and 726 `TTYP`
+beside the classes, so the folder dictionary indexes them too and the
+catalogue is built per body the way `amdp-gen` builds it for the tree:
+`USING` tables through `ddicCatalogue`, table parameters through the class's
+own `TYPES` or a `TTYP` → `TABL` of the dictionary.
+
+Two things were under the walk that reads a table, both older than this
+branch. `osd-type-graph` skipped every `DD03P` row whose name begins with a
+dot -- `.INCLUDE`, `.INCLU--AP`, `.INCLU-XXX` -- and 349 of the 1970 tables
+have one; the runtime catalogue was missing **2966 columns** (`SWD_VERSION`:
+1 field seen, 77 there), and a column not in the schema is what the
+non-strict binder reads as STRING. And its cycle guard was a set for the run
+rather than for the path, so a structure included twice or a data element
+used by two fields came back `CYCLE`. Both fixed with tests; the generated
+RFC dispatcher, which reads the same graph, is byte-identical before and
+after. An include that does not resolve is a missing *set* of columns whose
+names nobody knows, so that table is refused whole (90 of the 349).
+
+**The number that matters is the strict one.** foreman-dell asked for a
+second column: the same body bound with `strictColumns`, every column
+required to be in a typed scope. It says how many bodies lower only because
+a column nobody described was read as STRING:
+
+| working corpus | lowered | of which every column typed |
+| --- | ---: | ---: |
+| after 1b | 31 (9%) | *not measured* |
+| after 2a | 41 (11%) | **7 (2%)** |
+
+So the headline moved from 31 to 41, and 34 of the 41 are guesses. The
+strict column is now printed first and quoted as the number; the other one
+is there so the gap stays visible. A column whose data element is in no
+dictionary is carried **marked** and refused by name when a body reads it
+(or when `SELECT *` would carry it), the rule scalars already had -- so a
+table is not refused for a field nobody touches.
+
+What the strict refusals name, working corpus: `MANDT` ×8, `NULL` ×4,
+`ROW_NR` ×2, `HOST` ×2. The `MANDT` ones are not a dictionary gap in the
+data element (it is in the dump) but in the **table**: `USING` names
+standard tables of other packages -- `SCARR`, `SFLIGHT`, `TADIR`, `SPFLI`,
+`SWWCNTP0` -- and 97 of the 230 `USING` names are in no export at all. The
+instrument now prints the **wanted** list: absent tables ranked by the
+bodies they would let be typed, with the bodies that need two or more
+flagged. Today it is short -- `USOBHASH` 2, `ADR12` 2, then ones -- because
+most of the 34 guessing bodies fail strict on something else first
+(`NULL`, aliases, expressions). Exporting those tables from the sandbox is
+a decision, not a build step; the list is what to decide with.
+
+The `.INCLU-XXX` rule was read off the export rather than assumed:
+`DEMO_WEEK` includes `DEMO_DAY` five times as `.INCLU-_MO` … `.INCLU-_FR`,
+and its columns are `WORK_MO`, `FREE_MO`, … -- the suffix is appended to
+every included field. Expanding without it would have produced column names
+that look right and are not.

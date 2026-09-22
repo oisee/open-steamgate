@@ -19,6 +19,13 @@
 // body would run and answer something else.
 import {T} from "../sqlscript-ir.mjs";
 
+/** a column whose type could not be resolved, carried in a schema so that a
+ *  body is refused when it **references** the column, not when the table is
+ *  merely present -- the rule scalars already follow. `seamType` and the
+ *  binder both refuse it by name; nothing renders it. */
+export const unresolvedType = (reason) => ({abap: "UNRESOLVED", reason});
+export const isUnresolved = (type) => type !== null && typeof type === "object" && type.abap === "UNRESOLVED";
+
 export class UnresolvedScalarType extends Error {
   constructor(message) {
     super(message);
@@ -106,6 +113,9 @@ export function scalarTypeOf(abapType, resolve = () => undefined) {
 
 /** the signature's guess at which parameters are tables: the binder's rule, kept in one place */
 export function isTableParameter(p) {
+  // a caller that resolved the type says so; the name heuristic is for the rest
+  if (p.kind === "table") return true;
+  if (p.kind === "scalar") return false;
   return /^(tt_|.*_tab$|.*TABLE.*)/i.test(String(p.abapType ?? "")) || /^(it|et|ct)_/i.test(String(p.name ?? ""));
 }
 

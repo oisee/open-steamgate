@@ -23,6 +23,8 @@ import {lower} from "../sqlscript-lower.mjs";
 import * as extractor from "../amdp-extract.mjs";
 import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
 import {parseTableFunction} from "./table-function-ddls.mjs";
+import {typedParameters} from "./signature-schemas.mjs";
+import {ddicCatalogue} from "../sqlscript-ddic-catalogue.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
@@ -36,7 +38,7 @@ export function bodiesOf(source, filename) {
     const cls = extract(source, filename);
     const methods = cls?.methods ?? [];
     if (methods.length > 0) {
-      return methods.map((m) => ({body: m.body, signature: m, language: (m.language || "SQLSCRIPT").toUpperCase()}));
+      return methods.map((m) => ({body: m.body, signature: m, types: cls.types, language: (m.language || "SQLSCRIPT").toUpperCase()}));
     }
   } catch {
     // a class the extractor cannot read still has bodies worth counting
@@ -108,23 +110,66 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     if (name === undefined) continue;
     const ddls = ddic.read("DDLS", name);
     if (ddls === undefined) {
-      tableFunctionsMissing.set(name, (tableFunctionsMissing.get(name) ?? 0) + 1);
+      const key = `${name} (not in the export)`;
+      tableFunctionsMissing.set(key, (tableFunctionsMissing.get(key) ?? 0) + 1);
       continue;
     }
     let tf;
     try {
       tf = parseTableFunction(ddls.source);
     } catch (error) {
-      tableFunctionsMissing.set(`${name} (${String(error.message).slice(0, 40)})`, 1);
+      const key = `${name} (${String(error.message).slice(0, 40)})`;
+      tableFunctionsMissing.set(key, (tableFunctionsMissing.get(key) ?? 0) + 1);
       continue;
     }
     if (tf === undefined) {
       // the DDLS of that name is a view, not a table function
-      tableFunctionsMissing.set(`${name} (not a table function)`, 1);
+      const key = `${name} (not a table function)`;
+      tableFunctionsMissing.set(key, (tableFunctionsMissing.get(key) ?? 0) + 1);
       continue;
     }
     one.signature = {...one.signature, parameters: tf.parameters, returns: tf.returns};
     tableFunctionsRead += 1;
+  }
+
+  // **The catalogue, closed over the dictionary.** Three things a body reads
+  // that the instrument used to describe with nothing: the tables its USING
+  // names (resolved through the exports' own TABL, the way amdp-gen does it
+  // through the tree's), its table parameters (a local TYPES of the class
+  // or a TTYP of the dictionary), and, through both, every data element
+  // and include. A table that cannot be resolved is left out and named, so
+  // the body's refusal stays "the catalogue does not describe X" and the
+  // header says why.
+  const usingFailures = new Map();
+  const parameterFailures = new Map();
+  for (const one of [...corpora.teaching, ...corpora.working]) {
+    const catalogue = {};
+    for (const name of one.signature?.usings ?? []) {
+      const table = String(name).toUpperCase();
+      if (ddic.find("TABL", table) === undefined) continue;
+      try {
+        Object.assign(catalogue, ddicCatalogue(ddic, [table]));
+      } catch (error) {
+        usingFailures.set(`${table}: ${String(error.message).slice(0, 70)}`, (usingFailures.get(table) ?? 0) + 1);
+      }
+    }
+    const {parameters, untyped} = typedParameters(one.signature, {types: one.types, store: ddic, resolve: resolveType});
+    for (const [name, reason] of Object.entries(untyped)) parameterFailures.set(`${name}: ${reason.slice(0, 70)}`, (parameterFailures.get(name) ?? 0) + 1);
+    const relationSchemas = {};
+    for (const p of parameters) {
+      if (p.kind === "table") {
+        catalogue[String(p.name).toUpperCase()] = p.schema;
+        relationSchemas[String(p.name).toUpperCase()] = p.schema;
+      }
+    }
+    one.signature = {...one.signature, parameters};
+    one.catalogue = catalogue;
+    one.relationSchemas = relationSchemas;
+    // the USING tables no dictionary here holds at all: what an export
+    // from the system would have to bring, ranked below by what it unlocks
+    one.absentUsings = (one.signature?.usings ?? [])
+      .map((name) => String(name).toUpperCase())
+      .filter((name) => !name.includes("=>") && ddic.find("TABL", name) === undefined && ddic.find("DDLS", name) === undefined);
   }
 
   const report = {};
@@ -154,7 +199,11 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     let parsed = 0;
     let loweredCount = 0;
     let loweredHana = 0;
-    for (const {body, signature} of bodies) {
+    let loweredStrict = 0;
+    const strictOnly = new Map();
+    const wanted = new Map();
+    let wantsSeveral = 0;
+    for (const {body, signature, catalogue, relationSchemas, absentUsings} of bodies) {
       let tokens = [];
       let tree;
       try {
@@ -172,7 +221,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       // (foreman-dell). The headline is the portable one.
       let ir;
       try {
-        ir = toIr(tree, {catalogue: {}, signature, resolveType});
+        ir = toIr(tree, {catalogue, signature, resolveType, relationSchemas});
         lower(ir.rel, "duckdb");
         loweredCount += 1;
       } catch (error) {
@@ -186,6 +235,21 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         } catch {
           // counted by its absence from the hana column; the duckdb reason above names it
         }
+        // and how many lower only because a column nobody described became
+        // STRING: the same body bound with every column required to be typed
+        try {
+          lower(toIr(tree, {catalogue, signature, resolveType, relationSchemas, strictColumns: true}).rel, "duckdb");
+          loweredStrict += 1;
+        } catch (error) {
+          const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
+          strictOnly.set(why, (strictOnly.get(why) ?? 0) + 1);
+          // a body that lowers only by guessing: which absent tables would
+          // let it be typed. Counted per table, so an export can be asked
+          // for by name and by what it buys; a body needing two or more is
+          // flagged, because one table alone moves nothing for it.
+          for (const table of absentUsings ?? []) wanted.set(table, (wanted.get(table) ?? 0) + 1);
+          if ((absentUsings ?? []).length >= 2) wantsSeveral += 1;
+        }
       }
     }
     report[which] = {
@@ -195,14 +259,20 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       parsed,
       lowered: loweredCount,
       loweredHana,
+      loweredStrict,
+      strictRefusals: [...strictOnly.entries()].sort((a, b) => b[1] - a[1]),
+      wanted: [...wanted.entries()].sort((a, b) => b[1] - a[1]),
+      wantsSeveral,
       share: bodies.length === 0 ? 0 : Math.round((loweredCount / bodies.length) * 100),
+      shareStrict: bodies.length === 0 ? 0 : Math.round((loweredStrict / bodies.length) * 100),
       stoppedBy: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
       parsedButNotLowered: [...afterParse.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
     };
   }
   report.dictionary = ddic;
+  report.catalogueFailures = {using: [...usingFailures.keys()], parameters: [...parameterFailures.keys()]};
   report.scratch = scratch;
-  report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.keys()]};
+  report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
   return report;
 }
 
@@ -220,7 +290,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, scratch, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, scratch, catalogueFailures, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
@@ -230,13 +300,20 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
   }
   console.log(`  ${exports.length} package exports  (${exports.reduce((n, f) => n + (dictionary.hits.get(f) ?? 0), 0)} resolved)`);
   console.log(`table-function signatures read off their DDLS: ${tableFunctions.read}` +
-    (tableFunctions.missing.length === 0 ? "" : `; DDLS not in the export: ${tableFunctions.missing.join(", ")}`));
+    (tableFunctions.missing.length === 0 ? "" : `; not usable: ${tableFunctions.missing.join(", ")}`));
+  if (catalogueFailures.using.length > 0) console.log(`USING tables in the export refused whole (an include did not resolve): ${catalogueFailures.using.length}\n  ${catalogueFailures.using.slice(0, 8).join("\n  ")}`);
+  if (catalogueFailures.parameters.length > 0) console.log(`table parameters not typed: ${catalogueFailures.parameters.length}\n  ${catalogueFailures.parameters.slice(0, 8).join("\n  ")}`);
   for (const [which, r] of Object.entries(corporaReport)) {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
-    console.log(`  lowered  ${r.lowered}  (${r.share}% -- on duckdb, the portable one, the only number worth quoting)`);
-    if (r.loweredHana !== r.lowered) console.log(`           ${r.loweredHana} on hana (the difference is a name only HANA can answer)`);
+    console.log(`  lowered  ${r.loweredStrict}  (${r.shareStrict}% -- on duckdb with every column typed: the only number worth quoting)`);
+    console.log(`           ${r.lowered} when a column nobody described may be STRING (${r.share}%), ${r.loweredHana} of those on hana`);
+    for (const [reason, count] of r.strictRefusals.slice(0, 6)) console.log(`  ${String(count).padStart(5)}  strict: ${reason}`);
+    if (r.wanted.length > 0) {
+      console.log(`  wanted: tables in no dictionary here, by the bodies that lower only by guessing and name them (${r.wantsSeveral} of those need two or more):`);
+      console.log(`    ${r.wanted.slice(0, 15).map(([table, n]) => `${table} ${n}`).join(", ")}`);
+    }
     console.log("  stopped in the grammar:");
     for (const [reason, count] of r.stoppedBy) {
       console.log(`  ${String(count).padStart(5)}  ${reason}`);

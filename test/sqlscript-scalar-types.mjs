@@ -10,7 +10,7 @@ import {expect} from "chai";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {scalarTypeOf, signatureScalars, isTableParameter, UnresolvedScalarType} from "../tools/sqlscript/scalar-types.mjs";
+import {scalarTypeOf, signatureScalars, isTableParameter, unresolvedType, UnresolvedScalarType} from "../tools/sqlscript/scalar-types.mjs";
 import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
 import {lex} from "../tools/sqlscript/lexer.mjs";
 import {parse} from "../tools/sqlscript/combi.mjs";
@@ -111,6 +111,15 @@ describe("the binder takes its scalars from the signature", () => {
     ]};
     const ir = bind("SELECT k FROM src WHERE n = :iv_n;", signature);
     expect(lower(ir.rel, "hana").params.map((p) => p.name)).to.deep.equal(["IV_N"]);
+  });
+
+  it("refuses a column the dictionary could not type when the body reads it, and not before", () => {
+    const dark = {SRC: {K: {abap: "C", len: 4}, Z: unresolvedType("SRC.Z: ZUNKNOWN is not a data element")}};
+    const bindOn = (body) => toIr(parse(new Body(), lex(body)), {catalogue: dark});
+    expect(lower(bindOn("SELECT k FROM src;").rel, "duckdb").sql).to.match(/"K"/);
+    expect(() => bindOn("SELECT z FROM src;")).to.throw(BindError, /column z has no resolved type \(SRC.Z: ZUNKNOWN/i);
+    expect(() => bindOn("SELECT s.z FROM src AS s;")).to.throw(BindError, /column S.Z has no resolved type/i);
+    expect(() => bindOn("SELECT * FROM src;")).to.throw(BindError, /SELECT \* would carry column Z/);
   });
 
   it("still says 'unknown scalar' for a name the signature does not declare at all", () => {
