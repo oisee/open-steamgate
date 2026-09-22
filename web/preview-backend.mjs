@@ -328,7 +328,11 @@ function statusSnapshot() {
     }],
     services: rows,
     packs: packRows,
-    database: [{section: "Platform", name: "Architecture", value: "browser", note: "service worker; device details not collected"}],
+    database: [
+      {section: "Platform", name: "Architecture", value: "browser", note: "service worker; device details not collected"},
+      {section: "Database", name: "Engine", value: "sql.js", note: "browser SQLite-compatible backend"},
+      {section: "Database", name: "Storage", value: "memory", note: "service-worker database; rebuilt with the preview"},
+    ],
   };
 }
 
