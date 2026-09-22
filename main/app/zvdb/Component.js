@@ -17,6 +17,7 @@ sap.ui.define([
       var service = this.getModel();
       var state = new JSONModel({
         bucket: "EGEMMA768", engine: "ANYDB", database: "detecting …", allVectors: [], vectors: [], results: [],
+        amdpEnabled: false, hanaEnabled: false,
         queryId: "", queryText: "Choose a text on the left.", queryMeta: "",
         message: "Loading query vectors …"
       });
@@ -112,6 +113,18 @@ sap.ui.define([
         var bucket = state.getProperty("/bucket");
         var query = state.getProperty("/queryId");
         var engine = state.getProperty("/engine");
+        if (engine === "AMDP" && !state.getProperty("/amdpEnabled")) {
+          state.setProperty("/results", []);
+          state.setProperty("/message", "Portable AMDP requires an OSD instance running on DuckDB. This deployment uses "
+            + state.getProperty("/database") + ".");
+          return;
+        }
+        if (engine === "HANA" && !state.getProperty("/hanaEnabled")) {
+          state.setProperty("/results", []);
+          state.setProperty("/message", "Native AMDP requires an OSD instance running on SAP HANA. This deployment uses "
+            + state.getProperty("/database") + ".");
+          return;
+        }
         if (!query) return;
         state.setProperty("/message", "Searching " + bucket + " with " + engine + " …");
         var filter = "Bucket eq '" + quote(bucket) + "' and QueryId eq '" + quote(query)
@@ -172,8 +185,8 @@ sap.ui.define([
       }});
       var engine = new Select(this.createId("engineSelect"), {selectedKey: "{state>/engine}", items: [
         new Item({key: "ANYDB", text: "Portable ABAP (ANYDB)"}),
-        new Item({key: "AMDP", text: "Portable AMDP (DuckDB)"}),
-        new Item({key: "HANA", text: "SAP HANA AMDP (HANA only)"})
+        new Item({key: "AMDP", text: "Portable AMDP (DuckDB)", enabled: "{state>/amdpEnabled}"}),
+        new Item({key: "HANA", text: "SAP HANA AMDP (HANA only)", enabled: "{state>/hanaEnabled}"})
       ], change: runSearch});
 
       var master = new Page({title: "Choose query text", subHeader: new Toolbar({content: [
@@ -200,8 +213,15 @@ sap.ui.define([
         var facts = body.d && body.d.results || [];
         var engineFact = facts.find(function (fact) { return fact.Section === "Database" && fact.Name === "Engine"; });
         var storageFact = facts.find(function (fact) { return fact.Section === "Database" && fact.Name === "Storage"; });
-        state.setProperty("/database", engineFact ? engineFact.Value + (storageFact ? " · " + storageFact.Value : "") : "connected backend");
-      }).catch(function () { state.setProperty("/database", "connected backend"); });
+        var backend = engineFact ? String(engineFact.Value) : "unknown backend";
+        state.setProperty("/database", backend + (storageFact ? " · " + storageFact.Value : ""));
+        state.setProperty("/amdpEnabled", backend.toLowerCase() === "duckdb");
+        state.setProperty("/hanaEnabled", backend.toUpperCase() === "HDB");
+      }).catch(function () {
+        state.setProperty("/database", "unknown backend");
+        state.setProperty("/amdpEnabled", false);
+        state.setProperty("/hanaEnabled", false);
+      });
       setTimeout(function () { loadVectors(""); }, 0);
       return split;
     }
