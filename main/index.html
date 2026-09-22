@@ -39,7 +39,24 @@
       }
       try {
         await navigator.serviceWorker.register("./sw.js", {scope: "./"});
-        await navigator.serviceWorker.ready;
+        const expected = new URL("./sw.js", location.href).href;
+        // A worker registered at / also controls /open-steamgate/main/ until
+        // the more specific worker claims it. "controller !== null" is not
+        // enough: the old root worker passes mounted OData paths to the
+        // static server, which answers 404.
+        for (let waited = 0; navigator.serviceWorker.controller?.scriptURL !== expected && waited < 60000; waited += 100) {
+          await new Promise((tick) => setTimeout(tick, 100));
+        }
+        if (navigator.serviceWorker.controller?.scriptURL !== expected) {
+          const key = "stg-preview-controller-reload";
+          if (sessionStorage.getItem(key) !== "1") {
+            sessionStorage.setItem(key, "1");
+            location.reload();
+            return;
+          }
+          throw new Error(`Expected ${expected}, got ${navigator.serviceWorker.controller?.scriptURL ?? "no controller"}`);
+        }
+        sessionStorage.removeItem("stg-preview-controller-reload");
       } catch (error) {
         fail("The preview could not be installed", String(error));
         return;

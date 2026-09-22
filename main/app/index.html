@@ -34,16 +34,16 @@
         explain("This browser cannot run the preview", "navigator.serviceWorker is not available (private window, or service workers turned off).");
         return;
       }
-      if (!navigator.serviceWorker.controller) {
+      const expected = new URL("../sw.js", location.href).href;
+      if (navigator.serviceWorker.controller?.scriptURL !== expected) {
         try {
           await navigator.serviceWorker.register("../sw.js", {scope: "../"});
-          await navigator.serviceWorker.ready;
-          // clients.claim() in the worker makes this page controlled a moment
-          // after ready; the event for it may already have fired, so poll
-          for (let waited = 0; !navigator.serviceWorker.controller && waited < 5000; waited += 100) {
+          // A controller from a broader scope is not our backend. Wait for
+          // this deployment's own worker, not just any non-null controller.
+          for (let waited = 0; navigator.serviceWorker.controller?.scriptURL !== expected && waited < 60000; waited += 100) {
             await new Promise((tick) => setTimeout(tick, 100));
           }
-          if (!navigator.serviceWorker.controller) {
+          if (navigator.serviceWorker.controller?.scriptURL !== expected) {
             // a navigation after the registration is controlled for sure; once
             const key = "stg-preview-reload";
             if (!sessionStorage.getItem(key)) {
@@ -52,7 +52,7 @@
               return;
             }
             sessionStorage.removeItem(key);
-            throw new Error("the service worker was installed but does not control this page");
+            throw new Error("the expected service worker does not control this page: " + expected);
           }
         } catch (error) {
           explain("The preview could not start", String(error && error.stack || error));
