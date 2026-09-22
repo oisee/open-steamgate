@@ -13,11 +13,25 @@ const testOnly = new Set([
   "docker/image/Dockerfile.probes",
   "docker/image/probe-sources.mjs",
 ]);
+// The browser preview bundles DuckDB-Wasm and Arrow into sw.js and copies its
+// Wasm module to the static deployment. None of those packages is used by the
+// Node server. Keep them out of the runtime image: in particular, Arrow's
+// json-bignum dependency has no declared npm license and must not be shipped
+// under an invented license assumption merely because preview builds need it.
+const browserOnlyPackages = new Set([
+  "node_modules/@duckdb/duckdb-wasm",
+  "node_modules/apache-arrow",
+  "node_modules/json-bignum",
+]);
+function browserOnly(path) {
+  const normalized = path.replaceAll("\\", "/");
+  return [...browserOnlyPackages].some((name) => normalized === name || normalized.endsWith("/" + name));
+}
 for (const entry of roots) {
   cpSync(entry, join(out, entry), {recursive: true,
     ...(entry === "node_modules" ? {dereference: true} : {verbatimSymlinks: true}),
     filter: path => ![".git", "e2e", "test-results", "playwright-report"].includes(basename(path)) &&
-      !testOnly.has(path.replaceAll("\\", "/"))});
+      !testOnly.has(path.replaceAll("\\", "/")) && !browserOnly(path)});
 }
 // One serving generation; the checkout's build/ holds many older generations,
 // binaries, browser previews and temporary files.
