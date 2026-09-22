@@ -541,6 +541,28 @@ limits; native SQLScript and portable ordinary HANA SQL return equal typed
 rows for the same inputs. The full offline SQLScript/AMDP run is 407 passing
 with 17 live cases pending, and the focused live HANA suite is 15 passing.
 
+### 2026-09-22 — P2a real ABAP call reaches portable DuckDB
+
+`amdp-gen` now compiles each supported method while the extractor still owns
+its local ABAP type map and writes the typed IR into `procedures.json` beside
+the native HANA description. Unsupported methods keep a named portable
+refusal. Consequently the application runtime loads neither the lexer nor the
+parser when an AMDP is called.
+
+On DuckDB, the existing generated `CALL FUNCTION ... DESTINATION 'AMDP'`
+uses the system's already-open `DEFAULT` database client. Scalar and typed
+table inputs cross the ordinary runtime signature; table rows become a
+bounded typed relation plan, never procedure-local mutable JavaScript state.
+The boundary refuses more than 2,000 rows or 10,000 cells before constructing
+an expanded UNION. Empty input retains the declared schema.
+
+The transpiled `ZCL_OSD_AMDP_TEST` now proves the path twice: the original
+`SQUARES` call, and Open SQL rows passed to an unchanged aggregating SQLScript
+method. Full ABAP Unit passes on DuckDB with no HANA fallback. Both AMDP tests
+also completed natively on HANA; the wider HANA suite later stopped on the
+independent `ZCL_OSD_TRAN_SESSION` xstring/text mismatch. That later failure
+is not counted as an AMDP result.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

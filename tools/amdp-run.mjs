@@ -136,7 +136,14 @@ export async function call(client, name, method, inputs, types) {
     throw new Error("AMDP oracle call does not support INOUT parameters");
   }
   const outs = method.parameters.filter((p) => p.direction !== "IN");
-  const scalarOuts = outs.filter((p) => columnsOf(parameterType(p.abapType, types)) === undefined);
+  // A generated runtime manifest has already resolved class-local ABAP types
+  // and carries their exact HANA spelling. The source-level CLI instead has
+  // the extractor's type map. Prefer the resolved fact when it exists; trying
+  // to resolve `TABLE(...)` as though it were an ABAP type produced
+  // `schema.UNDEFINED` on the first table-input call through the real ABAP
+  // destination.
+  const databaseType = (p) => p.hanaType ?? parameterType(p.abapType, types);
+  const scalarOuts = outs.filter((p) => columnsOf(databaseType(p)) === undefined);
   const scalarOnly = outs.length > 0 && scalarOuts.length === outs.length;
   const temporary = [];
 
@@ -147,7 +154,7 @@ export async function call(client, name, method, inputs, types) {
       continue;
     }
     const given = inputs[p.name.toLowerCase()] ?? inputs[p.name];
-    const columns = columnsOf(parameterType(p.abapType, types));
+    const columns = columnsOf(databaseType(p));
     if (columns === undefined) {                       // a scalar
       args.push(given == null ? "NULL" : typeof given === "number" ? String(given)
         : `'${String(given).replace(/'/g, "''")}'`);
@@ -162,7 +169,7 @@ export async function call(client, name, method, inputs, types) {
 
   try {
     const sql = scalarOnly
-      ? `DO BEGIN ${scalarOuts.map((p) => `DECLARE V_${p.name.toUpperCase()} ${parameterType(p.abapType, types)};`).join(" ")} ` +
+      ? `DO BEGIN ${scalarOuts.map((p) => `DECLARE V_${p.name.toUpperCase()} ${databaseType(p)};`).join(" ")} ` +
         `CALL ${name} (${args.join(", ")}); SELECT ${scalarOuts.map((p) =>
           `:V_${p.name.toUpperCase()} AS "${p.name.toLowerCase()}"`).join(", ")} FROM DUMMY; END;`
       : `CALL ${name} (${args.join(", ")})`;

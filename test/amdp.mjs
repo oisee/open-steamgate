@@ -100,6 +100,24 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(failure.message).to.match(/does not support INOUT/);
   });
 
+  it("uses the resolved manifest TABLE type when the source type map is no longer present", async () => {
+    const {call} = await import("../tools/amdp-run.mjs");
+    const sql = [];
+    const client = {exec(statement, callback) {
+      sql.push(statement);
+      if (/^CALL\b/.test(statement)) callback(undefined, {}, []);
+      else callback(undefined);
+    }};
+    const method = {parameters: [
+      {name: "it_amount", direction: "IN", abapType: "TT_AMOUNT", hanaType: "TABLE(amount INTEGER)"},
+      {name: "et_total", direction: "OUT", abapType: "TT_TOTAL", hanaType: "TABLE(item_count INTEGER, total INTEGER)"},
+    ]};
+    await call(client, '"S"."P"', method, {it_amount: []}, undefined);
+    expect(sql).to.include("CREATE LOCAL TEMPORARY COLUMN TABLE #AMDP_IN_IT_AMOUNT (amount INTEGER)");
+    expect(sql.find((one) => /^CALL\b/.test(one))).to.equal('CALL "S"."P" (#AMDP_IN_IT_AMOUNT, ?)');
+    expect(sql.join("\n")).to.not.contain("UNDEFINED");
+  });
+
   it("builds a CREATE PROCEDURE that carries the body unchanged", () => {
     const r = extract(fixture("zcl_vsp_00_amdp_test.clas.abap"), "zcl_vsp_00_amdp_test.clas.abap");
     const sql = procedure(r.className, r.methods[0], "OSD", r.types);

@@ -196,6 +196,17 @@ methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
 methods must agree with native HANA and prove that they perform no database
 statement.
 
+The fifth proof crosses the real ABAP runtime boundary. The build now stores
+precompiled typed IR beside each generated HANA procedure entry. On DuckDB,
+the existing `CALL FUNCTION ... DESTINATION 'AMDP'` bridge executes that IR
+against `abap.context.databaseConnections.DEFAULT`; it neither loads the
+SQLScript parser at call time nor opens a second database nor falls back to
+HANA. A real transpiled ABAP Unit selects fixture rows with Open SQL, passes
+the resulting typed internal table to the unchanged `total_amount` AMDP body,
+and checks its database aggregation. A typed empty input is checked separately.
+The same ABAP call and SQLScript body completed natively on HANA before an
+unrelated later HANA unit exposed a pre-existing binary/text mismatch.
+
 That move required more than accepting `LIMIT :value`. Source aliases now
 survive in typed IR, query scopes distinguish unknown and ambiguous columns,
 and correlated subqueries can refer to an outer source without collapsing
@@ -295,11 +306,19 @@ fuzzy-search compatibility claim.
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
+- production bridge: full ABAP Unit is green on DuckDB, including `SQUARES`
+  and Open-SQL-table → portable-AMDP aggregation; the corresponding two AMDP
+  tests are green through native HANA in an isolated schema. The whole HANA
+  unit run remains red later in `ZCL_OSD_TRAN_SESSION`, where an xstring is
+  returned as hex text (`7B22...`) instead of JSON. That is recorded as an
+  unrelated existing backend boundary, not hidden as an AMDP failure.
 
 ## Next coverage order
 
-1. Continue general composition: nested calls, shared caller transaction and
-   the unchanged ABAP Unit entry path.
+1. Continue general composition: nested AMDP calls and a catalogue read that
+   proves visibility of an uncommitted ABAP SQL fixture in the shared caller
+   transaction. The ordinary ABAP Unit entry path and typed table boundary
+   are now proven.
 2. Return to full fuzzy profiles, dynamic SQL and controlled errors only as
    separately measured capabilities.
 

@@ -171,6 +171,11 @@ export class AmdpDestination {
     this.trace = options.trace === true;
     this.procedures = loadProcedures(this.folder);
     this.client = undefined;
+    // The application database is looked up at call time: setup installs the
+    // destination before every backend branch has connected. Keeping this a
+    // provider also proves that portable AMDP uses the caller's connection,
+    // not a second DuckDB beside the ABAP LUW.
+    this.database = options.database ?? (() => globalThis.abap?.context?.databaseConnections?.DEFAULT);
     // the source hash of what is deployed, so a body is created once and a
     // changed body is redeployed without anyone remembering to
     this.deployed = new Map();
@@ -404,6 +409,10 @@ export class AmdpDestination {
       await refuse(`AMDP: no procedure known for ${name}. Run 'node tools/amdp-gen.mjs' ` +
         "so gen/amdp/procedures.json carries it.", name);
     }
+    const database = this.database?.();
+    if (database?.name === "duckdb") {
+      return this.#portable(p, signature, database);
+    }
     await this.#connect();
     await this.#deploy(p);
 
@@ -439,6 +448,85 @@ export class AmdpDestination {
       fromJson(target, withAbapDates(result[x.name] ?? result[x.name.toUpperCase()]));
     }
     if (this.trace) console.log(`AMDP: ${p.class}=>${p.method} returned ${Object.keys(result).join(", ")}`);
+  }
+
+  /** Execute precompiled typed IR on the system's own DuckDB connection.
+   *
+   * The generator owns parsing and typing. This path owns only runtime value
+   * transfer and orchestration; the final relation still runs in DuckDB.
+   * There is intentionally no HANA fallback here: selecting DuckDB and then
+   * reaching a hidden HANA would make a passing unit test meaningless.
+   */
+  async #portable(p, signature, database) {
+    if (p.portable === undefined) {
+      await refuse(`AMDP: ${p.class}=>${p.method} is not in the portable SQLScript subset: ` +
+        `${p.portableRefusal?.message ?? "no compiled portable program"}`, p.module);
+    }
+    const pick = (bag, name) => {
+      if (bag === undefined) return undefined;
+      const key = Object.keys(bag).find((one) => one.toUpperCase() === String(name).toUpperCase());
+      return key === undefined ? undefined : bag[key];
+    };
+    // `null` is a real SQLScript input, while `undefined` means that the
+    // parameter is absent from this signature section. Nullish coalescing
+    // would accidentally turn a supplied NULL into an omitted argument.
+    const firstPresent = (...values) => values.find((value) => value !== undefined);
+    const inputs = {};
+    for (const parameter of p.portable.parameters ?? []) {
+      const given = firstPresent(pick(signature.exporting, parameter.name),
+        pick(signature.changing, parameter.name), pick(signature.tables, parameter.name));
+      if (given === undefined) continue;
+      inputs[parameter.name] = typeof given.get === "function" ? given.get() : given;
+    }
+    const relationInputs = {};
+    if ((p.portable.relationParameters ?? []).length > 0) {
+      const {scan, project, union, filter, lit, T} = await import("./sqlscript-ir.mjs");
+      for (const parameter of p.portable.relationParameters) {
+        const given = firstPresent(pick(signature.exporting, parameter.name),
+          pick(signature.changing, parameter.name), pick(signature.tables, parameter.name));
+        if (given === undefined || typeof given.array !== "function") {
+          await refuse(`AMDP: portable table input ${parameter.name} is missing or is not an ABAP table`, p.module);
+        }
+        const columns = Object.entries(parameter.schema);
+        const rows = given.array().map(plainRow);
+        // Build-time IR budgets protect the interpreter, but constructing a
+        // million-branch UNION before handing it over would spend the memory
+        // first and refuse afterwards. Bound the ABAP boundary itself.
+        if (rows.length > 2000 || rows.length * Math.max(columns.length, 1) > 10000) {
+          await refuse(`AMDP: portable table input ${parameter.name} exceeds 2000 rows or 10000 cells`, p.module);
+        }
+        const rowPlan = (row) => project(scan("DUMMY"), columns.map(([name, type]) => ({
+          as: name,
+          expr: lit(row[name.toLowerCase()] ?? null, type),
+        })));
+        // An empty relation still has the signature's schema. The false
+        // filter is executed by the database, and every projected NULL is
+        // typed by the IR; no inferred JavaScript-array schema exists.
+        relationInputs[parameter.name] = rows.length === 0
+          ? project(filter(scan("DUMMY"), lit(false, T.bool)), columns.map(([name, type]) => ({
+            as: name, expr: lit(null, type),
+          })))
+          : (rows.length === 1 ? rowPlan(rows[0]) : union(rows.map(rowPlan), true));
+      }
+    }
+    const {runProcedure} = await import("./sqlscript-procedure-ir.mjs");
+    let answer;
+    try {
+      answer = await runProcedure(p.portable, {client: database, dialect: "duckdb", inputs, relationInputs});
+    } catch (error) {
+      await refuse(`AMDP: portable ${p.class}=>${p.method} refused: ${String(error?.message ?? error)}`, p.module);
+    }
+    const output = p.portable.output;
+    const target = firstPresent(pick(signature.importing, output),
+      pick(signature.changing, output), pick(signature.tables, output));
+    if (target === undefined) {
+      await refuse(`AMDP: portable ${p.class}=>${p.method} has no runtime target for ${output}`, p.module);
+    }
+    fromJson(target, withAbapDates(p.portable.outputType === undefined ? answer.rows : answer.value));
+    if (this.trace) {
+      console.log(`AMDP: portable ${p.class}=>${p.method} on DuckDB; ` +
+        `${answer.trace?.databaseStatements ?? 0} database statement(s)`);
+    }
   }
 }
 

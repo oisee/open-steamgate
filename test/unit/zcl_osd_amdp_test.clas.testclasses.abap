@@ -1,21 +1,20 @@
 CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
 * The point of the whole bridge in one assertion: ordinary ABAP calls an
-* ordinary method, the body of that method is SQLScript, and it runs in a real
-* HANA without the caller knowing. Only in the HANA mode -- everywhere else
-* there is nowhere to run an AMDP body, and the test says so rather than
-* pretending.
+* ordinary method and the unchanged SQLScript body runs either natively in
+* HANA or through typed portable IR on DuckDB. The ABAP call site is the same.
   PRIVATE SECTION.
-    METHODS squares_are_computed_in_hana FOR TESTING RAISING cx_static_check.
+    METHODS squares_are_computed FOR TESTING RAISING cx_static_check.
+    METHODS open_sql_rows_cross_the_amdp FOR TESTING RAISING cx_static_check.
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_amdp IMPLEMENTATION.
 
-  METHOD squares_are_computed_in_hana.
+  METHOD squares_are_computed.
     DATA lt_square TYPE zcl_osd_amdp_demo=>tt_square.
     DATA ls_square TYPE zcl_osd_amdp_demo=>ty_square.
 
-    IF sy-dbsys <> 'HDB'.
+    IF sy-dbsys <> 'HDB' AND sy-dbsys <> 'duckdb'.
       RETURN.
     ENDIF.
 
@@ -24,7 +23,7 @@ CLASS ltcl_amdp IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( act = lines( lt_square )
                                         exp = 4
-                                        msg = 'four rows, computed by SQLScript in HANA' ).
+                                        msg = 'four rows, computed from the unchanged SQLScript body' ).
     READ TABLE lt_square INDEX 3 INTO ls_square.
     cl_abap_unit_assert=>assert_equals( act = ls_square-square
                                         exp = 9
@@ -32,6 +31,46 @@ CLASS ltcl_amdp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_square-label
                                         exp = 'square of 3'
                                         msg = 'and the text HANA built' ).
+  ENDMETHOD.
+
+  METHOD open_sql_rows_cross_the_amdp.
+    DATA lt_amount TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lt_total TYPE zcl_osd_amdp_demo=>tt_total.
+    DATA ls_total TYPE zcl_osd_amdp_demo=>ty_total.
+    DATA ls_amount TYPE zcl_osd_amdp_demo=>ty_amount.
+
+    IF sy-dbsys <> 'HDB' AND sy-dbsys <> 'duckdb'.
+      RETURN.
+    ENDIF.
+
+*   This is deliberately Open SQL at the call site, not a JavaScript fixture.
+*   The AMDP receives the typed table through the ordinary method signature.
+    SELECT seats AS amount
+      INTO CORRESPONDING FIELDS OF TABLE @lt_amount
+      FROM zstg_demo
+      WHERE status = 'A'.
+
+    zcl_osd_amdp_demo=>total_amount( EXPORTING it_amount = lt_amount
+                                     IMPORTING et_total  = lt_total ).
+
+    LOOP AT lt_amount INTO ls_amount.
+      ls_total-total = ls_total-total + ls_amount-amount.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_total ) exp = 1 ).
+    READ TABLE lt_total INDEX 1 INTO DATA(ls_actual).
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-item_count
+                                        exp = lines( lt_amount ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-total
+                                        exp = ls_total-total ).
+
+*   Empty is a typed zero-row relation, not an omitted input or an inferred
+*   JavaScript array. COUNT and SUM make that distinction observable.
+    CLEAR: lt_amount, lt_total, ls_actual.
+    zcl_osd_amdp_demo=>total_amount( EXPORTING it_amount = lt_amount
+                                     IMPORTING et_total  = lt_total ).
+    READ TABLE lt_total INDEX 1 INTO ls_actual.
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-item_count exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_actual-total exp = 0 ).
   ENDMETHOD.
 
   METHOD a_table_function_returns_rows.
