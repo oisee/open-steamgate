@@ -99,7 +99,8 @@ describe("independent AMDP clean-room corpus", () => {
     const result = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
     const byName = new Map(result.methods.map((method) => [method.name, method]));
     expect(byName.get("difference_cells").body).to.match(/\bEXCEPT\b/i);
-    expect(byName.get("search_cells").body).to.match(/APPROX_MATCH|MATCH_SCORE|COALESCE|MAP_DEFAULT|WITH HINT/i);
+    expect(byName.get("search_cells").body).to.match(/APPROX_MATCH|MATCH_SCORE|COALESCE|\bMAP\s*\(|WITH HINT/i);
+    expect(byName.get("search_cells").body).to.not.match(/MAP_DEFAULT/i);
     expect(byName.get("expand_values").body).to.match(/INTEGER ARRAY|UNNEST|WITH ORDINALITY/i);
     expect(byName.get("identity_cells").body).to.match(/CURRENT_USER|CURRENT_SCHEMA/i);
     expect(source("neutral_additions.clas.abap.txt")).to.match(/iv_seed\) TYPE i OPTIONAL/i);
@@ -124,10 +125,9 @@ describe("independent AMDP clean-room corpus", () => {
 
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
-      search_cells: /hint NEUTRAL_PLAN has not been looked at/,
       control_rows: /only scalar DECLARE/,
     };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values", "search_cells"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -405,6 +405,33 @@ describe("independent AMDP clean-room corpus", () => {
         {CELL_ID: 2, EXECUTION_USER: "UNIT_USER", EXECUTION_SCHEMA: "UNIT_SCHEMA"},
       ]);
       expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
+  });
+
+  it("keeps search scoring as an exact pre-database refusal", async () => {
+    const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "search_cells");
+    const compiled = compileProcedure(method, extracted.types);
+    const schema = compiled.relationParameters[0].schema;
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const input = await materializeRows(client, "SEARCH_CELLS", [
+        {cell_id: 1, label_text: "amber field", code_text: "A"},
+      ], schema);
+      let nativeCalls = 0;
+      const native = client.native.bind(client);
+      client.native = async (...args) => { nativeCalls += 1; return native(...args); };
+      let refusal;
+      try {
+        await runProcedure(compiled, {client, dialect: "duckdb", inputs: {IV_QUERY: "amber"},
+          relationInputs: {IT_CELLS: input}, inputCatalogue: {DUMMY: {}}});
+      } catch (error) { refusal = error; }
+      expect(refusal).to.be.instanceOf(UnsupportedSqlScript);
+      expect(refusal.message).to.match(/output SCORE_VALUE conversion from STRING to P is not measured/);
+      expect(nativeCalls, "unmeasured scoring must refuse before database execution").to.equal(0);
     } finally {
       await client.disconnect();
     }

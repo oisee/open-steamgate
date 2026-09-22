@@ -53,11 +53,11 @@ CLASS cl_neutral_additions IMPLEMENTATION.
     et_search = SELECT cell_id,
       MATCH_SCORE(label_text, :iv_query) AS score_value,
       COALESCE(label_text, 'none') AS label_text,
-      MAP_DEFAULT(code_text, 'fallback') AS mapped_text
+      MAP(code_text, 'A', 'group-one', 'B', 'group-two', 'fallback') AS mapped_text
       FROM :it_cells
       WHERE APPROX_MATCH(label_text, :iv_query) = 1
         OR label_text IS NULL
-      WITH HINT (NEUTRAL_PLAN);
+      WITH HINT (NO_USE_HEX_PLAN);
   ENDMETHOD.
 
   METHOD difference_cells BY DATABASE PROCEDURE FOR HDB

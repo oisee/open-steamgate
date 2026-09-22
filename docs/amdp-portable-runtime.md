@@ -482,6 +482,17 @@ agree for a NULL fallback and a supplied non-empty STRING. This advances the
 tracked `search_cells` body past null substitution to its optimizer-hint
 policy boundary; mapping and approximate scoring remain separate milestones.
 
+### 2026-09-22 — P1k real plan hint and mapping surface
+
+The tracked search case no longer relies on invented spellings. Its plan-only
+hint is the already allowlisted `NO_USE_HEX_PLAN`, which the portable path
+drops by name while unknown hints still refuse. Its default mapping is now a
+real SQLScript `MAP(...)`, represented by the existing typed CASE IR rather
+than a backend-specific function call. The whole method therefore compiles;
+execution still refuses before SQL because approximate score typing and
+matching semantics have not been defined. The demo count intentionally stays
+`9 executed / 0 partial / 2 refused`.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /
