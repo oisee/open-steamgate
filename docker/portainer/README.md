@@ -21,5 +21,5 @@ full YAML blocks in [spin.md](../../docs/spin.md).
 
 The old source-building Compose files are retained in Git history. The local
 source installation helper [setup-local.sh](setup-local.sh) remains available.
-For local DIAG/RFC ports, see [setup-protocols-local.sh](setup-protocols-local.sh)
-and the [local instructions](../../docs/spin.md#locally-without-docker).
+For the built-in local DIAG/RFC ports, see the
+[local instructions](../../docs/spin.md#locally-without-docker).

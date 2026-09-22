@@ -35,12 +35,12 @@ if (env.STG_TLS !== "0") {
   }
 }
 const osd = spawn(process.execPath, ["test/run.mjs"], {stdio: "inherit", env});
-let protocols;
+const protocols = [];
 let stopping = false;
 const stop = signal => {
   if (stopping) return;
   stopping = true;
-  protocols?.kill(signal);
+  for (const child of protocols) child.kill(signal);
   osd.kill(signal);
 };
 for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => stop(signal));
@@ -51,10 +51,11 @@ osd.on("exit", (code, signal) => {
 });
 if (env.STG_PROTOCOLS !== "0") {
   let ready = false;
+  const localHttp = `http://127.0.0.1:${env.STG_PORT ?? 3030}`;
   for (let attempt = 0; attempt < 300 && !stopping; attempt++) {
     if (osd.exitCode !== null || osd.signalCode !== null) break;
     try {
-      const response = await fetch("http://127.0.0.1:3030/sap/bc/adt/core/http/build", {signal: AbortSignal.timeout(3000)});
+      const response = await fetch(`${localHttp}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(3000)});
       if (response.ok && (await response.json()).system?.serving) { ready = true; break; }
     } catch { /* startup still in progress */ }
     await delay(2000);
@@ -65,13 +66,13 @@ if (env.STG_PROTOCOLS !== "0") {
     stop("SIGTERM");
   }
   if (ready && !stopping) {
-    protocols = spawn("/opt/protocols/osd-up", ["-attach", "http://127.0.0.1:3030",
-      "-instance", String(Number(env.INSTANCE ?? "00")), "-sid", env.OSD_SID ?? "OSD", "-stub", "tape"],
-    {stdio: "inherit", env});
-    protocols.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
-    protocols.on("exit", (code, signal) => {
+    const script = "tools/protocols/server.mjs";
+    const child = spawn(process.execPath, [script], {stdio: "inherit", env});
+    protocols.push(child);
+    child.on("error", error => { console.error(error.message); process.exitCode = 1; stop("SIGTERM"); });
+    child.on("exit", (code, signal) => {
       if (!stopping) {
-        console.error(`DIAG/RFC bridge exited (${signal ?? code})`);
+        console.error(`${script} exited (${signal ?? code})`);
         process.exitCode = code || 1;
         stop("SIGTERM");
       }

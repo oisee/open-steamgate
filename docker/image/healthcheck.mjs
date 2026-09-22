@@ -13,7 +13,7 @@ if (!build.system?.serving) throw new Error("No serving runtime");
 if (process.env.STG_PROTOCOLS !== "0") {
   const instance = process.env.INSTANCE ?? "00";
   if (!/^\d{2}$/.test(instance)) throw new Error("INSTANCE must be two digits");
-  for (const port of [Number(`32${instance}`), Number(`33${instance}`)]) {
+  for (const port of [Number(process.env.STG_DIAG_PORT ?? `32${instance}`), Number(process.env.STG_RFC_PORT ?? `33${instance}`)]) {
     await new Promise((resolve, reject) => {
       const socket = createConnection({host: "127.0.0.1", port});
       socket.setTimeout(3000, () => socket.destroy(new Error(`Port ${port} timed out`)));

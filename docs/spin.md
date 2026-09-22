@@ -71,6 +71,7 @@ services:
       INSTANCE: "${INSTANCE:-11}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: file
       TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
     ports:
@@ -103,6 +104,7 @@ services:
       INSTANCE: "${INSTANCE:-15}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: duckdb
       OSD_WORKERS: "1"
       TLS_SAN: "${TLS_SAN:-DNS:osd,DNS:localhost,IP:127.0.0.1}"
@@ -175,6 +177,7 @@ services:
       INSTANCE: "${INSTANCE:-17}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: hana
       HANA_HOST: hxe
       HANA_PORT: "39017"
@@ -233,6 +236,7 @@ services:
       INSTANCE: "${INSTANCE:-19}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
+      STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: postgres
       PGHOST: postgres
       PGPORT: "5432"
@@ -265,8 +269,11 @@ OData, DIAG and RFC. HANA's first start can take several minutes.
 Check the demo OData endpoint at
 `http://DOCKER-HOST:8011/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`,
 create a travel and restart OSD to confirm persistence. The DIAG/RFC ports
-are stubs, not a full SAP GUI or RFC implementation. This draft has no
-production authentication boundary; expose it only on a trusted network.
+are the bounded DIAG tape and ADT-over-RFC profiles, not a full SAP GUI or
+universal RFC server. The examples explicitly use `STG_RFC_AUTH_MODE=demo` so
+Eclipse can log on with demo credentials; expose them only on a trusted
+network. For a shared host, set it to `static` and provide `STG_RFC_USER`,
+`STG_RFC_PASSWORD` and optionally `STG_RFC_CLIENT`.
 For exact test steps and volume notes, see [the image guide](docker-image.md).
 
 ## Raspberry Pi (ARM64)
@@ -367,25 +374,19 @@ the immutable tag from the successful Docker workflow run if you want to pin
 the exact tested image instead of tracking `docker-draft`.
 See [database backends](db-backends.md) for details.
 
-To add the DIAG and ADT-over-RFC ports to this **local** Node server, install
-Go 1.26 and run this once from the checkout root:
-
-```sh
-sh docker/portainer/setup-protocols-local.sh
-```
-
 Leave `STG_PORT=8000 STG_TLS_PORT=44300 node test/run.mjs` running in the first
-terminal. In a second terminal, from the same directory, start the bridge:
+terminal. In a second terminal, from the same directory, start the built-in
+MIT JavaScript protocol listeners (no Go installation or sidecar is needed):
 
 ```sh
-.local/bin/osd-up -instance 11 -attach http://127.0.0.1:8000 -stub tape
+INSTANCE=11 STG_PORT=8000 node tools/protocols/server.mjs
 ```
 
 This listens on DIAG `3211` and RFC `3311`. The RFC bridge carries ADT
 requests such as `SADT_REST_RFC_ENDPOINT` to the Node server's HTTP endpoint;
 the DIAG port serves the tape stub. Stop the bridge with Ctrl-C, then stop
-Node. To use another instance, change `-instance 11` (and check both ports are
-free). The local HTTP port remains the one passed to `-attach`.
+Node. To use another instance, change `INSTANCE` (and check both ports are
+free). `STG_PORT` tells the RFC listener which local HTTP endpoint to use.
 
 The files under [`docker/portainer/`](../docker/portainer/README.md) are
 generated copies of the same four ready-image stacks. The older source-build

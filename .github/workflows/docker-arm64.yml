@@ -35,12 +35,11 @@ jobs:
           docker buildx build --platform linux/arm64 --load --tag osd:arm64-ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" -f docker/image/Dockerfile .
           test "$(docker image inspect --format '{{.Architecture}}' osd:arm64-ci)" = arm64
           docker run --rm --entrypoint node osd:arm64-ci -p 'if (process.arch !== "arm64") process.exit(1)'
-      - name: Check runtime and protocol license inventories
+      - name: Check runtime license inventory
         run: |
           docker run --rm --entrypoint node osd:arm64-ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
-          docker run --rm --entrypoint cat osd:arm64-ci /opt/protocols/licenses.json > protocol-licenses.json
-          node -e 'const r=require("./protocol-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
-      - name: Build native ARM64 SAP-TUI and RFC acceptance clients
+          docker run --rm --entrypoint sh osd:arm64-ci -c 'test ! -e /opt/protocols && ! command -v go'
+      - name: Build external ARM64 SAP-TUI and RFC acceptance clients (test only)
         run: docker buildx build --platform linux/arm64 --load --tag osd-probes:arm64-ci -f docker/image/Dockerfile.probes .
       - name: SQLite and DuckDB persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
         env:
