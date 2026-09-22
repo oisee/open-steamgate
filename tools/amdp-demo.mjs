@@ -4,7 +4,7 @@
 // DuckDB runtime, then renders the same result as terminal text, JSON, or one
 // self-contained HTML file.  The HTML deliberately has no application
 // backend: it is a report over a run, not a second test runner.
-import {readFileSync, readdirSync, mkdirSync, writeFileSync} from "node:fs";
+import {copyFileSync, readFileSync, readdirSync, mkdirSync, writeFileSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {createServer} from "node:http";
@@ -237,15 +237,18 @@ async function main(argv) {
   const out = outAt >= 0 ? resolve(argv[outAt + 1]) : join(root, ".local/amdp-demo/index.html");
   mkdirSync(dirname(out), {recursive: true});
   writeFileSync(out, renderDemoHtml(report));
+  const story = join(dirname(out), "story.html");
+  copyFileSync(join(root, "docs/portable-amdp-report.html"), story);
   console.log(json ? JSON.stringify(report, null, 2) : terminalSummary(report));
-  console.log(`\nHTML: ${out}`);
+  console.log(`\nLive ledger: ${out}`);
+  console.log(`Story: ${story}`);
   const serveAt = argv.indexOf("--serve");
   if (serveAt >= 0) {
     const port = Number(argv[serveAt + 1] ?? 3037);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("--serve needs a TCP port");
-    createServer((_request, response) => {
+    createServer((request, response) => {
       response.writeHead(200, {"content-type": "text/html; charset=utf-8", "cache-control": "no-store"});
-      response.end(readFileSync(out));
+      response.end(readFileSync(request.url === "/story.html" ? story : out));
     }).listen(port, "0.0.0.0", () => console.log(`Serving http://0.0.0.0:${port}/`));
   }
 }

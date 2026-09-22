@@ -1,4 +1,5 @@
 import {expect} from "chai";
+import {readFileSync} from "node:fs";
 import {buildDemoReport, renderDemoHtml, terminalSummary} from "../tools/amdp-demo.mjs";
 
 describe("the Portable AMDP progress demo", function () {
@@ -38,5 +39,14 @@ describe("the Portable AMDP progress demo", function () {
     expect(html).to.include("ZCL_OSD_AMDP_DEMO=>squares");
     expect(html).to.not.include("<script src=");
     expect(terminalSummary(report)).to.include("executed CL_NEUTRAL_FLOW=>transform");
+  });
+
+  it("keeps the illustrated story as a separate, committed report", () => {
+    const story = readFileSync(new URL("../docs/portable-amdp-report.html", import.meta.url), "utf8");
+    expect(story).to.include("Глубина уже сильная. Ширина пока ранняя.");
+    expect(story).to.include("17 / 101");
+    expect(story).to.include("16 / 364");
+    expect(story).to.include("npm run amdp:demo");
+    expect(story).to.not.match(/<script\b/i);
   });
 });

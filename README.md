@@ -1,35 +1,24 @@
-> ## 🧪 [Portable AMDP: live HANA oracle, DuckDB execution, and clean-room corpus](docs/amdp-portable-milestone-report.md)
->
-> The `feat/amdp-portable-ir` branch now runs the original `SQUARES` and the
-> clean-room `mix_rows` and `rank_rows` SQLScript through typed host control
-> flow and ordinary relational SQL on both HANA and DuckDB. The portable
-> branches of `transform` now run through host-side `IF / ELSEIF / ELSE` as
-> well, and the two clean-room scalar functions execute without a database
-> round trip. Typed `EXCEPT` now runs on HANA and DuckDB too. Explicit session
-> identity and context make `CURRENT_USER`, `CURRENT_SCHEMA` and the final
-> `transform` branch portable without borrowing the selected database's
-> identity. Typed ABAP `STRING` inputs now cross the same boundary too;
-> omitting an `OPTIONAL STRING` supplies the ABAP initial empty string, while
-> SQL `NULL` remains distinct. Read the milestone report for the
-> A real fixed `INTEGER ARRAY` now expands through `UNNEST ... WITH
-> ORDINALITY` as well, preserving duplicates, NULL elements and one-based
-> positions on HANA and DuckDB. Read the milestone report for the
-> architecture, safety boundaries, ten-method synthetic corpus and next
-> coverage steps.
-> Textual `COALESCE` now also preserves NULL selection while widening fixed
-> character operands deterministically; mixed text/numeric coercion remains
-> refused.
->
-> Run `npm run amdp:demo` for the live DuckDB ledger and a self-contained
-> master-detail report at `.local/amdp-demo/index.html`; add `-- --serve 3037`
-> to view that generated report from another machine on the local network.
-
 > ## ▶ [Run a whole ABAP application server in a browser tab](https://oisee.github.io/open-steamgate/main/app/flp.html)
 >
 > **oisee.github.io/open-steamgate/main/app/flp.html** — nothing to install,
 > no server to reach, no system to log on to. The transpiled ABAP, the OData
 > runtime and the database are all in a service worker on your own machine,
 > and every app on the launchpad is answered there.
+
+## 🔥 Hot Off Press
+
+### [Portable AMDP: illustrated engineering report](docs/portable-amdp-report.html)
+
+The illustrated report explains the architecture, the HANA/DuckDB proof,
+what already forms a useful read-only analytical core, and the honest gap
+between the deep 10-of-11 showcase and broad A4H corpus coverage. The
+detailed, source-oriented companion is the
+[milestone report](docs/amdp-portable-milestone-report.md).
+
+Run `npm run amdp:demo` for the live DuckDB ledger and a self-contained
+master-detail report at `.local/amdp-demo/index.html`; the narrative is
+copied beside it as `.local/amdp-demo/story.html`. Add `-- --serve 3037` to
+view `/` and `/story.html` from another machine on the local network.
 
 ## Try it yourself
 

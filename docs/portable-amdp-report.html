@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Portable AMDP — честная карта проекта</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5f7ff;
+      --muted: #aab5c8;
+      --bg: #07111f;
+      --panel: rgba(17, 31, 52, .82);
+      --panel2: #0d1b30;
+      --line: rgba(173, 199, 235, .18);
+      --cyan: #55d8ff;
+      --mint: #55e6b0;
+      --amber: #ffc86b;
+      --rose: #ff7891;
+      --violet: #b89cff;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .28);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(85, 216, 255, .14), transparent 31rem),
+        radial-gradient(circle at 88% 17%, rgba(184, 156, 255, .13), transparent 28rem),
+        linear-gradient(180deg, #081522 0, var(--bg) 42rem);
+      font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--cyan); }
+    code { color: #d8efff; font: .94em ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    .hero { padding: 72px 0 42px; position: relative; }
+    .eyebrow { color: var(--cyan); letter-spacing: .15em; text-transform: uppercase; font-size: 12px; font-weight: 800; }
+    h1 { max-width: 900px; margin: 13px 0 18px; font-size: clamp(42px, 7vw, 86px); line-height: .96; letter-spacing: -.055em; }
+    h1 span { color: transparent; background: linear-gradient(90deg, var(--cyan), var(--mint)); background-clip: text; }
+    .lead { max-width: 850px; color: #d2dced; font-size: clamp(18px, 2.2vw, 25px); line-height: 1.42; }
+    .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 26px; }
+    .pill { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: rgba(8, 19, 34, .66); }
+    .grid { display: grid; gap: 16px; }
+    .kpis { grid-template-columns: repeat(4, 1fr); margin: 22px 0 48px; }
+    .card, .section { border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
+    .card { min-height: 160px; padding: 22px; border-radius: 18px; }
+    .card .number { font-size: 44px; font-weight: 850; letter-spacing: -.04em; }
+    .card .label { color: var(--muted); }
+    .card .note { margin-top: 10px; font-size: 12px; color: #8291a7; }
+    .section { margin: 0 0 22px; padding: clamp(22px, 4vw, 42px); border-radius: 22px; }
+    h2 { margin: 0 0 10px; font-size: clamp(27px, 4vw, 43px); line-height: 1.12; letter-spacing: -.035em; }
+    h3 { margin: 0 0 8px; font-size: 19px; }
+    .sub { color: var(--muted); max-width: 850px; margin: 0 0 28px; }
+    .truth { border-left: 4px solid var(--amber); padding: 14px 18px; background: rgba(255, 200, 107, .08); border-radius: 0 12px 12px 0; }
+    .two { grid-template-columns: 1fr 1fr; }
+    .depth { display: grid; grid-template-columns: 190px 1fr; align-items: center; gap: 28px; }
+    .ring { width: 170px; height: 170px; border-radius: 50%; display: grid; place-items: center;
+      background: conic-gradient(var(--mint) 0 90.91%, rgba(255,255,255,.08) 90.91% 100%); position: relative; }
+    .ring::before { content: ""; width: 126px; height: 126px; border-radius: 50%; background: var(--panel2); position: absolute; }
+    .ring strong, .ring small { position: relative; z-index: 1; display: block; text-align: center; }
+    .ring strong { font-size: 35px; line-height: 1; }
+    .ring small { color: var(--muted); }
+    .bars { display: grid; gap: 17px; }
+    .bar-label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+    .track { height: 13px; background: rgba(255,255,255,.07); border-radius: 99px; overflow: hidden; }
+    .fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+    .fill.green { background: linear-gradient(90deg, var(--mint), var(--cyan)); }
+    .caption { color: var(--muted); font-size: 13px; }
+    .pipeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 26px; align-items: stretch; margin-top: 28px; }
+    .stage { position: relative; padding: 18px; border: 1px solid var(--line); border-radius: 15px; background: #0b1a2d; }
+    .stage:not(:last-child)::after { content: "→"; position: absolute; right: -21px; top: 42%; color: var(--cyan); font-size: 25px; }
+    .stage b { display: block; color: var(--cyan); margin-bottom: 7px; }
+    .stage small { color: var(--muted); }
+    .capabilities { grid-template-columns: repeat(3, 1fr); }
+    .cap { padding: 20px; border: 1px solid var(--line); border-radius: 15px; background: rgba(7, 17, 31, .48); }
+    .cap .flag { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
+    .ok { color: var(--mint); } .partial { color: var(--amber); } .later { color: var(--rose); }
+    ul { margin: 10px 0 0; padding-left: 20px; }
+    li + li { margin-top: 6px; }
+    .casegrid { grid-template-columns: repeat(2, 1fr); }
+    .case { padding: 19px; border: 1px solid var(--line); border-radius: 15px; background: #0a182a; }
+    .case b { color: var(--mint); }
+    .roadmap { counter-reset: milestone; display: grid; gap: 13px; }
+    .mile { counter-increment: milestone; display: grid; grid-template-columns: 48px 1fr; gap: 15px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; }
+    .mile::before { content: counter(milestone); display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: rgba(85,216,255,.12); color: var(--cyan); font-weight: 850; }
+    .legend { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+    .dot::before { content: ""; width: 9px; height: 9px; display: inline-block; border-radius: 50%; margin-right: 6px; background: currentColor; }
+    .codebox { padding: 17px; border-radius: 13px; background: #050d18; border: 1px solid var(--line); overflow: auto; }
+    footer { color: var(--muted); padding: 22px 0 60px; font-size: 13px; }
+    @media (max-width: 900px) {
+      .kpis, .capabilities { grid-template-columns: repeat(2, 1fr); }
+      .pipeline { grid-template-columns: 1fr; }
+      .stage:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -25px; }
+    }
+    @media (max-width: 650px) {
+      .kpis, .two, .casegrid, .capabilities { grid-template-columns: 1fr; }
+      .depth { grid-template-columns: 1fr; }
+      .hero { padding-top: 45px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <div class="eyebrow">open-steamgate · engineering report · 22 September 2026</div>
+    <h1>AMDP без обязательной HANA.<br><span>Уже не идея. Ещё не весь язык.</span></h1>
+    <p class="lead">Мы исполняем неизменённые тела SQLScript через типизированный IR: управляющая логика живёт в JavaScript, реляционная — в выбранной базе. HANA остаётся нативным oracle, а DuckDB доказывает, что результат не держится на скрытом fallback.</p>
+    <div class="meta">
+      <span class="pill">branch: feat/amdp-portable-ir</span>
+      <span class="pill">baseline: 4426a18</span>
+      <span class="pill">corpus snapshot: 29ae…ba6</span>
+      <span class="pill">no proprietary source in Git</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="grid kpis">
+      <article class="card"><div class="number" style="color:var(--mint)">10 / 11</div><div class="label">showcase-методов исполняются</div><div class="note">Оригинальные тела; один честный refusal.</div></article>
+      <article class="card"><div class="number" style="color:var(--cyan)">394</div><div class="label">offline regression tests</div><div class="note">17 live-интеграций пропускаются без HANA.</div></article>
+      <article class="card"><div class="number" style="color:var(--violet)">14 / 14</div><div class="label">live HANA differential</div><div class="note">Native SQLScript против portable ordinary SQL.</div></article>
+      <article class="card"><div class="number" style="color:var(--amber)">4%</div><div class="label">ширина рабочего A4H-корпуса</div><div class="note">16 из 364 тел lower целиком. Это важная честная цифра.</div></article>
+    </div>
+
+    <section class="section">
+      <div class="eyebrow">Главная мысль</div>
+      <h2>Глубина уже сильная. Ширина пока ранняя.</h2>
+      <p class="sub">Две цифры ниже отвечают на разные вопросы. Смешать их — получить красивый, но ложный процент готовности.</p>
+      <div class="grid two">
+        <div class="depth">
+          <div class="ring"><div><strong>91%</strong><small>10 из 11</small></div></div>
+          <div><h3>Showcase depth</h3><p>Мы специально выбрали одиннадцать синтетических методов так, чтобы пройти весь путь: ABAP signature → SQLScript → typed IR → реальная БД → типизированный результат. Здесь десять уже зелёные.</p></div>
+        </div>
+        <div class="bars">
+          <div><div class="bar-label"><span>Teaching corpus: parsed</span><strong>56 / 101 · 55%</strong></div><div class="track"><div class="fill" style="width:55.4%"></div></div></div>
+          <div><div class="bar-label"><span>Teaching corpus: lowered</span><strong>17 / 101 · 17%</strong></div><div class="track"><div class="fill green" style="width:16.8%"></div></div></div>
+          <div><div class="bar-label"><span>Working corpus: parsed</span><strong>131 / 364 · 36%</strong></div><div class="track"><div class="fill" style="width:36%"></div></div></div>
+          <div><div class="bar-label"><span>Working corpus: lowered</span><strong>16 / 364 · 4%</strong></div><div class="track"><div class="fill green" style="width:4.4%"></div></div></div>
+          <p class="caption">A4H snapshot, пересчитан этой веткой 2026-09-22. Lowered — тело целиком дошло до backend SQL; parser success отдельно успехом исполнения не называется.</p>
+        </div>
+      </div>
+      <p class="truth"><strong>Полезное ядро — ближе, чем «весь SQLScript».</strong> Для read-only аналитических AMDP нам нужны типизированные параметры, ветвления, joins, aggregates, windows, table results и одна транзакция. Значительная часть этого уже работает. Полная поверхность языка включает ещё mutation, DDL, dynamic SQL, handlers и специализированные библиотеки — она существенно дальше.</p>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Как это устроено</div>
+      <h2>JavaScript управляет. База считает отношения.</h2>
+      <p class="sub">Мы не переводим SQLScript в гигантскую JavaScript-функцию и не делаем строки таблиц JS-массивами. IR сохраняет типы, NULL, зависимости и версии отношений.</p>
+      <div class="pipeline">
+        <div class="stage"><b>1 · ABAP / AMDP</b><small>Неизменённая сигнатура и исходное тело SQLScript.</small></div>
+        <div class="stage"><b>2 · Frontend</b><small>Lexer, parser, имена, scope и точные типы.</small></div>
+        <div class="stage"><b>3 · Typed IR</b><small>Control nodes + immutable relational plans.</small></div>
+        <div class="stage"><b>4 · Runtime</b><small>IF/WHILE/scalars в JS; step limits и trace.</small></div>
+        <div class="stage"><b>5 · Database</b><small>Обычный SQL на HANA или DuckDB. Без fallback.</small></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Полезное ядро сегодня</div>
+      <h2>Что уже можно считать настоящей возможностью</h2>
+      <div class="grid capabilities">
+        <article class="cap"><span class="flag ok">Работает</span><h3>Реляционное ядро</h3><p>SELECT, filters, inner/left joins, derived и correlated subqueries, EXISTS/IN, DISTINCT, UNION/UNION ALL, EXCEPT, GROUP BY/HAVING, ORDER BY/LIMIT.</p></article>
+        <article class="cap"><span class="flag ok">Работает</span><h3>Аналитика</h3><p>ROW_NUMBER, RANK, DENSE_RANK, partitions, deterministic ties и агрегаты. Ranking fixture различает rank-with-gap и dense rank.</p></article>
+        <article class="cap"><span class="flag ok">Работает</span><h3>Control flow</h3><p>DECLARE scalar, assignments, IF / ELSEIF / ELSE и WHILE. Есть ограничение шагов; зависание программы становится диагностикой.</p></article>
+        <article class="cap"><span class="flag ok">Работает</span><h3>Типы и NULL</h3><p>INTEGER, часть packed decimal, fixed character, STRING, date storage, typed empty relations и явный SQL NULL. Непроверенные coercions отказываются.</p></article>
+        <article class="cap"><span class="flag ok">Работает</span><h3>Контекст и массив</h3><p>CURRENT_USER, CURRENT_SCHEMA и literal SESSION_CONTEXT приходят из execution context. Fixed INTEGER ARRAY раскрывается с NULL, duplicates и ordinality.</p></article>
+        <article class="cap"><span class="flag partial">Узкий baseline</span><h3>Поиск</h3><p>Exact/substring case над измеренным ASCII fixture исполняется на HANA и DuckDB. Настоящие fuzzy profiles вынесены в ADR 0002 и backlog.</p></article>
+        <article class="cap"><span class="flag later">Следом</span><h3>Composition</h3><p>Nested AMDP calls, единый caller transaction, fixtures из ABAP SQL и исходный ABAP Unit без обходов.</p></article>
+        <article class="cap"><span class="flag later">Не сейчас</span><h3>Широкий imperative</h3><p>FOR, general cursor OPEN/FETCH, handlers, dynamic SQL, mutation, temporary DDL и широкий набор built-ins.</p></article>
+        <article class="cap"><span class="flag later">Явная граница</span><h3>Не portable по природе</h3><p>XMLTABLE, HIERARCHY и часть HANA libraries могут остаться native-only. Refusal лучше похожего, но неверного результата.</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Доказательства, не чекбоксы</div>
+      <h2>Одиннадцать вертикальных кейсов</h2>
+      <div class="grid casegrid">
+        <div class="case"><b>SQUARES</b><p>Исходный WHILE, scalar snapshots и растущее отношение. Native HANA = portable HANA = DuckDB.</p></div>
+        <div class="case"><b>mix_rows</b><p>Два table inputs, joins, correlated EXISTS, DISTINCT, LIMIT и typed result.</p></div>
+        <div class="case"><b>rank_rows</b><p>Grouping, window ranks, ties и duplicate-eliminating UNION.</p></div>
+        <div class="case"><b>transform</b><p>Все ветки IF, regex и explicit session context.</p></div>
+        <div class="case"><b>identity_cells</b><p>Execution identity не заимствуется у случайного backend connection.</p></div>
+        <div class="case"><b>expand_values</b><p>Настоящий SQLScript ARRAY + UNNEST WITH ORDINALITY.</p></div>
+        <div class="case"><b>difference_cells</b><p>EXCEPT DISTINCT, duplicates и NULL row equality.</p></div>
+        <div class="case"><b>search_cells</b><p>Простой исполняемый search baseline; полный fuzzy честно отложен.</p></div>
+        <div class="case"><b>optional_value + scalar_value</b><p>RETURNING scalar, optional omission и zero database statements.</p></div>
+        <div class="case"><b>control_rows</b><p><span class="later">Единственный refusal:</span> cursor declaration + sequential block. Cursor не используется — это следующий узкий срез, не заявление о general cursor loops.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">А как насчёт «всех примеров из книги»?</div>
+      <h2>Пока нельзя назвать честный процент.</h2>
+      <p>Книга уже использована как <em>карта поверхности языка</em> в <code>docs/sqlscript-surface.md</code>: мы знаем, какие семейства конструкций существуют. Но её листинги не оформлены как отдельный легальный runnable corpus, поэтому «N из M примеров книги» сейчас не измеряется.</p>
+      <p>Ближайший proxy — teaching corpus из A4H: documentation demos, compiler fixtures и unit-double demos. В нём сейчас lower целиком <strong>17 из 101</strong>. Это не 17% книги, но хороший индикатор расстояния до учебной поверхности.</p>
+      <div class="truth"><strong>Чтобы получить настоящий book score:</strong> нужен отдельный clean-room набор листингов с ожидаемыми значениями и ошибками. После этого тот же runner даст точное <code>parsed / typed / lowered / executed</code>, не меняя архитектуру.</div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Почему broad coverage пока 4%</div>
+      <h2>Несколько массовых границ, а не 348 независимых провалов</h2>
+      <div class="grid two">
+        <div class="bars">
+          <div><div class="bar-label"><span>Grammar stops: FOR</span><strong>29 bodies</strong></div><div class="track"><div class="fill" style="width:100%"></div></div></div>
+          <div><div class="bar-label"><span>FROM table function</span><strong>19 lowered refusals</strong></div><div class="track"><div class="fill" style="width:65.5%"></div></div></div>
+          <div><div class="bar-label"><span>Unknown client scalar</span><strong>18+ bodies</strong></div><div class="track"><div class="fill" style="width:62%"></div></div></div>
+          <div><div class="bar-label"><span>Catalogue closure</span><strong>several families</strong></div><div class="track"><div class="fill" style="width:48%"></div></div></div>
+        </div>
+        <div><h3>Хорошая новость</h3><p>Corpus coverage растёт ступенями. Реализация одного корректного <code>FOR</code> или table-function node потенциально открывает десятки тел. Перед тем как писать очередную конструкцию, runner снова строит histogram: следующий шаг выбирается измерением, а не красотой синтаксиса.</p><p class="caption">Числа — blockers, а не обещание аддитивного прироста: одно тело может остановиться на следующей конструкции сразу после устранения первой.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Ближайший маршрут</div>
+      <h2>От showcase к полезному ядру</h2>
+      <div class="roadmap">
+        <div class="mile"><div><h3>Закрыть control_rows</h3><p>Typed cursor declaration как неиспользуемый resource + sequential block semantics. Не притворяться, что OPEN/FETCH уже готовы.</p></div></div>
+        <div class="mile"><div><h3>Composition</h3><p>Nested AMDP call, shared execution context и одна транзакция между ABAP SQL fixture и AMDP read.</p></div></div>
+        <div class="mile"><div><h3>Оригинальный ABAP Unit</h3><p>Неизменённый тест вызывает неизменённый AMDP на DuckDB без доступного HANA fallback.</p></div></div>
+        <div class="mile"><div><h3>Ширина по histogram</h3><p>FOR, table functions in FROM, client/session parameters и catalogue closure — в порядке реально разблокируемых тел.</p></div></div>
+        <div class="mile"><div><h3>После ядра</h3><p>Versioned fuzzy profiles, mutation/handlers, второй embedded backend и clean-room book corpus.</p></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Посмотреть живые данные</div>
+      <h2>Статья рядом. Ledger пересобирается.</h2>
+      <p>Этот файл — объяснение. Технический ledger строится из реального compiler/runtime run и показывает исходное тело, rows, trace или точную причину refusal.</p>
+      <pre class="codebox"><code>npm run amdp:demo
+# live ledger: .local/amdp-demo/index.html
+# эта статья:  .local/amdp-demo/story.html
+
+npm run amdp:demo -- --serve 3037
+# /            live ledger
+# /story.html  эта статья</code></pre>
+      <div class="legend">
+        <span class="dot ok">executed</span>
+        <span class="dot partial">partial / narrowly measured</span>
+        <span class="dot later">refused / deliberately deferred</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <p>Технические основания: <a href="amdp-portable-milestone-report.md">milestone report</a> · <a href="amdp-portable-runtime.md">runtime plan</a> · <a href="adr/0002-portable-and-native-fuzzy-text-profiles.md">ADR 0002</a> · <a href="sqlscript-corpus.md">A4H corpus notes</a>.</p>
+    <p>Этот отчёт намеренно различает «мы провели сложный case насквозь» и «мы покрыли широкую поверхность языка». Portable AMDP заслуживает красивой витрины — но не ценой красивой неправды.</p>
+  </footer>
+</body>
+</html>
