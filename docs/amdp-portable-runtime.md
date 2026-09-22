@@ -41,8 +41,8 @@ lower half of the design:
 - the `AMDP` RFC destination is already the dispatch seam used by transpiled
   ABAP;
 - `tools/sqlscript/lexer.mjs` and `tools/sqlscript/expressions/index.mjs`
-  parse the declarative core and already recognise `DECLARE`, scalar
-  assignments and `IF` syntax; `WHILE` is not in the grammar yet;
+  parse the declarative core and recognise `DECLARE`, scalar assignments,
+  `IF` and balanced `WHILE` syntax;
 - `tools/sqlscript/to-ir.mjs` binds and types relational plans, but currently
   refuses the imperative statements by name;
 - `tools/sqlscript-ir.mjs` carries typed relational operations, schemas,
@@ -163,10 +163,25 @@ A backend capability has three honest outcomes:
 
 There is no best-effort mode in ABAP Unit.
 
-PostgreSQL is the first backend because it gives strict server-side numeric
-types and is already an OSG database option. DuckDB is the second backend and
-proves the IR is not PostgreSQL-shaped. SQLite remains valuable for browser
-replay, but it is not the semantic authority for fixed decimals.
+The minimum portability proof deliberately uses two complementary tracks:
+
+1. native HANA SQLScript versus the portable procedural runtime using plain
+   relational SQL on that same HANA database;
+2. the same typed procedural IR on SQLite, called by the unchanged ABAP Unit
+   while no HANA fallback is available.
+
+The first isolates our parser/control/runtime from database-dialect changes.
+The second is the cheapest proof that the architecture really crosses a
+database boundary and can later run in the browser. Passing both does not
+claim that every function is portable: each additional backend still has to
+implement or explicitly refuse every capability through the conformance
+layer.
+
+PostgreSQL remains the first strict server backend because it gives strong
+numeric types and is already an OSG database option. DuckDB then tests the
+analytical path and helps expose assumptions accidentally tied to either
+SQLite or PostgreSQL. SQLite is not the semantic authority for fixed
+decimals, casts or database-specific error behaviour.
 
 The current inventory shows one prerequisite: PostgreSQL is an OSG runtime
 client, but SQLScript lowering currently has only `hana`, `duckdb` and
@@ -205,8 +220,11 @@ The empty initial relation in `SQUARES` must take its output schema from the
 extracted `ET_SQUARE` signature. Inferring only from `0, '', 0` would lose the
 declared character width (and can incorrectly invent `C(0)`).
 
-Acceptance: parsing and interpreting the original `SQUARES` body yields four
-typed rows on PostgreSQL for `iv_count = 4`, no HANA code path loaded.
+Acceptance is two-stage: parsing and interpreting the original `SQUARES`
+body first agrees with native SQLScript while its relational work uses plain
+HANA SQL, then yields the same four typed rows on SQLite for `iv_count = 4`
+with no HANA code path loaded. PostgreSQL runs the identical IR afterward;
+it is no longer on the critical path to the first end-to-end proof.
 
 ### P2 — AMDP dispatch and ABAP Unit
 
@@ -297,8 +315,9 @@ procedural half.
 2. Add the PostgreSQL native seam and relational lowering with focused tests.
 3. Introduce procedural IR types independently of execution.
 4. Lower and interpret only the constructs present in `SQUARES`.
-5. Connect the existing `AMDP` destination to the portable executor.
-6. Run the ABAP Unit with HANA disabled and publish the trace beside the test
+5. Compare native HANA SQLScript with portable control plus plain HANA SQL.
+6. Connect the existing `AMDP` destination to the portable SQLite executor.
+7. Run the ABAP Unit with HANA disabled and publish the trace beside the test
    result.
 
 This order keeps every commit executable and makes the first new language
@@ -326,3 +345,26 @@ typed multiplication, concatenation, decimal division, transaction reuse and
 bound values. Functions measured only on the earlier HANA/DuckDB/SQLite
 matrix are explicitly refused on PostgreSQL until PostgreSQL gains its own
 conformance rows. P1 (procedural IR) is next.
+
+### 2026-09-22 — P1a procedural semantics
+
+The first P1 slice now fixes the execution semantics independently of parser
+binding:
+
+- typed procedure, scalar declaration/assignment, relation assignment and
+  `WHILE` nodes;
+- SQL `NULL` preservation and strict INTEGER/boolean boundaries;
+- immutable table-variable versions and assignment-time scalar capture,
+  including parameters inside window partitions;
+- explicit host-step, expanded-plan, nesting and bound-parameter budgets;
+- refusal of `NO_INLINE` until a real materialisation barrier exists, and of
+  non-deterministic relations in this initial subset;
+- one final parameterised database statement with a trace that names the
+  engine and states `fallback=false`.
+
+The hand-built `SQUARES`-equivalent IR passes on DuckDB, including zero rows,
+four rows, NULL input, integer overflow and adversarial plan growth. The
+grammar retains a nested, balanced `WHILE` tree and the old relational binder
+refuses it by name instead of flattening it. P1 is not complete yet: the next
+slice maps the parser tree and extracted AMDP signature into these nodes,
+then runs the original body on PostgreSQL.

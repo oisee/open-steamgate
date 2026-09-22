@@ -105,6 +105,7 @@
     "test/sqlscript-parser.mjs",
     "test/sqlscript-portable.mjs",
     "test/sqlscript-postgres.mjs",
+    "test/sqlscript-procedure-ir.mjs",
     "test/sqlscript-refusals.mjs",
     "test/sqlscript-to-ir.mjs",
     "test/sqlscript-treatments.mjs",

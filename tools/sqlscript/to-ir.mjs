@@ -767,6 +767,11 @@ export function toIr(tree, options = {}) {
         returnedRel = known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue));
         break;
       }
+      case "While":
+        // The relational binder deliberately does not flatten a loop. The
+        // procedural compiler consumes this node and invokes this binder for
+        // each relational assignment with the current immutable bindings.
+        throw new BindError("While is parsed but belongs to the procedural IR, not the relational IR", node);
       case "word":
       case "operator":
         break;

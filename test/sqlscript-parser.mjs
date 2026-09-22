@@ -35,6 +35,31 @@ describe("the SQLScript grammar", () => {
     expect(assignments).to.have.length(3);
   });
 
+  it("keeps a WHILE body nested instead of flattening its assignments", () => {
+    const source = `DECLARE lv_i INTEGER;
+      lv_i = 1;
+      WHILE :lv_i <= :iv_count DO
+        et_rows = SELECT * FROM :et_rows UNION ALL SELECT :lv_i AS id FROM DUMMY;
+        lv_i = :lv_i + 1;
+      END WHILE;`;
+    const t = tree(source);
+    expect(names(t).filter((name) => name === "While")).to.have.length(1);
+    const loop = (function find(node) {
+      if (node.node === "While") return node;
+      for (const child of node.children ?? []) {
+        const found = find(child);
+        if (found !== undefined) return found;
+      }
+    })(t);
+    expect(names(loop).filter((name) => name === "Assignment")).to.have.length(2);
+  });
+
+  it("requires balanced parentheses around a WHILE condition", () => {
+    expect(() => tree("WHILE (1 = 1 DO END WHILE;")).to.throw(ParseError);
+    expect(() => tree("WHILE 1 = 1) DO END WHILE;")).to.throw(ParseError);
+    expect(() => tree("WHILE (1 = 1) DO END WHILE;")).not.to.throw();
+  });
+
   it("keeps a quoted name a name and a quoted value a value", () => {
     const t = tree(`SELECT "K" FROM t WHERE v = '{"draft":"kept"}';`);
     expect(leaves(t, "quoted"), "the name").to.deep.equal(["K"]);

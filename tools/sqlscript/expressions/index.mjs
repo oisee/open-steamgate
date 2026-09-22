@@ -330,7 +330,7 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new If(), new Block(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new While(), new Block(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }
@@ -357,6 +357,19 @@ export class If extends Expression {
       star(seq(str("ELSEIF"), opt("("), new Condition(), opt(")"), str("THEN"), star(new Statement()))),
       opt(seq(str("ELSE"), star(new Statement()))),
       str("END"), str("IF"), ";");
+  }
+}
+
+/** `WHILE condition DO ... END WHILE;` -- the smallest imperative loop and
+ *  the one used by the portable AMDP acceptance method. Its body contains
+ *  Statements, not a second special grammar: nesting and later BREAK /
+ *  CONTINUE support therefore have one place to live. */
+export class While extends Expression {
+  getRunnable() {
+    // Condition already owns balanced parenthesised groups. Independent
+    // optional opening/closing tokens accepted both half-open spellings.
+    return seq(str("WHILE"), new Condition(), str("DO"),
+      star(new Statement()), str("END"), str("WHILE"), ";");
   }
 }
 
