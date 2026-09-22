@@ -389,3 +389,21 @@ This remains a deliberately narrow semantic claim: exactly one structured
 OUT/RETURNING table, INTEGER scalar inputs and locals, assignments and
 `WHILE`. Extra outputs, INOUT, narrower scalar declarations, trailing result
 sets and unresolved named types are refused rather than widened or dropped.
+
+### 2026-09-22 — Clean-room corpus baseline
+
+A two-room process converted four restricted input archives into an
+independently authored synthetic corpus. Repository fixtures contain no
+source excerpts, original identifiers, literals, paths, fingerprints or
+statement sequences. Ten synthetic AMDP methods cover the generalized shape
+of table parameters, joins, subqueries, grouping/windows, control flow,
+set difference, approximate search, arrays, session values and optional or
+scalar returns.
+
+The first executable ledger intentionally reports `0 supported / 10 named
+refusals / 0 crashes`: it prevents parser coverage from being mistaken for
+runtime support. Typed table inputs are now represented as relation bindings
+rather than JavaScript arrays, and their schemas reach the existing
+relational binder. The next corpus slices remove refusals one semantic
+capability at a time; unknown session tokens and every unimplemented feature
+remain loud refusals.

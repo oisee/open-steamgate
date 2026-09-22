@@ -3,7 +3,7 @@
 // Statement ownership lives here; expressions and relations deliberately go
 // through the established relational binder in to-ir.mjs. That keeps one
 // implementation of SQLScript typing and one list of explicit refusals.
-import {T} from "./sqlscript-ir.mjs";
+import {T, schemaOf} from "./sqlscript-ir.mjs";
 import {toIr, BindError} from "./sqlscript/to-ir.mjs";
 import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
@@ -27,11 +27,19 @@ export function irTypeFromAbap(type) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
   if (["STRING", "SSTRING"].includes(text)) return T.str;
+  if (["D", "DATS"].includes(text)) return T.date;
   const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
   if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
   throw new UnsupportedSqlScript(`ABAP type ${type || "<empty>"} has no portable SQLScript mapping`);
+}
+
+function structuredTable(abapType, types) {
+  const table = types.get(upper(abapType));
+  const row = table?.kind === "table" ? types.get(table.of) : undefined;
+  if (row?.kind !== "structure") return undefined;
+  return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType)]));
 }
 
 function outputFrom(method, types) {
@@ -40,30 +48,33 @@ function outputFrom(method, types) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING table parameter");
   }
   const parameter = outputs[0];
-  const table = types.get(upper(parameter.abapType));
-  const row = table?.kind === "table" ? types.get(table.of) : undefined;
-  if (row?.kind !== "structure") {
+  const schema = structuredTable(parameter.abapType, types);
+  if (schema === undefined) {
     throw new UnsupportedSqlScript(`output ${parameter.name} is not a resolved structured table type`);
   }
-  return {
-    name: upper(parameter.name),
-    schema: Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType)])),
-  };
+  return {name: upper(parameter.name), schema};
 }
 
 /** Compile one extracted AMDP method without changing its source body. */
 export function compileProcedure(method, types) {
   const tree = parse(new Body(), lex(method.body));
   const output = outputFrom(method, types);
-  const parameters = method.parameters
-    .filter((one) => one.direction === "IN")
+  const inputParameters = method.parameters.filter((one) => one.direction === "IN");
+  const relationParameters = inputParameters
+    .map((one) => ({one, schema: structuredTable(one.abapType, types)}))
+    .filter(({schema}) => schema !== undefined)
+    .map(({one, schema}) => ({name: upper(one.name), schema}));
+  const relationNames = new Set(relationParameters.map((one) => one.name));
+  const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
+  const parameters = inputParameters
+    .filter((one) => !relationNames.has(upper(one.name)))
     .map((one) => ({name: upper(one.name), type: irTypeFromAbap(one.abapType)}));
   if (parameters.some((one) => one.type.abap !== "I")) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER scalars");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
   const bind = (node, fragment) => toIr(node, {
-    fragment, scalarTypes, deferTableVariables: true,
+    fragment, scalarTypes, relationSchemas, deferTableVariables: true,
     signature: method,
   });
 
@@ -92,7 +103,12 @@ export function compileProcedure(method, types) {
       } else if (node.node === "Assignment") {
         const name = nameOf(child(node, "Name"));
         const set = child(node, "SetOperation");
-        if (set !== undefined) result.push(assignRelation(name, bind(set, "relation"), node));
+        if (set !== undefined) {
+          const rel = bind(set, "relation");
+          try { relationSchemas[name] = schemaOf(rel); }
+          catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
+          result.push(assignRelation(name, rel, node));
+        }
         else result.push(assignScalar(name, bind(child(node, "Expr"), "expression"), node));
       } else if (node.node === "While") {
         result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
@@ -104,7 +120,8 @@ export function compileProcedure(method, types) {
   };
 
   try {
-    return procedure({parameters, body: compileStatements(tree), output: output.name, outputSchema: output.schema});
+    return procedure({parameters, relationParameters, body: compileStatements(tree),
+      output: output.name, outputSchema: output.schema});
   } catch (error) {
     if (error instanceof UnsupportedSqlScript) throw error;
     if (error instanceof BindError) throw new UnsupportedSqlScript(error.message, error);

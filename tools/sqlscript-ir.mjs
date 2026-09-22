@@ -95,7 +95,7 @@ export const scan = (table) => ({rel: "scan", table});
  * and shadowing a real table name is ordinary. Losing the colon here would
  * read one and mean the other.
  */
-export const varRef = (name) => ({rel: "var", name});
+export const varRef = (name, schema) => schema === undefined ? ({rel: "var", name}) : ({rel: "var", name, schema});
 /** a relation the seam already knows by name (a barrier materialised it) */
 export const ref = (handle) => ({rel: "ref", handle});
 
@@ -221,11 +221,15 @@ export function schemaOf(rel, catalogue = {}) {
   const need = (r) => schemaOf(r, catalogue);
   switch (rel.rel) {
     case "scan": {
+      // DUMMY is the engine's one-row, zero-domain source. Its projection
+      // defines every output column, so no dictionary entry is required.
+      if (String(rel.table).toUpperCase() === "DUMMY") return {};
       const table = catalogue[rel.table] ?? catalogue[rel.table?.toUpperCase?.()];
       if (table === undefined) throw new Error(`schemaOf: the catalogue does not describe ${rel.table}`);
       return {...table};
     }
     case "var":
+      if (rel.schema !== undefined) return {...rel.schema};
       throw new Error(`schemaOf: :${rel.name} has no schema until the binder resolves it`);
     case "ref":
       // a materialised relation: its schema is the plan's that made it, and
@@ -247,14 +251,26 @@ export function schemaOf(rel, catalogue = {}) {
     case "union": {
       const all = rel.inputs.map(need);
       const first = Object.keys(all[0]);
+      const merged = {...all[0]};
       for (const one of all.slice(1)) {
         // SQLScript lets a UNION of mismatched shapes through only by
         // position; refusing here is cheaper than a wrong column later
         if (JSON.stringify(Object.keys(one)) !== JSON.stringify(first)) {
           throw new Error("schemaOf: the branches of a UNION do not have the same columns");
         }
+        for (const name of first) {
+          const left = merged[name], right = one[name];
+          if (JSON.stringify(left) === JSON.stringify(right)) continue;
+          const text = (type) => type?.abap === "C" || type?.abap === "STRING";
+          if (text(left) && text(right)) {
+            merged[name] = left.abap === "STRING" || right.abap === "STRING"
+              ? T.str : T.char(Math.max(Number(left.len ?? 0), Number(right.len ?? 0)));
+            continue;
+          }
+          throw new Error(`schemaOf: UNION column ${name} differs in type`);
+        }
       }
-      return {...all[0]};
+      return merged;
     }
     case "aggregate": {
       const input = need(rel.input);

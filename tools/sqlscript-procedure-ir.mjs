@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects} from "./sqlscript-ir.mjs";
+import {effects, schemaOf} from "./sqlscript-ir.mjs";
 import {lower} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -19,8 +19,8 @@ export class UnsupportedSqlScript extends Error {
 
 const upper = (name) => String(name).toUpperCase();
 
-export const procedure = ({parameters = [], body = [], output, outputSchema = {}}) =>
-  ({ir: "sqlscript-procedure", parameters, body, output: upper(output), outputSchema});
+export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema = {}}) =>
+  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema});
 export const declareScalar = (name, type, initial, source) =>
   ({stmt: "declare-scalar", name: upper(name), type, initial, source});
 export const assignScalar = (name, expr, source) =>
@@ -217,7 +217,7 @@ function assertExpandedRelationBudget(rel, {nodes, depth, parameters}) {
 
 /** Interpret control flow, then execute the final relation once. */
 export async function runProcedure(program, {
-  client, dialect, inputs = {}, maxSteps = 10000, maxPlanNodes = 10000,
+  client, dialect, inputs = {}, relationInputs = {}, inputCatalogue = {}, maxSteps = 10000, maxPlanNodes = 10000,
   maxPlanDepth = 256, maxParameters = 10000,
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
@@ -228,11 +228,33 @@ export async function runProcedure(program, {
   const scalars = new Map();
   const relations = new Map();
   const supplied = new Map(Object.entries(inputs).map(([name, value]) => [upper(name), value]));
+  const suppliedRelations = new Map(Object.entries(relationInputs).map(([name, value]) => [upper(name), value]));
   for (const parameter of program.parameters) {
     const name = upper(parameter.name);
     if (!supplied.has(name)) throw new UnsupportedSqlScript(`missing input ${name}`);
     const value = scalarForType(supplied.get(name), parameter.type, name);
     scalars.set(name, {type: parameter.type, value});
+  }
+  for (const parameter of program.relationParameters ?? []) {
+    const name = upper(parameter.name);
+    const supplied = suppliedRelations.get(name);
+    if (supplied?.rel === undefined) throw new UnsupportedSqlScript(`missing typed relation input ${name}`);
+    // An input is already outside the procedure: it may not capture the
+    // procedure's scalars or unresolved table variables. Close it with empty
+    // environments, applying the same NO_INLINE and unknown-param refusals
+    // as an assignment inside the body.
+    const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
+    assertExpandedRelationBudget(supplied, budget);
+    const value = freezeRelation(supplied, new Map(), new Map());
+    assertExpandedRelationBudget(value, budget);
+    let actual;
+    try { actual = schemaOf(value, inputCatalogue); }
+    catch (error) { throw new UnsupportedSqlScript(`cannot prove schema of relation input ${name}: ${error.message}`); }
+    const expectedShape = JSON.stringify(parameter.schema);
+    if (JSON.stringify(actual) !== expectedShape) {
+      throw new UnsupportedSqlScript(`relation input ${name} schema does not match its AMDP signature`);
+    }
+    relations.set(name, value);
   }
   let steps = 0;
   const step = (node) => {

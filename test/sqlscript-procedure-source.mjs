@@ -26,6 +26,7 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
 
   it("compiles the extracted source and signature, not a translated fixture", () => {
     expect(compiled.parameters).to.deep.equal([{name: "IV_COUNT", type: {abap: "I"}}]);
+    expect(compiled.relationParameters).to.deep.equal([]);
     expect(compiled.output).to.equal("ET_SQUARE");
     expect(compiled.body.map((one) => one.stmt)).to.deep.equal([
       "declare-scalar", "assign-relation", "assign-scalar", "while",
@@ -84,5 +85,21 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
   it("does not classify user-defined names by an unanchored type fragment", () => {
     expect(() => irTypeFromAbap("PRICE")).to.throw(UnsupportedSqlScript);
     expect(() => irTypeFromAbap("ZCHAR10")).to.throw(UnsupportedSqlScript);
+  });
+
+  it("propagates a typed table-input schema through local assignments", () => {
+    const types = new Map([
+      ["TY_ROW", {kind: "structure", components: [{name: "id", abapType: "i"}]}],
+      ["TT_ROW", {kind: "table", of: "TY_ROW"}],
+    ]);
+    const method = {body: "a = SELECT id FROM :it; et = SELECT id FROM :a;", parameters: [
+      {name: "it", direction: "IN", abapType: "tt_row"},
+      {name: "et", direction: "OUT", abapType: "tt_row"},
+    ]};
+    const compiled = compileProcedure(method, types);
+    expect(compiled.body[0].rel.items[0].expr.type).to.deep.equal({abap: "I"});
+    expect(compiled.body[1].rel.items[0].expr.type).to.deep.equal({abap: "I"});
+    expect(() => compileProcedure({...method, body: "et = SELECT id FROM :missing;"}, types))
+      .to.throw(UnsupportedSqlScript, /cannot prove schema assigned to ET/);
   });
 });

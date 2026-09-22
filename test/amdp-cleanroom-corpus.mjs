@@ -6,6 +6,8 @@ import {extract} from "../tools/amdp-extract.mjs";
 import {lex} from "../tools/sqlscript/lexer.mjs";
 import {parse} from "../tools/sqlscript/combi.mjs";
 import {Body} from "../tools/sqlscript/expressions/index.mjs";
+import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
+import {UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 
 const root = fileURLToPath(new URL("fixtures/amdp-cleanroom/", import.meta.url));
 const fixtureFiles = readdirSync(root).filter((name) => name.endsWith(".clas.abap.txt")).sort();
@@ -86,5 +88,31 @@ describe("independent AMDP clean-room corpus", () => {
       /\b(?:sap|hana|abaplint|osd|iwbep)_[a-z0-9_]+\b/i,
     ];
     for (const pattern of forbidden) expect(all, pattern.toString()).to.not.match(pattern);
+  });
+
+  it("classifies every synthetic method as a named refusal, never a crash or false success", () => {
+    const expected = {
+      search_cells: /inputs support only INTEGER scalars/,
+      difference_cells: /EXCEPT is parsed/,
+      expand_values: /inputs support only INTEGER scalars/,
+      identity_cells: /CURRENT_USER is a session value/,
+      optional_value: /not a resolved structured table type/,
+      transform: /If is outside/,
+      mix_rows: /LIMIT over anything but a literal/,
+      rank_rows: /neither an aggregate nor one of the GROUP BY columns/,
+      control_rows: /only scalar DECLARE/,
+      scalar_value: /not a resolved structured table type/,
+    };
+    const seen = [];
+    for (const file of fixtureFiles) {
+      const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
+      const extracted = extract(source(file), logicalName);
+      for (const method of extracted.methods) {
+        seen.push(method.name);
+        expect(() => compileProcedure(method, extracted.types), method.name)
+          .to.throw(UnsupportedSqlScript, expected[method.name]);
+      }
+    }
+    expect(seen.sort()).to.deep.equal(Object.keys(expected).sort());
   });
 });

@@ -99,6 +99,13 @@ describe("the SQLScript tree into the IR", () => {
     expect(column.type).to.deep.equal({abap: "C", len: 8});
   });
 
+  it("refuses unimplemented session values instead of reading same-named columns", () => {
+    for (const name of ["CURRENT_USER", "CURRENT_SCHEMA", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"]) {
+      expect(() => ir(`SELECT ${name} AS v FROM src;`, {SRC: {[name]: {abap: "C", len: 20}}}), name)
+        .to.throw(BindError, /session value, not a column/);
+    }
+  });
+
   // The `str()` trap, third occurrence, as a table rather than an example:
   // every form in which a `*` can appear. Each of the first two was found by
   // a failing corpus body rather than by a test, because every test used a

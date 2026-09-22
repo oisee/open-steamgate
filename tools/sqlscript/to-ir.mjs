@@ -33,6 +33,9 @@ import {T, col, lit, param, bin, call, cast, not, like, inList, caseWhen,
 const AGGREGATE_FUNCTIONS = new Set([
   "COUNT", "SUM", "MIN", "MAX", "AVG", "STRING_AGG", "GROUP_CONCAT",
 ]);
+const SESSION_VALUE_NAMES = new Set([
+  "CURRENT_USER", "CURRENT_SCHEMA", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP",
+]);
 
 export class BindError extends Error {
   constructor(message, node) {
@@ -75,6 +78,7 @@ function literalType(token) {
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
   const scalarTypes = options.scalarTypes ?? {};
+  const relationSchemas = options.relationSchemas ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
   // OUT table parameter -- it assigns and never selects at the end -- and
@@ -236,11 +240,17 @@ export function toIr(tree, options = {}) {
         // having; a quiet wrong is what this was.
         const names = kids(node, "Name");
         const name = names.length > 1 ? nameOf(names[names.length - 1]) : nameOf(node);
+        if (SESSION_VALUE_NAMES.has(name)) {
+          throw new BindError(`${name} is a session value, not a column; its portable semantics are not implemented`, node);
+        }
         return col(name, typeOfColumn(name));
       }
       case "identifier":
       case "quoted": {
         const name = String(node.value).toUpperCase();
+        if (node.node === "identifier" && SESSION_VALUE_NAMES.has(name)) {
+          throw new BindError(`${name} is a session value, not a column; its portable semantics are not implemented`, node);
+        }
         return col(name, typeOfColumn(name));
       }
       case "string":
@@ -400,7 +410,10 @@ export function toIr(tree, options = {}) {
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
-      if (options.deferTableVariables === true) return varRef(name);
+      if (options.deferTableVariables === true) {
+        columns = relationSchemas[name] ?? columns;
+        return varRef(name, relationSchemas[name]);
+      }
       const known = bound.get(name);
       if (known === undefined && tableParams.some((p) => String(p.name).toUpperCase() === name)) {
         // an IN table parameter: a relation the caller supplies. It is

@@ -150,6 +150,7 @@ describe("the typed SQLScript procedural IR", function () {
     try { await runProcedure(program, {client, dialect: "duckdb"}); } catch (caught) { error = caught; }
     expect(error).to.be.instanceOf(UnsupportedSqlScript);
     expect(error.message).to.contain("materialisation barrier");
+
   });
 
   it("requires boolean operands and a boolean WHILE condition", async () => {
@@ -195,5 +196,70 @@ describe("the typed SQLScript procedural IR", function () {
     expect(error).to.be.instanceOf(UnsupportedSqlScript);
     expect(error.message).to.contain("bound parameter limit 1");
     expect(invocations).to.equal(0);
+  });
+
+  it("binds a typed table input as a relation, never as a JavaScript array", async () => {
+    const program = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "OUT", outputSchema: {ID: T.int},
+      body: [assignRelation("OUT", varRef("IT_ROWS"))],
+    });
+    const supplied = union([
+      project(scan("DUMMY"), [{as: "ID", expr: lit(2, T.int)}]),
+      project(scan("DUMMY"), [{as: "ID", expr: lit(3, T.int)}]),
+    ], true);
+    const answer = await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: supplied},
+      inputCatalogue: {DUMMY: {}}});
+    expect(answer.rows.map((one) => one.ID).sort()).to.deep.equal([2, 3]);
+    let error;
+    try { await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: [{ID: 2}]}}); }
+    catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("missing typed relation input IT_ROWS");
+
+    const wrong = project(scan("DUMMY"), [{as: "OTHER", expr: lit("abc", T.str)}]);
+    try {
+      await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: wrong},
+        inputCatalogue: {DUMMY: {}}});
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("schema does not match");
+
+    const open = project(scan("DUMMY"), [{as: "ID", expr: p("IV")}]);
+    try {
+      await runProcedure(program, {client, dialect: "duckdb", inputs: {IV: 7}, relationInputs: {IT_ROWS: open},
+        inputCatalogue: {DUMMY: {}}});
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("unknown scalar :iv");
+
+    const forced = project(scan("DUMMY"), [{as: "ID", expr: lit(2, T.int)}]);
+    forced.hints = ["NO_INLINE"];
+    try {
+      await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: forced},
+        inputCatalogue: {DUMMY: {}}});
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("materialisation barrier");
+
+    const mixed = union([
+      project(scan("DUMMY"), [{as: "ID", expr: lit(1, T.int)}]),
+      project(scan("DUMMY"), [{as: "ID", expr: lit("abc", T.str)}]),
+    ], true);
+    try {
+      await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: mixed},
+        inputCatalogue: {DUMMY: {}}});
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("differs in type");
+
+    let deep = scan("DUMMY");
+    for (let i = 0; i < 5000; i += 1) deep = filter(deep, bin("=", lit(1, T.int), lit(1, T.int), T.bool));
+    try {
+      await runProcedure(program, {client, dialect: "duckdb", relationInputs: {IT_ROWS: deep}, maxPlanDepth: 16,
+        inputCatalogue: {DUMMY: {}}});
+    } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(UnsupportedSqlScript);
+    expect(error.message).to.contain("plan depth limit 16");
   });
 });
