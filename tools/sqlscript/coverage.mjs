@@ -12,7 +12,7 @@
 // changes after every construct added.
 //
 //   node tools/sqlscript/coverage.mjs [.local/a4h-export] [--ddic <folder>]...
-import {readFileSync, readdirSync, mkdirSync} from "node:fs";
+import {readFileSync, readdirSync, mkdirSync, rmSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, join} from "node:path";
 import {lex, LexError} from "./lexer.mjs";
@@ -50,11 +50,14 @@ export function bodiesOf(source, filename) {
 }
 
 export function classesIn(zip, dir) {
+  // a scratch folder from an earlier, different export must not leak its
+  // dictionary into this run
+  rmSync(dir, {recursive: true, force: true});
   mkdirSync(dir, {recursive: true});
   execFileSync("unzip", ["-o", "-q", zip, "-d", dir]);
   const found = [];
   const walk = (d) => {
-    for (const e of readdirSync(d, {withFileTypes: true})) {
+    for (const e of readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))) {
       if (e.isDirectory()) walk(join(d, e.name));
       else if (e.name.endsWith(".clas.abap")) found.push(join(d, e.name));
     }
@@ -75,7 +78,7 @@ export function reasonOf(error, tokens) {
 }
 
 export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-coverage", options = {}) {
-  const zips = readdirSync(root).filter((f) => f.endsWith(".zip"));
+  const zips = readdirSync(root).filter((f) => f.endsWith(".zip")).sort();
   const corpora = {teaching: [], working: []};
   // The dictionary the scalar typer resolves data elements against: the
   // packages' own DTEL/DOMA (an export carries them beside the classes),
@@ -172,6 +175,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     };
   }
   report.dictionary = ddic;
+  report.scratch = scratch;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.keys()]};
   return report;
 }
@@ -190,11 +194,11 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, scratch, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
-  const exports = dictionary.folders.filter((f) => f.startsWith("/tmp/sqlscript-coverage"));
+  const exports = dictionary.folders.filter((f) => f.startsWith(scratch));
   for (const line of dictionary.describe()) {
     if (!exports.includes(line.split("  (")[0])) console.log(`  ${line}`);
   }

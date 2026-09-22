@@ -34,7 +34,7 @@ export class FolderDdic {
     this.folders = [];
     /** every name a later folder took over from an earlier one: {key, was, now} */
     this.overrides = [];
-    /** how many resolutions each folder answered, so two machines' numbers can be compared */
+    /** how many data elements each folder resolved (once per resolution, credited to the DTEL's folder) */
     this.hits = new Map();
     for (const folder of folders) this.add(folder);
   }
@@ -47,7 +47,10 @@ export class FolderDdic {
     this.folders.push(folder);
     this.hits.set(folder, 0);
     const walk = (dir) => {
-      for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      // sorted: a dictionary must not depend on readdir order (Bun's differs
+      // from Node's, CLAUDE.md), and a duplicate inside one folder is recorded
+      // like an override rather than resolved by whichever came last
+      for (const entry of readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))) {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) { walk(path); continue; }
         // DTEL and DOMA as abapGit XML; a DDLS as its source, because a
@@ -56,7 +59,7 @@ export class FolderDdic {
         if (m === null) continue;
         const key = `${m[2].toUpperCase()}:${m[1].toUpperCase().replaceAll("#", "/")}`;
         const was = this.index.get(key);
-        if (was !== undefined && was.folder !== folder) this.overrides.push({key, was: was.folder, now: folder});
+        if (was !== undefined) this.overrides.push({key, was: was.folder, now: folder, ...(was.folder === folder ? {duplicate: true} : {})});
         this.index.set(key, {path, folder});
       }
     };
@@ -72,7 +75,6 @@ export class FolderDdic {
   read(type, name) {
     const found = this.index.get(`${String(type).toUpperCase()}:${String(name).toUpperCase()}`);
     if (found === undefined) return undefined;
-    this.hits.set(found.folder, (this.hits.get(found.folder) ?? 0) + 1);
     return {source: readFileSync(found.path, "utf8")};
   }
 
@@ -80,14 +82,20 @@ export class FolderDdic {
   resolver() {
     return (name) => {
       const found = resolveType(this, name);
-      return found.KIND === "DTEL" && found.DATATYPE !== "" ? found : undefined;
+      if (found.KIND !== "DTEL" || found.DATATYPE === "") return undefined;
+      const owner = this.index.get(`DTEL:${String(name).toUpperCase()}`)?.folder;
+      if (owner !== undefined) this.hits.set(owner, (this.hits.get(owner) ?? 0) + 1);
+      return found;
     };
   }
 
   /** one line per folder, for a report header: what was given and what it answered */
   describe() {
+    const taken = this.overrides.filter((one) => one.duplicate !== true).length;
+    const duplicates = this.overrides.length - taken;
     return this.folders.map((folder) => `${folder}  (${this.hits.get(folder) ?? 0} resolved)`)
-      .concat(this.overrides.length === 0 ? [] : [`${this.overrides.length} names taken over by a later folder`]);
+      .concat(taken === 0 ? [] : [`${taken} names taken over by a later folder`])
+      .concat(duplicates === 0 ? [] : [`${duplicates} names twice inside one folder (the later path won)`]);
   }
 }
 

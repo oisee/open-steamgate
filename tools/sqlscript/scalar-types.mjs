@@ -44,13 +44,21 @@ export function irTypeOfDdic({DATATYPE, LENG, DECIMALS}, what = "a DDIC type") {
   throw new UnresolvedScalarType(`${what}: datatype ${datatype || "<unresolved>"} has no portable IR type`);
 }
 
-// the CDS spellings of the built-ins, `abap.xxx( len, dec )`
+// the CDS spellings of the built-ins, `abap.xxx( len, dec )`. A length-bearing
+// one without its length is a refusal, not a CHAR of undefined length: the
+// DDLS always writes it, so a missing one means the text was cut somewhere.
+const needs = (kind, n, make) => {
+  if (n === undefined) throw new UnresolvedScalarType(`CDS built-in abap.${kind.toLowerCase()} needs its length`);
+  return make(n);
+};
 const CDS_BUILTIN = {
   CLNT: () => T.char(3), LANG: () => T.char(1), DATS: () => T.char(8), TIMS: () => T.char(6),
-  CHAR: (n) => T.char(n), NUMC: (n) => T.char(n), CUKY: () => T.char(5), UNIT: (n) => T.char(n ?? 3),
-  ACCP: () => T.char(6), INT1: () => T.int, INT2: () => T.int, INT4: () => T.int, INT8: () => T.int8,
-  DEC: (n, d) => T.dec(n, d ?? 0), CURR: (n, d) => T.dec(n, d ?? 0), QUAN: (n, d) => T.dec(n, d ?? 0),
-  STRING: () => T.str, SSTRING: () => T.str, RAW: (n) => T.bytes(n), RAWSTRING: () => T.bytes(),
+  CHAR: (n) => needs("CHAR", n, T.char), NUMC: (n) => needs("NUMC", n, T.char), CUKY: () => T.char(5),
+  UNIT: (n) => T.char(n ?? 3), ACCP: () => T.char(6),
+  INT1: () => T.int, INT2: () => T.int, INT4: () => T.int, INT8: () => T.int8,
+  DEC: (n, d) => needs("DEC", n, (len) => T.dec(len, d ?? 0)), CURR: (n, d) => needs("CURR", n, (len) => T.dec(len, d ?? 0)),
+  QUAN: (n, d) => needs("QUAN", n, (len) => T.dec(len, d ?? 0)),
+  STRING: () => T.str, SSTRING: () => T.str, RAW: (n) => needs("RAW", n, T.bytes), RAWSTRING: () => T.bytes(),
 };
 
 /**
@@ -69,6 +77,9 @@ export function scalarTypeOf(abapType, resolve = () => undefined) {
   if (["D", "DATS"].includes(text)) return T.char(8);
   if (["T", "TIMS"].includes(text)) return T.char(6);
   if (["XSTRING"].includes(text)) return T.bytes();
+  // bare C, N, X: ABAP's default length is 1
+  if (text === "C" || text === "N") return T.char(1);
+  if (text === "X") return T.bytes(1);
   const length = /^(?:C\s+LENGTH\s+|CHAR|N\s+LENGTH\s+|NUMC)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));
   const raw = /^(?:X\s+LENGTH\s+|RAW)(\d+)$/.exec(text)?.[1];
@@ -86,7 +97,9 @@ export function scalarTypeOf(abapType, resolve = () => undefined) {
     if (found !== undefined && found.DATATYPE !== undefined && found.DATATYPE !== "") {
       return irTypeOfDdic(found, `data element ${text}`);
     }
-    throw new UnresolvedScalarType(`data element ${text} is not in any dictionary this run was given`);
+    // the dictionary may well hold the name as a table type or a structure;
+    // what it does not hold is a data element of it
+    throw new UnresolvedScalarType(`${text} is not a data element in any dictionary this run was given`);
   }
   throw new UnresolvedScalarType(`ABAP type ${abapType} has no portable SQLScript mapping`);
 }

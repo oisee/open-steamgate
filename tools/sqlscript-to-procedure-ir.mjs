@@ -43,13 +43,39 @@ const isBareNull = (node) => {
   return leaves.length === 1 && leaves[0].node === "identifier" && upper(leaves[0].value) === "NULL";
 };
 
+/**
+ * The ABAP type text of a procedure's signature into an IR type -- the
+ * **measured** set only. scalar-types.mjs reads more (NUMC, RAW, INT8, the
+ * CDS built-ins) for the corpus instruments, where a type that binds is a
+ * type that can be counted; here a type that compiles is a type that runs,
+ * and NUMC's leading zeros or bytes on SQLite have not been measured. So the
+ * literal forms admitted are the ones this function admitted before the
+ * shared reader existed, and a data element -- only when a caller hands in
+ * a dictionary -- is admitted when it resolves to one of the same datatypes.
+ * Everything else is the refusal it always was.
+ */
+const MEASURED_DATATYPES = new Set(["CHAR", "CLNT", "CUKY", "LANG", "UNIT", "DATS", "TIMS", "INT4", "INT2", "INT1", "STRG", "SSTR", "DEC", "CURR", "QUAN"]);
 export function irTypeFromAbap(type, resolve) {
-  try {
-    return scalarTypeOf(type, resolve);
-  } catch (error) {
-    if (error instanceof UnresolvedScalarType) throw new UnsupportedSqlScript(error.message);
-    throw error;
+  const text = upper(type).trim();
+  if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
+  if (["STRING", "SSTRING"].includes(text)) return T.str;
+  if (["D", "DATS"].includes(text)) return T.char(8);
+  if (["T", "TIMS"].includes(text)) return T.char(6);
+  const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
+  if (length !== undefined) return T.char(Number(length));
+  const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
+  if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
+  if (resolve !== undefined && /^[A-Z_\/][\w\/]*$/.test(text)) {
+    const found = resolve(text);
+    if (found !== undefined && MEASURED_DATATYPES.has(upper(found.DATATYPE))) {
+      try {
+        return scalarTypeOf(text, resolve);
+      } catch (error) {
+        if (!(error instanceof UnresolvedScalarType)) throw error;
+      }
+    }
   }
+  throw new UnsupportedSqlScript(`ABAP type ${type || "<empty>"} has no portable SQLScript mapping`);
 }
 
 function structuredTable(abapType, types, resolve) {

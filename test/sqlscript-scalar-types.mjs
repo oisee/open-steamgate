@@ -7,7 +7,7 @@
 // The rule under test is the one the critic asked for: a type that cannot
 // be resolved is refused by name, never read as STRING.
 import {expect} from "chai";
-import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {scalarTypeOf, signatureScalars, isTableParameter, UnresolvedScalarType} from "../tools/sqlscript/scalar-types.mjs";
@@ -17,6 +17,8 @@ import {parse} from "../tools/sqlscript/combi.mjs";
 import {Body} from "../tools/sqlscript/expressions/index.mjs";
 import {toIr, BindError} from "../tools/sqlscript/to-ir.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
+import {irTypeFromAbap} from "../tools/sqlscript-to-procedure-ir.mjs";
+import {UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 
 const dtel = (name, datatype, leng, decimals = 0) => `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_DTEL" serializer_version="v1.0.0">
@@ -47,8 +49,20 @@ describe("ABAP scalar types into the IR", () => {
   it("resolves a data element through whoever holds the dictionary, and refuses by name without one", () => {
     const resolve = (name) => (name === "MANDT" ? {DATATYPE: "CLNT", LENG: 3, DECIMALS: 0} : undefined);
     expect(scalarTypeOf("mandt", resolve)).to.deep.equal({abap: "C", len: 3});
-    expect(() => scalarTypeOf("db_schema", resolve)).to.throw(UnresolvedScalarType, /DB_SCHEMA is not in any dictionary/);
+    expect(() => scalarTypeOf("db_schema", resolve)).to.throw(UnresolvedScalarType, /DB_SCHEMA is not a data element in any dictionary/);
     expect(() => scalarTypeOf("db_schema")).to.throw(UnresolvedScalarType);
+  });
+
+  it("gives bare C, N and X ABAP's default length of one", () => {
+    expect(scalarTypeOf("c")).to.deep.equal({abap: "C", len: 1});
+    expect(scalarTypeOf("n")).to.deep.equal({abap: "C", len: 1});
+    expect(scalarTypeOf("x")).to.deep.equal({abap: "X", len: 1});
+  });
+
+  it("refuses a length-bearing CDS built-in that lost its length rather than making a CHAR of no length", () => {
+    for (const cut of ["abap.char", "abap.numc", "abap.dec", "abap.raw"]) {
+      expect(() => scalarTypeOf(cut)).to.throw(UnresolvedScalarType, /needs its length/);
+    }
   });
 
   it("never falls back to STRING: a datatype it has no rendering for is a refusal too", () => {
@@ -87,7 +101,7 @@ describe("the binder takes its scalars from the signature", () => {
   it("refuses a referenced parameter whose type no dictionary resolves, by name and with the reason", () => {
     const signature = {parameters: [{name: "iv_schema", direction: "IN", abapType: "db_schema"}]};
     expect(() => bind("SELECT k FROM src WHERE k = :iv_schema;", signature))
-      .to.throw(BindError, /scalar :iv_schema has a type this run cannot resolve \(data element DB_SCHEMA/);
+      .to.throw(BindError, /scalar :iv_schema has a type this run cannot resolve \(DB_SCHEMA is not a data element/);
   });
 
   it("does not refuse a body for an unresolvable parameter it never mentions", () => {
@@ -130,5 +144,54 @@ describe("a dictionary read off folders of abapGit XML", () => {
 
   it("skips a folder that is not there rather than failing the run", () => {
     expect(new FolderDdic([join(dir, "missing")]).size).to.equal(0);
+  });
+
+  it("counts a resolution once, credited to the folder that held the element, and records who took over a name", () => {
+    const later = mkdtempSync(join(tmpdir(), "osd-folder-ddic-later-"));
+    try {
+      writeFileSync(join(later, "mandt.dtel.xml"), dtel("MANDT", "CLNT", 3));
+      const ddic = new FolderDdic([dir, later]);
+      const resolve = ddic.resolver();
+      scalarTypeOf("mandt", resolve);
+      scalarTypeOf("zflag", resolve);
+      scalarTypeOf("zflag", resolve);
+      expect(() => scalarTypeOf("zorphan", resolve)).to.throw(UnresolvedScalarType);
+      expect(ddic.hits.get(later)).to.equal(1);
+      expect(ddic.hits.get(dir)).to.equal(2);
+      expect(ddic.overrides).to.deep.equal([{key: "DTEL:MANDT", was: dir, now: later}]);
+      expect(ddic.describe().at(-1)).to.match(/1 names taken over by a later folder/);
+    } finally {
+      rmSync(later, {recursive: true, force: true});
+    }
+  });
+
+  it("records the same name twice inside one folder instead of letting readdir order decide quietly", () => {
+    const twice = mkdtempSync(join(tmpdir(), "osd-folder-ddic-twice-"));
+    try {
+      writeFileSync(join(twice, "mandt.dtel.xml"), dtel("MANDT", "CLNT", 3));
+      mkdirSync(join(twice, "sub"));
+      writeFileSync(join(twice, "sub", "mandt.dtel.xml"), dtel("MANDT", "CLNT", 3));
+      const ddic = new FolderDdic([twice]);
+      expect(ddic.overrides).to.have.length(1);
+      expect(ddic.overrides[0].duplicate).to.equal(true);
+      expect(ddic.describe().at(-1)).to.match(/twice inside one folder/);
+    } finally {
+      rmSync(twice, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("the procedure compiler admits only the measured types, dictionary or not", () => {
+  it("still refuses what it refused before the shared reader existed", () => {
+    for (const type of ["NUMC5", "N LENGTH 5", "X LENGTH 16", "XSTRING", "INT8", "abap.clnt", "abap.char(10)"]) {
+      expect(() => irTypeFromAbap(type), type).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
+    }
+  });
+
+  it("admits a data element only with a dictionary, and only when it resolves to a measured datatype", () => {
+    const resolve = (name) => ({MANDT: {DATATYPE: "CLNT", LENG: 3, DECIMALS: 0}, ZNUM: {DATATYPE: "NUMC", LENG: 5, DECIMALS: 0}})[name];
+    expect(irTypeFromAbap("mandt", resolve)).to.deep.equal({abap: "C", len: 3});
+    expect(() => irTypeFromAbap("mandt")).to.throw(UnsupportedSqlScript);
+    expect(() => irTypeFromAbap("znum", resolve)).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
   });
 });
