@@ -276,14 +276,14 @@ consequence. What stays expensive is not the writing — it is the per-statement
 latency measured in the section above, which is why this is a mode and not a
 default.
 
-## The HANA client, and the nine things that were in the way
+## The HANA client, and the ten things that were in the way
 
 Built 2026-09-18, `tools/hana-client.mjs`, `STG_DB=hana`. **Both suites reach
 parity with SQLite: the 146 ABAP unit tests all run, and the 22 wire tests all
 pass.**
 
-What is worth recording is not that it works but what it cost, because eight
-of the nine obstacles were **not** about SQL, and none of them could have been
+What is worth recording is not that it works but what it cost, because nine
+of the ten obstacles were **not** about SQL, and none of them could have been
 read out of documentation. Each was found by running the suite and watching
 where it stopped.
 
@@ -323,6 +323,11 @@ where it stopped.
    false against a schema that was plainly there, and the setup then tried to
    create everything twice. The rule introduced in (6) caught its author one
    screen later.
+10. **A Buffer does not imply a binary column.** node-hdb returns `BLOB` and
+    `VARBINARY` as Buffer, but also returns `CLOB`/`NCLOB` that way. Converting
+    every Buffer to hex preserved vectors and silently changed a session JSON
+    string into `7B22...`. Prepared-result metadata now decides: character
+    LOBs decode as UTF-8; binary LOBs retain the hexadecimal ABAP boundary.
 
 **The rule worth carrying out of this**: a transformation of SQL that
 distinguishes literals from the rest cannot be done in two passes. Items 7 and

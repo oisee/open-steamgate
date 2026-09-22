@@ -117,6 +117,26 @@ describe("DDIC byte strings in the HANA dialect", () => {
     db.client = {exec: (_sql, cb) => cb(undefined, [{RAW: Buffer.from([0, 255, 0x80])}])};
     expect(await db.query(`SELECT "RAW" FROM "ZBIN"`)).to.deep.equal([{raw: "00FF80"}]);
   });
+
+  it("uses HANA metadata to distinguish NCLOB text from BLOB bytes", async () => {
+    const {HanaDatabaseClient} = await import("../tools/hana-client.mjs");
+    const db = new HanaDatabaseClient({});
+    let dropped = 0;
+    db.client = {prepare: (_sql, cb) => cb(undefined, {
+      resultSetMetadata: [
+        {columnDisplayName: "TEXT_VALUE", dataType: 26},
+        {columnDisplayName: "BINARY_VALUE", dataType: 27},
+      ],
+      exec: (_params, done) => done(undefined, [{
+        TEXT_VALUE: Buffer.from('{"draft":"kept"}', "utf8"),
+        BINARY_VALUE: Buffer.from([0, 255, 0x80]),
+      }]),
+      drop: (done) => { dropped += 1; done?.(); },
+    })};
+    expect(await db.query("SELECT text_value, binary_value FROM zlob"))
+      .to.deep.equal([{text_value: '{"draft":"kept"}', binary_value: "00FF80"}]);
+    expect(dropped).to.equal(1);
+  });
 });
 
 // A position without its text is a measurement of nothing.

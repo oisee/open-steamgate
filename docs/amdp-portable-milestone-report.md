@@ -204,8 +204,9 @@ SQLScript parser at call time nor opens a second database nor falls back to
 HANA. A real transpiled ABAP Unit selects fixture rows with Open SQL, passes
 the resulting typed internal table to the unchanged `total_amount` AMDP body,
 and checks its database aggregation. A typed empty input is checked separately.
-The same ABAP call and SQLScript body completed natively on HANA before an
-unrelated later HANA unit exposed a pre-existing binary/text mismatch.
+The same ABAP call and SQLScript body completed natively on HANA. The later
+binary/text mismatch it exposed was fixed at the HANA metadata boundary, and
+the complete HANA ABAP Unit run is now green.
 
 The sixth proof composes two unchanged AMDP methods. The parent contains a
 real SQLScript `CALL`; the portable runtime resolves its child from the
@@ -317,11 +318,10 @@ fuzzy-search compatibility claim.
 - clean-room focused suite and leak scan: green.
 - production bridge: full ABAP Unit is green on DuckDB, including `SQUARES`,
   Open-SQL-table → portable-AMDP aggregation and one nested table procedure;
-  all four AMDP tests are green through native HANA in an isolated schema.
-  The whole HANA
-  unit run remains red later in `ZCL_OSD_TRAN_SESSION`, where an xstring is
-  returned as hex text (`7B22...`) instead of JSON. That is recorded as an
-  unrelated existing backend boundary, not hidden as an AMDP failure.
+  all four AMDP tests and the complete ABAP Unit suite are green through
+  native HANA in an isolated schema. The adapter uses declared result metadata
+  to decode `CLOB`/`NCLOB` as text while retaining `BLOB`/`VARBINARY` as the
+  hexadecimal representation expected by ABAP byte-string types.
 
 ## Next coverage order
 

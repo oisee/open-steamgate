@@ -559,9 +559,10 @@ an expanded UNION. Empty input retains the declared schema.
 The transpiled `ZCL_OSD_AMDP_TEST` now proves the path twice: the original
 `SQUARES` call, and Open SQL rows passed to an unchanged aggregating SQLScript
 method. Full ABAP Unit passes on DuckDB with no HANA fallback. Both AMDP tests
-also completed natively on HANA; the wider HANA suite later stopped on the
-independent `ZCL_OSD_TRAN_SESSION` xstring/text mismatch. That later failure
-is not counted as an AMDP result.
+also completed natively on HANA. A later full-HANA failure exposed that the
+adapter treated an `NCLOB` Buffer like binary `BLOB`; metadata-aware LOB
+conversion now keeps character LOBs as UTF-8 and binary LOBs as ABAP hex.
+The full HANA ABAP Unit run is green.
 
 ### 2026-09-22 — P2b first nested AMDP remains relational
 
@@ -579,9 +580,8 @@ the database is touched.
 `CALL "ZCL_OSD_AMDP_DEMO=>TOTAL_AMOUNT"(...)`. The generated destination
 resolves the child from the same precompiled manifest. Native HANA deployment
 walks the same dependency first, even when the parent hash itself is unchanged.
-The ordinary ABAP Unit call is green on DuckDB and on HANA; the isolated HANA
-run again reached the later, unrelated transaction-session xstring assertion
-only after all four AMDP tests had completed.
+The ordinary ABAP Unit call is green on DuckDB and on HANA, and the complete
+isolated HANA ABAP Unit run now finishes successfully.
 
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
