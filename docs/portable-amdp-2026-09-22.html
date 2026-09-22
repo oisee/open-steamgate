@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Portable AMDP</title>
+<style>
+:root {
+  --ink: #1c2733; --ink-2: #4a5866; --ink-3: #7b8794;
+  --ground: #f6f7f5; --paper: #ffffff; --line: #d9dee2; --line-2: #eceff1;
+  --host: #b8641a; --host-bg: #fbeedd;
+  --device: #2a5d9f; --device-bg: #e3ecf7;
+  --ok: #2c7a4b; --ok-bg: #dff1e5; --bad: #b3261e; --bad-bg: #f9e1df; --unk: #8a7d1f; --unk-bg: #f5efc9;
+  --code-bg: #f0f2ef; --accent: #2a5d9f;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --ink: #e6eaee; --ink-2: #b4bec8; --ink-3: #8593a0;
+  --ground: #131a21; --paper: #1a232c; --line: #2c3842; --line-2: #222d37;
+  --host: #e8a25c; --host-bg: #3a2a18; --device: #7fb0ea; --device-bg: #1b2f47;
+  --ok: #7fd3a0; --ok-bg: #1d3a2a; --bad: #f28b82; --bad-bg: #44211f; --unk: #e0cf6a; --unk-bg: #3b3617;
+  --code-bg: #0f151b; --accent: #7fb0ea;
+}}
+:root[data-theme="dark"] {
+  --ink: #e6eaee; --ink-2: #b4bec8; --ink-3: #8593a0;
+  --ground: #131a21; --paper: #1a232c; --line: #2c3842; --line-2: #222d37;
+  --host: #e8a25c; --host-bg: #3a2a18; --device: #7fb0ea; --device-bg: #1b2f47;
+  --ok: #7fd3a0; --ok-bg: #1d3a2a; --bad: #f28b82; --bad-bg: #44211f; --unk: #e0cf6a; --unk-bg: #3b3617;
+  --code-bg: #0f151b; --accent: #7fb0ea;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--ground); color: var(--ink); font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding-block: 0 64px; padding-inline: 16px; }
+main { max-width: 1120px; margin: 0 auto; }
+h1, h2, h3, h4, h5 { line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 48px); letter-spacing: -0.02em; font-weight: 700; }
+h2 { font-size: 24px; margin-top: 56px; padding-top: 16px; border-top: 2px solid var(--ink); }
+h3 { font-size: 18px; margin-top: 28px; }
+h4 { font-size: 15px; margin-top: 18px; color: var(--ink-2); }
+h5 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+p { max-width: 74ch; margin: 10px 0; }
+a { color: var(--accent); }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; margin: 8px 0; }
+pre.sql b { color: var(--device); font-weight: 600; }
+pre.sql i.ph { color: var(--host); font-style: normal; font-weight: 700; }
+header { padding-block: 48px 8px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-3); margin-bottom: 12px; }
+.lede { font-size: 18px; color: var(--ink-2); max-width: 70ch; }
+.meta { font-size: 13px; color: var(--ink-3); margin-top: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 28px 0 8px; }
+.tile { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.tile .n { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tile .l { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--ink-2); margin: 16px 0; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend .f::before { background: var(--ok); } .legend .a::before { background: var(--unk); } .legend .h::before { background: var(--host); } .legend .d::before { background: var(--device); }
+.tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 3px; vertical-align: 1px; }
+.tag-fact { background: var(--ok-bg); color: var(--ok); } .tag-assume { background: var(--unk-bg); color: var(--unk); } .tag-refuse { background: var(--bad-bg); color: var(--bad); }
+.tag-host { background: var(--host-bg); color: var(--host); } .tag-device { background: var(--device-bg); color: var(--device); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; } @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.box { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+.box.host { border-left: 4px solid var(--host); } .box.device { border-left: 4px solid var(--device); }
+.dialects { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; } @media (max-width: 900px) { .dialects { grid-template-columns: 1fr; } }
+.dialect { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+.dialect pre { margin-top: 6px; }
+.params { font-size: 12px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px; }
+.params code { font-size: 11px; }
+.refused { background: var(--bad-bg); color: var(--ink); padding: 10px 12px; border-radius: 4px; font-size: 13px; margin-top: 6px; }
+.diagram { overflow-x: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 14px 0; }
+.diagram svg { width: 100%; height: auto; display: block; min-width: 640px; }
+svg text { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; fill: var(--ink); }
+svg .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+svg .small { font-size: 11px; fill: var(--ink-2); }
+svg .node { fill: var(--paper); stroke: var(--line); stroke-width: 1.2; }
+svg .node.host { fill: var(--host-bg); stroke: var(--host); } svg .node.device { fill: var(--device-bg); stroke: var(--device); }
+svg .node.gen { fill: var(--code-bg); stroke: var(--ink-3); stroke-dasharray: 4 3; }
+svg .edge { stroke: var(--ink-3); stroke-width: 1.4; fill: none; marker-end: url(#arr); }
+svg .lane { fill: none; stroke: var(--line); stroke-dasharray: 5 4; }
+svg .grid { stroke: var(--line-2); } svg .tick { font-size: 11px; fill: var(--ink-3); } svg .val { font-size: 11px; font-weight: 600; }
+svg .lbl { font-size: 11px; fill: var(--ink-2); }
+svg .bar-ok { fill: var(--ok); } svg .bar-unk { fill: var(--unk); } svg .bar-no { fill: var(--bad); } svg .bar-part { fill: var(--device); }
+svg .ceiling { fill: var(--bad-bg); }
+.chart { min-width: 0 !important; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--paper); }
+th, td { border: 1px solid var(--line); padding: 6px 9px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); font-weight: 600; }
+.tbl { overflow-x: auto; border-radius: 6px; border: 1px solid var(--line); margin: 12px 0; }
+.tbl table { border: 0; }
+.heat td { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+.heat th { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-weight: 500; }
+.c-ok { background: var(--ok-bg); } .c-bad { background: var(--bad-bg); font-weight: 700; } .c-ref { background: var(--device-bg); } .c-none { color: var(--ink-3); }
+.score td:nth-child(n+2) { text-align: center; }
+.s-ok { background: var(--ok-bg); } .s-mid { background: var(--unk-bg); } .s-bad { background: var(--bad-bg); } .s-na { color: var(--ink-3); }
+.result { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; } @media (max-width: 760px) { .result { grid-template-columns: 1fr; } }
+.trace { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; font-size: 13px; min-width: 240px; }
+.trace dt { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 6px; } .trace dd { margin: 0; font-family: ui-monospace, Menlo, monospace; }
+ol.steps { counter-reset: s; list-style: none; padding: 0; max-width: 78ch; } ol.steps li { position: relative; padding-left: 40px; margin: 10px 0; } ol.steps li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: var(--ground); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+ul { max-width: 78ch; } li { margin: 4px 0; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+.src { columns: 2; column-gap: 24px; font-size: 12.5px; } @media (max-width: 700px) { .src { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="eyebrow">open-steamgate · отчёт о состоянии · 2026-09-22</div>
+  <h1>Portable AMDP</h1>
+  <p class="lede">Как неизменённое тело <code>FOR HDB LANGUAGE SQLSCRIPT</code> исполняется там, где HANA нет: устройство компилятора, что в нём сделано красиво, примеры трансляции на четыре диалекта и оценка расширения на SQLite, PostgreSQL, MariaDB, MSSQL и ClickHouse.</p>
+  <p class="meta">Читалось из <code>main</code> (PR #18, merge <code>85fd5a5</code>) и ветки <code>feat/pages-duckdb-wasm</code> (<code>3887bd1</code>, PR #21, смёржен в <code>main</code> как <code>937631c</code>). Все SQL-примеры и трассы ниже получены прогоном реальных модулей репозитория, не написаны от руки. Ветки не переключались.</p>
+  <div class="legend"><span class="f">Факт — измерено кодом или оракулом</span><span class="a">Предположение — надо измерить</span><span class="h">host: JavaScript, управление и скаляры</span><span class="d">device: база, отношения</span></div>
+</header>
+
+<div class="tiles">
+  <div class="tile"><div class="n">11 / 0 / 0</div><div class="l">executed / partial / refused — live-ledger демо (SQUARES + 10 clean-room методов)</div></div>
+  <div class="tile"><div class="n">4</div><div class="l">диалекта в <code>sqlscript-lower.mjs</code>: hana, duckdb, postgres, sqlite</div></div>
+  <div class="tile"><div class="n">380</div><div class="l">тестов в <code>test/sqlscript-*</code> + <code>test/amdp-*</code> (по <code>it(</code>)</div></div>
+  <div class="tile"><div class="n">9 364</div><div class="l">строк в <code>tools/sqlscript*</code> + <code>tools/amdp*</code></div></div>
+  <div class="tile"><div class="n">40</div><div class="l">строк таблицы конформанса, колонка HANA измерена 2026-09-19</div></div>
+  <div class="tile"><div class="n">405</div><div class="l">рабочих тел AMDP в корпусе A4H; потолок покрытия 95 %</div></div>
+</div>
+
+<h2>1. Идея в одну строку</h2>
+<p><strong>Управление уходит в host, данные — нет.</strong> Ни DuckDB, ни SQLite, ни ClickHouse не имеют процедурного языка, так что портировать SQLScript <em>во что-то</em> некуда. Вместо этого тело <em>расщепляется</em>: скаляры, <code>DECLARE</code>, <code>WHILE</code>, <code>IF</code>, <code>CALL</code> интерпретируются в JavaScript рядом с транспилированным ABAP, а каждая табличная переменная остаётся <em>реляционным планом</em>, который в самом конце опускается в SQL выбранной базы. Табличная переменная никогда не становится массивом JavaScript.</p>
+
+<div class="diagram"><svg viewBox="0 0 930 250" role="img" aria-label="Тело SQLScript расщепляется на host-половину и device-половину">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-3)"/></marker></defs>
+<rect x="20" y="20" width="300" height="210" rx="6" class="node"/>
+<text x="34" y="44" class="small">тело метода, как оно есть в классе</text>
+<text x="34" y="70" class="mono" font-size="12">DECLARE lv_i INTEGER;</text>
+<text x="34" y="88" class="mono" font-size="12">et_square = SELECT 0 AS id, '' AS label,</text>
+<text x="34" y="104" class="mono" font-size="12">  0 AS square FROM DUMMY WHERE 1 = 0;</text>
+<text x="34" y="122" class="mono" font-size="12">lv_i = 1;</text>
+<text x="34" y="140" class="mono" font-size="12">WHILE :lv_i &lt;= :iv_count DO</text>
+<text x="34" y="158" class="mono" font-size="12">  et_square = SELECT * FROM :et_square</text>
+<text x="34" y="174" class="mono" font-size="12">   UNION ALL SELECT :lv_i, 'square of '||:lv_i,</text>
+<text x="34" y="190" class="mono" font-size="12">   :lv_i * :lv_i FROM DUMMY;</text>
+<text x="34" y="208" class="mono" font-size="12">  lv_i = :lv_i + 1;</text>
+<text x="34" y="224" class="mono" font-size="12">END WHILE;</text>
+<path d="M320,80 C380,80 380,70 440,70" class="edge"/>
+<path d="M320,170 C380,170 380,180 440,180" class="edge"/>
+<rect x="440" y="30" width="470" height="82" rx="6" class="node host"/>
+<text x="456" y="52" font-weight="700" fill="var(--host)">host — JavaScript</text>
+<text x="456" y="72" class="small">DECLARE, присваивания скаляров, WHILE/IF, CALL, бюджеты шагов</text>
+<text x="456" y="90" class="small">каждая итерация фиксирует значение :lv_i в момент присваивания</text>
+<text x="456" y="106" class="small mono">tools/sqlscript-procedure-ir.mjs · hostSteps = 16 при iv_count = 4</text>
+<rect x="440" y="140" width="470" height="82" rx="6" class="node device"/>
+<text x="456" y="162" font-weight="700" fill="var(--device)">device — база данных</text>
+<text x="456" y="182" class="small">et_square@0 → @1 → @2 … — неизменяемые версии одного плана</text>
+<text x="456" y="200" class="small">один параметризованный statement на всю процедуру</text>
+<text x="456" y="216" class="small mono">tools/sqlscript-lower.mjs · databaseStatements = 1, boundParameters = 21</text>
+</svg></div>
+
+<p>Что это покупает, сказано честно в <code>docs/sqlscript-splitter.md</code>: AMDP и так работает на HANA. Расщепитель покупает AMDP <em>там, где HANA нет</em> — прежде всего в браузерном превью — и покупает <em>оракул</em>: одно тело выполняется нативно на HANA и расщеплённым на другой базе, а ответы сравниваются. Это инструмент, а не «переносимость» как обещание.</p>
+
+<h2>2. Как это организовано</h2>
+<p>Две стадии: <strong>build</strong> (что делает <code>npm run transpile</code>) и <strong>runtime</strong> (что происходит при <code>CALL FUNCTION … DESTINATION 'AMDP'</code>). Исходник в <code>src/</code> не трогается — он остаётся тем AMDP, которым является, и компилируется на реальной системе.</p>
+
+<div class="diagram"><svg viewBox="0 0 1000 590" role="img" aria-label="Конвейер Portable AMDP: build-стадия и runtime-стадия">
+<text x="20" y="28" font-weight="700" font-size="14">BUILD — npm run transpile</text>
+<rect x="20" y="40" width="200" height="56" rx="6" class="node"/>
+<text x="32" y="60" font-size="12" font-weight="600">ABAP-класс с AMDP</text>
+<text x="32" y="78" class="small mono">zcl_osd_amdp_demo.clas.abap</text>
+<text x="32" y="92" class="small">BY DATABASE PROCEDURE FOR HDB</text>
+<path d="M220,68 L262,68" class="edge"/>
+<rect x="262" y="40" width="190" height="56" rx="6" class="node"/>
+<text x="274" y="60" font-size="12" font-weight="600">extract</text>
+<text x="274" y="78" class="small mono">tools/amdp-extract.mjs</text>
+<text x="274" y="92" class="small">сигнатура + типы + тело + USING</text>
+<path d="M452,68 L494,68" class="edge"/>
+<rect x="494" y="40" width="200" height="56" rx="6" class="node"/>
+<text x="506" y="60" font-size="12" font-weight="600">lexer → parser</text>
+<text x="506" y="78" class="small mono">sqlscript/lexer.mjs · combi.mjs</text>
+<text x="506" y="92" class="small mono">sqlscript/expressions/index.mjs</text>
+<path d="M694,68 L736,68" class="edge"/>
+<rect x="736" y="40" width="244" height="56" rx="6" class="node"/>
+<text x="748" y="60" font-size="12" font-weight="600">binder → typed relational IR</text>
+<text x="748" y="78" class="small mono">sqlscript/to-ir.mjs → sqlscript-ir.mjs</text>
+<text x="748" y="92" class="small">тип HANA на каждом узле; scope-ы алиасов</text>
+<path d="M858,96 L858,130" class="edge"/>
+<rect x="640" y="130" width="340" height="72" rx="6" class="node"/>
+<text x="652" y="150" font-size="12" font-weight="600">procedure IR — процедурная половина</text>
+<text x="652" y="166" class="small mono">sqlscript-to-procedure-ir.mjs</text>
+<text x="652" y="180" class="small mono">→ sqlscript-procedure-ir.mjs</text>
+<text x="652" y="195" class="small">declare/assign scalar · assign-relation · while · if · call</text>
+<path d="M640,158 L610,158" class="edge"/>
+<rect x="270" y="130" width="340" height="72" rx="6" class="node gen"/>
+<text x="282" y="150" font-size="12" font-weight="600">amdp-gen → gen/amdp/</text>
+<text x="282" y="166" class="small mono">clas.abap: тело → CALL FUNCTION 'Z_AMDP_…'</text>
+<text x="282" y="180" class="small mono">fugr-заглушки (never runs)</text>
+<text x="282" y="195" class="small mono">procedures.json: IR + outputSchema + catalogue</text>
+<path d="M270,158 L240,158" class="edge"/>
+<rect x="20" y="130" width="220" height="56" rx="6" class="node"/>
+<text x="32" y="150" font-size="12" font-weight="600">DDIC catalogue по USING</text>
+<text x="32" y="168" class="small mono">sqlscript-ddic-catalogue.mjs</text>
+<text x="32" y="182" class="small">только таблицы, названные в USING, с типами</text>
+
+<line x1="20" x2="980" y1="224" y2="224" class="lane"/>
+<text x="20" y="245" font-weight="700" font-size="14">RUNTIME — транспилированный ABAP вызывает метод</text>
+<rect x="20" y="260" width="230" height="56" rx="6" class="node"/>
+<text x="32" y="280" font-size="12" font-weight="600">CALL FUNCTION 'Z_AMDP_…'</text>
+<text x="32" y="298" class="small mono">DESTINATION 'AMDP'</text>
+<text x="32" y="312" class="small">тот же контракт, что rfc-replay.mjs</text>
+<path d="M250,288 L292,288" class="edge"/>
+<rect x="292" y="260" width="250" height="56" rx="6" class="node"/>
+<text x="304" y="280" font-size="12" font-weight="600">AmdpDestination — явная политика</text>
+<text x="304" y="298" class="small mono">tools/amdp-destination.mjs</text>
+<text x="304" y="312" class="small">native-hana | portable | refuse — без fallback</text>
+<path d="M542,275 C600,275 600,262 660,262" class="edge"/>
+<path d="M542,300 C600,300 600,340 660,340" class="edge"/>
+<rect x="660" y="240" width="320" height="46" rx="6" class="node device"/>
+<text x="672" y="259" font-size="12" font-weight="600">native HANA: deploy процедуры, CALL</text>
+<text x="672" y="275" class="small mono">amdp-run.mjs · hdb · оракул, не зависимость</text>
+<rect x="660" y="318" width="320" height="46" rx="6" class="node host"/>
+<text x="672" y="337" font-size="12" font-weight="600">portable: runProcedure(IR из манифеста)</text>
+<text x="672" y="353" class="small">парсер в рантайме не грузится; тот же DEFAULT-коннект</text>
+<path d="M820,364 L820,398" class="edge"/>
+<rect x="500" y="398" width="480" height="60" rx="6" class="node host"/>
+<text x="512" y="418" font-size="12" font-weight="600">интерпретация: скаляры в host, отношения замораживаются</text>
+<text x="512" y="436" class="small">freezeRelation: :var → инлайн предыдущей версии, :scalar → param</text>
+<text x="512" y="450" class="small">бюджеты steps / plan / depth / params / calls; NO_INLINE → refuse</text>
+<path d="M500,428 L480,428" class="edge"/>
+<rect x="240" y="398" width="240" height="60" rx="6" class="node device"/>
+<text x="252" y="418" font-size="12" font-weight="600">lower(plan, dialect)</text>
+<text x="252" y="436" class="small mono">sqlscript-lower.mjs — единственное</text>
+<text x="252" y="450" class="small mono">место, где известен диалект</text>
+<path d="M240,428 L220,428" class="edge"/>
+<rect x="20" y="398" width="200" height="60" rx="6" class="node device"/>
+<text x="32" y="418" font-size="12" font-weight="600">client.native()</text>
+<text x="32" y="436" class="small">{sql, params, expect}</text>
+<text x="32" y="450" class="small">DuckDB · DuckDB-Wasm · PG · SQLite</text>
+<path d="M110,458 L110,492" class="edge"/>
+<rect x="20" y="492" width="960" height="66" rx="6" class="node"/>
+<text x="32" y="512" font-size="12" font-weight="600">результат → fromJson() → типизированные значения ABAP (CHAR получает паддинг обратно, даты — формат ABAP)</text>
+<text x="32" y="530" class="small mono">trace: engine · fallback=false · hostSteps · databaseStatements · boundParameters</text>
+<text x="32" y="548" class="small">refuse — это CX_SY_DYN_CALL_ILLEGAL_FUNC, который ABAP вокруг умеет ловить, а не JavaScript-исключение мимо CATCH cx_root</text>
+</svg></div>
+
+<h3>Что лежит в <code>gen/amdp/procedures.json</code></h3>
+<p>Шесть записей на сегодняшнем <code>main</code>: пять методов демо-класса и <code>ZCL_VDB_100_HANA=&gt;SEARCH_DB</code> из Vector Workbench. Для каждой — оригинальное тело, HANA-типы сигнатуры, хэш, и <code>portable</code>: готовый procedure IR с <code>outputSchema</code> и компактным DDIC-каталогом по <code>USING</code>. Табличная функция <code>squares_tf</code> (<code>BY DATABASE FUNCTION</code>, <code>SERIES_GENERATE_INTEGER</code>) записи <code>portable</code> не имеет — это честное «не в подмножестве», а не пустая заглушка.</p>
+
+<h2>3. eAMDP и pAMDP — две половины одной идеи</h2>
+<p>Имена — Алисины, и они точнее, чем «native» и «portable», потому что называют <em>механизм</em>, а не свойство. <strong>eAMDP — express AMDP</strong>: тело метода уже является валидным SQLScript, так что его вырезают из класса и отдают HANA Express выполнить <em>как есть</em>; интерпретатора второго языка не пишется вовсе (B.19, решено 2026-09-18: «HANA Express — не backend для OSD, а движок для одного узкого случая»). <strong>pAMDP — portable AMDP</strong>: то же тело расщепляется на host-половину и реляционный план и исполняется на базе, которая под рукой. Первое было готово 18-го и стало оракулом для второго; второе появилось 21–22-го и не могло бы быть доказано без первого.</p>
+
+<div class="diagram"><svg viewBox="0 0 1000 330" role="img" aria-label="eAMDP и pAMDP: один экстрактор, два пути, одна политика">
+<rect x="20" y="130" width="210" height="70" rx="6" class="node"/>
+<text x="32" y="152" font-size="12" font-weight="600">tools/amdp-extract.mjs</text>
+<text x="32" y="170" class="small">сигнатура, локальные типы,</text>
+<text x="32" y="184" class="small">тело, USING — одно для обоих путей</text>
+<path d="M230,150 C290,150 290,70 350,70" class="edge"/>
+<path d="M230,180 C290,180 290,250 350,250" class="edge"/>
+<rect x="350" y="20" width="420" height="110" rx="6" class="node device"/>
+<text x="362" y="42" font-size="14" font-weight="700" fill="var(--device)">eAMDP — express</text>
+<text x="362" y="62" class="small">CREATE PROCEDURE "OSD"."CLASS=&gt;METHOD" из тела и сигнатуры,</text>
+<text x="362" y="76" class="small">кэш по хэшу исходника; CALL через npm-драйвер hdb</text>
+<text x="362" y="92" class="small">табличный вход → временная таблица, bound batch (10 000 строк: 59 мс)</text>
+<text x="362" y="108" class="small">данные должны быть в HANA: STG_DB=hana — «режим AMDP»</text>
+<text x="362" y="122" class="small mono">amdp-run.mjs · amdp-destination.mjs · sandbox /sap/bc/osd/amdp/</text>
+<rect x="350" y="200" width="420" height="110" rx="6" class="node host"/>
+<text x="362" y="222" font-size="14" font-weight="700" fill="var(--host)">pAMDP — portable</text>
+<text x="362" y="242" class="small">lexer → parser → typed IR → host-интерпретация → lower(dialect)</text>
+<text x="362" y="256" class="small">IR прекомпилирован в procedures.json; парсер в рантайме не нужен</text>
+<text x="362" y="272" class="small">тот же DEFAULT-коннект, что у Open SQL вызывающего</text>
+<text x="362" y="288" class="small">DuckDB · DuckDB-Wasm (браузер) · PostgreSQL · SQLite · и сама HANA</text>
+<text x="362" y="302" class="small mono">sqlscript-*.mjs · sqlscript/ · amdp-destination.mjs</text>
+<path d="M770,75 C780,75 780,150 790,150" class="edge"/>
+<path d="M770,255 C780,255 780,180 790,180" class="edge"/>
+<rect x="790" y="120" width="190" height="90" rx="6" class="node"/>
+<text x="802" y="142" font-size="12" font-weight="600">AmdpDestination</text>
+<text x="802" y="160" class="small">явная политика:</text>
+<text x="802" y="176" class="small mono">native-hana | portable | refuse</text>
+<text x="802" y="196" class="small">fallback между ними — нет</text>
+<path d="M560,130 L560,200" class="edge" stroke-dasharray="4 3"/>
+<text x="568" y="170" class="small" font-weight="600">e — оракул для p</text>
+</svg></div>
+
+<div class="two">
+<div class="box device"><h5>что даёт eAMDP</h5>
+<ul style="margin:6px 0 0;padding-left:18px">
+<li>Семантика по определению верна: исполняет HANA. Это единственный оракул SQLScript, который у нас есть или будет — «no parser of ours would know the dialect of the version in front of us».</li>
+<li>Песочница <code>/sap/bc/osd/amdp/</code>: тело, набранное на экране, разворачивается под одноразовым именем, выполняется и сносится; ошибка HANA возвращается <em>её словами</em>, с позицией, пересчитанной в строки автора.</li>
+<li>Наш <code>ZCL_Z80_00_CPU_AMDP</code> — 18 <code>DECLARE</code>, 36 <code>SELECT</code>, три цикла в одной процедуре — работает только так. Это и был аргумент «транспилировать AMDP не на столе».</li>
+<li>Вложенные вызовы: destination разворачивает нативные зависимости раньше вызывающих, по манифесту.</li>
+</ul></div>
+<div class="box host"><h5>что даёт pAMDP</h5>
+<ul style="margin:6px 0 0;padding-left:18px">
+<li>AMDP там, где HANA нет: браузерное превью (PR #21 — одна DuckDB-Wasm под Open SQL, OData и AMDP), ноутбук без HXE, CI.</li>
+<li>Общий LUW с вызывающим ABAP (§4.7) — eAMDP этого дать не может по построению: данные надо сначала довезти в HANA.</li>
+<li>Отказ до I/O по имени конструкции, с бюджетами шагов и параметров — свойство, которого у нативного пути нет и не надо.</li>
+<li>Второе независимое исполнение того же тела: расхождение между e и p — находка, а не шум. Восемь аномалий за два дня в O4D-оракуле пришли ровно из такой пары.</li>
+</ul></div>
+</div>
+<p>Почему имя удачное: «express» читается двояко и оба смысла верны — HANA <em>Express</em> как движок и «экспресс» как самый короткий путь (ничего не переводится). А пара e/p делает видимым, что <code>native-hana | portable</code> в <code>AmdpDestination</code> — это выбор между двумя <em>исполнителями</em> одного экстракта, а не «настоящий и запасной». Vector Workbench показывает это буквально: у сервиса три значения <code>Engine</code> — <code>ANYDB</code>, <code>HANA</code> (нативная, eAMDP) и <code>AMDP</code> (portable, в UI «Portable AMDP (DuckDB)»), и нативный остаётся отдельным выбором, а не тем, куда молча падают.</p>
+
+<h2>4. Что здесь сделано красиво</h2>
+
+<h3>4.1 Присваивание табличной переменной — не барьер. Измерено, а не решено</h3>
+<p>Это измерение определило форму всего IR, поэтому его сделали первым. На HANA Express: проекция, которая <em>может</em> упасть (<code>TO_INTEGER</code> над колонкой с одной нечисловой строкой), затем присваивание, затем фильтр, убирающий плохую строку, затем чтение. HANA вернула строки и ничего не подняла. Тот же код с <code>WITH HINT(NO_INLINE)</code> — падает. Значит, цепочка присваиваний — это <em>один</em> план, а «материализовать каждое присваивание, чтобы быть верным HANA» было бы ошибкой в дорогую сторону. И следствие, которое неудобно: <strong>исключение — свойство плана, а не программы</strong>. Поэтому таблица конформанса сравнивает <em>значения</em>, а не «упало или нет». (<code>docs/sqlscript-hana-observed.md</code>)</p>
+
+<h3>4.2 Неизменяемые версии отношения и захват скаляров</h3>
+<div class="two">
+<div class="box host"><h5>что делает host</h5>
+<pre>et_square@0 = typed empty relation (схема из сигнатуры ET_SQUARE)
+lv_i = 1
+et_square@1 = UNION ALL(et_square@0, row(lv_i = 1))   ← значение зафиксировано
+lv_i = 2
+et_square@2 = UNION ALL(et_square@1, row(lv_i = 2))
+…</pre>
+<p>Каждое присваивание захватывает значение скаляра <em>в этот момент</em>. Никакого замыкания, которое потом прочитает итоговый счётчик. Схема пустого отношения берётся из извлечённой сигнатуры <code>ET_SQUARE</code>, а не выводится из <code>0, '', 0</code> — иначе получился бы <code>C(0)</code>.</p></div>
+<div class="box device"><h5>что видит база</h5>
+<p>Один statement, в котором <code>:lv_i</code> встречается <strong>21</strong> раз как связанный параметр при <code>iv_count = 4</code> — четыре итерации, ни одного литерала в тексте.</p>
+<dl class="trace" style="min-width:0">
+<dt>engine</dt><dd>duckdb</dd>
+<dt>fallback</dt><dd>false</dd>
+<dt>hostSteps · databaseStatements</dt><dd>16 · 1</dd>
+<dt>rows</dt><dd>[[1,&quot;square of 1&quot;,1],[2,&quot;square of 2&quot;,4],[3,&quot;square of 3&quot;,9],[4,&quot;square of 4&quot;,16]]</dd>
+</dl></div>
+</div>
+
+<h3>4.3 Значения связываются, идентификаторы генерируются — ничего не интерполируется</h3>
+<p>Параметр становится плейсхолдером и едет в <code>params</code>; отношение, уже известное seam-у, — тем, что дал <code>relationRef()</code>. Измеренная причина, зачем это ещё и быстро (<code>amdp-run.mjs</code>): 10 000 строк литералами — 21 745 мс, связанным батчем — 59 мс; 99,8 % цены литеральной формы — парсинг, потому что текст с значениями никогда не попадает в plan cache. И один класс дефектов исчезает целиком: кавычка, JSON-документ или слово <code>true</code> в значении ничего не ломают.</p>
+
+<h3>4.4 На каждом узле выражения — тип, который дала бы HANA</h3>
+<p>Не для документации: без него lowering не может выбрать форму. <code>1/2</code> — это <code>0.5</code> в DuckDB и <code>0</code> в SQLite, и узел деления, не знающий, целочисленное оно или нет, не имеет правильного рендеринга ни в одном из них. Измеренные расхождения, каждое — тихо неверный ответ, а не ошибка:</p>
+<div class="tbl"><table>
+<tr><th>выражение</th><th>HANA</th><th>DuckDB</th><th>sql.js / SQLite</th><th>что делает lowering</th></tr>
+<tr><td><code>1 / 2</code></td><td>0.500000</td><td>0.5</td><td>0</td><td>sqlite: <code>((a) * 1.0 / (b))</code>; для целочисленного деления в источнике — <code>DIV</code> / <code>//</code> / <code>TRUNC</code></td></tr>
+<tr><td><code>CAST(1.7 AS INTEGER)</code></td><td>1</td><td><strong>2</strong></td><td>1</td><td>duckdb: <code>CAST(TRUNC(CAST(x AS DOUBLE)) AS INTEGER)</code> — «это была наша ошибка, и она shipped»</td></tr>
+<tr><td><code>CAST('x' AS INTEGER)</code></td><td>raise</td><td>raise</td><td><strong>0</strong></td><td>sqlite: <span class="tag tag-refuse">refuse</span> — движок не умеет поднять исключение, а «0» — другая программа</td></tr>
+<tr><td><code>CAST('abcdef' AS NVARCHAR(3))</code></td><td>abc</td><td>abcdef</td><td>abcdef</td><td><code>SUBSTR(CAST(x AS VARCHAR), 1, 3)</code></td></tr>
+<tr><td><code>'ABC' LIKE 'abc'</code></td><td>нет</td><td>нет</td><td><strong>да</strong></td><td>решается на соединении: <code>PRAGMA case_sensitive_like = ON</code>, не в каждом statement</td></tr>
+<tr><td><code>x / 0</code></td><td>raise</td><td>Infinity / NULL</td><td>NULL</td><td>duckdb: <code>CASE WHEN divisor = 0 THEN error(…)</code>; sqlite: <em>намеренно</em> не отвечено и записано почему</td></tr>
+<tr><td><code>0.10 + 0.20</code> (DECIMAL)</td><td>0.30</td><td>0.30</td><td>0.30000000000000004</td><td>sqlite: <code>ROUND(e, scale)</code> из типа результата; только для <code>+</code>/<code>-</code>, <code>*</code> оставлено</td></tr>
+</table></div>
+
+<h3>4.5 Отказ по имени вместо приближения</h3>
+<p>У backend-а три честных исхода: нативный эквивалент с измеренной семантикой; явный compat-рендеринг с тестами; <code>UNSUPPORTED_SQLSCRIPT</code> <em>до</em> выполнения. Best-effort режима в ABAP Unit нет. Список <code>PORTABLE</code>-функций коротко́к намеренно: членство — это утверждение «одни аргументы дают один ответ на всех трёх», а не «на всех трёх есть функция с таким именем». <code>ROUND</code> попал туда только после того, как измерили tie-rule (<code>ROUND(2.5) = 3</code>, <code>ROUND(-2.5) = -3</code> везде). Ниже, в примерах, видно, как <code>rank_rows</code> отказывается на PostgreSQL (<code>ROW_NUMBER</code> не измерен) и на SQLite (CAST не умеет падать), а <code>search_db</code> — на обоих (<code>BITCOUNT</code> без измеренного рендеринга).</p>
+
+<h3>4.6 Идентичность сессии — данные контекста, не свойство соединения</h3>
+<p><code>CURRENT_USER</code>, <code>CURRENT_SCHEMA</code>, <code>SESSION_CONTEXT('…')</code> — типизированные узлы IR, которые захватываются в связанные параметры из явной AMDP-сессии до lowering. DuckDB никогда не подставит своего пользователя только потому, что финальный statement выполняет он. Нет факта — отказ до I/O. Часы (<code>CURRENT_DATE</code>) остаются неподдержанными, пока не измерен детерминированный контракт.</p>
+
+<h3>4.7 Один LUW: AMDP читает то, что ABAP только что записал и не закоммитил</h3>
+<p>Седьмое доказательство: ABAP Unit вставляет в <code>ZSTG_DEMO</code> через Open SQL, <em>не</em> делает <code>COMMIT</code>, вызывает неизменённый <code>read_travel</code>. Portable-исполнение читает строку через <code>abap.context.databaseConnections.DEFAULT</code> — то же соединение, та же транзакция. Ни копии фикстуры, ни второго соединения, ни JavaScript-адаптера строк. Это и есть контракт: фикстура на одном соединении и AMDP на другом — не валидный зелёный тест.</p>
+
+<h3>4.8 Оракул из трёх колонок</h3>
+<div class="diagram"><svg viewBox="0 0 900 190" role="img" aria-label="Три пути исполнения одного тела и что сравнивается">
+<rect x="20" y="70" width="200" height="50" rx="6" class="node"/><text x="32" y="90" font-size="12" font-weight="600">одно тело SQLScript</text><text x="32" y="108" class="small">без переписывания</text>
+<path d="M220,80 C280,80 280,40 340,40" class="edge"/><path d="M220,95 L340,95" class="edge"/><path d="M220,110 C280,110 280,150 340,150" class="edge"/>
+<rect x="340" y="20" width="250" height="42" rx="6" class="node device"/><text x="352" y="38" font-size="12" font-weight="600">native SQLScript на HANA</text><text x="352" y="54" class="small">процедура с одноразовым именем, CALL</text>
+<rect x="340" y="75" width="250" height="42" rx="6" class="node host"/><text x="352" y="93" font-size="12" font-weight="600">portable host + plain HANA SQL</text><text x="352" y="109" class="small">изолирует наш парсер/интерпретатор от диалекта</text>
+<rect x="340" y="130" width="250" height="42" rx="6" class="node host"/><text x="352" y="148" font-size="12" font-weight="600">portable host + DuckDB</text><text x="352" y="164" class="small">HANA физически недоступна, fallback=false</text>
+<path d="M590,41 C650,41 650,96 700,96" class="edge"/><path d="M590,96 L700,96" class="edge"/><path d="M590,151 C650,151 650,96 700,96" class="edge"/>
+<rect x="700" y="66" width="180" height="60" rx="6" class="node"/><text x="712" y="86" font-size="12" font-weight="600">сравнение значений</text><text x="712" y="102" class="small">как bag с кратностями,</text><text x="712" y="116" class="small">схема отдельно, без ORDER BY</text>
+</svg></div>
+<p>Первая пара изолирует парсер и управление от диалекта; вторая — доказательство, что архитектура действительно пересекает границу базы. Прохождение обеих не утверждает, что портируема каждая функция: каждый следующий backend всё равно обязан реализовать или явно отказать по каждой строке конформанса.</p>
+
+<h3>4.9 Clean-room корпус: наблюдатель и реализатор не встречались</h3>
+<p>Ограниченные архивы не в Git и не переписаны «почти копиями». Наблюдатель видел исходники и выдал только абстрактный список категорий языка; независимый реализатор видел только этот список и написал новые идентификаторы, литералы, строки, методы и порядок операторов. Провенанс — в <code>test/fixtures/amdp-cleanroom/provenance.json</code>, leak-scan — ноль. Успех парсера не считается поддержкой: метод переходит в «executed» только когда его тело выполнилось напрямую, без переписывания, на уровне значений — и совпало native-vs-portable на HANA и на DuckDB.</p>
+
+<h2>5. Примеры трансляции</h2>
+<p>Каждый пример ниже — вывод реального <code>compileProcedure</code> + <code>runProcedure</code> над клиентом-перехватчиком, по одному разу на диалект. <i class="ph" style="color:var(--host);font-style:normal;font-weight:700">?</i> и <code>$n::type</code> — связанные параметры; ниже каждого statement перечислено, что именно связано (<code>имя=значение:тип</code>). Форматирование добавлено для чтения, текст statement не менялся.</p>
+
+<h3>4.1 <code>ZCL_OSD_AMDP_DEMO=&gt;SQUARES</code>, <code>iv_count = 3</code></h3>
+<p>Тело — в диаграмме §1. Тело IR: <code>declare-scalar · assign-relation · assign-scalar · while</code>. Три итерации <code>WHILE</code> в host дали один <code>UNION ALL</code> из четырёх ветвей. Обратите внимание на HANA-плейсхолдеры: <code>CAST(? AS INTEGER)</code> — потому что HANA выводит тип голого <code>?</code> из контекста, и в <code>? || ?</code> тот же INTEGER стал бы строкой, а в <code>? * ?</code> — числом; node-hdb отверг бы число раньше, чем HANA применила бы неявное преобразование. PostgreSQL получает нумерованные плейсхолдеры с явными типами.</p>
+
+<div class="dialects"><section class="dialect"><h5>hana</h5><pre class="sql"><b>SELECT</b> 0 <b>AS</b> &quot;ID&quot;, <i class="ph">?</i> <b>AS</b> &quot;LABEL&quot;, 0 <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> DUMMY
+<b>WHERE</b> (1 = 0)
+<b>UNION ALL</b> <b>SELECT</b> <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;LABEL&quot;, (<b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) * <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> DUMMY
+<b>UNION ALL</b> <b>SELECT</b> <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;LABEL&quot;, (<b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) * <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> DUMMY
+<b>UNION ALL</b> <b>SELECT</b> <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;LABEL&quot;, (<b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER) * <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER)) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> DUMMY</pre><div class="params">bound: <code>p0=&quot;&quot;:C(0)</code> <code>LV_I=1:I</code> <code>p2=&quot;square of &quot;:C(10)</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=2:I</code> <code>p7=&quot;square of &quot;:C(10)</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=3:I</code> <code>p12=&quot;square of &quot;:C(10)</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code></div></section><section class="dialect"><h5>duckdb</h5><pre class="sql"><b>SELECT</b> 0 <b>AS</b> &quot;ID&quot;, <i class="ph">?</i> <b>AS</b> &quot;LABEL&quot;, 0 <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>WHERE</b> (1 = 0)
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy</pre><div class="params">bound: <code>p0=&quot;&quot;:C(0)</code> <code>LV_I=1:I</code> <code>p2=&quot;square of &quot;:C(10)</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=2:I</code> <code>p7=&quot;square of &quot;:C(10)</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=3:I</code> <code>p12=&quot;square of &quot;:C(10)</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code></div></section><section class="dialect"><h5>postgres</h5><pre class="sql"><b>SELECT</b> 0 <b>AS</b> &quot;ID&quot;, <i class="ph">$1::varchar(0)</i> <b>AS</b> &quot;LABEL&quot;, 0 <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>WHERE</b> (1 = 0)
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">$2::integer </i><b>AS</b> &quot;ID&quot;, (<i class="ph">$3::varchar(10)</i> || <i class="ph">$4::integer</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">$5::integer </i>* <i class="ph">$6::integer</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">$7::integer </i><b>AS</b> &quot;ID&quot;, (<i class="ph">$8::varchar(10)</i> || <i class="ph">$9::integer</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">$10::integer </i>* <i class="ph">$11::integer</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">$12::integer </i><b>AS</b> &quot;ID&quot;, (<i class="ph">$13::varchar(10)</i> || <i class="ph">$14::integer</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">$15::integer </i>* <i class="ph">$16::integer</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy</pre><div class="params">bound: <code>p0=&quot;&quot;:C(0)</code> <code>LV_I=1:I</code> <code>p2=&quot;square of &quot;:C(10)</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=2:I</code> <code>p7=&quot;square of &quot;:C(10)</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=3:I</code> <code>p12=&quot;square of &quot;:C(10)</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code></div></section><section class="dialect"><h5>sqlite</h5><pre class="sql"><b>SELECT</b> 0 <b>AS</b> &quot;ID&quot;, <i class="ph">?</i> <b>AS</b> &quot;LABEL&quot;, 0 <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>WHERE</b> (1 = 0)
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy
+<b>UNION ALL</b> <b>SELECT</b> <i class="ph">?</i> <b>AS</b> &quot;ID&quot;, (<i class="ph">?</i> || <i class="ph">?</i>) <b>AS</b> &quot;LABEL&quot;, (<i class="ph">?</i> * <i class="ph">?</i>) <b>AS</b> &quot;SQUARE&quot;
+<b>FROM</b> (<b>SELECT</b> 1) <b>AS</b> dummy</pre><div class="params">bound: <code>p0=&quot;&quot;:C(0)</code> <code>LV_I=1:I</code> <code>p2=&quot;square of &quot;:C(10)</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=1:I</code> <code>LV_I=2:I</code> <code>p7=&quot;square of &quot;:C(10)</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=2:I</code> <code>LV_I=3:I</code> <code>p12=&quot;square of &quot;:C(10)</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code> <code>LV_I=3:I</code></div></section></div>
+
+<h3>4.2 <code>READ_TRAVEL</code> — чтение таблицы из <code>USING zstg_demo</code></h3>
+<p>Тело: <code>et_travel = SELECT travel_id, description, status, seats FROM zstg_demo WHERE mandt = CAST(:iv_client AS NVARCHAR(3)) AND travel_id = CAST(:iv_travel_id AS NVARCHAR(8));</code> Каталог для <code>ZSTG_DEMO</code> (MANDT C(3), TRAVEL_ID C(8), …) лежит рядом с IR в <code>procedures.json</code>. HANA усекает при <code>CAST … AS NVARCHAR(3)</code>, остальные — нет, поэтому у них появляется <code>SUBSTR</code>.</p>
+
+<div class="dialects"><section class="dialect"><h5>hana</h5><pre class="sql"><b>SELECT</b> &quot;TRAVEL_ID&quot; <b>AS</b> &quot;TRAVEL_ID&quot;, &quot;DESCRIPTION&quot; <b>AS</b> &quot;DESCRIPTION&quot;, &quot;STATUS&quot; <b>AS</b> &quot;STATUS&quot;, &quot;SEATS&quot; <b>AS</b> &quot;SEATS&quot;
+<b>FROM</b> &quot;ZSTG_DEMO&quot;
+<b>WHERE</b> ((&quot;MANDT&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(3))) <b>AND</b> (&quot;TRAVEL_ID&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(8))))</pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_TRAVEL_ID=&quot;00000042&quot;:STRING</code></div></section><section class="dialect"><h5>duckdb</h5><pre class="sql"><b>SELECT</b> &quot;TRAVEL_ID&quot; <b>AS</b> &quot;TRAVEL_ID&quot;, &quot;DESCRIPTION&quot; <b>AS</b> &quot;DESCRIPTION&quot;, &quot;STATUS&quot; <b>AS</b> &quot;STATUS&quot;, &quot;SEATS&quot; <b>AS</b> &quot;SEATS&quot;
+<b>FROM</b> &quot;ZSTG_DEMO&quot;
+<b>WHERE</b> ((&quot;MANDT&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 3)) <b>AND</b> (&quot;TRAVEL_ID&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 8)))</pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_TRAVEL_ID=&quot;00000042&quot;:STRING</code></div></section><section class="dialect"><h5>postgres</h5><pre class="sql"><b>SELECT</b> &quot;TRAVEL_ID&quot; <b>AS</b> &quot;TRAVEL_ID&quot;, &quot;DESCRIPTION&quot; <b>AS</b> &quot;DESCRIPTION&quot;, &quot;STATUS&quot; <b>AS</b> &quot;STATUS&quot;, &quot;SEATS&quot; <b>AS</b> &quot;SEATS&quot;
+<b>FROM</b> &quot;ZSTG_DEMO&quot;
+<b>WHERE</b> ((&quot;MANDT&quot; = SUBSTRING(<b>CAST</b>(<i class="ph">$1::text </i><b>AS</b> VARCHAR)
+<b>FROM</b> 1 FOR 3)) <b>AND</b> (&quot;TRAVEL_ID&quot; = SUBSTRING(<b>CAST</b>(<i class="ph">$2::text </i><b>AS</b> VARCHAR)
+<b>FROM</b> 1 FOR 8)))</pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_TRAVEL_ID=&quot;00000042&quot;:STRING</code></div></section><section class="dialect"><h5>sqlite</h5><pre class="sql"><b>SELECT</b> &quot;TRAVEL_ID&quot; <b>AS</b> &quot;TRAVEL_ID&quot;, &quot;DESCRIPTION&quot; <b>AS</b> &quot;DESCRIPTION&quot;, &quot;STATUS&quot; <b>AS</b> &quot;STATUS&quot;, &quot;SEATS&quot; <b>AS</b> &quot;SEATS&quot;
+<b>FROM</b> &quot;ZSTG_DEMO&quot;
+<b>WHERE</b> ((&quot;MANDT&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 3)) <b>AND</b> (&quot;TRAVEL_ID&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 8)))</pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_TRAVEL_ID=&quot;00000042&quot;:STRING</code></div></section></div>
+
+<h3>4.3 <code>MIX_ROWS</code> (clean-room) — два табличных входа, DISTINCT, INNER + LEFT JOIN, derived table, коррелированный EXISTS, <code>LIMIT :lv_limit</code></h3>
+<p>Тело IR: <code>declare-scalar · assign-relation · assign-relation</code>. Табличные входы уже материализованы seam-ом (<code>IT_LEFT_ROWS</code>, <code>IT_RIGHT_ROWS</code>) — это <code>ref</code>-узлы со схемой, проверенной против сигнатуры AMDP до выполнения. Алиасы <code>L</code>, <code>R</code>, <code>Q</code> автора сохранены до рендеринга, поэтому коррелированное <code>"KEY_ID" = "L"."KEY_ID"</code> не схлопывается в <code>key = key</code>. <code>BETWEEN</code> переписан в пару сравнений, <code>DECLARE lv_limit INTEGER := :iv_limit</code> вычислен в host и связан дважды — в фильтре и в <code>LIMIT</code>. На HANA измерено: <code>LIMIT ?</code> принимается, <code>LIMIT CAST(? AS INTEGER)</code> — нет, поэтому в этой позиции плейсхолдер голый.</p>
+
+<div class="dialects"><section class="dialect"><h5>hana</h5><pre class="sql"><b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;DAY_VALUE&quot; <b>AS</b> &quot;DAY_VALUE&quot;, &quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;, &quot;CODE_TEXT&quot; <b>AS</b> &quot;CODE_TEXT&quot;, &quot;FACTOR&quot; <b>AS</b> &quot;FACTOR&quot;
+<b>FROM</b> (<b>SELECT</b> <b>DISTINCT</b> &quot;L&quot;.&quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;L&quot;.&quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;L&quot;.&quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;L&quot;.&quot;DAY_VALUE&quot; <b>AS</b> &quot;DAY_VALUE&quot;, &quot;L&quot;.&quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;, &quot;R&quot;.&quot;CODE_TEXT&quot; <b>AS</b> &quot;CODE_TEXT&quot;, &quot;R&quot;.&quot;FACTOR&quot; <b>AS</b> &quot;FACTOR&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_LEFT_ROWS&quot;) <b>AS</b> &quot;L&quot;
+<b>INNER JOIN</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;) <b>AS</b> &quot;R&quot; <b>ON</b> (&quot;L&quot;.&quot;KEY_ID&quot; = &quot;R&quot;.&quot;KEY_ID&quot;)
+<b>LEFT JOIN</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;CODE_TEXT&quot; <b>IN</b> (<i class="ph">?</i>, <i class="ph">?</i>))) <b>AS</b> &quot;Q&quot; <b>ON</b> (&quot;L&quot;.&quot;KEY_ID&quot; = &quot;Q&quot;.&quot;KEY_ID&quot;)
+<b>WHERE</b> ((((&quot;L&quot;.&quot;AMOUNT&quot; &gt;= 0) <b>AND</b> (&quot;L&quot;.&quot;AMOUNT&quot; &lt;= <b>CAST</b>(<i class="ph">?</i> <b>AS</b> INTEGER))) <b>AND</b> (<b>EXISTS</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;KEY_ID&quot; = &quot;L&quot;.&quot;KEY_ID&quot;)))) <b>AND</b> (&quot;L&quot;.&quot;NOTE_TEXT&quot; <b>NOT</b> <b>IN</b> (<i class="ph">?</i>, <i class="ph">?</i>)))) <b>AS</b> &quot;t0&quot;
+<b>ORDER BY</b> &quot;KEY_ID&quot; <b>ASC</b>
+<b>LIMIT</b> <i class="ph">?</i></pre><div class="params">bound: <code>p0=&quot;Q&quot;:C(1)</code> <code>p1=&quot;q&quot;:C(1)</code> <code>LV_LIMIT=10:I</code> <code>p3=&quot;&quot;:C(0)</code> <code>p4=&quot; &quot;:C(1)</code> <code>LV_LIMIT=10:I</code></div></section><section class="dialect"><h5>postgres</h5><pre class="sql"><b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;DAY_VALUE&quot; <b>AS</b> &quot;DAY_VALUE&quot;, &quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;, &quot;CODE_TEXT&quot; <b>AS</b> &quot;CODE_TEXT&quot;, &quot;FACTOR&quot; <b>AS</b> &quot;FACTOR&quot;
+<b>FROM</b> (<b>SELECT</b> <b>DISTINCT</b> &quot;L&quot;.&quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;L&quot;.&quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;L&quot;.&quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;L&quot;.&quot;DAY_VALUE&quot; <b>AS</b> &quot;DAY_VALUE&quot;, &quot;L&quot;.&quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;, &quot;R&quot;.&quot;CODE_TEXT&quot; <b>AS</b> &quot;CODE_TEXT&quot;, &quot;R&quot;.&quot;FACTOR&quot; <b>AS</b> &quot;FACTOR&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_LEFT_ROWS&quot;) <b>AS</b> &quot;L&quot;
+<b>INNER JOIN</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;) <b>AS</b> &quot;R&quot; <b>ON</b> (&quot;L&quot;.&quot;KEY_ID&quot; = &quot;R&quot;.&quot;KEY_ID&quot;)
+<b>LEFT JOIN</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;CODE_TEXT&quot; <b>IN</b> (<i class="ph">$1::varchar(1)</i>, <i class="ph">$2::varchar(1)</i>))) <b>AS</b> &quot;Q&quot; <b>ON</b> (&quot;L&quot;.&quot;KEY_ID&quot; = &quot;Q&quot;.&quot;KEY_ID&quot;)
+<b>WHERE</b> ((((&quot;L&quot;.&quot;AMOUNT&quot; &gt;= 0) <b>AND</b> (&quot;L&quot;.&quot;AMOUNT&quot; &lt;= <i class="ph">$3::integer</i>)) <b>AND</b> (<b>EXISTS</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;KEY_ID&quot; = &quot;L&quot;.&quot;KEY_ID&quot;)))) <b>AND</b> (&quot;L&quot;.&quot;NOTE_TEXT&quot; <b>NOT</b> <b>IN</b> (<i class="ph">$4::varchar(0)</i>, <i class="ph">$5::varchar(1)</i>)))) <b>AS</b> &quot;t0&quot;
+<b>ORDER BY</b> &quot;KEY_ID&quot; <b>ASC</b>
+<b>LIMIT</b> <i class="ph">$6::integer</i></pre><div class="params">bound: <code>p0=&quot;Q&quot;:C(1)</code> <code>p1=&quot;q&quot;:C(1)</code> <code>LV_LIMIT=10:I</code> <code>p3=&quot;&quot;:C(0)</code> <code>p4=&quot; &quot;:C(1)</code> <code>LV_LIMIT=10:I</code></div></section></div>
+
+<h3>4.4 <code>RANK_ROWS</code> (clean-room) — GROUP BY / HAVING, три оконные функции, IN-подзапрос, UNION DISTINCT</h3>
+<p>Здесь видны обе стороны политики. DuckDB получает план целиком; ранги приводятся к INTEGER через измеренную форму с <code>TRUNC</code> (в DuckDB <code>CAST</code> округляет). PostgreSQL и SQLite <strong>отказывают до I/O</strong> — по имени, с причиной.</p>
+
+<div class="dialects"><section class="dialect"><h5>duckdb</h5><pre class="sql"><b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, <b>CAST</b>(TRUNC(<b>CAST</b>(&quot;RANK_VALUE&quot; <b>AS</b> DOUBLE)) <b>AS</b> INTEGER) <b>AS</b> &quot;RANK_VALUE&quot;, <b>CAST</b>(TRUNC(<b>CAST</b>(&quot;DENSE_VALUE&quot; <b>AS</b> DOUBLE)) <b>AS</b> INTEGER) <b>AS</b> &quot;DENSE_VALUE&quot;, <b>CAST</b>(TRUNC(<b>CAST</b>(&quot;ROW_VALUE&quot; <b>AS</b> DOUBLE)) <b>AS</b> INTEGER) <b>AS</b> &quot;ROW_VALUE&quot;, &quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;
+<b>FROM</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;RANK_VALUE&quot; <b>AS</b> &quot;RANK_VALUE&quot;, &quot;DENSE_VALUE&quot; <b>AS</b> &quot;DENSE_VALUE&quot;, &quot;ROW_VALUE&quot; <b>AS</b> &quot;ROW_VALUE&quot;, &quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> (<b>SELECT</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot;, &quot;AMOUNT&quot;, &quot;NOTE_TEXT&quot;, ROW_NUMBER() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>, &quot;KEY_ID&quot; <b>ASC</b>, &quot;NOTE_TEXT&quot; <b>ASC</b>) <b>AS</b> &quot;ROW_VALUE&quot;, RANK() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;RANK_VALUE&quot;, DENSE_RANK() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;DENSE_VALUE&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_LEFT_ROWS&quot;
+<b>WHERE</b> (&quot;KEY_ID&quot; <b>IN</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;CODE_TEXT&quot; = <i class="ph">?</i>)))) <b>AS</b> &quot;t0&quot;
+<b>GROUP BY</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot;, &quot;AMOUNT&quot;, &quot;NOTE_TEXT&quot;
+<b>HAVING</b> (COUNT(*) &gt; 0)) <b>AS</b> &quot;t1&quot;
+<b>ORDER BY</b> &quot;GROUP_ID&quot; <b>ASC</b>, &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;t2&quot;
+<b>UNION</b> <b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot; <b>AS</b> &quot;GROUP_ID&quot;, &quot;AMOUNT&quot; <b>AS</b> &quot;AMOUNT&quot;, &quot;RANK_VALUE&quot; <b>AS</b> &quot;RANK_VALUE&quot;, &quot;DENSE_VALUE&quot; <b>AS</b> &quot;DENSE_VALUE&quot;, &quot;ROW_VALUE&quot; <b>AS</b> &quot;ROW_VALUE&quot;, &quot;NOTE_TEXT&quot; <b>AS</b> &quot;NOTE_TEXT&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> (<b>SELECT</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot;, &quot;AMOUNT&quot;, &quot;NOTE_TEXT&quot;, ROW_NUMBER() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>, &quot;KEY_ID&quot; <b>ASC</b>, &quot;NOTE_TEXT&quot; <b>ASC</b>) <b>AS</b> &quot;ROW_VALUE&quot;, RANK() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;RANK_VALUE&quot;, DENSE_RANK() <b>OVER</b> (<b>PARTITION BY</b> &quot;GROUP_ID&quot;
+<b>ORDER BY</b> &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;DENSE_VALUE&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;IT_LEFT_ROWS&quot;
+<b>WHERE</b> (&quot;KEY_ID&quot; <b>IN</b> (<b>SELECT</b> &quot;KEY_ID&quot; <b>AS</b> &quot;KEY_ID&quot;
+<b>FROM</b> &quot;IT_RIGHT_ROWS&quot;
+<b>WHERE</b> (&quot;CODE_TEXT&quot; = <i class="ph">?</i>)))) <b>AS</b> &quot;t3&quot;
+<b>GROUP BY</b> &quot;KEY_ID&quot;, &quot;GROUP_ID&quot;, &quot;AMOUNT&quot;, &quot;NOTE_TEXT&quot;
+<b>HAVING</b> (COUNT(*) &gt; 0)) <b>AS</b> &quot;t4&quot;
+<b>ORDER BY</b> &quot;GROUP_ID&quot; <b>ASC</b>, &quot;AMOUNT&quot; <b>DESC</b>) <b>AS</b> &quot;t5&quot;) <b>AS</b> &quot;t6&quot;</pre><div class="params">bound: <code>p0=&quot;Q&quot;:C(1)</code> <code>p1=&quot;Q&quot;:C(1)</code></div></section><section class="dialect"><h5>postgres</h5><div class="refused"><span class="tag tag-refuse">UNSUPPORTED_SQLSCRIPT</span> the function ROW_NUMBER has not been measured on postgres</div></section><section class="dialect"><h5>sqlite</h5><div class="refused"><span class="tag tag-refuse">UNSUPPORTED_SQLSCRIPT</span> CAST to INTEGER cannot raise in SQLite: it returns 0 where HANA and DuckDB raise</div></section></div>
+<div class="result">
+<div><h4>Живой результат на DuckDB для tie-фикстуры (два amount = 5 в группе 9, точный дубликат в группе 10)</h4>
+<div class="tbl"><table><tr><th>KEY_ID</th><th>GROUP_ID</th><th>AMOUNT</th><th>RANK</th><th>DENSE</th><th>ROW</th><th>NOTE</th></tr>
+<tr><td>2</td><td>9</td><td>5.00</td><td>1</td><td>1</td><td>2</td><td>B</td></tr><tr><td>1</td><td>9</td><td>5.00</td><td>1</td><td>1</td><td>1</td><td>A</td></tr><tr><td>3</td><td>9</td><td>3.00</td><td>3</td><td>2</td><td>3</td><td>C</td></tr><tr><td>4</td><td>10</td><td>8.00</td><td>1</td><td>1</td><td>1</td><td>D</td></tr>
+</table></div>
+<p>RANK 1, 1, 3 — с пропуском; DENSE_RANK 1, 1, 2 — без; дубликат группы 10 схлопнут <code>GROUP BY</code> до окна; <code>AMOUNT</code> пришёл как строка <code>"8.00"</code> — DECIMAL не превращён в float.</p></div>
+<dl class="trace"><dt>engine</dt><dd>duckdb</dd><dt>fallback</dt><dd>false</dd><dt>hostSteps</dt><dd>2</dd><dt>databaseStatements</dt><dd>1</dd><dt>boundParameters</dt><dd>2</dd></dl>
+</div>
+
+<h3>4.5 <code>ZCL_VDB_100_HANA=&gt;SEARCH_DB</code> — продуктовый потребитель: Vector Workbench</h3>
+<p>Тело неизменное: два скана <code>zvdb_100_vec</code>, <code>RAW(192)</code>-колонки, <code>v.dims - 2 * BITCOUNT(BITXOR(v.qbits, q.qbits))</code>, <code>ORDER BY rank DESC LIMIT :iv_top_k</code>. HANA пропускает своё; DuckDB получает точный xor равной длины над <code>BIT</code> после декодирования канонического hex-представления RAW из seam-а. ABAP Unit сравнивает первые семь id/rank/payload с независимой ANYDB-реализацией.</p>
+
+<div class="dialects"><section class="dialect"><h5>hana</h5><pre class="sql"><b>SELECT</b> &quot;V&quot;.&quot;ID&quot; <b>AS</b> &quot;RESULT_ID&quot;, &quot;V&quot;.&quot;BID&quot; <b>AS</b> &quot;BID&quot;, &quot;V&quot;.&quot;PAYLOAD&quot; <b>AS</b> &quot;PAYLOAD&quot;, &quot;V&quot;.&quot;DIMS&quot; <b>AS</b> &quot;DIMS&quot;, (&quot;V&quot;.&quot;DIMS&quot; - (2 * BITCOUNT(BITXOR(&quot;V&quot;.&quot;QBITS&quot;, &quot;Q&quot;.&quot;QBITS&quot;)))) <b>AS</b> &quot;RANK&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;ZVDB_100_VEC&quot;) <b>AS</b> &quot;V&quot;
+<b>INNER JOIN</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;ZVDB_100_VEC&quot;) <b>AS</b> &quot;Q&quot; <b>ON</b> (((&quot;Q&quot;.&quot;MANDT&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(3))) <b>AND</b> (&quot;Q&quot;.&quot;BID&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(32)))) <b>AND</b> (&quot;Q&quot;.&quot;ID&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(32))))
+<b>WHERE</b> ((((&quot;V&quot;.&quot;MANDT&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(3))) <b>AND</b> (&quot;V&quot;.&quot;BID&quot; = <b>CAST</b>(<i class="ph">?</i> <b>AS</b> NVARCHAR(32)))) <b>AND</b> (&quot;V&quot;.&quot;DIMS&quot; = &quot;Q&quot;.&quot;DIMS&quot;)) <b>AND</b> (&quot;V&quot;.&quot;MODEL&quot; = &quot;Q&quot;.&quot;MODEL&quot;))
+<b>ORDER BY</b> &quot;RANK&quot; <b>DESC</b>, &quot;RESULT_ID&quot; <b>ASC</b>
+<b>LIMIT</b> <i class="ph">?</i></pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_BUCKET=&quot;docs&quot;:STRING</code> <code>IV_QUERY_ID=&quot;q1&quot;:STRING</code> <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_BUCKET=&quot;docs&quot;:STRING</code> <code>IV_TOP_K=7:I</code></div></section><section class="dialect"><h5>duckdb</h5><pre class="sql"><b>SELECT</b> &quot;V&quot;.&quot;ID&quot; <b>AS</b> &quot;RESULT_ID&quot;, &quot;V&quot;.&quot;BID&quot; <b>AS</b> &quot;BID&quot;, &quot;V&quot;.&quot;PAYLOAD&quot; <b>AS</b> &quot;PAYLOAD&quot;, &quot;V&quot;.&quot;DIMS&quot; <b>AS</b> &quot;DIMS&quot;, (&quot;V&quot;.&quot;DIMS&quot; - (2 * bit_count(<b>CAST</b>(xor(<b>CAST</b>(from_hex(&quot;V&quot;.&quot;QBITS&quot;) <b>AS</b> BIT), <b>CAST</b>(from_hex(&quot;Q&quot;.&quot;QBITS&quot;) <b>AS</b> BIT)) <b>AS</b> BIT)))) <b>AS</b> &quot;RANK&quot;
+<b>FROM</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;ZVDB_100_VEC&quot;) <b>AS</b> &quot;V&quot;
+<b>INNER JOIN</b> (<b>SELECT</b> *
+<b>FROM</b> &quot;ZVDB_100_VEC&quot;) <b>AS</b> &quot;Q&quot; <b>ON</b> (((&quot;Q&quot;.&quot;MANDT&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 3)) <b>AND</b> (&quot;Q&quot;.&quot;BID&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 32))) <b>AND</b> (&quot;Q&quot;.&quot;ID&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 32)))
+<b>WHERE</b> ((((&quot;V&quot;.&quot;MANDT&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 3)) <b>AND</b> (&quot;V&quot;.&quot;BID&quot; = SUBSTR(<b>CAST</b>(<i class="ph">?</i> <b>AS</b> VARCHAR), 1, 32))) <b>AND</b> (&quot;V&quot;.&quot;DIMS&quot; = &quot;Q&quot;.&quot;DIMS&quot;)) <b>AND</b> (&quot;V&quot;.&quot;MODEL&quot; = &quot;Q&quot;.&quot;MODEL&quot;))
+<b>ORDER BY</b> &quot;RANK&quot; <b>DESC</b>, &quot;RESULT_ID&quot; <b>ASC</b>
+<b>LIMIT</b> <i class="ph">?</i></pre><div class="params">bound: <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_BUCKET=&quot;docs&quot;:STRING</code> <code>IV_QUERY_ID=&quot;q1&quot;:STRING</code> <code>IV_CLIENT=&quot;100&quot;:STRING</code> <code>IV_BUCKET=&quot;docs&quot;:STRING</code> <code>IV_TOP_K=7:I</code></div></section><section class="dialect"><h5>postgres</h5><div class="refused"><span class="tag tag-refuse">UNSUPPORTED_SQLSCRIPT</span> BITCOUNT has no measured rendering on postgres</div></section><section class="dialect"><h5>sqlite</h5><div class="refused"><span class="tag tag-refuse">UNSUPPORTED_SQLSCRIPT</span> BITCOUNT has no measured rendering on sqlite</div></section></div>
+
+<h2>6. Таблица конформанса: 40 строк, четыре движка</h2>
+<p>Каждая строка читает <em>колонку</em> таблицы с DDIC-подобными типами, а не литерал (литерал сворачивается парсером и ничего не говорит о типовом режиме). Зелёное — совпало с HANA, красное — нет. Колонка HANA измерена 2026-09-19 и хранится в <code>test/sqlscript-hana-oracle.json</code>; остальные три — прогон <code>tools/sqlscript-conformance.mjs --json</code> на этой машине сейчас. Совпадения: <strong>duckdb</strong> 35/39, <strong>sqlite_node</strong> 31/39, <strong>sqljs</strong> 31/39. Красные клетки — ровно то, что §4.4 закрывает рендерингом или отказом; они не исчезли из таблицы, потому что таблица измеряет <em>движок</em>, а не наш lowering.</p>
+<div class="tbl heat"><table>
+<tr><th>case</th><th>HANA (оракул)</th><th>duckdb</th><th>sqlite_node</th><th>sqljs</th></tr>
+<tr><th>int_div</th><td class="c-ref">0.5</td><td class="c-ok" title="int_div · duckdb: 0.5">0.5</td><td class="c-bad" title="int_div · sqlite_node: 0">0</td><td class="c-bad" title="int_div · sqljs: 0">0</td></tr>
+<tr><th>int_div_neg</th><td class="c-ref">-3.5</td><td class="c-ok" title="int_div_neg · duckdb: -3.5">-3.5</td><td class="c-bad" title="int_div_neg · sqlite_node: -3">-3</td><td class="c-bad" title="int_div_neg · sqljs: -3">-3</td></tr>
+<tr><th>dec_arith</th><td class="c-ref">0.3</td><td class="c-ok" title="dec_arith · duckdb: 0.3">0.3</td><td class="c-bad" title="dec_arith · sqlite_node: 0.30000000000000004">0.30000000000000004</td><td class="c-bad" title="dec_arith · sqljs: 0.30000000000000004">0.30000000000000004</td></tr>
+<tr><th>cast_ok</th><td class="c-ref">42</td><td class="c-ok" title="cast_ok · duckdb: 42">42</td><td class="c-ok" title="cast_ok · sqlite_node: 42">42</td><td class="c-ok" title="cast_ok · sqljs: 42">42</td></tr>
+<tr><th>cast_bad</th><td class="c-ref">ERR</td><td class="c-ok" title="cast_bad · duckdb: ERR">ERR</td><td class="c-bad" title="cast_bad · sqlite_node: 0">0</td><td class="c-bad" title="cast_bad · sqljs: 0">0</td></tr>
+<tr><th>concat_padded</th><td class="c-ref">abc|</td><td class="c-ok" title="concat_padded · duckdb: abc|">abc|</td><td class="c-ok" title="concat_padded · sqlite_node: abc|">abc|</td><td class="c-ok" title="concat_padded · sqljs: abc|">abc|</td></tr>
+<tr><th>substr_padded</th><td class="c-ref">abc</td><td class="c-ok" title="substr_padded · duckdb: abc">abc</td><td class="c-ok" title="substr_padded · sqlite_node: abc">abc</td><td class="c-ok" title="substr_padded · sqljs: abc">abc</td></tr>
+<tr><th>length_padded</th><td class="c-ref">3</td><td class="c-ok" title="length_padded · duckdb: 3">3</td><td class="c-ok" title="length_padded · sqlite_node: 3">3</td><td class="c-ok" title="length_padded · sqljs: 3">3</td></tr>
+<tr><th>char_equals</th><td class="c-ref">1</td><td class="c-ok" title="char_equals · duckdb: 1">1</td><td class="c-ok" title="char_equals · sqlite_node: 1">1</td><td class="c-ok" title="char_equals · sqljs: 1">1</td></tr>
+<tr><th>ifnull</th><td class="c-ref">-1</td><td class="c-ok" title="ifnull · duckdb: -1">-1</td><td class="c-ok" title="ifnull · sqlite_node: -1">-1</td><td class="c-ok" title="ifnull · sqljs: -1">-1</td></tr>
+<tr><th>null_arith</th><td class="c-ref">NULL</td><td class="c-ok" title="null_arith · duckdb: NULL">NULL</td><td class="c-ok" title="null_arith · sqlite_node: NULL">NULL</td><td class="c-ok" title="null_arith · sqljs: NULL">NULL</td></tr>
+<tr><th>null_order</th><td class="c-ref">5</td><td class="c-ok" title="null_order · duckdb: 5">5</td><td class="c-ok" title="null_order · sqlite_node: 5">5</td><td class="c-ok" title="null_order · sqljs: 5">5</td></tr>
+<tr><th>empty_scalar</th><td class="c-ref">NULL</td><td class="c-ok" title="empty_scalar · duckdb: NULL">NULL</td><td class="c-ok" title="empty_scalar · sqlite_node: NULL">NULL</td><td class="c-ok" title="empty_scalar · sqljs: NULL">NULL</td></tr>
+<tr><th>div_zero</th><td class="c-ref">ERR</td><td class="c-bad" title="div_zero · duckdb: Infinity">Infinity</td><td class="c-bad" title="div_zero · sqlite_node: NULL">NULL</td><td class="c-bad" title="div_zero · sqljs: NULL">NULL</td></tr>
+<tr><th>like_case</th><td class="c-ref">0</td><td class="c-ok" title="like_case · duckdb: 0">0</td><td class="c-bad" title="like_case · sqlite_node: 1">1</td><td class="c-bad" title="like_case · sqljs: 1">1</td></tr>
+<tr><th>cast_char_narrow</th><td class="c-ref">abc</td><td class="c-bad" title="cast_char_narrow · duckdb: abcdef">abcdef</td><td class="c-bad" title="cast_char_narrow · sqlite_node: abcdef">abcdef</td><td class="c-bad" title="cast_char_narrow · sqljs: abcdef">abcdef</td></tr>
+<tr><th>cast_round</th><td class="c-ref">1</td><td class="c-bad" title="cast_round · duckdb: 2">2</td><td class="c-ok" title="cast_round · sqlite_node: 1">1</td><td class="c-ok" title="cast_round · sqljs: 1">1</td></tr>
+<tr><th>fn_lower</th><td class="c-ref">abc</td><td class="c-ok" title="fn_lower · duckdb: abc">abc</td><td class="c-ok" title="fn_lower · sqlite_node: abc">abc</td><td class="c-ok" title="fn_lower · sqljs: abc">abc</td></tr>
+<tr><th>fn_upper</th><td class="c-ref">ABC</td><td class="c-ok" title="fn_upper · duckdb: ABC">ABC</td><td class="c-ok" title="fn_upper · sqlite_node: ABC">ABC</td><td class="c-ok" title="fn_upper · sqljs: ABC">ABC</td></tr>
+<tr><th>fn_trim</th><td class="c-ref">abc</td><td class="c-ok" title="fn_trim · duckdb: abc">abc</td><td class="c-ok" title="fn_trim · sqlite_node: abc">abc</td><td class="c-ok" title="fn_trim · sqljs: abc">abc</td></tr>
+<tr><th>fn_ltrim</th><td class="c-ref">abc</td><td class="c-ok" title="fn_ltrim · duckdb: abc">abc</td><td class="c-ok" title="fn_ltrim · sqlite_node: abc">abc</td><td class="c-ok" title="fn_ltrim · sqljs: abc">abc</td></tr>
+<tr><th>fn_rtrim</th><td class="c-ref">abc</td><td class="c-ok" title="fn_rtrim · duckdb: abc">abc</td><td class="c-ok" title="fn_rtrim · sqlite_node: abc">abc</td><td class="c-ok" title="fn_rtrim · sqljs: abc">abc</td></tr>
+<tr><th>fn_abs</th><td class="c-ref">7</td><td class="c-ok" title="fn_abs · duckdb: 7">7</td><td class="c-ok" title="fn_abs · sqlite_node: 7">7</td><td class="c-ok" title="fn_abs · sqljs: 7">7</td></tr>
+<tr><th>fn_coalesce</th><td class="c-ref">-1</td><td class="c-ok" title="fn_coalesce · duckdb: -1">-1</td><td class="c-ok" title="fn_coalesce · sqlite_node: -1">-1</td><td class="c-ok" title="fn_coalesce · sqljs: -1">-1</td></tr>
+<tr><th>fn_sum</th><td class="c-ref">3</td><td class="c-ok" title="fn_sum · duckdb: 3">3</td><td class="c-ok" title="fn_sum · sqlite_node: 3">3</td><td class="c-ok" title="fn_sum · sqljs: 3">3</td></tr>
+<tr><th>fn_min</th><td class="c-ref">abc</td><td class="c-ok" title="fn_min · duckdb: abc">abc</td><td class="c-ok" title="fn_min · sqlite_node: abc">abc</td><td class="c-ok" title="fn_min · sqljs: abc">abc</td></tr>
+<tr><th>fn_max</th><td class="c-ref">-7</td><td class="c-ok" title="fn_max · duckdb: -7">-7</td><td class="c-ok" title="fn_max · sqlite_node: -7">-7</td><td class="c-ok" title="fn_max · sqljs: -7">-7</td></tr>
+<tr><th>fn_count</th><td class="c-ref">1</td><td class="c-ok" title="fn_count · duckdb: 1">1</td><td class="c-ok" title="fn_count · sqlite_node: 1">1</td><td class="c-ok" title="fn_count · sqljs: 1">1</td></tr>
+<tr><th>agg_concat_ordered</th><td class="c-ref">zz,cc,abc</td><td class="c-ok" title="agg_concat_ordered · duckdb: zz,cc,abc">zz,cc,abc</td><td class="c-ok" title="agg_concat_ordered · sqlite_node: zz,cc,abc">zz,cc,abc</td><td class="c-ok" title="agg_concat_ordered · sqljs: zz,cc,abc">zz,cc,abc</td></tr>
+<tr><th>agg_concat_unordered</th><td class="c-ref">abc,zz,cc</td><td class="c-ok" title="agg_concat_unordered · duckdb: abc,zz,cc">abc,zz,cc</td><td class="c-ok" title="agg_concat_unordered · sqlite_node: abc,zz,cc">abc,zz,cc</td><td class="c-ok" title="agg_concat_unordered · sqljs: abc,zz,cc">abc,zz,cc</td></tr>
+<tr><th>win_row_number</th><td class="c-ref">1</td><td class="c-ok" title="win_row_number · duckdb: 1">1</td><td class="c-ok" title="win_row_number · sqlite_node: 1">1</td><td class="c-ok" title="win_row_number · sqljs: 1">1</td></tr>
+<tr><th>win_rank</th><td class="c-ref">1</td><td class="c-ok" title="win_rank · duckdb: 1">1</td><td class="c-ok" title="win_rank · sqlite_node: 1">1</td><td class="c-ok" title="win_rank · sqljs: 1">1</td></tr>
+<tr><th>win_dense_rank</th><td class="c-ref">1</td><td class="c-ok" title="win_dense_rank · duckdb: 1">1</td><td class="c-ok" title="win_dense_rank · sqlite_node: 1">1</td><td class="c-ok" title="win_dense_rank · sqljs: 1">1</td></tr>
+<tr><th>win_count_over</th><td class="c-ref">1</td><td class="c-ok" title="win_count_over · duckdb: 1">1</td><td class="c-ok" title="win_count_over · sqlite_node: 1">1</td><td class="c-ok" title="win_count_over · sqljs: 1">1</td></tr>
+<tr><th>fn_round_half</th><td class="c-ref">3</td><td class="c-ok" title="fn_round_half · duckdb: 3">3</td><td class="c-ok" title="fn_round_half · sqlite_node: 3">3</td><td class="c-ok" title="fn_round_half · sqljs: 3">3</td></tr>
+<tr><th>fn_round_half_negative</th><td class="c-ref">-3</td><td class="c-ok" title="fn_round_half_negative · duckdb: -3">-3</td><td class="c-ok" title="fn_round_half_negative · sqlite_node: -3">-3</td><td class="c-ok" title="fn_round_half_negative · sqljs: -3">-3</td></tr>
+<tr><th>fn_round_scale</th><td class="c-ref">2.35</td><td class="c-ok" title="fn_round_scale · duckdb: 2.35">2.35</td><td class="c-ok" title="fn_round_scale · sqlite_node: 2.35">2.35</td><td class="c-ok" title="fn_round_scale · sqljs: 2.35">2.35</td></tr>
+<tr><th>fn_avg</th><td class="c-ref">1</td><td class="c-ok" title="fn_avg · duckdb: 1">1</td><td class="c-ok" title="fn_avg · sqlite_node: 1">1</td><td class="c-ok" title="fn_avg · sqljs: 1">1</td></tr>
+<tr><th>fn_log</th><td class="c-ref">ERR</td><td class="c-bad" title="fn_log · duckdb: 1">1</td><td class="c-bad" title="fn_log · sqlite_node: 1">1</td><td class="c-bad" title="fn_log · sqljs: 2.302585092994046">2.302585092994046</td></tr>
+</table></div>
+
+<h2>7. Где расщепитель стоит относительно реального корпуса</h2>
+<p>Отсчёт не по вхождениям, а по <strong>целым телам</strong>: телу нужны все его конструкции сразу, и три самых частых могут не покрыть ни одного. Кривая — по 405 рабочим телам A4H (<code>docs/sqlscript-corpus.md</code>), жадно добавляя конструкцию, которая закрывает больше всего тел. Цвет — статус в сегодняшнем portable-подмножестве по tracked-корпусу (не по этим 405 телам: они не в репозитории).</p>
+<div class="diagram">
+<svg viewBox="0 0 760 360" class="chart" role="img" aria-label="Cumulative bodies of the working corpus covered as constructs are added">
+  <line x1="150" x2="690" y1="260" y2="260" class="grid"/><text x="144" y="264" class="tick" text-anchor="end">0%</text><line x1="150" x2="690" y1="199" y2="199" class="grid"/><text x="144" y="203" class="tick" text-anchor="end">25%</text><line x1="150" x2="690" y1="138" y2="138" class="grid"/><text x="144" y="142" class="tick" text-anchor="end">50%</text><line x1="150" x2="690" y1="77" y2="77" class="grid"/><text x="144" y="81" class="tick" text-anchor="end">75%</text><line x1="150" x2="690" y1="16" y2="16" class="grid"/><text x="144" y="20" class="tick" text-anchor="end">100%</text>
+  <rect x="150" y="16" width="540" height="12.20000000000001" class="ceiling"/>
+  <text x="686" y="27" class="tick" text-anchor="end">потолок 5 % — XMLTABLE / HIERARCHY</text>
+  <rect x="153" y="244.33580246913579" width="30" height="15.664197530864215" class="bar bar-ok"/>
+    <text x="168" y="240.33580246913579" class="val" text-anchor="middle">6%</text>
+    <text transform="translate(172,266) rotate(45)" class="lbl">plain SELECT</text><rect x="189" y="232.28641975308642" width="30" height="27.71358024691358" class="bar bar-ok"/>
+    <text x="204" y="228.28641975308642" class="val" text-anchor="middle">11%</text>
+    <text transform="translate(208,266) rotate(45)" class="lbl">WHERE</text><rect x="225" y="219.03209876543212" width="30" height="40.967901234567876" class="bar bar-ok"/>
+    <text x="240" y="215.03209876543212" class="val" text-anchor="middle">17%</text>
+    <text transform="translate(244,266) rotate(45)" class="lbl">table var ← SELECT</text><rect x="261" y="209.99506172839506" width="30" height="50.00493827160494" class="bar bar-ok"/>
+    <text x="276" y="205.99506172839506" class="val" text-anchor="middle">20%</text>
+    <text transform="translate(280,266) rotate(45)" class="lbl">UNION</text><rect x="297" y="200.95802469135802" width="30" height="59.04197530864198" class="bar bar-ok"/>
+    <text x="312" y="196.95802469135802" class="val" text-anchor="middle">24%</text>
+    <text transform="translate(316,266) rotate(45)" class="lbl">INNER JOIN</text><rect x="333" y="192.52345679012345" width="30" height="67.47654320987655" class="bar bar-ok"/>
+    <text x="348" y="188.52345679012345" class="val" text-anchor="middle">28%</text>
+    <text transform="translate(352,266) rotate(45)" class="lbl">DECLARE scalar</text><rect x="369" y="183.48641975308644" width="30" height="76.51358024691356" class="bar bar-ok"/>
+    <text x="384" y="179.48641975308644" class="val" text-anchor="middle">31%</text>
+    <text transform="translate(388,266) rotate(45)" class="lbl">ORDER BY</text><rect x="405" y="175.05185185185186" width="30" height="84.94814814814814" class="bar bar-ok"/>
+    <text x="420" y="171.05185185185186" class="val" text-anchor="middle">35%</text>
+    <text transform="translate(424,266) rotate(45)" class="lbl">CALL</text><rect x="441" y="158.7851851851852" width="30" height="101.21481481481479" class="bar bar-ok"/>
+    <text x="456" y="154.7851851851852" class="val" text-anchor="middle">41%</text>
+    <text transform="translate(460,266) rotate(45)" class="lbl">IF / ELSE</text><rect x="477" y="149.14567901234565" width="30" height="110.85432098765435" class="bar bar-unk"/>
+    <text x="492" y="145.14567901234565" class="val" text-anchor="middle">45%</text>
+    <text transform="translate(496,266) rotate(45)" class="lbl">CROSS JOIN</text><rect x="513" y="138.9037037037037" width="30" height="121.09629629629629" class="bar bar-ok"/>
+    <text x="528" y="134.9037037037037" class="val" text-anchor="middle">50%</text>
+    <text transform="translate(532,266) rotate(45)" class="lbl">GROUP BY</text><rect x="549" y="126.25185185185185" width="30" height="133.74814814814815" class="bar bar-ok"/>
+    <text x="564" y="122.25185185185185" class="val" text-anchor="middle">55%</text>
+    <text transform="translate(568,266) rotate(45)" class="lbl">outer join</text><rect x="585" y="117.21481481481483" width="30" height="142.78518518518518" class="bar bar-no"/>
+    <text x="600" y="113.21481481481483" class="val" text-anchor="middle">59%</text>
+    <text transform="translate(604,266) rotate(45)" class="lbl">dynamic SQL</text><rect x="621" y="109.98518518518519" width="30" height="150.01481481481483" class="bar bar-part"/>
+    <text x="636" y="105.98518518518519" class="val" text-anchor="middle">61%</text>
+    <text transform="translate(640,266) rotate(45)" class="lbl">scalar subquery</text><rect x="657" y="102.75555555555555" width="30" height="157.24444444444447" class="bar bar-ok"/>
+    <text x="672" y="98.75555555555555" class="val" text-anchor="middle">64%</text>
+    <text transform="translate(676,266) rotate(45)" class="lbl">session variable</text>
+</svg></div>
+<div class="legend"><span class="f">выполняется в tracked-корпусе</span><span style="--c:var(--device)" class="d">частично (EXISTS/IN — да; скалярный <code>= (SELECT)</code> — узел есть, в корпусе нет)</span><span class="a">не измерено (CROSS JOIN)</span><span style="color:var(--bad)">■ отказ по проекту (динамический SQL)</span></div>
+<p>Десять конструкций дают 52 % тел, а не 90 %. После четырнадцати самая дешёвая работа — тела, которым не хватает ровно одной конструкции: <code>FOR</code> открывает 12, <code>UPDATE</code> 10, <code>UPSERT</code> 8, CTE 8, <code>DECLARE TABLE</code> 7, <code>INTERSECT</code>/<code>EXCEPT</code> 6. Настоящее препятствие — не императивная оболочка (IF 32 %, WHILE 5 %, курсоры 0), а <strong>типы и встроенные функции</strong>: <code>CONCAT</code> 38 тел, <code>RECORD_COUNT</code> 33, <code>SUBSTR</code> 33, <code>IS_EMPTY</code> 29, <code>TO_NVARCHAR</code> 27 — класс, где перевод тихо возвращает другое число.</p>
+
+<h2>8. Оценка расширения: SQLite · PostgreSQL · MariaDB · MSSQL · ClickHouse</h2>
+<p>Что вообще значит «добавить backend» в этой архитектуре. Диалект — это объект в <code>DIALECTS</code> с ~18 хуками, плюс seam-клиент с четырьмя обязанностями. Ничего из процедурной половины трогать не нужно: она не знает диалекта.</p>
+<div class="two">
+<div class="box device"><h5>хуки диалекта (sqlscript-lower.mjs)</h5>
+<p><code>quote</code> · <code>placeholder(n, type)</code> · <code>divide</code> · <code>intDiv</code> · <code>guardZero</code> · <code>decArith</code> · <code>concat</code> · <code>ifnull</code> · <code>substr</code> · <code>castInt</code> · <code>castChar</code> · <code>castDec</code> · <code>substrBefore</code>/<code>After</code> · <code>toChar</code> · <code>locate</code> · <code>like</code> · <code>aggName</code> · <code>dummy</code> · <code>functions</code> (allowlist) — и точечные: <code>BITXOR</code>, <code>BITCOUNT</code>, <code>REGEXP_REPLACE_ALL</code>, <code>EXCEPT</code>, оконные.</p></div>
+<div class="box host"><h5>обязанности seam-клиента</h5>
+<p><code>supportsNative</code> + <code>native({sql, params, expect})</code> с типизированной привязкой; <code>relationRef(handle)</code> и жизненный цикл материализованных отношений (view/table + drop); ограждение statement savepoint-ом на соединении вызывающего (PG: <code>SAVEPOINT osd_native</code>, fail-stop после отравленного COMMIT); типизированные пустые результаты (у пустой таблицы есть схема).</p></div>
+</div>
+
+<h3>Матрица</h3>
+<div class="tbl"><table class="score">
+<tr><th>критерий</th><th>SQLite / sql.js</th><th>PostgreSQL</th><th>MariaDB</th><th>MSSQL</th><th>ClickHouse</th></tr>
+<tr><td>диалект в <code>sqlscript-lower.mjs</code></td><td class="s-ok">есть <span class="tag tag-fact">факт</span></td><td class="s-ok">есть, <code>functions</code> пуст <span class="tag tag-fact">факт</span></td><td class="s-bad">нет</td><td class="s-bad">нет</td><td class="s-bad">нет</td></tr>
+<tr><td>seam <code>native()</code> + savepoint</td><td class="s-ok"><code>sqljs-native</code>, <code>sqlite-file-client</code></td><td class="s-ok"><code>postgres-client.mjs</code>, 14 live-тестов</td><td class="s-bad">нет</td><td class="s-bad">нет</td><td class="s-bad">нет транзакций вовсе</td></tr>
+<tr><td>колонка конформанса (40)</td><td class="s-ok">измерена</td><td class="s-mid">не измерена</td><td class="s-bad">—</td><td class="s-bad">—</td><td class="s-bad">—</td></tr>
+<tr><td>точные DECIMAL</td><td class="s-bad">нет типа; <code>ROUND</code> на +/− <span class="tag tag-fact">факт</span></td><td class="s-ok">NUMERIC <span class="tag tag-fact">факт</span></td><td class="s-ok">DECIMAL <span class="tag tag-assume">предп.</span></td><td class="s-ok">DECIMAL <span class="tag tag-assume">предп.</span></td><td class="s-ok">Decimal(P,S) <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td><code>CAST('x' AS INTEGER)</code> поднимает</td><td class="s-bad">0 → отказ <span class="tag tag-fact">факт</span></td><td class="s-ok">да <span class="tag tag-fact">факт</span></td><td class="s-bad">0 + warning вне STRICT <span class="tag tag-assume">предп.</span></td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td><td class="s-ok">да (accurateCast) <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td>INT / INT</td><td class="s-mid">усекает → <code>*1.0</code></td><td class="s-mid">усекает → <code>CAST NUMERIC</code> <span class="tag tag-fact">факт</span></td><td class="s-ok">DECIMAL, как HANA; <code>DIV</code> то же слово <span class="tag tag-assume">предп.</span></td><td class="s-mid">усекает <span class="tag tag-assume">предп.</span></td><td class="s-mid">Float64 всегда; <code>intDiv()</code> <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td><code>||</code> конкатенация</td><td class="s-ok">да</td><td class="s-ok">да</td><td class="s-bad">это OR без <code>PIPES_AS_CONCAT</code> → <code>CONCAT()</code> <span class="tag tag-assume">предп.</span></td><td class="s-bad">нет; <code>+</code> с NULL-пропагацией или <code>CONCAT()</code> <span class="tag tag-assume">предп.</span></td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td><code>LIMIT ?</code></td><td class="s-ok">да</td><td class="s-ok">да</td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td><td class="s-bad"><code>OFFSET … FETCH</code> требует ORDER BY — тело без него не имеет прямой формы <span class="tag tag-assume">предп.</span></td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td>LIKE чувствителен к регистру</td><td class="s-mid">PRAGMA на соединении <span class="tag tag-fact">факт</span></td><td class="s-ok">да <span class="tag tag-fact">факт</span></td><td class="s-mid">коллация; <code>COLLATE …_bin</code> на соединении <span class="tag tag-assume">предп.</span></td><td class="s-mid">коллация БД, чаще CI <span class="tag tag-assume">предп.</span></td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td>оконные / EXCEPT / коррел. подзапросы</td><td class="s-ok">измерено / — / да</td><td class="s-mid">есть, не измерено</td><td class="s-mid">10.2+ / 10.3+ / да <span class="tag tag-assume">предп.</span></td><td class="s-ok">да / да / да <span class="tag tag-assume">предп.</span></td><td class="s-mid">да / да / <strong>ограничены</strong> <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td><code>BITXOR</code>/<code>BITCOUNT</code> (Vector Workbench)</td><td class="s-bad">отказ</td><td class="s-mid"><code>bit_count</code>, xor над <code>bit</code> <span class="tag tag-assume">предп.</span></td><td class="s-bad">нет над бинарными <span class="tag tag-assume">предп.</span></td><td class="s-bad">нет над varbinary <span class="tag tag-assume">предп.</span></td><td class="s-ok"><code>bitXor</code>, <code>bitCount</code> нативно <span class="tag tag-assume">предп.</span></td></tr>
+<tr><td>общий LUW с Open SQL (§4.7)</td><td class="s-ok">да</td><td class="s-ok">да <span class="tag tag-fact">факт</span></td><td class="s-ok">да <span class="tag tag-assume">предп.</span></td><td class="s-ok">да, <code>SAVE TRANSACTION</code> <span class="tag tag-assume">предп.</span></td><td class="s-bad"><strong>невозможен</strong>: нет транзакций и savepoint-ов</td></tr>
+<tr><td>класс «тихо другое число»</td><td class="s-bad">float DECIMAL, CAST→0</td><td class="s-ok">низкий</td><td class="s-bad">CAST→0, <code>||</code>=OR, коллации</td><td class="s-mid">коллации, <code>+</code> с NULL</td><td class="s-mid">Float64-деление, Nullable-семантика</td></tr>
+<tr><td>где окупается</td><td>браузер (уже: sql.js в превью)</td><td>серверный prod без HANA</td><td>дешёвый LAMP-хостинг</td><td>заказчики на MS-стеке</td><td>аналитические AMDP над большими фактами</td></tr>
+<tr><td><strong>оценка усилий</strong></td><td class="s-ok">малые — уже есть; потолок задокументирован</td><td class="s-ok">малые: в основном измерение</td><td class="s-mid">средние</td><td class="s-mid">средне-высокие</td><td class="s-mid">средние диалект, но <em>другой продукт</em> (read-only)</td></tr>
+</table></div>
+
+<h3>Рекомендуемый порядок</h3>
+<ol class="steps">
+<li><strong>PostgreSQL.</strong> Все детали уже существуют: строгий диалект с нумерованными типизированными плейсхолдерами, <code>native()</code> с savepoint-ограждением, 14 живых тестов. Не хватает только измерений: 40 строк конформанса, оконные функции, <code>EXCEPT</code>, битовые операции. Пустой <code>functions: new Set()</code> — сознательная честность («adding a dialect must not silently widen the allowlist»), и наполняется он ровно так, как наполнялся для DuckDB: по строке за измерение. Это единственный из пяти, где после работы можно сказать «AMDP на PostgreSQL» без оговорок про типы.</li>
+<li><strong>SQLite.</strong> Уже стоит в браузере (sql.js). Расширять — значит принять потолок: нет типа DECIMAL (compat только на <code>+</code>/<code>−</code>, <code>*</code> намеренно не тронут), CAST не поднимает, деление на ноль отвечает NULL. Сегодняшняя цена этого потолка видна в §5.4: <code>rank_rows</code> отказывает на SQLite не из-за окон, а потому что binder приводит ранги к INTEGER. Именно поэтому PR #21 привёл в превью DuckDB-Wasm: одна DuckDB под Open SQL, OData и AMDP, а не «SQLite с оговорками».</li>
+<li><strong>ClickHouse — как отдельный продукт, не как пятый backend того же контракта.</strong> Всё, что делает AMDP интересным на ClickHouse (окна, <code>bitXor</code>/<code>bitCount</code> нативно, колоночные сканы), там есть; чего нет — транзакций. Свойство §4.7 («читает незакоммиченное на соединении вызывающего») не реализуемо в принципе, а не «пока». Честная форма: <code>OPTIONS READ-ONLY</code> AMDP над снапшотом, без общего LUW, с явной политикой в <code>AmdpDestination</code>. Корпус это поддерживает: <code>READ-ONLY</code> — норма (все пять методов демо), DML редок (UPDATE 10, UPSERT 8 тел из 405). Коррелированные подзапросы — измерить первыми: в корпусе они есть (<code>mix_rows</code>).</li>
+<li><strong>MariaDB и MSSQL — по запросу заказчика, не превентивно.</strong> Обе несут класс дефектов, за который проект уже платил дважды: MariaDB вне STRICT-режима отвечает <code>0</code> на плохой CAST (та же ловушка, что SQLite) и читает <code>||</code> как OR; MSSQL требует ORDER BY для любого LIMIT и делает <code>+</code> NULL-пропагирующим. Всё решаемо — часть на соединении (sql_mode, коллация, <code>QUOTED_IDENTIFIER</code>), как уже сделано с <code>PRAGMA case_sensitive_like</code>, — но каждое решение нужно измерить, а измерять без потребителя значит копить непроверенные утверждения.</li>
+</ol>
+<p>Общее правило для любого из пяти, взятое из того, как делались первые четыре: <strong>сначала колонка конформанса, потом диалект</strong>. Диалект, написанный до измерения, — это DuckDB-<code>CAST</code>, который округлял с первого дня и был «движком, которому этот файл доверял».</p>
+
+<h2>9. Открытые края, честно</h2>
+<ul>
+<li>Подмножество узкое и заявлено таким: <code>DECLARE</code> только INTEGER; скалярные входы только INTEGER/STRING; ровно одна табличная OUT/RETURNING; INOUT, дополнительные выходы, trailing result set, неразрешённые именованные типы — отказ. Скалярный RETURNING — только INTEGER.</li>
+<li>Не поддержаны по проекту первой вертикали: динамический SQL, DML в AMDP, автономные транзакции, курсоры (<code>OPEN</code>/<code>FETCH</code>), массивы, обработчики исключений, <code>NO_INLINE</code> (до появления настоящего барьера материализации), часы.</li>
+<li>Нечёткий поиск — это capability с двумя профилями (ADR 0002: <code>portable-deterministic</code> и <code>native-fuzzy</code>), не подстановка написания; <code>search_cells</code> сейчас — <code>simple-search-v0</code> обычным SQLScript, не лингвистический профиль.</li>
+<li>Следующий шаг по каталогу: замыкание за пределами прямо объявленных <code>USING</code>; следующая конструкция — <code>FOR</code> или табличные функции в <code>FROM</code> — по гистограмме корпуса.</li>
+<li>Потолок 5 % (<code>XMLTABLE</code>, <code>HIERARCHY</code>) — потолок, а не пункт бэклога.</li>
+<li>PR #21 (DuckDB-Wasm в превью): база в памяти, снапшот Cache Storage не восстанавливается — заявлено как «intentionally volatile»; OPFS и политика миграции — отдельные ворота перед сменой дефолта Pages.</li>
+</ul>
+
+<footer>
+<p><strong>Источники</strong> (всё в репозитории; читалось на <code>main</code>/<code>3887bd1</code>, 2026-09-22):</p>
+<div class="src">
+docs/amdp-portable-milestone-report.md · docs/amdp-portable-runtime.md · docs/sqlscript-splitter.md · docs/sqlscript-hana-observed.md · docs/sqlscript-surface.md · docs/sqlscript-corpus.md · docs/amdp-oracle.md · docs/adr/0002-portable-and-native-fuzzy-text-profiles.md · tools/amdp-extract.mjs · tools/amdp-gen.mjs · tools/amdp-destination.mjs · tools/amdp-run.mjs · tools/sqlscript/lexer.mjs · tools/sqlscript/to-ir.mjs · tools/sqlscript-ir.mjs · tools/sqlscript-to-procedure-ir.mjs · tools/sqlscript-procedure-ir.mjs · tools/sqlscript-lower.mjs · tools/sqlscript-conformance.mjs · tools/postgres-client.mjs · tools/duckdb-wasm-client.mjs · test/sqlscript-hana-oracle.json · test/fixtures/amdp-cleanroom/neutral_matrix.clas.abap.txt · gen/amdp/procedures.json
+</div>
+<p>SQL в §5 и трассы получены скриптом вне дерева, импортирующим перечисленные модули; таблица §6 — прогон <code>tools/sqlscript-conformance.mjs --json</code> на этой машине. Ячейки «предп.» в §8 — знания о движках, которые в репозитории не измерены; они помечены, чтобы не быть прочитанными как факты.</p>
+</footer>
+</main>
+</body>
+</html>
