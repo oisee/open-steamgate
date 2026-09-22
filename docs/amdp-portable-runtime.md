@@ -451,6 +451,24 @@ the actual SQLScript `ARRAY` declaration and `UNNEST ... WITH ORDINALITY`
 surface; the synthetic `array_expand` spelling will not be presented as a
 native HANA feature.
 
+### 2026-09-22 — P1i fixed INTEGER ARRAY expansion
+
+The tracked `expand_values` method now uses real SQLScript rather than the
+old parse-only placeholder: a top-level `INTEGER ARRAY = ARRAY(...)`, an
+assignment from `UNNEST(:array) WITH ORDINALITY AS (value, position)`, and an
+ordered read of that table variable. The parser retains ARRAY and UNNEST as
+named constructs; the procedure compiler turns the fixed constructor into a
+typed immutable relation, so the database still performs the relational
+work rather than receiving a JavaScript row array.
+
+The direct source agrees between native HANA SQLScript, portable ordinary
+HANA SQL and DuckDB for `[2, 2, NULL, 5]`: duplicates remain, NULL remains,
+and positions are one-based. The portable trace reports one database
+statement and no fallback. Empty constructors, non-INTEGER elements, unknown
+arrays, conditional declarations, multiple arrays, mutation, concatenation
+and `ARRAY_AGG` remain named boundaries. The demo advances to `9 executed / 0
+partial / 2 refused`.
+
 ### 2026-09-22 — P1c first corpus method on HANA and DuckDB
 
 The unchanged synthetic `mix_rows` method moves the ledger to `1 executable /

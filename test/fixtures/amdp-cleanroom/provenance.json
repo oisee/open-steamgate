@@ -1,11 +1,11 @@
 {
-  "schema": "amdp-cleanroom-corpus/v2",
-  "construction": "Every fixture, identifier, literal, row, and statement was independently authored from the aggregate observation specification.",
+  "schema": "amdp-cleanroom-corpus/v3",
+  "construction": "Every fixture, identifier, literal, row, and statement was independently authored from the aggregate observation specification; public SQLScript syntax was checked separately without consulting restricted sources.",
   "source_exclusions": [
     "No original archive was opened or copied.",
     "No restricted source tree was opened or copied.",
     "No member path, filename, source identifier, comment, domain vocabulary, literal payload, algorithm, or statement sequence was retained.",
-    "No network or external reference was used to construct these fixtures."
+    "No external reference was used to reconstruct restricted identifiers, payloads, algorithms, or statement sequences."
   ],
   "covered_categories": [
     "procedure and function headers",
@@ -18,7 +18,7 @@
     "date/current-value expressions, declarations, local assignment, host references, cursor declaration, block control",
     "session context and null-bearing synthetic data",
     "approximate-match and score-shaped calls as parse-only placeholders",
-    "array-expansion-shaped table function call as a parse-only placeholder",
+    "a synthetic fixed INTEGER ARRAY expanded through the public UNNEST WITH ORDINALITY syntax",
     "set difference, null substitution, mapping/default-shaped calls, and null predicates",
     "optimizer-hint syntax, execution identity tokens, and optional/returning declaration shapes"
   ],
@@ -31,6 +31,6 @@
     {"category": "runtime filtering and dynamically executed SQL", "reason": "No safe public grammar or runtime harness exists for dynamic text execution; omitted rather than inventing statement fragments."},
     {"category": "controlled SQL errors and native error codes", "reason": "Explicit error statements and source-specific codes are not represented by the public grammar; omitted rather than guessing error text."},
     {"category": "loop continuation", "reason": "The public grammar models conditional branches but no loop or continuation statement; omitted rather than simulating control flow."},
-    {"category": "table constructors and array runtime semantics", "reason": "The fixture retains parse-only function/table-function shapes; constructor typing, element order, and null-array behavior require an isolated runtime."}
+    {"category": "general array runtime semantics", "reason": "Only a fixed INTEGER ARRAY constructor, duplicate and NULL elements, UNNEST, and one-based ordinality are measured; empty arrays, other element types, mutation, concatenation, multiple arrays and ARRAY_AGG remain outside this slice."}
   ]
 }

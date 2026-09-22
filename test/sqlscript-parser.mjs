@@ -54,6 +54,14 @@ describe("the SQLScript grammar", () => {
     expect(names(loop).filter((name) => name === "Assignment")).to.have.length(2);
   });
 
+  it("keeps a measured ARRAY constructor and UNNEST WITH ORDINALITY visible", () => {
+    const t = tree(`DECLARE lv_values INTEGER ARRAY = ARRAY(2, 5, NULL);
+      lt = UNNEST(:lv_values) WITH ORDINALITY AS (element_value, position_value);
+      et = SELECT element_value, position_value FROM :lt;`);
+    expect(names(t)).to.include("Declare").and.to.include("UnnestCall");
+    expect(leaves(t, "host")).to.include(":lv_values");
+  });
+
   it("requires balanced parentheses around a WHILE condition", () => {
     expect(() => tree("WHILE (1 = 1 DO END WHILE;")).to.throw(ParseError);
     expect(() => tree("WHILE 1 = 1) DO END WHILE;")).to.throw(ParseError);

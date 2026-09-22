@@ -14,6 +14,13 @@ describe("the Portable AMDP progress demo", function () {
     expect(byMethod.get("squares").portable.runs[0].trace).to.include({engine: "duckdb", fallback: false});
     expect(byMethod.get("transform").portable.status).to.equal("executed");
     expect(byMethod.get("identity_cells").portable.status).to.equal("executed");
+    expect(byMethod.get("expand_values").portable.status).to.equal("executed");
+    expect(byMethod.get("expand_values").portable.runs[0].rows).to.deep.equal([
+      {ELEMENT_VALUE: 2, POSITION_VALUE: 1},
+      {ELEMENT_VALUE: 2, POSITION_VALUE: 2},
+      {ELEMENT_VALUE: null, POSITION_VALUE: 3},
+      {ELEMENT_VALUE: 5, POSITION_VALUE: 4},
+    ]);
     expect(byMethod.get("search_cells").portable.status).to.equal("refused");
     expect(report.counts.executed + report.counts.partial + report.counts.refused).to.equal(11);
   });

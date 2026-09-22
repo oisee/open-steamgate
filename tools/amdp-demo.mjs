@@ -63,7 +63,7 @@ const scenarios = {
   identity_cells: [{session: {currentUser: "DEMO_USER", currentSchema: "DEMO_SCHEMA"},
     relations: () => ({IT_CELLS: simpleCells})}],
   search_cells: [{inputs: {IV_QUERY: "amber"}, relations: () => ({IT_CELLS: simpleCells})}],
-  expand_values: [{inputs: {IV_ARRAY: "[2,5]"}}],
+  expand_values: [{}],
   optional_value: [{inputs: {IV_SEED: 11}}],
   scalar_value: [{inputs: {IV_SEED: -3}}],
   control_rows: [{inputs: {IV_LIMIT: 2}, relations: () => ({IT_LEFT: seed().leftRows})}],

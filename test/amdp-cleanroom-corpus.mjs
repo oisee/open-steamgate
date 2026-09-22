@@ -100,7 +100,7 @@ describe("independent AMDP clean-room corpus", () => {
     const byName = new Map(result.methods.map((method) => [method.name, method]));
     expect(byName.get("difference_cells").body).to.match(/\bEXCEPT\b/i);
     expect(byName.get("search_cells").body).to.match(/APPROX_MATCH|MATCH_SCORE|COALESCE|MAP_DEFAULT|WITH HINT/i);
-    expect(byName.get("expand_values").body).to.match(/array_expand/i);
+    expect(byName.get("expand_values").body).to.match(/INTEGER ARRAY|UNNEST|WITH ORDINALITY/i);
     expect(byName.get("identity_cells").body).to.match(/CURRENT_USER|CURRENT_SCHEMA/i);
     expect(source("neutral_additions.clas.abap.txt")).to.match(/iv_seed\) TYPE i OPTIONAL/i);
     expect(byName.get("optional_value").parameters.map((p) => p.direction)).to.deep.equal(["IN", "RETURNING"]);
@@ -125,10 +125,9 @@ describe("independent AMDP clean-room corpus", () => {
   it("classifies every corpus method as compilable or a named refusal, never a crash", () => {
     const expected = {
       search_cells: /COALESCE arguments require identical measured types/,
-      expand_values: /table function call in FROM is parsed but not lowered/,
       control_rows: /only scalar DECLARE/,
     };
-    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells"]);
+    const compilable = new Set(["mix_rows", "rank_rows", "transform", "optional_value", "scalar_value", "difference_cells", "identity_cells", "expand_values"]);
     const seen = [];
     for (const file of fixtureFiles) {
       const logicalName = file.replace(/\.txt$/, "").replace(/^neutral_/, "cl_neutral_");
@@ -465,6 +464,58 @@ describe("independent AMDP clean-room corpus", () => {
     } finally {
       await client.disconnect();
     }
+  });
+
+  it("executes the tracked INTEGER ARRAY with duplicate, NULL and one-based ordinality", async () => {
+    const extracted = extract(source("neutral_additions.clas.abap.txt"), "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "expand_values");
+    const compiled = compileProcedure(method, extracted.types);
+    const client = new DuckDBDatabaseClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const answer = await runProcedure(compiled, {client, dialect: "duckdb"});
+      expect(answer.rows).to.deep.equal([
+        {ELEMENT_VALUE: 2, POSITION_VALUE: 1},
+        {ELEMENT_VALUE: 2, POSITION_VALUE: 2},
+        {ELEMENT_VALUE: null, POSITION_VALUE: 3},
+        {ELEMENT_VALUE: 5, POSITION_VALUE: 4},
+      ]);
+      expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+    } finally {
+      await client.disconnect();
+    }
+
+    expect(() => compileProcedure({...method, body: method.body.replace("ARRAY(2, 2, NULL, 5)", "ARRAY()")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /empty ARRAY constructor/);
+    expect(() => compileProcedure({...method, body: method.body.replace("INTEGER ARRAY", "NVARCHAR(4) ARRAY")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ARRAY support is limited to INTEGER elements exactly/);
+    expect(() => compileProcedure({...method, body: method.body.replace("INTEGER ARRAY", "INTEGER(4) ARRAY")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ARRAY support is limited to INTEGER elements exactly/);
+    expect(() => compileProcedure({...method, body: method.body.replace("ARRAY(2, 2, NULL, 5)", "ARRAY(1 + 1)")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ARRAY constructor values must be INTEGER literals or NULL exactly/);
+    for (const expression of ["ARRAY(1) || ARRAY(2)", "ARRAY(1) + 2", "ARRAY(1) * 2"]) {
+      expect(() => compileProcedure({...method, body: method.body.replace("ARRAY(2, 2, NULL, 5)", expression)}, extracted.types), expression)
+        .to.throw(UnsupportedSqlScript, /requires an ARRAY\(\.\.\.\) constructor/);
+    }
+    for (const expression of ["ARRAY(1 ORDER BY 2)", "ARRAY(1) OVER ()"]) {
+      expect(() => compileProcedure({...method, body: method.body.replace("ARRAY(2, 2, NULL, 5)", expression)}, extracted.types), expression)
+        .to.throw(UnsupportedSqlScript, /ARRAY constructor decorations are outside/);
+    }
+    expect(() => compileProcedure({...method, body: method.body.replace("ARRAY(2, 2, NULL, 5)", "ARRAY(2147483648)")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /outside SQLScript INTEGER/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "DECLARE lv_values INTEGER ARRAY = ARRAY(2, 2, NULL, 5);",
+      "DECLARE lv_seed INTEGER := 3;\n    DECLARE lv_values INTEGER ARRAY = ARRAY(:lv_seed);\n    lv_seed = 9;")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /ARRAY constructor values must be INTEGER literals or NULL exactly/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "DECLARE lv_values INTEGER ARRAY = ARRAY(2, 2, NULL, 5);",
+      "DECLARE lv_first INTEGER ARRAY = ARRAY(1);\n    DECLARE lv_values INTEGER ARRAY = ARRAY(2, 2, NULL, 5);")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /supports one ARRAY declaration exactly/);
+    expect(() => compileProcedure({...method, body: method.body.replace(":lv_values", ":missing_values")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /UNNEST refers to unknown array/);
+    expect(() => compileProcedure({...method, body: method.body.replace(
+      "AS (element_value, position_value)", "AS (element_value, element_value)")}, extracted.types))
+      .to.throw(UnsupportedSqlScript, /column names must be distinct/);
   });
 
   it("executes a value-level correlated EXISTS where the correlation changes the answer", async () => {

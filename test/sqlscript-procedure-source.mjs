@@ -177,4 +177,29 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
       expect(refusal.message).to.match(/scalar assignment RV requires an identical measured type/);
     }
   });
+
+  it("expands a measured INTEGER ARRAY through UNNEST WITH ORDINALITY", async () => {
+    const types = new Map([
+      ["TY_VALUE", {kind: "structure", components: [
+        {name: "element_value", abapType: "i"}, {name: "position_value", abapType: "i"},
+      ]}],
+      ["TT_VALUES", {kind: "table", of: "TY_VALUE"}],
+    ]);
+    const method = {body: `DECLARE lv_values INTEGER ARRAY = ARRAY(2, 2, NULL, 5);
+      lt_values = UNNEST(:lv_values) WITH ORDINALITY AS (element_value, position_value);
+      et_values = SELECT element_value, position_value
+        FROM :lt_values
+        ORDER BY position_value;`, parameters: [
+      {name: "et_values", direction: "OUT", abapType: "tt_values"},
+    ]};
+    const compiled = compileProcedure(method, types);
+    const answer = await runProcedure(compiled, {client, dialect: "duckdb"});
+    expect(answer.rows).to.deep.equal([
+      {ELEMENT_VALUE: 2, POSITION_VALUE: 1},
+      {ELEMENT_VALUE: 2, POSITION_VALUE: 2},
+      {ELEMENT_VALUE: null, POSITION_VALUE: 3},
+      {ELEMENT_VALUE: 5, POSITION_VALUE: 4},
+    ]);
+    expect(answer.trace).to.include({engine: "duckdb", fallback: false, databaseStatements: 1});
+  });
 });

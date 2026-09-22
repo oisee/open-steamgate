@@ -3,7 +3,7 @@
 // Statement ownership lives here; expressions and relations deliberately go
 // through the established relational binder in to-ir.mjs. That keeps one
 // implementation of SQLScript typing and one list of explicit refusals.
-import {T, schemaOf} from "./sqlscript-ir.mjs";
+import {T, lit, scan, project, union, schemaOf} from "./sqlscript-ir.mjs";
 import {toIr, BindError} from "./sqlscript/to-ir.mjs";
 import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
@@ -22,6 +22,25 @@ const leaf = (node) => {
   }
 };
 const nameOf = (node) => upper(leaf(node)?.value ?? "");
+const exactWrapped = (node, kind) => {
+  let current = node;
+  while (current !== undefined && current.node !== kind) {
+    if (!["Expr", "Term", "Factor"].includes(current.node)) return undefined;
+    const semantic = (current.children ?? []).filter((one) => one.node !== "word");
+    if (semantic.length !== 1) return undefined;
+    current = semantic[0];
+  }
+  return current;
+};
+const terminalLeaves = (node, found = []) => {
+  if (node?.value !== undefined) found.push(node);
+  else for (const one of node?.children ?? []) terminalLeaves(one, found);
+  return found;
+};
+const isBareNull = (node) => {
+  const leaves = terminalLeaves(node);
+  return leaves.length === 1 && leaves[0].node === "identifier" && upper(leaves[0].value) === "NULL";
+};
 
 export function irTypeFromAbap(type) {
   const text = upper(type).trim();
@@ -84,6 +103,7 @@ export function compileProcedure(method, types) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
+  const arrayValues = Object.create(null);
   if (output.kind === "scalar") scalarTypes[output.name] = output.type;
   const snapshotEnvironment = () => ({
     relations: structuredClone(relationSchemas),
@@ -108,10 +128,10 @@ export function compileProcedure(method, types) {
   };
   const bind = (node, fragment) => toIr(node, {
     fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
-    signature: method,
+    signature: method, arrayValues,
   });
 
-  const compileStatements = (container) => {
+  const compileStatements = (container, allowArrayDeclarations = false) => {
     const result = [];
     const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "Return", "SetOperation"]);
     for (const wrapper of container.children ?? []) {
@@ -120,6 +140,43 @@ export function compileProcedure(method, types) {
         : (directStatements.has(wrapper.node) ? wrapper : undefined);
       if (node === undefined) continue;
       if (node.node === "Declare") {
+        if ((node.children ?? []).some((one) => one.node === "word" && upper(one.value) === "ARRAY")) {
+          if (!allowArrayDeclarations) {
+            throw new UnsupportedSqlScript("initial ARRAY declarations must be top-level and unconditional", node);
+          }
+          const name = nameOf(child(node, "Name"));
+          if (Object.keys(arrayValues).length > 0) {
+            throw new UnsupportedSqlScript("initial portable subset supports one ARRAY declaration exactly", node);
+          }
+          if (arrayValues[name] !== undefined) throw new UnsupportedSqlScript(`duplicate ARRAY declaration ${name}`, node);
+          const typeNode = child(node, "TypeName");
+          const typeLeaves = terminalLeaves(typeNode);
+          const typeName = nameOf(typeNode);
+          if (typeLeaves.length !== 1 || typeLeaves[0].node !== "identifier"
+              || !["INT", "INTEGER"].includes(typeName)) {
+            throw new UnsupportedSqlScript("initial ARRAY support is limited to INTEGER elements exactly", node);
+          }
+          const constructor = exactWrapped(child(node, "Expr"), "FunctionCall");
+          if (constructor === undefined || nameOf(constructor) !== "ARRAY") {
+            throw new UnsupportedSqlScript("ARRAY declaration requires an ARRAY(...) constructor", node);
+          }
+          if ((constructor.children ?? []).some((one) => !["identifier", "word", "Expr"].includes(one.node))
+              || children(constructor, "identifier").length !== 1) {
+            throw new UnsupportedSqlScript("ARRAY constructor decorations are outside the fixed portable subset", constructor);
+          }
+          const values = children(constructor, "Expr").map((one) =>
+            isBareNull(one) ? lit(null, T.int) : bind(one, "expression"));
+          if (values.length === 0) throw new UnsupportedSqlScript("empty ARRAY constructor is not supported yet", node);
+          if (values.some((one) => one.node !== "lit" || JSON.stringify(one.type) !== JSON.stringify(T.int))) {
+            throw new UnsupportedSqlScript("initial ARRAY constructor values must be INTEGER literals or NULL exactly", node);
+          }
+          if (values.some((one) => one.value != null
+              && (!Number.isInteger(one.value) || one.value < -2147483648 || one.value > 2147483647))) {
+            throw new UnsupportedSqlScript("ARRAY constructor literal is outside SQLScript INTEGER", node);
+          }
+          arrayValues[name] = values;
+          continue;
+        }
         if (child(node, "ColumnDef") !== undefined || (node.children ?? []).some((one) =>
           one.node === "word" && ["TABLE", "CURSOR"].includes(upper(one.value)))) {
           throw new UnsupportedSqlScript("only scalar DECLARE belongs to the initial portable subset", node);
@@ -135,6 +192,29 @@ export function compileProcedure(method, types) {
           initialNode === undefined ? undefined : bind(initialNode, "expression"), node));
       } else if (node.node === "Assignment") {
         const name = nameOf(child(node, "Name"));
+        const unnest = child(node, "UnnestCall");
+        if (unnest !== undefined) {
+          const host = (unnest.children ?? []).find((one) => one.node === "host");
+          const arrayName = upper(String(host?.value ?? "").slice(1));
+          const values = arrayValues[arrayName];
+          if (!Array.isArray(values)) {
+            throw new UnsupportedSqlScript(`UNNEST refers to unknown array :${arrayName.toLowerCase()}`, unnest);
+          }
+          const names = children(unnest, "Name").map(nameOf);
+          if (names.length !== 2) {
+            throw new UnsupportedSqlScript("UNNEST WITH ORDINALITY requires value and position column names", unnest);
+          }
+          if (names[0] === names[1]) {
+            throw new UnsupportedSqlScript("UNNEST WITH ORDINALITY column names must be distinct", unnest);
+          }
+          const rows = values.map((value, index) => project(scan("DUMMY"), [
+            {as: names[0], expr: value}, {as: names[1], expr: lit(index + 1, T.int)},
+          ]));
+          const rel = rows.length === 1 ? rows[0] : union(rows, true);
+          relationSchemas[name] = {[names[0]]: T.int, [names[1]]: T.int};
+          result.push(assignRelation(name, rel, node));
+          continue;
+        }
         const set = child(node, "SetOperation");
         if (set !== undefined) {
           const rel = bind(set, "relation");
@@ -200,7 +280,7 @@ export function compileProcedure(method, types) {
   };
 
   try {
-    const body = compileStatements(tree);
+    const body = compileStatements(tree, true);
     const containsRelationStatement = (statements) => statements.some((statement) =>
       statement.stmt === "assign-relation"
         || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))

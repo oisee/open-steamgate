@@ -198,6 +198,19 @@ export class Source extends Expression {
   }
 }
 
+/** The first measured SQLScript array-to-relation form.
+ *
+ * `UNNEST(:a) WITH ORDINALITY AS ("VALUE", "POSITION")` deliberately has
+ * its own node: treating it as a generic table function would lose both the
+ * array binding and HANA's one-based ordinal column. */
+export class UnnestCall extends Expression {
+  getRunnable() {
+    return seq(str("UNNEST"), "(", tok(TokenKind.host), ")",
+      str("WITH"), str("ORDINALITY"), str("AS"),
+      "(", new Name(), ",", new Name(), ")");
+  }
+}
+
 /** `FROM "CL_X=>GET_ROWS"( :iv_a, 1 )` -- one AMDP table function calling
  *  another. The name arrives as a **quoted identifier** because that is how
  *  the generated procedure is named, which is why this is not an ordinary
@@ -295,7 +308,7 @@ export class Assignment extends Expression {
     // have it: 27 bodies, named by the corpus once failures pointed at the
     // right token
     return seq(new Name(), altPrio(":=", "="),
-      altPrio(new SetOperation(), new Expr()), ";");
+      altPrio(new UnnestCall(), new SetOperation(), new Expr()), ";");
   }
 }
 
@@ -322,7 +335,7 @@ export class Declare extends Expression {
       altPrio(
         seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
         seq(new Name(), str("CURSOR"), str("FOR"), new SetOperation()),
-        seq(new Name(), new TypeName(), opt(seq(altPrio(":=", "="), new Expr())))),
+        seq(new Name(), new TypeName(), opt(str("ARRAY")), opt(seq(altPrio(":=", "="), new Expr())))),
       ";");
   }
 }

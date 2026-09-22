@@ -413,6 +413,42 @@ describe("STRING inputs: native SQLScript against portable bound values", functi
   });
 });
 
+describe("INTEGER ARRAY: native UNNEST against a portable relation", function () {
+  this.timeout(60000);
+
+  liveIt("matches values and one-based WITH ORDINALITY positions", async () => {
+    if (process.env.STG_DB_FRESH === "1") throw new Error("live AMDP differential refuses STG_DB_FRESH=1");
+    const source = readFileSync(new URL("fixtures/amdp-cleanroom/neutral_additions.clas.abap.txt", import.meta.url), "utf8");
+    const extracted = extract(source, "cl_neutral_additions.clas.abap");
+    const method = extracted.methods.find((one) => one.name === "expand_values");
+    const portable = compileProcedure(method, extracted.types);
+    const schema = process.env.HANA_SCHEMA ?? "OSD_AMDP_PORTABLE";
+    const client = new HanaDatabaseClient({...connection(), schema});
+    const disposableClass = `ZOSD_A_${randomBytes(6).toString("hex").toUpperCase()}`;
+    const procedureName = `"${schema}"."${disposableClass}=>EXPAND_VALUES"`;
+    let created = false;
+    await client.connect();
+    try {
+      await client.native({sql: hanaProcedure(disposableClass, method, schema, extracted.types), expect: "none"});
+      created = true;
+      const native = await callAmDP(client.client, procedureName, method, {}, extracted.types);
+      const answer = await runProcedure(portable, {client, dialect: "hana"});
+      const rows = (value) => value.map((row) => ({
+        ELEMENT_VALUE: row.ELEMENT_VALUE == null ? null : Number(row.ELEMENT_VALUE),
+        POSITION_VALUE: Number(row.POSITION_VALUE),
+      })).sort((a, b) => a.POSITION_VALUE - b.POSITION_VALUE);
+      expect(rows(answer.rows)).to.deep.equal(rows(native.et_values));
+      expect(answer.trace).to.include({engine: "hana", fallback: false, databaseStatements: 1});
+    } finally {
+      try {
+        if (created) await client.native({sql: `DROP PROCEDURE ${procedureName}`, expect: "none"}).catch(() => undefined);
+      } finally {
+        await client.disconnect();
+      }
+    }
+  });
+});
+
 describe("scalar functions: native SQLScript against portable host evaluation", function () {
   this.timeout(60000);
 

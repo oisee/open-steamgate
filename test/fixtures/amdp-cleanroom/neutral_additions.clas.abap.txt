@@ -38,7 +38,6 @@ CLASS cl_neutral_additions DEFINITION PUBLIC FINAL CREATE PUBLIC.
                   VALUE(it_right) TYPE tt_cell
         EXPORTING VALUE(et_diff) TYPE tt_cell,
       expand_values
-        IMPORTING VALUE(iv_array) TYPE string
         EXPORTING VALUE(et_values) TYPE tt_element,
       identity_cells
         IMPORTING VALUE(it_cells) TYPE tt_cell
@@ -70,8 +69,11 @@ CLASS cl_neutral_additions IMPLEMENTATION.
 
   METHOD expand_values BY DATABASE PROCEDURE FOR HDB
                         LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
-    et_values = SELECT element_value, position_value
-      FROM array_expand(:iv_array) AS expanded;
+    DECLARE lv_values INTEGER ARRAY = ARRAY(2, 2, NULL, 5);
+    lt_values = UNNEST(:lv_values) WITH ORDINALITY
+      AS (element_value, position_value);
+    et_values = SELECT element_value, position_value FROM :lt_values
+      ORDER BY position_value;
   ENDMETHOD.
 
   METHOD identity_cells BY DATABASE PROCEDURE FOR HDB

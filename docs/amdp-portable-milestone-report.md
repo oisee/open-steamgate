@@ -178,7 +178,7 @@ It currently contains ten synthetic methods covering these categories:
 | --- | --- | --- |
 | `search_cells` | approximate scoring, null substitution, mapping, hint | measured mixed-type `COALESCE`, then fuzzy-search capability |
 | `difference_cells` | set difference | **executable on HANA and DuckDB** |
-| `expand_values` | array/row expansion shape | table-function/array semantics |
+| `expand_values` | fixed INTEGER array and ordered row expansion | **executable on HANA and DuckDB** |
 | `identity_cells` | execution identity | **executable on HANA and DuckDB with an explicit session** |
 | `optional_value` | optional input and scalar return | **executable in the portable host runtime** |
 | `transform` | `IF`/`ELSEIF`, regex and session context | **all branches executable on HANA and DuckDB** |
@@ -187,9 +187,9 @@ It currently contains ten synthetic methods covering these categories:
 | `control_rows` | cursor declaration, block and conditional | cursor/table declaration |
 | `scalar_value` | scalar function return | **executable in the portable host runtime** |
 
-The current clean-room ledger is `7 fully executable / 3 named refusals / 0
+The current clean-room ledger is `8 fully executable / 2 named refusals / 0
 crashes`; including the original `SQUARES` showcase, the live demo reads
-`8 executed / 0 partial / 3 refused`. Parser
+`9 executed / 0 partial / 2 refused`. Parser
 success is not reported as runtime support: a tracked method body moves only
 after it executes directly, without body rewriting, at value level. Relational
 methods must agree on native-versus-portable HANA and DuckDB; scalar-only host
@@ -266,16 +266,19 @@ that contract and its cross-engine corpus exist.
   non-string value is refused, while an explicit SQL NULL remains distinct.
   STRING-dependent host assignment/control flow remains refused until its
   conversion and collation semantics are measured;
-- full SQLScript/AMDP regression: 386 passing tests and 14 explicit live
+- direct-source `expand_values`: native HANA `INTEGER ARRAY` and `UNNEST WITH
+  ORDINALITY` agree with portable ordinary HANA SQL; DuckDB preserves a
+  duplicate, a NULL element and one-based positions in one statement;
+- full SQLScript/AMDP regression: 389 passing tests and 15 explicit live
   integration cases pending in the ordinary offline run;
-- live HANA focused suite: 11 passing, including the positive `LIMIT ?` and
+- live HANA focused suite: 12 passing, including the positive `LIMIT ?` and
   negative `LIMIT CAST(? AS INTEGER)` oracle probes;
 - ABAP lint: zero issues;
 - clean-room focused suite and leak scan: green.
 
 ## Next coverage order
 
-1. Native array declaration/expansion, then fuzzy search, dynamic SQL, controlled errors and
+1. Fuzzy search, dynamic SQL, controlled errors and
    cursor execution only as separately measured capabilities.
 
 SQLite and further PostgreSQL integration remain parked until the HANA and

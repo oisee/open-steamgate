@@ -11,6 +11,9 @@
 > identity. Typed ABAP `STRING` inputs now cross the same boundary too;
 > omitting an `OPTIONAL STRING` supplies the ABAP initial empty string, while
 > SQL `NULL` remains distinct. Read the milestone report for the
+> A real fixed `INTEGER ARRAY` now expands through `UNNEST ... WITH
+> ORDINALITY` as well, preserving duplicates, NULL elements and one-based
+> positions on HANA and DuckDB. Read the milestone report for the
 > architecture, safety boundaries, ten-method synthetic corpus and next
 > coverage steps.
 >
