@@ -93,6 +93,13 @@ describe("tools/osd-data: the rows of the local system", function () {
     expect(error).to.be.instanceOf(Error);
   });
 
+  it("keeps spaces inside a COUNT expression instead of inventing commas", async () => {
+    expect(openSqlToSql("SELECT COUNT( * ) FROM zstg_demo"))
+      .to.equal("SELECT COUNT( * ) FROM zstg_demo");
+    expect(Object.values((await data.query("SELECT COUNT( * ) FROM zstg_demo")).rows[0])[0])
+      .to.be.greaterThan(0);
+  });
+
   it("the store hands out the same data layer, so the façade has one door", async () => {
     const store = new ObjectStore();
     expect(store.data()).to.equal(store.data());

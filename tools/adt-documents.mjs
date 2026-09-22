@@ -1153,18 +1153,26 @@ function classNodesOf(store, name) {
 // is holding, which is usually source it has not written yet. Status matters
 // as much as the messages: a client reads "processed" as "this ran", and a
 // report that could not run must not look like a report that found nothing.
-export function checkReportDocument(reports) {
+export function checkReportDocument(reports, options = {}) {
   // A4H puts the message text in shortText and the position only in the URI
   // fragment; it emits no line, column or category attributes
   // (.local/capture/oracle/a4h-adt.jsonl:154). A message whose text is a
   // child element reaches the client as a finding with no words in it.
   const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
 
-  const report = (r) => `  <chkrun:checkReport chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}">
+  const report = (r) => {
+    const attrs = `chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}"`;
+    // The SQL Console handler assumes that a present message list contains
+    // an error at index 0. A4H omits the list entirely on a clean check.
+    if (options.omitEmptyList === true && r.issues.length === 0) {
+      return `  <chkrun:checkReport ${attrs}/>`;
+    }
+    return `  <chkrun:checkReport ${attrs}>
     <chkrun:checkMessageList>
 ${r.issues.map((i) => message(r.uri, i)).join("\n")}
     </chkrun:checkMessageList>
   </chkrun:checkReport>`;
+  };
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun">

@@ -485,6 +485,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(report).to.contain(`chkrun:triggeringUri="${uri}"`);
       expect(report).to.contain('chkrun:status="processed"');
       expect(report).to.not.contain("<chkrun:checkMessage ");
+      expect(report).to.not.contain("<chkrun:checkMessageList>");
 
       const bad = await call(`/datapreview/freestyle?action=checkSyntax&uniqueURI=${encodeURIComponent(uri)}`, {
         method: "POST", body: "SELECT definitely_missing FROM zstg_demo",
@@ -1194,9 +1195,12 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
 
       const cds = await call("/datapreview/ddic?ddicEntityName=ZC_STG_BOOKING", {method: "POST",
-        body: "SELECT COUNT(*) FROM ZC_STG_BOOKING"});
+        body: "SELECT COUNT( * ) FROM ZC_STG_BOOKING"});
       expect(cds.status, "CDS count travels through the same DDIC relation").to.equal(200);
       expect(await cds.text()).to.match(/<dataPreview:data>\d+<\/dataPreview:data>/);
+      const table = await call("/datapreview/ddic?ddicEntityName=ZSTG_PHOTO&dataAging=false", {method: "POST",
+        body: "SELECT COUNT( * ) FROM ZSTG_PHOTO"});
+      expect(table.status, "ADT's COUNT( * ) spelling works for TABL too").to.equal(200);
     });
 
     it("describes a CDS view by its element names, not its columns", async () => {

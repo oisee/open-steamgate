@@ -2031,14 +2031,14 @@ export function adtRouter(options = {}) {
         // grammar in the façade or materialising a Check button's SELECT.
         await data.check(query);
         res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
-          .send(checkReportDocument([{uri, issues: []}]));
+          .send(checkReportDocument([{uri, issues: [], statusText: "processed"}], {omitEmptyList: true}));
       } catch (e) {
         const message = String(e?.message || e?.cause?.message || e?.code || "SQL syntax check failed");
         const infrastructure = ["NOT_BUILT", "NOT_SERVING", "CHECK_UNAVAILABLE"].includes(e?.code);
         res.status(200).type("application/vnd.sap.adt.checkmessages+xml; charset=utf-8")
           .send(checkReportDocument([infrastructure
             ? {uri, issues: [], status: "notProcessed", statusText: message}
-            : {uri, issues: [{line: 1, column: 1, severity: "E", message}]}]));
+            : {uri, issues: [{line: 1, column: 1, severity: "E", message}]}], {omitEmptyList: true}));
       }
       return;
     }

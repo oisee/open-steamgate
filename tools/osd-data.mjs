@@ -29,7 +29,10 @@ export function openSqlToSql(text) {
   const head = /^(select\s+(?:distinct\s+)?)(.+?)(\s+from\s+)/is.exec(out);
   if (head !== null) {
     const [, keyword, list, from] = head;
-    if (!list.includes(",") && list.trim() !== "*" && /\s/.test(list.trim())) {
+    // Only a sequence of plain field names is the old comma-less syntax.
+    // Eclipse's row-count query is COUNT( * ); splitting inside the function
+    // turned it into COUNT(, *, ) and made F8 counts fail on every backend.
+    if (!list.includes(",") && /^[A-Za-z_/$][\w/$~]*(?:\s+[A-Za-z_/$][\w/$~]*)+$/.test(list.trim())) {
       out = keyword + list.trim().split(/\s+/).join(", ") + from + out.slice(head[0].length);
     }
   }
