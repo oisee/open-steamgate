@@ -529,12 +529,6 @@ export function compileProcedure(method, types, options = {}) {
         let shape;
         try { shape = Object.entries(schemaOf(rel, catalogue)); }
         catch (error) { throw new UnsupportedSqlScript(`cannot prove the columns of SELECT ... INTO: ${error.message}`, node); }
-        // two columns of one name collapse into one key of the schema and of
-        // the answer's row, so they cannot be told apart: refused, not merged
-        const items = children(selects[0], "SelectItem");
-        if (!items.some((one) => terminalLeaves(one).some((leaf) => leaf.value === "*")) && items.length !== shape.length) {
-          throw new UnsupportedSqlScript(`SELECT ... INTO reads ${items.length} columns under ${shape.length} distinct names; give each its own`, node);
-        }
         if (shape.length !== targets.length) {
           throw new UnsupportedSqlScript(`SELECT ... INTO names ${targets.length} target(s) for ${shape.length} column(s)`, node);
         }
@@ -548,7 +542,7 @@ export function compileProcedure(method, types, options = {}) {
           // lv INTEGER compiles and assigns on A4H; the value is range-checked
           const narrowing = shape[i][1]?.abap === "INT8" && same(scalarTypes[target], T.int);
           if (!narrowing && !same(shape[i][1], scalarTypes[target])) {
-            throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: column ${shape[i][0]} is ${shape[i][1]?.abap ?? "untyped"}, the scalar ${scalarTypes[target].abap}; not an identical measured type`, node);
+            throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: column ${i + 1} (${shape[i][0]}) is ${shape[i][1]?.abap ?? "untyped"}, the scalar ${scalarTypes[target].abap}; not an identical measured type`, node);
           }
         });
         const defaults = defaultNodes.length === 0 ? undefined : defaultNodes.map((one, i) => {

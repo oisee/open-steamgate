@@ -953,8 +953,12 @@ nearly all `SELECT COUNT(*) INTO lv FROM …`. Measured on A4H first.*
 `SELECT … INTO a, b [DEFAULT x, y]` parses and compiles into a step of its
 own: the engine is asked for two rows, one assigns, none raises unless a
 DEFAULT is given, two raise always, as on A4H. The targets must be declared
-scalars of the columns' types; a BIGINT fills an INTEGER, range-checked; two
-columns of one name are refused, since they collapse into one key. The same
+scalars of the columns' types; a BIGINT fills an INTEGER, range-checked. Two
+items of one name in any select are refused where it is bound, since they
+collapse into one key of the schema and of an answer's row (a critic found
+the first version of that check taking the `*` of `count(*)` for a
+`SELECT *`). COUNT, MIN and MAX are typed in every relation now, not only
+here. The same
 step fixed an old grammar defect: a body whose statements went on after a
 bare `SELECT …;` could not be read at all, because the first reading of the
 body matched that prefix and committed.

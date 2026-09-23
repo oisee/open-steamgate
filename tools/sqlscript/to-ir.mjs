@@ -1109,6 +1109,14 @@ export function toIr(tree, options = {}) {
       const as = alias === undefined ? (expr.name ?? "V") : nameOf(alias);
       return {as, expr: projected(expr, as, item)};
     });
+    // two items under one name collapse into one key of the schema and of an
+    // answer's row: a column silently lost. Refused once, here, for every
+    // relation (foreman-dell's critic on #36)
+    const named = items.filter((one) => one.as !== "*").map((one) => one.as);
+    if (new Set(named).size !== named.length) {
+      const twice = named.find((one, i) => named.indexOf(one) !== i);
+      throw new BindError(`${named.length} items under ${new Set(named).size} distinct names (${twice} twice${twice === "V" ? ", an unnamed expression" : ""}); give each its own`, node);
+    }
     // **`SELECT *` is not a projection, it is the absence of one.**
     //
     // A `project` whose only item is a star was reaching the lowering as

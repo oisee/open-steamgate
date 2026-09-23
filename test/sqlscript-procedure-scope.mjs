@@ -535,6 +535,21 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
     expect(await raises(defaultedMany, 0)).to.be.instanceOf(SelectIntoRows);
   });
 
+  it("a BIGINT into an INTEGER scalar is range-checked: 2147483647 fits, 2147483648 is refused", async () => {
+    const edge = program("SELECT count(*) * 2147483647 AS n INTO rv FROM src WHERE id = :iv;");
+    expect((await run(edge, 5)).value).to.equal(2147483647);
+    const over = program("SELECT count(*) * 2147483647 + count(*) AS n INTO rv FROM src WHERE id = :iv;");
+    expect((await raises(over, 5))?.message).to.match(/2147483648 does not fit an INTEGER/);
+    const big = program("SELECT count(*) * 1000000000 AS n INTO rv FROM src;");
+    expect((await raises(big, 0))?.message).to.match(/3000000000 does not fit an INTEGER/);
+  });
+
+  it("a NULL in the one row assigns NULL", async () => {
+    const nulled = program("SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO rv FROM src WHERE id = :iv;");
+    expect((await run(nulled, 5)).value).to.equal(null);
+    expect((await run(nulled, 1)).value).to.equal(1);
+  });
+
   it("COUNT is BIGINT and fills an INTEGER scalar, always one row; MAX of no rows is NULL", async () => {
     const counted = program("SELECT count(*) INTO rv FROM src WHERE id > :iv;");
     expect((await run(counted, 100)).value).to.equal(0);
@@ -546,9 +561,18 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
 
   it("refuses a target that is not declared, a type that differs, a count that differs, and INTO where rows are wanted", () => {
     expect(() => program("SELECT id INTO nobody FROM src WHERE id = :iv; rv = 1;")).to.throw(/SELECT \.\.\. INTO undeclared scalar NOBODY/);
-    expect(() => program("SELECT txt INTO rv FROM src WHERE id = :iv;")).to.throw(/column TXT is C, the scalar I; not an identical measured type/);
+    expect(() => program("SELECT txt INTO rv FROM src WHERE id = :iv;")).to.throw(/column 1 \(TXT\) is C, the scalar I; not an identical measured type/);
     expect(() => program("SELECT id, txt INTO rv FROM src WHERE id = :iv;")).to.throw(/names 1 target\(s\) for 2 column\(s\)/);
-    expect(() => program("DECLARE la INTEGER; SELECT id, id INTO rv, la FROM src WHERE id = :iv;")).to.throw(/reads 2 columns under 1 distinct names/);
+    // the `*` of count(*) is not a SELECT *: three columns into two targets
+    expect(() => program("DECLARE la INTEGER; SELECT id, max(id) AS m, count(*) AS c INTO rv, la FROM src WHERE id = :iv GROUP BY id;"))
+      .to.throw(/names 2 target\(s\) for 3 column\(s\)/);
+    // two items of one name are refused where the select is bound, for every relation
+    expect(() => program("DECLARE la INTEGER; SELECT id, id INTO rv, la FROM src WHERE id = :iv;")).to.throw(/2 items under 1 distinct names \(ID twice\)/);
+    expect(() => program("DECLARE la INTEGER; SELECT count(*), count(*) INTO rv, la FROM src;")).to.throw(/2 items under 1 distinct names \(V twice, an unnamed expression\)/);
+    // DEFAULT values must be one per target
+    expect(() => program("DECLARE la INTEGER; SELECT id, id * 2 AS d INTO rv, la DEFAULT 1 FROM src WHERE id = :iv;")).to.throw(/1 DEFAULT value\(s\) for 2 target\(s\)/);
+    // a BIGINT fills a plain INTEGER only, never an INT2
+    expect(() => program("SELECT count(*) INTO rv FROM src;", "RETURNING VALUE(rv) TYPE int2")).to.throw(/column 1 \(V\) is INT8, the scalar I; not an identical measured type/);
     expect(() => program("et_rows = select id, txt into rv from src;", "EXPORTING VALUE(et_rows) TYPE tt_rows")).to.throw(/SELECT \.\.\. INTO fills scalars; it is a statement, not a relation/);
   });
 });

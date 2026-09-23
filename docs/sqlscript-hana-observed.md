@@ -514,7 +514,11 @@ column in the same expression did **not** overflow, so HANA widens column
 arithmetic and not an aggregate's: the comparison stands between the
 aggregates, not against the column.
 
-The binder types COUNT as INT8 and MIN / MAX as their argument; a BIGINT
-fills an INTEGER scalar through `SELECT … INTO`, range-checked. SUM stays
-untyped: DuckDB widens `SUM(INTEGER)` where HANA overflows, and that
-difference has no answer in the lowering yet. AVG stays untyped too.
+The binder types COUNT as INT8 and MIN / MAX as their argument -- in every
+relation and in window forms too, not only for `SELECT … INTO`; a BIGINT
+fills an INTEGER scalar through `SELECT … INTO`, range-checked. SUM and AVG
+stay typed STRING, the binder's default for a call it has not measured, so
+`SELECT SUM(k) INTO v` with v INTEGER is refused as a type mismatch: DuckDB
+widens `SUM(INTEGER)` where HANA overflows, and that difference has no answer
+in the lowering yet. An unnamed expression is called `V` in the binder's
+messages; two of them in one select are refused as two items of one name.
