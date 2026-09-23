@@ -34,15 +34,19 @@ import {bodiesOf, classesIn} from "./coverage.mjs";
 import {adversarialRows, tableShapesPerTable, effects} from "../sqlscript-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
 import {runBothWays, compare} from "../sqlscript-eager.mjs";
+import {teachingPackages} from "./corpus-config.mjs";
 
-const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
+/** the teaching packages, named in the gitignored .local/corpus-names.json (corpus content stays local) */
+let teaching;
+const isTeaching = (pkg) => (teaching ??= teachingPackages())(pkg);
+
 
 /** every body of the working corpus that reaches an engine */
 export function lowerable(root = ".local/a4h-export", scratch = "/tmp/sqlscript-run") {
   const out = [];
   for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
     const pkg = zip.replace(/\.zip$/, "");
-    if (TEACHING.test(pkg)) continue;
+    if (isTeaching(pkg)) continue;
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
       const name = file.split("/").pop();
       for (const one of bodiesOf(readFileSync(file, "utf8"), name)) {

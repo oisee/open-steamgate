@@ -372,3 +372,39 @@ twenty-two. Naming which is which is the point of counting both ways: a
 remainder of "12 divergences" would have sent somebody to fix rounding
 **presentation** at the same priority as integer division, and only one of
 those can give a wrong answer to an application.
+
+## What the kernel binds for a CHAR-like AMDP input (measured on A4H, 2026-09-23)
+
+Measured with a throwaway `$TMP` class holding one AMDP procedure and a
+program whose ABAP Unit test called it with three sets of values; each
+answer was read back from the assertion text (`fail( quit = no )`), and
+both objects were deleted afterwards. The procedure returned, per input,
+`LENGTH(:iv)`, `'[' || :iv || ']'` and a few comparisons.
+
+| ABAP parameter type | value passed | what the procedure sees |
+| --- | --- | --- |
+| `c LENGTH 3` | `'A'` | `A`, length 1 -- trailing blanks are gone |
+| `c LENGTH 3` | initial | `''`, length 0, and **not NULL** (`IS NULL` false, `= ''` true) |
+| `c LENGTH 3` | `' A'` | ` A`, length 2 -- a leading blank stays |
+| `n LENGTH 3` | `'7'` / `'12'` / initial | `007` / `012` / `000` -- zero-padded to the length |
+| `d` | initial | `00000000` (length 8), not `''` |
+| `t` | initial | `000000` |
+| `mandt` | `sy-mandt` | the logon client, equal to `SESSION_CONTEXT('CLIENT')` |
+| `mandt` | initial | `''` |
+| `string` | `` `A  ` `` / `` ` A` `` | `A  ` (length 3) / ` A` -- STRING keeps its blanks |
+| `tabname` (CHAR 30) | `'T000'` | length 4, and `WHERE tabname = :iv` finds the DD02L row |
+
+`'A'` and `'A  '` are one value for a `c` parameter; ABAP cannot tell them
+apart, so the question was only ever what the kernel binds, and the answer
+is the right-trimmed value. The last row is the one that matters for a
+body: a dictionary CHAR column holds right-trimmed values too, so the
+trimmed input compares equal to it under HANA's unpadded NVARCHAR
+comparison.
+
+What the portable runtime must do at the bind, therefore: CHAR-like inputs
+(CHAR, CLNT, LANG, CUKY, UNIT) right-trimmed, never left-trimmed, the
+initial value as `''` and not NULL; NUMC left-padded with zeros to its
+length; DATS and TIMS as their fixed-width digits (`00000000` initial);
+STRING unchanged. DuckDB and SQLite compare VARCHAR without padding, like
+HANA, so with the trim at the bind no rewriting of comparisons is needed
+(foreman-dell's DuckDB column: `'A  ' = 'A'` is false there).

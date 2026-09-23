@@ -120,6 +120,73 @@ export function toIr(tree, options = {}) {
     else for (const one of n?.children ?? []) terminalLeaves(one, found);
     return found;
   };
+  /** the projection that decides a relation's columns, through the wrappers
+   *  that keep them (order, limit); hints and DISTINCT ride on the project node itself */
+  const projectionOf = (rel) => {
+    let r = rel;
+    while (r !== undefined && (r.rel === "order" || r.rel === "limit")) r = r.input;
+    return r?.rel === "project" ? r : undefined;
+  };
+  const withItems = (rel, items) => {
+    if (rel.rel === "project") return {...rel, items};
+    return {...rel, input: withItems(rel.input, items)};
+  };
+  const giveType = (expr, type) => (expr?.untyped === true && type !== undefined && !isUnresolved(type)
+    ? {...expr, type, untyped: undefined} : expr);
+  /** `SELECT 'k' AS key, NULL AS context FROM dummy UNION ALL SELECT key, ctx
+   *  FROM t`: the columns of a UNION are positional, and a bare NULL in one
+   *  branch takes the type of the first branch that types that column --
+   *  which is how HANA types it (the corpus bodies, 2026-09-23). A column that
+   *  is NULL in every branch stays untyped and is refused at the end. */
+  const typeNullsAcross = (branches) => {
+    const projections = branches.map(projectionOf);
+    if (projections.some((one) => one === undefined)) return branches;
+    const width = projections[0].items.length;
+    if (projections.some((one) => one.items.length !== width)) return branches;
+    const types = [];
+    for (let i = 0; i < width; i += 1) {
+      types.push(projections.map((one) => one.items[i].expr).find((e) => e?.untyped !== true && e?.type !== undefined)?.type);
+    }
+    return branches.map((branch, b) => {
+      const items = projections[b].items;
+      if (!items.some((item) => item.expr?.untyped === true)) return branch;
+      return withItems(branch, items.map((item, i) => ({...item, expr: giveType(item.expr, types[i])})));
+    });
+  };
+  /** an assignment to a declared output (an OUT table parameter, a RETURNING
+   *  table): its schema types a bare NULL by column name */
+  const typeNullsFrom = (rel, schema) => {
+    if (schema === undefined || rel === undefined) return rel;
+    if (rel.rel === "union") return {...rel, inputs: rel.inputs.map((one) => typeNullsFrom(one, schema))};
+    const projection = projectionOf(rel);
+    if (projection === undefined || !projection.items.some((item) => item.expr?.untyped === true)) return rel;
+    return withItems(rel, projection.items.map((item) => ({...item, expr: giveType(item.expr, schema[String(item.as).toUpperCase()])})));
+  };
+  const outSchema = outParam === undefined ? undefined
+    : (outParam.schema ?? relationSchemas[String(outParam.name).toUpperCase()] ?? options.outputSchema);
+
+  // **No untyped NULL leaves the binder.** A CAST, a CASE branch and a
+  // comparison give a NULL literal its type; every other path -- a function
+  // argument, arithmetic, an IN list, a window argument -- would pass
+  // `type: undefined` on to whatever reads it next, and a default there is
+  // the quiet kind of wrong. Checked once, by construction, rather than at
+  // each site somebody remembers (foreman-dell, 2026-09-22).
+  const noUntyped = (out) => {
+    const walk = (node, where) => {
+      if (node === null || typeof node !== "object") return;
+      if (node.untyped === true) throw new BindError(`NULL ${where} has no type here: CAST(NULL AS <type>) says which`);
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "type") continue;
+        const place = node.node === "call" ? `in ${String(node.name ?? node.fn ?? "a call").toUpperCase()}`
+          : (node.as !== undefined && key === "expr" ? `AS ${String(node.as).toLowerCase()}` : where);
+        if (Array.isArray(value)) value.forEach((one) => walk(one, place));
+        else walk(value, place);
+      }
+    };
+    walk(out, "in an expression");
+    return out;
+  };
+
   /** an untyped NULL beside a typed operand takes that type */
   const adopt = (left, right) => {
     if (left?.untyped === true && right?.untyped !== true && right?.type !== undefined) return [{...left, type: right.type, untyped: undefined}, right];
@@ -161,7 +228,7 @@ export function toIr(tree, options = {}) {
     const at = children.findIndex((one) => one.node === "word" && String(one.value).toUpperCase() === "AS");
     if (at >= 0) return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
     // `FROM :it_guid a` -- the AS is optional, and the corpus leaves it out
-    // (`from :it_parent_guid a inner join rsanaummtrmodel b`, 2026-09-22):
+    // (`FROM :it_x a INNER JOIN t b`, a shape the corpus uses, 2026-09-22):
     // an identifier after the source term, on its own, is the alias
     const last = children[children.length - 1];
     if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
@@ -645,7 +712,7 @@ export function toIr(tree, options = {}) {
     }
     const argNodes = kids(call, "Expr");
     // a trailing OPTIONAL / DEFAULT parameter may be left out, as the corpus
-    // does (`convert_configuration(:it_configuration)`, iv_convertvalues
+    // does (a table function called with its table argument only, the
     // DEFAULT 0); the callee's own default then applies on the engine
     const required = fn.parameters.filter((p) => p.optional !== true).length;
     if (argNodes.length < required || argNodes.length > fn.parameters.length) {
@@ -951,12 +1018,10 @@ export function toIr(tree, options = {}) {
       // list, so nothing covered it.
       const star = (item.children ?? []).some((c) =>
         (c.node === "operator" || c.node === "word") && c.value === "*");
-      const projected = (expr, as, at) => {
-        if (expr?.untyped === true) {
-          throw new BindError(`NULL AS ${String(as).toLowerCase()} has no type here: CAST(NULL AS <type>) says which`, at);
-        }
-        return expr;
-      };
+      // A bare `NULL AS x` is kept untyped here: the other branch of a UNION
+      // or the declared output it is assigned to may type it (typeNulls), and
+      // one that nothing types is refused by name when the binder finishes.
+      const projected = (expr) => expr;
       if (star) {
         // `SELECT *` reads every column of the scope, the marked ones included
         const dark = Object.entries(columns).find(([, type]) => isUnresolved(type));
@@ -1179,16 +1244,21 @@ export function toIr(tree, options = {}) {
       return finishSet(except(select(selects[0]), select(selects[1])));
     }
     const all = hasWord(node, "ALL");
-    return finishSet(union(selects.map(select), all));
+    return finishSet(union(typeNullsAcross(selects.map(select)), all));
   }
 
   // The procedural compiler owns statement order and control flow, but it
   // must use this exact binder for the expressions and relations inside
   // those statements. Fragment entry points avoid both a second binder and
   // reparsing source substrings with regular expressions.
-  if (options.fragment === "expression") return expression(tree);
-  if (options.fragment === "condition") return condition(tree);
-  if (options.fragment === "relation") return relation(tree);
+  // an expression or condition fragment (IF, WHILE, a scalar assignment)
+  // may hold a subquery with a bare NULL; it is checked like a relation
+  if (options.fragment === "expression") return noUntyped({expr: expression(tree)}).expr;
+  if (options.fragment === "condition") return noUntyped({cond: condition(tree)}).cond;
+  // the procedural compiler binds relations one assignment at a time; a bare
+  // NULL there is typed by the target's schema when it passes one, and a
+  // NULL nothing typed is refused here exactly as at the end of a body
+  if (options.fragment === "relation") return noUntyped({rel: typeNullsFrom(relation(tree), options.targetSchema)}).rel;
   if (options.fragment === "type") return typeFromName(tree);
 
   // The body, statement by statement and **in order**, because an assignment
@@ -1226,7 +1296,10 @@ export function toIr(tree, options = {}) {
           // and not the thing that was wrong.
           throw new BindError(`the assignment to ${name.toLowerCase()} is of a scalar, and this IR carries relations`, node);
         }
-        const rel = relation(set);
+        // an assignment to the declared output, or to a variable whose schema
+        // was declared, types a bare NULL by that schema's column
+        const targetSchema = outParam !== undefined && String(outParam.name).toUpperCase() === name ? outSchema : relationSchemas[name];
+        const rel = typeNullsFrom(relation(set), targetSchema);
         bound.set(name, {rel});
         statements.push({stmt: "assign", name, rel});
         break;
@@ -1279,35 +1352,15 @@ export function toIr(tree, options = {}) {
         throw new BindError(`${node.node} is parsed but not lowered yet`, node);
     }
   }
-  // **No untyped NULL leaves the binder.** A CAST, a CASE branch and a
-  // comparison give a NULL literal its type; every other path -- a function
-  // argument, arithmetic, an IN list, a window argument -- would pass
-  // `type: undefined` on to whatever reads it next, and a default there is
-  // the quiet kind of wrong. Checked once, by construction, rather than at
-  // each site somebody remembers (foreman-dell, 2026-09-22).
-  const noUntyped = (out) => {
-    const walk = (node, where) => {
-      if (node === null || typeof node !== "object") return;
-      if (node.untyped === true) throw new BindError(`NULL ${where} has no type here: CAST(NULL AS <type>) says which`);
-      for (const [key, value] of Object.entries(node)) {
-        if (key === "type") continue;
-        const place = node.node === "call" ? `in ${String(node.name ?? node.fn ?? "a call").toUpperCase()}` : where;
-        if (Array.isArray(value)) value.forEach((one) => walk(one, place));
-        else walk(value, place);
-      }
-    };
-    walk(out, "in an expression");
-    return out;
-  };
-  if (returnedRel !== undefined) return noUntyped({statements, rel: returnedRel});
+  if (returnedRel !== undefined) return noUntyped({statements, rel: typeNullsFrom(returnedRel, outSchema)});
   if (last === undefined && outParam !== undefined) {
     // the body answers through its OUT table parameter: the last thing
     // assigned to it is the plan, and there is no final select because the
     // procedure does not need one
     const assigned = bound.get(String(outParam.name).toUpperCase());
-    if (assigned !== undefined) return noUntyped({statements, rel: assigned.rel});
+    if (assigned !== undefined) return noUntyped({statements, rel: typeNullsFrom(assigned.rel, outSchema)});
   }
   if (last === undefined && options.allowNoResult === true) return noUntyped({statements});
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
-  return noUntyped({statements, rel: relation(last)});
+  return noUntyped({statements, rel: typeNullsFrom(relation(last), outSchema)});
 }

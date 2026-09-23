@@ -19,8 +19,12 @@ import {Body} from "./expressions/index.mjs";
 import {bodiesOf, classesIn, reasonOf} from "./coverage.mjs";
 import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
+import {teachingPackages} from "./corpus-config.mjs";
 
-const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
+/** the teaching packages, named in the gitignored .local/corpus-names.json (corpus content stays local) */
+let teaching;
+const isTeaching = (pkg) => (teaching ??= teachingPackages())(pkg);
+
 
 // The coverage report prints **two** histograms -- one for bodies the
 // grammar stopped, one for bodies it read and the lowering then refused --
@@ -51,7 +55,7 @@ const seen = new Set();
 outer:
 for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
   const pkg = zip.replace(/\.zip$/, "");
-  if (TEACHING.test(pkg)) continue;  // the working corpus is what decides
+  if (isTeaching(pkg)) continue;  // the working corpus is what decides
   for (const file of classesIn(join(root, zip), join("/tmp/sqlscript-coverage", pkg))) {
     for (const {body, signature, language} of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) {
       // the same pipeline `coverage.mjs` measures, argument for argument.

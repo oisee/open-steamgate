@@ -5,7 +5,7 @@
 //     with parameters
 //       @Environment.systemField: #CLIENT
 //       p_clnt : mandt,
-//       p_guid : rsana_umm2_uuid
+//       p_guid : zde_uuid
 //   returns {
 //     key mandt : mandt;
 //         value : abap.char(10);

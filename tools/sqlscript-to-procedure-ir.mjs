@@ -3,9 +3,10 @@
 // Statement ownership lives here; expressions and relations deliberately go
 // through the established relational binder in to-ir.mjs. That keeps one
 // implementation of SQLScript typing and one list of explicit refusals.
-import {T, lit, scan, project, union, schemaOf} from "./sqlscript-ir.mjs";
+import {T, lit, scan, project, union, schemaOf, varRef} from "./sqlscript-ir.mjs";
 import {toIr, BindError} from "./sqlscript/to-ir.mjs";
-import {scalarTypeOf, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
+import {scalarTypeOf, irTypeOfDdic, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
+import {resolveType} from "./osd-type-graph.mjs";
 import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
@@ -68,6 +69,18 @@ export function irTypeFromAbap(type, resolve) {
   if (length !== undefined) return T.char(Number(length));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
   if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
+  // a CDS built-in, as a DDLS RETURNS list spells it: admitted when its
+  // datatype is one of the measured ones (abap.int4, abap.char(n),
+  // abap.dats, abap.tims, abap.string, abap.dec(n,m)); abap.clnt and the
+  // rest stay refused until their conformance case exists
+  const cds = /^ABAP\.(\w+)/.exec(text);
+  if (cds !== null && MEASURED_DATATYPES.has(cds[1] === "STRING" ? "STRG" : cds[1])) {
+    try {
+      return scalarTypeOf(text);
+    } catch (error) {
+      if (!(error instanceof UnresolvedScalarType)) throw error;
+    }
+  }
   if (resolve !== undefined && /^[A-Z_\/][\w\/]*$/.test(text)) {
     const found = resolve(text);
     if (found !== undefined && MEASURED_DATATYPES.has(upper(found.DATATYPE))) {
@@ -81,20 +94,64 @@ export function irTypeFromAbap(type, resolve) {
   throw new UnsupportedSqlScript(`ABAP type ${type || "<empty>"} has no portable SQLScript mapping`);
 }
 
-function structuredTable(abapType, types, resolve) {
+/** A table type of the DICTIONARY (TTYP -> structure TABL): its components,
+ *  admitted only when every field's DDIC datatype is one of the measured
+ *  ones. An include that did not resolve, a field of another datatype, a
+ *  row that is not a structure: a named refusal of the whole parameter --
+ *  a procedure signature is not a place for a column refused on reference. */
+function dictionaryTable(abapType, store) {
+  if (store === undefined) return undefined;
+  const found = resolveType(store, upper(abapType));
+  if (found.KIND !== "TABLE") return undefined;
+  if (found.ROW?.KIND !== "STRUCTURE") {
+    throw new UnsupportedSqlScript(`table type ${abapType}: row type ${found.ROWTYPE} is ${found.ROW?.KIND ?? "missing"}, not a structure`);
+  }
+  const schema = {};
+  for (const field of found.ROW.FIELDS) {
+    if (field.INCLUDE !== undefined) {
+      throw new UnsupportedSqlScript(`table type ${abapType}: include ${field.INCLUDE} did not resolve`);
+    }
+    const type = field.TYPE ?? field;
+    const datatype = upper(type.DATATYPE ?? "");
+    if (!MEASURED_DATATYPES.has(datatype)) {
+      throw new UnsupportedSqlScript(`table type ${abapType}: ${field.NAME} is ${datatype || "unresolved"}, outside the measured portable datatypes`);
+    }
+    schema[upper(field.NAME)] = irTypeOfDdic(type, `${abapType}.${field.NAME}`);
+  }
+  return schema;
+}
+
+function structuredTable(abapType, types, resolve, store) {
+  const local = structuredLocal(abapType, types, resolve);
+  return local ?? dictionaryTable(abapType, store);
+}
+
+function structuredLocal(abapType, types, resolve) {
   const table = types.get(upper(abapType));
   const row = table?.kind === "table" ? types.get(table.of) : undefined;
   if (row?.kind !== "structure") return undefined;
   return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType, resolve)]));
 }
 
-function outputFrom(method, types, resolve) {
+function outputFrom(method, types, resolve, store) {
+  // a CDS table function declares its output in the DDLS RETURNS list, not
+  // in the class; the caller hands it over as `returns` (ABAP type texts),
+  // typed here under the same measured gate as every other column
+  if (method.tableFunction !== undefined && Array.isArray(method.returns)
+      && method.parameters.every((one) => one.direction === "IN")) {
+    const schema = {};
+    for (const column of method.returns) {
+      const type = irTypeFromAbap(column.abapType, resolve);
+      schema[upper(column.name)] = type;
+    }
+    return {name: "RESULT", kind: "relation", schema};
+  }
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
   }
   const parameter = outputs[0];
-  const schema = structuredTable(parameter.abapType, types, resolve);
+  const schema = structuredTable(parameter.abapType, types, resolve, store);
   if (schema !== undefined) return {name: upper(parameter.name), kind: "relation", schema};
   if (parameter.direction === "RETURNING") {
     const type = irTypeFromAbap(parameter.abapType, resolve);
@@ -110,11 +167,12 @@ function outputFrom(method, types, resolve) {
 export function compileProcedure(method, types, options = {}) {
   const catalogue = options.catalogue ?? {};
   const resolve = options.resolveType;
+  const store = options.store;
   const tree = parse(new Body(), lex(method.body));
-  const output = outputFrom(method, types, resolve);
+  const output = outputFrom(method, types, resolve, store);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
   const relationCandidates = inputParameters
-    .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve)}))
+    .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve, store)}))
     .filter(({schema}) => schema !== undefined);
   if (relationCandidates.some(({one}) => one.optional === true)) {
     throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER or STRING scalars");
@@ -173,12 +231,12 @@ export function compileProcedure(method, types, options = {}) {
     restoreObject(relationSchemas, common("relations"));
     restoreObject(scalarTypes, common("scalars"));
   };
-  const bind = (node, fragment) => toIr(node, {
+  const bind = (node, fragment, targetSchema) => toIr(node, {
     fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
-    signature: method, arrayValues, catalogue,
+    signature: method, arrayValues, catalogue, ...(targetSchema === undefined ? {} : {targetSchema}),
   });
 
-  const compileStatements = (container, allowArrayDeclarations = false) => {
+  const compileStatements = (container, allowArrayDeclarations = false, returnAllowed = false) => {
     const result = [];
     const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation"]);
     for (const wrapper of container.children ?? []) {
@@ -303,7 +361,8 @@ export function compileProcedure(method, types, options = {}) {
         }
         const set = child(node, "SetOperation");
         if (set !== undefined) {
-          const rel = bind(set, "relation");
+          // the output's declared schema types a bare NULL assigned to it
+          const rel = bind(set, "relation", name === output.name && output.kind === "relation" ? output.schema : undefined);
           try { relationSchemas[name] = schemaOf(rel, catalogue); }
           catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
           result.push(assignRelation(name, rel, node));
@@ -398,6 +457,27 @@ export function compileProcedure(method, types, options = {}) {
         if (otherwise.length === 0) paths.push(before);
         mergeEnvironment(paths);
         result.push(ifElse(branches, otherwise, node));
+      } else if (node.node === "Return" && returnAllowed && output.kind === "relation"
+          && wrapper === (container.children ?? []).filter((one) => one.node === "Statement" || directStatements.has(one.node)).at(-1)) {
+        // `RETURN SELECT ...` / `RETURN :lt` as the LAST statement of the body
+        // is how a table function answers: an assignment to its output. A
+        // RETURN anywhere else would end the procedure early, which the
+        // procedural IR has no statement for, so it stays refused.
+        const set = child(node, "SetOperation");
+        let rel;
+        if (set !== undefined) {
+          rel = bind(set, "relation", output.schema);
+        } else {
+          const host = terminalLeaves(node).find((one) => one.node === "host");
+          const only = terminalLeaves(node).filter((one) => one.node !== "word" && upper(one.value) !== "RETURN");
+          if (host === undefined || only.length !== 1) {
+            throw new UnsupportedSqlScript("RETURN of something that is not a table variable or a select", node);
+          }
+          const name = upper(String(host.value).slice(1));
+          if (relationSchemas[name] === undefined) throw new UnsupportedSqlScript(`RETURN of an unassigned table variable :${name.toLowerCase()}`, node);
+          rel = varRef(name, relationSchemas[name]);
+        }
+        result.push(assignRelation(output.name, rel, node));
       } else {
         throw new UnsupportedSqlScript(`${node.node} is outside the initial portable procedural subset`, node);
       }
@@ -406,7 +486,17 @@ export function compileProcedure(method, types, options = {}) {
   };
 
   try {
-    const body = compileStatements(tree, true);
+    // A body wrapped whole in `BEGIN ... END` (plain, or SEQUENTIAL
+    // EXECUTION) is the procedure's own scope, as table functions write it:
+    // its statements are the body. A nested block keeps the narrow rule.
+    const topStatements = (tree.children ?? []).filter((one) => one.node === "Statement");
+    const onlyNode = topStatements.length === 1 ? (topStatements[0].children ?? []).find((one) => one.node !== "word") : undefined;
+    const wrapperMode = onlyNode?.node === "Block"
+      ? (onlyNode.children ?? []).filter((one) => one.node === "word").map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one))
+      : undefined;
+    const outer = wrapperMode !== undefined && (wrapperMode.length === 0 || JSON.stringify(wrapperMode) === JSON.stringify(["SEQUENTIAL", "EXECUTION"]))
+      ? {children: children(onlyNode, "Statement")} : tree;
+    const body = compileStatements(outer, true, true);
     const containsRelationStatement = (statements) => statements.some((statement) =>
       statement.stmt === "assign-relation"
         || statement.stmt === "call-procedure"

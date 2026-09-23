@@ -32,14 +32,18 @@ import {Body} from "./sqlscript/expressions/index.mjs";
 import {toIr} from "./sqlscript/to-ir.mjs";
 import {lower} from "./sqlscript-lower.mjs";
 import {forceability} from "./sqlscript-eager.mjs";
+import {teachingPackages} from "./sqlscript/corpus-config.mjs";
 
-const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
+/** the teaching packages, named in the gitignored .local/corpus-names.json (corpus content stays local) */
+let teaching;
+const isTeaching = (pkg) => (teaching ??= teachingPackages())(pkg);
+
 
 export function count(root, {dialect = "hana", paramsOnMaterialise = true, scratch = "/tmp/sqlscript-forcing"} = {}) {
   const corpora = {teaching: [], working: []};
   for (const zip of readdirSync(root).filter((f) => f.endsWith(".zip"))) {
     const pkg = zip.replace(/\.zip$/, "");
-    const which = TEACHING.test(pkg) ? "teaching" : "working";
+    const which = isTeaching(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
       for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push(one);
     }

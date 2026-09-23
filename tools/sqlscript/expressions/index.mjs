@@ -102,7 +102,7 @@ export class Factor extends Expression {
 }
 
 /** `CAST(x AS NVARCHAR(36))`, and the AMDP spelling
- *  `CAST(x AS "$ABAP.type( cds_get_rsau_log-sal_data )")`.
+ *  `CAST(x AS "$ABAP.type( zcds_log-data )")`.
  *
  *  It is not a FunctionCall with a funny argument: `AS` is a keyword in the
  *  middle, so the ordinary call shape fails at it -- which is precisely what
@@ -329,7 +329,7 @@ export class ProcedureCall extends Expression {
 /** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
 export class TypeName extends Expression {
   getRunnable() {
-    // `"$ABAP.type( cds_get_rsau_log-sal_data )"` is ONE quoted token: inside
+    // `"$ABAP.type( zcds_log-data )"` is ONE quoted token: inside
     // a CAST the whole thing is written between double quotes, so it never
     // reaches AbapType below and has to be accepted as the quoted name it is
     return altPrio(new AbapType(), tok(TokenKind.quoted), seq(tok(TokenKind.identifier),

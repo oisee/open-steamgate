@@ -173,7 +173,7 @@ describe("a table's include rows are its fields too", () => {
     expect(resolveType(store, "ZPLAIN").FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);
   });
 
-  it("appends the suffix of an .INCLU-XXX to every included field, as the export shows (DEMO_WEEK: WORK_MO, FREE_MO)", () => {
+  it("appends the suffix of an .INCLU-XXX to every included field, as the export shows (a demo week table: WORK_MO, FREE_MO)", () => {
     expect(resolveType(store, "ZWEEK").FIELDS.map((f) => f.NAME)).to.deep.equal(["WORK_MO", "FREE_MO", "WORK_TU", "FREE_TU"]);
   });
 
