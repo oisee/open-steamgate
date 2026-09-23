@@ -22,9 +22,10 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
+import {tableFunctionCall, T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
+import {isTableParameter, signatureScalars, isUnresolved} from "./scalar-types.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -89,7 +90,6 @@ const mergedTextType = (left, right) => {
 
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
-  const scalarTypes = options.scalarTypes ?? {};
   const relationSchemas = options.relationSchemas ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
@@ -98,8 +98,15 @@ export function toIr(tree, options = {}) {
   // from the caller. Without the signature both look like defects in the
   // body, and neither is.
   const signature = options.signature ?? {parameters: []};
-  const tableParams = (signature.parameters ?? []).filter((p) => /^(tt_|.*_tab$|.*TABLE.*)/i.test(String(p.abapType ?? ""))
-    || /^(it|et|ct)_/i.test(String(p.name ?? "")));
+  const tableParams = (signature.parameters ?? []).filter(isTableParameter);
+  // The scalar IN parameters come from the same signature. A caller that
+  // already typed them (the procedure compiler) passes `scalarTypes`; the
+  // others get them derived here, so that "unknown scalar :p_clnt" means the
+  // body and not the instrument (docs/sqlscript-corpus.md). One that the
+  // dictionary at hand cannot type is refused **when referenced**, by name.
+  const derived = options.scalarTypes === undefined ? signatureScalars(signature, options.resolveType) : {types: {}, unresolved: {}};
+  const scalarTypes = options.scalarTypes ?? derived.types;
+  const unresolvedScalars = derived.unresolved;
   const outParam = tableParams.find((p) => p.direction === "OUT" || p.direction === "RETURNING");
   /** table variables assigned so far: name -> {rel} or {handle} */
   const bound = new Map();
@@ -108,27 +115,146 @@ export function toIr(tree, options = {}) {
   let ambiguousColumns = new Set();
   let qualifiedColumns = Object.create(null);
 
+  const terminalLeaves = (n, found = []) => {
+    if (n?.value !== undefined) found.push(n);
+    else for (const one of n?.children ?? []) terminalLeaves(one, found);
+    return found;
+  };
+  /** the projection that decides a relation's columns, through the wrappers
+   *  that keep them (order, limit); hints and DISTINCT ride on the project node itself */
+  const projectionOf = (rel) => {
+    let r = rel;
+    while (r !== undefined && (r.rel === "order" || r.rel === "limit")) r = r.input;
+    return r?.rel === "project" ? r : undefined;
+  };
+  const withItems = (rel, items) => {
+    if (rel.rel === "project") return {...rel, items};
+    return {...rel, input: withItems(rel.input, items)};
+  };
+  const giveType = (expr, type) => (expr?.untyped === true && type !== undefined && !isUnresolved(type)
+    ? {...expr, type, untyped: undefined} : expr);
+  /** `SELECT 'k' AS key, NULL AS context FROM dummy UNION ALL SELECT key, ctx
+   *  FROM t`: the columns of a UNION are positional, and a bare NULL in one
+   *  branch takes the type of the first branch that types that column --
+   *  which is how HANA types it (the corpus bodies, 2026-09-23). A column that
+   *  is NULL in every branch stays untyped and is refused at the end. */
+  const typeNullsAcross = (branches) => {
+    const projections = branches.map(projectionOf);
+    if (projections.some((one) => one === undefined)) return branches;
+    const width = projections[0].items.length;
+    if (projections.some((one) => one.items.length !== width)) return branches;
+    const types = [];
+    for (let i = 0; i < width; i += 1) {
+      types.push(projections.map((one) => one.items[i].expr).find((e) => e?.untyped !== true && e?.type !== undefined)?.type);
+    }
+    return branches.map((branch, b) => {
+      const items = projections[b].items;
+      if (!items.some((item) => item.expr?.untyped === true)) return branch;
+      return withItems(branch, items.map((item, i) => ({...item, expr: giveType(item.expr, types[i])})));
+    });
+  };
+  /** an assignment to a declared output (an OUT table parameter, a RETURNING
+   *  table): its schema types a bare NULL by column name */
+  const typeNullsFrom = (rel, schema) => {
+    if (schema === undefined || rel === undefined) return rel;
+    if (rel.rel === "union") return {...rel, inputs: rel.inputs.map((one) => typeNullsFrom(one, schema))};
+    const projection = projectionOf(rel);
+    if (projection === undefined || !projection.items.some((item) => item.expr?.untyped === true)) return rel;
+    return withItems(rel, projection.items.map((item) => ({...item, expr: giveType(item.expr, schema[String(item.as).toUpperCase()])})));
+  };
+  const outSchema = outParam === undefined ? undefined
+    : (outParam.schema ?? relationSchemas[String(outParam.name).toUpperCase()] ?? options.outputSchema);
+
+  // **No untyped NULL leaves the binder.** A CAST, a CASE branch and a
+  // comparison give a NULL literal its type; every other path -- a function
+  // argument, arithmetic, an IN list, a window argument -- would pass
+  // `type: undefined` on to whatever reads it next, and a default there is
+  // the quiet kind of wrong. Checked once, by construction, rather than at
+  // each site somebody remembers (foreman-dell, 2026-09-22).
+  const noUntyped = (out) => {
+    const walk = (node, where) => {
+      if (node === null || typeof node !== "object") return;
+      if (node.untyped === true) throw new BindError(`NULL ${where} has no type here: CAST(NULL AS <type>) says which`);
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "type") continue;
+        const place = node.node === "call" ? `in ${String(node.name ?? node.fn ?? "a call").toUpperCase()}`
+          : (node.as !== undefined && key === "expr" ? `AS ${String(node.as).toLowerCase()}` : where);
+        if (Array.isArray(value)) value.forEach((one) => walk(one, place));
+        else walk(value, place);
+      }
+    };
+    walk(out, "in an expression");
+    return out;
+  };
+
+  /** an untyped NULL beside a typed operand takes that type */
+  const adopt = (left, right) => {
+    if (left?.untyped === true && right?.untyped !== true && right?.type !== undefined) return [{...left, type: right.type, untyped: undefined}, right];
+    if (right?.untyped === true && left?.untyped !== true && left?.type !== undefined) return [left, {...right, type: left.type, untyped: undefined}];
+    return [left, right];
+  };
+  /** CASE / MAP branches: an untyped NULL branch takes the type of the first typed one; all-NULL is refused */
+  const typedBranches = (whens, otherwise) => {
+    const typed = [...whens.map((w) => w.then), otherwise].find((e) => e !== undefined && e.untyped !== true);
+    if (typed === undefined) throw new BindError("a CASE whose every branch is NULL has no type");
+    const give = (e) => (e?.untyped === true ? {...e, type: typed.type, untyped: undefined} : e);
+    return [whens.map((w) => ({...w, then: give(w.then)})), give(otherwise), typed.type];
+  };
+
   const typeOfColumn = (name, sourceName) => {
     if (sourceName !== undefined) {
+      if (ambiguousSources.has(sourceName)) {
+        throw new BindError(`source ${sourceName} appears more than once without an alias, so ${sourceName}.${name} is ambiguous`);
+      }
       const type = qualifiedColumns[sourceName]?.[name];
       if (type === undefined && options.strictColumns === true) {
         throw new BindError(`column ${sourceName}.${name} is not present in the typed query scope`);
       }
+      if (isUnresolved(type)) throw new BindError(`column ${sourceName}.${name} has no resolved type (${type.reason})`);
       return type ?? T.str;
     }
     if (ambiguousColumns.has(name)) throw new BindError(`column ${name} is ambiguous without a source qualifier`);
     if (columns[name] === undefined && options.strictColumns === true) {
       throw new BindError(`column ${name} is not present in the typed query scope`);
     }
+    // a column the dictionary could not type is refused when it is read,
+    // by name, the way an unresolved scalar parameter is
+    if (isUnresolved(columns[name])) throw new BindError(`column ${name} has no resolved type (${columns[name].reason})`);
     return columns[name] ?? T.str;
   };
 
   const sourceAlias = (node) => {
     const children = node.children ?? [];
     const at = children.findIndex((one) => one.node === "word" && String(one.value).toUpperCase() === "AS");
-    if (at < 0) return undefined;
-    return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+    if (at >= 0) return nameOf(children.slice(at + 1).find((one) => one.node === "identifier" || one.node === "Name"));
+    // `FROM :it_guid a` -- the AS is optional, and the corpus leaves it out
+    // (`FROM :it_x a INNER JOIN t b`, a shape the corpus uses, 2026-09-22):
+    // an identifier after the source term, on its own, is the alias
+    const last = children[children.length - 1];
+    if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
+    return undefined;
   };
+  /** the common table expressions in scope, by name */
+  let ctes = new Map();
+  /** names of this WITH's CTEs not bound yet: a reference to one is a forward reference */
+  let laterCtes = new Set();
+  /** Select nodes whose TOP the enclosing statement applies after its ORDER BY */
+  const deferredTop = new Set();
+  const directWord = (node, word) => (node.children ?? []).some((c) => c.node === "word" && String(c.value).toUpperCase() === word);
+  /** the TOP count of a Select, or undefined; refused unless it is an INTEGER literal or parameter */
+  const topOf = (sel) => {
+    const children = sel.children ?? [];
+    const at = children.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "TOP");
+    if (at < 0) return undefined;
+    const count = children[at + 1]?.node === "Expr" ? expression(children[at + 1]) : undefined;
+    if (count?.type?.abap !== "I" || !["lit", "param"].includes(count?.node)) {
+      throw new BindError("TOP requires a literal or scalar INTEGER count", sel);
+    }
+    return count;
+  };
+  /** table names used as qualifiers without an alias, per SELECT; a name used twice in one FROM is ambiguous and stays so */
+  let implicitSources = new Set();
+  let ambiguousSources = new Set();
 
   const registerSource = (schema, sourceName) => {
     for (const [name, type] of Object.entries(schema ?? {})) {
@@ -161,8 +287,11 @@ export function toIr(tree, options = {}) {
           // the result type of arithmetic is the wider of the two, and a
           // division is decimal because that is what HANA answers -- measured
           // (docs/sqlscript-hana-observed.md), not assumed from SQL folklore
+          // INT2 arithmetic is INTEGER's: 32767 + 32767 is 65534 on A4H, no
+          // SMALLINT overflow, so the INT2 range does not travel into a result
+          const widened = (t) => (t?.abap === "I" && t.bits !== undefined ? T.int : t);
           const type = op === "/" ? T.dec(15, 2)
-            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : left.type);
+            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
           left = bin(op, left, right, type);
         }
         return left;
@@ -181,6 +310,7 @@ export function toIr(tree, options = {}) {
         const named = (node.children ?? []).find((c) => c.node === "TypeName");
         const source = expression(inner[0]);
         const target = typeFromName(named);
+        if (source.untyped === true) return cast({...source, type: target, untyped: undefined}, target);
         // The first measured decimal conversion only widens precision while
         // preserving scale.  Parsing strings and changing scale introduce
         // backend-specific error/rounding rules, so keep them named gaps
@@ -223,7 +353,7 @@ export function toIr(tree, options = {}) {
           whens.push({when: left, then: expression(pairs[i + 1])});
         }
         if (whens.length === 0) throw new BindError("a CASE with no WHEN", node);
-        return caseWhen(whens, otherwise, whens[0].then.type);
+        return caseWhen(...typedBranches(whens, otherwise));
       }
       case "FunctionCall": {
         const fn = String(leaf(node).value).toUpperCase();
@@ -258,7 +388,7 @@ export function toIr(tree, options = {}) {
           }
           // an odd argument left over is the default; none means NULL
           const otherwise = i < args.length ? args[i] : undefined;
-          return caseWhen(whens, otherwise, whens[0].then.type);
+          return caseWhen(...typedBranches(whens, otherwise));
         }
         if (fn === "CAST" || fn === "TO_INTEGER") {
           return cast(args[0] ?? lit(null, T.str), fn === "TO_INTEGER" ? T.int : T.str);
@@ -278,6 +408,12 @@ export function toIr(tree, options = {}) {
         // expose the wrong AMDP boundary type even when the SQL itself ran.
         let resultType = T.str;
         if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        // measured on A4H (docs/sqlscript-hana-observed.md): COUNT is wider
+        // than INTEGER (BIGINT), and MIN / MAX keep their argument's type --
+        // doubling 2147483647 overflows for MAX(int) and not for COUNT(*).
+        // SUM(int) overflowed too on HANA, where DuckDB widens: not typed yet.
+        if (fn === "COUNT") resultType = T.int8;
+        if (["MIN", "MAX"].includes(fn) && args.length === 1 && args[0].type !== undefined && !isUnresolved(args[0].type)) resultType = args[0].type;
         if (fn === "LOWER") {
           if (args.length !== 1 || !measuredTextType(args[0]?.type)) {
             throw new BindError("LOWER requires exactly one measured text argument", node);
@@ -393,6 +529,12 @@ export function toIr(tree, options = {}) {
           if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
           throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
         }
+        // the same three words arrive here as a Name when they stand in an
+        // expression position; the identifier case below has the reasons
+        if (sessionKeyword && name === "NULL") return {...lit(null, undefined), untyped: true};
+        if (sessionKeyword && (name === "TRUE" || name === "FALSE")) {
+          throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
+        }
         return col(name, typeOfColumn(name, sourceName), sourceName);
       }
       case "identifier":
@@ -402,6 +544,16 @@ export function toIr(tree, options = {}) {
           if (name === "CURRENT_USER") return sessionValue("user", name, T.str);
           if (name === "CURRENT_SCHEMA") return sessionValue("schema", name, T.str);
           throw new BindError(`${name} is a session value, not a column; its portable clock semantics are not implemented`, node);
+        }
+        if (node.node === "identifier" && name === "NULL") {
+          // `NULL AS context`, `map(x, '', null, ...)`: a literal, not a column
+          // called NULL (six corpus bodies read it as one, 2026-09-22). It has
+          // no type of its own; a CAST, a CASE branch or a comparison gives it
+          // one, and a bare projection of it is refused rather than typed STRING.
+          return {...lit(null, undefined), untyped: true};
+        }
+        if (node.node === "identifier" && (name === "TRUE" || name === "FALSE")) {
+          throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
         }
         return col(name, typeOfColumn(name));
       }
@@ -415,6 +567,9 @@ export function toIr(tree, options = {}) {
         {
           const name = String(node.value).slice(1).toUpperCase();
           if (scalarTypes[name] === undefined) {
+            if (unresolvedScalars[name] !== undefined) {
+              throw new BindError(`scalar :${name.toLowerCase()} has a type this run cannot resolve (${unresolvedScalars[name]})`, node);
+            }
             throw new BindError(`unknown scalar :${name.toLowerCase()}`, node);
           }
           return param(name, scalarTypes[name]);
@@ -436,7 +591,10 @@ export function toIr(tree, options = {}) {
     const words = (node.children ?? []);
     const name = String(words.find((c) => c.node === "identifier" || c.node === "quoted")?.value ?? "").toUpperCase();
     const sizes = words.filter((c) => c.node === "number").map((c) => Number(c.value));
-    if (/^(INT|INTEGER|BIGINT|SMALLINT|TINYINT)$/.test(name)) return T.int;
+    // SMALLINT and TINYINT carry a range the portable engines do not enforce
+    // on a CAST (DuckDB kept 40000); refused until measured, like INT1
+    if (/^(SMALLINT|TINYINT)$/.test(name)) throw new BindError(`the SQL type ${name} is not measured yet`, node);
+    if (/^(INT|INTEGER|BIGINT)$/.test(name)) return T.int;
     if (/^(N?VARCHAR|N?CHAR|ALPHANUM|SHORTTEXT)$/.test(name)) {
       if (sizes[0] === undefined) throw new BindError(`CAST to ${name} without a length`, node);
       return T.char(sizes[0]);
@@ -555,14 +713,122 @@ export function toIr(tree, options = {}) {
     if (ops.length === 0) {
       throw new BindError("a comparison without an operator", node);
     }
-    return bin(ops[0], expression(sides[0]), expression(sides[1]), T.bool);
+    return bin(ops[0], ...adopt(expression(sides[0]), expression(sides[1])), T.bool);
+  }
+
+  /** `FROM "CL_X=>GET_ROWS"(:it_rows, 1)`: the callee is looked up in the
+   *  registry this run was given, its arguments bound against the declared
+   *  parameters, and its declared RETURNS is the schema. Nothing is guessed:
+   *  a callee not in the registry, an argument count that differs, or a
+   *  table argument that is not a table variable of this body is a refusal
+   *  by name. The name is kept as the source spells it, because on HANA
+   *  `"CL=>M"` and the DDLS entity are different objects. */
+  function tableFunction(call) {
+    const method = kid(call, "MethodName");
+    const ref = kid(call, "ColumnRef");
+    const names = method !== undefined ? kids(method, "Name") : ref === undefined ? [] : kids(ref, "Name");
+    // an unquoted `CL=>M` is one name, spelled as the source spells it
+    const parts = method !== undefined ? [names.map(nameOf).join("=>")] : names.map(nameOf);
+    const spelled = method !== undefined ? [names.map((one) => String(leaf(one)?.value ?? "")).join("=>")] : names.map((one) => String(leaf(one)?.value ?? ""));
+    if (parts.length >= 2) {
+      const schema = parts[0];
+      if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
+        throw new BindError(`${parts.join(".")} is a HANA system function, not portable`, call);
+      }
+      throw new BindError(`a schema-qualified table function call ${parts.join(".")} is not lowered: the registry knows callees by name only`, call);
+    }
+    const name = parts[0] ?? "";
+    const fn = (options.tableFunctions ?? {})[name];
+    if (fn === undefined) {
+      throw new BindError(`table function call ${name} is not in the registry of this run`, call);
+    }
+    // positional or named, never both: a mix has no single reading
+    const named = kids(call, "NamedArgument");
+    const positional = kids(call, "Expr");
+    if (named.length > 0 && positional.length > 0) {
+      throw new BindError(`table function ${name} is called with positional and named arguments together`, call);
+    }
+    let argNodes = positional;
+    if (named.length > 0) {
+      const byName = new Map();
+      for (const one of named) {
+        const argName = nameOf(kid(one, "Name"));
+        if (byName.has(argName)) throw new BindError(`argument ${argName.toLowerCase()} of ${name} is given twice`, one);
+        if (!fn.parameters.some((p) => p.name === argName)) {
+          throw new BindError(`table function ${name} has no parameter ${argName.toLowerCase()}`, one);
+        }
+        byName.set(argName, kid(one, "Expr"));
+      }
+      // named arguments in the declared order; an omitted one must be
+      // OPTIONAL or DEFAULT, and only a trailing run may be left out
+      const upto = fn.parameters.reduce((last, p, i) => (byName.has(p.name) ? i : last), -1);
+      const gap = fn.parameters.find((p) => !byName.has(p.name) && p.optional !== true);
+      if (gap !== undefined) throw new BindError(`argument ${gap.name.toLowerCase()} of ${name} is missing`, call);
+      if (fn.parameters.slice(0, upto + 1).some((p) => !byName.has(p.name))) {
+        throw new BindError(`${name}: leaving out an optional argument before a named one is not lowered`, call);
+      }
+      argNodes = fn.parameters.slice(0, upto + 1).map((p) => byName.get(p.name));
+    }
+    // a trailing OPTIONAL / DEFAULT parameter may be left out, as the corpus
+    // does (a table function called with its table argument only, the
+    // DEFAULT 0); the callee's own default then applies on the engine
+    const required = fn.parameters.filter((p) => p.optional !== true).length;
+    if (argNodes.length < required || argNodes.length > fn.parameters.length) {
+      const spelled = fn.parameters.map((p) => p.name.toLowerCase() + (p.optional === true ? "?" : "")).join(", ");
+      throw new BindError(`table function ${name} takes ${required === fn.parameters.length ? required : `${required} to ${fn.parameters.length}`} argument(s) (${spelled}) and is called with ${argNodes.length}`, call);
+    }
+    const args = fn.parameters.slice(0, argNodes.length).map((p, i) => {
+      const argNode = argNodes[i];
+      if (p.kind === "table") {
+        // a table argument is a table variable of this body or one of its IN
+        // table parameters, and nothing else: an expression here is not a table
+        const host = terminalLeaves(argNode).find((l) => l.node === "host");
+        const only = terminalLeaves(argNode).length === 1;
+        if (host === undefined || !only) {
+          throw new BindError(`argument ${p.name.toLowerCase()} of ${name} is a table and must be a table variable`, argNode);
+        }
+        const varName = String(host.value).slice(1).toUpperCase();
+        const known = bound.get(varName);
+        if (known !== undefined) return {kind: "relation", name: varName, rel: known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue))};
+        if (tableParams.some((one) => String(one.name).toUpperCase() === varName)) return {kind: "relation", name: varName, rel: scan(varName)};
+        throw new BindError(`unknown table variable :${varName.toLowerCase()} passed to ${name}`, host);
+      }
+      if (p.type === undefined || isUnresolved(p.type)) {
+        throw new BindError(`argument ${p.name.toLowerCase()} of ${name} has no resolved type${p.type?.reason === undefined ? "" : ` (${p.type.reason})`}`, argNode);
+      }
+      let e = expression(argNode);
+      if (e.untyped === true) e = {...e, type: p.type, untyped: undefined};
+      // the argument's type must be the parameter's: 'abc' into an INTEGER,
+      // or a STRING scalar into a CHAR, is refused rather than handed on
+      const same = (a, b) => a?.abap === b?.abap || (["C", "STRING"].includes(a?.abap) && ["C", "STRING"].includes(b?.abap));
+      if (!same(e.type, p.type)) {
+        throw new BindError(`argument ${p.name.toLowerCase()} of ${name} is ${e.type?.abap ?? "untyped"} and the parameter is ${p.type.abap}`, argNode);
+      }
+      return {kind: "scalar", name: p.name, expr: e};
+    });
+    const schema = fn.returns ?? {};
+    return [tableFunctionCall(spelled[0], args, schema), schema];
   }
 
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
     const sourceName = sourceAlias(node);
-    const finish = (rel, schema) => {
+    const finish = (rel, schema, tableName) => {
       registerSource(schema, sourceName);
+      if (sourceName === undefined && tableName !== undefined) {
+        // `SELECT src.k FROM src` -- a table without an alias is qualified
+        // by its own name, but only while that name is one source: a
+        // self-join without aliases stays ambiguous and says so
+        // own properties only: a subquery reading the same table shadows the
+        // outer scope (Object.create chain) rather than colliding with it
+        if (implicitSources.has(tableName) || Object.hasOwn(qualifiedColumns, tableName)) {
+          ambiguousSources.add(tableName);
+          delete qualifiedColumns[tableName];
+        } else {
+          implicitSources.add(tableName);
+          qualifiedColumns[tableName] = schema ?? {};
+        }
+      }
       return sourceName === undefined ? rel : alias(rel, sourceName);
     };
     // **A table function call is not a table.** The grammar parses
@@ -575,9 +841,7 @@ export function toIr(tree, options = {}) {
     // against the ones this stage mentions, which is what
     // `tools/sqlscript/grammar-cover.mjs` does now.
     const call = (node.children ?? []).find((c) => c.node === "TableFunctionCall");
-    if (call !== undefined) {
-      throw new BindError("a table function call in FROM is parsed but not lowered yet", call);
-    }
+    if (call !== undefined) return finish(...tableFunction(call));
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();
@@ -620,8 +884,39 @@ export function toIr(tree, options = {}) {
       const table = String(temp.value).toUpperCase();
       return finish(scan(table), catalogue[table] ?? {});
     }
+    // a schema-qualified source: `sys.m_host_information`, `"PUBLIC"."TABLES"`
+    const ref = kid(node, "ColumnRef");
+    const parts = ref === undefined ? [] : kids(ref, "Name").map(nameOf);
+    if (parts.length >= 2) {
+      const schema = parts[0];
+      const table = parts[parts.length - 1];
+      // `sys.dummy` is DUMMY, the one-row source every dialect renders
+      if (schema === "SYS" && table === "DUMMY") return finish(scan("DUMMY"), {});
+      if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
+        // HANA's own views: not a dictionary table anywhere, not portable in
+        // principle, and refused by name so a catalogue miss on them does not
+        // read as a table an export could bring
+        throw new BindError(`${schema}.${table} is a HANA system view, not portable`, node);
+      }
+      throw new BindError(`a schema-qualified source ${schema}.${table} is not lowered: the catalogue knows tables by name only`, node);
+    }
     const table = nameOf(node);
-    return finish(scan(table), catalogue[table] ?? {});
+    // a CTE defined later is not in scope yet, so the name is a table's, as
+    // in plain SQL; with no such table it is a forward reference, said so
+    if (laterCtes.has(table) && !ctes.has(table) && catalogue[table] === undefined) {
+      throw new BindError(`CTE ${table.toLowerCase()} used before it is defined`, node);
+    }
+    if (ctes.has(table)) {
+      // a common table expression of the enclosing WITH, by its name
+      const cte = ctes.get(table);
+      return finish(cte, schemaOf(cte, catalogue), table);
+    }
+    if (table.startsWith("M_") && catalogue[table] === undefined) {
+      // an unqualified M_* the dictionary knows is an ordinary object (old
+      // matchcode views are named so); one it does not is HANA's monitoring
+      throw new BindError(`${table} is a HANA monitoring view (M_*), not portable`, node);
+    }
+    return finish(scan(table), catalogue[table] ?? {}, table);
   }
 
   /** Hints, which are a request to one engine rather than part of the meaning.
@@ -719,18 +1014,32 @@ export function toIr(tree, options = {}) {
   }
 
   function select(node) {
+    // `SELECT ... INTO v` fills scalars; it is a statement, and the procedural
+    // compiler takes the IntoClause off before binding what is left as a
+    // relation. One that reaches here stands where rows were expected.
+    if (kid(node, "IntoClause") !== undefined) {
+      throw new BindError("SELECT ... INTO fills scalars; it is a statement, not a relation", node);
+    }
     const outerColumns = columns;
     const outerAmbiguous = ambiguousColumns;
     const outerQualified = qualifiedColumns;
+    const outerImplicit = implicitSources;
+    const outerAmbiguousSources = ambiguousSources;
     columns = {};
     ambiguousColumns = new Set();
     qualifiedColumns = Object.create(outerQualified);
+    // the two SELECTs of a UNION may both read one table without an alias:
+    // ambiguity is a property of one FROM, not of the body
+    implicitSources = new Set();
+    ambiguousSources = new Set();
     try {
       return selectInScope(node);
     } finally {
       columns = outerColumns;
       ambiguousColumns = outerAmbiguous;
       qualifiedColumns = outerQualified;
+      implicitSources = outerImplicit;
+      ambiguousSources = outerAmbiguousSources;
     }
   }
 
@@ -783,11 +1092,31 @@ export function toIr(tree, options = {}) {
       // list, so nothing covered it.
       const star = (item.children ?? []).some((c) =>
         (c.node === "operator" || c.node === "word") && c.value === "*");
-      if (star) return {as: "*", expr: {node: "star"}};
+      // A bare `NULL AS x` is kept untyped here: the other branch of a UNION
+      // or the declared output it is assigned to may type it (typeNulls), and
+      // one that nothing types is refused by name when the binder finishes.
+      const projected = (expr) => expr;
+      if (star) {
+        // `SELECT *` reads every column of the scope, the marked ones included
+        const dark = Object.entries(columns).find(([, type]) => isUnresolved(type));
+        if (dark !== undefined) {
+          throw new BindError(`SELECT * would carry column ${dark[0]}, which has no resolved type (${dark[1].reason})`, item);
+        }
+        return {as: "*", expr: {node: "star"}};
+      }
       const alias = kids(item, "Name")[0];
       const expr = expression((item.children ?? []).find((c) => c.node !== "word" && c !== alias));
-      return {as: alias === undefined ? (expr.name ?? "V") : nameOf(alias), expr};
+      const as = alias === undefined ? (expr.name ?? "V") : nameOf(alias);
+      return {as, expr: projected(expr, as, item)};
     });
+    // two items under one name collapse into one key of the schema and of an
+    // answer's row: a column silently lost. Refused once, here, for every
+    // relation (foreman-dell's critic on #36)
+    const named = items.filter((one) => one.as !== "*").map((one) => one.as);
+    if (new Set(named).size !== named.length) {
+      const twice = named.find((one, i) => named.indexOf(one) !== i);
+      throw new BindError(`${named.length} items under ${new Set(named).size} distinct names (${twice} twice${twice === "V" ? ", an unnamed expression" : ""}); give each its own`, node);
+    }
     // **`SELECT *` is not a projection, it is the absence of one.**
     //
     // A `project` whose only item is a star was reaching the lowering as
@@ -911,7 +1240,26 @@ export function toIr(tree, options = {}) {
       // near-miss here would have created exactly the translation layer we
       // agreed not to build -- and it would have been found at run time, on
       // an engine, rather than here.
+      // a key may name a column of the projection rather than of the
+      // sources: `... row_number() OVER (...) AS row_nr ... ORDER BY row_nr`
+      // (two corpus bodies, 2026-09-22). The projection's aliases are in
+      // scope for ORDER BY, and only there.
+      const projection = input.rel === "project" ? input : undefined;
+      const aliasOf = (k) => {
+        // the key is a bare name when the whole key is one ColumnRef of one Name
+        const leaves = terminalLeaves(k);
+        const single = leaves.length === 1 && leaves[0].node === "identifier" ? String(leaves[0].value).toUpperCase() : undefined;
+        return projection?.items.some((item) => item.as === single) ? single : undefined;
+      };
       rel = order(rel, keys.map((k) => {
+        const projected = aliasOf(k);
+        if (projected !== undefined) return {col: projected, desc: hasWord(k, "DESC")};
+        // the statement's ORDER BY sees the projected columns only, so a
+        // source qualifier (`ORDER BY a.id`) has nothing to resolve against;
+        // said by name rather than as a column that "is not present"
+        if (node.node !== "Select" && terminalLeaves(k).some((leaf) => leaf.value === ".")) {
+          throw new BindError("ORDER BY a qualified source column is not lowered yet", k);
+        }
         const e = expression(k);
         if (e.node !== "col") {
           throw new BindError("ORDER BY over an expression is not lowered yet", k);
@@ -919,6 +1267,12 @@ export function toIr(tree, options = {}) {
         return {col: e.name, desc: hasWord(k, "DESC")};
       }));
     }
+    // TOP is a word of the Select itself (direct child), and it applies after
+    // the ORDER BY: when the ORDER BY sits on the enclosing statement, the
+    // statement applies the TOP (topOf, relationBody) and the select skips it
+    // (LIMIT belongs to the enclosing statement, which refuses it beside a TOP)
+    const top = node.node === "Select" && !deferredTop.has(node) ? topOf(node) : undefined;
+    if (top !== undefined) rel = limit(rel, top);
     if (hasWord(node, "LIMIT")) {
       const after = (node.children ?? []);
       const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
@@ -944,7 +1298,53 @@ export function toIr(tree, options = {}) {
     if (node === undefined) {
       throw new BindError("a relation was expected here and the tree has none");
     }
+    // `WITH a AS (...), b AS (...)`: each definition is bound in order (a
+    // later one may read an earlier one) and inlined where its name stands,
+    // like a table variable -- a CTE is not a barrier either. The names are
+    // scoped to this statement: the map is restored when it is done.
+    const cteDefs = kids(node, "CteDef");
+    if (directWord(node, "RECURSIVE")) throw new BindError("WITH RECURSIVE is not lowered", node);
+    if (cteDefs.length > 0) {
+      const outerCtes = ctes;
+      const outerLater = laterCtes;
+      ctes = new Map(outerCtes);
+      try {
+        for (const [at, def] of cteDefs.entries()) {
+          const cteName = nameOf(kid(def, "Name"));
+          laterCtes = new Set(cteDefs.slice(at + 1).map((one) => nameOf(kid(one, "Name"))));
+          if (ctes.has(cteName) && !outerCtes.has(cteName)) throw new BindError(`WITH names ${cteName.toLowerCase()} twice`, def);
+          let body = relation(kid(def, "SetOperation"));
+          const renames = kids(def, "Name").slice(1).map(nameOf);
+          if (renames.length > 0) {
+            const shape = Object.entries(schemaOf(body, catalogue));
+            if (shape.length !== renames.length) {
+              throw new BindError(`WITH ${cteName.toLowerCase()} names ${renames.length} column(s) for a select of ${shape.length}`, def);
+            }
+            if (new Set(renames).size !== renames.length) throw new BindError(`WITH ${cteName.toLowerCase()} names a column twice`, def);
+            body = project(body, shape.map(([from, type], i) => ({as: renames[i], expr: col(from, type)})));
+          }
+          ctes.set(cteName, body);
+        }
+        laterCtes = outerLater;
+        return relationBody(node);
+      } finally {
+        ctes = outerCtes;
+        laterCtes = outerLater;
+      }
+    }
+    return relationBody(node);
+  }
+
+  function relationBody(node) {
     const selects = kids(node, "Select");
+    // `SELECT TOP n ... ORDER BY ...` reads the ORDER BY onto the statement:
+    // sort first, then take n, as HANA does
+    const selectTop = selects.length === 1 ? topOf(selects[0]) : undefined;
+    if (selectTop !== undefined && directWord(node, "LIMIT")) {
+      throw new BindError("a select with both TOP and LIMIT has no single reading", node);
+    }
+    const top = kids(node, "OrderKey").length > 0 ? selectTop : undefined;
+    if (top !== undefined) deferredTop.add(selects[0]);
     const finishSet = (rel) => {
       const outerWords = new Set((node.children ?? []).filter((one) => one.node === "word")
         .map((one) => String(one.value).toUpperCase()));
@@ -961,7 +1361,13 @@ export function toIr(tree, options = {}) {
     };
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
-    if (selects.length === 1) return finishSet(select(selects[0]));
+    if (selects.length === 1) {
+      const rel = finishSet(select(selects[0]));
+      return top === undefined ? rel : limit(rel, top);
+    }
+    if (selects.some((one) => topOf(one) !== undefined)) {
+      throw new BindError("TOP inside a branch of a set operation is not lowered", node);
+    }
     // **Which set operation it was is a word, and the word was never read.**
     //
     // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were
@@ -984,16 +1390,21 @@ export function toIr(tree, options = {}) {
       return finishSet(except(select(selects[0]), select(selects[1])));
     }
     const all = hasWord(node, "ALL");
-    return finishSet(union(selects.map(select), all));
+    return finishSet(union(typeNullsAcross(selects.map(select)), all));
   }
 
   // The procedural compiler owns statement order and control flow, but it
   // must use this exact binder for the expressions and relations inside
   // those statements. Fragment entry points avoid both a second binder and
   // reparsing source substrings with regular expressions.
-  if (options.fragment === "expression") return expression(tree);
-  if (options.fragment === "condition") return condition(tree);
-  if (options.fragment === "relation") return relation(tree);
+  // an expression or condition fragment (IF, WHILE, a scalar assignment)
+  // may hold a subquery with a bare NULL; it is checked like a relation
+  if (options.fragment === "expression") return noUntyped({expr: expression(tree)}).expr;
+  if (options.fragment === "condition") return noUntyped({cond: condition(tree)}).cond;
+  // the procedural compiler binds relations one assignment at a time; a bare
+  // NULL there is typed by the target's schema when it passes one, and a
+  // NULL nothing typed is refused here exactly as at the end of a body
+  if (options.fragment === "relation") return noUntyped({rel: typeNullsFrom(relation(tree), options.targetSchema)}).rel;
   if (options.fragment === "type") return typeFromName(tree);
 
   // The body, statement by statement and **in order**, because an assignment
@@ -1031,7 +1442,10 @@ export function toIr(tree, options = {}) {
           // and not the thing that was wrong.
           throw new BindError(`the assignment to ${name.toLowerCase()} is of a scalar, and this IR carries relations`, node);
         }
-        const rel = relation(set);
+        // an assignment to the declared output, or to a variable whose schema
+        // was declared, types a bare NULL by that schema's column
+        const targetSchema = outParam !== undefined && String(outParam.name).toUpperCase() === name ? outSchema : relationSchemas[name];
+        const rel = typeNullsFrom(relation(set), targetSchema);
         bound.set(name, {rel});
         statements.push({stmt: "assign", name, rel});
         break;
@@ -1084,15 +1498,15 @@ export function toIr(tree, options = {}) {
         throw new BindError(`${node.node} is parsed but not lowered yet`, node);
     }
   }
-  if (returnedRel !== undefined) return {statements, rel: returnedRel};
+  if (returnedRel !== undefined) return noUntyped({statements, rel: typeNullsFrom(returnedRel, outSchema)});
   if (last === undefined && outParam !== undefined) {
     // the body answers through its OUT table parameter: the last thing
     // assigned to it is the plan, and there is no final select because the
     // procedure does not need one
     const assigned = bound.get(String(outParam.name).toUpperCase());
-    if (assigned !== undefined) return {statements, rel: assigned.rel};
+    if (assigned !== undefined) return noUntyped({statements, rel: typeNullsFrom(assigned.rel, outSchema)});
   }
-  if (last === undefined && options.allowNoResult === true) return {statements};
+  if (last === undefined && options.allowNoResult === true) return noUntyped({statements});
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
-  return {statements, rel: relation(last)};
+  return noUntyped({statements, rel: typeNullsFrom(relation(last), outSchema)});
 }

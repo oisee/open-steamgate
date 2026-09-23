@@ -44,7 +44,7 @@
 // approximating. Refusing is a feature: an engine that quietly returns a
 // different number is the failure this project has already paid for twice.
 
-const DIALECTS = {
+export const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     // HANA infers a bare `?` from its immediate context. In `? || ?` that
@@ -278,6 +278,7 @@ export function lower(rel, dialectName, options = {}) {
   const d = DIALECTS[dialectName];
   if (d === undefined) throw new Refused(`no dialect ${dialectName}`);
   const params = [];
+  const hostPreds = [];
   const refOf = options.relationRef ?? ((handle) => handle);
 
   const expr = (e) => {
@@ -302,6 +303,14 @@ export function lower(rel, dialectName, options = {}) {
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
         return d.placeholder(params.length, seamType(e.type));
+      case "hostPred": {
+        // a predicate the host supplies at run time (tools/ir-ranges.mjs):
+        // a marker, not a parameter, so the build-time text keeps its own
+        // placeholders in order and the host splices its own in
+        if (!/^[A-Za-z0-9_]+$/.test(String(e.id))) throw new Refused(`host predicate id ${JSON.stringify(e.id)} is not a plain name`);
+        hostPreds.push({id: e.id, column: e.column, columnType: e.columnType, ...(e.kind === undefined ? {} : {kind: e.kind}), after: params.length});
+        return `/*@range:${e.id}*/`;
+      }
       case "session":
         throw new Refused(`session value ${e.kind} ${e.name} was not captured by the procedure runtime`);
       case "bin": {
@@ -499,7 +508,26 @@ export function lower(rel, dialectName, options = {}) {
     if (r.rel === "alias") return `(${select(r.input)}) AS ${d.quote(r.name)}`;
     if (r.rel === "scan") return String(r.table).toUpperCase() === "DUMMY" ? d.dummy : d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
+    if (r.rel === "tfcall") return tableFunctionFrom(r);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
+  };
+
+  /** A table function called in FROM. Only HANA has the callee as an object
+   *  of that name; every other dialect refuses until the callee is compiled
+   *  for it (the DuckDB table-macro route is being measured, 2026-09-23). A
+   *  table-valued argument is refused everywhere: on HANA it has to be a
+   *  table variable, which this SQL does not have. */
+  const tableFunctionFrom = (r) => {
+    if (dialectName !== "hana") {
+      throw new Refused(`the table function ${r.name} is not compiled for ${dialectName}: only HANA has it as an object of that name`);
+    }
+    const args = r.args.map((arg) => {
+      if (arg.kind === "relation") {
+        throw new Refused(`a table-valued argument to ${r.name} is not lowered yet: on HANA it must be a table variable, which one statement does not have`);
+      }
+      return expr(arg.expr);
+    });
+    return `${d.quote(r.name)}(${args.join(", ")})`;
   };
 
   const joinFrom = (r) => {
@@ -553,6 +581,7 @@ export function lower(rel, dialectName, options = {}) {
       case "scan":
       case "ref":
       case "alias":
+      case "tfcall":
         return `SELECT * FROM ${from(r)}`;
       case "filter":
         // **A filter over an aggregate is a HAVING, and has to be rendered
@@ -651,7 +680,55 @@ export function lower(rel, dialectName, options = {}) {
     }
   };
 
-  return {sql: select(rel), params};
+  // writes (tools/ir-writes.mjs): the same expr() renders their values and
+  // conditions, so their placeholders and params come in text order
+  const writeStatement = (w) => {
+    const table = d.quote(w.table);
+    const cols = (list) => `(${list.map((c) => d.quote(c)).join(", ")})`;
+    const values = (rows) => rows.map((row) => `(${row.map(expr).join(", ")})`).join(", ");
+    // HANA takes one VALUES row; several go as a SELECT ... FROM DUMMY union
+    const hanaRows = (rows) => rows.map((row) => `SELECT ${row.map(expr).join(", ")} FROM DUMMY`).join(" UNION ALL ");
+    // a function, called where the WHERE stands in the text: rendering it
+    // earlier would push its params before the SET's (a bug caught by
+    // printing params next to the text, 2026-09-23)
+    const where = () => (w.pred === undefined ? "" : ` WHERE ${expr(w.pred)}`);
+    if (w.write === "insert") {
+      // "raise" writes what it can and the host raises after (A4H's INSERT
+      // FROM TABLE), so it renders as the skipping INSERT
+      const skip = w.onDuplicate === "ignore" || w.onDuplicate === "raise";
+      if (skip && dialectName === "hana") {
+        throw new Refused("INSERT that skips duplicate keys is not rendered for hana yet");
+      }
+      const ignore = skip ? " ON CONFLICT DO NOTHING" : "";
+      if (w.from !== undefined) {
+        // SQLite reads `... FROM t ON CONFLICT` as a join constraint: the
+        // select goes into a derived table with a WHERE of its own first
+        const from = skip && dialectName === "sqlite" ? `SELECT * FROM (${select(w.from)}) WHERE true` : select(w.from);
+        return `INSERT INTO ${table} ${cols(w.columns)} ${from}${ignore}`;
+      }
+      if (dialectName === "hana" && w.rows.length > 1) return `INSERT INTO ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
+      return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)}${ignore}`;
+    }
+    if (w.write === "update") {
+      const set = w.set.map((one) => `${d.quote(one.col)} = ${expr(one.expr)}`).join(", ");
+      return `UPDATE ${table} SET ${set}${where()}`;
+    }
+    if (w.write === "delete") return `DELETE FROM ${table}${where()}`;
+    if (w.write === "upsert") {
+      if (dialectName === "hana") {
+        return w.rows.length === 1
+          ? `UPSERT ${table} ${cols(w.columns)} VALUES ${values(w.rows)} WITH PRIMARY KEY`
+          : `UPSERT ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
+      }
+      const rest = w.columns.filter((c) => !w.key.includes(c));
+      const action = rest.length === 0 ? "DO NOTHING"
+        : `DO UPDATE SET ${rest.map((c) => `${d.quote(c)} = excluded.${d.quote(c)}`).join(", ")}`;
+      return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)} ON CONFLICT ${cols(w.key)} ${action}`;
+    }
+    throw new Refused(`no write ${JSON.stringify(w.write)}`);
+  };
+  const sql = rel.write !== undefined ? writeStatement(rel) : select(rel);
+  return hostPreds.length === 0 ? {sql, params} : {sql, params, hostPreds};
 }
 
 /** how many statements this plan will cost - one, unless a barrier says otherwise */

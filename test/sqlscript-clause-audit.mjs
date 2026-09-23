@@ -31,7 +31,7 @@ describe("the binder carries what the grammar reads, or refuses it by name", () 
   //
   // The first version asked "does the output contain a keyword as an
   // identifier?" and, run over 78 corpus bodies, fired once -- on
-  // `cl_islm_ml_engine_int_util`, which projects a column genuinely NAMED
+  // a utility class of the corpus, which projects a column genuinely NAMED
   // ORDER. `"ORDER" AS "IS_ORDER"` is correct SQL over a correct plan, and
   // SAP tables are full of such names: ORDER, VALUE, CLIENT, KEY. The check
   // would have cried wolf on hundreds of good bodies, and a check that cries

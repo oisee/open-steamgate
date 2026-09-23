@@ -24,6 +24,10 @@
 /** ABAP-ish type letters, because that is what the caller and the seam speak */
 export const T = {
   int: {abap: "I"},
+  // INT2: an INTEGER in every expression (HANA promotes SMALLINT arithmetic,
+  // measured on A4H), whose range is checked where ABAP meets it -- the input
+  // bind and the output boundary (docs/sqlscript-hana-observed.md)
+  int2: {abap: "I", bits: 16},
   int8: {abap: "INT8"},
   dec: (len, dec) => ({abap: "P", len, dec}),
   char: (len) => ({abap: "C", len}),
@@ -121,6 +125,11 @@ export const ref = (handle) => ({rel: "ref", handle});
  * the right thing than the wrong one.
  */
 export const refTo = (handle, schema) => ({rel: "ref", handle, schema});
+/** a table function called in FROM: the callee as the source spells it, its
+ *  arguments (scalar expressions or relations), and the schema its
+ *  declaration promises -- carried, like a ref's, because nothing below it
+ *  can derive it */
+export const tableFunctionCall = (name, args, schema) => ({rel: "tfcall", name, args, schema});
 export const filter = (input, pred) => ({rel: "filter", input, pred});
 export const project = (input, items) => ({rel: "project", input, items});
 export const join = (left, right, on, kind = "inner") => ({rel: "join", left, right, on, kind});
@@ -201,6 +210,7 @@ export function seamType(type) {
   if (type === undefined || type === null) return "STRING";
   if (typeof type === "string") return type;
   const {abap, len, dec} = type;
+  if (abap === "UNRESOLVED") throw new Error(`a column with no resolved type reached the seam (${type.reason})`);
   if (abap === "P" && len !== undefined) return `P(${len},${dec ?? 0})`;
   if (len !== undefined) return `${abap}(${len})`;
   return abap;
@@ -251,6 +261,9 @@ export function schemaOf(rel, catalogue = {}) {
       // a materialised relation: its schema is the plan's that made it, and
       // the binder knows which that was - it must carry it on the node
       if (rel.schema === undefined) throw new Error("schemaOf: a ref must carry the schema of the relation it points at");
+      return {...rel.schema};
+    case "tfcall":
+      if (rel.schema === undefined) throw new Error(`schemaOf: the call of ${rel.name} must carry the schema its declaration promises`);
       return {...rel.schema};
     case "filter":
     case "order":

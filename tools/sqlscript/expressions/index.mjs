@@ -102,7 +102,7 @@ export class Factor extends Expression {
 }
 
 /** `CAST(x AS NVARCHAR(36))`, and the AMDP spelling
- *  `CAST(x AS "$ABAP.type( cds_get_rsau_log-sal_data )")`.
+ *  `CAST(x AS "$ABAP.type( zcds_log-data )")`.
  *
  *  It is not a FunctionCall with a funny argument: `AS` is a keyword in the
  *  middle, so the ordinary call shape fails at it -- which is precisely what
@@ -218,8 +218,27 @@ export class UnnestCall extends Expression {
 export class TableFunctionCall extends Expression {
   getRunnable() {
     // `sys.series_generate_date( ... )` -- a built-in table function is
-    // reached through its schema, so the name is a ColumnRef and not a Name
-    return seq(new ColumnRef(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
+    // reached through its schema, so the name is a ColumnRef and not a Name.
+    // `CL_X=>GET_ROWS( ... )` without quotes -- an AMDP method named the way
+    // the corpus writes it -- is tried first, because a ColumnRef stops at `=>`.
+    // Arguments are positional or named (`p_clnt => :p_clnt`), never mixed:
+    // the binder refuses a mix by name.
+    const arg = altPrio(new NamedArgument(), new Expr());
+    return seq(altPrio(new MethodName(), new ColumnRef()), "(", opt(seq(arg, star(seq(",", arg)))), ")");
+  }
+}
+
+/** `CL_X=>METHOD` written without quotes */
+export class MethodName extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Name());
+  }
+}
+
+/** `p_clnt => :p_clnt` -- an argument bound to a parameter by its name */
+export class NamedArgument extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Expr());
   }
 }
 
@@ -233,6 +252,16 @@ export class Join extends Expression {
 }
 
 /** SELECT ... FROM ... [WHERE] [GROUP BY] [ORDER BY] */
+/** `INTO a, b [DEFAULT x, y]` -- a SELECT that fills scalars instead of
+ *  producing rows. Measured on A4H (docs/sqlscript-hana-observed.md): one
+ *  row assigns, none raises unless DEFAULT is given, two raise always. */
+export class IntoClause extends Expression {
+  getRunnable() {
+    return seq(str("INTO"), new Name(), star(seq(",", new Name())),
+      opt(seq(str("DEFAULT"), new Expr(), star(seq(",", new Expr())))));
+  }
+}
+
 export class Select extends Expression {
   getRunnable() {
     // **`altPrio`, not `opt`, for DISTINCT.** With `opt` the grammar admits
@@ -242,9 +271,12 @@ export class Select extends Expression {
     // DISTINCT. `altPrio` commits to the first branch that matches, which is
     // the keyword. Found by fable-osd running the same body on HANA twice,
     // once through HANA's own compiler and once through our lowering.
-    return seq(str("SELECT"),
+    // `SELECT TOP 1 ...` is HANA's spelling of a LIMIT; the binder treats it
+    // as one, after the ORDER BY of the same select
+    return seq(str("SELECT"), opt(seq(str("TOP"), new Expr())),
       altPrio(seq(str("DISTINCT"), new SelectItem(), star(seq(",", new SelectItem()))),
         seq(new SelectItem(), star(seq(",", new SelectItem())))),
+      opt(new IntoClause()),
       // `FROM a, b` is a cross join written with a comma, and the corpus uses
       // it for exactly that -- `FROM public.m_services s, public.m_volume_files v`
       // with the join written out in the WHERE
@@ -290,9 +322,19 @@ export class OrderKey extends Expression {
 }
 
 /** UNION, which the corpus puts third and both local engines needed */
+/** `name AS ( SELECT ... )` -- one common table expression of a WITH */
+export class CteDef extends Expression {
+  getRunnable() {
+    // the column list `x (a, b) AS (...)` renames the projected columns in order
+    return seq(new Name(), opt(seq("(", new Name(), star(seq(",", new Name())), ")")), str("AS"), "(", new SetOperation(), ")");
+  }
+}
+
 export class SetOperation extends Expression {
   getRunnable() {
-    return seq(new Select(),
+    // `WITH a AS ( ... ), b AS ( ... ) SELECT ...` -- the names are in scope
+    // for the statement that follows, and for the definitions after their own
+    return seq(opt(seq(str("WITH"), opt(str("RECURSIVE")), new CteDef(), star(seq(",", new CteDef())))), new Select(),
       star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
       opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));
@@ -329,7 +371,7 @@ export class ProcedureCall extends Expression {
 /** A type as a declaration writes it: NVARCHAR(10), INTEGER, DECIMAL(15,2) */
 export class TypeName extends Expression {
   getRunnable() {
-    // `"$ABAP.type( cds_get_rsau_log-sal_data )"` is ONE quoted token: inside
+    // `"$ABAP.type( zcds_log-data )"` is ONE quoted token: inside
     // a CAST the whole thing is written between double quotes, so it never
     // reaches AbapType below and has to be accepted as the quoted name it is
     return altPrio(new AbapType(), tok(TokenKind.quoted), seq(tok(TokenKind.identifier),
@@ -433,7 +475,11 @@ export class AbapType extends Expression {
  *  (docs/sqlscript-corpus.md, 0 of 405). */
 export class Body extends Expression {
   getRunnable() {
-    return altPrio(
+    // `alt`, not `altPrio`: the first reading matched a PREFIX ending in a
+    // bare `SELECT ...;` and committed, so a body with statements after one
+    // (a `SELECT ... INTO v;` followed by `rv = :v;`) could not be read at
+    // all. parse() still prefers the first reading that consumes the body.
+    return alt(
       seq(star(new Statement()), new SetOperation(), opt(";")),
       plus(new Statement()));
   }

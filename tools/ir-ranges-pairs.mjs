@@ -1,0 +1,102 @@
+// The ranges pairs: for each case, rangesPredicate() lowered per dialect,
+// {sql, params}, written to test/fixtures/ir-pairs/ranges.json. A port of
+// rangesPredicate (the Go runtime's) must give the same bytes on the same
+// cases; test/ir-ranges.mjs checks this file is current, so it cannot drift
+// from the code that writes it.
+//
+//   node tools/ir-ranges-pairs.mjs           write the file
+//   node tools/ir-ranges-pairs.mjs --check   exit 1 when it is stale
+import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
+import {dirname, join} from "node:path";
+import {fileURLToPath} from "node:url";
+import {rangesPredicate, lowerPredicate, errorCode} from "./ir-ranges.mjs";
+import {runsAs} from "./osd-main.mjs";
+
+const C10 = {abap: "C", len: 10};
+const N4 = {abap: "C", len: 4};
+const I = {abap: "I"};
+const r = (SIGN, OPTION, LOW, HIGH) => (HIGH === undefined ? {SIGN, OPTION, LOW} : {SIGN, OPTION, LOW, HIGH});
+
+export const CASES = [
+  {name: "empty ranges: no restriction", type: C10, rows: []},
+  {name: "I EQ", type: C10, rows: [r("I", "EQ", "A")]},
+  {name: "I EQ, CHAR with trailing blanks", type: C10, rows: [r("I", "EQ", "A    ")]},
+  {name: "I EQ with a HIGH, which EQ ignores", type: C10, rows: [r("I", "EQ", "A", "Z")]},
+  {name: "I EQ twice", type: C10, rows: [r("I", "EQ", "A"), r("I", "EQ", "B")]},
+  {name: "E EQ only", type: C10, rows: [r("E", "EQ", "A")]},
+  {name: "I BT and E EQ", type: C10, rows: [r("I", "BT", "A", "M"), r("E", "EQ", "C")]},
+  {name: "I BT with LOW above HIGH", type: C10, rows: [r("I", "BT", "M", "A")]},
+  {name: "I NB", type: C10, rows: [r("I", "NB", "B", "D")]},
+  {name: "I NE", type: I, rows: [r("I", "NE", 3)]},
+  {name: "I GT", type: I, rows: [r("I", "GT", 3)]},
+  {name: "I GE", type: I, rows: [r("I", "GE", 3)]},
+  {name: "I LT", type: I, rows: [r("I", "LT", 3)]},
+  {name: "I LE", type: I, rows: [r("I", "LE", 3)]},
+  {name: "I CP with * + and an escaped *", type: C10, rows: [r("I", "CP", "T*1#*+")]},
+  {name: "I CP with a literal % and _", type: C10, rows: [r("I", "CP", "50%_off*")]},
+  {name: "I CP with trailing blanks", type: C10, rows: [r("I", "CP", "T*   ")]},
+  {name: "I CP with a blank inside", type: C10, rows: [r("I", "CP", "T a*")]},
+  {name: "I CP without a wildcard is an equality", type: C10, rows: [r("I", "CP", "B")]},
+  {name: "I CP with an escaped * only is an equality", type: C10, rows: [r("I", "CP", "T1#*x")]},
+  {name: "I CP ending in a lone # escapes a padding blank", type: C10, rows: [r("I", "CP", "A#")]},
+  {name: "I CP of * alone is no restriction", type: C10, rows: [r("I", "CP", "*")]},
+  {name: "I NP of * alone matches nothing", type: C10, rows: [r("I", "NP", "*")]},
+  {name: "I CP with a HIGH after LOW at full width", type: C10, lowLen: 10, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "I NP with a HIGH matches every row", type: C10, lowLen: 10, rows: [r("I", "NP", "X*", "Z")]},
+  {name: "I CP with a literal # beside a literal %", type: C10, rows: [r("I", "CP", "5%##*")]},
+  {name: "I CP of 12 characters does not raise", type: C10, rows: [r("I", "CP", "ABCDEFGHIJK*")]},
+  {name: "I CP of exactly twice the column does not raise", type: C10, rows: [r("I", "CP", "ABCDEFGHIJKLMNOPQRS*")]},
+  {name: "I LT on CHAR", type: C10, rows: [r("I", "LT", "0")]},
+  {name: "I GE the initial value on CHAR", type: C10, rows: [r("I", "GE", "")]},
+  {name: "E NP", type: C10, rows: [r("E", "NP", "X*")]},
+  {name: "I EQ, NUMC zero-padded", type: N4, kind: "NUMC", rows: [r("I", "EQ", "7")]},
+  {name: "I BT, NUMC zero-padded to the column", type: N4, kind: "NUMC", rows: [r("I", "BT", "5", "10")]},
+  // the refusals, so a port checks them against this file too
+  {name: "a lower-case SIGN is a dump", type: C10, rows: [r("i", "EQ", "A")]},
+  {name: "a lower-case OPTION is a dump", type: C10, rows: [r("I", "eq", "A")]},
+  {name: "an unknown SIGN is a dump", type: C10, rows: [r("X", "EQ", "A")]},
+  {name: "an unknown OPTION is a dump", type: C10, rows: [r("I", "ZZ", "A")]},
+  {name: "a CP with a HIGH in a wider range raises", type: C10, lowLen: 45, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "a CP with a HIGH and no range width is refused", type: C10, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "an initial row is a dump, not no restriction", type: C10, rows: [r("", "", "")]},
+  {name: "a value longer than the column raises", type: C10, rows: [r("I", "EQ", "ABCDEFGHIJK")]},
+  {name: "a CP pattern past twice the column raises", type: C10, rows: [r("I", "CP", "ABCDEFGHIJKLMNOPQRSTU*")]},
+  {name: "a leading blank in CP is the special padding form", type: C10, rows: [r("I", "CP", " *")]},
+  {name: "CP + alone is refused", type: C10, rows: [r("I", "CP", "+")]},
+];
+export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
+
+function outcome(one) {
+  let pred;
+  try { pred = rangesPredicate("COL", one.type, one.rows, {kind: one.kind, lowLen: one.lowLen}); }
+  catch (error) { return {outcome: errorCode(error)}; }
+  return {lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, lowerPredicate(pred, dialect)]))};
+}
+
+export function pairs() {
+  return CASES.map((one) => ({
+    name: one.name, column: "COL", type: one.type, ...(one.kind === undefined ? {} : {kind: one.kind}),
+    ...(one.lowLen === undefined ? {} : {lowLen: one.lowLen}), rows: one.rows,
+    ...outcome(one),
+  }));
+}
+
+export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "ranges.json");
+const render = () => JSON.stringify({
+  note: "rangesPredicate(COL, type, rows, {kind, lowLen}) lowered per dialect by tools/ir-ranges-pairs.mjs; a port must give the same {sql, params} bytes. Two deliberate differences from the kernel's text, same meaning: BT / NB render as (>= AND <=), where the kernel sends BETWEEN; an INTEGER value is inlined, where the kernel binds it. A port copies these as they are.",
+  pairs: pairs(),
+}, undefined, 2) + "\n";
+
+if (runsAs("ir-ranges-pairs.mjs")) {
+  const text = render();
+  if (process.argv.includes("--check")) {
+    const current = existsSync(PAIRS_FILE) ? readFileSync(PAIRS_FILE, "utf8") : "";
+    if (current !== text) { console.error(`${PAIRS_FILE} is stale: run node tools/ir-ranges-pairs.mjs`); process.exit(1); }
+    console.log("ranges pairs current");
+  } else {
+    mkdirSync(dirname(PAIRS_FILE), {recursive: true});
+    writeFileSync(PAIRS_FILE, text);
+    console.log(`wrote ${PAIRS_FILE}: ${CASES.length} cases x ${DIALECT_ORDER.length} dialects`);
+  }
+}
+export {render};

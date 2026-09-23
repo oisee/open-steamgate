@@ -1,8 +1,8 @@
 // SEGW "Map to Data Source" code: what the DPC base class gets for an
 // operation mapped to an RFC / BOR function module (data source type 2) or
 // to a search help (type 6). The templates copy what SEGW writes on a 7.40+
-// system (/IWBEP/EPM_DEVELOPER_SCENARIO, SEPM_HCM_SCENARIO and
-// /IWBEP/GWSAMPLE_BASIC are the oracles, see docs/segw-mapping.md):
+// system (EPM-RFC-SAMPLE, EPM-CDS-SAMPLE-PROJECT and
+// /IWBEP/GWSAMPLE_BASIC are the oracles, see docs/segw-mapping.md; GWSAMPLE_BASIC is documented on help.sap.com, linked there):
 //
 //   RFC: declare one variable per mapped function module parameter, fill
 //   the inputs from the request (keys, entry data, filter ranges, constant
@@ -109,8 +109,8 @@ export function loadFunctionGroups(dirs) {
 // --------------------------------------------------------- mapping model
 
 // SEGW copies the DDIC types the module uses into one generated interface
-// per module (artifact type BOP): /IWBEP/IF_SEPM_GWS_BP_GET_DE1 for
-// SEPM_GWS_BP_GET_DETAIL. The name is IF_ + the module name, cut to 30
+// per module (artifact type BOP): /IWBEP/IF_<module> for an RFC module of
+// the EPM sample. The name is IF_ + the module name, cut to 30
 // characters with a number where it collides.
 // Newer trees say which module an interface belongs to (RFC_NAME); older
 // ones only have the name, and a regenerated project keeps the stale

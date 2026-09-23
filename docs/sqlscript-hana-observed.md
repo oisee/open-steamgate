@@ -372,3 +372,198 @@ twenty-two. Naming which is which is the point of counting both ways: a
 remainder of "12 divergences" would have sent somebody to fix rounding
 **presentation** at the same priority as integer division, and only one of
 those can give a wrong answer to an application.
+
+## What the kernel binds for a CHAR-like AMDP input (measured on A4H, 2026-09-23)
+
+Measured with a throwaway `$TMP` class holding one AMDP procedure and a
+program whose ABAP Unit test called it with three sets of values; each
+answer was read back from the assertion text (`fail( quit = no )`), and
+both objects were deleted afterwards. The procedure returned, per input,
+`LENGTH(:iv)`, `'[' || :iv || ']'` and a few comparisons.
+
+| ABAP parameter type | value passed | what the procedure sees |
+| --- | --- | --- |
+| `c LENGTH 3` | `'A'` | `A`, length 1 -- trailing blanks are gone |
+| `c LENGTH 3` | initial | `''`, length 0, and **not NULL** (`IS NULL` false, `= ''` true) |
+| `c LENGTH 3` | `' A'` | ` A`, length 2 -- a leading blank stays |
+| `n LENGTH 3` | `'7'` / `'12'` / initial | `007` / `012` / `000` -- zero-padded to the length |
+| `d` | initial | `00000000` (length 8), not `''` |
+| `t` | initial | `000000` |
+| `mandt` | `sy-mandt` | the logon client, equal to `SESSION_CONTEXT('CLIENT')` |
+| `mandt` | initial | `''` |
+| `string` | `` `A  ` `` / `` ` A` `` | `A  ` (length 3) / ` A` -- STRING keeps its blanks |
+| `tabname` (CHAR 30) | `'T000'` | length 4, and `WHERE tabname = :iv` finds the DD02L row |
+
+`'A'` and `'A  '` are one value for a `c` parameter; ABAP cannot tell them
+apart, so the question was only ever what the kernel binds, and the answer
+is the right-trimmed value. The last row is the one that matters for a
+body: a dictionary CHAR column holds right-trimmed values too, so the
+trimmed input compares equal to it under HANA's unpadded NVARCHAR
+comparison.
+
+What the portable runtime must do at the bind, therefore: CHAR-like inputs
+(CHAR, CLNT, LANG, CUKY, UNIT) right-trimmed, never left-trimmed, the
+initial value as `''` and not NULL; NUMC left-padded with zeros to its
+length; DATS and TIMS as their fixed-width digits (`00000000` initial);
+STRING unchanged. DuckDB and SQLite compare VARCHAR without padding, like
+HANA, so with the trim at the bind no rewriting of comparisons is needed
+(foreman-dell's DuckDB column: `'A  ' = 'A'` is false there).
+
+## What the kernel binds for a RAW AMDP input (measured on A4H, 2026-09-23)
+
+Same method: a throwaway `$TMP` class and an ABAP Unit driver, deleted
+afterwards.
+
+| ABAP parameter type | value passed | what the procedure sees |
+| --- | --- | --- |
+| a RAW 16 data element | `0123…CDEF` | 16 bytes; `BINTOHEX` gives the upper-case hex |
+| a RAW 16 data element | initial | **16 zero bytes** -- not NULL, not empty |
+| `x LENGTH 4` | initial | 4 zero bytes |
+
+The comparison is byte-wise: the input equals `X'0123…CDEF'` and
+`HEXTOBIN('0123…cdef')` in either case of hex, and not `X''`. Going the
+other way, a shorter VARBINARY returned into an `x LENGTH 16` component
+arrives padded with zero bytes on the right, and an empty one as 16 zero
+bytes.
+
+An ABAP `x LENGTH 16` input is always 16 bytes, so a shorter value can only
+come from a JavaScript caller of the portable runtime. For that case the
+runtime applies ABAP's own assignment rule for `x`: a shorter value moved
+into a longer field is padded with hex `00` on the right. The ABAP database
+seam here holds fixed RAW as canonical upper-case hex text, so the portable
+bind is: the value as upper-case hex, padded with `00` on the right to the
+field's length, initial all zeros, a longer value or one that is not hex
+refused. String equality on that canonical form is byte equality.
+
+## What the kernel does with INT2 at an AMDP boundary (measured on A4H, 2026-09-23)
+
+Same method: a throwaway class with AMDP procedures and an ABAP Unit
+driver, in their own package, deleted afterwards.
+
+| case | what happens |
+| --- | --- |
+| an `int2` input of -32768, 32767, 0, 7 | seen exactly, not NULL |
+| `:iv + 1` with 32767 | 32768: the arithmetic is INTEGER's, no SMALLINT overflow |
+| `:iv + :iv` with 32767 | 65534, likewise |
+| an `int2` input with `DEFAULT 5`, omitted | 5 |
+| an INTEGER of 32767 or -32768 into an `int2` output component | kept |
+| an INTEGER of 32768, 40000, -40000 or 65536 into that component | `CX_AMDP_EXECUTION_FAILED` |
+| `:iv + :iv` with 20000, into that component | `CX_AMDP_EXECUTION_FAILED` |
+
+So INT2 is an INTEGER everywhere inside a body, and its range is checked
+where ABAP meets it. On the way out, the kernel **raises** for a value
+outside -32768..32767; it does not wrap and does not truncate. The
+portable runtime does the same: an INT2 column is checked on the rows it
+returns, with an error that names
+the exception HANA raises. An ABAP `int2` input cannot carry a value
+outside the range, so a JavaScript caller's value that does is refused at
+the bind. A nested CALL hands its relation on unevaluated, so an INT2
+output of a nested CALL is refused rather than passed on unchecked.
+
+A by-product: an AMDP method parameter declared `OPTIONAL` does not
+compile on A4H ("Use DEFAULT instead of OPTIONAL for the optional
+parameter"). Only `DEFAULT` makes an AMDP input optional.
+
+Refused by name until measured, around INT2: a CAST or DECLARE to
+SMALLINT or TINYINT; INT1 on every path (unsigned 0..255 in ABAP); a
+UNION of an INT2 and an INTEGER column (HANA unifies them; the IR does not
+yet); an INTEGER assigned to an INT2 scalar (so a scalar INT2 output only ever
+holds an INT2 value and needs no check of its own). Not INT2 but found on
+the way: a CAST to BIGINT is typed as a plain INTEGER, which is narrower
+than BIGINT; it is a known gap, recorded here until it is measured. An INT2 column of a table
+input is range-checked at the bind with one query; across a nested CALL,
+INT2 inputs and outputs are refused.
+## OPTIONAL on an AMDP input (measured on A4H, 2026-09-23)
+
+| declaration | on A4H |
+| --- | --- |
+| a scalar input (`i`, `string`) with `OPTIONAL` | does not compile: `Use DEFAULT instead of OPTIONAL for the optional parameter "IV" of the AMDP method "M".` |
+| a table input with `OPTIONAL` | compiles |
+| that table input, omitted by the caller | the body sees an empty table (`COUNT(*)` is 0) |
+
+So an AMDP scalar is optional only through `DEFAULT`, and the portable
+compiler refuses a scalar `OPTIONAL` in the same words. A table
+`OPTIONAL` is refused by name until it is carried as an empty relation.
+
+## SELECT ... INTO, and the types of COUNT, MIN and MAX (measured on A4H, 2026-09-23)
+
+Two throwaway classes with AMDP procedures and ABAP Unit drivers, in their
+own packages, deleted afterwards.
+
+| `SELECT … INTO v` | on A4H |
+| --- | --- |
+| exactly one row | assigns it |
+| no row | `CX_AMDP_EXECUTION_FAILED` |
+| two rows | `CX_AMDP_EXECUTION_FAILED` |
+| `INTO v DEFAULT 42`, no row | 42 |
+| `INTO v DEFAULT 42`, two rows | `CX_AMDP_EXECUTION_FAILED` |
+| `COUNT(*) INTO v`, v INTEGER | always one row; 0, 1, 2 |
+| `INTO la, lb` | the columns in order |
+| a NULL in the row | the variable becomes NULL |
+| `'a  '` into an NVARCHAR variable | `a  `, blanks kept |
+
+The portable runtime asks the engine for two rows and decides the same way;
+its error names the exception HANA raises.
+
+For the result types, one expression was run over a one-row INTEGER table:
+`X * 2147483647 + X * 2147483647`. With `X` = `COUNT(*)` or `COUNT(k)` the
+answer is 4294967294; with `MAX(k)`, `MIN(k)` or `SUM(k)` the procedure
+raises. So COUNT is wider than INTEGER (BIGINT), and MIN, MAX and SUM of an
+INTEGER stay INTEGER. `AVG` of 1 and 2 is `1.500000`. A plain INTEGER
+column in the same expression did **not** overflow, so HANA widens column
+arithmetic and not an aggregate's: the comparison stands between the
+aggregates, not against the column.
+
+The binder types COUNT as INT8 and MIN / MAX as their argument -- in every
+relation and in window forms too, not only for `SELECT … INTO`; a BIGINT
+fills an INTEGER scalar through `SELECT … INTO`, range-checked. SUM and AVG
+stay typed STRING, the binder's default for a call it has not measured, so
+`SELECT SUM(k) INTO v` with v INTEGER is refused as a type mismatch: DuckDB
+widens `SUM(INTEGER)` where HANA overflows, and that difference has no answer
+in the lowering yet. An unnamed expression is called `V` in the binder's
+messages; two of them in one select are refused as two items of one name.
+
+## What the kernel sends for `col IN ranges` (read off A4H's plan cache, 2026-09-23)
+
+The SQL a range table becomes was read from `M_SQL_PLAN_CACHE` right after
+each SELECT, one case per statement (a distinct table alias through a
+dynamic FROM kept the statements apart; the bound values are not kept by
+the plan cache, so what is below is the statement's shape). Which rows each
+case selects was measured separately by foreman-dell on a table of its own
+(the result sets agree with the shapes).
+
+| range row | what the kernel sends |
+| --- | --- |
+| CP `D*`, `+`, `A+`, `T*   `, `D E*`, `D*` with HIGH `Z` | `col LIKE ?` |
+| CP with a literal `%` or `_` (`5%*`) | `col LIKE ? ESCAPE ?`, and only then |
+| CP with no wildcard left: `DE`, `A#`, `D#*`, an initial LOW | `col = ?` |
+| CP `*` | `1 = 1` |
+| CP with a leading blank (` *`), `X` with HIGH `*` | `(col LIKE ? OR col LIKE ? AND (N'_' <> ? OR col <> N''))` |
+| EQ (a HIGH is ignored), BT, NE | `col = ?`, `col BETWEEN ? AND ?`, `col <> ?` |
+| NP, or SIGN E | `NOT col LIKE ?` |
+
+From that and the result sets: the CP pattern is LOW at the declared width
+of the range's LOW (not the column's: a char45 range on a CHAR10 column put
+44 blanks between `X` and `*`) with HIGH after it (so `X*` with HIGH `Z` asks for `X`, anything, blanks,
+`Z`, and finds nothing); a trailing `#` escapes a padding blank (`A#` is
+`= 'A'`); trailing blanks do not count. `tools/ir-ranges.mjs` renders the
+same shapes. The special OR form serves blanks that meet the padding and
+the initial value stored as `''`; its bound values would be needed to copy
+it, so such a pattern is refused by name, and so is `+` alone, which
+matched the initial value through a plain `LIKE ?` -- the difference is in
+a value the plan cache does not keep.
+
+Measured by foreman-dell and adopted: SIGN and OPTION are exactly `I` / `E`
+and the ten options in upper case; a lower-case one, an unknown one or an
+initial row is an uncatchable dump (`SAPSQL_IN_ITAB_ILLEGAL_SIGN` /
+`_OPTION`), never "no restriction". A value longer than the column raises
+`CX_SY_OPEN_SQL_DATA_ERROR`; a CP pattern too long raises
+`CX_SY_DYNAMIC_OSQL_SEMANTICS` -- measured at one width only (on CHAR10, 12
+and 20 characters pass, 46 raise), so "longer than twice the column" is an
+extrapolation from CHAR10 and is labelled so in the code.
+
+Two differences from the kernel's text are deliberate and do not change the
+meaning: `tools/ir-ranges.mjs` renders BT / NB as `(>= AND <=)` where the
+kernel sends `BETWEEN ? AND ?`, and inlines an INTEGER where the kernel
+binds it. The pairs file says so, so that a port does not "fix" them. LOW and HIGH are converted to the
+column's type (a NUMC column gets `0005`..`0010` for `5`..`10`).

@@ -886,7 +886,7 @@ ENDLOOP.
   source the code already used — `StatusVH` now maps its query operation to
   `ZSTG_STATUS_SH` in `src/demo/zstg_demo.stg.yaml`, so segw-gen writes the
   `INTERFACES` line into the generated `_DPC`, which is where SEGW puts it.
-  Measured before deciding where: SAP's own `/IWBEP/CL_GWSAMPLE_BAS_DPC`
+  Measured before deciding where: the DPC of [GWSAMPLE_BASIC](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html)
   declares three interfaces (`IF_SB_DPC_COMM_SERVICES`,
   `IF_SB_GENDPC_SHLP_DATA`, `IF_SB_GEN_DPC_INJECTION`); eight corpus DPCs
   declare the first and third and **none** declares the second, and none of
@@ -923,9 +923,9 @@ twice out loud before reading the code that answers it.
   times. 39 observations, no occurrences, several vendors
 - **And it is still not enough to act on.** All 39 could share a binding
   style; the case that would settle it is a SAP-delivered service with a
-  DDIC-bound date. Tried on A4H: `/IWFND/GWDEMO_SP2` answers 403 and
-  `/IWBEP/TEA_TEST_COMP_APP` 500 for this user, and
-  `EPM_DEVELOPER_SCENARIO_SRV` and `GWSAMPLE_BASIC` are not activated. So
+  DDIC-bound date. Tried on A4H: a Gateway demo service answers 403 and
+  a test application service 500 for this user, and the EPM-RFC-SAMPLE
+  service and GWSAMPLE_BASIC are not activated. So
   the measurement is blocked on an authorisation, not on an argument, and
   nothing changes until it is not
 - What fable-osd's numbers do settle: `Precision` on `Edm.DateTime` is
@@ -1379,3 +1379,86 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: the range check is the transpiler runtime's (**needs an issue** once reduced to the runtime alone); the `EPOCH_MS` fix is ours
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_RQDATE (`dOVF`)
 - Upstream version containing a fix: none yet
+### NOTE-2026-09-22-packed-length-is-bytes — `P LENGTH n` is n bytes, and the portable IR reads it as n digits
+
+- `tools/sqlscript-to-procedure-ir.mjs` (`irTypeFromAbap`) maps
+  `P LENGTH n DECIMALS m` to `T.dec(n, m)`, and bare `P` to `dec(16, 2)`.
+  In ABAP the length of a packed number is in **bytes**: `n` bytes hold
+  `2n - 1` digits, and the default is 8 bytes = 15 digits. So a parameter
+  `TYPE p LENGTH 8 DECIMALS 2` -- 15 digits -- becomes a `DECIMAL(8,2)` on
+  the way to the database, which holds 8 digits: an amount above 999999.99
+  overflows or is refused by the engine, depending on the dialect.
+- Found by foreman-dell reading `c12329b..ddde7d7`, not by a test: no
+  conformance case sends a packed parameter of more than six digits.
+- Not changed in that branch, because it is the runtime's type boundary and
+  a change there needs its conformance case (a `P LENGTH 8 DECIMALS 2`
+  input of 15 digits through the destination, on HXE and DuckDB) before it
+  is trusted. Until then, the mapping is wrong in a known direction --
+  **narrower** than the ABAP type -- which fails loudly rather than
+  silently for a value that does not fit.
+- Where the fix goes: `irTypeFromAbap`, `scalarTypeOf` (the same literal
+  form) and the DDIC catalogue's `DEC` mapping (`LENG` of a DEC field in DD03P is already digits, not bytes, so
+  only the literal `P LENGTH n` form is affected).
+
+### ANOMALY-2026-09-23-amdp-method-options — abaplint drops the whole class definition when an AMDP method uses an OPTIONS clause other than READ-ONLY
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55 (as installed; `npm ls @abaplint/core`)
+- Affected ABAP statement, runtime API or adapter: `METHOD … BY DATABASE PROCEDURE|FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS …` — the statement accepts `OPTIONS READ-ONLY` and nothing else; `OPTIONS SUPPRESS SYNTAX ERRORS`, `OPTIONS READ-ONLY SUPPRESS SYNTAX ERRORS`, `OPTIONS DETERMINISTIC` and `OPTIONS CDS SESSION CLIENT p_clnt` are all reported as "Statement does not exist in the configured ABAP version (or a parser error)". `LANGUAGE LLANG` and `BY DATABASE GRAPH WORKSPACE` are refused the same way.
+- Minimal ABAP reproducer:
+  ```abap
+  CLASS cl_x DEFINITION PUBLIC.
+    PUBLIC SECTION.
+      INTERFACES if_amdp_marker_hdb.
+      CLASS-METHODS m IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.
+  ENDCLASS.
+  CLASS cl_x IMPLEMENTATION.
+    METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS SUPPRESS SYNTAX ERRORS
+    USING ztab.
+      ev = 1;
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+  With `OPTIONS READ-ONLY` in place of `OPTIONS SUPPRESS SYNTAX ERRORS` the same file parses and `getClassDefinition()` lists one method.
+- Exact command used to run it: `new abaplint.Registry().addFile(new MemoryFile("cl_x.clas.abap", src)).parse()`, then `getFirstObject().getClassDefinition()` is `undefined` and `findIssues()` carries a `parser_error` on the METHOD line.
+- Not a configuration matter: the same file fails identically under `syntax.version` `v702`, `v750`, `v755`, `v757`, `v758`, `open-abap` and `Cloud` (the extractor uses the default, `Newest`), so no version setting in `abaplint.json` parses the clause — the grammar lacks it (checked 2026-09-23 at foreman-dell's request).
+- Expected SAP behaviour: all four OPTIONS forms are documented AMDP syntax (`SUPPRESS SYNTAX ERRORS`, `DETERMINISTIC` for functions, `CDS SESSION CLIENT` for CDS table functions); the class activates.
+- Actual open-abap behaviour: the METHOD statement fails to parse, the method body is read as ABAP statements (more parser errors on `declare`, on a column name), and **`getClassDefinition()` answers `undefined` for the whole class**, so every method of it has no parameters.
+- Impact on open-steamgate: measured on the A4H AMDP export, 17 of 181 AMDP classes lose their definition, 12 of them on exactly this clause (`SUPPRESS SYNTAX ERRORS` ×11, `DETERMINISTIC` ×1; the other 5 are GRAPH WORKSPACE and LLANG). Among them the classes of one package whose functions 15 corpus bodies call. The extractor (`tools/amdp-extract.mjs`) then had no signature for any of their methods, and a body's own `:it_configuration` was refused as an unknown table variable.
+- Smallest safe workaround: `tools/amdp-extract.mjs` reads the method definitions as text (`definitionsByText`) when abaplint hands back no class definition, and for a single method abaplint dropped from a definition it did read; a section the reader cannot read whole yields no parameters for that method; the coverage instrument cross-checks that reader against abaplint on every class abaplint does read and prints the count of disagreements, so the fallback is measured where it is not the only source. It is gated, not preferred: abaplint resolves what the text reader cannot (types from includes, aliases, inheritance), and a runtime refusal on disagreement would make abaplint's right answer depend on the weaker parser (foreman-dell).
+- The same clause in the **definition** has the same effect on that one method: `METHODS m AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.` is a parser error, the class definition survives without `m`, and `m` has no parameters (two documentation demo classes and a family of compiler fixtures: 10 methods on the export, found by the cross-check below). `METHODS: a …, b ….` chains are fine.
+- Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
+- Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-amdp-scalar-optional — our compiler and abaplint accept OPTIONAL on an AMDP scalar input, which the kernel refuses
+
+- Status: `workaround`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55; `tools/sqlscript-to-procedure-ir.mjs` before this entry
+- Affected ABAP statement, runtime API or adapter: `CLASS-METHODS m IMPORTING VALUE(iv) TYPE <scalar> OPTIONAL …` on an AMDP method (`BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT`)
+- Minimal ABAP reproducer:
+  ```abap
+  CLASS zcl_opt DEFINITION PUBLIC FINAL CREATE PUBLIC.
+    PUBLIC SECTION.
+      INTERFACES if_amdp_marker_hdb.
+      TYPES: BEGIN OF ty_seen, n TYPE i, END OF ty_seen,
+             tt_seen TYPE STANDARD TABLE OF ty_seen WITH EMPTY KEY.
+      CLASS-METHODS m IMPORTING VALUE(iv) TYPE i OPTIONAL EXPORTING VALUE(et) TYPE tt_seen.
+  ENDCLASS.
+  CLASS zcl_opt IMPLEMENTATION.
+    METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+      et = SELECT :iv AS n FROM dummy;
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+- Exact command used to run it: on A4H, saving the class through ADT; in abaplint, `new Registry(Config.getDefault(v757|v758|Cloud))`, `addFile`, `parse()`, `findIssues()`.
+- Expected SAP behaviour (measured on A4H, throwaway class, deleted): the class does not compile -- `Use DEFAULT instead of OPTIONAL for the optional parameter "IV" of the AMDP method "M".` -- for `i` and `string` alike. On a **table** input `OPTIONAL` compiles, and an omitted table arrives in the body as an empty table (`COUNT(*)` = 0; a passed two-row table counts 2). Every OPTIONAL in the A4H AMDP export is on a table input.
+- Actual open-abap behaviour: abaplint reports no issue under `v757`, `v758` or `Cloud`. Our compiler accepted the scalar OPTIONAL and bound an omitted input as ABAP's initial value -- a case the kernel never lets happen -- and a clean-room fixture of ours was written that way.
+- Impact on open-steamgate: none on the measured corpus (no scalar OPTIONAL there); a hand-written AMDP class would have run here and failed to activate on a system.
+- Smallest safe workaround: the compiler refuses a scalar OPTIONAL in the kernel's words and a table OPTIONAL by name ("omitted it is an empty table (measured on A4H); not carried yet"); the fixture and the tests that leaned on the omission use `DEFAULT` or pass the initial value.
+- Upstream issue: **needs an issue** in `abaplint/abaplint` (a syntax check for OPTIONAL on an AMDP method's scalar parameter); not yet filed -- goes out through the critic gate.
+- Upstream version containing a fix: none yet (the workaround lives in our compiler; abaplint has no check to fix)
+- Regression-test location: `test/sqlscript-procedure-scope.mjs` ("OPTIONAL on a scalar is refused in the kernel's words …"), `test/sqlscript-procedure-source.mjs`, `test/amdp-cleanroom-corpus.mjs`

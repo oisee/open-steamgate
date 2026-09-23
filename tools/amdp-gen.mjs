@@ -30,6 +30,8 @@ import {contentFoldersOf} from "./osd-packs.mjs";
 import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
 import {ObjectStore} from "./osd-store.mjs";
 import {ddicCatalogue} from "./sqlscript-ddic-catalogue.mjs";
+import {parseTableFunction} from "./sqlscript/table-function-ddls.mjs";
+import {resolveType} from "./osd-type-graph.mjs";
 
 const DEFAULT_OUT = "gen/amdp";
 
@@ -146,9 +148,10 @@ const progXml = (name) => `<?xml version="1.0" encoding="utf-8"?>
 </abapGit>
 `;
 
-export function generate(folders, out = DEFAULT_OUT) {
+export function generate(folders, out = DEFAULT_OUT, options = {}) {
   const extras = typeSources(folders);
-  const store = new ObjectStore({root: process.cwd()});
+  // the runtime's object store; a test hands one over a fixture root
+  const store = options.store ?? new ObjectStore({root: process.cwd()});
   const procedures = [];
   const written = [];
   rmSync(out, {recursive: true, force: true});
@@ -197,7 +200,23 @@ export function generate(folders, out = DEFAULT_OUT) {
         // read.  Carry only those schemas: a procedure must not silently
         // acquire access to the entire system catalogue, and the generated
         // browser artefact should not contain a system-sized DDIC dump.
-        portable = compileProcedure(m, parsed.types, {catalogue: ddicCatalogue(store, m.usings)});
+        // the store also types a table parameter declared by the dictionary
+        // (TTYP -> TABL), under the compiler's measured datatype gate
+        // a method FOR TABLE FUNCTION takes its parameters and output from
+        // the DDLS it names, read through the same store; a DDLS that is not
+        // in the tree leaves the method as it was (refused by the compiler)
+        let method = m;
+        if (m.tableFunction !== undefined) {
+          let ddls;
+          try { ddls = store.read("DDLS", m.tableFunction)?.source; } catch { ddls = undefined; }
+          const tf = ddls === undefined ? undefined : parseTableFunction(ddls);
+          if (tf !== undefined) method = {...m, parameters: tf.parameters, returns: tf.returns};
+        }
+        const resolveElement = (name) => {
+          const found = resolveType(store, name);
+          return found.KIND === "DTEL" && found.DATATYPE !== "" ? found : undefined;
+        };
+        portable = compileProcedure(method, parsed.types, {catalogue: ddicCatalogue(store, m.usings), store, resolveType: resolveElement});
       } catch (error) {
         portableRefusal = {
           code: error?.code ?? "UNSUPPORTED_SQLSCRIPT",

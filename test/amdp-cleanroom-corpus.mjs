@@ -103,7 +103,9 @@ describe("independent AMDP clean-room corpus", () => {
     expect(byName.get("search_cells").body).to.not.match(/MAP_DEFAULT/i);
     expect(byName.get("expand_values").body).to.match(/INTEGER ARRAY|UNNEST|WITH ORDINALITY/i);
     expect(byName.get("identity_cells").body).to.match(/CURRENT_USER|CURRENT_SCHEMA/i);
-    expect(source("neutral_additions.clas.abap.txt")).to.match(/iv_seed\) TYPE i OPTIONAL/i);
+    // DEFAULT, not OPTIONAL: an AMDP scalar input may only be made optional
+    // with DEFAULT (measured on A4H, 2026-09-23)
+    expect(source("neutral_additions.clas.abap.txt")).to.match(/iv_seed\) TYPE i DEFAULT 0/i);
     expect(byName.get("optional_value").parameters.map((p) => p.direction)).to.deep.equal(["IN", "RETURNING"]);
     expect(byName.get("optional_value").parameters[0].abapType).to.equal("i");
   });
@@ -533,9 +535,9 @@ describe("independent AMDP clean-room corpus", () => {
       body: "rv_value = COALESCE(:iv_seed, 0) OVER ();"};
     expect(() => compileProcedure(decoratedCoalesce, matrix.types))
       .to.throw(UnsupportedSqlScript, /COALESCE does not accept window/);
-    expect(optional.parameters).to.deep.equal([{name: "IV_SEED", type: {abap: "I"}, optional: true}]);
+    expect(optional.parameters).to.deep.equal([{name: "IV_SEED", type: {abap: "I"}, optional: true, default: 0}]);
     expect((await runProcedure(optional)).value,
-      "omitted OPTIONAL ABAP I has its ABAP initial value before SQLScript sees it").to.equal(0);
+      "omitted DEFAULT 0 is 0 before SQLScript sees it").to.equal(0);
     expect((await runProcedure(optional, {inputs: {IV_SEED: null}})).value,
       "an explicit SQL NULL exercises COALESCE independently of ABAP omission").to.equal(7);
     expect((await runProcedure(optional, {inputs: {IV_SEED: 11}})).value).to.equal(11);

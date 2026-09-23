@@ -201,7 +201,7 @@ export function buildModel(p) {
   });
   // two entities that agree on the first 23 characters: the one whose name
   // fits keeps DEFINE_<name>, the other loses one more character
-  // (ESH_SEARCH: DEFINE_DATASOURCEACTIVATIONLOG and DEFINE_DATASOURCEACTIVATIONLO)
+  // (ESH_SEARCH, documented on help.sap.com -- link in docs/segw-mapping.md: DEFINE_DATASOURCEACTIVATIONLOG and DEFINE_DATASOURCEACTIVATIONLO)
   const taken = new Set();
   for (const et of [...entityTypes].sort((a, b) => a.techName.length - b.techName.length)) {
     let stem = et.defineStem;
@@ -258,7 +258,7 @@ export function buildModel(p) {
     // 1 = code based / mapped, 3 = annotation model, 4 = OData 4.0 strategy
     projectType: p.project.PROJECT_TYPE ?? "1",
     description: p.projectText.DESCRIPTION ?? "",
-    // a model without VALUE_NS (EPM_DEVELOPER_SCENARIO) has no namespace, not "undefined"
+    // a model without VALUE_NS (EPM-RFC-SAMPLE) has no namespace, not "undefined"
     namespace: p.model.VALUE_NS ?? "",
     lastChanged: p.project.LAST_CHG_TIME ?? "",
     classes: {mpc, mpcExt: artifact("MPCS"), dpc: artifact("DPCB"), dpcExt: artifact("DPCS")},
@@ -1305,7 +1305,7 @@ function sadlMethods(m, opts) {
   const refs = sets.filter((es) => es.sadl.type !== "EPM").map((es, i) => `    TYPES ty_${es.sadl.binding.replace(/\//g, "/")}_${i + 1} TYPE ${es.sadl.binding.toLowerCase()} ##NEEDED. " reference for where-used list`);
   const dataSources = sets.map((es) => `               | <sadl:dataSource type="${es.sadl.type}" name="${es.name}" binding="${es.sadl.binding}" />| &`);
   const structureLines = [...sets].reverse().flatMap((es) => [
-    // maxEditMode follows what the tree says the set allows: S_EPM_CDS_EXP has
+    // maxEditMode follows what the tree says the set allows: EPM-CDS-SAMPLE has
     // CDS sources, writable EmployeeSet/LeaveRequestSet and EX; every
     // read-only project in the corpus has RO.
     `               |<sadl:structure name="${es.name}" dataSource="${es.name}" maxEditMode="${es.creatable || es.updatable || es.deletable ? "EX" : "RO"}" >| &`,
@@ -1533,7 +1533,7 @@ function clasXml(name, description, components = [], subs = [], tpool = []) {
   }
   if (tpool.length > 0) {
     // The shape abapGit serialises a text pool in, read off a real export
-    // (cl_esh_search_mpc.clas.xml): ID I for a text symbol, the three-digit
+    // (the ESH_SEARCH MPC's XML): ID I for a text symbol, the three-digit
     // key, the text, and the field length the symbol was defined with.
     s += "   <TPOOL>\n" + tpool.map(([key, entry]) => `    <item>
      <ID>I</ID>

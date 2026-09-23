@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf, col, cast, project} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -33,6 +33,12 @@ export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
 export const ifElse = (branches, otherwise = [], source) =>
   ({stmt: "if", branches, otherwise, source});
+// `SELECT ... INTO a, b [DEFAULT x, y]`: the relation, the scalars it
+// fills in column order, and the DEFAULT values for the no-row case
+export const selectInto = (rel, targets, defaults, source) =>
+  ({stmt: "select-into", rel, targets: targets.map(upper), ...(defaults === undefined ? {} : {defaults}), source});
+/** what HANA raises for SELECT ... INTO with no row (and no DEFAULT) or more than one */
+export class SelectIntoRows extends Error {}
 export const callProcedure = (name, input, output, source) =>
   ({stmt: "call-procedure", procedure: upper(name), input: upper(input), output: upper(output), source});
 
@@ -52,10 +58,71 @@ function scalarForType(value, type, name) {
   if (type?.abap === "STRING" && typeof value !== "string") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript string`);
   }
+
   if (type?.abap === "BOOL" && typeof value !== "boolean") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript boolean`);
   }
   return value;
+}
+
+/** What the kernel binds for a fixed-length character INPUT, measured on
+ *  A4H: trailing blanks removed, a leading blank kept, initial as ''
+ *  (docs/sqlscript-hana-observed.md). Only at the input boundary: a scalar
+ *  the body declares is an NVARCHAR, and HANA keeps its blanks. Today the
+ *  host evaluates INTEGER scalars only, so no character value is ever built
+ *  inside a program; when string scalars arrive, the trim must stay here and
+ *  not move into scalarForType, and that is the test to write with them.
+ *  A value longer than the field is not one ABAP could have passed: refused,
+ *  not cut. */
+// INT2 on A4H: -32768 .. 32767 in and out; outside it the kernel raises
+// CX_AMDP_EXECUTION_FAILED at the output boundary rather than wrapping, and
+// an ABAP int2 input can never be outside it, so a JavaScript caller's value
+// that is, is refused the same way
+const isInt2 = (type) => type?.abap === "I" && type.bits === 16;
+export class Int2OutOfRange extends Error {}
+function inInt2Range(value, where) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < -32768 || n > 32767) {
+    throw new Int2OutOfRange(`${where}: ${value} is outside INT2 (-32768..32767); HANA raises CX_AMDP_EXECUTION_FAILED here`);
+  }
+}
+
+function boundCharacter(value, type, name) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new UnsupportedSqlScript(`${name} is not a character value`);
+  const trimmed = value.replace(/ +$/, "");
+  if (trimmed.length > type.len) throw new UnsupportedSqlScript(`${name} is longer than its ${type.len} characters`);
+  return trimmed;
+}
+
+/** A fixed RAW input, measured on A4H: always its n bytes, initial as n zero
+ *  bytes, compared byte-wise. The ABAP database seam holds RAW as canonical
+ *  upper-case hex text, so that is the bound form: a shorter value is padded
+ *  with zero bytes on the right (as ABAP pads x), a longer one or one that
+ *  is not hex is refused. */
+function boundBytes(value, type, name) {
+  if (value == null) return null;
+  if (typeof value !== "string" || !/^([0-9A-Fa-f]{2})*$/.test(value)) {
+    throw new UnsupportedSqlScript(`${name} is not a RAW value as hex text`);
+  }
+  if (value.length > type.len * 2) throw new UnsupportedSqlScript(`${name} is longer than its ${type.len} bytes`);
+  return value.toUpperCase().padEnd(type.len * 2, "0");
+}
+
+/** A date or time input, measured on A4H: always its 8 / 6 digits, the
+ *  initial value as zeros ('00000000', '000000'), never ''. An empty or
+ *  blank value from the caller is the initial value; anything that is not
+ *  that many digits is refused rather than passed as a date. */
+function boundDateTime(value, kind, name) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new UnsupportedSqlScript(`${name} is not a ${kind === "DATS" ? "date" : "time"} value`);
+  const width = kind === "DATS" ? 8 : 6;
+  const trimmed = value.trim();
+  if (trimmed === "") return "0".repeat(width);
+  if (!new RegExp(`^\\d{${width}}$`).test(trimmed)) {
+    throw new UnsupportedSqlScript(`${name} is not ${width} digits, so not a ${kind === "DATS" ? "date" : "time"}`);
+  }
+  return trimmed;
 }
 
 function booleanOrNull(value, context) {
@@ -346,14 +413,34 @@ export async function runProcedure(program, {
     if (parameter.optional !== undefined && typeof parameter.optional !== "boolean") {
       throw new UnsupportedSqlScript(`portable scalar input ${name} has a malformed OPTIONAL flag`);
     }
-    const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type) : [];
-    if (typeKeys.length !== 1 || typeKeys[0] !== "abap" || !["I", "STRING"].includes(parameter.type.abap)) {
-      throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER or STRING type");
+    const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type).sort() : [];
+    const exactScalar = (typeKeys.length === 1 && typeKeys[0] === "abap" && ["I", "STRING"].includes(parameter.type.abap))
+      || (typeKeys.join() === "abap,bits" && isInt2(parameter.type));
+    const fixedChar = typeKeys.join() === "abap,len" && ["C", "X"].includes(parameter.type.abap)
+      && Number.isInteger(parameter.type.len) && parameter.type.len > 0;
+    if (!exactScalar && !fixedChar) {
+      throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER, STRING, fixed-length character or fixed-length RAW type");
     }
     if (!supplied.has(name) && parameter.optional !== true) throw new UnsupportedSqlScript(`missing input ${name}`);
-    const initial = parameter.type?.abap === "I" ? 0 : parameter.type?.abap === "STRING" ? "" : null;
+    if (parameter.default !== undefined && typeof parameter.default !== (parameter.type?.abap === "I" ? "number" : "string")) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} has a DEFAULT of the wrong kind`);
+    }
+    // an omitted input takes its DEFAULT when the signature has one, and
+    // ABAP's initial value only for a bare OPTIONAL
+    const initial = parameter.default !== undefined ? parameter.default
+      : parameter.type?.abap === "I" ? 0 : ["STRING", "C"].includes(parameter.type?.abap) ? ""
+        : parameter.type?.abap === "X" ? "0".repeat(parameter.type.len * 2) : null;
     const raw = supplied.has(name) ? supplied.get(name) : initial;
-    const value = scalarForType(raw, parameter.type, name);
+    if (parameter.kind !== undefined && !["DATS", "TIMS"].includes(parameter.kind)) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} has an unknown kind ${parameter.kind}`);
+    }
+    if (parameter.kind !== undefined && !(parameter.type.abap === "C" && parameter.type.len === (parameter.kind === "DATS" ? 8 : 6))) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} is a ${parameter.kind} but not C(${parameter.kind === "DATS" ? 8 : 6})`);
+    }
+    if (isInt2(parameter.type)) inInt2Range(raw, `input ${name}`);
+    const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
+      : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
+      : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);
     scalars.set(name, {type: parameter.type, value});
   }
   if (program.outputType !== undefined) {
@@ -380,6 +467,26 @@ export async function runProcedure(program, {
     const expectedShape = JSON.stringify(parameter.schema);
     if (JSON.stringify(actual) !== expectedShape) {
       throw new UnsupportedSqlScript(`relation input ${name} schema does not match its AMDP signature`);
+    }
+    // INT2 columns of a table input: an ABAP caller cannot hand over a value
+    // outside -32768..32767, so one that does came from a JavaScript caller
+    // and is refused at the bind, as the scalar input is (foreman-dell)
+    const int2Inputs = Object.entries(parameter.schema).filter(([, type]) => isInt2(type)).map(([column]) => column);
+    if (int2Inputs.length > 0) {
+      if (closedRelationInputs || client?.native === undefined) {
+        throw new UnsupportedSqlScript(`relation input ${name} has INT2 columns (${int2Inputs.join(", ")}); their range check needs the database and is not carried across a CALL`);
+      }
+      const outside = int2Inputs.map((column) => bin("OR",
+        bin("<", col(column, T.int2), lit(-32768, T.int), T.bool),
+        bin(">", col(column, T.int2), lit(32767, T.int), T.bool), T.bool))
+        .reduce((a, b) => bin("OR", a, b, T.bool));
+      let probe;
+      try { probe = lower(limit(filter(value, outside), 1), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+      catch (error) { throw new UnsupportedSqlScript(`cannot check INT2 columns of relation input ${name}: ${error.message}`); }
+      const found = await client.native({...probe, expect: "rows"});
+      if (found.rows.length > 0) {
+        throw new Int2OutOfRange(`relation input ${name}: a row is outside INT2 (-32768..32767) in ${int2Inputs.join(", ")}; an ABAP int2 table cannot carry it`);
+      }
     }
     relations.set(name, value);
   }
@@ -410,6 +517,51 @@ export async function runProcedure(program, {
         value = scalarForType(value, current.type, statement.name);
         scalars.set(statement.name, {type: current.type, value});
         assignedScalars.add(statement.name);
+      } else if (statement.stmt === "select-into") {
+        // measured on A4H: one row assigns, none raises unless DEFAULT is
+        // given, two raise always (CX_AMDP_EXECUTION_FAILED); a NULL in the
+        // row assigns NULL. Two rows are asked for, which is enough to tell.
+        if (client?.native === undefined) {
+          throw new UnsupportedSqlScript("SELECT ... INTO needs the database, and this run has none", statement);
+        }
+        const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
+        assertExpandedRelationBudget(statement.rel, budget);
+        const frozen = freezeRelation(statement.rel, relations, scalars, session);
+        assertExpandedRelationBudget(frozen, budget);
+        let compiled;
+        try { compiled = lower(limit(frozen, 2), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+        catch (error) {
+          if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+          throw error;
+        }
+        const answer = await client.native({...compiled, expect: "rows"});
+        let values;
+        if (answer.rows.length > 1) {
+          throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found more than one row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+        } else if (answer.rows.length === 0) {
+          if (statement.defaults === undefined) {
+            throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found no row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+          }
+          values = statement.defaults.map((expr) => {
+            assertPortableHostExpression(expr, "SELECT ... INTO DEFAULT", scalars);
+            return evaluateScalar(expr, scalars);
+          });
+        } else {
+          const columns = Object.keys(schemaOf(frozen, inputCatalogue));
+          values = columns.map((column) => answer.rows[0][column] ?? null);
+        }
+        statement.targets.forEach((target, i) => {
+          const current = scalars.get(target);
+          if (current === undefined) throw new UnsupportedSqlScript(`SELECT ... INTO undeclared scalar ${target}`, statement);
+          if (values[i] !== null && current.type?.abap === "I" && current.type.bits === undefined) {
+            const n = Number(values[i]);
+            if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) {
+              throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: ${values[i]} does not fit an INTEGER; the overflow is not measured, so it is refused`, statement);
+            }
+          }
+          scalars.set(target, {type: current.type, value: scalarForType(values[i], current.type, target)});
+          assignedScalars.add(target);
+        });
       } else if (statement.stmt === "assign-relation") {
         // Reject hostile/deep input before recursive freezing or effects()
         // can exhaust the JavaScript stack. A var reference is cheap here;
@@ -474,6 +626,9 @@ export async function runProcedure(program, {
     if (scalar === undefined || !assignedScalars.has(program.output)) {
       throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
     }
+    // no range check here: a scalar INT2 output can only be assigned an INT2
+    // value (an INTEGER into it is refused as not an identical measured type),
+    // so it is always in range; the INT2 scalar boundary itself is unmeasured
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
       trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
   }
@@ -503,6 +658,11 @@ export async function runProcedure(program, {
     if (expected.abap === "STRING" && ["C", "STRING"].includes(actual.abap)) {
       return {as: name, expr: source};
     }
+    // into an INT2 column: an INTEGER passes unchanged, and its range is
+    // checked on the rows below, where HANA raises rather than wraps
+    if (isInt2(expected) && actual.abap === "I") return {as: name, expr: source};
+    // and an INT2 value into an INTEGER column only widens
+    if (expected.abap === "I" && expected.bits === undefined && isInt2(actual)) return {as: name, expr: source};
     if (expected.abap === "I" && actual.abap === "INT8") {
       return {as: name, expr: cast(source, expected)};
     }
@@ -524,7 +684,14 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
+  const int2Columns = Object.entries(program.outputSchema).filter(([, type]) => isInt2(type)).map(([column]) => column);
   if (deferRelation) {
+    // a nested CALL hands its relation to the caller unevaluated, so the
+    // range check at this boundary has no rows to look at; refused rather
+    // than letting an out-of-range value through where HANA raises
+    if (int2Columns.length > 0) {
+      throw new UnsupportedSqlScript(`output ${program.output} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
+    }
     return {relation: output, outputSchema: program.outputSchema,
       trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
         nestedCalls, databaseStatements: 0, boundParameters: 0}};
@@ -540,6 +707,11 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }
   const answer = await client.native({...compiled, expect: "rows"});
+  for (const row of answer.rows) {
+    for (const column of int2Columns) {
+      if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${program.output}.${column}`);
+    }
+  }
   return {
     rows: answer.rows,
     columns: answer.columns,

@@ -24,7 +24,7 @@
 //   npm run segw:closure            report per project
 //   npm run segw:closure -- --names also list the missing DDIC names
 //   npm run segw:closure -- --odata .local/fork/open-abap-odata
-//   npm run segw:closure -- --corpus .local/corpus-sap --lib .local/corpus-sap/S_EPM_GATEWAY
+//   npm run segw:closure -- --corpus .local/corpus-sap --lib .local/corpus-sap/<EPM-FG-PACKAGE>
 //                                  another folder of repos, function groups for the RFC-mapped ones
 //                                   check against a fork instead of Lars's clone
 

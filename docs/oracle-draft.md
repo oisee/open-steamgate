@@ -119,42 +119,42 @@ Confirms the AGENDA note that abapGit does not serialize the BO model.
 
 ### 2.2 `DraftAdministrativeData` — in `.local/corpus-sap/`
 
-`.local/corpus-sap/SADL_GW_DRAFT_ADMINISTRATION/src/sadl_gw_draft_administration/`
+`.local/corpus-sap/<DRAFT-ADMIN-SAMPLE>/src/<draft-admin-sample>/`
 (SAP-delivered, exported from A4H on 2026-09-12; already listed in `docs/segw-tree.md`).
 
 This is the draft **monitoring** app, not a draft-enabled transactional service —
 its exposure is `maxEditMode="RO"` over three consumption views. Still, it gives:
 
-- `c_draftadministrativedata.ddls.asddls` — `C_DraftAdministrativeData` over
+- `<draft admin CDS view>.ddls.asddls` — `<draft admin CDS view>` over
   `I_DraftAdministrativeData`, with `@UI.lineItem … {type: #FOR_ACTION, dataAction: 'MPC_EXT:TakeOverDraft'}`,
   `@ObjectModel.association.type: [#TO_COMPOSITION_CHILD / #TO_COMPOSITION_PARENT, #TO_COMPOSITION_ROOT]`.
-- `csdraft_admin.view.xml` — **the `DraftAdministrativeData` field list**, read
+- `<draft admin field view>.view.xml` — **the `DraftAdministrativeData` field list**, read
   from `SDRAFT_ADMIN_CDS`: `MANDT`, `DRAFTENTITYTYPE`, `DRAFTUUID`, `OBJECTKEY`,
   `CREATEDBYUSER`, `CREATEDBYUSERDESCRIPTION`, `CREATIONDATETIME`,
   `LASTCHANGEDBYUSER`, `LASTCHANGEDBYUSERDESCRIPTION`, `LASTCHANGEDATETIME`,
   `INPROCESSBYUSER`, `INPROCESSBYUSERDESCRIPTION`, `PROCESSINGSTARTDATETIME`,
   `ENQUEUESTARTDATETIME`, `DRAFTACCESSTYPE`.
-- `isdraft_log.view.xml` — the log table `SDRAFT_ADMIN_LOG`
+- `<draft log view>.view.xml` — the log table `SDRAFT_ADMIN_LOG`
   (`CLIENT`, `DRAFT_ENTITY`, `DRAFT_KEY`, `LOGNUMBER`, `OBJECT_KEY`).
-- `isdraft_config.view.xml` — `SDRAFT_LC_CONFIG` joined with `/BOBF/OBM_BO` and
+- `<draft config view>.view.xml` — `SDRAFT_LC_CONFIG` joined with `/BOBF/OBM_BO` and
   `/BOBF/OBM_OBJT`: the lifecycle/expiry configuration.
-- `cl_sadl_draft_admin_takeover.clas.abap` — a real function-import
+- `<draft takeover class>.clas.abap` — a real function-import
   implementation over `cl_draft_admin_access=>change_owner`, with
   `sdraft_entity_name` / `sdraft_key` as parameter types.
-- `cl_sadl_draft_admin_object_key.clas.abap` — `cl_draft_lifecycle_handler=>get_bo_keys`,
+- `<draft object-key class>.clas.abap` — `cl_draft_lifecycle_handler=>get_bo_keys`,
   `if_draft_admin_access=>tt_sdraft_admin` (`draft_entity`, `draft_key`, `d_key`).
-- `cl_sadl_draft_admin_ui_mpc.clas.abap` — a real SEGW **RDS** MPC verbatim:
+- `<draft admin MPC>.clas.abap` — a real SEGW **RDS** MPC verbatim:
   `define_rds_4`, `get_last_modified_rds_4`,
   `IF_SADL_GW_MODEL_EXPOSURE_DATA~GET_MODEL_EXPOSURE` with
   `<sadl:definition … syntaxVersion="">` and `cl_sadl_gw_model_exposure=>get_exposure_xml`.
   Together with §2.1's MPC this is a sufficient oracle for the RDS templates
   `tools/segw-gen.mjs` is missing.
-- `cl_sadl_draft_admin_ui_dpc_ext.clas.abap` — how a `_DPC_EXT` post-processes a
+- `<draft admin DPC_EXT>.clas.abap` — how a `_DPC_EXT` post-processes a
   SADL read (`super->` then enrich) and dispatches a function import.
 
 ### 2.3 `Common.DraftRoot` / `Common.DraftNode` as Gateway vocabulary
 
-`.local/corpus-sap/S_ESH_SEARCH_ODATA/src/s_esh_search_odata/esh_search_anno_ref.iwpr.xml`
+`.local/corpus-sap/<SEARCH-ODATA-SAMPLE>/src/<search-odata-sample>/<search-annotation-project>.iwpr.xml`
 declares, in a `PROJECT_TYPE 3` annotation-reference model:
 complex types `DraftRootType` and `DraftNodeType` (`DraftRootType.BASE_TYPE = DraftNodeType`),
 term mappings `VALUE_NA = DraftRoot` / `DraftNode` under plugin `/IWBEP/ODATA`,
@@ -165,7 +165,7 @@ So the term *exists* in the tree format; its payload does not.
 
 ### 2.4 Nothing else
 
-- `.local/corpus-sap/S_EPM_SADL_GW_DEV_SCEN_TX/` — "TX" is BOPF-transactional
+- `.local/corpus-sap/<EPM-SADL-TX-SAMPLE>/` — "TX" is BOPF-transactional
   (a plain `Address` entity over a `/BOBF/` `NODE_KEY`, generated 2014). **Not draft.**
 - No `$metadata` capture, no `$batch` trace, no draft-enabled FE V2 app anywhere
   under `.local/`. `.local/capture/` does not exist yet.
@@ -283,7 +283,7 @@ These are the standard objects §2.4 proved absent locally.
      — expect `ACTIVE_ENTITY_KEY`
    - `SELECT det_key, det_name, impl_class, pattern FROM /bobf/obm_determination WHERE bo_key = '<bo_key>'`
    (exact column names to be discovered with a `SELECT *` on one row; the table
-   names are confirmed by `isdraft_config.view.xml` referencing `/BOBF/OBM_BO`
+   names are confirmed by `<draft config view>.view.xml` referencing `/BOBF/OBM_BO`
    and `/BOBF/OBM_OBJT`.)
 6. **Release fingerprint**, to judge oracle validity (§6):
    `SELECT * FROM cvers` / the component release of `SAP_BASIS`, and
@@ -323,7 +323,7 @@ Scrub before anything is quoted in a tracked file: no hostnames, no user names
 - The draft table's physical shape, field for field (`z4t_draft_dels.tabl.xml`).
 - The exposed entity type's field set, including the four `A_*` action-control
   properties (`zcl_z_4_monster_delive_mpc.clas.abap`).
-- The `DraftAdministrativeData` field set (`csdraft_admin.view.xml`).
+- The `DraftAdministrativeData` field set (`<draft admin field view>.view.xml`).
 - The BOPF action / determination / alternative-key inventory and the member names
   of `SDRAFT_WRITE_DRAFT_ADMIN` (`zif_4cds_monster_deliveries_c.intf.abap`).
 - That the SEGW tree stores **nothing** draft-specific — so `stg-compile`'s
@@ -460,7 +460,7 @@ separately, and one developer-day is a working day in this repo's rhythm.
 
 | Block | Work | Days |
 |---|---|---|
-| **Prerequisite (R8)** | RDS templates in `tools/segw-gen.mjs`: `define_rds_N`, `get_last_modified_rds_N`, `IF_SADL_GW_MODEL_EXPOSURE_DATA~GET_MODEL_EXPOSURE`, `syntaxVersion=""`, the RDS DPC method blocks; `--check` byte-identical against `SADL_GW_DRAFT_ADMINISTRATION` and `Z_4_MONSTER_DELIVERY_CDS_PULL`; both projects leave the skip list in `docs/segw-closure.md` | **1.5** |
+| **Prerequisite (R8)** | RDS templates in `tools/segw-gen.mjs`: `define_rds_N`, `get_last_modified_rds_N`, `IF_SADL_GW_MODEL_EXPOSURE_DATA~GET_MODEL_EXPOSURE`, `syntaxVersion=""`, the RDS DPC method blocks; `--check` byte-identical against `DRAFT-ADMIN-SAMPLE` and `Z_4_MONSTER_DELIVERY_CDS_PULL`; both projects leave the skip list in `docs/segw-closure.md` | **1.5** |
 | **Model / metadata** | draft-field injection into the exposed entity type (`ActiveUuid`, `DraftEntityCreationDateTime`, `DraftEntityLastChangeDateTime`, `HasActiveEntity`, `HasDraftEntity`, `IsActiveEntity`, `A_EDIT`/`A_ACTIVATION`/`A_PREPARATION`/`A_VALIDATION`); compound key `(<key>, IsActiveEntity)`; the `DraftAdministrativeData` entity type + set; `SiblingEntity` and `DraftAdministrativeData` navigations + association sets; four function imports with `sap:action-for` + `sap:applicable-path`; `Common.DraftRoot`/`DraftNode` through `vocab_anno_model`; the open-abap-odata setters this needs (expect 1–2 upstream PRs, as with `set_is_media` / `sap:semantics`) | **3** |
 | | `draft: true` in `*.stg.yaml` → tree + generated classes + annotations (`tools/stg-compile.mjs`, `docs/stg-compile.md`) | **0.5** |
 | **Runtime** | RAW16/GUID + boolean keys end to end (`zcl_stg_url`, `zcl_stg_json`, `zcl_stg_filter`, `zcl_stg_entry_provider`) — R6 | **1** |
@@ -508,18 +508,18 @@ Oracles already on disk (untracked, read-only):
   zcl_au_4cds_monster_deliveries.clas.abap    /BOBF/CL_LIB_AUTH_DRAFT_ACTIVE
   zcl_d_4cds_monster_deliveries0.clas.abap    /BOBF/CL_LIB_D_SUPERCL_SIMPLE
 
-.local/corpus-sap/SADL_GW_DRAFT_ADMINISTRATION/src/sadl_gw_draft_administration/
-  c_draftadministrativedata.ddls.asddls       C_DraftAdministrativeData
-  csdraft_admin.view.xml                      DraftAdministrativeData field set
-  isdraft_log.view.xml                        SDRAFT_ADMIN_LOG
-  isdraft_config.view.xml                     SDRAFT_LC_CONFIG + /BOBF/OBM_BO
-  cl_sadl_draft_admin_ui_mpc.clas.abap        real SEGW RDS MPC template
-  cl_sadl_draft_admin_ui_dpc_ext.clas.abap    _EXT post-processing a SADL read
-  cl_sadl_draft_admin_takeover.clas.abap      a real draft function import
-  cl_sadl_draft_admin_object_key.clas.abap    cl_draft_lifecycle_handler
+.local/corpus-sap/<DRAFT-ADMIN-SAMPLE>/src/<draft-admin-sample>/
+  <draft admin CDS view>.ddls.asddls      <draft admin CDS view>
+  <draft admin field view>.view.xml       DraftAdministrativeData field set
+  <draft log view>.view.xml               SDRAFT_ADMIN_LOG
+  <draft config view>.view.xml            SDRAFT_LC_CONFIG + /BOBF/OBM_BO
+  <draft admin MPC>.clas.abap             real SEGW RDS MPC template
+  <draft admin DPC_EXT>.clas.abap         _EXT post-processing a SADL read
+  <draft takeover class>.clas.abap        a real draft function import
+  <draft object-key class>.clas.abap      cl_draft_lifecycle_handler
 
-.local/corpus-sap/S_ESH_SEARCH_ODATA/src/s_esh_search_odata/
-  esh_search_anno_ref.iwpr.xml                DraftRoot/DraftNode as CTYP+term
+.local/corpus-sap/<SEARCH-ODATA-SAMPLE>/src/<search-odata-sample>/
+  <search-annotation-project>.iwpr.xml    DraftRoot/DraftNode as CTYP+term
 ```
 
 Ours, to be touched when the work starts:

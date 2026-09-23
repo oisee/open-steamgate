@@ -116,4 +116,14 @@ describe("the SQLScript grammar", () => {
     // defect as a scan that reads nothing and prints the clean line
     expect(() => tree("SELECT a FROM t; this is not SQLScript")).to.throw(ParseError);
   });
+
+  it("reads a bare SELECT; followed by more statements, and keeps the value-of-the-body tree for one that ends in it", () => {
+    // Body is `alt`: the first full reading wins, so a body ending in a
+    // SELECT keeps [Statement..., SetOperation] and one going on after it
+    // reads as statements (it could not be read at all under altPrio)
+    const tail = parse(new Body(), lex("x = SELECT a FROM t; SELECT a FROM t;"));
+    expect((tail.children ?? []).filter((c) => c.node !== "word").map((c) => c.node)).to.deep.equal(["Statement", "SetOperation"]);
+    const onward = parse(new Body(), lex("SELECT a INTO v FROM t; x = SELECT a FROM t;"));
+    expect((onward.children ?? []).map((c) => c.node)).to.deep.equal(["Statement", "Statement"]);
+  });
 });

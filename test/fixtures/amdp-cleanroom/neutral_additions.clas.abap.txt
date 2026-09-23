@@ -31,7 +31,7 @@ CLASS cl_neutral_additions DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS:
       search_cells
         IMPORTING VALUE(it_cells) TYPE tt_cell
-                  VALUE(iv_query) TYPE string OPTIONAL
+                  VALUE(iv_query) TYPE string DEFAULT ''
         EXPORTING VALUE(et_search) TYPE tt_search,
       difference_cells
         IMPORTING VALUE(it_left) TYPE tt_cell
@@ -43,7 +43,7 @@ CLASS cl_neutral_additions DEFINITION PUBLIC FINAL CREATE PUBLIC.
         IMPORTING VALUE(it_cells) TYPE tt_cell
         EXPORTING VALUE(et_identity) TYPE tt_identity,
       optional_value
-        IMPORTING VALUE(iv_seed) TYPE i OPTIONAL
+        IMPORTING VALUE(iv_seed) TYPE i DEFAULT 0
         RETURNING VALUE(rv_value) TYPE i.
 ENDCLASS.
 
