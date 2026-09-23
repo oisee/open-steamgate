@@ -26,7 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const home = "/home/alice/dev/open-steamgate";
 const pack = `${home}/packs/o4d/upstream`;
 const libs = [`${home}/.local/lars/open-abap-core/src`, `${home}/.local/lars/open-abap-apc/src`];
-const wantedScenes = process.argv.slice(2);
+const wantedScenes = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 
 const recordings = readdirSync(`${home}/.local`).filter((f) => /^o4d-a4h-[a-z0-9_]+\.jsonl$/.test(f) && f !== "o4d-a4h.jsonl")
   .map((f) => ({scene: f.replace(/^o4d-a4h-|\.jsonl$/g, ""), file: `${home}/.local/${f}`}))
@@ -50,11 +50,12 @@ writeFileSync(join(dir, "zz_main.go"), goMain());
 execFileSync("gofmt", ["-w", dir]);
 const bin = join(out, "demo");
 const t1 = performance.now();
-// sin and cos from glibc (cgo, tag libm): A4H computes them with the C
-// library, measured 2026-09-23 on the seed chains of constellation and
-// ignition, which fdlibm (V8, the pure-Go default) does not reproduce.
-// GOGEN_TAGS= (empty) builds the pure-Go variant.
-const tags = process.env.GOGEN_TAGS ?? "libm";
+// sin and cos: pure Go (a port of fdlibm, as V8 has it) unless --libm asks
+// for the C library's through cgo. A4H computes them with glibc (measured
+// 2026-09-23 on the seed chains of constellation and ignition); the pure
+// build is the same on every platform and is a known difference
+// (ANORMALIES sin-cos-libm), the glibc build is opt-in, for the oracle.
+const tags = process.argv.includes("--libm") ? "libm" : "";
 execFileSync("go", ["build", "-trimpath", `-tags=${tags}`, "-ldflags=-s -w", "-o", bin, "./cmd/demo"], {cwd: join(here, "go"), stdio: "inherit", env: {...process.env, CGO_ENABLED: tags.includes("libm") ? "1" : "0"}});
 const tBuild = performance.now() - t1;
 // one process per recording, with a hard ceiling: a loop the compiler got
@@ -103,7 +104,7 @@ function diff(a, b, path = "") {
   }
   return close(a, b) ? null : path;
 }
-console.log(`\ndemo: ${program.classes.length} classes compiled, front end ${Math.round(tFront)} ms, go build ${Math.round(tBuild)} ms, binary ${(statSync(bin).size / 1e6).toFixed(1)} MB`);
+console.log(`\ndemo: sin/cos from ${tags.includes("libm") ? "glibc (cgo)" : "fdlibm (pure Go)"}, ${program.classes.length} classes compiled, front end ${Math.round(tFront)} ms, go build ${Math.round(tBuild)} ms, binary ${(statSync(bin).size / 1e6).toFixed(1)} MB`);
 console.log(`${"scene".padEnd(18)}${"frames".padStart(7)}${"Go = A4H".padStart(10)}${"JS = A4H".padStart(10)}${"Go µs".padStart(9)}${"JS µs".padStart(9)}  first difference`);
 let totals = {n: 0, go: 0, js: 0};
 for (const [i, r] of runs.entries()) {
