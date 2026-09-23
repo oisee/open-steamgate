@@ -342,6 +342,44 @@ reason, content type and body, and OSG's HTTP layer adds
 `dataserviceversion: 2.0` and `; charset=utf-8` on top:
 `{"error":{"code":"STG/ENTITY_SET_NOT_FOUND","message":{"lang":"en","value":"Entity set NoSuchSet does not exist in ZSTG_DEMO_SRV"}}}`.
 
+## SMW0 media and APC for a Go host, 2026-09-23
+
+Two host services a server built from this compiler mounts.
+
+**SMW0.** `CALL FUNCTION '<literal>'` of a module the host implements
+(`NATIVE_FM` in the front end) compiles into a Go call that takes every
+actual as generic data and raises the module's classic exceptions by name;
+the JS emitter refuses it. `go/abap/w3mi.go` answers `WWWDATA_IMPORT` and
+`SCMS_BINARY_TO_XSTRING` out of a media directory beside the binary
+(`abap.SetMediaDir`, a flag of the host): `node media.mjs --out <dir>
+<folder> ...` copies every W3MI object's data file there with an index
+`w3mi.json` (object id, as the object's XML names it, to file and size),
+and `media.mjs` also gives the `WWWPARAMS` rows with the real filesize
+(`replaceWwwparams`: the transpiler's `DatabaseSetup` writes 0 for an
+object whose data file it was not handed). What a system answers at the
+edges was measured on A4H first and is pinned (`ZCL_GOGEN_T_W3MI`,
+ANORMALIES w3mi-edges: open-abap-core differs in three places).
+`node mediacheck.mjs` reads the 31 objects of o4d and zork (11.9 MB, the
+three MP3s and ZORK-MINI-Z3 among them) through compiled ABAP of the
+packs' loader shape and compares them with the files: 31 of 31 equal, and
+an unknown object sy-subrc 1, in 37 ms. The packs' own loaders stop before
+the call, at `SELECT ... WHERE col = value INTO TABLE` (the o4d handler,
+Zork's game loader) and `CONCATENATE ... IN BYTE MODE` (Zork), which the
+subset does not have yet.
+
+**APC.** `go/abap/apc.go` is the socket part of the framework as an
+`http.Handler` (`abap.APCChannel`) for `/sap/bc/apc/sap/<app>`; the ABAP
+part stays ABAP, open-abap-apc's `ZCL_APC_HOST` (handler by name,
+`open` = ON_ACCEPT + ON_START, `message`, `close`, `drain`), which the Node
+hosts drive too. A program adapts it in a few lines (`cmd/o4dserve`
+`apcHost`). One Session per socket, each call one dialog step under
+`abap.WorkProcess` and `DialogStep`, ON_START before the upgrade and its
+messages written after it (open before drain), a rejection 403, binary
+frames refused with 1003. The ZO4D stand now runs on it with the
+handler's own ON_MESSAGE; `cmd/apcprobe` (length and sha256 of every
+message) finds it equal to the stand at 98d4d1c for the config, the
+scenario, 300 frames and the JSON and control commands.
+
 ## Next, if this is pursued
 
 Ranked with codex gpt-6-sol, 2026-09-23:
