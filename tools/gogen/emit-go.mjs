@@ -890,15 +890,6 @@ function stmtLines(st, ctx, d) {
         ...moves.map((m) => `${t}\t${m}`),
         `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
-    case "split_fields": {
-      // the pieces, the last with the rest; a c field cut sets sy-subrc 4
-      const n = ctx.loop++;
-      const lines = [`${t}{`, `${t}\tp${n} := abap.SplitN(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length})`, `${t}\ts.Sy.Subrc = 0`];
-      st.targets.forEach((x, i) => lines.push(x.type.k === "string" ? `${t}\t${place(x, ctx)} = p${n}[${i}]`
-        : `${t}\t${place(x, ctx)} = abap.SplitFit(s, p${n}[${i}], ${x.type.len})`));
-      lines.push(`${t}}`);
-      return lines;
-    }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
     case "read_key": {

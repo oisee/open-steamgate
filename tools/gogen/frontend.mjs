@@ -2008,23 +2008,6 @@ function declaringClass(reg, cls, name, kind) {
   return undefined;
 }
 
-/**
- * SPLIT s AT sep INTO f1 f2 ...: measured on A4H (2026-09-23) --
- * 'Seats desc' gives [Seats][desc]; the last field takes the rest of the
- * string after its separator ('a  b' -> [a][ b], 'a b c' -> [a][b c]); a
- * field without a piece is cleared ('a' -> [a][]); a piece too long for a c
- * field is cut and sy-subrc is 4 ('abcdef gh' into two c(3) -> [abc][gh] 4),
- * else 0. Targets are c and string; AT space splits at one blank.
- */
-function splitIntoFields(node, ctx, text) {
-  const [str, sep] = node.findDirectExpressions(Expressions.Source);
-  const targets = node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx));
-  if (!sep || targets.length < 2 || !/^SPLIT\s+.+\s+AT\s+.+\s+INTO\s+/i.test(text) || /\bIN\s+(CHARACTER|BYTE)\s+MODE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
-  for (const t of targets) if (t.type.k !== "c" && t.type.k !== "string") throw new Unsupported(`SPLIT into a ${t.type.k}: ${text}`);
-  // space is a c of one blank, which a c here carries without it
-  const sepExpr = upper(sep.concatTokens()) === "SPACE" ? {e: "chars", value: " ", type: S} : convert(source(sep, ctx), S);
-  return {s: "split_fields", x: convert(source(str, ctx), S), sep: sepExpr, targets};
-}
 
 /**
  * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
