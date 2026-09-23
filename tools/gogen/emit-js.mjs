@@ -208,6 +208,7 @@ function stmt(st, ctx, d) {
         `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)});`];
+    case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
       const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (e instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(e.cls)) {\n${c.into ? `${t}    ${ident(c.into)} = e;\n` : ""}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);

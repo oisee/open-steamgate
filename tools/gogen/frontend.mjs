@@ -87,7 +87,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
-    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken]};
+    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
   const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
@@ -276,8 +276,11 @@ function classIr(ctx0, obj) {
     const sig = signatures.get(name);
     const skip = (why) => {
       program.skipped.push(`${className}=>${name}: ${why}`);
+      // a method with a typed signature still exists as a stub that raises
+      // when called, so its callers compile; only an untyped signature
+      // cannot be called at all
       if (typed.has(name)) cls.stubs.push({...typed.get(name), reason: why});
-      signatures.set(name, {name, unsupported: why});
+      else signatures.set(name, {name, unsupported: why});
     };
     if (sig === undefined) { skip("no signature"); continue; }
     if (sig.unsupported) { skip(sig.unsupported); continue; }
@@ -404,12 +407,25 @@ function registerConst(program, name, id, className) {
 function block(node, ctx) {
   const out = [];
   for (const child of node.getChildren()) {
-    if (child instanceof Nodes.StructureNode) {
-      if (isStruct(child, Structures.Normal) || isStruct(child, Structures.Body)) out.push(...block(child, ctx));
-      else out.push(structure(child, ctx));
-    } else if (child instanceof Nodes.StatementNode) {
-      const s = statement(child, ctx);
-      if (s !== undefined) out.push(s);
+    if (child instanceof Nodes.StructureNode && (isStruct(child, Structures.Normal) || isStruct(child, Structures.Body))) {
+      out.push(...block(child, ctx));
+      continue;
+    }
+    // one statement (or one IF, LOOP, TRY ...) the subset does not cover
+    // becomes a stub that raises NOT_COMPILED when it runs, as a system
+    // dumps; the rest of the method compiles, and nothing is skipped
+    // silently: execution never passes the stub
+    try {
+      if (child instanceof Nodes.StructureNode) out.push(structure(child, ctx));
+      else if (child instanceof Nodes.StatementNode) {
+        const s = statement(child, ctx);
+        if (s !== undefined) out.push(s);
+      }
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      const where = `${ctx.className}=>${ctx.method}`;
+      ctx.program.partial.push(`${where}: ${e.message}`);
+      out.push({s: "stub", where, reason: e.message.slice(0, 200)});
     }
   }
   return out;
