@@ -375,6 +375,10 @@ function stmt(st, ctx, d) {
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT SINGLE ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "kernel_loop":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
+    case "select_count":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT COUNT(*) FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
+    case "db_write_sql": case "db_write":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.verb ?? st.op.toUpperCase()} ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "native":
       // see nativeMessageText in emit-go.mjs
       if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {

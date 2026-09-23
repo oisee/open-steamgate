@@ -22,6 +22,8 @@ type Sy struct {
 	Index int32
 	Tabix int32
 	Subrc int32
+	// Dbcnt: the rows the last Open SQL statement read or wrote
+	Dbcnt int32
 }
 
 // Session is what a dialog step runs in. A goroutine picks one up, runs, and

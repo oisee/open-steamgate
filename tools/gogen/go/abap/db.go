@@ -35,6 +35,9 @@ func OpenDB(script []byte) error {
 			return fmt.Errorf("statement %d: %w: %.200s", i, err, st)
 		}
 	}
+	if err := prepareStore(d); err != nil {
+		return err
+	}
 	db = d
 	return nil
 }
