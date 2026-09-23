@@ -20,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pack = `${home}/packs/o4d/upstream`;
 const objects = ["zif_o4d_effect", ...new Set(readdirSync(pack).filter((f) => /^zcl_o4d_.*\.clas\.abap$/.test(f)).map((f) => f.split(".")[0])),
   // the APC framework of open-abap-apc, which the host library
-  // (go/abap/apc.go) drives through ZCL_APC_HOST, as the Node hosts do
+  // (go/apc/apc.go) drives through ZCL_APC_HOST, as the Node hosts do
   "zcl_apc_host", "zcl_apc_message_manager", "zcl_apc_message", "zcl_apc_context", "zcl_apc_initial_request", "zcl_apc_binding_manager", "cx_apc_error",
   // its exception and the roots it inherits from, as semantics.mjs compiles them
   "cx_root", "cx_static_check", "cx_dynamic_check", "cx_no_check", "cl_message_helper"];

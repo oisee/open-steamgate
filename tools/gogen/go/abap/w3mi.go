@@ -72,7 +72,10 @@ func W3MIObjects() map[string]W3MIEntry {
 func W3MIBytes(objid string) ([]byte, bool) {
 	mediaMu.Lock()
 	defer mediaMu.Unlock()
-	id := strings.ToUpper(strings.TrimRight(objid, " "))
+	// the key as given, trailing blanks off (a CHAR field): WWWDATA compares
+	// it as stored, and the index keys are the objects' NAMEs, upper case as
+	// SMW0 stores them, so a lower-case OBJID is a miss, not a guess
+	id := strings.TrimRight(objid, " ")
 	e, ok := mediaIndex[id]
 	if !ok {
 		return nil, false
@@ -115,6 +118,8 @@ func WWWDATA_IMPORT(s *Session, args map[string]Data) {
 	if !found {
 		panic(ClassicException{Name: "IMPORT_ERROR", Method: "WWWDATA_IMPORT"})
 	}
+	// MIME is OPTIONAL in the signature (TABLES MIME STRUCTURE W3MIME
+	// OPTIONAL), so a call without it is an existence check and legal
 	mime, ok := fmArg(args, "MIME")
 	if !ok {
 		return
@@ -164,12 +169,19 @@ func SCMS_BINARY_TO_XSTRING(s *Session, args map[string]Data) {
 			panic(NotCompiled("SCMS_BINARY_TO_XSTRING", p+" is not measured"))
 		}
 	}
-	n := int32(0)
-	if d, ok := fmArg(args, "INPUT_LENGTH"); ok {
-		n = DataI(d)
+	// INPUT_LENGTH and BINARY_TAB are obligatory: a call without either is
+	// a syntax error on a system, so it is refused rather than defaulted
+	d, ok := fmArg(args, "INPUT_LENGTH")
+	if !ok {
+		panic(NotCompiled("SCMS_BINARY_TO_XSTRING", "INPUT_LENGTH not supplied"))
 	}
+	n := DataI(d)
 	var all strings.Builder
-	if tab, ok := fmArg(args, "BINARY_TAB"); ok {
+	tab, ok := fmArg(args, "BINARY_TAB")
+	if !ok {
+		panic(NotCompiled("SCMS_BINARY_TO_XSTRING", "BINARY_TAB not supplied"))
+	}
+	{
 		if tab.T.Kind != 'h' {
 			panic(NotCompiled("SCMS_BINARY_TO_XSTRING", "BINARY_TAB is not a table"))
 		}

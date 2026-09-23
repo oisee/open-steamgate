@@ -65,14 +65,29 @@ export function wwwparamsInserts(objects) {
     .map(([k, v]) => `INSERT INTO "wwwparams" ("relid", "objid", "name", "value") VALUES ('MI', ${q(o.id)}, ${q(k)}, ${q(v)});`));
 }
 
-/** a statement list with every WWWPARAMS row of these objects replaced by wwwparamsInserts */
+/**
+ * a statement list with every WWWPARAMS row of these objects replaced by
+ * wwwparamsInserts. The rows are recognised by the transpiler's own INSERT
+ * text (PopulateTables.insertWWWPARAMS); an object with no row recognised is
+ * an error rather than a silent duplicate, since a change of that text
+ * upstream would otherwise keep its filesize 0 row beside the real one.
+ */
 export function replaceWwwparams(statements, objects) {
   const ids = new Set(objects.map((o) => o.id));
+  const seen = new Set();
   const mine = /^INSERT INTO "wwwparams" \("relid", "objid", "name", "value"\) VALUES \('MI', '((?:[^']|'')*)'/;
   const kept = statements.filter((st) => {
     const m = mine.exec(String(st));
-    return m === null || !ids.has(m[1].replace(/''/g, "'"));
+    if (m === null) return true;
+    const id = m[1].replace(/''/g, "'");
+    if (!ids.has(id)) return true;
+    seen.add(id);
+    return false;
   });
+  const missing = [...ids].filter((id) => !seen.has(id));
+  if (missing.length > 0) {
+    throw new Error(`replaceWwwparams: no WWWPARAMS row of the transpiler recognised for ${missing.join(", ")}: has the INSERT text of PopulateTables changed?`);
+  }
   return [...kept, ...wwwparamsInserts(objects)];
 }
 
