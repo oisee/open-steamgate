@@ -295,7 +295,7 @@ function stmt(st, ctx, d) {
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
-const FN_F = {SIN: "math.Sin", COS: "math.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
+const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
 function expr(e, ctx) {
   switch (e.e) {

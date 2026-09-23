@@ -449,8 +449,21 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
-    const target = lvalue(targets[0], ctx);
     const src = node.findDirectExpression(Expressions.Source);
+    const inline = targets[0].getChildren()[0];
+    if (isExpr(inline, Expressions.InlineData)) {
+      // DATA(x) = ... takes the type of what is assigned. abaplint types some
+      // built-ins by a fixed return (frac( ) as i, _builtin.js), where ABAP
+      // gives the argument's type: frac( f ) is an f (A4H: pulse 0.25, not 0)
+      const name = upper(inline.findFirstExpression(Expressions.TargetField).concatTokens());
+      const declared = ctx.locals.get(name);
+      if (declared && numeric(declared)) {
+        let t;
+        try { t = source(src, ctx).type; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
+        if (t && numeric(t) && declared.k !== t.k) ctx.locals.set(name, t);
+      }
+    }
+    const target = lvalue(targets[0], ctx);
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
