@@ -108,15 +108,29 @@ function descFuncs() {
       out.push(`var ${d.name} = &abap.Type{}`);
       if (t.k === "table") {
         const g = goType(t);
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }}`);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${copyZero(t)}}`);
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'u', Comps: []abap.Comp{${fs.map((f) => `{Name: ${JSON.stringify(String(f.name).toUpperCase())}, T: ${desc(f.type)}, Get: func(p any) any { return &p.(*${t.go}).${ident(f.name)} }}`).join(", ")}}}`);
+        // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
+        inits.push(`\t*${d.name} = abap.Type{Kind: '${deepType(t) ? "v" : "u"}', Comps: []abap.Comp{${fs.map((f) => `{Name: ${JSON.stringify(String(f.name).toUpperCase())}, T: ${desc(f.type)}, Get: func(p any) any { return &p.(*${t.go}).${ident(f.name)} }}`).join(", ")}}, ${copyZero(t)}}`);
       }
     }
   }
   if (out.length === 0) return [];
   return [...out, "", "func init() {", ...inits, "}", ""];
+}
+
+/** a structure that holds a string, a table or a reference, at any depth */
+export function deepType(t) {
+  if (["string", "xstring", "table", "ref", "exc", "dref", "data"].includes(t?.k)) return true;
+  if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => deepType(f.type));
+  return false;
+}
+
+/** the Copy and Zero of a generated descriptor: a whole move and a CLEAR through generic data */
+function copyZero(t) {
+  const g = goType(t);
+  return `Copy: func(dst, src any) { *dst.(*${g}) = ${copied(`*src.(*${g})`, t)} }, Zero: func(p any) { *p.(*${g}) = ${zero(t)} }`;
 }
 
 function cloneFuncs() {
@@ -215,8 +229,10 @@ export function emitGo(program, pkg = "main") {
   out.push(...dispatcher(classes));
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.s === "native"))) out.push(...nativeRtti(program));
+  // descriptors first: their Copy asks for clone functions
+  const descs = descFuncs();
   out.push(...cloneFuncs());
-  out.push(...descFuncs());
+  out.push(...descs);
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
   return out.join("\n") + "\n";
@@ -701,6 +717,11 @@ function stmtLines(st, ctx, d) {
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];
+    // a move into generic data writes into the slot it is bound to
+    case "set_data":
+      return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)})`];
+    case "clear_data":
+      return [`${t}abap.ClearData(${expr(st.target, ctx)})`];
     case "get_ref":
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
     case "describe_kind":

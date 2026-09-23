@@ -841,6 +841,8 @@ function statement(node, ctx) {
     const target = lvalue(targets[0], ctx);
     // a ?= b: a down-cast, checked at run time
     if (node.getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(src, ctx), target.type, node.concatTokens())};
+    // a generic target is a binding: the value is written into its slot
+    if (target.type.k === "data") return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)};
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
@@ -1061,9 +1063,17 @@ function statement(node, ctx) {
     void targets;
     return out;
   }
-  if (isStmt(node, Statements.Clear)) return {s: "clear", target: lvalue(node.findDirectExpression(Expressions.Target), ctx)};
+  if (isStmt(node, Statements.Clear)) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // CLEAR of generic data clears the slot it is bound to
+    if (target.type.k === "data") {
+      if (/\bWITH\b/i.test(text)) throw new Unsupported(`CLEAR form: ${text}`);
+      return {s: "clear_data", target};
+    }
+    return {s: "clear", target};
+  }
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
-  if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => ({s: "clear", target: lvalue(t, ctx)}))};
+  if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map((target) => ({s: target.type.k === "data" ? "clear_data" : "clear", target}))};
   // WRITE goes to a list; in an APC or HTTP handler nobody ever displays it
   // WRITE is a no-op here, except the transpiler runtime's host code: open-abap-core
   // writes its kernel parts in JS as WRITE '@KERNEL ...', and skipping one would
