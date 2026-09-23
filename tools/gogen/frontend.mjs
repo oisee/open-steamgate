@@ -700,8 +700,10 @@ function tryBlock(node, ctx) {
   // CLEANUP: runs when a class-based exception leaves the TRY body for a
   // handler further out, inner CLEANUPs first, then the handler (A4H
   // 2026-09-23); not for one raised inside a CATCH of the same TRY. For an
-  // exception nobody catches the CLEANUPs run on the way to the dump; what a
-  // system does then is not measured
+  // exception nobody catches no CLEANUP runs: the kernel looks for a handler
+  // before it unwinds and dumps at the RAISE when there is none (A4H
+  // 2026-09-23, ZCL_GOGEN_T_UNCAUGHT); the emitters ask the session's
+  // active CATCHes (abap.Session.Handled)
   const cl = node.findDirectStructure(Structures.Cleanup);
   let cleanup = null;
   if (cl) {

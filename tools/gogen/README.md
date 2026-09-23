@@ -231,12 +231,15 @@ each measured on A4H where the rule could be argued and pinned in
   `@KERNEL` line is a stub that dumps: it was a silent no-op before, which
   ran the ABAP around it on values nobody set.
 
-The call closure from `ZCL_STG_DISPATCHER=>DISPATCH` (`closure.mjs`): 53
-methods reachable, 47 compiled with 43 statement stubs inside them, 6 whole
-methods stubbed. The service document's path passes none of them. The rest
-of the gateway waits on `REF TO data` (5 methods: reading and writing
-entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
-`CONDENSE`, `COMMIT` / `ROLLBACK`, and the database.
+The call closure from `ZCL_STG_DISPATCHER=>DISPATCH` (`closure.mjs`), as
+of 2026-09-23 after class-based exceptions: 116 methods reachable, 114
+compiled with 30 statement stubs inside them, 2 whole methods stubbed
+(`/IWBEP/CX_MGW_BASE_EXCEPTION=>IF_MESSAGE~GET_TEXT`,
+`/IWBEP/CL_MGW_PUSH_ABS_MODEL=>DEFINE`). What is left: `SPLIT` into several
+targets (6), `COMMIT` / `ROLLBACK`, `CONDENSE`, `SHIFT`, `d` and `t`
+conversions and offsets, a numeric `MSGNO` type. (It was 53 / 47 / 43 / 6
+when the service document first answered, with `REF TO data` and `RAISE
+EXCEPTION TYPE` among the gaps.)
 
 ## What this does not show
 
@@ -283,12 +286,21 @@ host function; a T100 or OTR text dumps), `RAISE EXCEPTION obj` hands over
 the same object. Refused, as a system refuses: a `CATCH` after one of its
 superclass (does not activate on A4H; abaplint takes it, ANORMALIES
 catch-after-superclass). An initial reference raised aborts, and nothing
-catches it. Not measured: whether a system runs the `CLEANUP`s of an
-exception nobody catches before it dumps; here they run on the way to the
-dump (a dump ends the request either way).
+catches it. An exception that no `TRY` takes runs no `CLEANUP` at all:
+the kernel looks for a handler before it unwinds and dumps at the `RAISE`
+(A4H 2026-09-23: the same code in an RFC module, each `CLEANUP` writing a
+committed row, `UNCAUGHT_EXCEPTION` at the `RAISE` and no row; the rows of
+a handled one did come). Each `TRY` with `CATCH`es registers them in the
+session while its body runs (Go `Session.Handlers`, JS `s.handlers`), and a
+`CLEANUP` runs only when one further out takes the exception; pinned by
+ZCL_GOGEN_T_UNCAUGHT and its reader, and the Go dump names the `RAISE`'s
+line, the stack a `TRY` passes on starting at the frame that raised.
 
 `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/NoSuchSet` through the Go binary:
-`404 Not Found`, and the body byte for byte what OSG answers:
+`404 Not Found`, and the body (132 bytes) byte for byte what OSG answers.
+Headers are not compared: the Go host prints the dispatcher's status,
+reason, content type and body, and OSG's HTTP layer adds
+`dataserviceversion: 2.0` and `; charset=utf-8` on top:
 `{"error":{"code":"STG/ENTITY_SET_NOT_FOUND","message":{"lang":"en","value":"Entity set NoSuchSet does not exist in ZSTG_DEMO_SRV"}}}`.
 
 ## Next, if this is pursued

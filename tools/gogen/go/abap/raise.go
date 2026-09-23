@@ -106,3 +106,17 @@ func (e *Exception) TextOf(s *Session) string {
 	}
 	return e.Text()
 }
+
+// Handled: some TRY still active further out takes the exception. The kernel
+// looks for a handler before it unwinds, and the CLEANUP blocks on the way run
+// only when it finds one; an exception that nothing takes dumps at the RAISE
+// with no CLEANUP run (A4H, RFC module with CLEANUPs writing committed rows,
+// UNCAUGHT_EXCEPTION at the RAISE and no row, 2026-09-23).
+func (s *Session) Handled(r any) bool {
+	for i := len(s.Handlers) - 1; i >= 0; i-- {
+		if s.Handlers[i](r) {
+			return true
+		}
+	}
+	return false
+}

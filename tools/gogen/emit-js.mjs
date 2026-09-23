@@ -133,7 +133,7 @@ function method(cls, m) {
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
-  const ctx = {cls, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
+  const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
@@ -212,7 +212,10 @@ function stmt(st, ctx, d) {
     case "native":
       // see nativeMessageText in emit-go.mjs
       if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {
-        return [`${t}if (text === null || text.constructor.$is.has("IF_T100_MESSAGE") || !text.constructor.$is.has("CX_ROOT") || text.textid !== "") throw new abap.AbapError("NOT_COMPILED", "CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE: T100 and OTR texts are not read here");`,
+        // the names as the Go side derives them, so a renamed parameter or
+        // attribute fails here as it fails there
+        const x = ident(ctx.method.params[0].name);
+        return [`${t}if (${x} === null || ${x}.constructor.$is.has("IF_T100_MESSAGE") || !${x}.constructor.$is.has("CX_ROOT") || ${x}.${ident("TEXTID")} !== "") throw new abap.AbapError("NOT_COMPILED", "CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE: T100 and OTR texts are not read here");`,
           `${t}return "An exception was raised.";`];
       }
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
@@ -287,9 +290,16 @@ function stmt(st, ctx, d) {
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
       const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
-      const cleanup = st.cleanup ? `if (abap.classBased(xE)) {\n${st.cleanup.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  } ` : "";
-      return [`${t}try {`, ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}} catch (xE) {`,
-        `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ ${cleanup}throw xE; }`, `${t}}`];
+      // a CLEANUP runs only when a TRY further out takes the exception: see
+      // emit-go; the CATCHes of this TRY are registered while its body runs
+      const cleanup = st.cleanup ? `if (abap.classBased(xE) && abap.handled(s, xE)) {\n${st.cleanup.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  } ` : "";
+      const n = ctx.loop++;
+      const guard = st.catches.length ? `(xE) => ${st.catches.map((c) => `(${catchCondJs(c)})`).join(" || ")}` : null;
+      const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
+      const tail = [`${t}} catch (xE) {`, ...(guard ? [`${t}  abap.popHandler(s, xH${n});`] : []),
+        `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ ${cleanup}throw xE; }`];
+      if (!guard) return [`${t}try {`, ...body, ...tail, `${t}}`];
+      return [`${t}{`, `${t}const xH${n} = abap.pushHandler(s, ${guard});`, `${t}try {`, ...body, ...tail, `${t}} finally {`, `${t}  abap.popHandler(s, xH${n});`, `${t}}`, `${t}}`];
     }
     case "raise": return [`${t}throw abap.raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")});`];
     case "sort": {

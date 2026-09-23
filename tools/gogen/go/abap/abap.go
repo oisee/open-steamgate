@@ -12,6 +12,7 @@ package abap
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // Sy holds the system fields one session writes. On a system they belong to
@@ -27,6 +28,10 @@ type Sy struct {
 // puts it down: nothing ties a Session to the goroutine that ran it last.
 type Session struct {
 	Sy Sy
+	// Handlers: the CATCH clauses of the TRYs active in this session,
+	// outermost first, each asking whether it takes a recovered value. A
+	// CLEANUP runs only when one of them does (see Handled).
+	Handlers []func(any) bool
 }
 
 // ArithmeticError is a class-based ABAP exception, raised as a Go panic and
@@ -195,7 +200,18 @@ func Repanic(r any, stack []byte) {
 	if _, ok := r.(*Rethrown); ok {
 		panic(r)
 	}
-	panic(&Rethrown{V: r, Stack: string(stack)})
+	// the stack is taken in the TRY's deferred function: what is above the
+	// panic frame is that function, whose line is the end of the method,
+	// so the stack starts at the frame that raised
+	st := string(stack)
+	if i := strings.Index(st, "\npanic("); i >= 0 {
+		if j := strings.Index(st[i+1:], "\n\t"); j >= 0 {
+			if k := strings.Index(st[i+1+j+2:], "\n"); k >= 0 {
+				st = st[:strings.Index(st, "\n")+1] + st[i+1+j+2+k+1:]
+			}
+		}
+	}
+	panic(&Rethrown{V: r, Stack: st})
 }
 
 // AsError is the ABAP exception inside a recovered value, unwrapped.

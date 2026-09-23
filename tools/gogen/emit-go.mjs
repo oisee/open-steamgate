@@ -239,7 +239,7 @@ function nativeMessageText(program) {
   return [head, "\tif text == nil {", `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "an initial reference"))`, "\t}",
     ...(t100.length ? [`\tswitch abap.ClassOf(text) {`, `\tcase ${t100.map((x) => JSON.stringify(x)).join(", ")}:`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "T100 message texts are not read in the Go host"))`, "\t}"] : []),
     ...(root && POLY.has("CX_ROOT") && root.attributes.some((a) => a.name === "TEXTID" && !a.unsupported)
-      ? ["\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().textid != \"\" {", `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
+      ? [`\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().${ident("TEXTID")} != "" {`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
       : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
     `\treturn "An exception was raised."`, "}", ""];
 }
@@ -720,9 +720,16 @@ function stmtLines(st, ctx, d) {
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
         ...catchInto(c, t),
         ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
-      const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) {`, ...st.cleanup.flatMap((x) => stmt(x, ctx, d + 5)), `${t}\t\t\t\t}`] : [];
+      // a CLEANUP runs only when a TRY further out takes the exception (A4H:
+      // the handler is looked for before unwinding; none, and the dump is at
+      // the RAISE with no CLEANUP run), so each TRY with CATCHes registers
+      // them in the session while its body runs
+      const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) && s.Handled(xR) {`, ...st.cleanup.flatMap((x) => stmt(x, ctx, d + 5)), `${t}\t\t\t\t}`] : [];
       ctx.tries.pop();
-      const out = [`${t}ctl${n} := func() (ctl int) {`, `${t}\tdefer func() {`, `${t}\t\tif xR := recover(); xR != nil {`, `${t}\t\t\txE, xOK := abap.AsError(xR)`,
+      const guard = st.catches.length ? `${t}\t\t\t\txE, xOK := abap.AsError(xR)\n${t}\t\t\t\txRX, xROK := abap.AsRaised(xR)\n${t}\t\t\t\t_, _, _, _ = xE, xOK, xRX, xROK\n${t}\t\t\t\treturn ${st.catches.map(catchCond).join(" || ")}` : null;
+      const push = guard ? [`${t}\txH := len(s.Handlers)`, `${t}\ts.Handlers = append(s.Handlers, func(xR any) bool {`, guard, `${t}\t})`] : [];
+      const pop = guard ? [`${t}\t\ts.Handlers = s.Handlers[:xH]`] : [];
+      const out = [`${t}ctl${n} := func() (ctl int) {`, ...push, `${t}\tdefer func() {`, ...pop, `${t}\t\tif xR := recover(); xR != nil {`, `${t}\t\t\txE, xOK := abap.AsError(xR)`,
         `${t}\t\t\txRX, xROK := abap.AsRaised(xR)`, `${t}\t\t\t_, _, _, _ = xE, xOK, xRX, xROK`,
         `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, ...cleanup, `${t}\t\t\t\tabap.Repanic(xR, debug.Stack())`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
         ...body, `${t}\treturn 0`, `${t}}()`, `${t}_ = ctl${n}`];

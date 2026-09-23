@@ -379,6 +379,15 @@ export function raise(obj, cls) {
   if (!c) throw new AbapError("NOT_COMPILED", "RAISE EXCEPTION: the class of the object is not registered");
   return new Raised(obj, c);
 }
+// the CATCH clauses of the active TRYs of a session and Handled( ): see
+// raise.go; a CLEANUP runs only when a TRY further out takes the exception
+export function pushHandler(s, f) { const h = (s.handlers ??= []); const n = h.length; h.push(f); return n; }
+export function popHandler(s, n) { if (s.handlers) s.handlers.length = n; }
+export function handled(s, e) {
+  const h = s.handlers ?? [];
+  for (let i = h.length - 1; i >= 0; i--) if (h[i](e)) return true;
+  return false;
+}
 export function classBased(e) {
   return e instanceof Raised || (e instanceof AbapError && e.cls.startsWith("CX_"));
 }
