@@ -150,7 +150,7 @@ What it took, each measured before it was written:
 - `x IS NOT INITIAL` read its `NOT` twice;
 - `DATA(x) = frac( f )` is an f: abaplint types the six numeric built-ins by
   a fixed return (#4302), the IR types the declaration from its source;
-- **sin and cos are glibc's on A4H** (opt-in: `node demo.mjs --libm`; the default is the pure-Go fdlibm port).** The seed chains of constellation and
+- **sin and cos are glibc's on A4H.** The Go build calls glibc only when asked (`node demo.mjs --libm`, cgo); by default it is the pure-Go fdlibm port, the same on every platform, and the difference is known (ANORMALIES sin-cos-libm). The seed chains of constellation and
   ignition (`seed = frac( sin( seed * 12345 + i ) * 43758 )`) diverge from
   V8 at exactly the step where glibc and fdlibm differ, and a build that
   calls glibc through cgo reproduces them frame for frame. Go's own
