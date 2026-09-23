@@ -364,8 +364,9 @@ database). The Go host does what `cl_express_icf_shim=>run` does -- a
 `CL_HTTP_SERVER`, two `CL_HTTP_ENTITY`s, the headers, `~path`, the query
 as form fields -- and calls `ZCL_STG_HTTP_HANDLER`, so the CSRF token, the
 COMMIT / ROLLBACK brackets and the response headers are the ABAP's own.
-`--compare <origin>` checks the status, every header the ABAP set and the
-body byte for byte; what it forgives it names: express adding `;
+`--compare <origin>` checks the status, every header the ABAP set (both
+ways: one OSG sent and Go did not is a difference too, apart from the ones
+OSG's HTTP layers add) and the body byte for byte; what it forgives it names: express adding `;
 charset=utf-8`, the `$batch` boundary counter of the OSG process, and with
 `--other-client TravelId=T0009` the rows of client 001 that OSG returns.
 `GW_REUSE=1` rebuilds only the host, `GW_REUSE=2` reruns the last binary.
@@ -385,10 +386,10 @@ the app in Chromium):
 | MERGE / PATCH of a travel, POST of a booking below it (direct and in a changeset) | run to `UPDATE zstg_demo` / `INSERT zstg_demo_bk` in the DPC, which wait for the IR's write nodes |
 | `StatusVHSet` (the F4 on Status) | `CREATE DATA ... TYPE STANDARD TABLE OF (name)` and a dynamic `SELECT` in `ZCL_OAO_SHLP_DDIC` |
 
-What it took: the UTF-8 conversions of `cl_abap_conv_in_ce` / `out_ce` as
-host functions; a `DEFAULT` naming a constant; `m( )-comp`; a regex check
+What it took: the conversions of `cl_abap_conv_in_ce` / `out_ce` as
+host functions (Go only, JS refuses); a `DEFAULT` naming a constant; `m( )-comp`; a regex check
 that skips bracket expressions (`[^/(?]` is no group); a raw column read
-as hex into an xstring; `ASSIGN ref->* TO <typed>`; `SHIFT s RIGHT
+as hex into an xstring; `ASSIGN ref->* TO <typed>` (Go only, JS refuses); `SHIFT s RIGHT
 DELETING TRAILING` (A4H, `ZCL_GOGEN_T_SHIFT`); a generic `EXPORTING` as a
 binding to the caller's variable and `MOVE-CORRESPONDING` over generic
 data (A4H, `ZCL_GOGEN_T_GENEXP`); `sy-mandt`; `n` components of structured

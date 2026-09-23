@@ -10,7 +10,16 @@
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
-import {ident, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
+import {ident as goIdent, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
+
+// Go's identifiers, and an _ after a word JavaScript reserves (a parameter
+// named IN made the module a syntax error)
+const JS_RESERVED = new Set(("await catch class const debugger delete do enum export extends finally function in instanceof let "
+  + "super this throw try typeof void while with yield arguments eval implements private protected public static").split(" "));
+const ident = (name) => {
+  const id = goIdent(name);
+  return JS_RESERVED.has(id) ? `${id}_` : id;
+};
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 

@@ -28,7 +28,7 @@
 import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
@@ -67,7 +67,7 @@ const requests = requestsFile !== undefined ? JSON.parse(readFileSync(requestsFi
   const m = /^([A-Z]+) (\/.*)$/.exec(p);
   const rq = {method: m ? m[1] : (method ?? "GET"), path: m ? m[2] : p, headers: []};
   // the host header a client sends; the answers' absolute URLs are built from it
-  rq.headers.push(["host", new URL(compareWith ?? process.env.GW_HOST ?? "http://localhost:3091").host]);
+  rq.headers.push(hostHeader());
   for (const h of headerArgs) {
     const i = h.indexOf(":");
     rq.headers.push([h.slice(0, i).trim().toLowerCase(), h.slice(i + 1).trim()]);
@@ -85,6 +85,10 @@ const t0 = performance.now();
 // GW_REUSE=1: the Go of the last compile and its database again, only the
 // host (main.go) rewritten -- for work on the host, not on the compiler
 const reuse = ["1", "2"].includes(process.env.GW_REUSE) && existsSync(join(here, "go", "cmd", "gateway", "zz_generated.go"));
+if (reuse) {
+  const f = process.env.GW_REUSE === "2" ? join(here, ".out", "gateway") : join(here, "go", "cmd", "gateway", "zz_generated.go");
+  console.log(`GW_REUSE=${process.env.GW_REUSE}: reusing ${f} from ${existsSync(f) ? statSync(f).mtime.toISOString() : "(missing)"}`);
+}
 const program = reuse ? null : compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
@@ -353,6 +357,8 @@ async function osgAnswer(rq) {
 // status, every header the ABAP set (OSG's HTTP layers add more: date, etag,
 // content-length, x-powered-by), and the body byte for byte
 function verdict(r, o, method) {
+  // the headers OSG's HTTP layers add, not the ABAP
+  const hostLayer = new Set(["date", "content-length", "connection", "keep-alive", "etag", "x-powered-by", "x-osd-generation"]);
   if (r.dump) return `Go dumped: ${r.dump.slice(0, 200)}`;
   const diffs = [];
   const notes = [];
@@ -364,6 +370,13 @@ function verdict(r, o, method) {
     if (k === "content-type" && ov === `${v}; charset=utf-8`) notes.push("express adds '; charset=utf-8' to content-type");
     else if (ov !== v && counters(ov ?? "") === counters(v)) notes.push(`header ${k} equal apart from the $batch counter`);
     else if (ov !== v) diffs.push(`header ${k}: Go ${JSON.stringify(v)} OSG ${JSON.stringify(ov)}`);
+  }
+  // and the other way: a header OSG's ABAP set that the Go host left out;
+  // the ones OSG's HTTP layers add are skipped by name
+  const goNames = new Set(r.headers.map(([k]) => k));
+  for (const [k, ov] of o.headers) {
+    if (hostLayer.has(k) || goNames.has(k)) continue;
+    diffs.push(`header ${k}: Go (none) OSG ${JSON.stringify(ov)}`);
   }
   let g = Buffer.from(r.body, "base64");
   // HTTP sends no body for HEAD; what the ABAP wrote is not compared

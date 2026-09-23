@@ -9,6 +9,8 @@ func TestOutsideClasses(t *testing.T) {
 		{`[]?(]x(?i)`, `_x(?i)`},
 		{`\(?x`, `_?x`},
 		{`[[:alpha:]?]+?`, `_+?`},
+		{`[\]+?x]y`, `_y`},
+		{`[\]]+?`, `_+?`},
 	} {
 		if got := outsideClasses(c[0]); got != c[1] {
 			t.Errorf("%s: %s, want %s", c[0], got, c[1])

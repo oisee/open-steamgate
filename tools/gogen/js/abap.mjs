@@ -849,8 +849,10 @@ export function ShiftRightTrailing(s, mask) {
   return " ".repeat(r.length - n) + r.slice(0, n).join("");
 }
 
-// MOVE-CORRESPONDING over generic data (see go/abap/movecorr.go)
+// sy-mandt: the transpiler runtime's logon client (see go/abap/select.go, ANORMALIES)
 export const Mandt = "123";
+
+// MOVE-CORRESPONDING over generic data (see go/abap/movecorr.go)
 export function MoveCorrespondingData(dst, src) {
   if (dst === null) throw notAssigned("MOVE-CORRESPONDING into a field symbol");
   if (src === null) throw notAssigned("MOVE-CORRESPONDING from a field symbol");

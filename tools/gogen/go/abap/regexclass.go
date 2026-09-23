@@ -23,6 +23,10 @@ func outsideClasses(p string) string {
 				j++
 			}
 			for j < len(p) && p[j] != ']' {
+				if p[j] == '\\' {
+					j += 2 // an escaped character, \] included, belongs to the class
+					continue
+				}
 				if p[j] == '[' && j+1 < len(p) && (p[j+1] == ':' || p[j+1] == '.' || p[j+1] == '=') {
 					// [:alpha:] and friends inside a class
 					if k := strings.Index(p[j+2:], string(p[j+1])+"]"); k >= 0 {
