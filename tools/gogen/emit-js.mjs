@@ -39,6 +39,7 @@ function zero(t) {
     case "d": return `"00000000"`;
     case "p": return `"0"`;
     case "t": return `"000000"`;
+    case "n": return JSON.stringify("0".repeat(t.len));
     default: throw new Error(`no zero for ${t.k}`);
   }
 }
@@ -370,6 +371,8 @@ function stmt(st, ctx, d) {
     // the JS side has no database: a SELECT is refused, not guessed
     case "select_table":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
+    case "select_single":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT SINGLE ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "native":
       // see nativeMessageText in emit-go.mjs
       if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {
@@ -702,6 +705,7 @@ function conv(e, ctx) {
     case "x2i": return `abap.XToI(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
+    case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;
@@ -738,6 +742,9 @@ function cond(c, ctx) {
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;
+      // "" or the typed zero for d, t and n; a structure or table compared component by component
+      if (["d", "t", "n"].includes(c.x.type.k)) return `abap.InitialCh(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
+      if (c.x.type.k === "struct" || c.x.type.k === "table") return `abap.IsInitialDeep(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
       return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
     case "assigned": return `${ident(c.fs.name)} !== null`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;

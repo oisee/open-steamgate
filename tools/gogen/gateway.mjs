@@ -3,8 +3,11 @@
 // subset raises NOT_COMPILED at its ABAP line when it runs), then the start
 // of OSG (the SEGW registry) and one request through ZCL_STG_DISPATCHER.
 //
-//   node tools/gogen/gateway.mjs [path]      default: the demo service document
-//   tools/gogen/.out/gateway <path>           the built binary, another GET
+//   node tools/gogen/gateway.mjs [path ...]  default: the demo service document
+//
+// Several paths share one compile and one go build (a minute each); the
+// binary then runs once per path, each run from the seeded database, and
+// each answer is printed after a "== <path>" line when there is more than one.
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -12,7 +15,12 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 
-const path = process.argv[2] ?? "/sap/opu/odata/sap/ZSTG_DEMO_SRV/";
+const argv = process.argv.slice(2);
+// --compare <origin>: each answer's body next to what a running OSG answers
+// for the same path (one table line per path at the end)
+const ci = argv.indexOf("--compare");
+const compareWith = ci >= 0 ? argv.splice(ci, 2)[1] : undefined;
+const paths = argv.length > 0 ? argv : ["/sap/opu/odata/sap/ZSTG_DEMO_SRV/"];
 const here = import.meta.dirname;
 const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 const layers = [`${home}/src`, `${home}/gen`];
@@ -21,7 +29,7 @@ const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src",
 const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
 const t0 = performance.now();
 const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
-console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`);
+console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`);
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
@@ -101,14 +109,11 @@ func main() {
 		os.Exit(1)
 	}
 	ZCL_STG_SEGW_REGISTRY_REGISTER(s)
+	// the search helps of src/ as providers, as test/start.mjs does
+	ZCL_STG_SHLP_REGISTRY_REGISTER(s)
 	// what the ICF handler does before dispatch: ~path without the query,
 	// the query as form fields, decoded; the host as the outside sees it
-	// (the built binary, .out/gateway, answers another path given as its argument)
-	target := ${JSON.stringify(path)}
-	if len(os.Args) > 1 {
-		target = os.Args[1]
-	}
-	path, query, _ := strings.Cut(target, "?")
+	path, query, _ := strings.Cut(os.Args[1], "?")
 	opts := []IHTTPNVP{}
 	for _, kv := range strings.Split(query, "&") {
 		if kv == "" {
@@ -138,6 +143,27 @@ try {
   process.exit(1);
 }
 console.log(`go build ${Math.round(performance.now() - t1)} ms`);
-try {
-  console.log(execFileSync("prlimit", ["--as=4000000000", join(here, ".out", "gateway")], {timeout: 60000}).toString());
-} catch (e) { console.log(String(e.stdout) + String(e.stderr).slice(0, 800)); }
+const table = [];
+for (const path of paths) {
+  if (paths.length > 1) console.log(`== ${path}`);
+  let out;
+  try {
+    out = execFileSync("prlimit", ["--as=4000000000", join(here, ".out", "gateway"), path], {timeout: 60000}).toString();
+  } catch (e) { out = String(e.stdout) + String(e.stderr).slice(0, 800); }
+  console.log(out);
+  if (compareWith === undefined) continue;
+  const res = await fetch(compareWith + path);
+  const osg = await res.text();
+  const m = /^(\d{3}) [^\n]*\n[^\n]*\n([\s\S]*)\n$/.exec(out);
+  let verdict;
+  if (m === null) verdict = out.split("\n")[0].slice(0, 160);
+  else if (Number(m[1]) !== res.status) verdict = `status ${m[1]}, OSG ${res.status}`;
+  else if (m[2] === osg) verdict = `equal (${osg.length} bytes)`;
+  else {
+    let i = 0;
+    while (i < osg.length && m[2][i] === osg[i]) i += 1;
+    verdict = `differs at byte ${i}: Go ${JSON.stringify(m[2].slice(i, i + 40))} OSG ${JSON.stringify(osg.slice(i, i + 40))}`;
+  }
+  table.push(`${path}\t${verdict}`);
+}
+if (table.length) console.log(`compared with ${compareWith}:\n${table.join("\n")}`);

@@ -183,6 +183,22 @@ const EXPECT = {
   ZCL_GOGEN_T_DBW: {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered) at zcl_gogen_t_dbw.clas.abap:26",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered)"},
+  // d and t (A4H 2026-09-23, two probes joined into one class): c -> d keeps
+  // 'ABC'; d - d counts days in calculation type i (( d / 7 ) * 7 rounds in
+  // between); an i template expression overflows at 20713 * 86400 * 1000,
+  // which OSG's ZCL_STG_JSON=>EPOCH_MS computes (ANORMALIES); a t read by
+  // offset; d -> i is days since 00010101, Julian before 15821015, 0 for a
+  // date that is not one
+  ZCL_GOGEN_T_RQDATE: "a[ABC];b20713,-719164;c739879;dOVF;k12,34;00000000=0;00010101=0;00010102=1;15821004=577736;15821015=577737;19700101=719164;20000229=730180;20260917=739877;99991231=3652060;20260230=0;ABC=0;1900022=0;",
+  // SPLIT ... INTO fields (A4H 2026-09-23): the last field takes the rest,
+  // a field without a piece is cleared, a piece cut to fit a c sets sy-subrc 4
+  ZCL_GOGEN_T_RQSPLIT: "e[Seats][desc]0;f[a][ b]0;g[a][]0;h[a][b c]0;i[abc][gh]4;j[x][yyy]4",
+  // not an A4H value (the probe could not be created on A4H in this
+  // session): the language rule that a d, t or n field is initial at its
+  // typed zero, and a structure when every component is. Go gave
+  // a---X- c---X dX- e-- before (a structure field starts as ""), JS
+  // aXXX-X cXXX- dX- e-- (a structure compared with a fresh one by ===)
+  ZCL_GOGEN_T_RQINIT: "aXXXXX b-- cXXXX dXX eX- fX",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

@@ -276,13 +276,19 @@ of those rules the transpiler's runtime gets wrong (ANORMALIES
 
 ## What this does not show
 
-- A request that reads data: every `SELECT` is a `NotCompiled` stub, and
-  the entity set path needs `REF TO data`.
-- No database: every `SELECT` is a `NotCompiled` stub. The plan is the
-  relational IR of portable AMDP as the one DB IR (docs/pamdp-ir-portability.md).
-- No `p`, `d`, `t`, `decfloat`; no `RAISE RESUMABLE`, no `RAISE EXCEPTION
-  ... MESSAGE`, no T100 or OTR texts in `get_text( )`; dynamic calls only
-  as `CREATE OBJECT ... TYPE (name)` without arguments.
+- The database is Go-only: `SELECT ... INTO TABLE` and `SELECT SINGLE`
+  (lowered through the relational IR of portable AMDP, run on SQLite in the
+  Go host, the logon client added to the WHERE) exist in the Go backend; the
+  JS backend refuses both at run time. `SELECT SINGLE` without
+  `CORRESPONDING FIELDS` is refused unless each column has its field's type
+  and length (a move by layout); a character field takes its column cut to
+  its length. `COMMIT WORK` / `ROLLBACK WORK` close the dialog step's
+  database transaction. `INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a
+  table wait for the write nodes of the relational IR; every other SQL form
+  is a `NotCompiled` stub.
+- `d`, `t` and `n` are declared, copied and compared with initial; `p` is
+  declared and copied only; no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
+  EXCEPTION ... MESSAGE`, no T100 or OTR texts in `get_text( )`.
 - Class statics are per process, so a host runs one step at a time (the
   stand serializes). Statics per session come before any parallelism.
 - The handler's `ON_MESSAGE` is still three host lines in the stands; the

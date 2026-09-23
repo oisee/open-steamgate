@@ -1364,3 +1364,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream version containing a fix: none yet
 
 The same run also showed an `INSERT` taking `mandt` from the work area (999 written; A4H writes the logon client, 001 there): that is ANOMALY-2026-09-11-no-implicit-mandt, not a new entry.
+### ANOMALY-2026-09-23-epoch-ms-overflow — `ZCL_STG_JSON=>EPOCH_MS` overflows `i` on a system, and the transpiler runtime lets it through
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (npm) runtime; OSG's own `src/gateway/zcl_stg_json.clas.abap`
+- Affected ABAP statement, runtime API or adapter: an arithmetic expression of `i` operands embedded in a string template, `rv_ms = |{ ( lv_days * 86400 + lv_seconds ) * 1000 }|` in `EPOCH_MS`, which every `Edm.DateTime` of a JSON answer goes through
+- Minimal ABAP reproducer: `DATA li TYPE i VALUE 20713. DATA lv TYPE string. lv = |{ ( li * 86400 + 0 ) * 1000 }|.`
+- Exact command used to run it: A4H, a throwaway ABAP Unit probe in `$ZOSG_TMP_0160` (deleted after); here, `node tools/gogen/semantics.mjs` (ZCL_GOGEN_T_RQDATE, part `d`) and `node tools/gogen/gateway.mjs '/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet?$format=json'`
+- Expected SAP behaviour: measured on A4H: `CX_SY_ARITHMETIC_OVERFLOW`. The calculation type of the embedded expression is `i` (its operands' type; a template gives it no wider target), and 20713 * 86400 * 1000 is outside `i` for any date after 1970-01-25. The same probe measured that a `d` operand counts as `i` too: `( d / 7 ) * 7` into `i` rounds in between
+- Actual open-abap behaviour: OSG answers `BookingSet` with `"FlightDate":"\/Date(1789430400000)\/"`; the JS runtime computes the product without the `i` range check
+- Impact on open-steamgate: every entity with a date (`BookingSet`, `TravelSet('T0001')/to_Bookings`) answers here and would dump on a system; the Go backend of `tools/gogen` computes in `i` as A4H does and stops with the same exception
+- Smallest safe workaround: none applied; the fix belongs in `EPOCH_MS` (compute the milliseconds in `int8` or `p`), which is OSG code, not a runtime workaround
+- Upstream: the range check is the transpiler runtime's (**needs an issue** once reduced to the runtime alone); the `EPOCH_MS` fix is ours
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_RQDATE (`dOVF`)
+- Upstream version containing a fix: none yet
