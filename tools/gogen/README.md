@@ -33,12 +33,19 @@ standard table. A method is a function taking the `Session` first. The
 Session is the roll area and carries `sy`, so any goroutine can run any
 session.
 
-Subset: `i`, `f`, standard tables of them; `DO [n TIMES]`, `WHILE`, `LOOP AT
-... INTO`, `IF/ELSEIF/ELSE`, `APPEND`, `READ TABLE ... INDEX`, `EXIT`,
-`CONTINUE`, `RETURN`, `CLEAR`; static methods with IMPORTING and RETURNING;
-`sin cos sqrt exp log abs lines`; `sy-index sy-tabix sy-subrc`. Anything else
-is `Unsupported` with its name. Text literals are refused on purpose: a text
-operand makes the calculation type `p`, which this runtime does not have.
+Subset, grown until two demo scenes compile unchanged: `i`, `f`, `int8`,
+`string`, `c`, `x`; structures and standard tables of anything in the
+subset; instance and static classes, attributes, constructors with DEFAULT
+parameters, interface methods and constants; `DATA( )` inline, `CONV`,
+`VALUE` (nested `VALUE #( )` too), string templates and `&&`; `IF`, `CASE`,
+`DO`, `WHILE`, `LOOP AT ... INTO`, `APPEND`, `READ TABLE ... INDEX`,
+`TRANSLATE`, `EXIT`, `CONTINUE`, `RETURN`, `CLEAR`; method calls with
+positional, named and EXPORTING/IMPORTING parameters; `sin cos tan sqrt exp
+log abs sign floor ceil trunc frac nmax nmin lines strlen`;
+`sy-index sy-tabix sy-subrc`. Anything else is `Unsupported` with its name,
+and a method that calls a refused one is refused in turn. Refused on
+purpose until measured: `i` -> `string` (the sign goes to the end there),
+and arithmetic whose calculation type would be `p`.
 
 ## Measured, 2026-09-23
 
@@ -94,47 +101,44 @@ digits, always positional, trailing zeros dropped.
 
 ## Semantics: what the two backends answer
 
-The `ABAP rule` column is the **documented** rule. Only the target-type row
-has been measured on a system (ANORMALIES). The other disagreements are
-candidates to measure on A4H before they become entries.
-
+Every row below was measured on A4H with ABAP Unit (2026-09-23).
 | case | ABAP rule | Go | JS |
 | --- | --- | --- | --- |
 | `7 / 2`, `-7 / 2`, `5 / 3`, `-5 / 3` (i) | 4, −4, 2, −2 | same | same |
 | `0 / 0`, `1 / 0` | 0, CX_SY_ZERODIVIDE | same | same |
-| `7 DIV -2` | −3 | −3 | **−4** |
+| `7 DIV -2`, `7 MOD -3` | −3, 1 | same | **−4, 2** |
 | `-7 DIV -2` | 4 | 4 | **3** |
 | `MOD` with negative operands | never negative | same | same |
 | f 2.5 / −2.5 / 1.4999 → i | 3 / −3 / 1 | same | same |
 | f 3e9 → i | CX_SY_CONVERSION_OVERFLOW | same | **3000000000** |
-| i 3 / i 2 into f | 1.5 (measured on A4H) | 1.5 | 1.5 |
+| i 3 / i 2 into f | 1.5 | 1.5 | 1.5 |
 
-`DIV` with a negative divisor looks like a floor in the JS runtime, where ABAP
-keeps the remainder non-negative. An `f` too large for `i` is stored without
-an overflow. Both need an A4H probe before anyone calls them defects.
+The JS disagreements are recorded in ANORMALIES. DIV and MOD with a
+negative divisor are fixed upstream in abaplint/transpiler#1885; f -> i
+without an overflow is a question for Lars, not a patch.
 
 ## What this does not show
 
-- It is not the O4D demo. `plasma` is a kernel written for this spike, in
-  the demo's style. The demo's frame costs 0.7 ms in the JS runtime, because
-  the demo does less per frame. Only the ratios carry over; the absolute times
-  do not.
-- There is no database, no strings, no `p`, no objects and no exceptions
-  beyond arithmetic. Those are the expensive parts of a real runtime port
-  (`@abaplint/runtime` is 11.2k lines of TS).
+- Two scenes out of about forty, each read in isolation: the handler, the
+  demo director and the scene switching are not compiled, the context is
+  built by the harness.
+- No database, no `p`, no exceptions beyond arithmetic and conversion, no
+  dynamic calls, no references to interfaces (the harness calls the class).
+  Those are the expensive parts of a real runtime port (`@abaplint/runtime`
+  is 11.2k lines of TS).
 - JS runs one thread here. The pool of backlog B.12 takes the JS side to
-  several processes, 474 → 1646 frames/s on the demo. The Go column shows the
-  same thing inside one process, with no socket pinned to a process.
-- Tables are Go slices: assigning one table to another would share it, where
-  ABAP copies. The front end refuses table assignment until copy-on-write
-  exists.
+  several processes, 474 -> 1646 frames/s on the demo. The Go numbers show
+  the same thing inside one process, with no socket pinned to a process.
+- Tables are Go slices: assigning one table to another would share it,
+  where ABAP copies. The front end refuses table assignment until
+  copy-on-write exists.
 
 ## Next, if this is pursued
 
-1. Put the IR where the transpiler's traversal is (a branch of the
-   transpiler fork, not a second parser), with the JS output byte-identical
-   to today's.
-2. Grow the subset in the order of what the demo pack needs: strings and `c`,
-   structures, then `p` through a decimal library.
-3. Run the demo's frames through both backends and compare them against the
-   A4H recordings (`docs/frame-comparison.md`).
+1. The rest of the recorded scenes (copperbars, joydivision, cell16/24,
+   ignite_emit, ...) and then the demo's director, so the harness no longer
+   builds the context.
+2. Zork: one closed interpreter of 3k lines, strings, `xstring` and a deep
+   call graph, compared by transcript.
+3. Only then the IR inside the transpiler, gradually: an IR node may be an
+   opaque JS chunk, the Go backend refuses those.
