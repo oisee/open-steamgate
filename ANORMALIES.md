@@ -1222,7 +1222,7 @@ for `zosd_status_app`, which has been deployed for a day.
 - Impact on open-steamgate: none on the served path; the gogen front end now refuses such an attribute (a statement stub that dumps), since the source could never run on a system
 - Smallest safe workaround: none needed; do not write VALUE there
 - Upstream: **needs an issue** in abaplint (a syntax error for VALUE on interface DATA / CLASS-DATA)
-- Regression-test location: none that runs (a refusal); the rule is in the comment of ZCL_GOGEN_T_IA in `tools/gogen/semantics.mjs`
+- Regression-test location: `tools/gogen/semantics.mjs`, the refusal check over `tools/gogen/testdata-refused/` (ZCL_GOGEN_T_RF line 12 must answer the VALUE message; an attribute named `value` must still compile)
 - Upstream version containing a fix: none yet
 
 ### ANOMALY-2026-09-23-interface-read-only — abaplint does not check writes to a READ-ONLY interface attribute
@@ -1238,5 +1238,5 @@ for `zosd_status_app`, which has been deployed for a day.
 - Impact on open-steamgate: none on the served path; the gogen front end reads READ-ONLY off the DATA statement itself and refuses such a write
 - Smallest safe workaround: the front end's own check (`intfRefAttribute`, `classRefIntfAttribute` in `tools/gogen/frontend.mjs`)
 - Upstream: **needs an issue** in abaplint (keep READ-ONLY in an interface attribute's meta and check writes against it)
-- Regression-test location: the READ-ONLY writes that do activate are in ZCL_GOGEN_T_IA (`tools/gogen/semantics.mjs`); the refusals have no running test
+- Regression-test location: the READ-ONLY writes that do activate are in ZCL_GOGEN_T_IA (`tools/gogen/semantics.mjs`); the refusals are the check over `tools/gogen/testdata-refused/` in the same script (ZCL_GOGEN_T_RF lines 13, 14 and 17)
 - Upstream version containing a fix: none yet
