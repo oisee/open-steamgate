@@ -261,6 +261,11 @@ const EXPECT = {
   // JS emitter has no host function modules and refuses the call
   ZCL_GOGEN_T_W3MI: {Go: "miss:2/1 rel:1/0 hit:0 rowsdiff:0 pad:00/255 exact:0/X five:5/X zero:0 over:0/0 neg:0/0 empty:0/0",
     JS: "ERROR NOT_COMPILED in CALL FUNCTION 'WWWDATA_IMPORT': the JS emitter has no host function modules"},
+  // p DECIMALS 0: calculation type p (OSG's EPOCH_MS, A4H 2026-09-23 in
+  // ANORMALIES epoch-ms-overflow: the i operands do not overflow when the
+  // target is p); a move that does not fit is a conversion overflow (ABAP
+  // documentation)
+  ZCL_GOGEN_T_PACKED: "ms:1728003600000 neg:-16400 small:conv max:999",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

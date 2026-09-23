@@ -1046,6 +1046,7 @@ function stmtLines(st, ctx, d) {
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
+const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
@@ -1081,6 +1082,7 @@ function expr(e, ctx) {
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -1152,6 +1154,7 @@ function templateValue(v, ctx, opts) {
     case "i": return `abap.FmtI(${x})`;
     case "int8": return `abap.FmtI8(${x})`;
     case "f": return `abap.FmtF(${x})`;
+    case "p": return x;
     case "string": case "c": case "d": case "t": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
     case "data": return `abap.FmtData(${x})`;
@@ -1179,6 +1182,8 @@ function conv(e, ctx) {
     case "i2s": return `abap.IToString(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
+    case "i2p": return `abap.PFit(abap.IToP(${x}), ${e.to.len}, ${e.x.e === "bin"})`;
+    case "p2p": return `abap.PFit(${x}, ${e.to.len}, ${e.x.e === "bin"})`;
     case "x2i": return `abap.XToI(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "d2i": return `abap.DToI(${x})`;

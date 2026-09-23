@@ -29,6 +29,7 @@ export class Unsupported extends Error {}
 export const I = {k: "i"};
 export const F = {k: "f"};
 export const INT8 = {k: "int8"};
+const P31 = {k: "p", len: 16, dec: 0};
 export const S = {k: "string"};
 const C = (len) => ({k: "c", len});
 const X = (len) => ({k: "x", len});
@@ -1986,6 +1987,10 @@ function source(node, ctx, outer, hint = outer) {
   // target (days back into a date) is not measured
   if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
   if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
+  // calculation type p, for packed numbers without decimals only: integer
+  // operands and p DECIMALS 0, + - * (31 digits, beyond that
+  // CX_SY_ARITHMETIC_OVERFLOW); decimals, / DIV MOD and ** stay refused
+  if (types.some((t) => t.k === "p") && types.every((t) => (t.k === "p" && t.dec === 0) || t.k === "i" || t.k === "int8")) return arith(node, ctx, P31);
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
@@ -2027,6 +2032,7 @@ function arith(node, ctx, calc, hint) {
     if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
     if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
     if (BIT_OPS.has(op) !== (calc.k === "x")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
+    if (calc.k === "p" && !["+", "-", "*"].includes(op)) throw new Unsupported(`${op} with calculation type p`);
     expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
   } else if (its.length === 1) {
     // a lone constructor takes its # from where the value goes
@@ -3049,7 +3055,7 @@ function template(n, ctx) {
         }
       }
       // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
-      if (!["i", "int8", "f", "string", "c", "x", "xstring", "data", "d", "t"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      if (!["i", "int8", "f", "string", "c", "x", "xstring", "data", "d", "t"].includes(v.type.k) && !(v.type.k === "p" && v.type.dec === 0)) throw new Unsupported(`${v.type.k} in a string template`);
       parts.push({value: v, opts});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);
@@ -3369,6 +3375,10 @@ export function convert(expr, to) {
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
   if (to.k === "x" && from.k === "i") return ok("i2x");
+  // packed without decimals: an integer into p, p into a p of another
+  // length (overflow when the digits do not fit, as ABAP raises)
+  if (to.k === "p" && to.dec === 0 && (from.k === "i" || from.k === "int8")) return ok("i2p");
+  if (to.k === "p" && to.dec === 0 && from.k === "p" && from.dec === 0) return ok("p2p");
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
   if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");

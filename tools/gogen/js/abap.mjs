@@ -866,3 +866,19 @@ export function MoveCorrespondingData(dst, src) {
     MoveData(Component(dst, dc.name), Component(src, sc.name));
   }
 }
+
+// packed numbers without decimals (see go/abap/packed.go): decimal digits
+// with a leading minus, 31 digits in the calculation, 2n-1 in a p(n)
+const pOut = (v, digits, op) => {
+  if ((v < 0n ? -v : v).toString().length > digits) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", op);
+  return v.toString();
+};
+export const AddP = (a, b) => pOut(BigInt(a) + BigInt(b), 31, "+");
+export const SubP = (a, b) => pOut(BigInt(a) - BigInt(b), 31, "-");
+export const MulP = (a, b) => pOut(BigInt(a) * BigInt(b), 31, "*");
+export const IToP = (i) => String(i);
+export const PFit = (a, n, arith) => {
+  const v = BigInt(a);
+  if ((v < 0n ? -v : v).toString().length > 2 * n - 1) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p");
+  return v.toString();
+};
