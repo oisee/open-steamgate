@@ -66,7 +66,9 @@ export function compileProgram({folders, objects, tolerant = false}) {
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   // every file of the folders is loaded, so a class sees what it refers to;
   // only the objects named are compiled, and only their syntax errors count
-  const wanted = objects.map((o) => o.toLowerCase());
+  // a namespace is written # in a file name and / in the object's name
+  const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
+  const wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   const walk = (dir) => {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
@@ -77,13 +79,13 @@ export function compileProgram({folders, objects, tolerant = false}) {
   for (const folder of folders) walk(folder);
   reg.parse();
   REG = reg;
-  const ours = (fn) => wanted.includes(fn.split("/").pop().split(".")[0].toLowerCase());
+  const ours = (fn) => wanted.includes(objName(fn));
   const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
   // tolerant (a survey): an object with syntax errors is left out and named,
   // instead of refusing the whole program
   const broken = new Set();
   if (errors.length > 0 && !tolerant) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
-  for (const e of errors) broken.add(e.getFilename().split("/").pop().split(".")[0].toLowerCase());
+  for (const e of errors) broken.add(objName(e.getFilename()));
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
@@ -99,14 +101,95 @@ export function compileProgram({folders, objects, tolerant = false}) {
   let pending = [...program.interfaces];
   while (pending.length > 0) {
     for (const name of pending) {
-      const all = reg.getObject("INTF", name).getDefinition().getMethodDefinitions();
-      const sigs = Array.from(Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, name, `${name}~${upper(m.getName())}`))
-        .filter((x) => !x.unsupported);
-      program.interfaceMethods.set(name, sigs);
+      // its own methods and those of the interfaces it includes (INTERFACES
+      // inside an interface), which are called as COMP~M through it
+      const sigs = [];
+      for (const i of [name, ...componentInterfaces(reg, name)]) {
+        const all = reg.getObject("INTF", i)?.getDefinition()?.getMethodDefinitions();
+        if (!all) continue;
+        sigs.push(...Array.from(Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, i, `${i}~${upper(m.getName())}`)));
+      }
+      // a CLASS-METHODS of an interface is the class's function, not a method of the reference
+      program.interfaceMethods.set(name, sigs.filter((x) => !x.unsupported && !x.static));
     }
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
   }
+  program.rtti = rttiTable(reg, program);
   return program;
+}
+
+/**
+ * What RTTI (cl_abap_typedescr=>describe_by_name) can describe, for the Go
+ * host, which has no transpiler kernel: the structures of the dictionary and
+ * the structured TYPES of the compiled classes (CLASS=>TYPE), each as its
+ * components and their type kinds. `known` is every name the registry has,
+ * so a name that exists but is not a structure dumps instead of reading as
+ * TYPE_NOT_FOUND.
+ */
+function rttiTable(reg, program) {
+  const structs = new Map();
+  const add = (name, t) => {
+    if (!(t instanceof BasicTypes.StructureType)) return;
+    structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
+  };
+  const known = new Set();
+  for (const obj of reg.getObjects()) {
+    const n = upper(obj.getName());
+    if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
+    try {
+      if (obj instanceof abaplint.Objects.Table) add(n, obj.parseType(reg));
+      if (obj instanceof abaplint.Objects.Class && program.wanted.has(n)) {
+        for (const td of obj.getDefinition()?.getTypeDefinitions().getAll() ?? []) {
+          known.add(`${n}=>${upper(td.type.getName())}`);
+          add(`${n}=>${upper(td.type.getName())}`, td.type.getType());
+        }
+      }
+    } catch { /* a type abaplint cannot resolve is simply not described */ }
+  }
+  return {structs, known};
+}
+
+/** the RTTI type kind (cl_abap_typedescr=>typekind_*) of an abaplint type */
+function typeKindOf(t) {
+  if (t instanceof BasicTypes.CharacterType) return "C";
+  if (t instanceof BasicTypes.NumericType) return "N";
+  if (t instanceof BasicTypes.DateType) return "D";
+  if (t instanceof BasicTypes.TimeType) return "T";
+  if (t instanceof BasicTypes.IntegerType) return "I";
+  if (t instanceof BasicTypes.Integer8Type) return "8";
+  if (t instanceof BasicTypes.PackedType) return "P";
+  if (t instanceof BasicTypes.FloatType) return "F";
+  if (t instanceof BasicTypes.HexType) return "X";
+  if (t instanceof BasicTypes.StringType) return "g";
+  if (t instanceof BasicTypes.XStringType) return "y";
+  if (t instanceof BasicTypes.DecFloat16Type) return "a";
+  if (t instanceof BasicTypes.DecFloat34Type) return "e";
+  if (t instanceof BasicTypes.StructureType) return "u";
+  if (t instanceof BasicTypes.TableType) return "h";
+  if (t instanceof BasicTypes.DataReference) return "l";
+  if (t instanceof BasicTypes.ObjectReferenceType) return "r";
+  return "?";
+}
+
+/** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
+function aliasTarget(reg, owner, name) {
+  for (const o of [owner, ...ancestors(reg, owner)]) {
+    const def = reg.getObject("INTF", o)?.getDefinition() ?? reg.getObject("CLAS", o)?.getDefinition();
+    const all = def?.getAliases?.();
+    const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
+    const hit = list.find((x) => upper(x.getName()) === name);
+    if (hit) return upper(hit.getComponent());
+  }
+  return undefined;
+}
+
+/** the interfaces an interface includes, transitively */
+function componentInterfaces(reg, intf, seen = new Set()) {
+  for (const c of reg.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
+    const n = upper(c.name);
+    if (!seen.has(n)) { seen.add(n); componentInterfaces(reg, n, seen); }
+  }
+  return [...seen];
 }
 
 /** kept for the numeric bench sample: one folder, every class in it */
@@ -114,6 +197,12 @@ export function readClass(folder) {
   const objects = [...new Set(readdirSync(folder).map((f) => f.split(".")[0]))];
   return compileProgram({folders: [folder], objects}).classes;
 }
+
+/** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
+const NATIVE = new Map([
+  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
+  ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+]);
 
 /* --------------------------------------------------------------------- types */
 
@@ -128,6 +217,11 @@ function typeOf(t, where, program) {
   // a parameter TYPE c takes the length of what is passed: stored without
   // trailing blanks like any c, so a length no value reaches
   if (t instanceof BasicTypes.CGenericType) return C(262143);
+  // csequence and clike take a c or a string: carried as a string, so a c
+  // passed in arrives without its trailing blanks, which every character
+  // operation of a c ignores anyway (a structure passed as clike is refused
+  // at the call, where the conversion to string fails)
+  if (t instanceof BasicTypes.CSequenceType || t instanceof BasicTypes.CLikeType) return S;
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
@@ -210,6 +304,7 @@ function classIr(ctx0, obj) {
   const implScope = findScope(spaghetti.getTop(), "class_implementation");
   const defScope = findScope(spaghetti.getTop(), "class_definition");
   const attributes = [];
+  const ownAttrs = new Set(def.getAttributes().getAll().map((a) => upper(a.getName())));
   const classVars = {...(defScope?.getData().vars ?? {}), ...(implScope?.getData().vars ?? {})};
   for (const [name, id] of Object.entries(classVars)) {
     if (name === "ME" || name === "SUPER") continue;
@@ -218,6 +313,8 @@ function classIr(ctx0, obj) {
       registerConst(program, name, id, className);
       continue;
     }
+    // an inherited attribute lives in the superclass's part of the object
+    if (!ownAttrs.has(name)) continue;
     try {
       const type = typeOf(id.getType(), `${className} ${name}`, program);
       attributes.push({name, type, static: meta.includes("static"), value: attributeValue(id, type, `${className} ${name}`)});
@@ -239,7 +336,7 @@ function classIr(ctx0, obj) {
         default: defaultOf(p, x), optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       signatures.set(name, {
-        name, static: isStatic,
+        name, static: isStatic, private: m.getVisibility?.() === 1, abstract: m.isAbstract?.() ?? false,
         params: [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
           ...p.getChanging().map((x) => param(x, "changing"))],
         returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), where, program)},
@@ -278,15 +375,21 @@ function classIr(ctx0, obj) {
     try { o = origin(m); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(m.getName()), {name: upper(m.getName()), unsupported: e.message}); continue; }
     addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => m.getName()}), "", m.isStatic());
   }
-  for (const intf of def.getImplementing()) {
+  const implemented = [...new Set(def.getImplementing().flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]))];
+  for (const intf of implemented.map((name) => ({name}))) {
     const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
     const all = idef.getMethodDefinitions();
-    for (const m of Array.from(Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, false);
+    for (const m of Array.from(Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, m.isStatic?.() ?? false);
   }
 
+  // single inheritance: the superclass when it is compiled too (else the
+  // class stands alone, as it did before inheritance was compiled)
+  const sup = def.getSuperClass() ? upper(def.getSuperClass()) : null;
   const cls = {name: className, attributes, methods: [], constructor: null, stubs: [],
-    interfaces: def.getImplementing().map((i) => upper(i.name))};
+    interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
+  cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
+  cls.signatures = signatures;
   const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   for (const node of tree.findAllStructures(Structures.Method)) {
     const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
@@ -301,6 +404,13 @@ function classIr(ctx0, obj) {
     };
     if (sig === undefined) { skip("no signature"); continue; }
     if (sig.unsupported) { skip(sig.unsupported); continue; }
+    // a kernel service the host implements: the ABAP body (the transpiler's
+    // @KERNEL code) is replaced by a call into the host
+    if (NATIVE.has(`${className}=>${name}`)) {
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE.get(`${className}=>${name}`)}],
+        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      continue;
+    }
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
       const ctx = {program, reg, className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
@@ -409,14 +519,26 @@ function registerConst(program, name, id, className) {
   let type;
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
   let value = id.getValue?.();
-  if (typeof value !== "string" && typeof value !== "number") return undefined; // structured constants: not yet
-  if (!["i", "int8", "f", "c", "string", "x", "xstring"].includes(type.k)) return undefined;
+  const SCALAR = ["i", "int8", "f", "c", "string", "x", "xstring"];
   // a quote inside a literal is written twice: '#''"' is #'" (the Zork
   // alphabet shifted by one character after it until this was read right)
-  value = String(value);
-  if (/^'.*'$/s.test(value)) value = value.slice(1, -1).replaceAll("''", "'");
-  else if (/^`.*`$/s.test(value)) value = value.slice(1, -1).replaceAll("``", "`");
-  program.consts.set(go, {go, type, value});
+  const unquote = (v) => {
+    v = String(v);
+    if (/^'.*'$/s.test(v)) return v.slice(1, -1).replaceAll("''", "'");
+    if (/^`.*`$/s.test(v)) return v.slice(1, -1).replaceAll("``", "`");
+    return v;
+  };
+  // CONSTANTS: BEGIN OF ... END OF: one value per component, all scalar
+  if (value !== null && typeof value === "object" && type.k === "struct") {
+    const fields = program.structs.get(type.go)?.fields ?? [];
+    const byName = new Map(Object.entries(value).map(([k, v]) => [upper(k), v]));
+    if (fields.length === 0 || fields.some((f) => !SCALAR.includes(f.type.k) || typeof byName.get(f.name) === "object")) return undefined;
+    program.consts.set(go, {go, type, value: Object.fromEntries(fields.map((f) => [f.name, byName.has(f.name) ? unquote(byName.get(f.name)) : undefined]))});
+    return go;
+  }
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  if (!SCALAR.includes(type.k)) return undefined;
+  program.consts.set(go, {go, type, value: unquote(value)});
   return go;
 }
 
@@ -499,7 +621,6 @@ function tryBlock(node, ctx) {
     const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
     return {classes: names, into, covers: RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n))), body: bodyOf(c, ctx)};
   });
-  if (leaves(body) || catches.some((c) => leaves(c.body))) throw new Unsupported("RETURN, EXIT or CONTINUE leaving a TRY");
   return {s: "try", body, catches};
 }
 
@@ -610,6 +731,12 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
+  // ASSERT: a false condition ends the program (ASSERTION_FAILED, a runtime
+  // error no CATCH reaches); no checkpoint group, so always active
+  if (isStmt(node, Statements.Assert)) {
+    if (/\bID\b/i.test(node.concatTokens())) throw new Unsupported(`ASSERT with a checkpoint group: ${node.concatTokens()}`);
+    return {s: "assert", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), text: node.concatTokens()};
+  }
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
@@ -628,6 +755,8 @@ function statement(node, ctx) {
       }
     }
     const target = lvalue(targets[0], ctx);
+    // a ?= b: a down-cast, checked at run time
+    if (node.getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(src, ctx), target.type, node.concatTokens())};
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
@@ -758,6 +887,12 @@ function statement(node, ctx) {
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
+  // RAISE name: a classic exception, for the caller's EXCEPTIONS list
+  if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
+    const n = node.findDirectExpression(Expressions.ExceptionName);
+    if (!n) throw new Unsupported(`RAISE form: ${text}`);
+    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+  }
   if (isStmt(node, Statements.Call)) {
     const chain = node.findDirectExpression(Expressions.MethodCallChain);
     if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
@@ -824,7 +959,13 @@ function statement(node, ctx) {
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
   if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => ({s: "clear", target: lvalue(t, ctx)}))};
   // WRITE goes to a list; in an APC or HTTP handler nobody ever displays it
-  if (isStmt(node, Statements.Write)) return {s: "nop"};
+  // WRITE is a no-op here, except the transpiler runtime's host code: open-abap-core
+  // writes its kernel parts in JS as WRITE '@KERNEL ...', and skipping one would
+  // run the ABAP around it on values nobody set
+  if (isStmt(node, Statements.Write)) {
+    if (/'@KERNEL/i.test(node.concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
+    return {s: "nop"};
+  }
   throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
 }
 
@@ -852,6 +993,8 @@ function initialValue(node, ctx) {
  */
 function variable(name, ctx) {
   const n = upper(name);
+  // me as a value: the object itself (in Go its most-derived self)
+  if (n === "ME") return {e: "me", type: {k: "ref", name: ctx.className}};
   if (ctx.fieldSymbols?.has(n)) return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
   const p = ctx.sig.params.find((x) => x.name === n);
   // ref: a pointer in Go; box: an EXPORTING / CHANGING box in JS (an
@@ -878,7 +1021,7 @@ function findAttribute(ctx, n) {
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
   const type = typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
-  if (id.getMeta().includes("static")) return {e: "static", go: goName(`${ctx.className}=>${n}`), type};
+  if (id.getMeta().includes("static")) return {e: "static", go: goName(`${declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className}=>${n}`), type};
   return {e: "attr", name: n, type};
 }
 
@@ -927,8 +1070,8 @@ function lvalue(target, ctx) {
 function refAttribute(base, attrNode, ctx) {
   if (base.type.k !== "ref" || base.type.intf) throw new Unsupported(`-> on a ${base.type.k === "ref" ? "interface reference" : base.type.k}`);
   const name = upper(attrNode.concatTokens());
-  const def = ctx.reg.getObject("CLAS", base.type.name)?.getDefinition();
-  const a = def?.getAttributes().getInstance().find((x) => upper(x.getName()) === name);
+  const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => ctx.reg.getObject("CLAS", c)?.getDefinition()?.getAttributes().getInstance()
+    .find((x) => upper(x.getName()) === name)).find(Boolean);
   if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
   return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
 }
@@ -1260,6 +1403,11 @@ function constructor(c, ctx, inferred) {
     }
     return {e: "cond", branches, else: otherwise, type: to};
   }
+  if (c.kw === "CAST") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    if (!c.body || !isExpr(c.body, Expressions.Source)) throw new Unsupported(`CAST form: ${c.text}`);
+    return downCast(source(c.body, ctx), to, c.text);
+  }
   if (c.kw === "NEW") {
     const to = namedType(c.typeNode, ctx, inferred);
     if (to.k !== "ref") throw new Unsupported(`NEW of a ${to.k}: ${c.text}`);
@@ -1305,8 +1453,8 @@ function methodSignature(ctx, owner, name) {
     const defOwner = intf ?? owner;
     const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? ctx.reg.getObject("CLAS", defOwner)?.getDefinition();
     if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
-    const all = def.getMethodDefinitions();
-    const m = Array.from(Array.isArray(all) ? all : all.getAll()).find((x) => upper(x.getName()) === meth);
+    const m = intf ? Array.from((() => { const all = def.getMethodDefinitions(); return Array.isArray(all) ? all : all.getAll(); })()).find((x) => upper(x.getName()) === meth)
+      : declaredMethod(ctx.reg, defOwner, meth);
     if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
@@ -1323,6 +1471,38 @@ function methodSignature(ctx, owner, name) {
   }
   ctx.program.sigs.set(key, sig);
   return sig;
+}
+
+/** the superclasses of a class, nearest first, as far as the registry has them */
+export function ancestors(reg, cls) {
+  const out = [];
+  for (let c = reg.getObject("CLAS", cls)?.getDefinition()?.getSuperClass(), g = 0; c && g < 30; g += 1) {
+    out.push(upper(c));
+    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass();
+  }
+  return out;
+}
+
+/** the definition of a method as a class has it: its own, else the nearest
+ * superclass's; a REDEFINITION declares no parameters, so its origin's */
+function declaredMethod(reg, cls, meth) {
+  for (const c of [cls, ...ancestors(reg, cls)]) {
+    const m = reg.getObject("CLAS", c)?.getDefinition()?.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === meth);
+    if (m && !m.isRedefinition()) return m;
+  }
+  return undefined;
+}
+
+/** the class in cls's chain, itself first, that declares a method or attribute */
+function declaringClass(reg, cls, name, kind) {
+  for (const c of [cls, ...ancestors(reg, cls)]) {
+    const def = reg.getObject("CLAS", c)?.getDefinition();
+    if (!def) return undefined;
+    const has = kind === "method" ? def.getMethodDefinitions().getAll().some((x) => upper(x.getName()) === name && !x.isRedefinition())
+      : def.getAttributes().getAll().some((x) => upper(x.getName()) === name);
+    if (has) return c;
+  }
+  return undefined;
 }
 
 /**
@@ -1369,7 +1549,9 @@ function createObject(node, ctx) {
 
 /** the importing parameters of a class's constructor, read off its definition */
 function constructorSignature(ctx, clsName) {
-  const def = ctx.reg.getObject("CLAS", clsName)?.getDefinition();
+  // a class without a constructor of its own is created through the
+  // nearest superclass's
+  const def = ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
   const m = def?.getMethodDefinitions().getByName("CONSTRUCTOR");
   if (m === undefined) return [];
   const p = m.getParameters();
@@ -1462,7 +1644,6 @@ const FUNCTIONS = {
 
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
-  if (/^super\s*->/i.test(chain.concatTokens())) throw new Unsupported(`SUPER-> call: inheritance is not compiled yet`);
   // x->get_text( ) of an exception caught INTO x
   if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     const v = kids[0].concatTokens();
@@ -1489,8 +1670,16 @@ function call(chain, ctx, statement, hint) {
   }
   let receiver = null;
   let owner = null;
+  let sup = null;
+  let receiving = null;
+  let exceptions = null;
   let mc;
-  if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
+  if (kids.length === 3 && upper(kids[0].concatTokens()) === "SUPER" && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
+    // SUPER->m( ): the superclass's implementation, not a virtual call
+    sup = ancestors(ctx.reg, ctx.className)[0];
+    if (!sup || !ctx.program.wanted.has(sup)) throw new Unsupported(`SUPER-> in ${ctx.className}: the superclass is not compiled in this program`);
+    mc = kids[2];
+  } else if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
     mc = kids[0];
   } else if (kids.length === 3 && isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>") && isExpr(kids[2], Expressions.MethodCall)) {
     if (upper(kids[0].concatTokens()) !== ctx.className) owner = upper(kids[0].concatTokens());
@@ -1503,6 +1692,16 @@ function call(chain, ctx, statement, hint) {
     if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[2];
+  } else if (kids.length > 3 && isTok(kids[kids.length - 2], "->") && isExpr(kids[kids.length - 1], Expressions.MethodCall)) {
+    // a->b( )->c( ): the receiver is what the chain before the last -> returns
+    const head = kids.slice(0, -2);
+    const prefix = {getChildren: () => head, concatTokens: () => head.map((k) => k.concatTokens()).join(""),
+      findFirstExpression: (t) => head.map((k) => (isTok(k) ? undefined : isExpr(k, t) ? k : k.findFirstExpression(t))).find(Boolean)};
+    receiver = call(prefix, ctx, false);
+    if (receiver.type.k !== "ref") throw new Unsupported(`call through a ${receiver.type.k}: ${chain.concatTokens()}`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
+    owner = receiver.type.name;
+    mc = kids[kids.length - 1];
   } else {
     throw new Unsupported(`call chain ${chain.concatTokens()}`);
   }
@@ -1551,9 +1750,29 @@ function call(chain, ctx, statement, hint) {
       len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
   }
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
-  // through an interface reference, a method is the interface's: I~M
-  const qualified = owner !== null && receiver?.type.intf && !name.includes("~") ? `${owner}~${name}` : name;
-  const sig = owner === null ? ctx.signatures.get(name) : methodSignature(ctx, owner, qualified);
+  // an ALIASES name is the component it stands for; through an interface
+  // reference, a method is otherwise the interface's own: I~M
+  const alias = owner !== null && !name.includes("~") ? aliasTarget(ctx.reg, owner, name)
+    : owner === null && !name.includes("~") && !ctx.signatures.has(name) ? aliasTarget(ctx.reg, ctx.className, name) : undefined;
+  const qualified = alias ?? (owner !== null && receiver?.type.intf && !name.includes("~") ? `${owner}~${name}` : name);
+  let sig;
+  if (sup !== null && name === "CONSTRUCTOR") {
+    const at = declaringClass(ctx.reg, sup, "CONSTRUCTOR", "method");
+    sig = {name, static: false, params: at ? constructorSignature(ctx, at) : [], returning: null, none: !at};
+  } else if (sup !== null) {
+    sig = methodSignature(ctx, sup, name);
+  } else if (owner === null && !ctx.signatures.has(name) && !alias) {
+    // a method the class inherits: resolved where it is declared
+    const at = declaringClass(ctx.reg, ctx.className, name, "method");
+    if (at === undefined || at === ctx.className) throw new Unsupported(`unknown method ${name}`);
+    if (declaredMethod(ctx.reg, at, name)?.getVisibility?.() === 1) throw new Unsupported(`${name} is private in ${at}`);
+    sig = methodSignature(ctx, at, name);
+    if (sig.static) owner = at;
+  } else {
+    sig = owner === null ? ctx.signatures.get(qualified) : methodSignature(ctx, owner, qualified);
+  }
+  // a static method named through a subclass is the declaring class's function
+  if (owner !== null && receiver === null && sig?.static && !qualified.includes("~")) owner = declaringClass(ctx.reg, owner, name, "method") ?? owner;
   if (sig === undefined) throw new Unsupported(`unknown method ${name}`);
   if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
   if (!statement && sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
@@ -1570,8 +1789,23 @@ function call(chain, ctx, statement, hint) {
       given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
     }
   } else if (full !== undefined) {
-    const text = full.concatTokens();
-    if (/\b(RECEIVING|EXCEPTIONS)\b/i.test(text)) throw new Unsupported(`call with ${text}`);
+    const kidsP = full.getChildren();
+    // RECEIVING r = x: the RETURNING value into x
+    const ri = kidsP.findIndex((k) => isTok(k, "RECEIVING"));
+    if (ri >= 0) receiving = lvalue(kidsP[ri + 1].findDirectExpression(Expressions.Target), ctx);
+    // EXCEPTIONS name = n ... OTHERS = n: a classic exception of the method
+    // called ends it, and sy-subrc says which
+    const exl = full.findDirectExpression(Expressions.ParameterListExceptions);
+    if (exl) {
+      exceptions = {map: {}, others: 0};
+      for (const x of exl.findDirectExpressions(Expressions.ParameterException)) {
+        const v = x.findDirectExpression(Expressions.Integer);
+        if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
+        const nm = x.findDirectExpression(Expressions.ParameterName);
+        if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
+        else exceptions.others = Number(v.concatTokens());
+      }
+    }
     const exp = full.findDirectExpression(Expressions.MethodParameters) ?? full;
     for (const list of full.findAllExpressions(Expressions.ParameterListS)) {
       for (const p of list.findDirectExpressions(Expressions.ParameterS)) {
@@ -1601,8 +1835,13 @@ function call(chain, ctx, statement, hint) {
     return {dir: p.dir, place: t, type: p.type};
   });
   if (owner === null && !sig.static && ctx.sig.static) throw new Unsupported(`${name}: an instance method called from a static one`);
-  if (owner === null) (ctx.calls = ctx.calls ?? []).push(name);
-  return {e: "call", method: qualified, static: sig.static, owner, receiver, args, type: sig.returning?.type ?? {k: "void"}};
+  if (owner === null && sup === null) (ctx.calls = ctx.calls ?? []).push(name);
+  if ((exceptions || receiving) && !statement) throw new Unsupported(`RECEIVING / EXCEPTIONS in an expression: ${chain.concatTokens()}`);
+  if (receiving && (sig.returning === null || !sameType(receiving.type, sig.returning.type))) throw new Unsupported(`RECEIVING into a ${receiving.type.k}: ${chain.concatTokens()}`);
+  // SUPER->constructor( ) of a chain where no superclass has a constructor does nothing
+  if (sig.none) return {e: "nop_call", type: {k: "void"}};
+  return {e: "call", method: qualified, static: sig.static, owner, receiver, sup, args, type: sig.returning?.type ?? {k: "void"},
+    exceptions, receiving, callee: name.includes("~") ? name.split("~")[1] : name};
 }
 
 function defaultValue(p, ctx) {
@@ -1664,17 +1903,29 @@ export function convert(expr, to) {
   if (from.k === "ref" && to.k === "ref") {
     // up-cast: a class into an interface it implements, or any reference into
     // the same interface; a down-cast needs CAST and is refused
-    if (to.intf && implementsIntf(expr, from.name, to.name)) return {...expr, type: to};
+    if (to.intf && implementsIntf(expr, from.name, to.name)) return {e: "upcast", x: expr, type: to};
+    if (!to.intf && !from.intf && REG && ancestors(REG, from.name).includes(to.name)) return {e: "upcast", x: expr, type: to};
     throw new Unsupported(`reference ${from.name} -> ${to.name}`);
   }
   throw new Unsupported(`conversion ${from.k} -> ${to.k}`);
 }
 
+/** a ?= b and CAST: to a class or interface reference, checked at run time
+ * (CX_SY_MOVE_CAST_ERROR); an up-cast needs no check */
+function downCast(x, to, text) {
+  if (x.type.k !== "ref" || to.k !== "ref") throw new Unsupported(`cast of a ${x.type.k} to a ${to.k}: ${text}`);
+  try { return convert(x, to); } catch (e) { if (!(e instanceof Unsupported)) throw e; }
+  return {e: "cast", x, type: to};
+}
+
 let REG = null;
 function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
-  const def = REG?.getObject("CLAS", cls)?.getDefinition() ?? REG?.getObject("INTF", cls)?.getDefinition();
-  return (def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf);
+  for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {
+    const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition();
+    if ((def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf)) return true;
+  }
+  return false;
 }
 
 /* ---------------------------------------------------------------- conditions */

@@ -1192,3 +1192,19 @@ for `zosd_status_app`, which has been deployed for a day.
   the 404 assertion and names this entry. When this is fixed, delete the
   exclusion; if the exclusion outlives the defect, the assertion has
   stopped testing what it says.
+
+### ANOMALY-2026-09-23-dynamic-create-ctor-params — abaplint checks `CREATE OBJECT ... TYPE (name)` against the static type's constructor
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `CREATE OBJECT ref TYPE (name)` without `EXPORTING`, where the static type of `ref` has a constructor with a mandatory parameter
+- Minimal ABAP reproducer: an abstract class `zcl_base` with `METHODS constructor IMPORTING iv_tag TYPE string`, a subclass `zcl_sub` whose own `constructor` takes no parameters, and `DATA lo TYPE REF TO zcl_base. CREATE OBJECT lo TYPE ('ZCL_SUB').`
+- Exact command used to run it: `node tools/gogen/semantics.mjs` with that statement in `tools/gogen/testdata/zcl_gogen_t_inh.clas.abap` (the front end runs abaplint's syntax check first)
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0017, 2026-09-23, deleted after): the class activates, and the statement creates a `zcl_sub` and runs `zcl_sub`'s constructor. The class is not known until run time, so neither is its constructor
+- Actual open-abap behaviour: abaplint reports `constructor parameter "IV_TAG" must be supplied`. `validateParameters` in `5_syntax/statements/create_object.js` looks up `CONSTRUCTOR` on the static type even when the type is dynamic
+- Impact on open-steamgate: none on the served path so far (the gateway's own dynamic creates target types whose constructors take no parameters); it blocks a test from saying what A4H accepts
+- Smallest safe workaround: the test creates the object into a reference of the subclass's type and widens it afterwards; no code works around it
+- Upstream: **needs an issue** in abaplint (the check should skip the parameter validation when the type is dynamic)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_INH (the A4H-only line `abl:` is left out of the local copy until abaplint accepts it)
+- Upstream version containing a fix: none yet

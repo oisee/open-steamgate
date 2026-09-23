@@ -312,3 +312,23 @@ export function createAs(s, name, target) {
   if (!c.is.has(target)) throw new AbapError("CX_SY_MOVE_CAST_ERROR", `CREATE OBJECT TYPE (${name})`);
   return c.make(s);
 }
+
+// ?= and CAST: an initial reference casts to initial; anything else must be
+// the target class or interface (the class's $is), or CX_SY_MOVE_CAST_ERROR
+export function cast(x, target) {
+  if (x === null || x === undefined) return null;
+  if (!x.constructor?.$is?.has(target)) throw new AbapError("CX_SY_MOVE_CAST_ERROR", "?=");
+  return x;
+}
+
+// RAISE name, taken only by the caller's EXCEPTIONS list (see the Go runtime)
+export class ClassicException extends Error {
+  constructor(name, method) { super(`RAISE_EXCEPTION ${name} in ${method}`); this.exName = name; this.method = method; }
+}
+export function classic(s, e, method, map, others) {
+  if (e instanceof ClassicException && e.method === method) {
+    if (map[e.exName] !== undefined) { s.sy.subrc = map[e.exName]; return; }
+    if (others !== 0) { s.sy.subrc = others; return; }
+  }
+  throw e;
+}

@@ -24,11 +24,24 @@ const EXPECT = {
   // CREATE OBJECT TYPE (name): the name as written, so lower case is an
   // unknown class, as is a class that does not exist
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
+  // inheritance: a base method's call on me reaches the redefinition, SUPER->
+  // the superclass's; a protected attribute is one field across levels; in
+  // the superclass's constructor me->name( ) is the superclass's own
+  // (ctor:base); ?= down, an initial reference widened stays initial, and an
+  // initial reference casts without CX_SY_MOVE_CAST_ERROR
+  ZCL_GOGEN_T_INH: "sub<base>/k/t1+ ctor:base down:k initial dyn:sub<base> nullcast:ok",
+  // RETURN out of a TRY body and out of a CATCH, CONTINUE and EXIT of a DO
+  // from inside two nested TRYs (Go runs a TRY as a closure and hands these
+  // out as codes)
+  ZCL_GOGEN_T_TRYFLOW: "b cd caught a1 13!",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]);
 const program = compileProgram({folders: [join(here, "testdata"), core], objects});
+// the classes that carry a test: a static RUN of their own (the others are
+// the classes those tests use)
+objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));
 if (program.skipped.length) console.log(`not compiled: ${program.skipped.join("; ")}`);
 const out = join(here, ".out", "semantics");
 mkdirSync(out, {recursive: true});
@@ -47,6 +60,7 @@ for (const line of goOut.trim().split("\n")) {
   let js;
   try { js = m[cls].RUN({sy: {index: 0, tabix: 0, subrc: 0}}); } catch (e) { js = `ERROR ${e.message}`; }
   for (const [who, got] of [["Go", go], ["JS", js]]) {
+    if (EXPECT[cls] === undefined) { console.log(`new  ${who} ${cls}: ${got}`); continue; }
     const want = typeof EXPECT[cls] === "string" ? EXPECT[cls] : EXPECT[cls][who];
     const ok = got === want;
     if (!ok) bad += 1;

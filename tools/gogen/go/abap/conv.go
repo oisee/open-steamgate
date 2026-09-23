@@ -3,6 +3,7 @@ package abap
 import (
 	"encoding/hex"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -542,4 +543,17 @@ func Split(v, sep string) []string {
 		parts = parts[:len(parts)-1]
 	}
 	return parts
+}
+
+// UnescapeURL is cl_http_utility=>unescape_url, which open-abap-core writes as
+// the host's decodeURIComponent: %xx sequences decode as UTF-8, a + stays a +,
+// and a malformed sequence is an error (a URIError there, a dump here)
+func UnescapeURL(s *Session, escaped string, options int32) string {
+	_ = options // open-abap-core ignores it too
+	out, err := url.PathUnescape(escaped)
+	if err != nil {
+		// not an ABAP exception class: the transpiler runtime dumps with a URIError
+		panic(ArithmeticError{"URI_MALFORMED", "unescape_url: " + err.Error()})
+	}
+	return out
 }

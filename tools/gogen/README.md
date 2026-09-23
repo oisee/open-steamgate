@@ -192,20 +192,66 @@ The JS disagreements are recorded in ANORMALIES. DIV and MOD with a
 negative divisor are fixed upstream in abaplint/transpiler#1885; f -> i
 without an overflow is a question for Lars, not a patch.
 
+## One request of OSG's gateway, 2026-09-23
+
+`node tools/gogen/gateway.mjs` compiles OSG with its libraries (821
+classes, open-abap-core, open-abap-odata and the rest), registers the SEGW
+services and sends `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/?$format=json`
+through `ZCL_STG_DISPATCHER`. The Go binary answers what OSG answers:
+
+```
+200 OK
+application/json
+{"d":{"EntitySets":["TravelSet","BookingSet","StatusVHSet","PhotoSet"]}}
+```
+
+On the way: the SEGW registry, the URL parser (FIND REGEX), the model
+registry (`CREATE OBJECT ... TYPE (name)`), the `_MPC_EXT` -> `_MPC` ->
+`/IWBEP/CL_MGW_PUSH_ABS_MODEL` chain (inheritance, `SUPER->`, the
+constructor chain), the model's `DEFINE` with its entity types, properties,
+annotations and actions, and `BIND_STRUCTURE` through RTTI. What that took,
+each measured on A4H where the rule could be argued and pinned in
+`semantics.mjs`:
+
+- `CREATE OBJECT` static and by name, through a class registry; the name is
+  taken as written (lower case is CX_SY_CREATE_OBJECT_ERROR).
+- Single inheritance: the superclass embedded, one Go interface per class
+  that has subclasses, `self` for the calls a method makes on `me`, `SUPER->`
+  bound statically, `?=` / `CAST` checked, an initial reference widened stays
+  initial. In a superclass's constructor, `me->m( )` is the superclass's own.
+- Classic exceptions: `RAISE name`, `EXCEPTIONS ... = n` / `OTHERS`,
+  `RECEIVING`.
+- `RETURN`, `EXIT`, `CONTINUE` out of a `TRY` (a closure in Go, so they come
+  out as codes); `ASSERT`; structured constants; aliases; interfaces that
+  include interfaces; `csequence` / `clike` parameters; call chains.
+- Two kernel services in the host, since open-abap-core writes them as
+  `WRITE '@KERNEL ...'` JavaScript: `describe_by_name` for structures (from
+  a table the compiler builds out of the registry: the dictionary's
+  structures and the classes' `TYPES`) and `unescape_url`. Every other
+  `@KERNEL` line is a stub that dumps: it was a silent no-op before, which
+  ran the ABAP around it on values nobody set.
+
+The call closure from `ZCL_STG_DISPATCHER=>DISPATCH` (`closure.mjs`): 53
+methods reachable, 47 compiled with 43 statement stubs inside them, 6 whole
+methods stubbed. The service document's path passes none of them. The rest
+of the gateway waits on `REF TO data` (5 methods: reading and writing
+entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
+`CONDENSE`, `COMMIT` / `ROLLBACK`, and the database.
+
 ## What this does not show
 
-- A request of OSG's own gateway. 190 of 963 methods of OSG's ABAP compile,
-  but no entry point has a stub-free call closure yet; that is the next
-  milestone (below), not a percentage.
+- A request that reads data: every `SELECT` is a `NotCompiled` stub, and
+  the entity set path needs `REF TO data`.
 - No database: every `SELECT` is a `NotCompiled` stub. The plan is the
   relational IR of portable AMDP as the one DB IR (docs/pamdp-ir-portability.md).
-- No `p`, `d`, `t`, `decfloat`; exceptions only as far as the runtime raises
-  them (`TRY`/`CATCH`, `CATCH INTO` + `get_text( )`), no `RAISE` of own
-  classes, no `CLEANUP`; no inheritance or `super`; no dynamic calls.
+- No `p`, `d`, `t`, `decfloat`; class-based exceptions only as far as the
+  runtime raises them (`TRY`/`CATCH`, `CATCH INTO` + `get_text( )`), no
+  `RAISE EXCEPTION` of own classes, no `CLEANUP`; dynamic calls only as
+  `CREATE OBJECT ... TYPE (name)` without arguments.
 - Class statics are per process, so a host runs one step at a time (the
   stand serializes). Statics per session come before any parallelism.
-- The handler's `ON_MESSAGE` is three host lines (a `RETURN` inside its
-  `TRY` is refused); everything it calls is compiled.
+- The handler's `ON_MESSAGE` is still three host lines in the stands; the
+  `RETURN` inside its `TRY` that kept it out compiles now.
 - Table values: an assignment, `APPEND`, `MODIFY`, `READ ... INTO`, `LOOP
   ... INTO` clone a table or a structure holding one; a composite
   `IMPORTING` by reference is a pointer in Go and the object in JS, a
@@ -215,12 +261,9 @@ without an overflow is a question for Lars, not a patch.
 ## Next, if this is pursued
 
 Ranked with codex gpt-6-sol, 2026-09-23:
-1. One request end to end: a Go HTTP handler calling the compiled
-   `ZCL_STG_DISPATCHER` for the service document of a registered service,
-   answering what OSG answers, with the call closure from that entry point
-   reported and the build failing on any reachable stub.
-2. The part of exceptions, interface dispatch and inheritance that request
-   needs, and no more.
+1. ~~One request end to end~~ (done, above), and ~~the exceptions,
+   interface dispatch and inheritance it needs~~ (done).
+2. An entity set: `REF TO data`, `RAISE EXCEPTION TYPE`, then the database.
 3. A step budget counted at loop back edges (a goroutine cannot be stopped
    from outside; the OOM of 2026-09-23 is the reason).
 4. The DB layer through the shared relational IR and its conformance pairs.

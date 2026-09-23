@@ -16,6 +16,11 @@ const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace
 
 /** a constant's or an attribute's VALUE as a JS literal */
 function literal(c) {
+  // a structured constant: frozen, so a write through an alias fails loudly
+  if (c.type.k === "struct") {
+    const fields = STRUCTS.get(c.type.go)?.fields ?? [];
+    return `Object.freeze({${fields.map((f) => `${ident(f.name)}: ${c.value[f.name] === undefined ? zero(f.type) : literal({type: f.type, value: c.value[f.name]})}`).join(", ")}})`;
+  }
   if (c.type.k === "i" || c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "int8") return `${BigInt(c.value)}n`;
   if (c.type.k === "x" || c.type.k === "xstring") return JSON.stringify(String.fromCharCode(...hexBytes(c.value, c.type.len)));
@@ -51,17 +56,36 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
-  for (const cls of program.classes) {
+  // a superclass is declared before its subclasses
+  const byName = new Map(program.classes.map((c) => [c.name, c]));
+  const ordered = [];
+  const placed = new Set();
+  const put = (c) => { if (placed.has(c.name)) return; placed.add(c.name); if (c.super && byName.has(c.super)) put(byName.get(c.super)); ordered.push(c); };
+  program.classes.forEach(put);
+  // what a class is, for casts and CREATE OBJECT by name: itself, its
+  // superclasses and every interface along the chain
+  const isOf = (c) => {
+    const names = [];
+    for (let x = c; x; x = x.super ? byName.get(x.super) : null) names.push(x.name, ...(x.interfaces ?? []));
+    return names;
+  };
+  for (const cls of ordered) {
     const inst = (cls.attributes ?? []).filter((a) => !a.static && !a.unsupported);
-    out.push(`export class ${typeName(cls.name)} {`, "  constructor() {");
+    out.push(`export class ${typeName(cls.name)}${cls.super ? ` extends ${typeName(cls.super)}` : ""} {`, "  constructor() {");
+    if (cls.super) out.push("    super();");
     for (const a of inst) out.push(`    this.${ident(a.name)} = ${a.value === undefined ? zero(a.type) : literal(a)};`);
     out.push("  }");
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
       out.push(`  static ${ident(a.name)} = ${a.value === undefined ? zero(a.type) : literal(a)};`);
     }
-    const cp = cls.constructor?.params ?? cls.ctorParams ?? [];
+    // the nearest constructor of the chain runs; the object inherits it
+    const chain = [cls];
+    for (let c = cls; c.super && byName.has(c.super);) { c = byName.get(c.super); chain.push(c); }
+    const ctorAt = chain.find((c) => c.constructor || c.ctorParams);
+    const cp = ctorAt ? (ctorAt.constructor?.params ?? ctorAt.ctorParams ?? []) : [];
+    out.push(`  static $is = new Set(${JSON.stringify(isOf(cls))});`);
     out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
-      ...(cls.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
+      ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
     for (const m of all) out.push(...method(cls, m));
     for (const m of cls.stubs ?? []) {
@@ -69,10 +93,11 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
       out.push(`  ${m.static ? "static " : ""}${typeName(m.name)}() { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: ${m.reason}`)}); }`);
     }
     out.push("}", "");
+    if (cls.abstract) continue;
     // CREATE OBJECT ... TYPE (name) passes no arguments
     const make = cp.length === 0 ? `(s) => ${typeName(cls.name)}.$new(s)`
       : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>CONSTRUCTOR: CREATE OBJECT by name of a class whose constructor has parameters`)}); }`;
-    out.push(`abap.registerClass(${JSON.stringify(cls.name)}, ${JSON.stringify([cls.name, ...(cls.interfaces ?? [])])}, ${make});`, "");
+    out.push(`abap.registerClass(${JSON.stringify(cls.name)}, ${JSON.stringify(isOf(cls))}, ${make});`, "");
   }
   return out.join("\n") + "\n";
 }
@@ -86,7 +111,7 @@ function method(cls, m) {
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
-  const ctx = {cls, loop: 0, ret};
+  const ctx = {cls, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
@@ -99,6 +124,7 @@ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.box ? `${ident(p.name)}.v` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
+    case "const": return p.go;
     case "static": {
       const [cls, attr] = p.go.split("__");
       return `${cls}.${ident(attr)}`;
@@ -147,7 +173,18 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.${st.upper ? "ToUpper" : "ToLower"}(${p});`];
     }
-    case "call": return callStmt(st.call, ctx, t);
+    case "call": {
+      if (st.call.e === "nop_call") return [];
+      const c = st.call;
+      const plain = c.receiving ? [`${t}${place(c.receiving, ctx)} = ${expr(c, ctx)};`] : callStmt(c, ctx, t);
+      if (!c.exceptions) return plain;
+      return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
+        `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
+    }
+    case "native":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
+    case "raise_classic":
+      return [`${t}throw new abap.ClassicException(${JSON.stringify(st.name)}, ${JSON.stringify(st.method)});`];
     case "if": {
       const lines = [];
       st.branches.forEach((b, i) => {
@@ -236,6 +273,8 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}{ const r = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
     }
+    case "assert":
+      return [`${t}if (!(${cond(st.cond, ctx)})) throw new abap.AbapError("ASSERTION_FAILED", ${JSON.stringify(st.text)});`];
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.createAs(s, ${expr(st.name, ctx)}, ${JSON.stringify(st.target.type.name)});`];
     case "read_key": {
@@ -307,7 +346,13 @@ function callStmt(e, ctx, t) {
 const callee = (e, ctx) => {
   if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}`;
   if (e.owner) return `${typeName(e.owner)}.${typeName(e.method)}`;
-  return e.static ? `${typeName(ctx.cls.name)}.${typeName(e.method)}` : `me.${typeName(e.method)}`;
+  if (e.static) return `${typeName(ctx.cls.name)}.${typeName(e.method)}`;
+  // SUPER->m( ): the superclass's implementation
+  if (e.sup) return `super.${typeName(e.method)}`;
+  // in a constructor ABAP calls the class's own implementation, not a
+  // subclass's redefinition: the subclass's part does not exist yet
+  if (ctx.inCtor && !ctx.cls.signatures?.get(e.method)?.private) return `${typeName(ctx.cls.name)}.prototype.${typeName(e.method)}.bind(me)`;
+  return `me.${typeName(e.method)}`;
 };
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
@@ -388,6 +433,9 @@ function expr(e, ctx) {
       const args = e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx) : `{v: ${zero(a.type)}}`));
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
+    case "me": return "me";
+    case "upcast": return expr(e.x, ctx);
+    case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
     default: throw new Error(`no JS for expression ${e.e}`);
   }
 }

@@ -30,3 +30,59 @@ func CreateAs[T any](s *Session, name string) T {
 	}
 	return c.make(s).(T)
 }
+
+// Up widens a class pointer into an interface. A nil pointer inside an
+// interface is not a nil interface, and an unbound reference must stay
+// initial after the move.
+func Up[T any, P any](p *P) T {
+	var z T
+	if p == nil {
+		return z
+	}
+	return any(p).(T)
+}
+
+// Cast is ?= and CAST: an initial reference casts to initial, anything else
+// must fit the target or it is CX_SY_MOVE_CAST_ERROR.
+func Cast[T any](v any) T {
+	var z T
+	if v == nil {
+		return z
+	}
+	t, ok := v.(T)
+	if !ok {
+		panic(ArithmeticError{"CX_SY_MOVE_CAST_ERROR", "?="})
+	}
+	return t
+}
+
+// ClassicException is RAISE name: it ends the method that raised it, and
+// only its caller's EXCEPTIONS list can take it. Method names the raiser, so
+// a classic exception that passes a caller without the list is not taken by
+// one further up: it goes on and ends the program, as RAISE_EXCEPTION does.
+type ClassicException struct {
+	Name   string
+	Method string
+}
+
+func (c ClassicException) Error() string { return "RAISE_EXCEPTION " + c.Name + " in " + c.Method }
+
+// Classic is deferred around a call with EXCEPTIONS: the exception named, or
+// OTHERS, sets sy-subrc; anything else goes on.
+func Classic(s *Session, method string, m map[string]int32, others int32) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	if c, ok := r.(ClassicException); ok && c.Method == method {
+		if v, ok := m[c.Name]; ok {
+			s.Sy.Subrc = v
+			return
+		}
+		if others != 0 {
+			s.Sy.Subrc = others
+			return
+		}
+	}
+	panic(r)
+}
