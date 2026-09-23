@@ -76,6 +76,29 @@ boxed arguments (fib, 95–105×). A table row is an object (35×). Arithmetic
 through the operator protocol costs 15–55×. Plasma is the smallest gap
 because `Math.sin` is the same cost in both.
 
+## Language or model? The same IR emitted as JS
+
+`emit-js.mjs` writes JavaScript from the same IR, with the same value model
+as the Go backend: numbers instead of boxed ABAP values, synchronous calls
+instead of an `await` on every one, the calculation type decided at compile
+time, structures as objects copied on a move. The runtime (`js/abap.mjs`)
+follows `go/abap` line for line. It answers the same as Go on all 21
+semantic cases and on every frame of both scenes.
+
+| work | transpiler JS | JS from the IR | Go | transpiler / IR | IR / Go |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| plasma kernel (sample) | 25.5 ms | 3.6 ms | 2.1 ms | ×7 | ×1.7 |
+| fib(25) | 24.0 ms | 0.96 ms | 0.24 ms | ×25 | ×4.1 |
+| primes to 50 000 | 93 ms | 3.4 ms | 1.6 ms | ×27 | ×2.1 |
+| table of 10⁶ rows | 311 ms | 11.3 ms | 8.7 ms | ×28 | ×1.3 |
+| scene glitch, a frame | 205 µs | 16.4 µs | 14.2 µs | ×12.5 | ×1.15 |
+| scene plasma, a frame | 2527 µs | 218 µs | 117 µs | ×11.6 | ×1.9 |
+
+So most of the gap is the model, not the language: the same IR in JS is
+7-28 times faster than today's transpiler output, in the browser too. Go
+adds 1.2-4 times on top, most on calls (fib), and every core of the
+machine on one session's work.
+
 ## Demo scenes against A4H
 
 `node tools/gogen/scenes.mjs <scene>` compiles one scene of ZO4D straight out

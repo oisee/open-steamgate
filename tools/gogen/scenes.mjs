@@ -14,6 +14,9 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo, funcName} from "./emit-go.mjs";
+import {emitJs} from "./emit-js.mjs";
+import {copyFileSync} from "node:fs";
+import {pathToFileURL} from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
@@ -31,10 +34,14 @@ const repeat = Number(flag("repeat", 20));
 const BEAT_SEC = 60 / 152;
 const pos16 = (gt) => Math.floor(gt / (BEAT_SEC / 4));
 const SCENES = {
-  glitch: {cls: "ZCL_O4D_GLITCH", ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}}`},
+  glitch: {cls: "ZCL_O4D_GLITCH", ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}}`,
+    jsCtx: (m, r) => Object.assign(m.new_ZIF_O4D_EFFECT__TY_RENDER_CTX(), {t: r.t})},
   // NEW #( ) in the handler: the constructor's defaults 640 x 400, scale 20
   plasma: {cls: "ZCL_O4D_PLASMA", init: "obj.CONSTRUCTOR(s, 640, 400, 20)",
-    ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}, gt: ${r.gt}, gbi: ZIF_O4D_EFFECT__TY_BEAT_INFO{pos_16: ${pos16(r.gt)}}}`},
+    ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}, gt: ${r.gt}, gbi: ZIF_O4D_EFFECT__TY_BEAT_INFO{pos_16: ${pos16(r.gt)}}}`,
+    jsInit: (obj, s) => obj.CONSTRUCTOR(s, 640, 400, 20),
+    jsCtx: (m, r) => Object.assign(m.new_ZIF_O4D_EFFECT__TY_RENDER_CTX(), {t: r.t, gt: r.gt,
+      gbi: Object.assign(m.new_ZIF_O4D_EFFECT__TY_BEAT_INFO(), {pos_16: pos16(r.gt)})})},
 };
 const sc = SCENES[scene];
 if (!sc) throw new Error(`no scene ${scene} (known: ${Object.keys(SCENES).join(", ")})`);
@@ -103,6 +110,34 @@ if (differing) {
   console.log(`first difference: ${JSON.stringify(first)}`);
 }
 console.log(`Go: ${(result.nsPerFrame / 1e3).toFixed(1)} µs a frame (render_frame only, median of ${repeat} sweeps)`);
+
+/* ------------------------------------------------- the same IR, emitted as JS */
+writeFileSync(join(out, "scene.mjs"), emitJs(program));
+copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+const m = await import(pathToFileURL(join(out, "scene.mjs")).href);
+const jsObj = new m[sc.cls]();
+const jsS = {sy: {index: 0, tabix: 0, subrc: 0}};
+sc.jsInit?.(jsObj, jsS);
+const ctxs = frames.map((r) => sc.jsCtx(m, r));
+let jsDiff = 0;
+ctxs.forEach((c, i) => {
+  const f = jsObj.ZIF_O4D_EFFECT__RENDER_FRAME(jsS, c);
+  const got = {l: f.lines.map((l) => ({x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2, c: l.color})),
+    r: f.rects.map((r) => ({x: r.x, y: r.y, w: r.w, h: r.h, f: r.fill})),
+    tx: f.texts.map((t) => ({x: t.x, y: t.y, t: t.text, c: t.color, s: t.size}))};
+  const want = frames[i];
+  const same = Object.entries(KEYS).every(([list, keys]) => (got[list].length === (want[list] ?? []).length)
+    && got[list].every((row, j) => keys.every((k) => close(row[k], want[list][j][k]))));
+  if (!same) jsDiff += 1;
+});
+const jsSweeps = [];
+for (let k = 0; k < repeat; k++) {
+  const t = process.hrtime.bigint();
+  for (const c of ctxs) jsObj.ZIF_O4D_EFFECT__RENDER_FRAME(jsS, c);
+  jsSweeps.push(Number(process.hrtime.bigint() - t) / ctxs.length);
+}
+jsSweeps.sort((a, b) => a - b);
+console.log(`JS from the IR: ${frames.length - jsDiff} of ${frames.length} frames equal to A4H, ${(jsSweeps[jsSweeps.length >> 1] / 1e3).toFixed(1)} µs a frame`);
 
 function sceneMain(sc, recs) {
   const ctxs = recs.map((r) => `\t\t${sc.ctx(r)},`).join("\n");

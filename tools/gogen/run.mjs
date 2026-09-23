@@ -16,6 +16,9 @@ import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {readClass} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {emitJs} from "./emit-js.mjs";
+import {compileProgram} from "./frontend.mjs";
+import {copyFileSync} from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = process.argv[2] ?? join(here, "samples");
@@ -130,6 +133,26 @@ async function runJs(c) {
 const jsResults = [];
 for (const c of CASES) jsResults.push(await runJs(c));
 
+/* ------------------------------------------------ the same IR, emitted as JS */
+const irProgram = compileProgram({folders: [samples], objects: [...new Set(readdirSync(samples).map((f) => f.split(".")[0]))]});
+writeFileSync(join(out, "ir-js.mjs"), emitJs(irProgram));
+copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+const irm = await import(pathToFileURL(join(out, "ir-js.mjs")).href);
+const irResults = CASES.map((c) => {
+  const fnc = irm[C][c.method];
+  const call = () => {
+    try { return {value: fnc({sy: {index: 0, tabix: 0, subrc: 0}}, ...c.args)}; } catch (e) { return {error: e.cls ?? String(e)}; }
+  };
+  const first = call();
+  const ns = [];
+  for (let i = 0; i < (c.repeat ?? 0); i += 1) {
+    const t = process.hrtime.bigint();
+    call();
+    ns.push(Number(process.hrtime.bigint() - t));
+  }
+  return {...first, ns};
+});
+
 /* ------------------------------------------------------------------ report */
 const median = (xs) => {
   if (xs.length === 0) return undefined;
@@ -151,6 +174,8 @@ const rows = CASES.map((c, i) => {
     jsOk: c.expect === undefined ? undefined : jv === c.expect,
     agree: gv === jv,
     goMs: median(g.ns ?? []) / 1e6,
+    irMs: median(irResults[i].ns) / 1e6,
+    irAgree: (irResults[i].error ?? irResults[i].value) === gv,
     jsMs: median(j.ns) / 1e6,
   };
 });
@@ -174,10 +199,12 @@ for (const r of rows.filter((x) => x.expect !== undefined)) {
   const mark = (ok) => (ok ? "  " : "✗ ");
   console.log(`${pad(r.name, 22)}${pad(r.expect, 26)}${pad(mark(r.goOk) + r.go, 26)}${pad(mark(r.jsOk) + r.js, 26)}`);
 }
-console.log(`\n${pad("work", 22)}${pad("Go ms (median)", 18)}${pad("JS ms (median)", 18)}${pad("JS / Go", 10)}agree`);
+console.log(`\n${pad("work", 22)}${pad("Go ms", 10)}${pad("JS from IR ms", 15)}${pad("transpiler ms", 15)}${pad("tr/Go", 8)}${pad("tr/IR", 8)}${pad("IR/Go", 8)}agree`);
 for (const r of rows.filter((x) => x.expect === undefined)) {
-  console.log(`${pad(r.name, 22)}${pad(r.goMs.toFixed(3), 18)}${pad(r.jsMs.toFixed(3), 18)}${pad((r.jsMs / r.goMs).toFixed(1) + "×", 10)}${r.agree ? "yes" : `NO  go=${r.go} js=${r.js}`}`);
+  console.log(`${pad(r.name, 22)}${pad(r.goMs.toFixed(3), 10)}${pad(r.irMs.toFixed(3), 15)}${pad(r.jsMs.toFixed(3), 15)}${pad((r.jsMs / r.goMs).toFixed(1) + "×", 8)}${pad((r.jsMs / r.irMs).toFixed(1) + "×", 8)}${pad((r.irMs / r.goMs).toFixed(1) + "×", 8)}${r.agree && r.irAgree ? "yes" : `NO go=${r.go} js=${r.js} ir=${r.irAgree}`}`);
 }
+const irSemantic = rows.filter((x) => x.expect !== undefined && !x.irAgree).map((x) => x.name);
+console.log(`JS from the IR agrees with Go on ${rows.filter((x) => x.expect !== undefined).length - irSemantic.length} of ${rows.filter((x) => x.expect !== undefined).length} semantic cases${irSemantic.length ? `; not on: ${irSemantic.join(", ")}` : ""}`);
 const plasmaJs = rows.find((r) => r.name === "plasma frame");
 console.log(`\nplasma frames/s: JS one thread ${Math.round(1000 / plasmaJs.jsMs)}; Go ` +
   parallel.map((p) => `${p.goroutines} goroutine${p.goroutines > 1 ? "s" : ""} ${p.framesPerSecond}`).join(" · "));
