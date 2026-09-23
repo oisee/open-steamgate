@@ -668,8 +668,17 @@ export function toIr(tree, options = {}) {
         if (tableParams.some((one) => String(one.name).toUpperCase() === varName)) return {kind: "relation", name: varName, rel: scan(varName)};
         throw new BindError(`unknown table variable :${varName.toLowerCase()} passed to ${name}`, host);
       }
+      if (p.type === undefined || isUnresolved(p.type)) {
+        throw new BindError(`argument ${p.name.toLowerCase()} of ${name} has no resolved type${p.type?.reason === undefined ? "" : ` (${p.type.reason})`}`, argNode);
+      }
       let e = expression(argNode);
       if (e.untyped === true) e = {...e, type: p.type, untyped: undefined};
+      // the argument's type must be the parameter's: 'abc' into an INTEGER,
+      // or a STRING scalar into a CHAR, is refused rather than handed on
+      const same = (a, b) => a?.abap === b?.abap || (["C", "STRING"].includes(a?.abap) && ["C", "STRING"].includes(b?.abap));
+      if (!same(e.type, p.type)) {
+        throw new BindError(`argument ${p.name.toLowerCase()} of ${name} is ${e.type?.abap ?? "untyped"} and the parameter is ${p.type.abap}`, argNode);
+      }
       return {kind: "scalar", name: p.name, expr: e};
     });
     const schema = fn.returns ?? {};
@@ -685,7 +694,9 @@ export function toIr(tree, options = {}) {
         // `SELECT src.k FROM src` -- a table without an alias is qualified
         // by its own name, but only while that name is one source: a
         // self-join without aliases stays ambiguous and says so
-        if (implicitSources.has(tableName) || qualifiedColumns[tableName] !== undefined) {
+        // own properties only: a subquery reading the same table shadows the
+        // outer scope (Object.create chain) rather than colliding with it
+        if (implicitSources.has(tableName) || Object.hasOwn(qualifiedColumns, tableName)) {
           ambiguousSources.add(tableName);
           delete qualifiedColumns[tableName];
         } else {

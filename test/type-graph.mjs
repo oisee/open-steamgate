@@ -3,7 +3,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {resolveType, typeGraph} from "../tools/osd-type-graph.mjs";
 import {ddicCatalogue} from "../tools/sqlscript-ddic-catalogue.mjs";
 import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
-import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
@@ -200,6 +200,24 @@ describe("a table's include rows are its fields too", () => {
     expect(t.FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);
     expect(t.DUPLICATES).to.deep.equal(["ID"]);
     expect(resolveType(store, "ZPLAIN").DUPLICATES).to.equal(undefined);
+  });
+
+  it("resolves the same through an ObjectStore, whose read throws for a missing object rather than answering undefined", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-type-graph-store-"));
+    try {
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
+      writeFileSync(join(root, "src", "zflag.dtel.xml"), dtel("ZFLAG", "CHAR", 1));
+      writeFileSync(join(root, "src", "zkey.tabl.xml"), tabl("ZKEY", [field("ID", "ZFLAG")]));
+      writeFileSync(join(root, "src", "zplain.tabl.xml"), tabl("ZPLAIN", [field("A", "ZFLAG"), include(".INCLUDE", "ZKEY"), field("B", "ZFLAG")]));
+      writeFileSync(join(root, "src", "zbroken.tabl.xml"), tabl("ZBROKEN", [field("A", "ZFLAG"), include(".INCLUDE", "ZNOWHERE")]));
+      const objectStore = new ObjectStore({root, libs: []});
+      expect(resolveType(objectStore, "ZPLAIN").FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);
+      expect(ddicCatalogue(objectStore, ["ZPLAIN"]).ZPLAIN).to.have.keys(["A", "ID", "B"]);
+      expect(() => ddicCatalogue(objectStore, ["ZBROKEN"])).to.throw(/include ZNOWHERE did not resolve/);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
   });
 
   it("does not loop on a table that includes itself", () => {

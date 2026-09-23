@@ -168,6 +168,7 @@ ENDCLASS.`;
     expect(Object.keys(registry)).to.deep.equal(["CL_UTIL=>CONVERT_CONFIGURATION"]);
     const fn = registry["CL_UTIL=>CONVERT_CONFIGURATION"];
     expect(fn.parameters.map((p) => [p.name, p.kind, p.optional])).to.deep.equal([["IT_CONFIGURATION", "table", undefined], ["IV_CONVERT", "scalar", true]]);
+    expect(fn.parameters[1].type).to.deep.equal({abap: "I"});
     expect(fn.returns).to.deep.equal({KEY: {abap: "C", len: 30}, VALUE: {abap: "STRING"}});
     expect(skipped).to.deep.equal(["CL_UTIL=>COUNT_ROWS: returns a scalar"]);
   });
@@ -196,6 +197,22 @@ ENDCLASS.`);
       ["IT_CONFIGURATION", "IN", "ISLM_T_ENG_CONTEXT_CONFIG", false], ["IV_N", "IN", "i", true], ["ET_CONFIG_EXT", "RETURNING", "ISLM_T_EXT", false]]);
     expect(defs.get("TWO").map((p) => [p.name, p.direction, p.abapType])).to.deep.equal([
       ["iv_a", "IN", "string"], ["iv_b", "IN", "c LENGTH 10"], ["cv_c", "INOUT", "i"], ["et_rows", "OUT", "tt_rows"]]);
+  });
+
+  it("is quote-aware, keeps REF TO and the table kind in the type text, reads LIKE and DEFAULT, and gives NOTHING rather than part of a list", () => {
+    const defs = definitionsByText(`CLASS x DEFINITION. PUBLIC SECTION.
+  METHODS quoted IMPORTING iv_sep TYPE string DEFAULT '. ' iv_q TYPE string DEFAULT '"' iv_after TYPE i.
+  METHODS shapes IMPORTING iv_d LIKE sy-datum io_x TYPE REF TO zcl_x it_t TYPE STANDARD TABLE OF ty_row iv_n TYPE i DEFAULT -1.
+  METHODS partial IMPORTING iv_a TYPE i iv_b TYPE REF TO DATA iv_c TYPE i.
+ENDCLASS.`);
+    expect(defs.get("QUOTED").map((p) => [p.name, p.default ?? null])).to.deep.equal([["iv_sep", "'. '"], ["iv_q", "'\"'"], ["iv_after", null]]);
+    expect(defs.get("SHAPES").map((p) => [p.name, p.abapType, p.default ?? null])).to.deep.equal([
+      ["iv_d", "sy-datum", null], ["io_x", "REF TO zcl_x", null], ["it_t", "STANDARD TABLE OF ty_row", null], ["iv_n", "i", "-1"]]);
+    // `TYPE REF TO DATA` is a head the reader accepts; a head it does not
+    // accept empties the method, so nothing compiles against a partial list
+    expect(defs.get("PARTIAL").map((p) => p.name)).to.deep.equal(["iv_a", "iv_b", "iv_c"]);
+    const broken = definitionsByText("CLASS x DEFINITION. PUBLIC SECTION.\n  METHODS odd IMPORTING iv_a TYPE i iv_b TYPE %%% iv_c TYPE i.\nENDCLASS.");
+    expect(broken.get("ODD")).to.deep.equal([]);
   });
 
   it("is what extract() falls back to for a class abaplint cannot read, so the body's IN table is not an unknown variable", () => {

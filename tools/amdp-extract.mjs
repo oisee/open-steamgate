@@ -153,24 +153,69 @@ export function withoutBangValue(source) {
   return out;
 }
 
+/** the type text of a parameter: `TYPE x`, `TYPE REF TO x`, `TYPE STANDARD TABLE OF x`,
+ *  `TYPE sy-mandt`, `LIKE x`, with LENGTH / DECIMALS -- REF TO and the table
+ *  kind are kept in the text, so a reader downstream refuses them by name
+ *  rather than reading `REF TO x` as `x` */
+const TYPE_TEXT = /\b(?:TYPE|LIKE)\s+((?:REF\s+TO\s+)?(?:(?:STANDARD|SORTED|HASHED)\s+TABLE\s+OF\s+)?[\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i;
+/** the literal after DEFAULT: a quoted text (with '' inside), a number, or a name such as sy-datum */
+const DEFAULT_TEXT = /\bDEFAULT\s+('(?:[^']|'')*'|[-\w.]+)/i;
+
+/** ABAP comments out, quote-aware: a `"` inside a '…' literal is text, and a
+ *  `'` inside a "…" comment is a comment */
+function withoutComments(source) {
+  return source.split("\n").map((line) => {
+    if (/^\*/.test(line)) return "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      if (line[i] === "'") quoted = !quoted;
+      else if (line[i] === '"' && !quoted) return line.slice(0, i);
+    }
+    return line;
+  }).join("\n");
+}
+
+/** split ABAP text into statements on the periods outside '…' literals */
+function statementsOf(text) {
+  const out = [];
+  let quoted = false;
+  let current = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "'") quoted = !quoted;
+    if (ch === "." && !quoted && /\s|$/.test(text[i + 1] ?? "")) {
+      out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim() !== "") out.push(current);
+  return out;
+}
+
 /** The method definitions of a class, read as text: `[CLASS-]METHODS name
  *  IMPORTING value(p) TYPE t ... RETURNING value(r) TYPE t.` Used when
- *  abaplint hands back no class definition at all. Comments are dropped
- *  first, and only the four parameter sections are read; a declaration
- *  this cannot read yields no parameters, never wrong ones. */
+ *  abaplint hands back no class definition, and for a method abaplint
+ *  dropped from one it did read (ANOMALY-2026-09-23-amdp-method-options).
+ *  Comments and statement ends are read quote-aware; a section whose heads
+ *  are not all read yields no parameters for that method -- the coverage
+ *  instrument cross-checks this reader against abaplint wherever both
+ *  read the class. */
 export function definitionsByText(source) {
-  const text = source.split("\n").map((line) => line.replace(/^\*.*$/, "").replace(/"[^\n]*$/, "")).join("\n");
   const out = new Map();
   const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
-  /** split a chained `METHODS: a ..., b ....` on the commas outside parentheses */
+  /** split a chained `METHODS: a ..., b ....` on the commas outside parentheses and quotes */
   const chain = (body) => {
     const parts = [];
     let depth = 0;
+    let quoted = false;
     let current = "";
     for (const ch of body) {
-      if (ch === "(") depth += 1;
-      if (ch === ")") depth -= 1;
-      if (ch === "," && depth === 0) {
+      if (ch === "'") quoted = !quoted;
+      if (!quoted && ch === "(") depth += 1;
+      if (!quoted && ch === ")") depth -= 1;
+      if (ch === "," && depth === 0 && !quoted) {
         parts.push(current);
         current = "";
       } else {
@@ -180,7 +225,9 @@ export function definitionsByText(source) {
     parts.push(current);
     return parts;
   };
-  for (const m of text.matchAll(/\b(?:CLASS-)?METHODS\b(:?)([\s\S]*?)\s*\.(?=\s|$)/gi)) {
+  for (const statement of statementsOf(withoutComments(source))) {
+    const m = /^\s*(?:CLASS-)?METHODS\b(:?)([\s\S]*)$/i.exec(statement);
+    if (m === null) continue;
     const declarations = m[1] === ":" ? chain(m[2]) : [m[2]];
     for (const declaration of declarations) {
       const head = /^\s*([\w~]+)\b([\s\S]*)$/.exec(declaration);
@@ -189,22 +236,32 @@ export function definitionsByText(source) {
       const rest = head[2];
       if (/^\s*FOR\s+TABLE\s+FUNCTION/i.test(rest) || /^\s*(REDEFINITION|ABSTRACT|FINAL)?\s*$/i.test(rest)) continue;
       const params = [];
-      let current;
+      let complete = true;
       const words = rest.replace(/\s+/g, " ").trim();
       // `AMDP OPTIONS READ-ONLY CDS SESSION CLIENT clnt` may precede the
       // sections; it lands before the first section keyword and is skipped
       const sections = words.split(/\b(IMPORTING|EXPORTING|CHANGING|RETURNING|RAISING|EXCEPTIONS)\b/i);
       for (let i = 1; i < sections.length; i += 2) {
-        current = direction[sections[i].toLowerCase()];
+        const current = direction[sections[i].toLowerCase()];
         if (current === undefined) continue;
-        // a type text is a name, `sy-mandt` / `spfli-carrid` (a table field), `REF TO x`, with LENGTH / DECIMALS
-        for (const p of sections[i + 1].matchAll(/(?:VALUE\s*\(\s*([\w\/]+)\s*\)|REFERENCE\s*\(\s*([\w\/]+)\s*\)|\b([\w\/]+))\s+TYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)((?:\s+(?:OPTIONAL|DEFAULT\s+\S+))*)/gi)) {
+        const body = sections[i + 1];
+        // every `name TYPE|LIKE` head in the section must be read, or the
+        // method gets no parameters at all: a partial list would compile
+        // against a signature the class does not have
+        const heads = [...body.matchAll(/(?:VALUE\s*\(\s*[\w\/]+\s*\)|REFERENCE\s*\(\s*[\w\/]+\s*\)|\b[\w\/]+)\s+(?:TYPE|LIKE)\b/gi)].length;
+        let read = 0;
+        for (const p of body.matchAll(new RegExp(`(?:VALUE\\s*\\(\\s*([\\w\\/]+)\\s*\\)|REFERENCE\\s*\\(\\s*([\\w\\/]+)\\s*\\)|\\b([\\w\\/]+))\\s+${TYPE_TEXT.source.slice(2)}((?:\\s+(?:OPTIONAL|DEFAULT\\s+(?:'(?:[^']|'')*'|[-\\w.]+)))*)`, "gi"))) {
           const pname = p[1] ?? p[2] ?? p[3];
-          if (/^(IMPORTING|EXPORTING|CHANGING|RETURNING|OPTIONAL|DEFAULT|TYPE)$/i.test(pname)) continue;
-          params.push({name: pname, direction: current, abapType: p[4].trim(), optional: /\b(OPTIONAL|DEFAULT)\b/i.test(p[5] ?? "")});
+          if (/^(IMPORTING|EXPORTING|CHANGING|RETURNING|OPTIONAL|DEFAULT|TYPE|LIKE)$/i.test(pname)) continue;
+          const modifiers = p[5] ?? "";
+          const defaultText = DEFAULT_TEXT.exec(modifiers)?.[1];
+          params.push({name: pname, direction: current, abapType: p[4].trim(), optional: /\bOPTIONAL\b/i.test(modifiers),
+            ...(defaultText === undefined ? {} : {default: defaultText})});
+          read += 1;
         }
+        if (read !== heads) complete = false;
       }
-      if (!out.has(name)) out.set(name, params);
+      if (!out.has(name)) out.set(name, complete ? params : []);
     }
   }
   return out;
@@ -263,18 +320,23 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
       // a type text may be a table field, `sy-mandt` / `spfli-carrid`: the
       // cross-check against the text reader found this regex cutting them
       // to `SY` and `SPFLI` (27 methods on the A4H export, 2026-09-23)
-      const typeMatch = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(declaration);
+      const typeMatch = TYPE_TEXT.exec(declaration);
       const abapType = typeMatch?.[1] ?? "";
       const modifiers = typeMatch === null ? "" : declaration.slice(typeMatch.index + typeMatch[0].length);
-      // OPTIONAL and DEFAULT both make a parameter one a caller may omit
+      // OPTIONAL is a flag; DEFAULT is a value, carried as the text of its
+      // literal so the compiler can put THAT into the program -- an omitted
+      // DEFAULT 10 filled with the initial value 0 answered [] where HANA
+      // answered every row (foreman-dell's probe, 2026-09-23)
+      const defaultText = DEFAULT_TEXT.exec(modifiers)?.[1];
       params.push({name: p.name, direction: direction[p.direction] ?? "IN", abapType: abapType.trim(),
-        optional: /\b(OPTIONAL|DEFAULT)\b/i.test(modifiers)});
+        optional: /\bOPTIONAL\b/i.test(modifiers), ...(defaultText === undefined ? {} : {default: defaultText})});
     }
     defs.set(String(m.name).toUpperCase(), params);
   }
   // the same clause in the DEFINITION (`METHODS m AMDP OPTIONS READ-ONLY
   // IMPORTING ...`) drops that one method from abaplint's class definition
-  // while the rest survive; the text reader has it, and says so
+  // while the rest survive; the text reader has it, and says so (this is
+  // the second place the reader feeds amdp-gen, not only a missing classdef)
   if (classDefinition !== undefined) {
     for (const [name, params] of textDefinitions) {
       if (!defs.has(name) && params.length > 0) {

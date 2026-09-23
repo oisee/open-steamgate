@@ -122,11 +122,21 @@ export function compileProcedure(method, types, options = {}) {
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
   const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
+  // a DEFAULT is carried as its literal, never as the initial value: an
+  // omitted `DEFAULT 10` filled with 0 answers a different question
+  const defaultOf = (one, type) => {
+    if (one.default === undefined) return {};
+    const text = String(one.default);
+    if (type.abap === "I" && /^-?\d+$/.test(text)) return {optional: true, default: Number(text)};
+    if (type.abap === "STRING" && /^'(?:[^']|'')*'$/.test(text)) return {optional: true, default: text.slice(1, -1).replaceAll("''", "'")};
+    throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} is not a literal of its type this compiler carries`);
+  };
   const parameters = inputParameters
     .filter((one) => !relationNames.has(upper(one.name)))
-    .map((one) => one.optional === true
-      ? {name: upper(one.name), type: irTypeFromAbap(one.abapType, resolve), optional: true}
-      : {name: upper(one.name), type: irTypeFromAbap(one.abapType, resolve)});
+    .map((one) => {
+      const type = irTypeFromAbap(one.abapType, resolve);
+      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...defaultOf(one, type)};
+    });
   if (parameters.some((one) => !["I", "STRING"].includes(one.type.abap))) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
   }

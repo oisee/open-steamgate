@@ -201,11 +201,15 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       try {
         Object.assign(catalogue, ddicCatalogue(ddic, [table]));
       } catch (error) {
-        usingFailures.set(`${table}: ${String(error.message).slice(0, 70)}`, (usingFailures.get(table) ?? 0) + 1);
+        const key = `${table}: ${String(error.message).slice(0, 70)}`;
+        usingFailures.set(key, (usingFailures.get(key) ?? 0) + 1);
       }
     }
     const {parameters, untyped} = typedParameters(one.signature, {types: one.types, store: ddic, resolve: resolveType});
-    for (const [name, reason] of Object.entries(untyped)) parameterFailures.set(`${name}: ${reason.slice(0, 70)}`, (parameterFailures.get(name) ?? 0) + 1);
+    for (const [name, reason] of Object.entries(untyped)) {
+      const key = `${name}: ${reason.slice(0, 70)}`;
+      parameterFailures.set(key, (parameterFailures.get(key) ?? 0) + 1);
+    }
     const relationSchemas = {};
     for (const p of parameters) {
       if (p.kind === "table") {
@@ -340,7 +344,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   report.dictionary = ddic;
   report.bodies = corpora;
   report.catalogueFailures = {using: [...usingFailures.keys()], parameters: [...parameterFailures.keys()]};
-  report.registry = {size: Object.keys(tableFunctions).length, ddls: Object.values(fromDdls.registry).length, skipped: registrySkipped};
+  // distinct declarations, not keys: a DDLS with `implemented by method` is keyed twice
+  report.registry = {size: new Set(Object.values(tableFunctions)).size, ddls: new Set(Object.values(fromDdls.registry)).size, skipped: registrySkipped};
   report.signatures = {classesByText, crossCheck};
   report.scratch = scratch;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
@@ -372,7 +377,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
   console.log(`  ${exports.length} package exports  (${exports.reduce((n, f) => n + (dictionary.hits.get(f) ?? 0), 0)} resolved)`);
   console.log(`table-function signatures read off their DDLS: ${tableFunctions.read}` +
     (tableFunctions.missing.length === 0 ? "" : `; not usable: ${tableFunctions.missing.join(", ")}`));
-  console.log(`table functions a body may call: ${registry.size} names (${registry.ddls} DDLS entries, the rest AMDP functions of the classes read)` +
+  console.log(`table functions a body may call: ${registry.size} declarations (${registry.ddls} DDLS, the rest AMDP functions of the classes read)` +
     (registry.skipped.length === 0 ? "" : `; ${registry.skipped.length} not registered, e.g. ${registry.skipped.slice(0, 3).join("; ")}`));
   console.log(`signatures: ${signatures.classesByText} classes read as text because abaplint gave no definition (ANOMALY-2026-09-23-amdp-method-options); ` +
     `text reader cross-checked against abaplint on ${signatures.crossCheck.classes} classes / ${signatures.crossCheck.methodsCompared} methods: ${signatures.crossCheck.differing.length} differ` +

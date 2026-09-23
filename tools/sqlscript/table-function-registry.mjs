@@ -32,6 +32,24 @@ function schemaOfColumns(columns, resolve, owner) {
   return schema;
 }
 
+/** one declared parameter as the binder needs it: kind, and for a scalar its
+ *  IR type (marked unresolved when no dictionary types it, so a call binds
+ *  its argument against a type or is refused by name); OPTIONAL and DEFAULT
+ *  both let a caller leave it out */
+function typedParameter(p, resolve, owner) {
+  const base = {name: upper(p.name), kind: p.kind ?? "scalar", abapType: p.abapType,
+    ...(p.optional === true || p.default !== undefined ? {optional: true} : {}),
+    ...(p.systemField === undefined ? {} : {systemField: p.systemField}),
+    ...(p.schema === undefined ? {} : {schema: p.schema})};
+  if (base.kind !== "scalar") return base;
+  try {
+    return {...base, type: scalarTypeOf(p.abapType, resolve)};
+  } catch (error) {
+    if (!(error instanceof UnresolvedScalarType)) throw error;
+    return {...base, type: unresolvedType(`${owner}.${p.name}: ${error.message}`)};
+  }
+}
+
 /**
  * Every table function declared as a DDLS the dictionary holds.
  * @param {{list: Function, read: Function}} ddic   a store with DDLS indexed
@@ -54,8 +72,7 @@ export function registryFromDdls(ddic, resolve) {
     const entry = {
       name: tf.name,
       source: "ddls",
-      parameters: parameters.map((p) => ({name: upper(p.name), kind: p.kind ?? "scalar",
-        ...(p.systemField === undefined ? {} : {systemField: p.systemField}), abapType: p.abapType, ...(p.schema === undefined ? {} : {schema: p.schema})})),
+      parameters: parameters.map((p) => typedParameter(p, resolve, tf.name)),
       returns: schemaOfColumns(tf.returns, resolve, tf.name),
     };
     registry[tf.name] = entry;
@@ -91,8 +108,7 @@ export function registryFromClass(className, methods, where) {
     registry[key] = {
       name: key,
       source: "class",
-      parameters: parameters.map((p) => ({name: upper(p.name), kind: p.kind ?? "scalar", abapType: p.abapType,
-        ...(p.optional === true ? {optional: true} : {}), ...(p.schema === undefined ? {} : {schema: p.schema})})),
+      parameters: parameters.map((p) => typedParameter(p, where.resolve, key)),
       returns: returns.schema,
     };
   }

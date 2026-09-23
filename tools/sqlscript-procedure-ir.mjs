@@ -351,7 +351,13 @@ export async function runProcedure(program, {
       throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER or STRING type");
     }
     if (!supplied.has(name) && parameter.optional !== true) throw new UnsupportedSqlScript(`missing input ${name}`);
-    const initial = parameter.type?.abap === "I" ? 0 : parameter.type?.abap === "STRING" ? "" : null;
+    if (parameter.default !== undefined && typeof parameter.default !== (parameter.type?.abap === "I" ? "number" : "string")) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} has a DEFAULT of the wrong kind`);
+    }
+    // an omitted input takes its DEFAULT when the signature has one, and
+    // ABAP's initial value only for a bare OPTIONAL
+    const initial = parameter.default !== undefined ? parameter.default
+      : parameter.type?.abap === "I" ? 0 : parameter.type?.abap === "STRING" ? "" : null;
     const raw = supplied.has(name) ? supplied.get(name) : initial;
     const value = scalarForType(raw, parameter.type, name);
     scalars.set(name, {type: parameter.type, value});

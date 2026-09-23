@@ -39,6 +39,10 @@ describe("a table without an alias is its own qualifier", () => {
     expect(sql("SELECT src.k FROM src WHERE src.n = 1 UNION ALL SELECT src.k FROM src WHERE src.n = 2;")).to.contain("UNION ALL");
   });
 
+  it("lets a subquery read the same table bare: the inner scope shadows the outer, it does not collide with it", () => {
+    expect(sql("SELECT k FROM src WHERE n IN (SELECT src.n FROM src WHERE src.k = 'x');")).to.contain("IN (SELECT");
+  });
+
   it("stays ambiguous and loud for a self-join without aliases", () => {
     expect(() => bind("SELECT src.k FROM src INNER JOIN src ON src.k = src.k;"))
       .to.throw(BindError, /source SRC appears more than once without an alias/);
@@ -103,7 +107,7 @@ describe("HANA's own views are refused by name, not guessed", () => {
 });
 
 describe("an alias that shadows a source column", () => {
-  it("wins in ORDER BY, as it does on every engine the suite runs", () => {
+  it("wins in ORDER BY at the IR level (the engines agree on alias-first; measured separately)", () => {
     const rel = bind("SELECT n + 1 AS n, k FROM src ORDER BY n;").rel;
     expect(rel.rel).to.equal("order");
     expect(rel.keys).to.deep.equal([{col: "N", desc: false}]);
@@ -113,8 +117,9 @@ describe("an alias that shadows a source column", () => {
 
 describe("a table function called in FROM", () => {
   const registry = {
-    "CL_X=>GET_ROWS": {name: "CL_X=>GET_ROWS", source: "class", parameters: [{name: "IV_A", kind: "scalar", abapType: "string"}, {name: "IV_N", kind: "scalar", abapType: "i"}], returns: {K: {abap: "C", len: 4}, V: {abap: "STRING"}}},
-    "CL_X=>CONVERT": {name: "CL_X=>CONVERT", source: "class", parameters: [{name: "IT_ROWS", kind: "table", abapType: "tt_rows", schema: {K: {abap: "C", len: 4}}}, {name: "IV_MODE", kind: "scalar", abapType: "i", optional: true}], returns: {K: {abap: "C", len: 4}}},
+    "CL_X=>GET_ROWS": {name: "CL_X=>GET_ROWS", source: "class", parameters: [{name: "IV_A", kind: "scalar", abapType: "string", type: {abap: "STRING"}}, {name: "IV_N", kind: "scalar", abapType: "i", type: {abap: "I"}}], returns: {K: {abap: "C", len: 4}, V: {abap: "STRING"}}},
+    "CL_X=>DARK": {name: "CL_X=>DARK", source: "class", parameters: [{name: "IV_Z", kind: "scalar", abapType: "zunknown", type: {abap: "UNRESOLVED", reason: "CL_X=>DARK.iv_z: ZUNKNOWN is not a data element"}}], returns: {K: {abap: "C", len: 4}}},
+    "CL_X=>CONVERT": {name: "CL_X=>CONVERT", source: "class", parameters: [{name: "IT_ROWS", kind: "table", abapType: "tt_rows", schema: {K: {abap: "C", len: 4}}}, {name: "IV_MODE", kind: "scalar", abapType: "i", type: {abap: "I"}, optional: true}], returns: {K: {abap: "C", len: 4}}},
   };
   const sig = {parameters: [{name: "iv_a", direction: "IN", abapType: "string"}, {name: "it_guid", direction: "IN", abapType: "tt_g", kind: "table", schema: GUIDS}]};
   const call = (body, options = {}) => toIr(parse(new Body(), lex(body)), {catalogue: {...CATALOGUE, IT_GUID: GUIDS}, signature: sig, relationSchemas: {IT_GUID: GUIDS}, tableFunctions: registry, strictColumns: true, ...options});
@@ -148,6 +153,15 @@ describe("a table function called in FROM", () => {
     expect(call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid, 1);').rel.input.args).to.have.length(2);
     expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"();')).to.throw(BindError, /takes 1 to 2 argument\(s\) \(it_rows, iv_mode\?\) and is called with 0/);
     expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid, 1, 2);')).to.throw(BindError, /is called with 3/);
+  });
+
+  it("checks a scalar argument against the parameter's type, types a NULL argument by it, and refuses a parameter nobody typed", () => {
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(:iv_a, \'abc\');')).to.throw(BindError, /argument iv_n of CL_X=>GET_ROWS is C and the parameter is I/);
+    const nulled = call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(NULL, 1);').rel.input.args[0].expr;
+    expect(nulled).to.include({node: "lit", value: null});
+    expect(nulled.type).to.deep.equal({abap: "STRING"});
+    expect(nulled.untyped).to.equal(undefined);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>DARK"(1);')).to.throw(BindError, /argument iv_z of CL_X=>DARK has no resolved type \(CL_X=>DARK.iv_z: ZUNKNOWN/);
   });
 
   it("binds a table argument to a table variable or an IN table parameter, and refuses anything else", () => {

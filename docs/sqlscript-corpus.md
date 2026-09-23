@@ -504,7 +504,7 @@ A4H, ANORMALIES).
 The dictionaries are folders of abapGit XML with the `input_folder` rule --
 the later folder wins a shared name and says so: the released dump, then
 `--ddic` folders, then the package's own export, which was taken off the
-system that runs the code. On this machine: 26 names taken over, 21 + 107
+system that runs the code. On this machine: 26 names taken over, 21 + 5
 resolutions answered by dump + exports.
 
 What the honest list says next, working corpus: 23 × a table function call
@@ -638,11 +638,14 @@ So the registry has both sources (`tools/sqlscript/table-function-registry.mjs`)
 every `define table function` the dictionary holds, keyed by its name and
 by `implemented by method`; and every `BY DATABASE FUNCTION` method with a
 RETURNING table type, keyed `CLASS=>METHOD`, its RETURNING type read through
-the class's TYPES or the dictionary. On this export: **242 names**, 190 of
-them DDLS. The binder looks the callee up as the body spells it -- `"CL=>M"`
+the class's TYPES or the dictionary. On this export: **147 declarations**,
+95 of them DDLS (an earlier figure of 242 counted registry keys, and a DDLS
+with `implemented by method` is keyed twice). The binder looks the callee up as the body spells it -- `"CL=>M"`
 and the DDLS entity are different objects on HANA, so nothing is normalised
--- binds each argument against the declared parameter (a scalar as a typed
-value, a table only as a table variable or an IN table of this body), lets a
+-- binds each argument against the declared parameter (a scalar against the
+parameter's resolved type, refused on a mismatch or when no dictionary
+types the parameter; a table only as a table variable or an IN table of
+this body), lets a
 trailing OPTIONAL or DEFAULT parameter be omitted as the corpus does, and
 refuses by name: a callee not in the registry, a count that does not fit,
 a table argument that is an expression, a system function (`SYS.*`). The
@@ -662,8 +665,9 @@ measured one is the **OPTIONS clause**: `OPTIONS SUPPRESS SYNTAX ERRORS`,
 grammar, and with the METHOD statement the whole class definition goes
 (ANOMALY-2026-09-23-amdp-method-options: 17 of 181 AMDP classes in the
 export, 12 on this clause). The extractor reads the definitions as text
-when abaplint hands back none (`definitionsByText`), never wrong parameters,
-at worst none -- and the instrument cross-checks that reader against
+when abaplint hands back none, and for a method abaplint dropped from a
+definition it did read (`definitionsByText`; a section it cannot read whole
+yields no parameters for that method) -- and the instrument cross-checks that reader against
 abaplint on every class abaplint does read, so its trust is a printed
 number rather than an assumption. And DEFAULT did not count as OPTIONAL:
 `iv_convertvalues TYPE i DEFAULT 0` is why every call of
