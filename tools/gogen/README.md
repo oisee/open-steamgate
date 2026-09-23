@@ -377,12 +377,29 @@ Session, one at a time (statics are per process); a dump is the Node host's
 500 (`STG/RUNTIME` JSON with the ABAP frames for OData, `<class>: <text>`
 for a SICF node), and rolled back. Mounted: `/sap/opu/odata/sap/` with
 `ZCL_STG_HTTP_HANDLER`, every SICF node of the tree whose handler class is
-compiled (10; the four whose class lives in a pack are listed as not
-served), `/app` (the tree's `webapp/`, express.static's redirects, ETag and
-304), each pack's `/app/<name>`, `/app/packs.json`,
+compiled (10), `/app` (the tree's `webapp/`, express.static's redirects,
+ETag and 304), each pack's `/app/<name>`, `/app/packs.json`,
 `/appconfig/fioriSandboxConfig.json`, `/` to the launchpad, and
-finalhandler's 404 for the rest. The database is in memory, or `-db` an
-SQLite file in WAL mode, seeded once when it has no tables.
+finalhandler's 404 for the rest. A SICF node whose class is not in this
+program (four: `webgui/sapevent`, and `zork`, `zo4d_demo`, `lsd` from the
+packs) is mounted too, as a refusal: `501 <path>: <CLASS> is not in this
+program`. Without it a request below such a node fell to its parent, and
+`webgui/sapevent` ran as a menu request of `ZCL_OSD_WEBGUI`. What express
+refuses of a response is a host error (`abap.HostError`, not catchable, not
+`NOT_COMPILED`): a second send ("headers already sent") and a second
+`Content-Type` (`res.set` of an array). The database is in memory, or `-db`
+an SQLite file in WAL mode, seeded once when it has no tables and marked
+with a hash of the build's tables and seed rows (`PRAGMA user_version`); a
+file another build seeded, or nobody marked, is refused at start rather than
+used. `ZOSD_STATUS_SRV` and the webgui read the five status tables, which
+the Node hosts refresh before each such request (`withFreshStatus`); OSGo
+has no refresh yet, so they answer out of the seed with
+`X-Osgo-Status-Snapshot: seed; not refreshed`.
+
+The front-end changes this needed that are not ICF-specific (findScope by
+class name, `DEFAULT <constant>`, the flattened block list,
+`CX_SY_CONVERSION_CODEPAGE`) are their own commit, ahead of the host
+commits, so that another branch touching `frontend.mjs` can rebase onto it.
 
 Against OSG on :3091 (bodies with the same `Host`): the service document,
 `TravelSet('T0001')`, `NoSuchSet` (404) and `/` without `$format` are byte

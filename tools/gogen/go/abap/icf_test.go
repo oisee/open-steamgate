@@ -54,6 +54,8 @@ func TestICFWrite(t *testing.T) {
 		{"GET", "application/json; charset=utf-8", "application/json; charset=utf-8", 200, "{}"},
 		{"HEAD", "text/plain", "text/plain; charset=utf-8", 200, ""},
 		{"GET", "", "", 204, ""},
+		// mime.charsets.lookup does not trim: a leading space is no text type
+		{"GET", " text/plain", " text/plain", 200, "{}"},
 	} {
 		x := &ICFExchange{Status: c.code, RespBody: []byte("{}")}
 		if c.ct != "" {
@@ -81,4 +83,29 @@ func TestICFGetCData(t *testing.T) {
 		}
 	}()
 	ICFGetCData(nil, "\xff")
+}
+
+// what express refuses of the response: a second Content-Type (res.set of an
+// array) and a second send (headers already sent), each a host error
+func TestICFResponseRefusals(t *testing.T) {
+	x := &ICFExchange{}
+	d := Data{P: x}
+	refused := func(what string, f func()) {
+		t.Helper()
+		defer func() {
+			if _, ok := recover().(HostError); !ok {
+				t.Errorf("%s: not a host error", what)
+			}
+		}()
+		f()
+	}
+	ICFResponseAppend(nil, d, "Content-Type", "text/plain")
+	ICFResponseAppend(nil, d, "x-a", "1")
+	ICFResponseAppend(nil, d, "x-a", "2")
+	refused("second content-type", func() { ICFResponseAppend(nil, d, "content-type", "text/html") })
+	ICFResponseSend(nil, d, 200, "a")
+	refused("second send", func() { ICFResponseSend(nil, d, 200, "b") })
+	if len(x.RespHeaders) != 3 || string(x.RespBody) != "a" {
+		t.Errorf("%+v", x)
+	}
 }

@@ -51,8 +51,10 @@ if (echo) {
   for (const s of sicf(home)) {
     if (s.handler === undefined && s.active !== false) continue;
     if (claimed.some((p) => s.path === p || s.path.startsWith(`${p}/`))) continue;
-    if (s.type !== "ABAP") notServed.push(`${s.path}: handler type ${s.icftyp}`);
-    else if (!compiled.has(String(s.handler).toUpperCase())) notServed.push(`${s.path}: ${s.handler} is not in this program`);
+    // mounted as a refusal (main.go), so a request below it is not taken by
+    // a parent node whose class is compiled, or by the 404 of no node
+    if (s.type !== "ABAP") notServed.push({path: s.path, handler: String(s.handler ?? ""), why: `handler type ${s.icftyp} is not served by OSGo`});
+    else if (!compiled.has(String(s.handler).toUpperCase())) notServed.push({path: s.path, handler: String(s.handler).toUpperCase(), why: `${String(s.handler).toUpperCase()} is not in this program`});
     else services.push({path: s.path, handler: String(s.handler).toUpperCase(), active: s.active !== false});
   }
   const {tilesOf, webappsOf} = await import(`${home}/tools/osd-packs.mjs`);
@@ -88,8 +90,9 @@ var icfServices = []icfService{
 ${services.map((s) => `\t{Path: ${JSON.stringify(s.path)}, Handler: ${JSON.stringify(s.handler)}, Active: ${s.active}},`).join("\n")}
 }
 
-var notServed = []string{
-${notServed.map((s) => `\t${JSON.stringify(s)},`).join("\n")}
+// the SICF nodes left out, each answered with a refusal at its own path
+var notServed = []icfRefused{
+${notServed.map((s) => `\t{Path: ${JSON.stringify(s.path)}, Handler: ${JSON.stringify(s.handler)}, Why: ${JSON.stringify(s.why)}},`).join("\n")}
 }
 
 const packTiles = ${JSON.stringify(JSON.stringify(tiles))}

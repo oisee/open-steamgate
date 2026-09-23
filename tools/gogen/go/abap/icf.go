@@ -83,19 +83,39 @@ func ICFRequestPath(s *Session, req Data, out *string) {
 	*out = icfExchange(req, "CL_EXPRESS_ICF_SHIM=>REQUEST").Path
 }
 
+// HostError is the host refusing what the ABAP asked of it: a contract of
+// the host (express's, here) that the call broke. It is not a compiler gap
+// (NotCompiled) and not an ABAP exception, so no CATCH takes it; the dialog
+// step ends in it as a dump.
+type HostError struct {
+	Where string
+	Text  string
+}
+
+func (e HostError) Error() string { return e.Where + ": " + e.Text }
+
 // ICFResponseAppend is res.append(name, value): a header line more, however
-// many of that name there are already.
+// many of that name there are already -- except Content-Type, where express's
+// append makes an array and res.set throws "Content-Type cannot be set to an
+// Array" (a TypeError inside the kernel line, so a dump on Node too).
 func ICFResponseAppend(s *Session, res Data, name, value string) {
 	x := icfExchange(res, "CL_EXPRESS_ICF_SHIM=>RESPONSE")
+	if strings.EqualFold(name, "content-type") {
+		for _, f := range x.RespHeaders {
+			if strings.EqualFold(f[0], "content-type") {
+				panic(HostError{"CL_EXPRESS_ICF_SHIM=>RESPONSE", "a second Content-Type (express: Content-Type cannot be set to an Array)"})
+			}
+		}
+	}
 	x.RespHeaders = append(x.RespHeaders, [2]string{name, value})
 }
 
 // ICFResponseSend is res.status(code).send(buffer). A second send is an
-// error on express ("headers already sent") and a dump here.
+// error on express ("headers already sent"), a host error here.
 func ICFResponseSend(s *Session, res Data, code int32, body string) {
 	x := icfExchange(res, "CL_EXPRESS_ICF_SHIM=>RESPONSE")
 	if x.Sent {
-		panic(NotCompiled("CL_EXPRESS_ICF_SHIM=>RESPONSE", "the response was sent twice"))
+		panic(HostError{"CL_EXPRESS_ICF_SHIM=>RESPONSE", "the response was sent twice (express: headers already sent)"})
 	}
 	x.Status = code
 	x.RespBody = []byte(body)
@@ -226,7 +246,8 @@ func (x *ICFExchange) Write(w http.ResponseWriter, method string) {
 	for _, f := range x.RespHeaders {
 		name, value := f[0], f[1]
 		if strings.EqualFold(name, "content-type") && !charsetRe.MatchString(value) {
-			if utf8Types.MatchString(strings.TrimSpace(strings.SplitN(value, ";", 2)[0])) {
+			// mime.charsets.lookup(value.split(';')[0]): not trimmed
+			if utf8Types.MatchString(strings.SplitN(value, ";", 2)[0]) {
 				value += "; charset=utf-8"
 			}
 		}

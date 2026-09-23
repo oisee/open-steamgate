@@ -52,6 +52,42 @@ type icfService struct {
 	Active  bool   `json:"active"`
 }
 
+// a SICF node this program does not serve (its class is not compiled, or its
+// handler is not an ABAP class): answered with a refusal at its own path
+type icfRefused struct {
+	Path    string
+	Handler string
+	Why     string
+}
+
+// refusal answers every request below a node left out: 501, and why. Without
+// it the request would fall to the nearest parent node, which would run it
+// with the wrong class, or to the 404 of a node that does not exist.
+func refusal(n icfRefused) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(501)
+		if r.Method != "HEAD" {
+			fmt.Fprintf(w, "%s: %s", n.Path, n.Why)
+		}
+	}
+}
+
+// statusServices read the five status tables (ZOSD_SVC ...), which the Node
+// hosts refresh before each such request (test/start.mjs withFreshStatus,
+// tools/osd-status.mjs: facts of the facade, not of the ABAP). OSGo has no
+// refresh yet, so they answer out of the seed, and say so in a header.
+var statusServices = []string{odataBase + "/ZOSD_STATUS_SRV", "/sap/bc/gui/sap/its/webgui"}
+
+const statusSnapshotHeader = "X-Osgo-Status-Snapshot"
+
+func seedSnapshot(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(statusSnapshotHeader, "seed; not refreshed (tools/osd-status.mjs is not in OSGo)")
+		h(w, r)
+	}
+}
+
 // odataBase is where test/start.mjs mounts the OData front.
 const odataBase = "/sap/opu/odata/sap"
 
@@ -261,7 +297,7 @@ func hasPrefixFold(p, prefix string) bool {
 func main() {
 	port := flag.Int("port", 3095, "port to listen on")
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
-	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables")
+	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	flag.Parse()
 
@@ -273,7 +309,7 @@ func main() {
 	} else {
 		seeded, err := abap.OpenDBFile(*dbFile, dbScript)
 		if err != nil {
-			log.Fatalf("database %s: %v", *dbFile, err)
+			log.Fatalf("database: %v", err)
 		}
 		log.Printf("database: %s (WAL)%s", *dbFile, map[bool]string{true: ", new: seeded", false: ", as it was"}[seeded])
 	}
@@ -333,9 +369,21 @@ func main() {
 		if !svc.Active {
 			h = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) }
 		}
+		for _, st := range statusServices {
+			if strings.EqualFold(svc.Path, st) {
+				h = seedSnapshot(h)
+			}
+		}
 		routes = append(routes, route{svc.Path, false, h})
 	}
-	routes = append(routes, route{odataBase + "/", false, icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)})
+	// the nodes left out, each at its own path: longer than its parent's, so
+	// it is matched first
+	for _, n := range notServed {
+		routes = append(routes, route{n.Path, false, refusal(n)})
+	}
+	odata := icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)
+	routes = append(routes, route{statusServices[0], false, seedSnapshot(odata)})
+	routes = append(routes, route{odataBase + "/", false, odata})
 	// longest prefix first, so /sap/bc/a/b is not taken by /sap/bc/a
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
@@ -368,8 +416,9 @@ func main() {
 		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
 	}
 	for _, n := range notServed {
-		log.Printf("not served   %s", n)
+		log.Printf("not served   %s: %s (answers 501)", n.Path, n.Why)
 	}
+	log.Printf("status       %s answer out of the seed, not refreshed (header %s)", strings.Join(statusServices, ", "), statusSnapshotHeader)
 	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	log.Fatal(server.ListenAndServe())
