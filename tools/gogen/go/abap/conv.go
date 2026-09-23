@@ -481,3 +481,34 @@ func XFit(v string, n int) string {
 // Uccpi is cl_abap_conv_in_ce=>uccpi: the character of a code point, as a
 // c(1) (a blank is stored as the empty c).
 func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }
+
+// Find is find( val = v sub = x off = n ), measured on A4H 2026-09-23: the
+// character offset or -1; an offset equal to the length finds nothing, one
+// beyond it raises; an empty sub raises CX_SY_STRG_PAR_VAL; case counts.
+func Find(v, sub string, off int32) int32 {
+	if sub == "" {
+		panic(ArithmeticError{"CX_SY_STRG_PAR_VAL", "find"})
+	}
+	r := []rune(v)
+	if off < 0 || off > int32(len(r)) {
+		rangeError()
+	}
+	i := strings.Index(string(r[off:]), sub)
+	if i < 0 {
+		return -1
+	}
+	return off + int32(utf8.RuneCountInString(string(r[off:])[:i]))
+}
+
+// CO: every character of a is one of b; true for an empty a.
+func CO(a, b string) bool {
+	for _, c := range a {
+		if !strings.ContainsRune(b, c) {
+			return false
+		}
+	}
+	return true
+}
+
+// CS: a contains b, ignoring case; an empty b is always found.
+func CS(a, b string) bool { return b == "" || strings.Contains(strings.ToUpper(a), strings.ToUpper(b)) }

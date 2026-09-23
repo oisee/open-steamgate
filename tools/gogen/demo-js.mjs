@@ -19,8 +19,13 @@ try {
   const first = Math.round(r.gt[0] / spt);
   const frames = [];
   const t = process.hrtime.bigint();
-  for (let k = 0; k < r.gt.length; k++) frames.push(frame(h, s, first + k));
-  res = {scene: r.scene, frames, ns: Number(process.hrtime.bigint() - t) / r.gt.length};
+  const each = [];
+  for (let k = 0; k < r.gt.length; k++) {
+    const t0 = process.hrtime.bigint();
+    frames.push(frame(h, s, first + k));
+    each.push(Number(process.hrtime.bigint() - t0));
+  }
+  res = {scene: r.scene, frames, each, ns: Number(process.hrtime.bigint() - t) / r.gt.length};
 } catch (e) {
   res = {scene: r.scene, error: String(e.message ?? e).slice(0, 160)};
 }

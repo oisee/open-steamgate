@@ -196,6 +196,12 @@ function stmt(st, ctx, d) {
       ];
     }
     case "nop": return [];
+    case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
+    case "try": {
+      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (e instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(e.cls)) {\n${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
+      return [`${t}try {`, ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}} catch (e) {`,
+        `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ throw e; }`, `${t}}`];
+    }
     case "sort": {
       const tb = place(st.table, ctx);
       const cmp = st.keys.map((k) => `if (x.${ident(k.name)} !== y.${ident(k.name)}) return (x.${ident(k.name)} < y.${ident(k.name)} ? -1 : 1) * ${k.desc ? -1 : 1};`);
@@ -300,6 +306,7 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `${expr(e.x, ctx)}.length`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -379,6 +386,8 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
     case "initial": return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;

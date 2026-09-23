@@ -312,6 +312,16 @@ function stmt(st, ctx, d) {
         `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
       ];
     });
+    case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
+    case "try": {
+      // a panic of the runtime is an ABAP exception; a CATCH takes the
+      // classes the front end found it covers, anything else goes on
+      const cases = st.catches.map((c) => [`${t}\t\t\tcase ok && (${c.covers.length ? c.covers.map((x) => `e.Class == ${JSON.stringify(x)}`).join(" || ") : "false"}):`,
+        ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
+      return [`${t}func() {`, `${t}\tdefer func() {`, `${t}\t\tif r := recover(); r != nil {`, `${t}\t\t\te, ok := r.(abap.ArithmeticError)`,
+        `${t}\t\t\t_ = e`, `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, `${t}\t\t\t\tpanic(r)`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
+        ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}()`];
+    }
     case "sort": {
       // SORT is not stable in ABAP; stable here, so equal keys keep their order
       const tb = place(st.table, ctx);
@@ -391,6 +401,7 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -479,6 +490,8 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     case "initial": return `${expr(c.x, ctx)} == ${zero(c.x.type)}`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;

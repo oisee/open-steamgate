@@ -118,7 +118,13 @@ for (const [i, r] of runs.entries()) {
     if (!dj) jok++; else first = first || `js f${k} ${dj}`;
   });
   totals.n += r.frames.length; totals.go += gok; totals.js += jok;
+  const own = (each) => { const v = (each ?? []).filter((_, k) => r.frames[k]?.e === r.scene); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN; };
+  (globalThis.ownTimes ??= []).push({scene: r.scene, frames: r.frames.filter((f) => f.e === r.scene).length, go: own(g.each), js: own(j.each)});
   console.log(`${r.scene.padEnd(18)}${String(r.frames.length).padStart(7)}${String(gok).padStart(10)}${String(jok).padStart(10)}${((g.ns ?? 0) / 1e3).toFixed(0).padStart(9)}${((j.ns ?? 0) / 1e3).toFixed(0).padStart(9)}  ${first}`);
+}
+if (process.argv.includes("--own")) {
+  console.log("\nper frame, the scene's own frames only (e === scene), microseconds");
+  for (const o of globalThis.ownTimes) console.log(`${o.scene.padEnd(18)}${String(o.frames).padStart(5)}${(o.go / 1e3).toFixed(0).padStart(9)}${(o.js / 1e3).toFixed(0).padStart(9)}`);
 }
 console.log(`${"all".padEnd(18)}${String(totals.n).padStart(7)}${String(totals.go).padStart(10)}${String(totals.js).padStart(10)}`);
 
@@ -146,6 +152,7 @@ type result struct {
 	Scene  string   \`json:"scene"\`
 	Frames []string \`json:"frames"\`
 	Ns     float64  \`json:"ns"\`
+	Each   []float64 \`json:"each"\`
 	Error  string   \`json:"error,omitempty"\`
 }
 
@@ -179,7 +186,9 @@ func one(r run) (res result) {
 		frames := []string{}
 		t := time.Now()
 		for k := range r.Gt {
+			t0 := time.Now()
 			frames = append(frames, frame(h, s, first+int32(k)))
+			res.Each = append(res.Each, float64(time.Since(t0).Nanoseconds()))
 		}
 		res.Frames = frames
 		res.Ns = float64(time.Since(t).Nanoseconds()) / float64(len(r.Gt))

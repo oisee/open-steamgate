@@ -223,7 +223,35 @@ function classIr(ctx0, obj) {
       signatures.set(name, {name, unsupported: e.message});
     }
   };
-  for (const m of def.getMethodDefinitions().getAll()) addSig(m, "", m.isStatic());
+  // a REDEFINITION declares no parameters of its own: they are the ones of
+  // the interface or superclass the method comes from (without this an
+  // inherited IF_APC_WSP_EXTENSION~ON_START read its I_MESSAGE_MANAGER as
+  // an empty local)
+  const origin = (m) => {
+    const nm = upper(m.getName());
+    if (nm.includes("~")) {
+      const [intf, meth] = nm.split("~");
+      const idef = reg.getObject("INTF", intf)?.getDefinition();
+      const all = idef?.getMethodDefinitions();
+      const found = all && Array.from(Array.isArray(all) ? all : all.getAll()).find((x) => upper(x.getName()) === meth);
+      if (!found) throw new Unsupported(`${className}: the interface method of REDEFINITION ${nm} is not in the program`);
+      return found;
+    }
+    for (let sup = def.getSuperClass(), guard = 0; sup && guard < 20; guard += 1) {
+      const sdef = reg.getObject("CLAS", sup)?.getDefinition();
+      if (!sdef) break;
+      const found = sdef.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === nm);
+      if (found && !found.isRedefinition()) return found;
+      sup = sdef.getSuperClass();
+    }
+    throw new Unsupported(`${className}: where REDEFINITION ${nm} comes from is not in the program`);
+  };
+  for (const m of def.getMethodDefinitions().getAll()) {
+    if (!m.isRedefinition()) { addSig(m, "", m.isStatic()); continue; }
+    let o;
+    try { o = origin(m); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(m.getName()), {name: upper(m.getName()), unsupported: e.message}); continue; }
+    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => m.getName()}), "", m.isStatic());
+  }
   for (const intf of def.getImplementing()) {
     const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
@@ -374,6 +402,49 @@ function block(node, ctx) {
   return out;
 }
 
+/*
+ * TRY / CATCH, the part a runtime can honour today: the exceptions the
+ * runtime itself raises (arithmetic, conversion, table line, offset). Which
+ * of them a CATCH covers is decided here, by the class hierarchy abaplint
+ * knows; an exception object (INTO), CLEANUP and leaving the method from
+ * inside a TRY are refused by name, not approximated.
+ */
+const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
+  "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN"];
+
+function isSubclass(reg, cls, ancestor) {
+  for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
+    if (c === ancestor) return true;
+    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass()?.toUpperCase();
+  }
+  return false;
+}
+
+function leaves(stmts, inLoop = false) {
+  for (const st of stmts ?? []) {
+    if (st.s === "return") return true;
+    if ((st.s === "exit" || st.s === "continue") && !inLoop) return true;
+    const loop = st.s === "loop" || st.s === "do" || st.s === "while";
+    for (const k of ["body", "then", "else"]) if (Array.isArray(st[k]) && leaves(st[k], inLoop || loop)) return true;
+    for (const b of st.branches ?? st.cases ?? st.elseifs ?? []) if (leaves(b.body, inLoop || loop)) return true;
+    for (const c of st.catches ?? []) if (leaves(c.body, inLoop)) return true;
+  }
+  return false;
+}
+
+function tryBlock(node, ctx) {
+  if (node.findDirectStructure(Structures.Cleanup)) throw new Unsupported("TRY with CLEANUP");
+  const body = bodyOf(node, ctx);
+  const catches = node.findDirectStructures(Structures.Catch).map((c) => {
+    const st = c.findDirectStatement(Statements.Catch);
+    if (/\bINTO\b/i.test(st.concatTokens())) throw new Unsupported(`CATCH ... INTO: ${st.concatTokens()}`);
+    const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
+    return {classes: names, covers: RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n))), body: bodyOf(c, ctx)};
+  });
+  if (leaves(body) || catches.some((c) => leaves(c.body))) throw new Unsupported("RETURN, EXIT or CONTINUE leaving a TRY");
+  return {s: "try", body, catches};
+}
+
 const bodyOf = (n, ctx) => {
   const b = n.findDirectStructure(Structures.Body);
   return b === undefined ? [] : block(b, ctx);
@@ -386,6 +457,7 @@ function structure(node, ctx) {
     return {s: "nop"};
   }
   if (isStruct(node, Structures.Constants)) throw new Unsupported(`CONSTANTS BEGIN OF: ${node.concatTokens().slice(0, 60)}`);
+  if (isStruct(node, Structures.Try)) return tryBlock(node, ctx);
   if (isStruct(node, Structures.If)) {
     const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
     for (const e of node.findDirectStructures(Structures.ElseIf)) {
@@ -561,6 +633,10 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Continue)) return {s: "continue"};
   if (isStmt(node, Statements.Return)) return {s: "return"};
   if (isStmt(node, Statements.Clear)) return {s: "clear", target: lvalue(node.findDirectExpression(Expressions.Target), ctx)};
+  // FREE is CLEAR that also gives the memory back, which a GC does anyway
+  if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => ({s: "clear", target: lvalue(t, ctx)}))};
+  // WRITE goes to a list; in an APC or HTTP handler nobody ever displays it
+  if (isStmt(node, Statements.Write)) return {s: "nop"};
   throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
 }
 
@@ -1183,6 +1259,13 @@ function call(chain, ctx, statement, hint) {
   if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
     return {e: "strlen", x: source(direct, ctx), type: I};
   }
+  if (receiver === null && owner === null && name === "FIND" && !ctx.signatures.has(name)) {
+    // find( val = s sub = x [off = n] ): measured on A4H, see abap.Find
+    const arg = (p) => named?.findDirectExpressions(Expressions.ParameterS).find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    const given = (named?.findDirectExpressions(Expressions.ParameterS) ?? []).map((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()));
+    if (!named || given.some((p) => !["VAL", "SUB", "OFF"].includes(p)) || !arg("VAL") || !arg("SUB")) throw new Unsupported(`find( ) form: ${chain.concatTokens()}`);
+    return {e: "find", val: convert(source(arg("VAL"), ctx), S), sub: convert(source(arg("SUB"), ctx), S), off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null, type: I};
+  }
   if (receiver === null && name === "XSTRLEN" && !ctx.signatures.has(name)) {
     const x = source(direct, ctx);
     if (x.type.k !== "xstring" && x.type.k !== "x") throw new Unsupported(`xstrlen( ) of a ${x.type.k}`);
@@ -1368,6 +1451,13 @@ function compare(node, ctx) {
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const opText = upper(opNode.concatTokens());
   const op = OPS[opText] ?? opText;
+  if (op === "CO" || op === "CS") {
+    // measured on A4H: CO is true for an empty operand; CS ignores case and
+    // an empty pattern is always found; trailing blanks count in a string,
+    // a c operand has none stored
+    const r = {c: op.toLowerCase(), l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
+    return not ? {c: "not", x: r} : r;
+  }
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;

@@ -250,3 +250,14 @@ export function SubX(v, off, len) {
 }
 export const XFit = (v, n) => (v.length >= n ? v.slice(0, n) : v + "\u0000".repeat(n - v.length));
 export const Uccpi = (v) => String.fromCodePoint(v).replace(/ +$/, "");
+// find( val sub off ), as measured on A4H: offset or -1, empty sub raises
+export function Find(v, sub, off) {
+  if (sub === "") throw new AbapError("CX_SY_STRG_PAR_VAL", "find");
+  const r = [...v];
+  if (off < 0 || off > r.length) rangeError();
+  const rest = r.slice(off).join("");
+  const i = rest.indexOf(sub);
+  return i < 0 ? -1 : off + [...rest.slice(0, i)].length;
+}
+export const CO = (a, b) => [...a].every((c) => b.includes(c));
+export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
