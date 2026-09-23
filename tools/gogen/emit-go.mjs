@@ -625,6 +625,27 @@ function withBuilders(body, ctx, t, emitLoop) {
  * line, not the generated one. Code that is not ABAP gets its own lines back
  * (the RESET marker, replaced once the file is assembled).
  */
+// the arguments of a statement lowered at build time: the logon client, a
+// host value (a c right-trimmed, as the column binds it), a literal
+function sqlArgs(args, ctx) {
+  return `[]any{${args.map((a) => (a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
+    : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
+}
+
+const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}}`;
+
+// the ranges of a statement: where lower() put each marker, and the rows of
+// the ranges table as the Go values of their fields
+function hostPreds(preds, ctx) {
+  if (!preds || preds.length === 0) return "nil";
+  return `[]abap.HostPred{${preds.map((p) => {
+    const fields = new Map((STRUCTDEFS.get(p.range.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
+    const v = (nm) => (fields.get(nm).type.k === "i" ? `int64(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
+    const rows = `func() []abap.RangeRow { out := []abap.RangeRow{}; for _, r := range ${expr(p.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident(fields.get("SIGN").name)}, Option: r.${ident(fields.get("OPTION").name)}, Low: ${v("LOW")}, High: ${v("HIGH")}}) }; return out }()`;
+    return `{ID: ${JSON.stringify(p.id)}, After: ${p.after}, Column: ${JSON.stringify(p.column)}, Type: ${irTypeGo(p.type)}, Kind: ${JSON.stringify(p.kind ?? "")}, LowLen: ${p.lowLen}, Rows: ${rows}}`;
+  }).join(", ")}}`;
+}
+
 const RESET = "\u0000reset-position";
 // GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
 const LINES = !process.env.GOGEN_NOLINE;
@@ -857,38 +878,59 @@ function stmtLines(st, ctx, d) {
       const n = ctx.loop++;
       const tgt = place(st.target, ctx);
       const rowGo = goType(st.target.type.row);
-      const args = st.args.map((a) => (a.nil ? "nil" : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value))));
-      const slots = st.slots.map((sl) => {
-        const fields = new Map((STRUCTDEFS.get(sl.range.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
-        const txt = (nm) => (fields.get(nm).type.k === "i" ? `abap.FmtI(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
-        return `{Index: ${sl.index}, Col: ${JSON.stringify(sl.col)}, Rows: func() []abap.RangeRow { var out []abap.RangeRow; for _, r := range ${expr(sl.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident(fields.get("SIGN").name)}, Option: r.${ident(fields.get("OPTION").name)}, Low: ${txt("LOW")}, High: ${txt("HIGH")}}) }; return out }()}`;
-      });
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
       return [`${t}${tgt} = nil`,
-        `${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, []abap.Slot{${slots.join(", ")}}, func(scan func(dest ...any) error) {`,
+        `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
         `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, r)`,
-        `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
     }
     case "select_single": {
       // one row at most; only the fields the columns go to are written, and
       // nothing when there is no row
       const n = ctx.loop++;
       const tgt = place(st.target, ctx);
-      const args = st.args.map((a) => (a.host ? expr(a.host, ctx) : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value))));
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       // a character field takes the column cut to its length
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
-      return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, nil, func(scan func(dest ...any) error) {`,
+      return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
         ...moves.map((m) => `${t}\t${m}`),
-        `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}}) > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
+    }
+    case "select_count": {
+      // the count into the target and into sy-dbcnt (A4H), sy-subrc 4 when 0
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}\tvar cnt${n} abap.DBInt`,
+        `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) { abap.Must(scan(&cnt${n})) })`,
+        `${t}\t${place(st.target, ctx)} = abap.DBI(cnt${n})`, `${t}\ts.Sy.Dbcnt = abap.DBI(cnt${n})`,
+        `${t}\tif cnt${n}.Int64 > 0 {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc = 4`, `${t}\t}`, `${t}}`];
+    }
+    case "db_write_sql":
+      return [`${t}abap.ExecWrite(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)})`];
+    case "db_write": {
+      // the rows as the Go values of the work area's fields, MANDT the logon
+      // client; the runtime binds and renders them (go/abap/dbwrite.go)
+      const n = ctx.loop++;
+      const spec = `abap.WriteSpec{Table: ${JSON.stringify(st.table)}, Cols: []abap.WriteCol{${st.cols.map((c) => `{Name: ${JSON.stringify(c.name)}, Type: ${irTypeGo(c.ir)}}`).join(", ")}}, Key: ${goStrings(st.key)}}`;
+      const fields = STRUCTDEFS.get((st.fromTable ? st.value.type.row : st.value.type).go)?.fields ?? [];
+      const value = (c, i) => {
+        if (c.client) return "abap.Mandt";
+        const f = `r${n}.${ident(fields[i].name)}`;
+        return c.kind === "c" ? `abap.DBC(${f})` : c.kind === "i" ? `int64(${f})` : f;
+      };
+      const row = `[]any{${st.cols.map(value).join(", ")}}`;
+      const rows = st.fromTable
+        ? `func() [][]any { rows := [][]any{}; for _, r${n} := range ${expr(st.value, ctx)} { rows = append(rows, ${row}) }; return rows }()`
+        : `func() [][]any { r${n} := ${expr(st.value, ctx)}; return [][]any{${row}} }()`;
+      const call = {insert: "InsertRows", update: "UpdateRows", delete: "DeleteRows", modify: "ModifyRows"}[st.op];
+      return [`${t}abap.${call}(s, ${spec}, ${rows}${st.op === "insert" ? `, ${JSON.stringify(st.onDuplicate)}` : ""})`];
     }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];

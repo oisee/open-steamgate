@@ -165,24 +165,40 @@ const EXPECT = {
   // written in between, sy-dbcnt left as it was). The JS emitter has no
   // database and refuses both rather than make them no-ops
   ZCL_GOGEN_T_LUW: {Go: "miss:4 rb:0 cw:0 cww:0", JS: "ERROR NOT_COMPILED in COMMIT / ROLLBACK WORK: the JS emitter has no database"},
-  // database writes: both backends refuse honestly, because the relational
-  // IR (tools/sqlscript-ir.mjs) has no insert / update / delete / merge node
-  // yet. A4H answered, as "sy-subrc/sy-dbcnt" after each statement (i ->
-  // string, hence the blank after each number):
+  // database writes through the write nodes of the relational IR
+  // (tools/ir-writes.mjs, go/abap/dbwrite.go). A4H answered, as
+  // "sy-subrc/sy-dbcnt" after each statement (i -> string, hence the blank
+  // after each number):
   //   ins:0 /1  dup:4 /0  tabcx:0 /0  rows3  acc:4 /2  rows5  updmiss:4 /0
   //   upd:0 /1  set2:0 /2  set0:4 /0  updtab:4 /1  modins:0 /1  modupd:0 /1
   //   modtab:0 /2  delmiss:4 /0  del:0 /1  delw0:4 /0  delw2:0 /2
   //   deltab:4 /1  insm:0 /1  mandt001 insempty:0 /0  rows4  rb:0 /4  after0
-  // (mandt001: A4H's logon client, the work area said 999). A second run
-  // with sy-subrc = sy-dbcnt = 7 before INSERT FROM TABLE of A(dup) B C
-  // A(dup) D gave "tabcx:7 /7": CX_SY_OPEN_SQL_DB, sy untouched, and B, C
-  // and D written all the same; FROM TABLE with the same key twice wrote
-  // one row and raised. That is the string this must turn into once the IR
-  // has the nodes (with the local transpiler it is not: ANORMALIES
-  // dbwrite-*).
+  // A second run with sy-subrc = sy-dbcnt = 7 before INSERT FROM TABLE of
+  // A(dup) B C A(dup) D gave "tabcx:7 /7": CX_SY_OPEN_SQL_DB, sy untouched,
+  // B, C and D written all the same. Go answers every statement the same;
+  // the string differs in two places, neither a database rule:
+  //   - mandt123: the logon client, which is 001 on A4H and 123 here (the
+  //     transpiler runtime's constant, abap.Mandt); the work area said 999;
+  //   - tabcx:4: the INSERT leaves sy as it was (the rule above), and what
+  //     it was differs: on A4H the call note( ) before it set sy-subrc to 0
+  //     (ZCL_GOGEN_T_CNT, $ZOSG_TMP_0220, 2026-09-23: "call:0" after a READ
+  //     that missed), and a method call in the subset leaves sy-subrc alone.
+  // The JS backend has no database and refuses (ANORMALIES dbwrite-* are
+  // the transpiler runtime's answers, not these)
   ZCL_GOGEN_T_DBW: {
-    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered) at zcl_gogen_t_dbw.clas.abap:26",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered)"},
+    Go: "ins:0 /1  dup:4 /0  tabcx:4 /0  rows3  acc:4 /2  rows5  updmiss:4 /0  upd:0 /1  set2:0 /2  set0:4 /0  updtab:4 /1  modins:0 /1  modupd:0 /1  modtab:0 /2  delmiss:4 /0  del:0 /1  delw0:4 /0  delw2:0 /2  deltab:4 /1  insm:0 /1  mandt123 insempty:0 /0  rows4  rb:0 /4  after0 ",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // sy after SELECT (A4H, ZCL_GOGEN_T_CNT, the same statements over a
+  // system table of two rows: "app:4 ... cnt0:4/0/0 cnt:0/2/2 tab:0/2/2
+  // tab0:4/0/0 single:0/1 single0:4/0"); here three rows, and two ranges:
+  // I CP 'A*' without E EQ 'AB', and a LOW longer than the column, which is
+  // CX_SY_OPEN_SQL_DATA_ERROR under CX_SY_OPEN_SQL_ERROR
+  ZCL_GOGEN_T_SELCNT: {Go: "app:4 cnt0:4/0/0 cnt:0/3/3 tab:0/3/3 tab0:4/0/0 single:0/1 single0:4/0 rng:1,A long:caught",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // an OPTION in lower case: a dump CATCH cx_root does not take (A4H,
+  // a4h-ranges.json), never "no restriction"
+  ZCL_GOGEN_T_SELDUMP: {Go: "ERROR SAPSQL_IN_ITAB_ILLEGAL_OPTION in range OPTION \"cp\": SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H at zcl_gogen_t_seldump.clas.abap:23",
+    JS: "ERROR NOT_COMPILED in SELECT ... FROM ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // d and t (A4H 2026-09-23, two probes joined into one class): c -> d keeps
   // 'ABC'; d - d counts days in calculation type i (( d / 7 ) * 7 rounds in
   // between); an i template expression overflows at 20713 * 86400 * 1000,
@@ -217,7 +233,11 @@ mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "semantics");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
-writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}))\n\t}()`).join("\n")}\n}\n`);
+// the database of the Go harness: the transpiler's CREATE TABLEs for this
+// registry (zgogen_t_dbw among them), no rows; each RUN is one dialog step
+const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
+writeFileSync(join(dir, "zz_db.json"), JSON.stringify(new DatabaseSetup(program.reg).run().schemas.sqlite));
+writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t_ "embed"\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n//go:embed zz_db.json\nvar dbScript []byte\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n\tif err := abap.OpenDB(dbScript); err != nil {\n\t\tpanic(err)\n\t}\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tvar out string\n\t\tabap.DialogStep(func() { out = ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}) })\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", out)\n\t}()`).join("\n")}\n}\n`);
 execFileSync("gofmt", ["-w", dir]);
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go")}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));
@@ -227,7 +247,7 @@ let bad = 0;
 for (const line of goOut.trim().split("\n")) {
   const [cls, go] = line.split("\t");
   let js;
-  try { js = m[cls].RUN({sy: {index: 0, tabix: 0, subrc: 0}}); } catch (e) { js = `ERROR ${e.message}`; }
+  try { js = m[cls].RUN({sy: {index: 0, tabix: 0, subrc: 0, dbcnt: 0}}); } catch (e) { js = `ERROR ${e.message}`; }
   for (const [who, got] of [["Go", go], ["JS", js]]) {
     if (EXPECT[cls] === undefined) { console.log(`new  ${who} ${cls}: ${got}`); continue; }
     const want = typeof EXPECT[cls] === "string" ? EXPECT[cls] : EXPECT[cls][who];
