@@ -1208,3 +1208,35 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: **needs an issue** in abaplint (the check should skip the parameter validation when the type is dynamic)
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_INH (the A4H-only line `abl:` is left out of the local copy until abaplint accepts it)
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-interface-data-value — abaplint accepts `VALUE` on an interface's `DATA`
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `DATA x TYPE i VALUE 5.` inside `INTERFACE ... ENDINTERFACE`
+- Minimal ABAP reproducer: `INTERFACE lif_ia. DATA mv_count TYPE i VALUE 5. ENDINTERFACE.` and a class implementing it
+- Exact command used to run it: `node tools/gogen/semantics.mjs` with the VALUE in `tools/gogen/testdata/zif_gogen_t_ia.intf.abap` (the front end runs abaplint's syntax check first)
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0120, 2026-09-23, deleted after): the include does not activate, "VALUE cannot be used with attributes (except constants) within interfaces."
+- Actual open-abap behaviour: abaplint reports nothing; the gogen front end used to read `zif~attr` inside the implementing class as a CONSTANT with that value (silently wrong: a write to it was lost)
+- Impact on open-steamgate: none on the served path; the gogen front end now refuses such an attribute (a statement stub that dumps), since the source could never run on a system
+- Smallest safe workaround: none needed; do not write VALUE there
+- Upstream: **needs an issue** in abaplint (a syntax error for VALUE on interface DATA / CLASS-DATA)
+- Regression-test location: none that runs (a refusal); the rule is in the comment of ZCL_GOGEN_T_IA in `tools/gogen/semantics.mjs`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-interface-read-only — abaplint does not check writes to a READ-ONLY interface attribute
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: a write to `DATA x TYPE i READ-ONLY` of an interface: `lo_intf->x = 1`, `lo_obj->zif~x = 1` outside the implementing class, `lo_intf->x = 1` inside it
+- Minimal ABAP reproducer: `INTERFACE lif_ia. DATA mv_ro TYPE i READ-ONLY. ENDINTERFACE.`, a class `lcl_obj` implementing it, and elsewhere `DATA lo_i TYPE REF TO lif_ia. lo_i = NEW lcl_obj( ). lo_i->mv_ro = 1.`
+- Exact command used to run it: the testdata of ZCL_GOGEN_T_IA with that line added, through `compileProgram` of `tools/gogen/frontend.mjs`
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0120, 2026-09-23, deleted after): "Write access to the READ-ONLY attribute "MV_RO" is not allowed outside the class/interface." for a write through an interface reference (also inside the implementing class) and for `lo_obj->lif_ia~mv_ro = 1` outside the class; writes through `me`, through a reference of the class's own type inside the class, and in a subclass activate
+- Actual open-abap behaviour: abaplint reports nothing; its `ClassAttribute` of an interface carries no `read_only` in `getMeta()` at all (a class's own READ-ONLY attribute does)
+- Impact on open-steamgate: none on the served path; the gogen front end reads READ-ONLY off the DATA statement itself and refuses such a write
+- Smallest safe workaround: the front end's own check (`intfRefAttribute`, `classRefIntfAttribute` in `tools/gogen/frontend.mjs`)
+- Upstream: **needs an issue** in abaplint (keep READ-ONLY in an interface attribute's meta and check writes against it)
+- Regression-test location: the READ-ONLY writes that do activate are in ZCL_GOGEN_T_IA (`tools/gogen/semantics.mjs`); the refusals have no running test
+- Upstream version containing a fix: none yet
