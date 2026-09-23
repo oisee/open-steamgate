@@ -361,3 +361,33 @@ export function CA(a, b) { return b !== "" && [...a].some((c) => b.includes(c));
 
 export function notCompiled(why) { throw new AbapError("NOT_COMPILED", why); }
 export function Condense(s, noGaps) { return noGaps ? s.replaceAll(" ", "") : s.split(" ").filter((x) => x !== "").join(" "); }
+
+// d -> i, measured on A4H (go/abap/datesplit.go DToI says how)
+export function DToI(v) {
+  if (!/^\d{8}$/.test(v)) return 0;
+  const y = Number(v.slice(0, 4)), m = Number(v.slice(4, 6)), d = Number(v.slice(6, 8));
+  if (y < 1 || m < 1 || m > 12 || d < 1) return 0;
+  const key = y * 10000 + m * 100 + d;
+  const julian = key < 15821015;
+  if (key > 15821004 && julian) throw new AbapError("NOT_COMPILED", "d -> i: a date of the ten days skipped in October 1582 is not measured");
+  let leap = y % 4 === 0;
+  if (!julian) leap = leap && (y % 100 !== 0 || y % 400 === 0);
+  const days = [0, 31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (d > days[m]) return 0;
+  const a = Math.trunc((14 - m) / 12), yy = y + 4800 - a, mm = m + 12 * a - 3;
+  let jdn = d + Math.trunc((153 * mm + 2) / 5) + 365 * yy + Math.trunc(yy / 4);
+  jdn += julian ? -32083 : -Math.trunc(yy / 100) + Math.trunc(yy / 400) - 32045;
+  return jdn - 1721424;
+}
+// SPLIT ... INTO n fields (go/abap/datesplit.go SplitN)
+export function SplitN(v, sep, n) {
+  if (sep === "") throw new AbapError("NOT_COMPILED", "SPLIT: at an empty separator is not measured");
+  const out = new Array(n).fill("");
+  const parts = v.split(sep);
+  for (let i = 0; i < n && i < parts.length; i += 1) out[i] = i === n - 1 ? parts.slice(i).join(sep) : parts[i];
+  return out;
+}
+export function SplitFit(s, piece, n) {
+  if ([...piece.replace(/ +$/, "")].length > n) s.sy.subrc = 4;
+  return CFit(piece, n);
+}

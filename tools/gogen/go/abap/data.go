@@ -69,6 +69,9 @@ func sizedType(kind byte, n int) *Type {
 func TC(n int) *Type { return sizedType('C', n) }
 func TX(n int) *Type { return sizedType('X', n) }
 
+// TN is n of a length, carried as its digits.
+func TN(n int) *Type { return sizedType('N', n) }
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -163,6 +166,8 @@ func IsInitialData(d Data) bool {
 	case 'T':
 		v := *d.P.(*string)
 		return v == "" || v == "000000"
+	case 'N':
+		return strings.Trim(*d.P.(*string), "0") == ""
 	case 'X':
 		return strings.Trim(*d.P.(*string), "\x00") == ""
 	case 'P':

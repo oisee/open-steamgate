@@ -256,6 +256,9 @@ function typeOf(t, where, program) {
   // numbers are measured on A4H
   if (t instanceof BasicTypes.PackedType) return {k: "p", len: t.getLength(), dec: t.getDecimals()};
   if (t instanceof BasicTypes.TimeType) return {k: "t", len: 6};
+  // n: its digits, initial all zeros; declared, copied and compared with
+  // initial only until its conversions are measured
+  if (t instanceof BasicTypes.NumericType) return {k: "n", len: t.getLength()};
   if (t instanceof BasicTypes.IntegerType) return I;
   if (t instanceof BasicTypes.FloatType) return F;
   if (t instanceof BasicTypes.Integer8Type) return INT8;
@@ -859,7 +862,9 @@ function statement(node, ctx) {
     if (/\b(BINARY|REFERENCE|CASTING|COMPARING)\b/i.test(text) || (/\bTRANSPORTING\b/i.test(text) && !/\bTRANSPORTING\s+NO\s+FIELDS\b/i.test(text))) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
-    const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    const ss2 = node.findDirectExpression(Expressions.SimpleSource2);
+    if (!ss2) throw new Unsupported(`READ TABLE table form: ${text}`);
+    const table = sourceOperand(ss2.getFirstChild(), ctx);
     if (table.type.k !== "table") throw new Unsupported("READ TABLE of a non-table");
     const cc = node.findDirectExpression(Expressions.ComponentCompareSimple);
     if (!cc) throw new Unsupported(`READ TABLE key form: ${text}`);
@@ -1019,7 +1024,7 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Split)) {
     // measured on A4H: an empty string gives no rows, and one empty last
     // piece after a trailing separator is dropped (a| -> [a], a|| -> [a,''])
-    if (!/\bINTO\s+TABLE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
+    if (!/\bINTO\s+TABLE\b/i.test(text)) return splitIntoFields(node, ctx, text);
     const [str, sep] = node.findDirectExpressions(Expressions.Source);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
@@ -1289,6 +1294,10 @@ function source(node, ctx, outer, hint = outer) {
     throw new Unsupported(`calculation type p (a character operand and no f): ${node.concatTokens()}`);
   }
   if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
+  // a d operand counts its days as an i (measured on A4H: ( d / 7 ) * 7
+  // into i rounds in between, so the calculation type is i, not p); a d
+  // target (days back into a date) is not measured
+  if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
   if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
@@ -1361,6 +1370,7 @@ function fieldChain(n, ctx) {
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
+  if (text === "SY-ABCDE") return {e: "chars", value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", type: C(26)};
   let place;
   let i = 0;
   if (isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>")) {
@@ -1424,6 +1434,9 @@ function offsetValue(node, ctx) {
  * length (trailing blanks included) and the part is stored trimmed again.
  */
 function substring(base, off, len, node) {
+  // a d or t is read as the c of its length (measured on A4H: t '123456'
+  // gives 12 and 34 for (2) and +2(2) into i)
+  if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(base.type.len)};
   const k = base.type.k;
   if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${node.concatTokens()}`);
   const litLen = len?.e === "int" ? len.value : undefined;
@@ -1602,6 +1615,16 @@ function declaredMethod(reg, cls, meth) {
 }
 
 /** the class in cls's chain, itself first, that declares a method or attribute */
+/** the class of cls and its ancestors that lists intf in its INTERFACES */
+function implementingClass(reg, cls, intf) {
+  for (const c of [cls, ...ancestors(reg, cls)]) {
+    const def = reg.getObject("CLAS", c)?.getDefinition();
+    if (!def) return undefined;
+    if (def.getImplementing().some((x) => upper(x.name) === intf)) return c;
+  }
+  return undefined;
+}
+
 function declaringClass(reg, cls, name, kind) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = reg.getObject("CLAS", c)?.getDefinition();
@@ -1614,6 +1637,24 @@ function declaringClass(reg, cls, name, kind) {
 }
 
 /**
+ * SPLIT s AT sep INTO f1 f2 ...: measured on A4H (2026-09-23) --
+ * 'Seats desc' gives [Seats][desc]; the last field takes the rest of the
+ * string after its separator ('a  b' -> [a][ b], 'a b c' -> [a][b c]); a
+ * field without a piece is cleared ('a' -> [a][]); a piece too long for a c
+ * field is cut and sy-subrc is 4 ('abcdef gh' into two c(3) -> [abc][gh] 4),
+ * else 0. Targets are c and string; AT space splits at one blank.
+ */
+function splitIntoFields(node, ctx, text) {
+  const [str, sep] = node.findDirectExpressions(Expressions.Source);
+  const targets = node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx));
+  if (!sep || targets.length < 2 || !/^SPLIT\s+.+\s+AT\s+.+\s+INTO\s+/i.test(text) || /\bIN\s+(CHARACTER|BYTE)\s+MODE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
+  for (const t of targets) if (t.type.k !== "c" && t.type.k !== "string") throw new Unsupported(`SPLIT into a ${t.type.k}: ${text}`);
+  // space is a c of one blank, which a c here carries without it
+  const sepExpr = upper(sep.concatTokens()) === "SPACE" ? {e: "chars", value: " ", type: S} : convert(source(sep, ctx), S);
+  return {s: "split_fields", x: convert(source(str, ctx), S), sep: sepExpr, targets};
+}
+
+/**
  * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
  * [WHERE f IN range AND f op value ...] [ORDER BY f ...]: the form the
  * gateway's DPCs use. The relation goes to the shared relational IR and is
@@ -1623,6 +1664,7 @@ function declaringClass(reg, cls, name, kind) {
  */
 function selectStatement(node, ctx, text) {
   const sel = node.findDirectExpression(Expressions.Select);
+  if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
@@ -1726,6 +1768,106 @@ function selectStatement(node, ctx, text) {
     args.push({value: p.value});
   });
   return {s: "select_table", table: tableName, cols, assign, target, sql: lowered.sql, args, slots};
+}
+
+/**
+ * SELECT SINGLE fields FROM table INTO [CORRESPONDING FIELDS OF] wa
+ * WHERE col = value [AND col = value ...]. Measured on A4H (2026-09-23):
+ * without a row, sy-subrc is 4 and the target keeps what it had; with one,
+ * only the fields the columns go to are written (by name with CORRESPONDING,
+ * else by position), the others keep theirs. A host value is converted to
+ * the column's type and bound; MANDT is the logon client, as for a table.
+ */
+function selectSingle(sel, ctx, text) {
+  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
+  const tableName = upper(from[0].concatTokens());
+  const tabl = ctx.reg.getObject("TABL", tableName);
+  if (!tabl) throw new Unsupported(`SELECT FROM ${tableName}: not a table of the dictionary in this program`);
+  let tType;
+  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`SELECT FROM ${tableName}: its type does not resolve`); }
+  const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
+  const colType = (n) => {
+    const c = columns.get(n);
+    if (!c) throw new Unsupported(`SELECT: ${tableName} has no column ${n}`);
+    return typeOf(c.type, `${tableName}-${n}`, ctx.program);
+  };
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...columns.keys()]
+    : (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
+      const n = f.findDirectExpression(Expressions.SQLFieldName);
+      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
+      return upper(n.concatTokens());
+    });
+  if (names.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
+  const cols = names.map((n) => ({name: n, type: colType(n)}));
+  const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
+  const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
+  if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SINGLE INTO form: ${text}`);
+  const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
+  const target = lvalue(tnode, ctx);
+  const okCol = (c, f) => ["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i");
+  let assign;
+  if (target.type.k === "struct") {
+    const fields = ctx.program.structs.get(target.type.go)?.fields ?? [];
+    const byName = new Map(fields.map((f) => [String(f.name).toUpperCase(), f]));
+    assign = cols.map((c, i) => {
+      const f = corresponding ? byName.get(c.name) : fields[i];
+      if (!f) return null;
+      if (!okCol(c, f)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+      return {field: f.name, type: f.type};
+    });
+  } else {
+    if (corresponding || cols.length !== 1 || !okCol(cols[0], target)) throw new Unsupported(`SELECT SINGLE INTO a ${target.type.k}: ${text}`);
+    assign = [{line: true, type: target.type}];
+  }
+  // WHERE: col = host value, AND'ed
+  const hosts = [];
+  const cond = sel.findDirectExpression(Expressions.SQLCond);
+  if (cond) {
+    for (const p of cond.getChildren()) {
+      if (isTok(p, "AND")) continue;
+      if (!isExpr(p, Expressions.SQLCompare)) throw new Unsupported(`SELECT WHERE form: ${cond.concatTokens()}`);
+      const kids = p.getChildren();
+      const op = p.findDirectExpression(Expressions.SQLCompareOperator);
+      const src = p.findDirectExpression(Expressions.SQLSource);
+      if (kids.length < 3 || kids[2] !== src || !isExpr(kids[0], Expressions.SQLFieldName) || !op || op.concatTokens() !== "=" || !src) throw new Unsupported(`SELECT WHERE compare: ${p.concatTokens()}`);
+      // the parser leaves wa-f of a host value as FieldChain, Dash, SQLFieldName
+      const sk = [...src.getChildren().filter((c) => !isTok(c, "@")), ...kids.slice(3)];
+      const simple = sk[0];
+      if (!isExpr(simple, Expressions.SimpleSource3) || simple.getChildren().length !== 1) throw new Unsupported(`SELECT WHERE value: ${src.concatTokens()}`);
+      let v = sourceOperand(simple.getFirstChild(), ctx);
+      for (let i = 1; i < sk.length; i += 2) {
+        if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SELECT WHERE value: ${src.concatTokens()}`);
+        const f = fieldOf(ctx, v.type, sk[i + 1].concatTokens(), src.concatTokens());
+        v = {e: "field", base: v, name: f.name, type: f.type};
+      }
+      const col = upper(kids[0].concatTokens());
+      const ct = colType(col);
+      if (!["c", "string", "i", "d"].includes(ct.k)) throw new Unsupported(`SELECT WHERE on a ${ct.k} column: ${p.concatTokens()}`);
+      hosts.push({col, type: ct, value: convert(v, ct)});
+    }
+  }
+  const irType = (t) => (t.k === "i" ? RIR.T.int : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
+  const low = (n) => n.toLowerCase();
+  let pred = null;
+  const and = (p) => { pred = pred === null ? p : RIR.bin("AND", pred, p, RIR.T.bool); };
+  if (columns.has("MANDT")) and(RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool));
+  hosts.forEach((h, i) => and(RIR.bin("=", RIR.col(low(h.col), irType(h.type)), RIR.param(`@@host:${i}@@`, irType(h.type)), RIR.T.bool)));
+  let rel = RIR.scan(low(tableName));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.project(rel, cols.map((c) => ({as: low(c.name), expr: RIR.col(low(c.name), irType(c.type))})));
+  rel = RIR.limit(rel, 1);
+  let lowered;
+  try { lowered = lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`SELECT: the relational IR refused it: ${e.message}`); }
+  const args = lowered.params.map((p) => {
+    const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
+    if (m) return {host: hosts[Number(m[1])].value};
+    if (p.name === "SY-MANDT") return {mandt: true};
+    return {value: p.value};
+  });
+  return {s: "select_single", table: tableName, cols, assign, target, sql: lowered.sql, args};
 }
 
 /**
@@ -2021,7 +2163,8 @@ function call(chain, ctx, statement, hint) {
     sig = methodSignature(ctx, sup, name);
   } else if (owner === null && !ctx.signatures.has(name) && !alias) {
     // a method the class inherits: resolved where it is declared
-    const at = declaringClass(ctx.reg, ctx.className, name, "method");
+    // me->intf~m( ) of an interface a superclass implements: that class's
+    const at = name.includes("~") ? implementingClass(ctx.reg, ctx.className, name.split("~")[0]) : declaringClass(ctx.reg, ctx.className, name, "method");
     if (at === undefined || at === ctx.className) throw new Unsupported(`unknown method ${name}`);
     if (declaredMethod(ctx.reg, at, name)?.getVisibility?.() === 1) throw new Unsupported(`${name} is private in ${at}`);
     sig = methodSignature(ctx, at, name);
@@ -2161,6 +2304,16 @@ export function convert(expr, to) {
   if (numeric(from) && numeric(to)) return ok("num");
   if (to.k === "string" && from.k === "c") return ok("c2s");
   if (to.k === "c" && charlike(from)) return ok("s2c");
+  // c -> d, measured on A4H: the first eight characters, no check ('ABC' is
+  // kept, reads back as ABC and counts as 0 days); '' is not initial
+  if (to.k === "d" && charlike(from)) return ok("s2c");
+  // c -> t: the first six characters, the same rule (measured on A4H for
+  // '123456' only, which then reads back 12 and 34 by offset)
+  if (to.k === "t" && charlike(from)) return ok("s2c");
+  // d -> i, measured on A4H: days since 00010101 (which is 0), Julian
+  // before 15821015 (15821004 is 577736, 15821015 is 577737), an invalid
+  // date is 0 (abap.DToI)
+  if (to.k === "i" && from.k === "d") return ok("d2i");
   // i -> string and x -> string are conversion rules not measured yet (the
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give

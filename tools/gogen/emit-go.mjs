@@ -29,7 +29,7 @@ export function goType(t) {
     case "ref": return t.name === "OBJECT" ? "any" : t.intf ? typeName(t.name) : POLY.has(t.name) ? `I_${typeName(t.name)}` : `*${typeName(t.name)}`;
     case "exc": return "*abap.Exception";
     case "data": case "dref": return "abap.Data";
-    case "d": case "t": case "p": return "string";
+    case "d": case "t": case "p": case "n": return "string";
     default: throw new Error(`no Go type for ${t.k}`);
   }
 }
@@ -37,7 +37,7 @@ export function goType(t) {
 // an x field is always its full length: initial is that many 00 bytes
 const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
   : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
-    : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? `"0"` : "nil");
+    : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? `"0"` : t.k === "n" ? JSON.stringify("0".repeat(t.len)) : "nil");
 
 /*
  * ABAP tables are values: an assignment copies them, deep, with the tables
@@ -84,6 +84,7 @@ function desc(t) {
     case "d": return "abap.TD";
     case "p": return `abap.TP(${t.len ?? 8}, ${t.dec ?? 0})`;
     case "t": return "abap.TT";
+    case "n": return `abap.TN(${t.len})`;
     case "dref": return "abap.TRef";
     case "ref": case "exc": return "abap.TObj";
     case "struct": case "table": {
@@ -741,6 +742,30 @@ function stmtLines(st, ctx, d) {
         `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, r)`,
         `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
+    case "select_single": {
+      // one row at most; only the fields the columns go to are written, and
+      // nothing when there is no row
+      const n = ctx.loop++;
+      const tgt = place(st.target, ctx);
+      const args = st.args.map((a) => (a.host ? expr(a.host, ctx) : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value))));
+      const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
+      const moves = st.assign.map((a, i) => (a === null ? null
+        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+      return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, nil, func(scan func(dest ...any) error) {`,
+        `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
+        `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
+        ...moves.map((m) => `${t}\t${m}`),
+        `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
+    case "split_fields": {
+      // the pieces, the last with the rest; a c field cut sets sy-subrc 4
+      const n = ctx.loop++;
+      const lines = [`${t}{`, `${t}\tp${n} := abap.SplitN(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length})`, `${t}\ts.Sy.Subrc = 0`];
+      st.targets.forEach((x, i) => lines.push(x.type.k === "string" ? `${t}\t${place(x, ctx)} = p${n}[${i}]`
+        : `${t}\t${place(x, ctx)} = abap.SplitFit(s, p${n}[${i}], ${x.type.len})`));
+      lines.push(`${t}}`);
+      return lines;
+    }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
     case "read_key": {
@@ -916,6 +941,7 @@ function conv(e, ctx) {
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
+    case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;

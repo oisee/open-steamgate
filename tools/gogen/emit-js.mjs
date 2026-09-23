@@ -39,6 +39,7 @@ function zero(t) {
     case "d": return `"00000000"`;
     case "p": return `"0"`;
     case "t": return `"000000"`;
+    case "n": return JSON.stringify("0".repeat(t.len));
     default: throw new Error(`no zero for ${t.k}`);
   }
 }
@@ -190,7 +191,7 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
     }
-    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static": case "select_table":
+    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static": case "select_table": case "select_single":
       return [`${t}${GENERIC};`];
     case "native":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
@@ -261,6 +262,14 @@ function stmt(st, ctx, d) {
         `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)});`];
+    case "split_fields": {
+      const n = ctx.loop++;
+      const lines = [`${t}{`, `${t}  const p${n} = abap.SplitN(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length});`, `${t}  s.sy.subrc = 0;`];
+      st.targets.forEach((x, i) => lines.push(x.type.k === "string" ? `${t}  ${place(x, ctx)} = p${n}[${i}];`
+        : `${t}  ${place(x, ctx)} = abap.SplitFit(s, p${n}[${i}], ${x.type.len});`));
+      lines.push(`${t}}`);
+      return lines;
+    }
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
@@ -486,6 +495,7 @@ function conv(e, ctx) {
     case "x2i": return `abap.XToI(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
+    case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;
