@@ -248,6 +248,15 @@ application's). sy-subrc 0 and sy-dbcnt untouched, measured on A4H. The JS
 emitter has no database and refuses both. 3313 -> 3306 statement stubs in
 the gateway, 65 -> 62 in the closure of `DISPATCH`.
 
+With a database open and no step running, every statement autocommits, so
+`ROLLBACK WORK` there is refused (`NOT_COMPILED`) rather than answered 0
+as if it had undone something; `COMMIT WORK` there is a no-op. A step
+begun inside a step fails at once (the pool has one connection, so the
+second `Begin` would otherwise wait forever), and a rollback that fails
+after a dump does not replace the dump. `DELETE <name> FROM ...` goes to
+the database only when `<name>` is not a variable: an internal table named
+like a TABL is the internal table's, as on A4H (`ZCL_GOGEN_T_DELNAME`).
+
 `INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a table do **not** compile,
 by decision: their SQL has to come from the shared relational IR
 (`tools/sqlscript-ir.mjs`, lowered by `tools/sqlscript-lower.mjs`), and it

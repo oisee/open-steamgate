@@ -802,8 +802,11 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.ModifyDatabase)) return dbWriteStatement("merge", node, ctx, text);
   if (isStmt(node, Statements.DeleteDatabase)) return dbWriteStatement("delete", node, ctx, text);
   // DELETE dbtab FROM wa parses as DeleteInternal (abaplint cannot tell it
-  // from DELETE itab FROM idx without the dictionary)
+  // from DELETE itab FROM idx without the dictionary); a name that resolves
+  // as a variable is the internal table, as ABAP resolves it, even when a
+  // TABL of the same name exists
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+FROM\s+/i.test(text)
+    && !isVariableName(text.split(/\s+/)[1], ctx)
     && ctx.reg.getObject("TABL", upper(text.split(/\s+/)[1]))) return dbWriteStatement("delete", node, ctx, text);
   // GET REFERENCE OF x INTO r: r is bound to x itself
   if (isStmt(node, Statements.GetReference)) {
@@ -1120,6 +1123,18 @@ function variable(name, ctx) {
   const attr = findAttribute(ctx, n);
   if (attr) return attr;
   throw new Unsupported(`${ctx.method}: ${name} is not a local, parameter or attribute of the subset`);
+}
+
+/** whether a name resolves as a variable the way variable() resolves it
+ * (field symbol, parameter, returning, local, attribute), without its side
+ * effects */
+function isVariableName(name, ctx) {
+  const n = upper(name);
+  if (n === "ME" || ctx.fieldSymbols?.has(n)) return true;
+  if (ctx.sig.params.some((x) => x.name === n) || ctx.sig.returning?.name === n || ctx.locals.has(n)) return true;
+  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
+  const defs = findScope(ctx.spaghetti.getTop(), "class_definition");
+  return (impl?.getData().vars[n] ?? defs?.getData().vars[n]) !== undefined;
 }
 
 function findAttribute(ctx, n) {

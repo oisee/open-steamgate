@@ -23,6 +23,15 @@ const EXPECT = {
   // line through its line directives; the JS emitter has no source map yet
   // CREATE OBJECT TYPE (name): the name as written, so lower case is an
   // unknown class, as is a class that does not exist
+  // DELETE <name> FROM n on an internal table named like a TABL is the
+  // internal table's statement: A4H answered "lines:1  subrc:0" (over an
+  // itab named T000). DELETE itab FROM idx is not in the subset yet, so both
+  // emitters refuse it as an internal DELETE form; what this pins is that it
+  // is not sent to the database (before the fix: "the relational IR has no
+  // delete node")
+  ZCL_GOGEN_T_DELNAME: {
+    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in

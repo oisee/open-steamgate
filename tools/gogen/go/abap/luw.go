@@ -38,6 +38,11 @@ func begin() {
 	if db == nil {
 		return
 	}
+	// one connection in the pool (db.go): a second Begin would wait for the
+	// first forever rather than fail
+	if tx != nil {
+		panic(NotCompiled("dialog step", "a dialog step is already open"))
+	}
 	t, err := db.Begin()
 	if err != nil {
 		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
@@ -68,8 +73,18 @@ func DialogStep(work func()) {
 	begin()
 	ok := false
 	defer func() {
-		if !ok {
+		if ok {
+			return
+		}
+		// the dump is what gets reported: a rollback that fails too must
+		// not replace it
+		dump := recover()
+		func() {
+			defer func() { recover() }()
 			end(false)
+		}()
+		if dump != nil { // nil: runtime.Goexit, which goes on by itself
+			panic(dump)
 		}
 	}()
 	work()
@@ -77,7 +92,8 @@ func DialogStep(work func()) {
 	end(true)
 }
 
-// CommitWork is COMMIT WORK [AND WAIT].
+// CommitWork is COMMIT WORK [AND WAIT]. Outside a dialog step it has
+// nothing to do: autocommit already made every write durable.
 func CommitWork(s *Session) {
 	if tx != nil {
 		end(true)
@@ -86,8 +102,14 @@ func CommitWork(s *Session) {
 	s.Sy.Subrc = 0
 }
 
-// RollbackWork is ROLLBACK WORK.
+// RollbackWork is ROLLBACK WORK. With a database open and no dialog step
+// running every statement ran in autocommit, so there is nothing a rollback
+// could undo: refused rather than answered 0 as if it had undone it. Without
+// a database (a harness that runs no SQL) there is nothing written either.
 func RollbackWork(s *Session) {
+	if tx == nil && db != nil {
+		panic(NotCompiled("ROLLBACK WORK", "outside a dialog step, where every statement already committed"))
+	}
 	if tx != nil {
 		end(false)
 		begin()
