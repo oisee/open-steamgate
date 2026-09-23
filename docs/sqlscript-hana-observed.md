@@ -454,7 +454,7 @@ So INT2 is an INTEGER everywhere inside a body, and its range is checked
 where ABAP meets it. On the way out, the kernel **raises** for a value
 outside -32768..32767; it does not wrap and does not truncate. The
 portable runtime does the same: an INT2 column is checked on the rows it
-returns, and a scalar INT2 output on its value, with an error that names
+returns, with an error that names
 the exception HANA raises. An ABAP `int2` input cannot carry a value
 outside the range, so a JavaScript caller's value that does is refused at
 the bind. A nested CALL hands its relation on unevaluated, so an INT2
@@ -467,6 +467,9 @@ parameter"). Only `DEFAULT` makes an AMDP input optional.
 Refused by name until measured, around INT2: a CAST or DECLARE to
 SMALLINT or TINYINT; INT1 on every path (unsigned 0..255 in ABAP); a
 UNION of an INT2 and an INTEGER column (HANA unifies them; the IR does not
-yet); an INTEGER assigned to an INT2 scalar. An INT2 column of a table
+yet); an INTEGER assigned to an INT2 scalar (so a scalar INT2 output only ever
+holds an INT2 value and needs no check of its own). Not INT2 but found on
+the way: a CAST to BIGINT is typed as a plain INTEGER, which is narrower
+than BIGINT; it is a known gap, recorded here until it is measured. An INT2 column of a table
 input is range-checked at the bind with one query; across a nested CALL,
 INT2 inputs and outputs are refused.

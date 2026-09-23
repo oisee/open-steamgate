@@ -445,9 +445,10 @@ describe("the typed SQLScript procedural IR", function () {
         inputCatalogue: {DUMMY: {}}, procedures: new Map([["ZCL_DEMO=>CHILD", childOut]])});
     } catch (error) { caught = error; }
     expect(caught?.message).to.match(/of a nested CALL has INT2 columns \(ID\)/);
+    // an INTEGER output, so only the input refusal can fire here
     const childIn = procedure({
       relationParameters: [{name: "IT_ROWS", schema: small}],
-      output: "ET_ROWS", outputSchema: small,
+      output: "ET_ROWS", outputSchema: {ID: T.int},
       body: [assignRelation("ET_ROWS", varRef("IT_ROWS"))],
     });
     caught = undefined;
@@ -456,6 +457,7 @@ describe("the typed SQLScript procedural IR", function () {
         inputCatalogue: {DUMMY: {}}, procedures: new Map([["ZCL_DEMO=>CHILD", childIn]])});
     } catch (error) { caught = error; }
     expect(caught).to.be.instanceOf(UnsupportedSqlScript);
+    expect(caught.message).to.match(/relation input IT_ROWS has INT2 columns \(ID\)/);
   });
 
   it("checks the INT2 columns of a table input at the bind, as it checks a scalar INT2 input", async () => {
