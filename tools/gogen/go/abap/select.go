@@ -15,42 +15,13 @@ type (
 	DBInt    = sql.NullInt64
 )
 
-// Slot is a place in the lowered SQL where a range predicate arrives at run
-// time: the Index-th ? of the statement stands for col IN rows.
-type Slot struct {
-	Index int
-	Col   string
-	Rows  []RangeRow
-}
-
-// Select runs a lowered SELECT: the SQL and its static arguments from the
-// build, the range slots expanded now, each row handed to row with a scan
-// function. It returns the number of rows.
-func Select(s *Session, text string, args []any, slots []Slot, row func(scan func(dest ...any) error)) int {
-	bySlot := map[int]Slot{}
-	for _, sl := range slots {
-		bySlot[sl.Index] = sl
-	}
-	var b strings.Builder
-	var bound []any
-	k := 0
-	for _, part := range strings.SplitAfter(text, "?") {
-		if !strings.HasSuffix(part, "?") {
-			b.WriteString(part)
-			continue
-		}
-		b.WriteString(part[:len(part)-1])
-		if sl, ok := bySlot[k]; ok {
-			frag, fa := RangeSQL(sl.Col, sl.Rows)
-			b.WriteString("(" + frag + ")")
-			bound = append(bound, fa...)
-		} else {
-			b.WriteByte('?')
-			bound = append(bound, args[k])
-		}
-		k++
-	}
-	rows, err := conn().Query(b.String(), bound...)
+// Select runs a SELECT lowered at build time: the SQL and its arguments
+// from the build, each range filled into its hostPred marker now
+// (SpliceRanges), each row handed to row with a scan function. It returns
+// the number of rows.
+func Select(s *Session, text string, args []any, preds []HostPred, row func(scan func(dest ...any) error)) int {
+	text, bound := SpliceRanges(text, args, preds)
+	rows, err := conn().Query(text, bound...)
 	if err != nil {
 		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
 	}

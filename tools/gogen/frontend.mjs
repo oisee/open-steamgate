@@ -13,6 +13,8 @@
 // why; a method that calls a skipped one is refused in turn.
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
+import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
+import * as WIR from "../ir-writes.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
@@ -652,10 +654,16 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   "CX_SY_STRG_PAR_VAL",
   // REPLACE ALL OCCURRENCES OF an empty pattern; open-abap-core has no such
   // class, so its superclass is written down below as A4H defines it
-  "CX_SY_REPLACE_INFINITE_LOOP"];
+  "CX_SY_REPLACE_INFINITE_LOOP",
+  // Open SQL (go/abap/select.go, dbwrite.go, ranges.go): a database error
+  // and INSERT FROM TABLE with a duplicate key; a range value longer than
+  // its column; a CP pattern past twice the column (tools/ir-ranges.mjs)
+  "CX_SY_OPEN_SQL_DB", "CX_SY_OPEN_SQL_DATA_ERROR", "CX_SY_DYNAMIC_OSQL_SEMANTICS"];
 // the superclass of a runtime exception the registry does not hold, read
-// off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK)
-const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK"};
+// off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK), and
+// CX_SY_OPEN_SQL_DATA_ERROR from CX_SY_OPEN_SQL_ERROR (its definition on
+// A4H, 2026-09-23)
+const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY_OPEN_SQL_DATA_ERROR: "CX_SY_OPEN_SQL_ERROR"};
 
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
@@ -1567,7 +1575,7 @@ function classRefIntfAttribute(base, name, ctx, write) {
 
 /* --------------------------------------------------------------- expressions */
 
-const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc"};
+const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt"};
 const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**
@@ -2009,47 +2017,219 @@ function declaringClass(reg, cls, name, kind) {
 }
 
 
-/**
- * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
- * [WHERE f IN range AND f op value ...] [ORDER BY f ...]: the form the
- * gateway's DPCs use. The relation goes to the shared relational IR and is
- * lowered to SQL at build time (emit side); a range arrives at run time and
- * is expanded there. MANDT is filtered with the logon client when the table
- * has one, as a system does implicitly.
+/*
+ * Open SQL through the shared relational IR (osg-i7's, tools/sqlscript-ir.mjs
+ * lowered by tools/sqlscript-lower.mjs; ranges tools/ir-ranges.mjs, writes
+ * tools/ir-writes.mjs). What is known at build time is lowered here, once:
+ * a SELECT, an UPDATE ... SET ... WHERE, a DELETE FROM ... WHERE, with a
+ * host value as a parameter and a range as a hostPred marker that the Go
+ * runtime fills (go/abap/ranges.go, a port checked byte for byte against
+ * the pairs). A write whose rows are a work area or an internal table is
+ * built here with ir-writes' constructors and lowered once to refuse what
+ * the IR refuses; its rows arrive at run time and the Go runtime renders
+ * them with its port of the same lowering (go/abap/irsql.go, checked
+ * against writes.json). MANDT is the logon client in every predicate and in
+ * every row written, as a system does implicitly.
  */
-function selectStatement(node, ctx, text) {
-  const sel = node.findDirectExpression(Expressions.Select);
-  if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
-  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
-  if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
-  const tableName = upper(from[0].concatTokens());
+
+/** a table of the dictionary: its columns (typed on demand), its key, whether it has a client */
+function dbTable(ctx, tableName, verb) {
   const tabl = ctx.reg.getObject("TABL", tableName);
-  if (!tabl) throw new Unsupported(`SELECT FROM ${tableName}: not a table of the dictionary in this program`);
+  if (!tabl) throw new Unsupported(`${verb} ${tableName}: not a table of the dictionary in this program`);
   let tType;
-  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`SELECT FROM ${tableName}: its type does not resolve`); }
+  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`${verb} ${tableName}: its type does not resolve`); }
+  if (!(tType instanceof BasicTypes.StructureType)) throw new Unsupported(`${verb} ${tableName}: its type does not resolve`);
   const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
   const colType = (n) => {
     const c = columns.get(n);
-    if (!c) throw new Unsupported(`SELECT: ${tableName} has no column ${n}`);
+    if (!c) throw new Unsupported(`${verb}: ${tableName} has no column ${n}`);
     return typeOf(c.type, `${tableName}-${n}`, ctx.program);
   };
+  let key = [];
+  try { key = tabl.listKeys(ctx.reg).map(upper); } catch { key = []; }
+  return {name: tableName, columns, colType, key, client: columns.has("MANDT")};
+}
+
+/** the IR type of a column in a predicate or a projection */
+const sqlIrType = (t) => (t.k === "i" ? RIR.T.int : t.k === "int8" ? RIR.T.int8 : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
+/** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
+ * d, t or n is its characters, as the column stores them */
+function writeIrType(t, where) {
+  if (t.k === "i") return RIR.T.int;
+  if (t.k === "int8") return RIR.T.int8;
+  if (t.k === "string") return RIR.T.str;
+  if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
+  if (t.k === "d") return RIR.T.char(8);
+  if (t.k === "t") return RIR.T.char(6);
+  throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
+}
+const lowName = (n) => n.toLowerCase();
+const mandtPred = () => RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool);
+const andIr = (a, b) => (a === null ? b : b === null ? a : RIR.bin("AND", a, b, RIR.T.bool));
+
+/** a host value of Open SQL: [@]name[-comp...], the parser leaving a
+ * component after @ as siblings (Dash, SQLFieldName) */
+function sqlHost(src, trailing, ctx, text) {
+  const sk = [...src.getChildren().filter((c) => !isTok(c, "@")), ...trailing];
+  const simple = sk[0];
+  if (isExpr(simple, Expressions.Source)) {
+    if (sk.length !== 1) throw new Unsupported(`SQL value: ${text}`);
+    return source(simple, ctx);
+  }
+  if (!isExpr(simple, Expressions.SimpleSource3) || simple.getChildren().length !== 1) throw new Unsupported(`SQL value: ${text}`);
+  let v = sourceOperand(simple.getFirstChild(), ctx);
+  for (let i = 1; i < sk.length; i += 2) {
+    if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SQL value: ${text}`);
+    const f = fieldOf(ctx, v.type, sk[i + 1].concatTokens(), text);
+    v = {e: "field", base: v, name: f.name, type: f.type};
+  }
+  return v;
+}
+
+/** a value compared with or written into a column: a literal of the
+ * column's own kind is an IR literal, anything else a host value converted
+ * to the column's type and bound at run time */
+function sqlValue(v, ct, ir, acc) {
+  if (v.e === "chars" && ct.k === "c" && v.value.length <= (ct.len ?? 1)) return RIR.lit(v.value, ir);
+  if (v.e === "int" && ct.k === "i") return RIR.lit(v.value, ir);
+  const x = convert(v, ct);
+  acc.hosts.push(x);
+  return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
+}
+
+const SQL_OPS = {"=": "=", EQ: "=", "<>": "<>", NE: "<>", "<": "<", LT: "<", ">": ">", GT: ">", "<=": "<=", LE: "<=", ">=": ">=", GE: ">="};
+
+/** one comparison of a WHERE: col op value, or col IN range (a hostPred) */
+function sqlCompare(p, ctx, tb, acc) {
+  const kids = p.getChildren();
+  const text = p.concatTokens();
+  if (!isExpr(kids[0], Expressions.SQLFieldName) || kids[0].concatTokens().includes("~")) throw new Unsupported(`WHERE compare: ${text}`);
+  const col = upper(kids[0].concatTokens());
+  const ct = tb.colType(col);
+  const inn = p.findDirectExpression(Expressions.SQLIn);
+  if (inn) {
+    if (kids.length !== 2 || kids[1] !== inn) throw new Unsupported(`WHERE IN form: ${text}`);
+    const srcs = inn.findDirectExpressions(Expressions.SQLSource);
+    if (srcs.length !== 1 || inn.getChildren().length !== 2) throw new Unsupported(`WHERE IN form: ${text}`);
+    const range = sqlHost(srcs[0], [], ctx, text);
+    if (range.type.k !== "table" || range.type.row.k !== "struct") throw new Unsupported(`IN of a ${range.type.k}`);
+    const fields = new Map((ctx.program.structs.get(range.type.row.go)?.fields ?? []).map((x) => [String(x.name).toUpperCase(), x]));
+    if (!["SIGN", "OPTION", "LOW", "HIGH"].every((x) => fields.has(x))) throw new Unsupported(`IN of a table that is not a ranges table`);
+    for (const f of ["LOW", "HIGH"]) {
+      if (!["c", "string", "i", "n", "d", "t"].includes(fields.get(f).type.k)) throw new Unsupported(`IN: a range whose ${f} is a ${fields.get(f).type.k}`);
+    }
+    if (!["c", "string", "i", "n", "d", "t"].includes(ct.k)) throw new Unsupported(`IN on a ${ct.k} column: ${text}`);
+    const id = String(acc.ranges.length);
+    const low = fields.get("LOW").type;
+    const kind = ct.k === "n" ? "NUMC" : undefined;
+    const irT = sqlIrType(ct);
+    acc.ranges.push({id, column: col, type: irT, kind, lowLen: low.k === "c" || low.k === "n" ? low.len ?? 0 : 0, range});
+    return rangeHostPred(id, col, irT, kind === undefined ? {} : {kind});
+  }
+  const op = p.findDirectExpression(Expressions.SQLCompareOperator);
+  const src = p.findDirectExpression(Expressions.SQLSource);
+  if (!op || !src || kids[1] !== op || kids[2] !== src) throw new Unsupported(`WHERE compare: ${text}`);
+  const sqlOp = SQL_OPS[upper(op.concatTokens())];
+  if (sqlOp === undefined) throw new Unsupported(`WHERE operator ${op.concatTokens()}`);
+  if (!["c", "string", "i", "n", "d", "t", "int8"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
+  const v = sqlHost(src, kids.slice(3), ctx, text);
+  return RIR.bin(sqlOp, RIR.col(lowName(col), sqlIrType(ct)), sqlValue(v, ct, sqlIrType(ct), acc), RIR.T.bool);
+}
+
+/** a WHERE (SQLCond) as an IR predicate: comparisons, IN range, AND, OR,
+ * NOT and parentheses, with ABAP's precedence (NOT, AND, OR) */
+function sqlCond(node, ctx, tb, acc) {
+  const items = node.getChildren();
+  let i = 0;
+  const text = node.concatTokens();
+  const primary = () => {
+    const n = items[i++];
+    if (isTok(n, "(")) {
+      const inner = items[i++];
+      if (!isExpr(inner, Expressions.SQLCond) || !isTok(items[i], ")")) throw new Unsupported(`WHERE form: ${text}`);
+      i += 1;
+      return sqlCond(inner, ctx, tb, acc);
+    }
+    if (isExpr(n, Expressions.SQLCompare)) return sqlCompare(n, ctx, tb, acc);
+    throw new Unsupported(`WHERE form: ${text}`);
+  };
+  const notExpr = () => {
+    if (isTok(items[i], "NOT")) { i += 1; return RIR.not(notExpr()); }
+    return primary();
+  };
+  const andExpr = () => {
+    let l = notExpr();
+    while (isTok(items[i], "AND")) { i += 1; l = RIR.bin("AND", l, notExpr(), RIR.T.bool); }
+    return l;
+  };
+  let l = andExpr();
+  while (isTok(items[i], "OR")) { i += 1; l = RIR.bin("OR", l, andExpr(), RIR.T.bool); }
+  if (i !== items.length) throw new Unsupported(`WHERE form: ${text}`);
+  return l;
+}
+
+/** the client and the WHERE of a statement, AND'ed */
+function wherePred(node, ctx, tb, acc) {
+  const cond = node.findDirectExpression(Expressions.SQLCond);
+  let pred = tb.client ? mandtPred() : null;
+  if (cond) pred = andIr(pred, sqlCond(cond, ctx, tb, acc));
+  return pred;
+}
+
+/** a lowered statement's parameters as the emitter binds them, and its ranges */
+function loweredArgs(lowered, acc) {
+  const args = lowered.params.map((p) => {
+    const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
+    if (m) return {host: acc.hosts[Number(m[1])]};
+    if (p.name === "SY-MANDT") return {mandt: true};
+    return {value: p.value};
+  });
+  const preds = (lowered.hostPreds ?? []).map((h) => ({...acc.ranges[Number(h.id)], after: h.after}));
+  return {args, preds};
+}
+
+function lowerOrRefuse(verb, rel) {
+  try { return lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`${verb}: the relational IR refused it: ${e.message}`); }
+}
+
+/** the field list of a SELECT: * or plain columns */
+function selectColumns(sel, tb, text) {
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
-  const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...columns.keys()]
+  const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...tb.columns.keys()]
     : (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
       const n = f.findDirectExpression(Expressions.SQLFieldName);
       if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
       return upper(n.concatTokens());
     });
   if (names.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
-  const cols = names.map((n) => ({name: n, type: colType(n)}));
+  return names.map((n) => ({name: n, type: tb.colType(n)}));
+}
+
+function selectTable(sel, ctx, text) {
+  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
+  return dbTable(ctx, upper(from[0].concatTokens()), "SELECT FROM");
+}
+
+/**
+ * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
+ * [WHERE ...] [ORDER BY f ...]: the form the gateway's DPCs use. sy-subrc 0
+ * with rows, 4 without; sy-dbcnt the rows.
+ */
+function selectStatement(node, ctx, text) {
+  const sel = node.findDirectExpression(Expressions.Select);
+  if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
+  if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  const tb = selectTable(sel, ctx, text);
+  const cols = selectColumns(sel, tb, text);
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
   if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   const target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
   if (target.type.k !== "table") throw new Unsupported(`SELECT INTO TABLE of a ${target.type.k}`);
   const elementary = target.type.row.k !== "struct";
-  if (elementary && (corresponding || names.length !== 1 || !["c", "string", "i"].includes(target.type.row.k))) throw new Unsupported(`SELECT INTO TABLE of ${target.type.row.k} rows: ${text}`);
+  if (elementary && (corresponding || cols.length !== 1 || !["c", "string", "i"].includes(target.type.row.k))) throw new Unsupported(`SELECT INTO TABLE of ${target.type.row.k} rows: ${text}`);
   const rowFields = new Map((ctx.program.structs.get(target.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
   const rowOrder = ctx.program.structs.get(target.type.row.go)?.fields ?? [];
   // where each column goes: by name for CORRESPONDING, else by position
@@ -2060,27 +2240,8 @@ function selectStatement(node, ctx, text) {
     if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     return {field: f.name, type: f.type};
   });
-  const where = [];
-  const cond = sel.findDirectExpression(Expressions.SQLCond);
-  if (cond) {
-    const parts = cond.getChildren();
-    for (let i = 0; i < parts.length; i += 1) {
-      const p = parts[i];
-      if (isTok(p, "AND")) continue;
-      if (!isExpr(p, Expressions.SQLCompare)) throw new Unsupported(`SELECT WHERE form: ${cond.concatTokens()}`);
-      const f = p.findDirectExpression(Expressions.SQLFieldName);
-      const inn = p.findDirectExpression(Expressions.SQLIn);
-      if (!f || !inn || /\bNOT\b/i.test(p.concatTokens())) throw new Unsupported(`SELECT WHERE compare: ${p.concatTokens()}`);
-      const col = upper(f.concatTokens());
-      const srcs = inn.findDirectExpressions(Expressions.SQLSource);
-      if (srcs.length !== 1 || inn.getChildren().length !== 2) throw new Unsupported(`SELECT WHERE IN form: ${p.concatTokens()}`);
-      const range = sourceOperand(srcs[0].getFirstChild().getFirstChild(), ctx);
-      if (range.type.k !== "table" || range.type.row.k !== "struct") throw new Unsupported(`IN of a ${range.type.k}`);
-      const rf = new Set((ctx.program.structs.get(range.type.row.go)?.fields ?? []).map((x) => String(x.name).toUpperCase()));
-      if (!["SIGN", "OPTION", "LOW", "HIGH"].every((x) => rf.has(x))) throw new Unsupported(`IN of a table that is not a ranges table`);
-      where.push({col, type: colType(col), range});
-    }
-  }
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(sel, ctx, tb, acc);
   const order = [];
   const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
   if (ob) {
@@ -2091,38 +2252,39 @@ function selectStatement(node, ctx, text) {
       const desc = isTok(kids[i + 1], "DESCENDING");
       if (isTok(kids[i + 1], "DESCENDING") || isTok(kids[i + 1], "ASCENDING")) i += 1;
       const col = upper(kids[i].concatTokens());
-      colType(col);
+      tb.colType(col);
       order.push({col, desc});
     }
   }
-  for (const w of where) {
-    const rt = (ctx.program.structs.get(w.range.type.row.go)?.fields ?? []);
-    for (const f of rt) if (["LOW", "HIGH"].includes(String(f.name).toUpperCase()) && !["c", "string", "i"].includes(f.type.k)) throw new Unsupported(`IN: a range whose ${f.name} is a ${f.type.k}`);
-  }
-  // the relation, in the shared relational IR (osg-i7's), lowered to SQLite
-  // here at build time; each range sits where a marker parameter is, until
-  // the IR carries a node of its own for a predicate that arrives at run time
-  const irType = (t) => (t.k === "i" ? RIR.T.int : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
-  const low = (n) => n.toLowerCase();
-  let pred = null;
-  const and = (p) => { pred = pred === null ? p : RIR.bin("AND", pred, p, RIR.T.bool); };
-  if (columns.has("MANDT")) and(RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool));
-  where.forEach((w, i) => and(RIR.lit(`@@range:${i}@@`, RIR.T.bool)));
-  let rel = RIR.scan(low(tableName));
+  let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
-  rel = RIR.project(rel, cols.map((c) => ({as: low(c.name), expr: RIR.col(low(c.name), irType(c.type))})));
-  if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: low(o.col), desc: o.desc})));
-  let lowered;
-  try { lowered = lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`SELECT: the relational IR refused it: ${e.message}`); }
-  const args = [];
-  const slots = [];
-  lowered.params.forEach((p, k) => {
-    const m = /^@@range:(\d+)@@$/.exec(String(p.value ?? ""));
-    if (m) { const w = where[Number(m[1])]; slots.push({index: k, col: `"${low(w.col)}"`, range: w.range}); args.push({nil: true}); return; }
-    if (p.name === "SY-MANDT") { args.push({mandt: true}); return; }
-    args.push({value: p.value});
-  });
-  return {s: "select_table", table: tableName, cols, assign, target, sql: lowered.sql, args, slots};
+  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
+  const lowered = lowerOrRefuse("SELECT", rel);
+  return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+
+/**
+ * SELECT COUNT(*) FROM table INTO n [WHERE ...]: the count into n, sy-dbcnt
+ * the count (A4H, ANORMALIES select-count-dbcnt), sy-subrc 4 when it is 0.
+ */
+function selectCount(sel, ctx, text) {
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT COUNT form: ${text}`);
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  if (!/^COUNT\s*\(\s*\*\s*\)$/i.test(fl?.concatTokens() ?? "")) throw new Unsupported(`SELECT COUNT form: ${text}`);
+  const tb = selectTable(sel, ctx, text);
+  const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
+  const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
+  if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT COUNT INTO form: ${text}`);
+  const target = lvalue(tnode, ctx);
+  if (target.type.k !== "i") throw new Unsupported(`SELECT COUNT INTO a ${target.type.k}: ${text}`);
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(sel, ctx, tb, acc);
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.aggregate(rel, [], [{as: "n", expr: {...RIR.call("COUNT", [], RIR.T.int), star: true}}]);
+  const lowered = lowerOrRefuse("SELECT COUNT", rel);
+  return {s: "select_count", table: tb.name, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
 /**
@@ -2138,64 +2300,136 @@ function luwStatement(node, text) {
 }
 
 /**
- * INSERT / UPDATE / MODIFY / DELETE on a database table. The SQL of a
- * statement comes from the shared relational IR (sqlscript-ir.mjs, lowered
- * by sqlscript-lower.mjs) and is never written here by hand. As of
- * 2026-09-23 the IR has no node for a write: effects() anticipates
- * {rel: "insert" | "update" | "delete" | "merge"}, but there is neither a
- * constructor nor a lowering, and lower() answers "relation <kind> not
- * lowered". Until it has them every such statement is a stub, and the
- * message names the node it waits on. What each must do once it exists was
- * measured on A4H (testdata/zcl_gogen_t_dbw, ANORMALIES
- * dbwrite-*): sy-subrc 4 for a duplicate key / a missing row, sy-dbcnt the
- * rows written, MANDT the logon client whatever the work area says, and
- * INSERT FROM TABLE with a duplicate raises CX_SY_OPEN_SQL_DB after writing
- * every other row.
+ * INSERT / UPDATE / MODIFY / DELETE on a database table, through the write
+ * nodes of the relational IR (tools/ir-writes.mjs). What each does was
+ * measured on A4H (testdata/zcl_gogen_t_dbw, ANORMALIES dbwrite-*):
+ *   INSERT FROM wa         sy-subrc 4 and nothing written for a duplicate key
+ *   INSERT FROM TABLE      every row without a duplicate written, then
+ *                          CX_SY_OPEN_SQL_DB with sy untouched ("raise")
+ *   ... ACCEPTING DUPLICATE KEYS  sy-subrc 4, sy-dbcnt the rows written
+ *   UPDATE / DELETE FROM wa / TABLE   by the primary key, one row at a time,
+ *                          the counts summed, sy-subrc 4 when a row is missing
+ *   UPDATE SET / DELETE WHERE   sy-subrc 4 when no row, sy-dbcnt the rows
+ *   MODIFY                 insert or update, sy-subrc 0
+ * MANDT is the logon client whatever the work area holds.
  */
 function dbWriteStatement(kind, node, ctx, text) {
   const verb = text.split(/\s+/)[0].toUpperCase();
   const name = upper((node.findFirstExpression(Expressions.DatabaseTable) ?? node.findFirstExpression(Expressions.Target))?.concatTokens() ?? "");
-  if (!ctx.reg.getObject("TABL", name)) throw new Unsupported(`${verb} ${name || "?"}: not a table of the dictionary in this program`);
-  try {
-    lowerRelation({rel: kind, table: name.toLowerCase()}, "sqlite");
-  } catch (e) {
-    throw new Unsupported(`${verb} ${name}: the relational IR has no ${kind} node (${e.message})`);
+  if (/\b(CLIENT|CONNECTION|USING)\b/i.test(text)) throw new Unsupported(`${verb} form: ${text}`);
+  // a name that is a variable is the internal table's, as ABAP resolves it
+  if (isVariableName(name, ctx)) throw new Unsupported(`${verb} ${name}: an internal table named like a table of the dictionary`);
+  const tb = dbTable(ctx, name, verb);
+  if (kind === "update" && isStmt(node, Statements.UpdateDatabase) && /^UPDATE\s+\S+\s+SET\b/i.test(text)) return updateSet(node, ctx, tb, text);
+  if (kind === "delete" && /^DELETE\s+FROM\b/i.test(text)) return deleteWhere(node, ctx, tb, text);
+  return writeRows(kind, node, ctx, tb, text, verb);
+}
+
+/** UPDATE dbtab SET col = value ... [WHERE ...], lowered here */
+function updateSet(node, ctx, tb, text) {
+  const acc = {hosts: [], ranges: []};
+  const set = [];
+  const kids = node.getChildren();
+  const at = kids.findIndex((k) => isTok(k, "SET"));
+  for (let i = at + 1; i < kids.length && !isTok(kids[i], "WHERE") && !isTok(kids[i], "."); i += 1) {
+    const k = kids[i];
+    if (isTok(k, ",")) continue;
+    if (!isExpr(k, Expressions.SQLFieldAndValue)) throw new Unsupported(`UPDATE SET form: ${text}`);
+    const fk = k.getChildren();
+    const src = k.findDirectExpression(Expressions.SQLSource);
+    if (!isExpr(fk[0], Expressions.SQLFieldName) || !isTok(fk[1], "=") || fk[2] !== src) throw new Unsupported(`UPDATE SET form: ${k.concatTokens()}`);
+    const col = upper(fk[0].concatTokens());
+    if (tb.client && col === "MANDT") throw new Unsupported(`UPDATE SET of the client column: ${text}`);
+    const ct = tb.colType(col);
+    const ir = writeIrType(ct, `UPDATE ${tb.name}-${col}`);
+    set.push({col, expr: sqlValue(sqlHost(src, fk.slice(3), ctx, k.concatTokens()), ct, ir, acc)});
   }
-  throw new Unsupported(`${verb} ${name}: the relational IR lowers ${kind} now, and nothing here emits it yet`);
+  if (set.length === 0) throw new Unsupported(`UPDATE SET form: ${text}`);
+  const pred = wherePred(node, ctx, tb, acc);
+  let stmt;
+  try { stmt = WIR.update(tb.name, set, pred ?? undefined); } catch (e) { throw new Unsupported(`UPDATE ${tb.name}: ${e.message}`); }
+  const lowered = lowerOrRefuse(`UPDATE ${tb.name}`, stmt);
+  return {s: "db_write_sql", verb: "UPDATE", table: tb.name, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+
+/** DELETE FROM dbtab [WHERE ...], lowered here */
+function deleteWhere(node, ctx, tb, text) {
+  if (!isStmt(node, Statements.DeleteDatabase)) throw new Unsupported(`DELETE form: ${text}`);
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(node, ctx, tb, acc);
+  const lowered = lowerOrRefuse(`DELETE ${tb.name}`, WIR.remove(tb.name, pred ?? undefined));
+  return {s: "db_write_sql", verb: "DELETE", table: tb.name, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+
+/** INSERT / UPDATE / MODIFY / DELETE dbtab FROM wa | FROM TABLE itab, INSERT INTO dbtab VALUES wa */
+function writeRows(kind, node, ctx, tb, text, verb) {
+  const fromTable = /\bFROM\s+TABLE\b/i.test(text);
+  const accepting = /\bACCEPTING\s+DUPLICATE\s+KEYS\b/i.test(text);
+  if (accepting && (kind !== "insert" || !fromTable)) throw new Unsupported(`${verb} form: ${text}`);
+  let value;
+  if (isStmt(node, Statements.DeleteInternal)) {
+    const src = node.findDirectExpression(Expressions.Source);
+    if (!src || !/^DELETE\s+\S+\s+FROM\s+[^\s.]+\s*\.?$/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
+    value = source(src, ctx);
+  } else {
+    const src = node.findDirectExpression(Expressions.SQLSource) ?? node.findDirectExpression(Expressions.SQLSourceSimple);
+    const ok = kind === "insert" ? /^INSERT\s+(INTO\s+\S+\s+VALUES|\S+\s+FROM(\s+TABLE)?)\s+\S+(\s+ACCEPTING\s+DUPLICATE\s+KEYS)?\s*\.?$/i
+      : new RegExp(`^${verb}\\s+\\S+\\s+FROM(\\s+TABLE)?\\s+\\S+\\s*\\.?$`, "i");
+    if (!src || !ok.test(text)) throw new Unsupported(`${verb} form: ${text}`);
+    value = sqlHost(src, [], ctx, text);
+  }
+  const row = fromTable ? (value.type.k === "table" ? value.type.row : null) : value.type;
+  if (row === null) throw new Unsupported(`${verb} ... FROM TABLE of a ${value.type.k}`);
+  if (row.k !== "struct") throw new Unsupported(`${verb} ${tb.name} FROM a ${row.k}: a work area of the table's line type is needed`);
+  // the work area has the table's columns, in order, of the same kind and
+  // length: a move by name and by layout are then the same
+  const fields = ctx.program.structs.get(row.go)?.fields ?? [];
+  const names = [...tb.columns.keys()];
+  if (fields.length !== names.length || names.some((n, i) => {
+    const ct = tb.colType(n);
+    const f = fields[i];
+    return f.name !== n || f.type.k !== ct.k || (f.type.len ?? null) !== (ct.len ?? null);
+  })) throw new Unsupported(`${verb} ${tb.name}: a work area not of the table's line type (${row.go})`);
+  const cols = names.map((n) => {
+    const ct = tb.colType(n);
+    return {name: n, kind: ct.k, ir: writeIrType(ct, `${verb} ${tb.name}-${n}`), client: tb.client && n === "MANDT"};
+  });
+  if (tb.key.length === 0 || tb.key.some((k) => !tb.columns.has(k))) throw new Unsupported(`${verb} ${tb.name}: its primary key does not resolve`);
+  const schema = Object.fromEntries(cols.map((c) => [c.name, c.ir]));
+  const rows = WIR.bindRows(names, schema, [{}]);
+  const keyPred = cols.filter((c) => tb.key.includes(c.name)).map((c) => RIR.bin("=", RIR.col(c.name, c.ir), WIR.initialValue(c.ir), RIR.T.bool))
+    .reduce((a, b) => RIR.bin("AND", a, b, RIR.T.bool));
+  const rest = cols.filter((c) => !tb.key.includes(c.name));
+  const op = kind === "merge" ? "modify" : kind;
+  if (op === "modify" && rest.length === 0) throw new Unsupported(`MODIFY ${tb.name}: every column is a key column, and what sy-dbcnt says for an existing row is not measured`);
+  // the statement as the IR has it, lowered once here so that what the IR
+  // refuses is refused at build time; the Go runtime renders the same
+  // shape with the rows it is given (go/abap/irsql.go, writes.json)
+  const onDuplicate = op !== "insert" ? undefined : accepting ? "ignore" : fromTable ? "raise" : "error";
+  try {
+    const stmt = op === "insert" ? WIR.insertRows(tb.name, names, rows, {onDuplicate})
+      : op === "update" ? WIR.update(tb.name, rest.map((c) => ({col: c.name, expr: WIR.initialValue(c.ir)})), keyPred)
+        : op === "delete" ? WIR.remove(tb.name, keyPred)
+          : WIR.upsert(tb.name, names, rows, tb.key);
+    lowerRelation(stmt, "sqlite");
+  } catch (e) {
+    throw new Unsupported(`${verb} ${tb.name}: the relational IR refused it: ${e.message}`);
+  }
+  return {s: "db_write", op, table: tb.name, value, fromTable, onDuplicate, cols, key: tb.key};
 }
 
 /**
  * SELECT SINGLE fields FROM table INTO [CORRESPONDING FIELDS OF] wa
- * WHERE col = value [AND col = value ...]. Measured on A4H (2026-09-23):
- * without a row, sy-subrc is 4 and the target keeps what it had; with one,
- * only the fields the columns go to are written (by name with CORRESPONDING,
- * else by position), the others keep theirs. A host value is converted to
- * the column's type and bound; MANDT is the logon client, as for a table.
+ * [WHERE ...]. Measured on A4H (2026-09-23): without a row, sy-subrc is 4
+ * and the target keeps what it had; with one, only the fields the columns
+ * go to are written (by name with CORRESPONDING, else by position), the
+ * others keep theirs. A host value is converted to the column's type and
+ * bound; MANDT is the logon client, as for a table.
  */
 function selectSingle(sel, ctx, text) {
   if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
-  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
-  if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
-  const tableName = upper(from[0].concatTokens());
-  const tabl = ctx.reg.getObject("TABL", tableName);
-  if (!tabl) throw new Unsupported(`SELECT FROM ${tableName}: not a table of the dictionary in this program`);
-  let tType;
-  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`SELECT FROM ${tableName}: its type does not resolve`); }
-  const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
-  const colType = (n) => {
-    const c = columns.get(n);
-    if (!c) throw new Unsupported(`SELECT: ${tableName} has no column ${n}`);
-    return typeOf(c.type, `${tableName}-${n}`, ctx.program);
-  };
-  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
-  const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...columns.keys()]
-    : (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
-      const n = f.findDirectExpression(Expressions.SQLFieldName);
-      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
-      return upper(n.concatTokens());
-    });
-  if (names.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
-  const cols = names.map((n) => ({name: n, type: colType(n)}));
+  const tb = selectTable(sel, ctx, text);
+  const cols = selectColumns(sel, tb, text);
   const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
   const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
   if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SINGLE INTO form: ${text}`);
@@ -2222,52 +2456,14 @@ function selectSingle(sel, ctx, text) {
     if (corresponding || cols.length !== 1 || !okCol(cols[0], target)) throw new Unsupported(`SELECT SINGLE INTO a ${target.type.k}: ${text}`);
     assign = [{line: true, type: target.type}];
   }
-  // WHERE: col = host value, AND'ed
-  const hosts = [];
-  const cond = sel.findDirectExpression(Expressions.SQLCond);
-  if (cond) {
-    for (const p of cond.getChildren()) {
-      if (isTok(p, "AND")) continue;
-      if (!isExpr(p, Expressions.SQLCompare)) throw new Unsupported(`SELECT WHERE form: ${cond.concatTokens()}`);
-      const kids = p.getChildren();
-      const op = p.findDirectExpression(Expressions.SQLCompareOperator);
-      const src = p.findDirectExpression(Expressions.SQLSource);
-      if (kids.length < 3 || kids[2] !== src || !isExpr(kids[0], Expressions.SQLFieldName) || !op || op.concatTokens() !== "=" || !src) throw new Unsupported(`SELECT WHERE compare: ${p.concatTokens()}`);
-      // the parser leaves wa-f of a host value as FieldChain, Dash, SQLFieldName
-      const sk = [...src.getChildren().filter((c) => !isTok(c, "@")), ...kids.slice(3)];
-      const simple = sk[0];
-      if (!isExpr(simple, Expressions.SimpleSource3) || simple.getChildren().length !== 1) throw new Unsupported(`SELECT WHERE value: ${src.concatTokens()}`);
-      let v = sourceOperand(simple.getFirstChild(), ctx);
-      for (let i = 1; i < sk.length; i += 2) {
-        if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SELECT WHERE value: ${src.concatTokens()}`);
-        const f = fieldOf(ctx, v.type, sk[i + 1].concatTokens(), src.concatTokens());
-        v = {e: "field", base: v, name: f.name, type: f.type};
-      }
-      const col = upper(kids[0].concatTokens());
-      const ct = colType(col);
-      if (!["c", "string", "i", "d"].includes(ct.k)) throw new Unsupported(`SELECT WHERE on a ${ct.k} column: ${p.concatTokens()}`);
-      hosts.push({col, type: ct, value: convert(v, ct)});
-    }
-  }
-  const irType = (t) => (t.k === "i" ? RIR.T.int : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
-  const low = (n) => n.toLowerCase();
-  let pred = null;
-  const and = (p) => { pred = pred === null ? p : RIR.bin("AND", pred, p, RIR.T.bool); };
-  if (columns.has("MANDT")) and(RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool));
-  hosts.forEach((h, i) => and(RIR.bin("=", RIR.col(low(h.col), irType(h.type)), RIR.param(`@@host:${i}@@`, irType(h.type)), RIR.T.bool)));
-  let rel = RIR.scan(low(tableName));
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(sel, ctx, tb, acc);
+  let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
-  rel = RIR.project(rel, cols.map((c) => ({as: low(c.name), expr: RIR.col(low(c.name), irType(c.type))})));
+  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   rel = RIR.limit(rel, 1);
-  let lowered;
-  try { lowered = lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`SELECT: the relational IR refused it: ${e.message}`); }
-  const args = lowered.params.map((p) => {
-    const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
-    if (m) return {host: hosts[Number(m[1])].value};
-    if (p.name === "SY-MANDT") return {mandt: true};
-    return {value: p.value};
-  });
-  return {s: "select_single", table: tableName, cols, assign, target, sql: lowered.sql, args};
+  const lowered = lowerOrRefuse("SELECT", rel);
+  return {s: "select_single", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
 /**
