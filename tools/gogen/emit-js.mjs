@@ -283,7 +283,7 @@ function place(p, ctx) {
       const [cls, attr] = p.go.split("__");
       return `${cls}.${ident(attr)}`;
     }
-    case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
+    case "field": return `${["var", "attr", "static", "field", "fs", "row", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "fs": return ident(p.name);
     case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {

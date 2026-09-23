@@ -59,10 +59,11 @@ func compileABAP(p string, icase bool) *regexp.Regexp {
 	if r, ok := regexCache.Load(key); ok {
 		return r.(*regexp.Regexp)
 	}
-	if strings.Contains(p, "*?") || strings.Contains(p, "+?") || strings.Contains(p, "??") {
+	syntax := outsideClasses(p)
+	if strings.Contains(syntax, "*?") || strings.Contains(syntax, "+?") || strings.Contains(syntax, "??") {
 		panic(ArithmeticError{"CX_SY_INVALID_REGEX", p})
 	}
-	if strings.Contains(strings.ReplaceAll(p, "(?:", ""), "(?") {
+	if strings.Contains(strings.ReplaceAll(syntax, "(?:", ""), "(?") {
 		panic(NotCompiled("FIND REGEX", "a (?...) group other than (?:...) is not in Go's regexp: "+p))
 	}
 	re, err := regexp.Compile(key)

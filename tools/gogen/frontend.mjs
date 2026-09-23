@@ -244,6 +244,25 @@ const NATIVE = new Map([
   ["CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "Native_GET_TEXT_FOR_MESSAGE"],
 ]);
 
+/**
+ * instance methods of the kernel whose ABAP signature is generic (TYPE
+ * simple, xsequence), so the subset cannot type them: the host function
+ * does the work and receives the object (me) first, and the signature it
+ * is called with is written here. A caller whose argument does not fit the
+ * written type is refused by the ordinary conversion rules.
+ * UTF-8 / UTF-16LE text <-> bytes: cl_abap_conv_out_ce / cl_abap_conv_in_ce.
+ */
+const NATIVE_ME = new Map([
+  ["CL_ABAP_CONV_OUT_CE=>CONVERT", {fn: "Native_CONV_OUT_CONVERT", params: [["DATA", "importing", "string"], ["N", "importing", "i", true], ["BUFFER", "exporting", "xstring"]]}],
+  ["CL_ABAP_CONV_IN_CE=>CONVERT", {fn: "Native_CONV_IN_CONVERT", params: [["INPUT", "importing", "xstring"], ["N", "importing", "i", true], ["DATA", "exporting", "string"]]}],
+]);
+const nativeMeSig = (program, key, name) => {
+  const n = NATIVE_ME.get(key);
+  const T = {string: S, xstring: XS, i: I};
+  const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
+  return {name, static: false, private: false, abstract: false, params: withSupplied(program, key, own), returning: null};
+};
+
 /* --------------------------------------------------------------------- types */
 
 function typeOf(t, where, program) {
@@ -386,11 +405,12 @@ function classIr(ctx0, obj) {
   const addSig = (m, prefix, isStatic) => {
     const name = prefix + upper(m.getName());
     const where = `${className}=>${name}`;
+    if (NATIVE_ME.has(where)) { signatures.set(name, nativeMeSig(program, where, name)); return; }
     try {
       const p = m.getParameters();
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
       const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
-        default: defaultOf(p, x), optional: optional.has(upper(x.getName()))});
+        default: defaultOf(p, x), optional: optional.has(upper(x.getName())), defOwner: prefix ? prefix.slice(0, -1) : className});
       const ret = p.getReturning();
       const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
         ...p.getChanging().map((x) => param(x, "changing"))];
@@ -471,6 +491,11 @@ function classIr(ctx0, obj) {
     if (sig.unsupported) { skip(sig.unsupported); continue; }
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
+    if (NATIVE_ME.has(`${className}=>${name}`)) {
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE_ME.get(`${className}=>${name}`).fn, me: true}],
+        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      continue;
+    }
     if (NATIVE.has(`${className}=>${name}`)) {
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE.get(`${className}=>${name}`)}],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
@@ -1599,6 +1624,10 @@ function items(node) {
       if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
       out.push({group: kids[i + 1]});
       i += 2;
+    } else if (isExpr(k, Expressions.MethodCallChain) && isTok(kids[i + 1], "-") && isExpr(kids[i + 2], Expressions.ComponentChain)) {
+      // m( )-comp: a component of what the call returns
+      out.push({node: k, comps: kids[i + 2]});
+      i += 2;
     } else if (isExpr(k, Expressions.ArithOperator)) {
       out.push({op: upper(k.concatTokens())});
     } else if (isTok(k) && ["&&", "&"].includes(tokenStr(k))) {
@@ -1621,6 +1650,7 @@ function leafTypes(node, ctx) {
       else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
       else if (it.group) walk(it.group);
       else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
+      else if (it.node && it.comps) out.push(componentsOf(sourceOperand(it.node, ctx), it.comps, ctx).type);
       else if (it.node) out.push(sourceOperand(it.node, ctx).type);
     }
   };
@@ -1672,6 +1702,17 @@ function source(node, ctx, outer, hint = outer) {
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
+/** a ComponentChain (a-b-c) read off a structured value */
+function componentsOf(v, chain, ctx) {
+  for (const c of chain.getChildren()) {
+    if (isTok(c, "-")) continue;
+    if (!isExpr(c, Expressions.ComponentName)) throw new Unsupported(`component chain ${chain.concatTokens()}`);
+    const f = fieldOf(ctx, v.type, c.concatTokens(), chain.concatTokens());
+    v = {e: "field", base: v, name: f.name, type: f.type};
+  }
+  return v;
+}
+
 function arith(node, ctx, calc, hint) {
   const its = items(node);
   let negate = false;
@@ -1687,7 +1728,8 @@ function arith(node, ctx, calc, hint) {
     }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    const v = sourceOperand(item.node, ctx, item.hint);
+    let v = sourceOperand(item.node, ctx, item.hint);
+    if (item.comps) v = componentsOf(v, item.comps, ctx);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -1939,6 +1981,7 @@ function constructor(c, ctx, inferred) {
 function methodSignature(ctx, owner, name) {
   const key = `${owner}=>${name}`;
   if (ctx.program.sigs.has(key)) return ctx.program.sigs.get(key);
+  if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return ctx.program.sigs.get(key); }
   let sig;
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
@@ -1951,7 +1994,7 @@ function methodSignature(ctx, owner, name) {
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
     const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
-      optional: optional.has(upper(x.getName()))});
+      optional: optional.has(upper(x.getName())), defOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
       ...p.getChanging().map((x) => param(x, "changing"))];
@@ -2726,6 +2769,9 @@ function defaultValue(p, ctx) {
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
   if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
   if (/^abap_false$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
+  // a constant: CLS=>C, or C of the class or interface the method is declared in
+  const named = /^([\w\/]+)=>(\w+)$/.exec(t) ?? (/^\w+$/.test(t) && p.defOwner ? [t, p.defOwner, t] : null);
+  if (named) return convert(resolveStatic(upper(named[1]), upper(named[2]), ctx), p.type);
   throw new Unsupported(`DEFAULT ${t}`);
 }
 

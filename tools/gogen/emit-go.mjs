@@ -254,6 +254,7 @@ export function emitGo(program, pkg = "main") {
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
+  out.push(...nativeCodepage(classes));
   // descriptors first: their Copy asks for clone functions
   const descs = descFuncs();
   out.push(...cloneFuncs());
@@ -281,6 +282,31 @@ function nativeMessageText(program) {
       ? [`\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().${ident("TEXTID")} != "" {`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
       : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
     `\treturn "An exception was raised."`, "}", ""];
+}
+
+/*
+ * cl_abap_conv_out_ce->convert and cl_abap_conv_in_ce->convert, kernel code
+ * in open-abap: text to bytes and back in the encoding create( ) chose
+ * (mv_js_encoding: utf8 or utf16le / utf-16le). The work is abap.EncodeText /
+ * abap.DecodeText; N and bytes that are no valid text are refused, not guessed.
+ */
+function nativeCodepage(classes) {
+  const out = [];
+  const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
+  const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.name === p);
+  if (has("Native_CONV_OUT_CONVERT")) {
+    const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "SUP_N");
+    out.push(`func Native_CONV_OUT_CONVERT(s *abap.Session, me *CL_ABAP_CONV_OUT_CE, data string, n int32, buffer *string${withSup ? ", sup_n string" : ""}) {`,
+      ...(withSup ? ["\tif sup_n != \"\" {", "\t\tdata = abap.SubS(data, 0, n)", "\t}"] : ["\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_OUT_CE=>CONVERT", "N given"))`, "\t}"]),
+      `\t*buffer = abap.EncodeText(me.${ident("MV_JS_ENCODING")}, data)`, "}", "");
+  }
+  if (has("Native_CONV_IN_CONVERT")) {
+    const withSup = sup("CL_ABAP_CONV_IN_CE", "CONVERT", "SUP_N");
+    out.push(`func Native_CONV_IN_CONVERT(s *abap.Session, me *CL_ABAP_CONV_IN_CE, input string, n int32, data *string${withSup ? ", sup_n string" : ""}) {`,
+      "\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "N given (open-abap ignores it)"))`, "\t}",
+      `\t*data = abap.DecodeText(me.${ident("MV_JS_ENCODING")}, me.${ident("MV_IGNORE_CERR")} != "", input)`, "}", "");
+  }
+  return out;
 }
 
 /*
@@ -554,7 +580,7 @@ function place(p, ctx) {
     case "attr": return `me.${ident(p.name)}`;
     case "static": return p.go;
     case "const": return p.go;
-    case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
+    case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
     case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
       return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
@@ -682,7 +708,7 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
-      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
+      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...(st.me ? ["me"] : []), ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
     case "raise":
       return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
