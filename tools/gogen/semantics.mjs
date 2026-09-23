@@ -140,6 +140,18 @@ const EXPECT = {
   // runs after it in the same process and reads the static its CLEANUPs
   // would have written to
   ZCL_GOGEN_T_UNCAUGHT_READ: "log:s-c-h",
+  // generic data: ASSIGN COMPONENT read and written back (a lower-case name
+  // is found, an unknown one is sy-subrc 4 and leaves the field symbol as it
+  // was), LOOP over ANY TABLE writing through the field symbol, DESCRIBE
+  // FIELD kinds (a structure with a string in it is v, a flat one u), GET
+  // REFERENCE + ->* written, ASSIGN of an initial reference sy-subrc 4 with
+  // the field symbol kept, IS SUPPLIED, CALL METHOD (class)=>m, a binding
+  // that outlives a move into its structure, c fitting, i into a string,
+  // CLEAR through generic data, a typed field symbol seen as generic data
+  // (CLEAR and a whole move write the row, and the typed field symbol sees
+  // it), a generic value read into a shorter c cut, CLEAR of a typed field
+  // symbol clearing its row. The A4H class had the same source.
+  ZCL_GOGEN_T_JSGENERIC: "comp:0/1/5/0/low/4/low lines:2 p11 q22 kinds:IFgCXDTvhl ref:0/3/42/4/asg/ini/set notini/ini sup:a-b-A+b-a-B+A+B+ dyn:<d1><7><noclass> flat:u moved:m9 m9 q22 fit:xy/5-/cleared:0 row:0 row:s3/0/s3 c2:xy clr:2/0/0",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

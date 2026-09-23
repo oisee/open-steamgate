@@ -1272,4 +1272,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Smallest safe workaround: `tools/gogen` refuses such a `TRY` (a statement stub, `CATCH x after a CATCH of its superclass`); the transpiler path has no workaround
 - Upstream: **needs an issue** in abaplint (a syntax error in `5_syntax/structures/try.js` or the `CATCH` statement check)
 - Regression-test location: none that runs: the pinned probe `ZCL_GOGEN_T_RAISE` in `tools/gogen/semantics.mjs` leaves the line out because it cannot be activated on A4H
+### ANOMALY-2026-09-23-describe-deep-structure — `DESCRIBE FIELD ... TYPE` of a deep structure is `u` in the transpiler runtime, `v` on a system
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `DESCRIBE FIELD s TYPE k` where `s` is a structure holding a string, a table or a reference
+- Minimal ABAP reproducer: `TYPES: BEGIN OF ty, name TYPE string, n TYPE i, END OF ty. DATA ls TYPE ty. DATA lv_k TYPE c LENGTH 1. DESCRIBE FIELD ls TYPE lv_k.`
+- Exact command used to run it: the runtime's `abap.statements.describe` called on a `Structure` of `String` + `Integer` and on one of `Integer` + `Character(2)` from a Node script against `node_modules/@abaplint/runtime` (both answer `u`); on A4H the same statement in `tools/gogen/testdata/zcl_gogen_t_jsgeneric.clas.abap`
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0150, 2026-09-23, deleted after): `v` for the structure with a string (deep), `u` for the flat one (`cl_abap_typedescr=>typekind_struct2` / `typekind_struct1`)
+- Actual open-abap behaviour: `u` for every structure (`statements/describe.js`: `input.field instanceof types_1.Structure` sets `"u"` with no look at the components)
+- Impact on open-steamgate: code that branches on the type kind of a structure (`typekind_struct2`) takes the flat branch on a deep one; nothing on the served path is known to do so. The gogen backends (Go and JS) answer `v` / `u` as A4H does
+- Smallest safe workaround: none needed in gogen; the transpiler runtime would have to look at the components (string, xstring, table, reference, or a deep structure inside)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `describe`)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSGENERIC (`kinds:...vhl ... flat:u`)
 - Upstream version containing a fix: none yet

@@ -23,6 +23,10 @@ type Type struct {
 	Row   *Type
 	Lines func(p any) int
 	At    func(p any, i int) any
+	// Copy moves a whole structure or table of this type (tables cloned);
+	// Zero clears one. Generated with the descriptor.
+	Copy func(dst, src any)
+	Zero func(p any)
 }
 
 type Comp struct {
@@ -83,7 +87,7 @@ func itoa(n int) string {
 // Component is ASSIGN COMPONENT name OF STRUCTURE d: false (sy-subrc 4) when
 // d is not a structure or has no component of that name.
 func Component(d Data, name string) (Data, bool) {
-	if d.P == nil || d.T == nil || d.T.Kind != 'u' {
+	if d.P == nil || d.T == nil || (d.T.Kind != 'u' && d.T.Kind != 'v') {
 		return Data{}, false
 	}
 	n := strings.ToUpper(strings.TrimRight(name, " "))
@@ -170,7 +174,7 @@ func IsInitialData(d Data) bool {
 		return v == ""
 	case 'h':
 		return d.T.Lines(d.P) == 0
-	case 'u':
+	case 'u', 'v':
 		for _, c := range d.T.Comps {
 			if !IsInitialData(Data{P: c.Get(d.P), T: c.T}) {
 				return false

@@ -585,3 +585,217 @@ export function excText(s, x) {
   }
   return x.message;
 }
+// Generic data: TYPE any, TYPE data, ANY TABLE and REF TO data, as in
+// go/abap/data.go. A generic value is a binding to the slot it stands for,
+// {get, set, t}: get reads the slot, set writes it, t is the descriptor of
+// the slot's ABAP type. Never a copy, so a write through a field symbol or a
+// data reference reaches the original. An unassigned field symbol and an
+// initial reference are null. Descriptors of structures and tables are
+// generated with the program ({kind, comps: [{name, key, t}], row, zero});
+// elementary ones are here.
+const sizedTypes = new Map();
+const sizedType = (kind, len, dec = 0) => {
+  const key = `${kind}:${len}:${dec}`;
+  if (!sizedTypes.has(key)) sizedTypes.set(key, {kind, len, dec});
+  return sizedTypes.get(key);
+};
+export const TI = {kind: "I", len: 4};
+export const TInt8 = {kind: "8", len: 8};
+export const TF = {kind: "F", len: 8};
+export const TString = {kind: "g"};
+export const TXString = {kind: "y"};
+export const TD = {kind: "D", len: 8};
+export const TT = {kind: "T", len: 6};
+export const TRef = {kind: "l"};
+export const TObj = {kind: "r"};
+export const TC = (n) => sizedType("C", n);
+export const TX = (n) => sizedType("X", n);
+export const TP = (n, dec) => sizedType("P", n, dec);
+
+// a value that is no place of its own, seen as generic data: a slot of its own
+export function cell(v, t) {
+  const c = {v};
+  return {get: () => c.v, set: (x) => { c.v = x; }, t};
+}
+
+const notAssigned = (op) => new AbapError("GETWA_NOT_ASSIGNED", op);
+
+// ASSIGN COMPONENT name OF STRUCTURE d: null (sy-subrc 4) when d is not a
+// structure or has no component of that name; the name in any case (A4H).
+// The component is reached through d each time, so it stays the field of
+// whatever structure d's slot holds.
+export function Component(d, name) {
+  if (d === null || (d.t.kind !== "u" && d.t.kind !== "v")) return null;
+  const n = String(name).replace(/ +$/, "").toUpperCase();
+  const c = d.t.comps.find((x) => x.name === n);
+  if (c === undefined) return null;
+  return {get: () => d.get()[c.key], set: (v) => { d.get()[c.key] = v; }, t: c.t};
+}
+
+// lines( ) of a generic table
+export function Lines(d) {
+  if (d === null || d.t.kind !== "h") throw new AbapError("NOT_COMPILED", "lines( ): of a generic value that is not a table");
+  return d.get().length;
+}
+
+// row i (from 0) of a generic table, bound to the row itself
+export function Row(d, i) {
+  const a = d.get();
+  return {get: () => a[i], set: (v) => { a[i] = v; }, t: d.t.row};
+}
+
+// a generic elementary value moved into a string
+export function DataString(d) {
+  if (d === null) throw notAssigned("move");
+  switch (d.t.kind) {
+    case "g": case "C": case "D": case "T": case "N": return d.get();
+    case "I": return IToString(d.get());
+    default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into a string`);
+  }
+}
+
+// a generic value moved into an i
+export function DataI(d) {
+  if (d === null) throw notAssigned("move");
+  if (d.t.kind === "I") return d.get();
+  throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an i`);
+}
+
+// a generic value in a string template
+export function FmtData(d) {
+  if (d === null) throw notAssigned("string template");
+  switch (d.t.kind) {
+    case "I": return FmtI(d.get());
+    case "8": return String(d.get());
+    case "F": return FmtF(d.get());
+    case "g": case "C": case "D": case "T": case "N": return d.get();
+    case "X": case "y": return XToHex(d.get());
+    default: throw new AbapError("NOT_COMPILED", `string template: a generic value of type kind ${d.t.kind}`);
+  }
+}
+
+// IS INITIAL of a generic value
+export function IsInitialData(d) {
+  if (d === null) return true;
+  const v = d.get();
+  switch (d.t.kind) {
+    case "I": case "F": return v === 0;
+    case "8": return v === 0n;
+    case "g": case "y": case "C": return v === "";
+    case "D": return v === "" || v === "00000000";
+    case "T": return v === "" || v === "000000";
+    case "X": return /^\u0000*$/.test(v);
+    case "P": return v.replaceAll(".", "").replace(/^[0-]+/, "") === "";
+    case "h": return v.length === 0;
+    case "u": case "v": return d.t.comps.every((c) => IsInitialData({get: () => v[c.key], t: c.t}));
+    case "l": case "r": return v === null;
+    default: throw new AbapError("NOT_COMPILED", `IS INITIAL: a generic value of type kind ${d.t.kind}`);
+  }
+}
+
+// A structure or table written through generic data is written in place, as
+// Go writes through the pointer: the object in the slot stays the same
+// object, so a typed field symbol holding it (LOOP ASSIGNING, READ TABLE
+// ASSIGNING) and a binding that fixed it (the row, the object of a
+// reference, a typed field symbol) still see it afterwards. A nested
+// structure or table is written in place too. src is a fresh value.
+export function Overwrite(t, dst, src) {
+  if (t.kind === "h") {
+    dst.length = 0;
+    for (const r of src) dst.push(r);
+    return;
+  }
+  for (const c of t.comps) {
+    const k = c.t.kind;
+    if ((k === "u" || k === "v" || k === "h") && dst[c.key] !== null && typeof dst[c.key] === "object") Overwrite(c.t, dst[c.key], src[c.key]);
+    else dst[c.key] = src[c.key];
+  }
+}
+
+// dst = src for a generic dst: converted to the type of the slot dst is bound
+// to and written there, never rebound. The pairs of go/abap MoveData; any
+// other dumps NOT_COMPILED rather than guess.
+export function MoveData(dst, src) {
+  if (dst === null) throw notAssigned("move into a field symbol");
+  if (src === null) throw notAssigned("move from a field symbol");
+  const dk = dst.t.kind;
+  const sk = src.t.kind;
+  const v = src.get();
+  switch (dk) {
+    case "u": case "v": case "h":
+      if (dst.t === src.t) return Overwrite(dst.t, dst.get(), copy(v));
+      break;
+    case "I":
+      if (sk === "I") return dst.set(v);
+      if (sk === "F") return dst.set(F2I(v));
+      if (sk === "C" || sk === "g") return dst.set(ParseI(v));
+      break;
+    case "F":
+      if (sk === "I" || sk === "F") return dst.set(v);
+      if (sk === "C" || sk === "g") return dst.set(ParseF(v));
+      break;
+    case "8":
+      if (sk === "8") return dst.set(v);
+      break;
+    case "g":
+      if (sk === "g" || sk === "C") return dst.set(v);
+      if (sk === "I") return dst.set(IToString(v));
+      break;
+    case "C":
+      if (sk === "g" || sk === "C") return dst.set(CFit(v, dst.t.len));
+      break;
+    case "X":
+      if (sk === "X") return dst.set(XFit(v, dst.t.len));
+      break;
+    case "y": case "D": case "T": case "P":
+      if (sk === dk && (dk !== "P" || dst.t === src.t)) return dst.set(v);
+      break;
+    case "l":
+      if (sk === "l") return dst.set(v);
+      break;
+    default: break;
+  }
+  throw new AbapError("NOT_COMPILED", `move: a value of type kind ${sk} into generic data of type kind ${dk}`);
+}
+
+// CLEAR of a generic value: the slot it is bound to becomes initial
+export function ClearData(d) {
+  if (d === null) throw notAssigned("CLEAR of a field symbol");
+  switch (d.t.kind) {
+    case "I": case "F": return d.set(0);
+    case "8": return d.set(0n);
+    case "g": case "y": case "C": return d.set("");
+    case "D": return d.set("00000000");
+    case "T": return d.set("000000");
+    case "P": return d.set("0");
+    case "X": return d.set("\u0000".repeat(d.t.len));
+    case "l": return d.set(null);
+    case "u": case "v": case "h": return Overwrite(d.t, d.get(), d.t.zero());
+    default: throw new AbapError("NOT_COMPILED", `CLEAR: generic data of type kind ${d.t.kind}`);
+  }
+}
+
+// CALL METHOD (class)=>m, as go/abap CallStatic: the classes the program
+// compiled, the ones the registry has (a class that exists but was not
+// compiled dumps instead of reading as unknown), and an adapter per static
+// method a dynamic call names, reading its arguments out of generic data.
+const compiledClasses = new Set();
+const registryClasses = new Set();
+const statics = new Map();
+export function knownClasses(compiled, known) {
+  for (const c of compiled) compiledClasses.add(c);
+  for (const c of known) registryClasses.add(c);
+}
+export function registerStatic(name, params, call) { statics.set(name, {params: new Set(params), call}); }
+export function CallStatic(s, cls, method, args) {
+  const c = String(cls).replace(/ +$/, "");
+  if (!compiledClasses.has(c)) {
+    if (registryClasses.has(c)) throw new AbapError("NOT_COMPILED", `CALL METHOD (${c})=>${method}: the class exists but is not compiled in this program`);
+    throw new AbapError("CX_SY_DYN_CALL_ILLEGAL_CLASS", `CALL METHOD (${c})=>${method}`);
+  }
+  const e = statics.get(`${c}=>${method}`);
+  if (e === undefined) throw new AbapError("CX_SY_DYN_CALL_ILLEGAL_METHOD", `CALL METHOD (${c})=>${method}`);
+  for (const n of Object.keys(args)) if (!e.params.has(n)) throw new AbapError("CX_SY_DYN_CALL_PARAM_NOT_FOUND", `${c}=>${method} ${n}`);
+  e.call(s, args);
+}
+export function paramMissing(op) { throw new AbapError("CX_SY_DYN_CALL_PARAM_MISSING", op); }

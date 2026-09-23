@@ -10,7 +10,7 @@
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
-import {ident, funcName, referencedClasses, hexBytes} from "./emit-go.mjs";
+import {ident, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
@@ -46,11 +46,107 @@ const composite = (t) => t.k === "struct" || t.k === "table";
 const isPlace = (e) => ["var", "attr", "static", "field", "fs", "row", "refattr"].includes(e.e);
 
 let STRUCTS = new Map();
-// generic data (TYPE any, REF TO data) runs in the Go backend only so far
-const GENERIC = `abap.notCompiled("generic data: the JS emitter has no descriptors yet")`;
+
+/*
+ * Generic data (TYPE any, ANY TABLE, REF TO data), the design of go/abap
+ * data.go: a generic value is a binding {get, set, t} to the slot it stands
+ * for, never a copy, and t is a descriptor. Elementary descriptors are in the
+ * runtime; one per structure and table type is generated here (DESCS) and
+ * written at the end of the module.
+ */
+let DESCS = new Map();
+const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t:${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
+function desc(t) {
+  switch (t.k) {
+    case "i": return "abap.TI";
+    case "int8": return "abap.TInt8";
+    case "f": return "abap.TF";
+    case "string": return "abap.TString";
+    case "xstring": return "abap.TXString";
+    case "c": return `abap.TC(${t.len ?? 0})`;
+    case "x": return `abap.TX(${t.len ?? 0})`;
+    case "d": return "abap.TD";
+    case "p": return `abap.TP(${t.len ?? 8}, ${t.dec ?? 0})`;
+    case "t": return "abap.TT";
+    case "dref": return "abap.TRef";
+    case "ref": case "exc": return "abap.TObj";
+    case "struct": case "table": {
+      const key = typeKey(t);
+      if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
+      return DESCS.get(key).name;
+    }
+    default: throw new Error(`no descriptor for ${t.k}`);
+  }
+}
+/** a structure that holds a string, a table or a reference, at any depth: type kind v (A4H) */
+function deep(t) {
+  if (["string", "xstring", "table", "ref", "exc", "dref", "data"].includes(t?.k)) return true;
+  if (t?.k === "struct") return (STRUCTS.get(t.go)?.fields ?? []).some((f) => deep(f.type));
+  return false;
+}
+function descDecls() {
+  const decl = [];
+  const fill = [];
+  const done = new Set();
+  for (let again = true; again;) {
+    again = false;
+    for (const [key, d] of [...DESCS]) {
+      if (done.has(key)) continue;
+      done.add(key);
+      again = true;
+      const t = d.type;
+      if (t.k === "table") {
+        decl.push(`const ${d.name} = {kind: "h", row: null, zero: () => []};`);
+        fill.push(`${d.name}.row = ${desc(t.row)};`);
+      } else {
+        const fs = STRUCTS.get(t.go)?.fields ?? [];
+        decl.push(`const ${d.name} = {kind: "${deep(t) ? "v" : "u"}", comps: [], zero: () => new_${t.go}()};`);
+        fill.push(`${d.name}.comps = [${fs.map((f) => `{name: ${JSON.stringify(String(f.name).toUpperCase())}, key: ${JSON.stringify(ident(f.name))}, t: ${desc(f.type)}}`).join(", ")}];`);
+      }
+    }
+  }
+  return decl.length ? ["// descriptors of the types generic data binds to", ...decl, ...fill, ""] : [];
+}
+
+/**
+ * a typed place seen as generic data: a binding that reaches the slot the
+ * way Go's &place does. What Go fixes when it takes the address is fixed
+ * here once too (the row of a table, the object of a reference, a typed
+ * field symbol); a variable, an attribute or a field is reached through its
+ * name on every access, so a structure moved into the variable later is the
+ * one written.
+ */
+function bind(p, ctx) {
+  const caps = [];
+  const cap = (code) => { const n = `$c${caps.length}`; caps.push(`const ${n} = ${code};`); return n; };
+  const path = (q) => {
+    switch (q.e) {
+      case "var": case "attr": case "static": case "const": return place(q, ctx);
+      case "field": return `${path(q.base)}.${ident(q.name)}`;
+      case "fs": return cap(ident(q.name));
+      case "refattr": return `${cap(expr(q.base, ctx))}.${ident(q.name)}`;
+      case "row": {
+        const b = cap(path(q.base));
+        return `${b}[${cap(`abap.Idx(${b}.length, ${expr(q.index, ctx)})`)}]`;
+      }
+      default: throw new Error(`not a place: ${q.e}`);
+    }
+  };
+  const at = path(p);
+  // a typed field symbol as a whole is a value held, not a slot: a structure
+  // or table in it is written in place (abap.MoveData / ClearData do so
+  // anyway); an elementary one has no slot the JS side could write to
+  const whole = p.e === "fs";
+  const set = !whole ? `($v) => { ${at} = $v; }`
+    : composite(p.type) ? `($v) => { abap.Overwrite(${desc(p.type)}, ${at}, $v); }`
+      : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`a write through generic data bound to the typed field symbol ${p.name} of an elementary type: the JS backend holds its value, not its slot`)}); }`;
+  const b = `{get: () => ${at}, set: ${set}, t: ${desc(p.type)}}`;
+  return caps.length ? `(() => { ${caps.join(" ")} return ${b}; })()` : b;
+}
 
 export function emitJs(program, runtimeUrl = "./abap.mjs") {
   STRUCTS = program.structs;
+  DESCS = new Map();
   const out = [];
   out.push("// Code generated by tools/gogen/emit-js.mjs. DO NOT EDIT.", `import * as abap from ${JSON.stringify(runtimeUrl)};`, "");
   for (const st of program.structs.values()) {
@@ -107,7 +203,42 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   }
   const supers = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (supers.length) out.push(`abap.registerSupers(${JSON.stringify(Object.fromEntries(supers))});`, "");
+  out.push(...staticRegistry(program));
+  out.push(...descDecls());
   return out.join("\n") + "\n";
+}
+
+/**
+ * CALL METHOD (class)=>m, as emit-go's staticRegistry: every compiled class is
+ * known by name, and each static method a dynamic call names gets an adapter
+ * that reads its arguments out of generic data by name.
+ */
+function staticRegistry(program) {
+  const wanted = program.dynStatics ?? new Set();
+  if (wanted.size === 0) return [];
+  const out = [`abap.knownClasses(${JSON.stringify(program.classes.map((c) => c.name))}, ${JSON.stringify([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))});`];
+  for (const cls of program.classes) {
+    for (const m of [...cls.methods, ...(cls.stubs ?? [])]) {
+      if (!m.static || !wanted.has(m.name) || !m.params || !definable(program, m)) continue;
+      const lines = [];
+      const args = m.params.map((p, i) => {
+        const v = `v${i}`;
+        if (p.dir !== "importing") { lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v; }
+        if (p.suppliedOf) { lines.push(`  const ${v} = ${JSON.stringify(p.suppliedOf)} in a ? "X" : "";`); return v; }
+        const d = `a[${JSON.stringify(p.name)}]`;
+        const read = ["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
+          : p.type.k === "data" ? d : composite(p.type) && p.byValue ? `abap.copy(${d}.get())` : `${d}.get()`;
+        const absent = p.optional && p.default === undefined ? zero(p.type)
+          : `abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)})`;
+        lines.push(`  const ${v} = ${JSON.stringify(p.name)} in a ? ${read} : ${absent};`);
+        return v;
+      });
+      out.push(`abap.registerStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, (s, a) => {`,
+        ...lines, `  ${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});");
+    }
+  }
+  out.push("");
+  return out;
 }
 
 /* class-based exceptions: see catchCond in emit-go.mjs */
@@ -172,7 +303,11 @@ function stmt(st, ctx, d) {
       // a field symbol is the row itself: assigning to it writes into the row
       if (st.target.e === "fs") return [`${t}Object.assign(${ident(st.target.name)}, ${moved(st.value, ctx)});`];
       return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
-    case "clear": return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
+    case "clear":
+      // a field symbol is the row itself: clearing it clears the row
+      if (st.target.e === "fs" && st.target.type.k === "struct") return [`${t}Object.assign(${ident(st.target.name)}, ${zero(st.target.type)});`];
+      if (st.target.e === "fs" && st.target.type.k === "table") return [`${t}${ident(st.target.name)}.length = 0;`];
+      return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
       return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`];
@@ -207,8 +342,34 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
     }
-    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static": case "select_table":
-      return [`${t}${GENERIC};`];
+    case "assign_comp":
+      return [`${t}{`, `${t}  const c = abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)});`,
+        `${t}  if (c !== null) { ${ident(st.fs.name)} = c; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    case "assign_deref":
+      return [`${t}{`, `${t}  const r = ${expr(st.ref, ctx)};`, `${t}  if (r !== null) { ${ident(st.fs.name)} = r; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    case "assign_data":
+      return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)};`];
+    // a move into generic data writes into the slot it is bound to
+    case "set_data":
+      return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)});`];
+    case "clear_data":
+      return [`${t}abap.ClearData(${expr(st.target, ctx)});`];
+    case "get_ref":
+      return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)};`];
+    case "describe_kind":
+      return [`${t}${place(st.target, ctx)} = ${expr(st.x, ctx)}.t.kind;`];
+    case "loop_data": {
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}  const tab${n} = ${expr(st.table, ctx)};`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
+        `${t}  for (let i${n} = 0; i${n} < abap.Lines(tab${n}); i${n}++) {`,
+        `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${ident(st.fs)} = abap.Row(tab${n}, i${n});`,
+        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`];
+    }
+    case "call_dyn_static":
+      return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, {${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}});`];
+    // the JS side has no database: a SELECT is refused, not guessed
+    case "select_table":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "native":
       // see nativeMessageText in emit-go.mjs
       if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {
@@ -487,9 +648,20 @@ function expr(e, ctx) {
     case "me": return "me";
     case "upcast": return expr(e.x, ctx);
     case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
-    case "wrap": case "unwrap": case "lines_data": return GENERIC;
+    // a typed slot seen as generic data: a binding to it; a value that is no
+    // place gets a slot of its own
+    case "wrap": return isPlace(e.x) ? bind(e.x, ctx) : `abap.cell(${expr(e.x, ctx)}, ${desc(e.x.type)})`;
+    case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
+    case "lines_data": return `abap.Lines(${expr(e.x, ctx)})`;
     default: throw new Error(`no JS for expression ${e.e}`);
   }
+}
+
+/** a generic value read into a typed one: an i, or a string fitted to a c's length */
+function unwrapTo(t, d) {
+  if (t.k === "i") return `abap.DataI(${d})`;
+  if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
+  return `abap.DataString(${d})`;
 }
 
 function templatePart(v, ctx, opts) {
@@ -506,7 +678,7 @@ function templateValue(v, ctx, opts) {
     case "f": return `abap.FmtF(${x})`;
     case "string": case "c": case "d": case "t": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
-    case "data": return GENERIC;
+    case "data": return `abap.FmtData(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
   }
 }
@@ -559,8 +731,11 @@ function cond(c, ctx) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
-    case "initial": return c.x.type.k === "data" || c.x.type.k === "dref" ? GENERIC : `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
-    case "assigned": return c.fs.type.k === "data" ? GENERIC : `${ident(c.fs.name)} !== null`;
+    case "initial":
+      if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
+      if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;
+      return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
+    case "assigned": return `${ident(c.fs.name)} !== null`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;

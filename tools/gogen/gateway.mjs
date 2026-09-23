@@ -4,6 +4,7 @@
 // of OSG (the SEGW registry) and one request through ZCL_STG_DISPATCHER.
 //
 //   node tools/gogen/gateway.mjs [path]      default: the demo service document
+//   tools/gogen/.out/gateway <path>           the built binary, another GET
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -102,7 +103,12 @@ func main() {
 	ZCL_STG_SEGW_REGISTRY_REGISTER(s)
 	// what the ICF handler does before dispatch: ~path without the query,
 	// the query as form fields, decoded; the host as the outside sees it
-	path, query, _ := strings.Cut(${JSON.stringify(path)}, "?")
+	// (the built binary, .out/gateway, answers another path given as its argument)
+	target := ${JSON.stringify(path)}
+	if len(os.Args) > 1 {
+		target = os.Args[1]
+	}
+	path, query, _ := strings.Cut(target, "?")
 	opts := []IHTTPNVP{}
 	for _, kv := range strings.Split(query, "&") {
 		if kv == "" {
