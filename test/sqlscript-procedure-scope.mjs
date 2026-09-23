@@ -239,6 +239,14 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
     refuse("et_rows = with recursive a as (select id, txt from src) select id, txt from a;", /WITH RECURSIVE is not lowered/);
     refuse("et_rows = with a (x) as (select id, txt from src) select id, txt from src;", /names 1 column\(s\) for a select of 2/);
     refuse("et_rows = with a as (select id, txt from b), b as (select id, txt from src) select id, txt from a;", /CTE b used before it is defined/);
+    refuse("et_rows = with a (id, id) as (select id, txt from src) select id, txt from src;", /names a column twice/);
+    refuse("et_rows = select a.id, a.txt from src as a order by a.id;", /ORDER BY a qualified source column is not lowered yet/);
+  });
+
+  it("WITH: a name of a CTE defined later is still a table's, as in plain SQL", async () => {
+    const prog = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with a as (select id, txt from src where id = 1), src as (select id, txt from src where id = 5) select id, txt from a;");
+    expect((await run(prog)).rows.map((r) => r.ID)).to.deep.equal([1]);
   });
 
   it("TOP n takes n rows after the ORDER BY, as HANA does", async () => {

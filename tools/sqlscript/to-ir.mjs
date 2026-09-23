@@ -889,7 +889,9 @@ export function toIr(tree, options = {}) {
       throw new BindError(`a schema-qualified source ${schema}.${table} is not lowered: the catalogue knows tables by name only`, node);
     }
     const table = nameOf(node);
-    if (laterCtes.has(table) && !ctes.has(table)) {
+    // a CTE defined later is not in scope yet, so the name is a table's, as
+    // in plain SQL; with no such table it is a forward reference, said so
+    if (laterCtes.has(table) && !ctes.has(table) && catalogue[table] === undefined) {
       throw new BindError(`CTE ${table.toLowerCase()} used before it is defined`, node);
     }
     if (ctes.has(table)) {
@@ -1226,6 +1228,12 @@ export function toIr(tree, options = {}) {
       rel = order(rel, keys.map((k) => {
         const projected = aliasOf(k);
         if (projected !== undefined) return {col: projected, desc: hasWord(k, "DESC")};
+        // the statement's ORDER BY sees the projected columns only, so a
+        // source qualifier (`ORDER BY a.id`) has nothing to resolve against;
+        // said by name rather than as a column that "is not present"
+        if (node.node !== "Select" && terminalLeaves(k).some((leaf) => leaf.value === ".")) {
+          throw new BindError("ORDER BY a qualified source column is not lowered yet", k);
+        }
         const e = expression(k);
         if (e.node !== "col") {
           throw new BindError("ORDER BY over an expression is not lowered yet", k);

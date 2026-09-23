@@ -858,6 +858,12 @@ branch of a set operation, is refused by name rather than given a reading.
 Both run as procedures on DuckDB and SQLite (`test/sqlscript-procedure-scope.mjs`).
 `abap_bool` is the type pool ABAP's `c LENGTH 1` and binds as a CHAR 1.
 
+Not lowered yet, and refused by name rather than blamed on a column: a
+statement-level `ORDER BY a.id`, a source qualifier after the projection.
+The statement's ORDER BY sees the projected columns only; `ORDER BY id`
+works. No body of the corpus is known to need it; a verifier found it
+while testing a self-join on a CTE.
+
 Per body: 6 bodies newly parse, and **none** compiled -- three stop at an
 output whose table type is not resolved, two at a parameter type, one at a
 column no catalogue describes. `abap_bool` alone moved no body. Compiles
