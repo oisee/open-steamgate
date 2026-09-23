@@ -557,3 +557,68 @@ func UnescapeURL(s *Session, escaped string, options int32) string {
 	}
 	return out
 }
+
+// CP is the pattern match, measured on A4H (2026-09-23): * is any run, + any
+// one character, # makes the next character literal and case-sensitive;
+// everything else compares ignoring case. A c pattern stored empty was all
+// blanks and is one blank (” CP ” is false); a string pattern is as written.
+func CP(a, p string, cpat bool) bool {
+	if cpat && p == "" {
+		p = " "
+	}
+	type tok struct {
+		r    rune
+		kind byte // 'l' literal ignoring case, 'e' escaped (exact), '*', '+'
+	}
+	var ps []tok
+	pr := []rune(p)
+	for i := 0; i < len(pr); i++ {
+		switch {
+		case pr[i] == '#' && i+1 < len(pr):
+			i++
+			ps = append(ps, tok{pr[i], 'e'})
+		case pr[i] == '*':
+			ps = append(ps, tok{0, '*'})
+		case pr[i] == '+':
+			ps = append(ps, tok{0, '+'})
+		default:
+			ps = append(ps, tok{pr[i], 'l'})
+		}
+	}
+	ar := []rune(a)
+	// classic wildcard matching with backtracking over the last *
+	i, j, star, mark := 0, 0, -1, 0
+	eq := func(t tok, c rune) bool {
+		switch t.kind {
+		case '+':
+			return true
+		case 'e':
+			return t.r == c
+		default:
+			return strings.EqualFold(string(t.r), string(c))
+		}
+	}
+	for i < len(ar) {
+		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], ar[i]) {
+			i++
+			j++
+		} else if j < len(ps) && ps[j].kind == '*' {
+			star, mark = j, i
+			j++
+		} else if star >= 0 {
+			j = star + 1
+			mark++
+			i = mark
+		} else {
+			return false
+		}
+	}
+	for j < len(ps) && ps[j].kind == '*' {
+		j++
+	}
+	return j == len(ps)
+}
+
+// CA: a contains any character of b, case-sensitive (A4H); an empty operand
+// on either side is false.
+func CA(a, b string) bool { return b != "" && strings.ContainsAny(a, b) }

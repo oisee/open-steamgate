@@ -798,6 +798,8 @@ function statement(node, ctx) {
     if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
       fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
       if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
+    } else if (rt && /^TRANSPORTING\s+NO\s+FIELDS$/i.test(rt.concatTokens().trim())) {
+      // only sy-subrc and sy-tabix
     } else if (rt) {
       const tgt = rt.findFirstExpression(Expressions.Target);
       if (!tgt) throw new Unsupported(`READ TABLE target form: ${rt.concatTokens()}`);
@@ -1989,6 +1991,17 @@ function compare(node, ctx) {
     // a c operand has none stored
     const r = {c: op.toLowerCase(), l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
     return not ? {c: "not", x: r} : r;
+  }
+  if (["CP", "NP", "CA", "NA"].includes(op)) {
+    // measured on A4H (2026-09-23): CP ignores case except after #, + is one
+    // character, #* #+ ## are literal; trailing blanks count in a string and
+    // not in a c, and a c pattern that is all blanks is one blank ('' CP ''
+    // is false). CA is case-sensitive. sy-fdpos is not set (not read on
+    // any path compiled so far; reading it is refused)
+    const rs = source(sources[1], ctx);
+    const r = {c: op === "CP" || op === "NP" ? "cp" : "ca", l: convert(source(sources[0], ctx), S), r: convert(rs, S), cpat: rs.type.k === "c"};
+    const neg = (op === "NP" || op === "NA") !== not;
+    return neg ? {c: "not", x: r} : r;
   }
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];

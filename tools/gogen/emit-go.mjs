@@ -802,6 +802,8 @@ function cond(c, ctx) {
   switch (c.c) {
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
+    case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     // in parentheses: a composite literal right before the { of an if does not parse
     case "initial": return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;

@@ -294,7 +294,8 @@ export function FindStmt(s, p, regex, icase, n) {
     const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
     return i < 0 ? [false, 0, 0, subs] : [true, [...s.slice(0, i)].length, [...p].length, subs];
   }
-  if (/\*\?|\+\?|\?\?|\(\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
+  // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
+  if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
   const m = new RegExp(p, icase ? "iu" : "u").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
@@ -332,3 +333,28 @@ export function classic(s, e, method, map, others) {
   }
   throw e;
 }
+
+// CP and CA: see the Go runtime (conv.go), measured on A4H
+export function CP(a, p, cpat) {
+  if (cpat && p === "") p = " ";
+  const ps = [];
+  const pr = [...p];
+  for (let i = 0; i < pr.length; i++) {
+    if (pr[i] === "#" && i + 1 < pr.length) ps.push({r: pr[++i], k: "e"});
+    else if (pr[i] === "*") ps.push({k: "*"});
+    else if (pr[i] === "+") ps.push({k: "+"});
+    else ps.push({r: pr[i], k: "l"});
+  }
+  const ar = [...a];
+  const eq = (t, c) => (t.k === "+" ? true : t.k === "e" ? t.r === c : t.r.toUpperCase() === c.toUpperCase());
+  let i = 0, j = 0, star = -1, mark = 0;
+  while (i < ar.length) {
+    if (j < ps.length && ps[j].k !== "*" && eq(ps[j], ar[i])) { i++; j++; }
+    else if (j < ps.length && ps[j].k === "*") { star = j; mark = i; j++; }
+    else if (star >= 0) { j = star + 1; mark++; i = mark; }
+    else return false;
+  }
+  while (j < ps.length && ps[j].k === "*") j++;
+  return j === ps.length;
+}
+export function CA(a, b) { return b !== "" && [...a].some((c) => b.includes(c)); }

@@ -34,6 +34,9 @@ const EXPECT = {
   // from inside two nested TRYs (Go runs a TRY as a closure and hands these
   // out as codes)
   ZCL_GOGEN_T_TRYFLOW: "b cd caught a1 13!",
+  // CP / NP / CA / NA; A4H gave "... ca:X1---X", the 1 being sy-fdpos,
+  // which the local copy does not read
+  ZCL_GOGEN_T_CP: "cp:XX-X--XX-XX-XX-XX ca:X---X",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

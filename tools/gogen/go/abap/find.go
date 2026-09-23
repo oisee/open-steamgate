@@ -12,8 +12,11 @@ var regexCache sync.Map
 // FindStmt is FIND [REGEX] p IN s, as measured on A4H 2026-09-23: POSIX, so the
 // leftmost-longest match (a|ab in xab is ab); offsets and lengths in
 // characters; n submatches, a group that did not take part (or that does
-// not exist) gives the empty string. Perl-only syntax (non-greedy
-// quantifiers, (?...) groups) raises, as the kernel does (INVALID_REGEX).
+// not exist) gives the empty string. A non-greedy quantifier raises
+// INVALID_REGEX, as the kernel does; a non-capturing group (?:...) is
+// accepted, as it is there (both measured). Lookahead (?= (?! is valid on a
+// system too, and Go's regexp has none: that dumps as not compiled rather
+// than calling a valid pattern invalid.
 func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []string) {
 	subs := make([]string, n)
 	if !regex {
@@ -51,8 +54,11 @@ func compileABAP(p string, icase bool) *regexp.Regexp {
 	if r, ok := regexCache.Load(key); ok {
 		return r.(*regexp.Regexp)
 	}
-	if strings.Contains(p, "*?") || strings.Contains(p, "+?") || strings.Contains(p, "??") || strings.Contains(p, "(?") {
+	if strings.Contains(p, "*?") || strings.Contains(p, "+?") || strings.Contains(p, "??") {
 		panic(ArithmeticError{"CX_SY_INVALID_REGEX", p})
+	}
+	if strings.Contains(strings.ReplaceAll(p, "(?:", ""), "(?") {
+		panic(NotCompiled("FIND REGEX", "a (?...) group other than (?:...) is not in Go's regexp: "+p))
 	}
 	re, err := regexp.Compile(key)
 	if err != nil {

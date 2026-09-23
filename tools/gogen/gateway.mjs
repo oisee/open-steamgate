@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"net/url"
 	"strings"
 
 	"osg/gogen/abap"
@@ -71,8 +72,20 @@ func main() {
 		}
 	}()
 	ZCL_STG_SEGW_REGISTRY_REGISTER(s)
+	// what the ICF handler does before dispatch: ~path without the query,
+	// the query as form fields, decoded; the host as the outside sees it
+	path, query, _ := strings.Cut(${JSON.stringify(path)}, "?")
 	opts := []IHTTPNVP{}
-	res := ZCL_STG_DISPATCHER_DISPATCH(s, "GET", ${JSON.stringify(path)}, &opts, "localhost", "", "", "")
+	for _, kv := range strings.Split(query, "&") {
+		if kv == "" {
+			continue
+		}
+		k, v, _ := strings.Cut(kv, "=")
+		k, _ = url.QueryUnescape(k)
+		v, _ = url.QueryUnescape(v)
+		opts = append(opts, IHTTPNVP{name: k, value: v})
+	}
+	res := ZCL_STG_DISPATCHER_DISPATCH(s, "GET", path, &opts, ${JSON.stringify(process.env.GW_HOST ?? "http://localhost:3091")}, "", "", "")
 	fmt.Printf("%d %s\\n%s\\n%s\\n", res.status, res.reason, res.content_type, res.body)
 }
 `);
