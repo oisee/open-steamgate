@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {T, lit, param, sessionValue, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  ifElse, callProcedure, runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, runProcedure, UnsupportedSqlScript, Int2OutOfRange} from "../tools/sqlscript-procedure-ir.mjs";
 
 const p = (name, type = T.int) => param(name, type);
 
@@ -424,6 +424,58 @@ describe("the typed SQLScript procedural IR", function () {
     expect(answer.rows.map((one) => one.ID).sort()).to.deep.equal([2, 5, 7]);
     expect(answer.trace).to.include({nestedCalls: 1, databaseStatements: 1});
     expect(invocations).to.equal(1);
+  });
+
+  it("refuses an INT2 output or an INT2 table input of a nested CALL, whose range check the CALL does not carry", async () => {
+    const rows = (...ids) => union(ids.map((id) => project(scan("DUMMY"), [{as: "ID", expr: lit(id, T.int)}])), true);
+    const small = {ID: T.int2};
+    const childOut = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: small,
+      body: [assignRelation("ET_ROWS", varRef("IT_ROWS"))],
+    });
+    const parent = (childSchema) => procedure({
+      relationParameters: [{name: "IT_ROWS", schema: childSchema}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [callProcedure("ZCL_DEMO=>CHILD", "IT_ROWS", "ET_ROWS")],
+    });
+    let caught;
+    try {
+      await runProcedure(parent({ID: T.int}), {client, dialect: "duckdb", relationInputs: {IT_ROWS: rows(40000)},
+        inputCatalogue: {DUMMY: {}}, procedures: new Map([["ZCL_DEMO=>CHILD", childOut]])});
+    } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/of a nested CALL has INT2 columns \(ID\)/);
+    // an INTEGER output, so only the input refusal can fire here
+    const childIn = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: small}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [assignRelation("ET_ROWS", varRef("IT_ROWS"))],
+    });
+    caught = undefined;
+    try {
+      await runProcedure(parent(small), {client, dialect: "duckdb", relationInputs: {IT_ROWS: project(rows(5), [{as: "ID", expr: {node: "col", name: "ID", type: T.int2}}])},
+        inputCatalogue: {DUMMY: {}}, procedures: new Map([["ZCL_DEMO=>CHILD", childIn]])});
+    } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(UnsupportedSqlScript);
+    expect(caught.message).to.match(/relation input IT_ROWS has INT2 columns \(ID\)/);
+  });
+
+  it("checks the INT2 columns of a table input at the bind, as it checks a scalar INT2 input", async () => {
+    const typed = (...ids) => project(union(ids.map((id) => project(scan("DUMMY"), [{as: "ID", expr: lit(id, T.int)}])), true),
+      [{as: "ID", expr: {node: "col", name: "ID", type: T.int2}}]);
+    const echo = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int2}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [assignRelation("ET_ROWS", varRef("IT_ROWS"))],
+    });
+    const ok = await runProcedure(echo, {client, dialect: "duckdb", relationInputs: {IT_ROWS: typed(-32768, 32767)}, inputCatalogue: {DUMMY: {}}});
+    expect(ok.rows.map((r) => Number(r.ID)).sort((a, b) => a - b)).to.deep.equal([-32768, 32767]);
+    let caught;
+    try {
+      await runProcedure(echo, {client, dialect: "duckdb", relationInputs: {IT_ROWS: typed(1, 40000)}, inputCatalogue: {DUMMY: {}}});
+    } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Int2OutOfRange);
+    expect(caught.message).to.match(/relation input IT_ROWS: a row is outside INT2/);
   });
 
   it("bounds recursive nested calls before touching the database", async () => {

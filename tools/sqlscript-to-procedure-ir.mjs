@@ -63,10 +63,14 @@ const isBareNull = (node) => {
 // (docs/sqlscript-hana-observed.md)
 // RAW joined the same day: a fixed RAW input is its n bytes, initial as n
 // zero bytes, compared byte-wise (docs/sqlscript-hana-observed.md)
-const MEASURED_DATATYPES = new Set(["CHAR", "CLNT", "DATS", "TIMS", "INT4", "STRG", "DEC", "RAW"]);
+// INT2 joined the same day: in and out exactly across its range, arithmetic
+// promoted to INTEGER, a value outside it raised at the output boundary
+// (CX_AMDP_EXECUTION_FAILED), never wrapped (docs/sqlscript-hana-observed.md)
+const MEASURED_DATATYPES = new Set(["CHAR", "CLNT", "DATS", "TIMS", "INT4", "INT2", "STRG", "DEC", "RAW"]);
 export function irTypeFromAbap(type, resolve) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
+  if (text === "INT2") return T.int2;
   if (["STRING", "SSTRING"].includes(text)) return T.str;
   if (["D", "DATS"].includes(text)) return T.char(8);
   if (["T", "TIMS"].includes(text)) return T.char(6);

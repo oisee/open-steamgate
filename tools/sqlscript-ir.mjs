@@ -24,6 +24,10 @@
 /** ABAP-ish type letters, because that is what the caller and the seam speak */
 export const T = {
   int: {abap: "I"},
+  // INT2: an INTEGER in every expression (HANA promotes SMALLINT arithmetic,
+  // measured on A4H), whose range is checked where ABAP meets it -- the input
+  // bind and the output boundary (docs/sqlscript-hana-observed.md)
+  int2: {abap: "I", bits: 16},
   int8: {abap: "INT8"},
   dec: (len, dec) => ({abap: "P", len, dec}),
   char: (len) => ({abap: "C", len}),

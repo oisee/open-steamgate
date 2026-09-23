@@ -287,8 +287,11 @@ export function toIr(tree, options = {}) {
           // the result type of arithmetic is the wider of the two, and a
           // division is decimal because that is what HANA answers -- measured
           // (docs/sqlscript-hana-observed.md), not assumed from SQL folklore
+          // INT2 arithmetic is INTEGER's: 32767 + 32767 is 65534 on A4H, no
+          // SMALLINT overflow, so the INT2 range does not travel into a result
+          const widened = (t) => (t?.abap === "I" && t.bits !== undefined ? T.int : t);
           const type = op === "/" ? T.dec(15, 2)
-            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : left.type);
+            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
           left = bin(op, left, right, type);
         }
         return left;
@@ -582,7 +585,10 @@ export function toIr(tree, options = {}) {
     const words = (node.children ?? []);
     const name = String(words.find((c) => c.node === "identifier" || c.node === "quoted")?.value ?? "").toUpperCase();
     const sizes = words.filter((c) => c.node === "number").map((c) => Number(c.value));
-    if (/^(INT|INTEGER|BIGINT|SMALLINT|TINYINT)$/.test(name)) return T.int;
+    // SMALLINT and TINYINT carry a range the portable engines do not enforce
+    // on a CAST (DuckDB kept 40000); refused until measured, like INT1
+    if (/^(SMALLINT|TINYINT)$/.test(name)) throw new BindError(`the SQL type ${name} is not measured yet`, node);
+    if (/^(INT|INTEGER|BIGINT)$/.test(name)) return T.int;
     if (/^(N?VARCHAR|N?CHAR|ALPHANUM|SHORTTEXT)$/.test(name)) {
       if (sizes[0] === undefined) throw new BindError(`CAST to ${name} without a length`, node);
       return T.char(sizes[0]);

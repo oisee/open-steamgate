@@ -43,7 +43,11 @@ export function irTypeOfDdic({DATATYPE, LENG, DECIMALS}, what = "a DDIC type") {
   if (["CHAR", "CLNT", "CUKY", "LANG", "UNIT", "ACCP", "NUMC", "DATS", "TIMS", "LCHR"].includes(datatype)) {
     return T.char(length);
   }
-  if (["INT1", "INT2", "INT4"].includes(datatype)) return T.int;
+  if (datatype === "INT2") return T.int2;
+  // INT1 is unsigned 0..255 in ABAP: a signed INTEGER without its range is
+  // plausibly wrong on the way out, so it is refused until measured
+  if (datatype === "INT1") throw new UnresolvedScalarType(`${what}: INT1 is not measured yet`);
+  if (datatype === "INT4") return T.int;
   if (datatype === "INT8") return T.int8;
   if (["DEC", "CURR", "QUAN", "DF16_DEC", "DF34_DEC"].includes(datatype)) return T.dec(length, decimals);
   if (["STRG", "SSTR"].includes(datatype)) return T.str;
@@ -62,7 +66,7 @@ const CDS_BUILTIN = {
   CLNT: () => T.char(3), LANG: () => T.char(1), DATS: () => T.char(8), TIMS: () => T.char(6),
   CHAR: (n) => needs("CHAR", n, T.char), NUMC: (n) => needs("NUMC", n, T.char), CUKY: () => T.char(5),
   UNIT: (n) => T.char(n ?? 3), ACCP: () => T.char(6),
-  INT1: () => T.int, INT2: () => T.int, INT4: () => T.int, INT8: () => T.int8,
+  INT1: () => { throw new UnresolvedScalarType("INT1 is not measured yet"); }, INT2: () => T.int2, INT4: () => T.int, INT8: () => T.int8,
   DEC: (n, d) => needs("DEC", n, (len) => T.dec(len, d ?? 0)), CURR: (n, d) => needs("CURR", n, (len) => T.dec(len, d ?? 0)),
   QUAN: (n, d) => needs("QUAN", n, (len) => T.dec(len, d ?? 0)),
   STRING: () => T.str, SSTRING: () => T.str, RAW: (n) => needs("RAW", n, T.bytes), RAWSTRING: () => T.bytes(),
@@ -80,6 +84,7 @@ export function scalarTypeOf(abapType, resolve = () => undefined) {
   if (text === "") throw new UnresolvedScalarType("a scalar with no ABAP type at all");
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
   if (["INT8"].includes(text)) return T.int8;
+  if (text === "INT2") return T.int2;
   if (["STRING", "SSTRING"].includes(text)) return T.str;
   if (["D", "DATS"].includes(text)) return T.char(8);
   if (["T", "TIMS"].includes(text)) return T.char(6);

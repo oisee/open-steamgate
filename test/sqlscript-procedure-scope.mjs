@@ -9,7 +9,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
-import {runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+import {runProcedure, UnsupportedSqlScript, Int2OutOfRange} from "../tools/sqlscript-procedure-ir.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
 import {scan} from "../tools/sqlscript-ir.mjs";
 import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
@@ -381,4 +381,110 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
       .to.throw(UnsupportedSqlScript, /Return is outside the initial portable procedural subset/);
   });
 
+});
+
+// INT2 as measured on A4H (docs/sqlscript-hana-observed.md): exact across its
+// range in and out, arithmetic promoted to INTEGER inside the body, and a
+// value outside the range raised at the output boundary, never wrapped
+const INT2_CLASS = (signature, body) => `CLASS cl_s DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    TYPES: BEGIN OF ty_small, n TYPE int2, END OF ty_small.
+    TYPES tt_small TYPE STANDARD TABLE OF ty_small WITH EMPTY KEY.
+    TYPES: BEGIN OF ty_wide, v TYPE i, END OF ty_wide.
+    TYPES tt_wide TYPE STANDARD TABLE OF ty_wide WITH EMPTY KEY.
+    CLASS-METHODS m ${signature}.
+ENDCLASS.
+CLASS cl_s IMPLEMENTATION.
+  METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    ${body}
+  ENDMETHOD.
+ENDCLASS.`;
+
+for (const {dialect, make} of ENGINES) describe(`INT2 as measured on A4H, as procedures on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "SRC" ("ID" INTEGER, "TXT" VARCHAR)', expect: "none"});
+    await client.native({sql: 'INSERT INTO "SRC" VALUES (1, \'one\')', expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  const program = (signature, body) => {
+    const {methods, types} = extract(INT2_CLASS(signature, body), "cl_s.clas.abap");
+    return compileProcedure(methods[0], types, {catalogue: CATALOGUE});
+  };
+  const run = (prog, inputs = {}) => runProcedure(prog, {client, dialect, inputs, relationInputs: {}, inputCatalogue: CATALOGUE});
+
+  it("an INT2 input arrives exactly at both ends of its range, and its arithmetic is INTEGER's", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 EXPORTING VALUE(et) TYPE tt_wide",
+      "et = select :iv + :iv as v from src;");
+    expect(prog.parameters[0].type).to.deep.equal({abap: "I", bits: 16});
+    for (const [given, doubled] of [[-32768, -65536], [32767, 65534], [0, 0]]) {
+      expect((await run(prog, {IV: given})).rows.map((r) => Number(r.V))).to.deep.equal([doubled]);
+    }
+  });
+
+  it("INT2 arithmetic is INTEGER's in the IR: a sum of INT2 inputs assigns to an INTEGER scalar and is not capped", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 RETURNING VALUE(rv) TYPE i", "rv = :iv + :iv;");
+    expect((await runProcedure(prog, {inputs: {IV: 32767}})).value).to.equal(65534);
+  });
+
+  it("an omitted INT2 DEFAULT takes its literal, and a DEFAULT outside the range is not a value it can hold", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 DEFAULT 5 EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv as n from src;");
+    expect((await run(prog)).rows.map((r) => Number(r.N))).to.deep.equal([5]);
+    const wide = program("IMPORTING VALUE(iv) TYPE int2 DEFAULT 40000 EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv as n from src;");
+    let caught;
+    try { await run(wide); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Int2OutOfRange);
+  });
+
+  it("INT1 is refused by name on every path until measured: a data element, a CDS built-in, a signature scalar", async () => {
+    const {scalarTypeOf, irTypeOfDdic} = await import("../tools/sqlscript/scalar-types.mjs");
+    expect(() => irTypeOfDdic({DATATYPE: "INT1", LENG: 3}, "ZDE_BYTE")).to.throw(/ZDE_BYTE: INT1 is not measured yet/);
+    expect(() => scalarTypeOf("abap.int1")).to.throw(/INT1 is not measured yet/);
+    expect(() => scalarTypeOf("zde_byte", () => ({DATATYPE: "INT1", LENG: 3, DECIMALS: 0}))).to.throw(/INT1 is not measured yet/);
+    expect(() => program("IMPORTING VALUE(iv) TYPE int1 EXPORTING VALUE(et) TYPE tt_small", "et = select 1 as n from src;")).to.throw();
+  });
+
+  it("a CAST to SMALLINT or TINYINT is refused until measured", () => {
+    for (const name of ["smallint", "tinyint"]) {
+      expect(() => program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et) TYPE tt_small",
+        `et = select cast(:iv as ${name}) as n from src;`)).to.throw(new RegExp(`the SQL type ${name.toUpperCase()} is not measured yet`));
+    }
+  });
+
+  it("an INT2 input outside the range is refused, as an ABAP int2 can never carry one", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 EXPORTING VALUE(et) TYPE tt_wide",
+      "et = select :iv as v from src;");
+    for (const bad of [32768, -32769, 1.5]) {
+      let caught;
+      try { await run(prog, {IV: bad}); } catch (error) { caught = error; }
+      expect(caught, String(bad)).to.be.instanceOf(Int2OutOfRange);
+    }
+  });
+
+  it("an INTEGER into an INT2 output column is kept inside the range and raised outside it, never wrapped", async () => {
+    const prog = program("IMPORTING VALUE(iv_i) TYPE i EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv_i as n from src;");
+    for (const kept of [32767, -32768]) expect((await run(prog, {IV_I: kept})).rows.map((r) => Number(r.N))).to.deep.equal([kept]);
+    for (const bad of [32768, 40000, -40000, 65536]) {
+      let caught;
+      try { await run(prog, {IV_I: bad}); } catch (error) { caught = error; }
+      expect(caught, String(bad)).to.be.instanceOf(Int2OutOfRange);
+      expect(caught.message).to.contain("CX_AMDP_EXECUTION_FAILED");
+    }
+  });
+
+  it("a sum of two INT2 inputs that leaves the range raises at the INT2 output, as on A4H", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv + :iv as n from src;");
+    expect((await run(prog, {IV: 100})).rows.map((r) => Number(r.N))).to.deep.equal([200]);
+    let caught;
+    try { await run(prog, {IV: 20000}); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Int2OutOfRange);
+  });
 });
