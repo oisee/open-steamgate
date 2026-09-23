@@ -342,6 +342,79 @@ reason, content type and body, and OSG's HTTP layer adds
 `dataserviceversion: 2.0` and `; charset=utf-8` on top:
 `{"error":{"code":"STG/ENTITY_SET_NOT_FOUND","message":{"lang":"en","value":"Entity set NoSuchSet does not exist in ZSTG_DEMO_SRV"}}}`.
 
+## OSGo host, 2026-09-23
+
+`node tools/gogen/osgo.mjs` (heavy: all 822 classes, run it under the
+shared lock) builds `.out/osgo`, an HTTP server in front of OSG's own ICF
+handler; `node tools/gogen/osgo.mjs --echo` builds `.out/osgo-echo` over
+the shim, open-abap-core and a test handler at `/echo` in five seconds.
+
+```
+.out/osgo [-port 3095] [-addr 127.0.0.1] [-db file.sqlite] [-root <checkout>]
+```
+
+The request path is the one the Node hosts run: express-icf-shim's
+`CL_EXPRESS_ICF_SHIM=>RUN`, **compiled as it is**, builds the ICF server,
+request and response objects and calls the handler class. Only its eleven
+`WRITE '@KERNEL ...'` lines are host functions (`go/abap/icf.go`, listed
+line by line in `frontend.mjs` `KERNEL`; the `for (const h in
+req.headers)` loop is a `kernel_loop`), and they answer what express
+answers: lower-case header names (repeats joined as Node joins them; sorted,
+since Go does not keep the order), the raw URL and path, a body only with a
+content type (express.raw, 16 MB), `res.append` and `res.send` with the
+charset express adds to a text or JSON content type, no body for HEAD, 204
+and 304. What that took in the front end: the shim's local server class
+compiles (local classes, for the owners in `LOCAL_CLASSES` only), a class
+with local classes reads its own scope and not the first one (it read the
+local's: `mi_server` "was not an attribute"), `DEFAULT <constant>` resolves
+to the constant's value, and `CL_HTTP_ENTITY`'s `get_cdata` / `set_cdata`
+are host functions with arguments, because `CL_ABAP_CONV_IN_CE` takes
+generic parameters: UTF-8 both ways, bytes that are not UTF-8 raise
+`CX_SY_CONVERSION_CODEPAGE`, as open-abap-core's fatal TextDecoder does.
+
+Each ICF request is one dialog step (`abap.DialogStep`) with a fresh
+Session, one at a time (statics are per process); a dump is the Node host's
+500 (`STG/RUNTIME` JSON with the ABAP frames for OData, `<class>: <text>`
+for a SICF node), and rolled back. Mounted: `/sap/opu/odata/sap/` with
+`ZCL_STG_HTTP_HANDLER`, every SICF node of the tree whose handler class is
+compiled (10), `/app` (the tree's `webapp/`, express.static's redirects,
+ETag and 304), each pack's `/app/<name>`, `/app/packs.json`,
+`/appconfig/fioriSandboxConfig.json`, `/` to the launchpad, and
+finalhandler's 404 for the rest. A SICF node whose class is not in this
+program (four: `webgui/sapevent`, and `zork`, `zo4d_demo`, `lsd` from the
+packs) is mounted too, as a refusal: `501 <path>: <CLASS> is not in this
+program`. Without it a request below such a node fell to its parent, and
+`webgui/sapevent` ran as a menu request of `ZCL_OSD_WEBGUI`. What express
+refuses of a response is a host error (`abap.HostError`, not catchable, not
+`NOT_COMPILED`): a second send ("headers already sent") and a second
+`Content-Type` (`res.set` of an array). The database is in memory, or `-db`
+an SQLite file in WAL mode, seeded once when it has no tables and marked
+with a hash of the build's tables and seed rows (`PRAGMA user_version`); a
+file another build seeded, or nobody marked, is refused at start rather than
+used. `ZOSD_STATUS_SRV` and the webgui read the five status tables, which
+the Node hosts refresh before each such request (`withFreshStatus`); OSGo
+has no refresh yet, so they answer out of the seed with
+`X-Osgo-Status-Snapshot: seed; not refreshed`.
+
+The front-end changes this needed that are not ICF-specific (findScope by
+class name, `DEFAULT <constant>`, the flattened block list,
+`CX_SY_CONVERSION_CODEPAGE`) are their own commit, ahead of the host
+commits, so that another branch touching `frontend.mjs` can rebase onto it.
+
+Against OSG on :3091 (bodies with the same `Host`): the service document,
+`TravelSet('T0001')`, `NoSuchSet` (404) and `/` without `$format` are byte
+for byte equal; `TravelSet` is equal except T0009, the client-001 row OSG
+serves ("Other client, must not leak") and Go filters. The launchpad
+(`/` -> `/app/flp.html`) renders its 35 tiles in Chromium and asks this
+origin for nine things: seven are answered as OSG answers them, two are
+500 where OSG answers 200 -- `/sap/bc/osd/amdp/engine` (a statement stub in
+`ZCL_OSD_AMDP_SBX`: `sy` as a whole) and `ZVDB_100_SRV/VectorSet/$count`
+(a pack's service, its DPC is not in this program). Opening an app stops
+at `$metadata` (a stub in `ZCL_STG_DISPATCHER=>RUN`: `handle( ... )-data`);
+the BSP pages stop at a `SELECT` form in `ZCL_OSD_BSP`, the webgui at
+`SELECT ... ENDSELECT`, the RFC catalogue at `GET_TYPE_ID`'s kernel line.
+Those are the compiler's next steps, not the host's.
+
 ## Next, if this is pursued
 
 Ranked with codex gpt-6-sol, 2026-09-23:

@@ -9,11 +9,10 @@
 // binary then runs once per path, each run from the seeded database, and
 // each answer is printed after a "== <path>" line when there is more than one.
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
+import {mkdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
-import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
-import {home} from "./home.mjs";
+import {compileOsg, osgDatabase} from "./osg-build.mjs";
 
 const argv = process.argv.slice(2);
 // --compare <origin>: each answer's body next to what a running OSG answers
@@ -22,37 +21,14 @@ const ci = argv.indexOf("--compare");
 const compareWith = ci >= 0 ? argv.splice(ci, 2)[1] : undefined;
 const paths = argv.length > 0 ? argv : ["/sap/opu/odata/sap/ZSTG_DEMO_SRV/"];
 const here = import.meta.dirname;
-const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
-const layers = [`${home}/src`, `${home}/gen`];
-const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/scaffold", "open-abap-odata/src", "ajson/src/core"]
-  .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
-const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
-const t0 = performance.now();
-const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
-console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`);
+const {program, summary} = compileOsg();
+console.log(summary);
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
-// the database: the transpiler's CREATE TABLEs for this registry and the rows
-// test/seed.mjs gives the Node side, so both hosts start from the same data
-const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
-const setup = new DatabaseSetup(program.reg).run();
-process.env.OSD_ROOT ??= home;
-const {seedStatements} = await import(`${home}/test/seed.mjs`);
-const seed = seedStatements();
-// rows of a table this program has no definition for (a pack's) are left
-// out, and said so
-const created = new Set(setup.schemas.sqlite.map((x) => /^CREATE\s+(?:TABLE|VIEW)\s+['"]?([\w\/]+)/i.exec(x)?.[1]?.toLowerCase()).filter(Boolean));
-const inserts = [...setup.insert, ...(Array.isArray(seed) ? seed : [seed])].filter((x) => String(x).trim() !== "");
-const skipped = new Map();
-const kept = inserts.filter((x) => {
-  const t = /^INSERT\s+INTO\s+['"]?([\w\/]+)/i.exec(x)?.[1]?.toLowerCase();
-  if (t === undefined || created.has(t)) return true;
-  skipped.set(t, (skipped.get(t) ?? 0) + 1);
-  return false;
-});
-writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...setup.schemas.sqlite, ...kept]));
-console.log(`database: ${created.size} tables and views, ${kept.length} inserts${skipped.size ? `; left out, no table in this program: ${[...skipped].map(([t, n]) => `${t} (${n})`).join(", ")}` : ""}`);
+const db = await osgDatabase(program);
+writeFileSync(join(dir, "zz_db.json"), JSON.stringify(db.statements));
+console.log(db.summary);
 writeFileSync(join(dir, "main.go"), `package main
 
 import (
