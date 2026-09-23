@@ -57,11 +57,34 @@ Both are on the path of the next milestone anyway (the OData service document
 answered by the Go binary through `ZCL_STG_DISPATCHER`), so the shift costs
 little extra once that milestone is reached.
 
+## Rules for moving (osg-i7's review)
+
+1. **A generator that stands in for missing dynamics is fixed in the
+   runtime, not rewritten in ABAP.** `osd-fm-registry.mjs` exists because
+   there is no `PARAMETER-TABLE`. Once the host can do dynamic calls, it
+   disappears. The ABAP registries depend on the same thing.
+2. **Twins go one at a time, and the JS twin stays as the oracle.** The ABAP
+   SEGW generator becomes the one that is used. The JS one moves into the
+   tests and is deleted only once the ABAP side has tests of its own.
+   Otherwise the one check that the ABAP generator is right is lost.
+3. **Measure the cost first.** For each candidate, count what it needs from
+   the runtime: dynamics, statics per session, `ASSERT 1 = 'todo'` stubs in
+   open-abap-core. It is five minutes of counting, the way the pAMDP work
+   was done.
+4. **Hot paths are measured before they move.** A registry read once at start
+   moves at no cost. Anything run on every request is timed first, on the
+   transpiler runtime as well as in Go.
+5. **Portable AMDP stays in the host.** It stands in for HANA, the database.
+   The ABAP side keeps only the dictionary, which is already read from the
+   objects.
+
 ## Order
 
-1. Reach the milestone: one request through the gateway, in Go.
-2. Dynamic instantiation and the name registry. The SEGW and search-help
-   registries move to ABAP, and their generators are deleted.
-3. `PARAMETER-TABLE` in the host. `osd-fm-registry.mjs` is deleted.
-4. The ICF apply in ABAP.
+1. The ICF apply in ABAP: nothing stands in its way.
+2. The SEGW generator: ABAP becomes the one that is used, JS the oracle.
+3. Dynamic calls in the host (`CREATE OBJECT ... TYPE (name)` in the Go
+   runtime since 2026-09-23). `osd-fm-registry.mjs` goes, and the service
+   registries can move to ABAP.
+4. Statics per session. Without them an ABAP registry in a shared process
+   is state shared by everyone.
 5. The dialog step in the Go host, with its test from `test/mocha.mjs`.
