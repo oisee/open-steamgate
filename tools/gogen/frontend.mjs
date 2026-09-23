@@ -1814,8 +1814,14 @@ function selectSingle(sel, ctx, text) {
     const byName = new Map(fields.map((f) => [String(f.name).toUpperCase(), f]));
     assign = cols.map((c, i) => {
       const f = corresponding ? byName.get(c.name) : fields[i];
+      if (!f && !corresponding) throw new Unsupported(`SELECT without CORRESPONDING: more columns than ${target.type.go} has fields`);
       if (!f) return null;
       if (!okCol(c, f)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+      // by position the move is by flat layout on a system: equal only while
+      // each column has its field's type and length
+      if (!corresponding && (c.type.k !== f.type.k || (c.type.len ?? null) !== (f.type.len ?? null))) {
+        throw new Unsupported(`SELECT without CORRESPONDING: column ${c.name} (${c.type.k}${c.type.len ?? ""}) into ${f.name} (${f.type.k}${f.type.len ?? ""}) is a layout move`);
+      }
       return {field: f.name, type: f.type};
     });
   } else {
@@ -2314,6 +2320,10 @@ export function convert(expr, to) {
   // before 15821015 (15821004 is 577736, 15821015 is 577737), an invalid
   // date is 0 (abap.DToI)
   if (to.k === "i" && from.k === "d") return ok("d2i");
+  // c -> n for a literal of exactly the field's digits only: the characters
+  // are the value (anything else, blanks, signs, other lengths, is a
+  // conversion rule not measured here)
+  if (to.k === "n" && expr.e === "chars" && to.len && new RegExp(`^[0-9]{${to.len}}$`).test(expr.value)) return {...expr, type: to};
   // i -> string and x -> string are conversion rules not measured yet (the
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give

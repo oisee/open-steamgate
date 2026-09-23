@@ -240,10 +240,13 @@ entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
 
 ## What this does not show
 
-- A request that reads data: every `SELECT` is a `NotCompiled` stub, and
-  the entity set path needs `REF TO data`.
-- No database: every `SELECT` is a `NotCompiled` stub. The plan is the
-  relational IR of portable AMDP as the one DB IR (docs/pamdp-ir-portability.md).
+- The database is Go-only: `SELECT ... INTO TABLE` and `SELECT SINGLE`
+  (lowered through the relational IR of portable AMDP, run on SQLite in the
+  Go host, the logon client added to the WHERE) exist in the Go backend; the
+  JS backend refuses both at run time. `SELECT SINGLE` without
+  `CORRESPONDING FIELDS` is refused unless each column has its field's type
+  and length (a move by layout); a character field takes its column cut to
+  its length. Every other SQL form is a `NotCompiled` stub.
 - No `p`, `d`, `t`, `decfloat`; class-based exceptions only as far as the
   runtime raises them (`TRY`/`CATCH`, `CATCH INTO` + `get_text( )`), no
   `RAISE EXCEPTION` of own classes, no `CLEANUP`; dynamic calls only as

@@ -391,3 +391,14 @@ export function SplitFit(s, piece, n) {
   if ([...piece.replace(/ +$/, "")].length > n) s.sy.subrc = 4;
   return CFit(piece, n);
 }
+
+// IS INITIAL of a d, t or n value: "" (never set) or its typed zero
+export const InitialCh = (v, z) => v === "" || v === z;
+// IS INITIAL of a structure or table: compared with its initial value
+// component by component, a table by its lines
+export function IsInitialDeep(v, z) {
+  if (Array.isArray(z)) return v.length === 0;
+  if (z !== null && typeof z === "object") return Object.keys(z).every((k) => IsInitialDeep(v[k], z[k]));
+  if (typeof z === "string") return v === z || v === "";
+  return v === z;
+}

@@ -529,7 +529,12 @@ function cond(c, ctx) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
-    case "initial": return c.x.type.k === "data" || c.x.type.k === "dref" ? GENERIC : `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
+    case "initial":
+      if (c.x.type.k === "data" || c.x.type.k === "dref") return GENERIC;
+      // "" or the typed zero for d, t and n; a structure or table compared component by component
+      if (["d", "t", "n"].includes(c.x.type.k)) return `abap.InitialCh(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
+      if (c.x.type.k === "struct" || c.x.type.k === "table") return `abap.IsInitialDeep(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
+      return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
     case "assigned": return c.fs.type.k === "data" ? GENERIC : `${ident(c.fs.name)} !== null`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;

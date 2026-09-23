@@ -29,7 +29,7 @@ const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src",
 const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
 const t0 = performance.now();
 const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
-console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`);
+console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`);
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));

@@ -120,6 +120,24 @@ function descFuncs() {
   return [...out, "", "func init() {", ...inits, "}", ""];
 }
 
+/** a structure with a d, t or n field somewhere (and nothing IsInitialData cannot read) */
+function typedZeroInside(t, seen = new Set()) {
+  if (seen.has(t.go)) return false;
+  seen.add(t.go);
+  const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
+  if (fs.some((f) => ["ref", "exc", "data", "dref"].includes(f.type.k))) return false;
+  let found = false;
+  for (const f of fs) {
+    if (["d", "t", "n"].includes(f.type.k)) found = true;
+    else if (f.type.k === "struct") {
+      const inner = STRUCTDEFS.get(f.type.go)?.fields ?? [];
+      if (inner.some((g) => ["ref", "exc", "data", "dref"].includes(g.type.k))) return false;
+      if (typedZeroInside(f.type, seen)) found = true;
+    }
+  }
+  return found;
+}
+
 function cloneFuncs() {
   const out = [];
   const done = new Set();
@@ -749,8 +767,10 @@ function stmtLines(st, ctx, d) {
       const tgt = place(st.target, ctx);
       const args = st.args.map((a) => (a.host ? expr(a.host, ctx) : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value))));
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
+      // a character field takes the column cut to its length
+      const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, nil, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
@@ -979,6 +999,11 @@ function cond(c, ctx) {
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)}.P == nil)`;
+      // a d, t or n field of a structure starts as "" (Go's zero), a
+      // variable as its typed zero: both are initial
+      if (["d", "t", "n"].includes(c.x.type.k)) return `abap.InitialCh(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
+      // a structure holding such a field: component by component
+      if (c.x.type.k === "struct" && typedZeroInside(c.x.type)) return `abap.IsInitialOf(${expr(c.x, ctx)}, ${desc(c.x.type)})`;
       return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
     case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;

@@ -203,3 +203,11 @@ var TObj = &Type{Kind: 'r'}
 // TP is p of a length and number of decimals. A p value is carried as its
 // decimal text ("0" initial) and only copied until packed arithmetic exists.
 func TP(n, dec int) *Type { return sizedType('P', n*100+dec) }
+
+// InitialCh is IS INITIAL of a d, t or n value: "" (a structure field never
+// set) or its typed zero.
+func InitialCh(v, zero string) bool { return v == "" || v == zero }
+
+// IsInitialOf is IS INITIAL of a typed value through its descriptor, for a
+// structure whose initial value is not Go's zero value.
+func IsInitialOf[T any](v T, t *Type) bool { return IsInitialData(Data{P: &v, T: t}) }

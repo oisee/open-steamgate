@@ -51,6 +51,12 @@ const EXPECT = {
   // SPLIT ... INTO fields (A4H 2026-09-23): the last field takes the rest,
   // a field without a piece is cleared, a piece cut to fit a c sets sy-subrc 4
   ZCL_GOGEN_T_RQSPLIT: "e[Seats][desc]0;f[a][ b]0;g[a][]0;h[a][b c]0;i[abc][gh]4;j[x][yyy]4",
+  // not an A4H value (the probe could not be created on A4H in this
+  // session): the language rule that a d, t or n field is initial at its
+  // typed zero, and a structure when every component is. Go gave
+  // a---X- c---X dX- e-- before (a structure field starts as ""), JS
+  // aXXX-X cXXX- dX- e-- (a structure compared with a fresh one by ===)
+  ZCL_GOGEN_T_RQINIT: "aXXXXX b-- cXXXX dXX eX- fX",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
