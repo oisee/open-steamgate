@@ -376,6 +376,11 @@ func main() {
 	}})
 	// each pack's own webapp/ under its name, then the tree's
 	for p, dir := range packWebapps {
+		// a pack folder of the build's checkout is looked for under -root,
+		// so a copied tree (root/webapp, root/packs/<name>/webapp) serves it
+		if rel, err := filepath.Rel(osgRoot, dir); err == nil && !strings.HasPrefix(rel, "..") {
+			dir = filepath.Join(*root, rel)
+		}
 		routes = append(routes, route{p, false, serveStatic(p, dir, notFound)})
 	}
 	routes = append(routes, route{"/app", false, serveStatic("/app", webapp, notFound)})
