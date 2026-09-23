@@ -796,6 +796,7 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
+  if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
   // GET REFERENCE OF x INTO r: r is bound to x itself
   if (isStmt(node, Statements.GetReference)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -1726,6 +1727,18 @@ function selectStatement(node, ctx, text) {
     args.push({value: p.value});
   });
   return {s: "select_table", table: tableName, cols, assign, target, sql: lowered.sql, args, slots};
+}
+
+/**
+ * COMMIT WORK [AND WAIT] / ROLLBACK WORK: the database LUW of the host
+ * (go/abap/luw.go). sy-subrc 0, sy-dbcnt untouched (A4H). Nothing else is
+ * registered for a COMMIT to run: PERFORM ON COMMIT and CALL FUNCTION IN
+ * UPDATE TASK do not compile. COMMIT/ROLLBACK CONNECTION is another
+ * database connection, which the host does not have.
+ */
+function luwStatement(node, text) {
+  if (!/^(COMMIT\s+WORK(\s+AND\s+WAIT)?|ROLLBACK\s+WORK)\s*\.?$/i.test(text)) throw new Unsupported(`LUW form: ${text}`);
+  return {s: isStmt(node, Statements.Commit) ? "commit_work" : "rollback_work"};
 }
 
 /**

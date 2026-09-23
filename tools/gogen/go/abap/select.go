@@ -50,7 +50,7 @@ func Select(s *Session, text string, args []any, slots []Slot, row func(scan fun
 		}
 		k++
 	}
-	rows, err := DB().Query(b.String(), bound...)
+	rows, err := conn().Query(b.String(), bound...)
 	if err != nil {
 		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
 	}

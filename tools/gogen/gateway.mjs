@@ -113,7 +113,12 @@ func main() {
 		v, _ = url.QueryUnescape(v)
 		opts = append(opts, IHTTPNVP{name: k, value: v})
 	}
-	res := ZCL_STG_DISPATCHER_DISPATCH(s, "GET", path, &opts, ${JSON.stringify(process.env.GW_HOST ?? "http://localhost:3091")}, "", "", "")
+	// one dialog step: its database LUW is committed when it ends and rolled
+	// back when it dumps (abap.DialogStep, the kernel's rule)
+	var res ZCL_STG_DISPATCHER__TY_RESPONSE
+	abap.DialogStep(func() {
+		res = ZCL_STG_DISPATCHER_DISPATCH(s, "GET", path, &opts, ${JSON.stringify(process.env.GW_HOST ?? "http://localhost:3091")}, "", "", "")
+	})
 	fmt.Printf("%d %s\\n%s\\n%s\\n", res.status, res.reason, res.content_type, res.body)
 }
 `);

@@ -41,6 +41,10 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // COMMIT WORK / ROLLBACK WORK set sy-subrc 0 (A4H: from 7, with rows
+  // written in between, sy-dbcnt left as it was). The JS emitter has no
+  // database and refuses both rather than make them no-ops
+  ZCL_GOGEN_T_LUW: {Go: "miss:4 rb:0 cw:0 cww:0", JS: "ERROR NOT_COMPILED in COMMIT / ROLLBACK WORK: the JS emitter has no database"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
