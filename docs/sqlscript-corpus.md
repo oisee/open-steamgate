@@ -807,3 +807,36 @@ another element type not measured yet (NUMC among them, and the GUIDs of
 one package, which RAW now admits as inputs but which stop elsewhere). RAW
 was measured the same day (docs/sqlscript-hana-observed.md) and is admitted
 the same way. The grammar is the next bulk.
+
+### Named arguments in a table-function call, and the data elements behind them: 15 → 17
+
+*2026-09-23. The first grammar step, bucketed by the construct behind the
+stop token rather than by body order, and reported per body.*
+
+The grammar stopped at `=>` in 12 working bodies: a table function called
+with named arguments (`p => :v`) or through an unquoted `CL=>M` callee. Both
+parse now, and the binder binds named arguments by the parameter's name and
+refuses a mix, an unknown or repeated name and a missing required one. Per
+body against `main`: 12 bodies newly parse (working 140 → 145, teaching
+60 → 67), and **none** compiled -- 11 of them stopped at a parameter typed
+by a data element that no dictionary here held.
+
+So the next step was the dictionary again. Every data-element name a
+signature, a RETURNS list or a class-local structure of the corpus names
+and nothing resolves was collected (394), the class-local and interface
+type names set aside (191; not data elements), and the other 203 read from
+the sandbox's DD04L, active version, definitions only, into
+`.local/a4h-ddic`. 171 were found; the 32 the sandbox has no DD04L entry
+for are table types, type-pool types and local names -- real gaps, not
+fetch misses.
+
+| | before | after the DD04L read |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 15 | **17** |
+| teaching, compiles as a procedure | 2 | **3** |
+| working, lowers with every column typed | 32 | 33 |
+
+Twelve bodies changed their parameter-type refusal: three now compile, the
+rest moved on -- to HANA's own views (refused by name), to columns no
+catalogue describes, to a STRING scalar in a DECLARE (host string scalars
+are the milestone that opens those), to an untyped CAST.
