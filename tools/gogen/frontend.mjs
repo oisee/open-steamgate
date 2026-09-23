@@ -389,6 +389,17 @@ function callFunction(node, ctx, text) {
   const lit = /^'([^']+)'$/.exec(nameNode?.concatTokens() ?? "");
   if (lit === null) throw new Unsupported(`CALL FUNCTION by a name that is not a literal: ${text}`);
   const name = upper(lit[1]);
+  // DESTINATION 'AMDP' (tools/amdp-destination.mjs on Node): SQLScript runs
+  // in a HANA, which the Go host has none of. Node without one raises
+  // CX_SY_DYN_CALL_ILLEGAL_FUNC from the destination before any parameter
+  // is passed, and the ABAP around such a call catches cx_root to say so
+  // (ZCL_OSD_AMDP_SBX=>ENGINE answers "none"); the Go host raises the same
+  // class at the call. Any other destination stays refused.
+  const dest = /\bDESTINATION\s+'([^']*)'/i.exec(text)?.[1];
+  if (dest !== undefined && upper(dest) === "AMDP" && !/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text)) {
+    return {s: "raise_runtime", cls: "CX_SY_DYN_CALL_ILLEGAL_FUNC",
+      op: `CALL FUNCTION '${name}' DESTINATION 'AMDP': this host has no database that speaks SQLScript (OSGo runs on SQLite; an AMDP method needs a HANA)`};
+  }
   const fm = NATIVE_FM.get(name);
   if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
   if (/\b(DESTINATION|IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
@@ -944,7 +955,9 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   // Open SQL (go/abap/select.go, dbwrite.go, ranges.go): a database error
   // and INSERT FROM TABLE with a duplicate key; a range value longer than
   // its column; a CP pattern past twice the column (tools/ir-ranges.mjs)
-  "CX_SY_OPEN_SQL_DB", "CX_SY_OPEN_SQL_DATA_ERROR", "CX_SY_DYNAMIC_OSQL_SEMANTICS"];
+  "CX_SY_OPEN_SQL_DB", "CX_SY_OPEN_SQL_DATA_ERROR", "CX_SY_DYNAMIC_OSQL_SEMANTICS",
+  // CALL FUNCTION ... DESTINATION 'AMDP' on a host without HANA (callFunction)
+  "CX_SY_DYN_CALL_ILLEGAL_FUNC"];
 // the superclass of a runtime exception the registry does not hold, read
 // off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK), and
 // CX_SY_OPEN_SQL_DATA_ERROR from CX_SY_OPEN_SQL_ERROR (its definition on
@@ -963,7 +976,7 @@ function leaves(stmts, inLoop = false) {
   for (const st of stmts ?? []) {
     if (st.s === "return") return true;
     if ((st.s === "exit" || st.s === "continue") && !inLoop) return true;
-    const loop = st.s === "loop" || st.s === "do" || st.s === "while";
+    const loop = st.s === "loop" || st.s === "do" || st.s === "while" || st.s === "select_loop";
     for (const k of ["body", "then", "else"]) if (Array.isArray(st[k]) && leaves(st[k], inLoop || loop)) return true;
     for (const b of st.branches ?? st.cases ?? st.elseifs ?? []) if (leaves(b.body, inLoop || loop)) return true;
     for (const c of st.catches ?? []) if (leaves(c.body, inLoop)) return true;
@@ -1077,6 +1090,7 @@ function structure(node, ctx) {
   if (isStruct(node, Structures.While)) {
     return {s: "while", cond: cond(node.findDirectStatement(Statements.While).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)};
   }
+  if (isStruct(node, Structures.Select)) return selectLoop(node, ctx);
   if (isStruct(node, Structures.Loop)) {
     const st = node.findDirectStatement(Statements.Loop);
     const text = st.concatTokens();
@@ -2092,6 +2106,12 @@ function fieldChain(n, ctx) {
   if (text === "SY-UNAME") return {e: "sy_host", name: "UName", type: C(12)};
   if (text === "SY-DATUM") return {e: "sy_host", name: "Datum()", type: {k: "d"}};
   if (text === "SY-UZEIT") return {e: "sy_host", name: "Uzeit()", type: {k: "t"}};
+  // the database and the release, as the transpiler runtime has them on Node:
+  // sy-dbsys the database client's name (c10, 'sqlite' for OSG's SQLite,
+  // test/setup.mjs), sy-saprl its constant 'OPEN' (c4, @abaplint/runtime
+  // builtin/sy.js); a system says 'HDB' and '758' (ultra/gaps)
+  if (text === "SY-DBSYS") return {e: "sy_host", name: "DBSys", type: C(10)};
+  if (text === "SY-SAPRL") return {e: "sy_host", name: "SapRl", type: C(4)};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
   // space: the c(1) blank, stored without its blank like every c value
@@ -2580,6 +2600,71 @@ function selectTable(sel, ctx, text) {
   return dbTable(ctx, upper(from[0].concatTokens()), "SELECT FROM");
 }
 
+/** ORDER BY f [ASCENDING|DESCENDING] ..., by columns of the table */
+function orderByOf(sel, tb) {
+  const order = [];
+  const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
+  if (ob) {
+    if (/PRIMARY\s+KEY/i.test(ob.concatTokens())) throw new Unsupported("ORDER BY PRIMARY KEY");
+    const kids = ob.getChildren().filter((c) => !isTok(c, "ORDER") && !isTok(c, "BY") && !isTok(c, ","));
+    for (let i = 0; i < kids.length; i += 1) {
+      if (!isExpr(kids[i], Expressions.SQLField)) throw new Unsupported(`ORDER BY form: ${ob.concatTokens()}`);
+      // the column before its direction (read after the step, it was the
+      // DESCENDING token itself: "no column DESCENDING")
+      const col = upper(kids[i].concatTokens());
+      const desc = isTok(kids[i + 1], "DESCENDING");
+      if (isTok(kids[i + 1], "DESCENDING") || isTok(kids[i + 1], "ASCENDING")) i += 1;
+      tb.colType(col);
+      order.push({col, desc});
+    }
+  }
+  return order;
+}
+
+/*
+ * SELECT ... INTO wa ... ENDSELECT, a loop over the rows. Measured on A4H
+ * 2026-09-24 (ZCL_GOGEN_T_SELLOOP in $ZOSG_TMP_0195, over T000 of two rows:
+ * "n:2 in:1/0,2/0, after:0/2 exit:0/1/000 exitmiss:0/1 none:4/0/QQQ
+ * cont:0/2/2 corr:5/000 elem:000/2 exit2:0/2"): each pass starts with
+ * sy-subrc 0 and sy-dbcnt the rows read so far, whatever the body did on
+ * the pass before; after ENDSELECT, or after an EXIT out of the loop,
+ * sy-subrc is 0 and sy-dbcnt the rows read when there was a row (a sy-subrc
+ * the body left is overwritten), 4 and 0 when there was none, and the work
+ * area keeps what it had. The rows are read before the first pass (the
+ * transpiler does the same); what a system's cursor shows of a write to the
+ * same table inside the loop is not measured, so such a body is refused.
+ */
+function selectLoop(node, ctx) {
+  const st = node.findDirectStatement(Statements.SelectLoop);
+  const text = st?.concatTokens() ?? "";
+  const sel = st?.findDirectExpression(Expressions.Select);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT loop form: ${text}`);
+  if (sel.findDirectExpression(Expressions.SQLIntoTable)) throw new Unsupported(`SELECT loop INTO TABLE: ${text}`);
+  const tb = selectTable(sel, ctx, text);
+  const cols = selectColumns(sel, tb, text);
+  const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT loop");
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(sel, ctx, tb, acc);
+  const order = orderByOf(sel, tb);
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
+  const lowered = lowerOrRefuse("SELECT", rel);
+  const body = bodyOf(node, ctx);
+  // a write to the table being read, inside the loop: refused (see above)
+  const writes = [];
+  const walk = (n) => {
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (!n || typeof n !== "object") return;
+    if ((n.s === "db_write" || n.s === "db_write_sql") && n.table === tb.name) writes.push(n);
+    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
+  };
+  walk(body);
+  if (writes.length > 0) throw new Unsupported(`SELECT loop over ${tb.name} that writes ${tb.name}: what the cursor sees of it is not measured`);
+  return {s: "select_loop", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc), body};
+}
+
 /**
  * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
  * [WHERE ...] [ORDER BY f ...]: the form the gateway's DPCs use. sy-subrc 0
@@ -2611,20 +2696,7 @@ function selectStatement(node, ctx, text) {
   });
   const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
-  const order = [];
-  const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
-  if (ob) {
-    if (/PRIMARY\s+KEY/i.test(ob.concatTokens())) throw new Unsupported("ORDER BY PRIMARY KEY");
-    const kids = ob.getChildren().filter((c) => !isTok(c, "ORDER") && !isTok(c, "BY") && !isTok(c, ","));
-    for (let i = 0; i < kids.length; i += 1) {
-      if (!isExpr(kids[i], Expressions.SQLField)) throw new Unsupported(`ORDER BY form: ${ob.concatTokens()}`);
-      const desc = isTok(kids[i + 1], "DESCENDING");
-      if (isTok(kids[i + 1], "DESCENDING") || isTok(kids[i + 1], "ASCENDING")) i += 1;
-      const col = upper(kids[i].concatTokens());
-      tb.colType(col);
-      order.push({col, desc});
-    }
-  }
+  const order = orderByOf(sel, tb);
   let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
   rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
@@ -2788,20 +2860,14 @@ function writeRows(kind, node, ctx, tb, text, verb) {
 }
 
 /**
- * SELECT SINGLE fields FROM table INTO [CORRESPONDING FIELDS OF] wa
- * [WHERE ...]. Measured on A4H (2026-09-23): without a row, sy-subrc is 4
- * and the target keeps what it had; with one, only the fields the columns
- * go to are written (by name with CORRESPONDING, else by position), the
- * others keep theirs. A host value is converted to the column's type and
- * bound; MANDT is the logon client, as for a table.
+ * The INTO of SELECT SINGLE and of a SELECT loop: one work area, or one
+ * elementary field for one column. Only the fields the columns go to are
+ * written (by name with CORRESPONDING, else by position).
  */
-function selectSingle(sel, ctx, text) {
-  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
-  const tb = selectTable(sel, ctx, text);
-  const cols = selectColumns(sel, tb, text);
+function intoWorkArea(sel, ctx, text, cols, verb) {
   const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
   const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
-  if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SINGLE INTO form: ${text}`);
+  if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`${verb} INTO form: ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   const target = lvalue(tnode, ctx);
   // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
@@ -2825,9 +2891,25 @@ function selectSingle(sel, ctx, text) {
       return {field: f.name, type: f.type};
     });
   } else {
-    if (corresponding || cols.length !== 1 || !okCol(cols[0], target)) throw new Unsupported(`SELECT SINGLE INTO a ${target.type.k}: ${text}`);
+    if (corresponding || cols.length !== 1 || !okCol(cols[0], target)) throw new Unsupported(`${verb} INTO a ${target.type.k}: ${text}`);
     assign = [{line: true, type: target.type}];
   }
+  return {assign, target};
+}
+
+/**
+ * SELECT SINGLE fields FROM table INTO [CORRESPONDING FIELDS OF] wa
+ * [WHERE ...]. Measured on A4H (2026-09-23): without a row, sy-subrc is 4
+ * and the target keeps what it had; with one, only the fields the columns
+ * go to are written (by name with CORRESPONDING, else by position), the
+ * others keep theirs. A host value is converted to the column's type and
+ * bound; MANDT is the logon client, as for a table.
+ */
+function selectSingle(sel, ctx, text) {
+  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  const tb = selectTable(sel, ctx, text);
+  const cols = selectColumns(sel, tb, text);
+  const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT SINGLE");
   const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
   let rel = RIR.scan(lowName(tb.name));

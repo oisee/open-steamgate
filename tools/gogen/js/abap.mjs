@@ -884,5 +884,8 @@ export const PFit = (a, n, arith) => {
 };
 export const SysID = "OSG";
 export const UName = "DEVELOPER";
+// sy-dbsys / sy-saprl (go/abap/sysinfo.go)
+export const DBSys = "sqlite";
+export const SapRl = "OPEN";
 export const Datum = () => new Date().toISOString().slice(0, 10).replaceAll("-", "");
 export const Uzeit = () => new Date().toISOString().slice(11, 19).replaceAll(":", "");

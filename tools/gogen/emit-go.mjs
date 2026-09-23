@@ -729,6 +729,7 @@ function stmtLines(st, ctx, d) {
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
         `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
+    case "raise_runtime": return [`${t}panic(abap.ArithmeticError{Class: ${JSON.stringify(st.cls)}, Op: ${JSON.stringify(st.op)}})`];
     case "call_fm": {
       // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
       // every actual as generic data, the module's classic exceptions by name
@@ -963,6 +964,30 @@ function stmtLines(st, ctx, d) {
         ...moves.map((m) => `${t}\t${m}`),
         `${t}}) > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
     }
+    case "select_loop": return withBuilders(st.body, ctx, t, () => {
+      // SELECT ... ENDSELECT (frontend selectLoop, A4H 2026-09-24): the rows
+      // are read first, then each pass starts with sy-subrc 0 and sy-dbcnt
+      // the rows so far; after the loop, EXIT included, 0 and the rows read,
+      // or 4 and 0 when there was no row and the work area is untouched
+      const n = ctx.loop++;
+      const tgt = place(st.target, ctx);
+      const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
+      const val = (i) => (st.cols[i].type.k === "i" ? `abap.DBI(q${n}.c${i})` : st.cols[i].type.k === "string" ? `abap.DBStr(q${n}.c${i})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(q${n}.c${i})` : `abap.DBChar(q${n}.c${i})`);
+      const moves = st.assign.map((a, i) => (a === null ? null : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
+      return [`${t}{`,
+        `${t}\ttype selrow${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
+        `${t}\tvar rows${n} []selrow${n}`,
+        `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
+        `${t}\t\tvar r selrow${n}`, `${t}\t\tabap.Must(scan(${st.cols.map((_, i) => `&r.c${i}`).join(", ")}))`, `${t}\t\trows${n} = append(rows${n}, r)`, `${t}\t})`,
+        `${t}\tread${n} := int32(0)`,
+        `${t}\tfor _, q${n} := range rows${n} {`,
+        `${t}\t\t_ = q${n}`, `${t}\t\tread${n}++`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, read${n}`,
+        ...moves.map((m) => `${t}\t\t${m}`),
+        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+        `${t}\t}`,
+        `${t}\tif read${n} > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, read${n}`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
+        `${t}}`];
+    });
     case "select_count": {
       // the count into the target and into sy-dbcnt (A4H), sy-subrc 4 when 0
       const n = ctx.loop++;

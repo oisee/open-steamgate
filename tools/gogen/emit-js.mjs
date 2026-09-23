@@ -390,6 +390,8 @@ function stmt(st, ctx, d) {
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "select_single":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT SINGLE ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
+    case "select_loop":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table} ... ENDSELECT: the JS backend has no database (the Go host has SQLite)`)});`];
     case "kernel_loop":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
     case "select_count":
@@ -485,6 +487,7 @@ function stmt(st, ctx, d) {
       return [`${t}{ const r = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
     }
     // CALL FUNCTION of a host module: the JS emitter has no host for them
+    case "raise_runtime": return [`${t}throw new abap.AbapError(${JSON.stringify(st.cls)}, ${JSON.stringify(st.op)});`];
     case "call_fm": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`CALL FUNCTION '${st.name}': the JS emitter has no host function modules`)});`];
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));

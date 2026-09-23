@@ -266,6 +266,18 @@ const EXPECT = {
   // target is p); a move that does not fit is a conversion overflow (ABAP
   // documentation)
   ZCL_GOGEN_T_PACKED: "ms:1728003600000 neg:-16400 small:conv max:999 lit:20260912000000",
+  // SELECT ... ENDSELECT (A4H 2026-09-24, this class over ZGOGEN_T_DBW in
+  // $ZOSG_TMP_0195): sy-dbcnt counts the passes, sy-subrc 0 at each pass and
+  // after the loop (EXIT too) when a row was read, 4/0 and the work area
+  // kept when none was. The transpiler reads the rows and loops without
+  // touching sy (ANORMALIES select-loop-sy)
+  ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity
+  // with OSG on Node without HANA, CX_SY_DYN_CALL_ILLEGAL_FUNC raised before
+  // any parameter is passed; sy-dbsys the database client's name, sy-saprl
+  // the transpiler runtime's constant (ultra/gaps, the AMDP sandbox page)
+  ZCL_GOGEN_T_AMDPDEST: "illegal_func out:[] db:[sqlite] rel:[OPEN]",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

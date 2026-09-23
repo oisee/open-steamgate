@@ -15,6 +15,11 @@ import (
 var (
 	SysID = "OSG"
 	UName = "DEVELOPER"
+	// sy-dbsys and sy-saprl as the Node hosts have them: the database
+	// client's name (the Go host's database is SQLite) and the transpiler
+	// runtime's release constant
+	DBSys = "sqlite"
+	SapRl = "OPEN"
 	// HostFacts are lines "name\tvalue" a host adds (its database, the build)
 	HostFacts []string
 	started   = time.Now()
