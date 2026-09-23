@@ -91,8 +91,8 @@ brightness or flash drives, which is #4302 and nothing else.
 | plasma (256) | 19 of 256 | pulse (12), and 7 frames of one row each where the sine index is a division inside `MOD` (#1866) |
 | mountains_oops (512) | 268 of 512 | pulse and flash; the sharp mountains of bars 28 to 31: `DATA(lv_tri1) = abs( … )` declared `i` (#4302) |
 | voxel_landscape (256) | 13 of 256 | pulse |
-| ignition, ignite_emit | 128 of 128 | the particle seed chain `frac( sin( seed * 12345 ) * 43758 )` amplifies a last-digit difference into a different particle field; measured: the first link of the chain is equal on both sides to 17 digits, the divergence is downstream and not traced further. **Open** |
-| copperbars | 15 of 128 | pulse (frames 32–35, 96–99); one line on six frames not traced. **Open, small** |
+| ignition, ignite_emit | 128 of 128 | the particle seed chain `frac( sin( seed * 12345 ) * 43758 )` amplifies a last-digit difference into a different particle field. Traced 2026-09-23: a system's `sin` is glibc's, the runtime's is V8's fdlibm, and they differ in the last bit on some links (ANOMALY-2026-09-23-sin-cos-libm, measured on A4H); a build calling glibc reproduces both scenes frame for frame. **Open, cause known** |
+| copperbars | 15 of 128 | pulse (frames 32–35, 96–99); one line on six frames, which the glibc build of 2026-09-23 also gets right (ANOMALY-2026-09-23-sin-cos-libm). **Open, small** |
 | twistzoomer, rotozoom, rotozoom_plasma, neon_city | 6 of 128 | pulse |
 | cell24, cell16, cell120, sierpinski_tet, quat_julia, sdf_blobs, torus_3d | 6 of 128 | pulse and its flash |
 | joydivision | 6 of 128 | pulse frames only (line heights follow it) |
@@ -132,6 +132,7 @@ and in the demo (a second sort key), not in the oracle.
 
 Anything the page computes (WebGL, audio timing), anything a system does
 with the wall clock, and randomness from `cl_abap_random`, which the demo
-does not use. The ignition seed chain is deterministic on each side and
-different between them, which is the limit of comparing two floating-point
-implementations rather than a defect.
+does not use. The ignition seed chain was listed here as the limit of
+comparing two floating-point implementations; it is narrower than that and
+known: `sin` and `cos` come from the C library on a system and from V8
+here (ANOMALY-2026-09-23-sin-cos-libm).
