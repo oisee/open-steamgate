@@ -35,3 +35,40 @@ ENDCLASS.\n`);
       .to.contain("DESTINATION 'AMDP'").and.not.contain("ev_n = :iv_n");
   });
 });
+
+describe("amdp-gen reads a table function's DDLS through the runtime store by the entity it defines", () => {
+  it("a DDL source whose object name is not the entity still gives the method its RETURNS", async () => {
+    const {ObjectStore} = await import("../tools/osd-store.mjs");
+    const {rmSync} = await import("node:fs");
+    const root = mkdtempSync(join(tmpdir(), "osd-amdp-entity-"));
+    try {
+      const src = join(root, "src");
+      mkdirSync(src, {recursive: true});
+      // the object is ZSTG_DDL_SRC, the entity it defines is ZSTG_TF_ENTITY,
+      // and the class names the entity, as FOR TABLE FUNCTION always does
+      writeFileSync(join(src, "zstg_ddl_src.ddls.asddls"), `@EndUserText.label: 'x'
+define table function Zstg_Tf_Entity
+returns { k : abap.int4; }
+implemented by method zcl_stg_tf_entity=>get;\n`);
+      writeFileSync(join(src, "zcl_stg_tf_entity.clas.abap"), `
+CLASS zcl_stg_tf_entity DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS get FOR TABLE FUNCTION zstg_tf_entity.
+ENDCLASS.
+CLASS zcl_stg_tf_entity IMPLEMENTATION.
+  METHOD get BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    RETURN SELECT 1 AS k FROM dummy;
+  ENDMETHOD.
+ENDCLASS.\n`);
+      const store = new ObjectStore({root, roots: [{path: "src", package: "$ENTITY", writable: false}], libs: []});
+      expect(store.read("DDLS", "ZSTG_TF_ENTITY").source).to.contain("Zstg_Tf_Entity");
+      const made = generate([src], join(root, "gen", "amdp"), {store});
+      expect(made.procedures).to.have.length(1);
+      expect(made.procedures[0].portableRefusal, JSON.stringify(made.procedures[0].portableRefusal)).to.equal(undefined);
+      expect(made.procedures[0].portable.outputSchema).to.deep.equal({K: {abap: "I"}});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});

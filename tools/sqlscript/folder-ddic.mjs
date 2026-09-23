@@ -10,6 +10,8 @@
 import {readdirSync, readFileSync, statSync, existsSync} from "node:fs";
 import {join, dirname} from "node:path";
 import {resolveType} from "../osd-type-graph.mjs";
+import {entityOf} from "../ddls-entity.mjs";
+export {entityOf};
 
 /** the released S/4 DOMA/DTEL dump, when `.local/lars` holds it -- looked for
  *  upward from the working directory, because a worktree under
@@ -123,13 +125,6 @@ export class FolderDdic {
       .concat(taken === 0 ? [] : [`${taken} names taken over by a later folder`])
       .concat(duplicates === 0 ? [] : [`${duplicates} names twice inside one folder (the later path won)`]);
   }
-}
-
-/** the name after `define [root] table function|view [entity]|... entity`, comments skipped */
-export function entityOf(source) {
-  const text = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(?:\/\/|--).*$/gm, " ");
-  const m = /\bdefine\s+(?:root\s+)?(?:table\s+function|view\s+entity|view|abstract\s+entity|custom\s+entity|transient\s+view\s+entity)\s+([\w\/]+)/i.exec(text);
-  return m === null ? undefined : m[1].toUpperCase();
 }
 
 /** folders that are there, in the order given; a missing one is skipped rather than failing the run */

@@ -15,6 +15,7 @@
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {parseDDLS} from "./cds2ddic.mjs";
+import {entityOf} from "./ddls-entity.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 
@@ -440,6 +441,22 @@ export class ObjectStore {
     return index;
   }
 
+  #ddlsEntities() {
+    const entries = this.#entries();
+    if (this.ddlsEntityIndex === undefined || this.ddlsEntityIndexOf !== entries) {
+      const byEntity = new Map();
+      for (const entry of entries.values()) {
+        if (entry.type !== "DDLS") continue;
+        let entity;
+        try { entity = entityOf(readFileSync(join(this.root, entry.file), "utf8")); } catch { entity = undefined; }
+        if (entity !== undefined && entity !== String(entry.name).toUpperCase() && !byEntity.has(entity)) byEntity.set(entity, entry);
+      }
+      this.ddlsEntityIndex = byEntity;
+      this.ddlsEntityIndexOf = entries;
+    }
+    return this.ddlsEntityIndex;
+  }
+
   #entries() {
     if (this.index === undefined) {
       this.build();
@@ -470,6 +487,10 @@ export class ObjectStore {
     if (type === "INCL") {
       const program = this.#entries().get(`PROG ${key}`);
       return program === undefined ? undefined : {...program, type: "INCL"};
+    }
+    // a DDLS by the entity it defines, when that is not its object name
+    if (type === "DDLS") {
+      return this.#ddlsEntities().get(key);
     }
     if (type === "STRU") {
       const table = this.#entries().get(`TABL ${key}`);
