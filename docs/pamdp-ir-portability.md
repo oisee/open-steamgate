@@ -19,12 +19,15 @@ document with no functions in it. It survives `JSON.stringify` and
 
 | part | files | lines, about | what it does |
 | --- | --- | ---: | --- |
-| front end | `tools/sqlscript/` lexer, grammar, `to-ir.mjs`; `tools/sqlscript-to-procedure-ir.mjs` | 2,050 | SQLScript text into typed IR, with a refusal that names what is missing |
-| lowering | `tools/sqlscript-lower.mjs` | 690 | IR into SQL text for hana, postgres, duckdb, sqlite |
-| procedural runtime | `tools/sqlscript-procedure-ir.mjs` | 620 | binds inputs as the kernel binds them, runs IF and WHILE, calls the `DatabaseClient` |
+| front end | `tools/sqlscript/lexer.mjs` (277), `combi.mjs` (221), `expressions/index.mjs` (471), `to-ir.mjs` (1,486); `tools/sqlscript-to-procedure-ir.mjs` (563) | 3,018 | SQLScript text into typed IR, with a refusal that names what is missing |
+| IR | `tools/sqlscript-ir.mjs` | 617 | the node constructors, the types, `schemaOf`, `effects`, `seamType` |
+| lowering | `tools/sqlscript-lower.mjs` | 688 | IR into SQL text for hana, postgres, duckdb, sqlite |
+| procedural runtime | `tools/sqlscript-procedure-ir.mjs` | 616 | binds inputs as the kernel binds them, runs IF and WHILE, calls the `DatabaseClient` |
 
 Only the front end is tied to a parser. The lowering and the runtime are
-table-driven over a small set of nodes.
+table-driven over a small set of nodes, and both import from the IR module:
+the lowering takes `seamType` from it, the runtime `effects`, `schemaOf`,
+`col`, `cast` and `project`. A port takes the IR module with them.
 
 **OSGo has no database layer yet.** No SELECT compiles there. In today's
 open-steamgate, Open SQL goes from ABAP through the transpiler into
@@ -45,11 +48,14 @@ now costs little.
    lowers ABAP Open SQL into these relational nodes, not into SQL text.
    SQLScript stays parsed by the JavaScript front end at build time. That
    front end writes the IR as JSON next to the transpiled program. The Go
-   runtime ports the lowering and the procedural runtime, about 1,300
-   lines, and must pass the same conformance pairs as the JavaScript one.
+   runtime ports the IR module, the lowering and the procedural runtime,
+   about 1,900 lines of JavaScript, and must pass the same conformance pairs as the JavaScript one.
 3. **Types are one mapping, and the hard rules live in the schema.**
-   pAMDP writes `{abap, len, dec}` and gogen writes `{k, len}`. The two map
-   one to one for everything that exists. Packed decimals and the binding
+   pAMDP writes `{abap, len, dec}` and gogen writes `{k, len}`. They agree
+   on `I`, `INT8`, `C`, `STRING`, `X` and `XSTRING`. They do not yet agree
+   everywhere: gogen's `f` has no pAMDP type, and pAMDP's `P` with its
+   decimals, `D` and `BOOL` have no gogen type yet. The schema lists these
+   gaps rather than hiding them. Packed decimals and the binding
    rules measured on A4H belong in the schema, with the rule written next
    to the type. CHAR right-trimmed, DATS initial `00000000` and RAW padded
    right are examples (`docs/sqlscript-hana-observed.md`). They must not be
@@ -80,8 +86,8 @@ now costs little.
 
 **Expressions** carry their type:
 - `col`, `lit`, `param` and `session` are leaf values.
-- `bin`, `call`, `cast`, `isnull`, `not`, `like`, `in`, `subquery` and
-  `case` combine them.
+- `bin`, `call`, `cast`, `isnull`, `not`, `like`, `in`, `sub` (a
+  subquery) and `case` combine them.
 - A window function travels on `call` with a `window`.
 
 **Types** are `I`, `INT8`, `P(len, dec)`, `C(len)`, `X(len)`, `XSTRING`,
