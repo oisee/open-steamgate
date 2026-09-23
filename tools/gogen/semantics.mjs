@@ -33,6 +33,10 @@ const EXPECT = {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
+  // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
+  // masked tail goes and blanks come in on the left; a blank stops it
+  // (A4H 2026-09-23, $batch parts end their body this way)
+  ZCL_GOGEN_T_SHIFT: "1:4[__ab] 2:4[_ab_] 3:2[ab] 4:0[] 5:4[_aNb] 6:1[_] 7:4[abN_] 8:5[___ab]",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in
   // the superclass's constructor me->name( ) is the superclass's own

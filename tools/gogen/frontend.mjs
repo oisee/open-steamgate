@@ -905,6 +905,18 @@ function statement(node, ctx) {
     return {s: "describe_kind", x: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"}), target};
   }
   // CONDENSE x [NO-GAPS]
+  // SHIFT s RIGHT DELETING TRAILING mask on a string, measured on A4H
+  // (ZCL_GOGEN_T_SHIFT, 2026-09-23): the trailing characters that are in the
+  // mask go and as many blanks come in on the left, so the length stays; a
+  // blank not in the mask stops it. Every other SHIFT form is refused.
+  if (isStmt(node, Statements.Shift)) {
+    if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
+    const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+    if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
+    return {s: "shift_right_trailing", target, mask: convert(mask, S)};
+  }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`CONDENSE of a ${target.type.k}`);
@@ -2244,7 +2256,10 @@ function selectSingle(sel, ctx, text) {
   if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SINGLE INTO form: ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   const target = lvalue(tnode, ctx);
-  const okCol = (c, f) => ["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i");
+  // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
+  // storage: it goes into an xstring field only
+  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring")
+    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
   let assign;
   if (target.type.k === "struct") {
     const fields = ctx.program.structs.get(target.type.go)?.fields ?? [];
@@ -2322,6 +2337,18 @@ function assignStatement(node, ctx, text) {
   const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
   const fsType = ctx.fieldSymbols?.get(fsName);
   if (!fsType) throw new Unsupported(`ASSIGN to ${fsName || "?"}`);
+  if (fsType.k === "struct" && !/\b(CASTING|INCREMENT|RANGE|COMPONENT)\b/i.test(text)) {
+    // ASSIGN ref->* TO <typed>: the reference must point at a value of that
+    // structure; one of another Go type (an ABAP-compatible structure of
+    // another name included) is refused at run time, not moved by layout
+    const inner = node.findDirectExpression(Expressions.AssignSource)?.getChildren().filter((c) => !isTok(c));
+    const kids = inner?.length === 1 && isExpr(inner[0], Expressions.Source) && inner[0].findDirectExpression(Expressions.Dereference) ? inner[0].getChildren() : null;
+    if (kids?.length === 2) {
+      const ref = sourceOperand(kids[0], ctx);
+      if (ref.type.k !== "dref") throw new Unsupported(`->* of a ${ref.type.k}`);
+      return {s: "assign_deref_typed", fs: {e: "fs", name: fsName, type: fsType}, ref, text};
+    }
+  }
   if (fsType.k !== "data") throw new Unsupported(`ASSIGN to a typed field symbol: ${text}`);
   if (/\b(CASTING|INCREMENT|RANGE)\b/i.test(text)) throw new Unsupported(`ASSIGN form: ${text}`);
   const fs = {e: "fs", name: fsName, type: fsType};

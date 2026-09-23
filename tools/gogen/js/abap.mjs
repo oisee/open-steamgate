@@ -839,3 +839,12 @@ export function IsInitialDeep(v, z) {
   if (typeof z === "string") return v === z || v === "";
   return v === z;
 }
+
+// SHIFT s RIGHT DELETING TRAILING mask on a string (see go/abap/shift.go)
+export function ShiftRightTrailing(s, mask) {
+  if ([...mask].length !== 1) throw new AbapError("NOT_COMPILED", "SHIFT RIGHT DELETING TRAILING: a mask of other than one character");
+  const r = [...s];
+  let n = r.length;
+  while (n > 0 && mask.includes(r[n - 1])) n -= 1;
+  return " ".repeat(r.length - n) + r.slice(0, n).join("");
+}

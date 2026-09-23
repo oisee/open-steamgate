@@ -852,6 +852,9 @@ function stmtLines(st, ctx, d) {
         `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref":
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "assign_deref_typed":
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})`,
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];
     // a move into generic data writes into the slot it is bound to
@@ -863,6 +866,10 @@ function stmtLines(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
+    case "shift_right_trailing": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)})`];
+    }
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -891,7 +898,7 @@ function stmtLines(st, ctx, d) {
       });
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
       return [`${t}${tgt} = nil`,
         `${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, []abap.Slot{${slots.join(", ")}}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -909,7 +916,7 @@ function stmtLines(st, ctx, d) {
       // a character field takes the column cut to its length
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
+        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, nil, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,

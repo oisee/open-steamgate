@@ -29,7 +29,7 @@ import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
@@ -48,10 +48,22 @@ const method = take("--method");
 const headerArgs = take("--header", true);
 const bodyArg = take("--body");
 const steps = flag("--steps");
-const icf = flag("--icf") || method !== undefined || headerArgs.length > 0 || bodyArg !== undefined || steps;
+// --requests <file.json>: [{method, path, headers: {k: v}, body | bodyFile}]
+// in place of paths, each with its own method, headers and body
+const requestsFile = take("--requests");
+// --other-client Prop=V1,V2: rows of another client (MANDT not the logon
+// client) that OSG's reads return and a system's (and the Go host's) do not;
+// dropped from OSG's JSON before the byte comparison, and said so
+const otherClient = take("--other-client", true).map((x) => { const [k, v] = x.split("="); return [k, new Set(v.split(","))]; });
+const icf = flag("--icf") || method !== undefined || headerArgs.length > 0 || bodyArg !== undefined || steps || requestsFile !== undefined;
 const paths = argv.length > 0 ? argv : ["/sap/opu/odata/sap/ZSTG_DEMO_SRV/"];
 const body = bodyArg === undefined ? "" : bodyArg.startsWith("@") ? readFileSync(bodyArg.slice(1)) : Buffer.from(bodyArg, "utf8");
-const requests = paths.map((p) => {
+const hostHeader = () => ["host", new URL(compareWith ?? process.env.GW_HOST ?? "http://localhost:3091").host];
+const requests = requestsFile !== undefined ? JSON.parse(readFileSync(requestsFile, "utf8")).map((r) => ({
+  method: r.method ?? "GET", path: r.path,
+  headers: [hostHeader(), ...Object.entries(r.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)])],
+  body: r.bodyFile !== undefined ? readFileSync(join(dirname(requestsFile), r.bodyFile)).toString("base64") : Buffer.from(r.body ?? "", "utf8").toString("base64"),
+})) : paths.map((p) => {
   const m = /^([A-Z]+) (\/.*)$/.exec(p);
   const rq = {method: m ? m[1] : (method ?? "GET"), path: m ? m[2] : p, headers: []};
   // the host header a client sends; the answers' absolute URLs are built from it
@@ -72,7 +84,7 @@ const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => /\.
 const t0 = performance.now();
 // GW_REUSE=1: the Go of the last compile and its database again, only the
 // host (main.go) rewritten -- for work on the host, not on the compiler
-const reuse = process.env.GW_REUSE === "1" && existsSync(join(here, "go", "cmd", "gateway", "zz_generated.go"));
+const reuse = ["1", "2"].includes(process.env.GW_REUSE) && existsSync(join(here, "go", "cmd", "gateway", "zz_generated.go"));
 const program = reuse ? null : compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
@@ -101,6 +113,8 @@ writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...setup.schemas.sqlite, 
 console.log(`database: ${created.size} tables and views, ${kept.length} inserts${skipped.size ? `; left out, no table in this program: ${[...skipped].map(([t, n]) => `${t} (${n})`).join(", ")}` : ""}`);
 
 }
+// GW_REUSE=2: the binary of the last build as it is (a comparison rerun)
+if (process.env.GW_REUSE !== "2") {
 writeFileSync(join(dir, "main.go"), `package main
 
 import (
@@ -289,6 +303,7 @@ try {
   process.exit(1);
 }
 console.log(`go build ${Math.round(performance.now() - t1)} ms`);
+}
 const table = [];
 if (icf) {
   await runIcf();
@@ -337,21 +352,46 @@ async function osgAnswer(rq) {
 
 // status, every header the ABAP set (OSG's HTTP layers add more: date, etag,
 // content-length, x-powered-by), and the body byte for byte
-function verdict(r, o) {
+function verdict(r, o, method) {
   if (r.dump) return `Go dumped: ${r.dump.slice(0, 200)}`;
   const diffs = [];
+  const notes = [];
   if (r.status !== o.status) diffs.push(`status ${r.status}, OSG ${o.status}`);
   for (const [k, v] of r.headers) {
     const ov = o.headers.get(k);
-    if (ov !== v) diffs.push(`header ${k}: Go ${JSON.stringify(v)} OSG ${JSON.stringify(ov)}`);
+    // express's res.set adds the charset the mime table has for a type: the
+    // host's HTTP layer, not the ABAP's answer
+    if (k === "content-type" && ov === `${v}; charset=utf-8`) notes.push("express adds '; charset=utf-8' to content-type");
+    else if (ov !== v && counters(ov ?? "") === counters(v)) notes.push(`header ${k} equal apart from the $batch counter`);
+    else if (ov !== v) diffs.push(`header ${k}: Go ${JSON.stringify(v)} OSG ${JSON.stringify(ov)}`);
   }
-  const g = Buffer.from(r.body, "base64");
+  let g = Buffer.from(r.body, "base64");
+  // HTTP sends no body for HEAD; what the ABAP wrote is not compared
+  if (method === "HEAD") { notes.push(`HEAD: the ABAP's ${g.length}-byte body is not sent`); g = o.body; }
+  // the response boundaries of $batch carry a counter of the process
+  // (zcl_stg_batch=>gv_counter): OSG's has served other batches before; and
+  // OSG's reads return rows of another client (--other-client)
+  if (!g.equals(o.body) && method !== "HEAD") {
+    let osg = o.body.toString("utf8");
+    const go = g.toString("utf8");
+    const before = [];
+    if (otherClient.length) {
+      const x = dropOtherClient(osg);
+      if (x.dropped > 0) { osg = x.text; before.push(`${x.dropped} row(s) of another client in OSG's answer`); }
+    }
+    if (counters(osg) !== osg || counters(go) !== go) {
+      if (counters(osg) === counters(go) && osg !== go) before.push("the $batch boundary counter");
+      osg = counters(osg);
+      if (counters(go) === osg) osg = go;
+    }
+    if (osg === go && before.length) { notes.push(`equal apart from ${before.join(" and ")}`); g = o.body; }
+  }
   if (!g.equals(o.body)) {
     let i = 0;
     while (i < g.length && i < o.body.length && g[i] === o.body[i]) i += 1;
     diffs.push(`body differs at byte ${i} (Go ${g.length}, OSG ${o.body.length} bytes): Go ${JSON.stringify(g.subarray(i, i + 60).toString("latin1"))} OSG ${JSON.stringify(o.body.subarray(i, i + 60).toString("latin1"))}`);
   }
-  return diffs.length ? diffs.join("; ") : `equal (status ${r.status}, ${r.headers.length} headers, ${g.length} bytes)`;
+  return diffs.length ? diffs.join("; ") : `equal (status ${r.status}, ${r.headers.length} headers, ${g.length} bytes)${notes.length ? `; ${notes.join("; ")}` : ""}`;
 }
 
 async function runIcf() {
@@ -370,8 +410,41 @@ async function runIcf() {
     for (let i = 0; i < answers.length; i += 1) {
       const rq = group[i];
       console.log(`== ${rq.method} ${rq.path}\n${show(answers[i])}\n`);
-      if (compareWith !== undefined) table.push(`${rq.method} ${rq.path}\t${verdict(answers[i], await osgAnswer(rq))}`);
+      if (compareWith !== undefined) table.push(`${rq.method} ${rq.path}\t${verdict(answers[i], await osgAnswer(rq), rq.method)}`);
     }
   }
   if (table.length) console.log(`compared with ${compareWith}:\n${table.join("\n")}`);
+}
+
+function counters(text) { return text.replace(/(batchresponse|changesetresponse)_stg_\d+/g, "$1_stg_N"); }
+
+// OSG's JSON without the rows of another client: each {"d":...} document (the
+// whole body, or a line of a $batch part) re-serialized with those results
+// left out, __count lowered, and the part's Content-Length fixed
+function dropOtherClient(text) {
+  let dropped = 0;
+  const doc = (json) => {
+    let d;
+    try { d = JSON.parse(json); } catch { return json; }
+    if (JSON.stringify(d) !== json || !Array.isArray(d?.d?.results)) return json;
+    const keep = d.d.results.filter((r) => !otherClient.some(([k, vs]) => vs.has(String(r[k]))));
+    const n = d.d.results.length - keep.length;
+    if (n === 0) return json;
+    dropped += n;
+    d.d.results = keep;
+    if (d.d.__count !== undefined) d.d.__count = String(Number(d.d.__count) - n);
+    return JSON.stringify(d);
+  };
+  if (text.startsWith('{"d":')) return {text: doc(text), dropped};
+  const lines = text.split("\r\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].startsWith('{"d":')) continue;
+    const before = lines[i];
+    lines[i] = doc(before);
+    if (lines[i] === before) continue;
+    for (let j = i - 1; j >= 0 && !lines[j].startsWith("--"); j -= 1) {
+      if (/^Content-Length: \d+$/i.test(lines[j])) lines[j] = lines[j].replace(/\d+$/, String(Buffer.byteLength(lines[i], "utf8")));
+    }
+  }
+  return {text: lines.join("\r\n"), dropped};
 }

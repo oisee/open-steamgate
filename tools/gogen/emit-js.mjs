@@ -339,6 +339,10 @@ function stmt(st, ctx, d) {
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
         `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
     }
+    case "shift_right_trailing": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
+    }
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
@@ -348,6 +352,8 @@ function stmt(st, ctx, d) {
         `${t}  if (c !== null) { ${ident(st.fs.name)} = c; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
     case "assign_deref":
       return [`${t}{`, `${t}  const r = ${expr(st.ref, ctx)};`, `${t}  if (r !== null) { ${ident(st.fs.name)} = r; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    case "assign_deref_typed":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.text}: a typed field symbol over a data reference is Go-only`)});`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)};`];
     // a move into generic data writes into the slot it is bound to
