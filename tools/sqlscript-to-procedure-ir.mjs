@@ -128,7 +128,15 @@ export function compileProcedure(method, types, options = {}) {
     if (one.default === undefined) return {};
     const text = String(one.default);
     if (type.abap === "I" && /^-?\d+$/.test(text)) return {optional: true, default: Number(text)};
-    if (type.abap === "STRING" && /^'(?:[^']|'')*'$/.test(text)) return {optional: true, default: text.slice(1, -1).replaceAll("''", "'")};
+    if (type.abap === "STRING" && /^'(?:[^']|'')*'$/.test(text)) {
+      const value = text.slice(1, -1).replaceAll("''", "'");
+      // 'ab  ' is a text-field literal, and ABAP drops its trailing blanks on
+      // the way into a STRING; whether that is what reaches the procedure
+      // has not been measured, so a default with trailing blanks is refused
+      // rather than trimmed or kept by guess (foreman-dell, 2026-09-23)
+      if (/\s$/.test(value)) throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} ends in blanks; a text-field literal into STRING is not measured yet`);
+      return {optional: true, default: value};
+    }
     throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} is not a literal of its type this compiler carries`);
   };
   const parameters = inputParameters

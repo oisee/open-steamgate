@@ -69,6 +69,10 @@ describe("slice (b) constructs, as procedures on DuckDB", function () {
       "et_rows = select id, txt from src;")).to.throw(UnsupportedSqlScript, /DEFAULT sy-datum for iv_d is not a literal/);
     expect(() => program("IMPORTING VALUE(iv_n) TYPE i DEFAULT 'x' EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select id, txt from src;")).to.throw(UnsupportedSqlScript, /DEFAULT 'x' for iv_n/);
+    // a text-field literal loses its trailing blanks into a STRING in ABAP;
+    // until that is measured through the procedure, it is refused, not guessed
+    expect(() => program("IMPORTING VALUE(iv_t) TYPE string DEFAULT 'ab  ' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select id, txt from src;")).to.throw(UnsupportedSqlScript, /ends in blanks/);
   });
 
   it("an alias without AS on a table parameter", async () => {
