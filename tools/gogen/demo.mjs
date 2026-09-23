@@ -45,23 +45,29 @@ mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
 
 // the ticks of each recording: frames are consecutive ticks from the first
-const spt = 60 / 152 / 1; // placeholder, the real value comes from the ABAP (get_sec_per_tick) at run time
-void spt;
 const runs = recordings.map((r) => ({scene: r.scene, frames: readFileSync(r.file, "utf8").trim().split("\n").map((l) => JSON.parse(l))}));
-writeFileSync(join(out, "runs.json"), JSON.stringify(runs.map((r) => ({scene: r.scene, gt: r.frames.map((f) => f.gt)}))));
 writeFileSync(join(dir, "zz_main.go"), goMain());
 execFileSync("gofmt", ["-w", dir]);
 const bin = join(out, "demo");
 const t1 = performance.now();
 execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/demo"], {cwd: join(here, "go"), stdio: "inherit"});
 const tBuild = performance.now() - t1;
-let goOut;
-try {
-  goOut = JSON.parse(execFileSync(bin, [join(out, "runs.json")], {maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"]}).toString());
-} catch (e) {
-  console.error(String(e.stderr).split("\n").slice(0, 12).join("\n"));
-  process.exit(1);
-}
+// one process per recording, with a hard ceiling: a loop the compiler got
+// wrong grows a table without end, and on 2026-09-23 one such run took the
+// whole WSL machine down (OOM at 14.7 GB). Now it fails its own scene only.
+const LIMIT_BYTES = 4e9;
+const goOut = {runs: runs.map((r, i) => {
+  const file = join(out, `run-${i}.json`);
+  writeFileSync(file, JSON.stringify([{scene: r.scene, gt: r.frames.map((f) => f.gt)}]));
+  try {
+    const res = execFileSync("prlimit", [`--as=${LIMIT_BYTES}`, bin, file],
+      {maxBuffer: 1 << 30, timeout: 120000, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "pipe"]});
+    return JSON.parse(res.toString()).runs[0];
+  } catch (e) {
+    const why = e.signal ? `killed (${e.signal}, 120 s or ${LIMIT_BYTES / 1e9} GB)` : String(e.stderr).split("\n").find((l) => l.trim()) ?? String(e.message);
+    return {scene: r.scene, error: why.slice(0, 160)};
+  }
+})};
 
 /* --------------------------------------------------------------------- JS */
 writeFileSync(join(out, "demo.mjs"), emitJs(program));
@@ -103,7 +109,7 @@ let totals = {n: 0, go: 0, js: 0};
 for (const [i, r] of runs.entries()) {
   const g = goOut.runs[i];
   const j = jsOut[i];
-  let gok = 0; let jok = 0; let first = g.error ? `go: ${g.error.slice(0, 110)}` : j.error ? `js: ${j.error.slice(0, 110)}` : "";
+  let gok = 0; let jok = 0; let first = g.error ? `go: ${g.error.slice(0, 110)}` : "";
   r.frames.forEach((want, k) => {
     const dg = g.error ? "error" : diff(JSON.parse(g.frames[k]), want);
     const dj = j.error ? "error" : diff(JSON.parse(j.frames[k]), want);

@@ -399,3 +399,29 @@ func Contains[T comparable](s []T, v T) bool {
 	}
 	return false
 }
+
+// BitX is BIT-AND / BIT-OR / BIT-XOR of two x fields of one length.
+func BitX(op, a, b string) string {
+	out := []byte(a)
+	for i := range out {
+		switch op {
+		case "BIT-AND":
+			out[i] &= b[i]
+		case "BIT-OR":
+			out[i] |= b[i]
+		default:
+			out[i] ^= b[i]
+		}
+	}
+	return string(out)
+}
+
+// XToI moves an x of fewer than four bytes into an i: filled with 00 on
+// the left, so it reads unsigned (FF is 255, measured on A4H).
+func XToI(v string) int32 {
+	var r int32
+	for i := 0; i < len(v); i++ {
+		r = r<<8 | int32(v[i])
+	}
+	return r
+}

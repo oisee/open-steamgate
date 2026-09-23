@@ -323,6 +323,7 @@ function expr(e, ctx) {
       return `${e.type.go}{${e.fields.map((f) => `${ident(f.name)}: ${expr(f.value, ctx)}`).join(", ")}}`;
     case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
+      if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -381,6 +382,7 @@ function conv(e, ctx) {
     case "i2s": return `abap.IToString(${x})`;
     case "x2s": return `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
+    case "x2i": return `abap.XToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;

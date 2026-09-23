@@ -285,6 +285,7 @@ function expr(e, ctx) {
     }
     case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
+      if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") throw new Error("int8 arithmetic in JS: not in this emitter yet");
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -334,6 +335,7 @@ function conv(e, ctx) {
     case "c2s": return x;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
+    case "x2i": return `abap.XToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;

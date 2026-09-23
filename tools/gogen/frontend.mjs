@@ -687,6 +687,9 @@ function leafTypes(node, ctx) {
   return out;
 }
 
+const BIT_OPS = new Set(["BIT-AND", "BIT-OR", "BIT-XOR"]);
+const hasBitOp = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && BIT_OPS.has(upper(c.concatTokens())))
+  || (isExpr(c, Expressions.Source) && hasBitOp(c)));
 const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
   || (isExpr(c, Expressions.Source) && hasArith(c)));
 
@@ -697,7 +700,20 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  */
 function source(node, ctx, outer, hint = outer) {
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
-  const types = [...leafTypes(node, ctx), ...(outer === undefined ? [] : [outer])];
+  const bits = hasBitOp(node);
+  if (bits) {
+    // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length, byte by byte
+    const leaves = leafTypes(node, ctx);
+    if (!leaves.every((t) => t.k === "x" && t.len === leaves[0].len)) {
+      throw new Unsupported(`bit operation on other than x fields of one length: ${node.concatTokens()}`);
+    }
+    return arith(node, ctx, leaves[0]);
+  }
+  // an x target computes as i and the i result is converted into it
+  // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
+  // both give FF, 300 gives 2C)
+  const target = outer?.k === "x" ? I : outer;
+  const types = [...leafTypes(node, ctx), ...(target === undefined ? [] : [target])];
   if (types.some((t) => t.k === "f")) return arith(node, ctx, F);
   if (types.some((t) => t.k === "c" || t.k === "string" || t.k === "x")) {
     throw new Unsupported(`calculation type p (a character operand and no f): ${node.concatTokens()}`);
@@ -732,6 +748,7 @@ function arith(node, ctx, calc, hint) {
     const op = its[1].op;
     if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
     if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
+    if (BIT_OPS.has(op) !== (calc.k === "x")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
     expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
   } else if (its.length === 1) {
     // a lone constructor takes its # from where the value goes
@@ -1186,6 +1203,10 @@ export function convert(expr, to) {
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give
   if (to.k === "x" && from.k === "i") return ok("i2x");
+  // x -> i: an x shorter than four bytes is filled with 00 on the left, so
+  // it reads unsigned (measured on A4H: FF gives 255); four and more bytes
+  // are not measured
+  if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
   if (from.k === "ref" && to.k === "ref") {

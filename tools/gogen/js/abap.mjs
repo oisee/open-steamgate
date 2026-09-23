@@ -211,3 +211,19 @@ export function ReplaceAll(v, of, wth) {
   if (of === "" || !v.includes(of)) return [v, 4];
   return [v.split(of).join(wth), 0];
 }
+
+// BIT-AND / BIT-OR / BIT-XOR of two x fields of one length
+export function BitX(op, a, b) {
+  let out = "";
+  for (let i = 0; i < a.length; i++) {
+    const x = a.charCodeAt(i); const y = b.charCodeAt(i);
+    out += String.fromCharCode(op === "BIT-AND" ? x & y : op === "BIT-OR" ? x | y : x ^ y);
+  }
+  return out;
+}
+// an x of fewer than four bytes into an i: 00 on the left, read unsigned
+export function XToI(v) {
+  let r = 0;
+  for (let i = 0; i < v.length; i++) r = r * 256 + v.charCodeAt(i);
+  return r;
+}
