@@ -292,9 +292,21 @@ CHAR columns right-trimmed after the seed (`go/abap/dbstore.go`). `SELECT
 COUNT(*)` compiles; sy-dbcnt is the count, sy-subrc 4 when it is 0; `SELECT
 ... INTO TABLE` sets sy-dbcnt to the rows and `SELECT SINGLE` to 1 or 0
 (A4H, `ZCL_GOGEN_T_SELCNT`). A WHERE takes comparisons, `IN` a range, `AND`,
-`OR`, `NOT` and parentheses.
+`OR`, `NOT` and parentheses. `IN` on a `d` column is refused at build time
+(ir-ranges does not carry dates). A string, or a c longer than its CHAR
+column, compared in a WHERE or written by `SET` is bound right-trimmed when
+it fits and refused (`NOT_COMPILED`, `abap.DBCFit`) when it does not,
+never cut to the column: A4H raises `CX_SY_OPEN_SQL_DATA_ERROR` for such a
+range LOW, and the plain comparison and the `SET` are not measured yet
+(`ZCL_GOGEN_T_HOSTFIT`, `ZCL_GOGEN_T_HOSTLONG`).
 
 ## What this does not show
+
+- **Known gap, call emission:** a method call without `EXCEPTIONS` leaves
+  sy-subrc as it was in both emitters; on A4H it is 0 afterwards
+  (`ZCL_GOGEN_T_CALLSUBRC`, pinned to the wrong `call:4`). It is why
+  `ZCL_GOGEN_T_DBW` answers `tabcx:4` where A4H answered `tabcx:0`. For
+  whoever owns call emission, not the database.
 
 - The database is Go-only: `SELECT ... INTO TABLE` and `SELECT SINGLE`
   (lowered through the relational IR of portable AMDP, run on SQLite in the

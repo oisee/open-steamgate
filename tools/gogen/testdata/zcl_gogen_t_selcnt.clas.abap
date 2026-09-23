@@ -2,7 +2,7 @@
 * same statements over a system table of two rows (probe ZCL_GOGEN_T_CNT in
 * $ZOSG_TMP_0220, deleted after): COUNT(*) puts the count into sy-dbcnt and
 * is sy-subrc 4 when it is 0; INTO TABLE 0/rows or 4/0; SINGLE 0/1 or 4/0;
-* APPEND leaves sy-subrc alone. Here the same over zgogen_t_dbw with two
+* APPEND leaves sy-subrc alone. Here the same over zgogen_t_dbw with three
 * rows, and ranges (their rules pinned by the pairs of tools/ir-ranges.mjs:
 * a value longer than the column is CX_SY_OPEN_SQL_DATA_ERROR, a subclass
 * of CX_SY_OPEN_SQL_ERROR on A4H).

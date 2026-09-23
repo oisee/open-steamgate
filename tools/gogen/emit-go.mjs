@@ -628,7 +628,8 @@ function withBuilders(body, ctx, t, emitLoop) {
 // the arguments of a statement lowered at build time: the logon client, a
 // host value (a c right-trimmed, as the column binds it), a literal
 function sqlArgs(args, ctx) {
-  return `[]any{${args.map((a) => (a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
+  return `[]any{${args.map((a) => (a.fit !== undefined ? `abap.DBCFit(${expr(a.host, ctx)}, ${a.fit})`
+    : a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
 }
 

@@ -2092,6 +2092,17 @@ function sqlHost(src, trailing, ctx, text) {
 function sqlValue(v, ct, ir, acc) {
   if (v.e === "chars" && ct.k === "c" && v.value.length <= (ct.len ?? 1)) return RIR.lit(v.value, ir);
   if (v.e === "int" && ct.k === "i") return RIR.lit(v.value, ir);
+  // a character value that may not fit the column: convert( ) would cut it,
+  // and a cut value can compare equal to (or be written as) a different
+  // key. A4H raises CX_SY_OPEN_SQL_DATA_ERROR for a range LOW longer than
+  // the column; a plain comparison and a SET are not measured, so a value
+  // that does not fit is refused when it arrives (abap.DBCFit) and one that
+  // fits is bound right-trimmed as before.
+  if (ct.k === "c" && (v.type.k === "string" || (v.type.k === "c" && (v.type.len ?? 1) > (ct.len ?? 1)))) {
+    if (v.e === "chars" || v.e === "str") throw new Unsupported(`a literal longer than the ${ct.len ?? 1} characters of its column`);
+    acc.hosts.push({fit: ct.len ?? 1, v});
+    return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
+  }
   const x = convert(v, ct);
   acc.hosts.push(x);
   return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
@@ -2118,13 +2129,15 @@ function sqlCompare(p, ctx, tb, acc) {
     for (const f of ["LOW", "HIGH"]) {
       if (!["c", "string", "i", "n", "d", "t"].includes(fields.get(f).type.k)) throw new Unsupported(`IN: a range whose ${f} is a ${fields.get(f).type.k}`);
     }
-    if (!["c", "string", "i", "n", "d", "t"].includes(ct.k)) throw new Unsupported(`IN on a ${ct.k} column: ${text}`);
+    if (!["c", "string", "i", "n", "t"].includes(ct.k)) throw new Unsupported(`IN on a ${ct.k} column: ${text}`);
+    // a d column: tools/ir-ranges.mjs refuses dates, so every range with a
+    // row would be NOT_COMPILED at run time; refused here until it does
     const id = String(acc.ranges.length);
     const low = fields.get("LOW").type;
     const kind = ct.k === "n" ? "NUMC" : undefined;
     const irT = sqlIrType(ct);
-    acc.ranges.push({id, column: col, type: irT, kind, lowLen: low.k === "c" || low.k === "n" ? low.len ?? 0 : 0, range});
-    return rangeHostPred(id, col, irT, kind === undefined ? {} : {kind});
+    acc.ranges.push({id, column: lowName(col), type: irT, kind, lowLen: low.k === "c" || low.k === "n" ? low.len ?? 0 : 0, range});
+    return rangeHostPred(id, lowName(col), irT, kind === undefined ? {} : {kind});
   }
   const op = p.findDirectExpression(Expressions.SQLCompareOperator);
   const src = p.findDirectExpression(Expressions.SQLSource);
@@ -2180,7 +2193,10 @@ function wherePred(node, ctx, tb, acc) {
 function loweredArgs(lowered, acc) {
   const args = lowered.params.map((p) => {
     const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
-    if (m) return {host: acc.hosts[Number(m[1])]};
+    if (m) {
+      const h = acc.hosts[Number(m[1])];
+      return h.fit !== undefined ? {host: h.v, fit: h.fit} : {host: h};
+    }
     if (p.name === "SY-MANDT") return {mandt: true};
     return {value: p.value};
   });

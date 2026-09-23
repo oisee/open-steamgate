@@ -42,6 +42,20 @@ type WriteSpec struct {
 // DBC is a c value bound as its column binds it: right-trimmed.
 func DBC(s string) string { return strings.TrimRight(s, " ") }
 
+// DBCFit is a character host value (a string, or a c longer than the
+// column) compared with or written into a CHAR column of n characters:
+// right-trimmed when it fits. One that does not fit is refused here rather
+// than cut: A4H raises CX_SY_OPEN_SQL_DATA_ERROR for such a range LOW, the
+// plain comparison and the SET are not measured, and a cut value can match
+// (or overwrite) a row A4H would not touch.
+func DBCFit(s string, n int) string {
+	t := strings.TrimRight(s, " ")
+	if jsLen(t) > n {
+		panic(NotCompiled("Open SQL host value", fmt.Sprintf("%q is longer than the column's %d characters (CX_SY_OPEN_SQL_DATA_ERROR for a range on A4H; a plain comparison or SET is not measured)", t, n)))
+	}
+	return t
+}
+
 // bindValue is ir-writes.mjs' bindValue for a value the work area holds.
 func bindValue(v any, t *IRType, where string) *IR {
 	switch t.Abap {
