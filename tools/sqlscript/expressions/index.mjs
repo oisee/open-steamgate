@@ -218,8 +218,27 @@ export class UnnestCall extends Expression {
 export class TableFunctionCall extends Expression {
   getRunnable() {
     // `sys.series_generate_date( ... )` -- a built-in table function is
-    // reached through its schema, so the name is a ColumnRef and not a Name
-    return seq(new ColumnRef(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
+    // reached through its schema, so the name is a ColumnRef and not a Name.
+    // `CL_X=>GET_ROWS( ... )` without quotes -- an AMDP method named the way
+    // the corpus writes it -- is tried first, because a ColumnRef stops at `=>`.
+    // Arguments are positional or named (`p_clnt => :p_clnt`), never mixed:
+    // the binder refuses a mix by name.
+    const arg = altPrio(new NamedArgument(), new Expr());
+    return seq(altPrio(new MethodName(), new ColumnRef()), "(", opt(seq(arg, star(seq(",", arg)))), ")");
+  }
+}
+
+/** `CL_X=>METHOD` written without quotes */
+export class MethodName extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Name());
+  }
+}
+
+/** `p_clnt => :p_clnt` -- an argument bound to a parameter by its name */
+export class NamedArgument extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Expr());
   }
 }
 

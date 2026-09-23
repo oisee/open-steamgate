@@ -694,10 +694,12 @@ export function toIr(tree, options = {}) {
    *  by name. The name is kept as the source spells it, because on HANA
    *  `"CL=>M"` and the DDLS entity are different objects. */
   function tableFunction(call) {
+    const method = kid(call, "MethodName");
     const ref = kid(call, "ColumnRef");
-    const names = ref === undefined ? [] : kids(ref, "Name");
-    const parts = names.map(nameOf);
-    const spelled = names.map((one) => String(leaf(one)?.value ?? ""));
+    const names = method !== undefined ? kids(method, "Name") : ref === undefined ? [] : kids(ref, "Name");
+    // an unquoted `CL=>M` is one name, spelled as the source spells it
+    const parts = method !== undefined ? [names.map(nameOf).join("=>")] : names.map(nameOf);
+    const spelled = method !== undefined ? [names.map((one) => String(leaf(one)?.value ?? "")).join("=>")] : names.map((one) => String(leaf(one)?.value ?? ""));
     if (parts.length >= 2) {
       const schema = parts[0];
       if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
@@ -710,7 +712,33 @@ export function toIr(tree, options = {}) {
     if (fn === undefined) {
       throw new BindError(`table function call ${name} is not in the registry of this run`, call);
     }
-    const argNodes = kids(call, "Expr");
+    // positional or named, never both: a mix has no single reading
+    const named = kids(call, "NamedArgument");
+    const positional = kids(call, "Expr");
+    if (named.length > 0 && positional.length > 0) {
+      throw new BindError(`table function ${name} is called with positional and named arguments together`, call);
+    }
+    let argNodes = positional;
+    if (named.length > 0) {
+      const byName = new Map();
+      for (const one of named) {
+        const argName = nameOf(kid(one, "Name"));
+        if (byName.has(argName)) throw new BindError(`argument ${argName.toLowerCase()} of ${name} is given twice`, one);
+        if (!fn.parameters.some((p) => p.name === argName)) {
+          throw new BindError(`table function ${name} has no parameter ${argName.toLowerCase()}`, one);
+        }
+        byName.set(argName, kid(one, "Expr"));
+      }
+      // named arguments in the declared order; an omitted one must be
+      // OPTIONAL or DEFAULT, and only a trailing run may be left out
+      const upto = fn.parameters.reduce((last, p, i) => (byName.has(p.name) ? i : last), -1);
+      const gap = fn.parameters.slice(0, upto + 1).find((p) => !byName.has(p.name) && p.optional !== true);
+      if (gap !== undefined) throw new BindError(`argument ${gap.name.toLowerCase()} of ${name} is missing`, call);
+      if (fn.parameters.slice(0, upto + 1).some((p) => !byName.has(p.name))) {
+        throw new BindError(`${name}: leaving out an optional argument before a named one is not lowered`, call);
+      }
+      argNodes = fn.parameters.slice(0, upto + 1).map((p) => byName.get(p.name));
+    }
     // a trailing OPTIONAL / DEFAULT parameter may be left out, as the corpus
     // does (a table function called with its table argument only, the
     // DEFAULT 0); the callee's own default then applies on the engine

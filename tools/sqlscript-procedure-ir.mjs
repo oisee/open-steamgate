@@ -414,6 +414,9 @@ export async function runProcedure(program, {
     if (parameter.kind !== undefined && !["DATS", "TIMS"].includes(parameter.kind)) {
       throw new UnsupportedSqlScript(`portable scalar input ${name} has an unknown kind ${parameter.kind}`);
     }
+    if (parameter.kind !== undefined && !(parameter.type.abap === "C" && parameter.type.len === (parameter.kind === "DATS" ? 8 : 6))) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} is a ${parameter.kind} but not C(${parameter.kind === "DATS" ? 8 : 6})`);
+    }
     const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
       : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
       : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);

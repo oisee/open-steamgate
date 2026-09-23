@@ -182,6 +182,22 @@ describe("a table function called in FROM", () => {
     expect(() => call('RETURN SELECT k FROM "CL_X=>DARK"(1);')).to.throw(BindError, /argument iv_z of CL_X=>DARK has no resolved type \(CL_X=>DARK.iv_z: ZUNKNOWN/);
   });
 
+  it("binds named arguments by the parameter's name, in any order, for a quoted or an unquoted callee", () => {
+    const quoted = call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_n => 1, iv_a => :iv_a);');
+    expect(quoted.rel.input.args.map((a) => a.name)).to.deep.equal(["IV_A", "IV_N"]);
+    const bare = call("RETURN SELECT k FROM CL_X=>GET_ROWS ( iv_a => :iv_a, iv_n => 2 );");
+    expect(bare.rel.input.name).to.equal("CL_X=>GET_ROWS");
+    expect(lower(bare.rel, "hana").sql).to.contain('"CL_X=>GET_ROWS"(');
+    expect(call('RETURN SELECT k FROM "CL_X=>CONVERT"(it_rows => :it_guid);').rel.input.args).to.have.length(1);
+  });
+
+  it("refuses named arguments that are mixed, unknown, repeated, or leave out a required one", () => {
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(:iv_a, iv_n => 1);')).to.throw(BindError, /positional and named arguments together/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_a => :iv_a, iv_z => 1);')).to.throw(BindError, /has no parameter iv_z/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_a => :iv_a, iv_a => :iv_a);')).to.throw(BindError, /argument iv_a of CL_X=>GET_ROWS is given twice/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_n => 1);')).to.throw(BindError, /argument iv_a of CL_X=>GET_ROWS is missing/);
+  });
+
   it("binds a table argument to a table variable or an IN table parameter, and refuses anything else", () => {
     const ir = call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid);');
     expect(ir.rel.input.args[0]).to.include({kind: "relation", name: "IT_GUID"});

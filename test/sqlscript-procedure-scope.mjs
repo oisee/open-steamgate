@@ -147,6 +147,18 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
       "et_rows = select 0 as id, :iv_d as txt from dummy;");
     expect(required.parameters[0].kind).to.equal("DATS");
     expect((await run(required, {IV_D: ""})).rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
+    // a date DEFAULT is checked when the method compiles, not first used
+    const withDefault = program("IMPORTING VALUE(iv_d) TYPE d DEFAULT '20260101' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;");
+    expect((await run(withDefault)).rows).to.deep.equal([{ID: 0, TXT: "20260101"}]);
+    expect(() => program("IMPORTING VALUE(iv_d) TYPE d DEFAULT '2026' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;")).to.throw(UnsupportedSqlScript, /DEFAULT '2026' for iv_d is not 8 digits/);
+    // a program handed over with a bad kind, or a kind on the wrong width, is refused
+    for (const [bad, message] of [[{...required.parameters[0], kind: "NUMC"}, /unknown kind NUMC/], [{...required.parameters[0], type: {abap: "C", len: 6}}, /is a DATS but not C\(8\)/]]) {
+      failure = undefined;
+      try { await runProcedure({...required, parameters: [bad]}, {client, dialect, inputs: {IV_D: "20260101"}, inputCatalogue: CATALOGUE}); } catch (error) { failure = error; }
+      expect(failure?.message).to.match(message);
+    }
   });
 
   it("a RAW input is its n bytes as canonical hex: padded with zero bytes, initial all zeros, compared exactly", async () => {

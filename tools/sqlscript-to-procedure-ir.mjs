@@ -226,6 +226,14 @@ export function compileProcedure(method, types, options = {}) {
       const type = irTypeFromAbap(one.abapType, resolve);
       const given = defaultOf(one, type);
       const zeros = zeroDigits(one);
+      // a date/time DEFAULT is checked here, not when a call first omits it:
+      // blank is the initial value, anything else must be the digits
+      if (zeros !== undefined && given.default !== undefined) {
+        if (given.default.trim() === "") given.default = zeros;
+        else if (!new RegExp(`^\\d{${zeros.length}}$`).test(given.default)) {
+          throw new UnsupportedSqlScript(`DEFAULT '${given.default}' for ${one.name} is not ${zeros.length} digits, so not a ${zeros.length === 8 ? "date" : "time"}`);
+        }
+      }
       const initial = one.optional === true && given.default === undefined && zeros !== undefined ? {default: zeros} : {};
       // the kind travels with the parameter, not in the IR type (which the
       // lowering reads as plain C(n)): the runtime binds an explicit initial
