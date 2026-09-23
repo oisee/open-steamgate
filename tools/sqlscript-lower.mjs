@@ -693,11 +693,19 @@ export function lower(rel, dialectName, options = {}) {
     // printing params next to the text, 2026-09-23)
     const where = () => (w.pred === undefined ? "" : ` WHERE ${expr(w.pred)}`);
     if (w.write === "insert") {
-      if (w.onDuplicate === "ignore" && dialectName === "hana") {
+      // "raise" writes what it can and the host raises after (A4H's INSERT
+      // FROM TABLE), so it renders as the skipping INSERT
+      const skip = w.onDuplicate === "ignore" || w.onDuplicate === "raise";
+      if (skip && dialectName === "hana") {
         throw new Refused("INSERT that skips duplicate keys is not rendered for hana yet");
       }
-      const ignore = w.onDuplicate === "ignore" ? " ON CONFLICT DO NOTHING" : "";
-      if (w.from !== undefined) return `INSERT INTO ${table} ${cols(w.columns)} ${select(w.from)}${ignore}`;
+      const ignore = skip ? " ON CONFLICT DO NOTHING" : "";
+      if (w.from !== undefined) {
+        // SQLite reads `... FROM t ON CONFLICT` as a join constraint: the
+        // select goes into a derived table with a WHERE of its own first
+        const from = skip && dialectName === "sqlite" ? `SELECT * FROM (${select(w.from)}) WHERE true` : select(w.from);
+        return `INSERT INTO ${table} ${cols(w.columns)} ${from}${ignore}`;
+      }
       if (dialectName === "hana" && w.rows.length > 1) return `INSERT INTO ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
       return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)}${ignore}`;
     }

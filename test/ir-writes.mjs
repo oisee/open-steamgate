@@ -6,7 +6,7 @@ import {readFileSync} from "node:fs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
-import {insertRows, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
+import {insertRows, insertFrom, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
 import {CASES, SEED, PAIRS_FILE, render} from "../tools/ir-writes-pairs.mjs";
 import {T, lit} from "../tools/sqlscript-ir.mjs";
 
@@ -28,7 +28,11 @@ const AFTER = {
   "UPDATE every row of a client": [S("001", 1, "x"), S("001", 2, "x"), S("002", 1, "other")],
   "DELETE one row by key": without(BASE, S("001", 2, "two")),
   "MODIFY: one row updated, one inserted": [...without(BASE, S("001", 1, "one")), S("001", 1, "uno"), S("001", 7, "seven")],
-  "MODIFY of key columns only": [...BASE, S("001", 8, "null")],
+  "INSERT FROM TABLE with a duplicate: the others written, the host raises": [...BASE, S("001", 3, "b"), S("001", 4, "c")],
+  "INSERT FROM TABLE with a duplicate inside the table: the first written": [...BASE, S("001", 5, "first")],
+  "INSERT FROM a select, skipping duplicate keys": [...BASE, S("001", 3, "two"), S("002", 2, "other")],
+  "MODIFY with a key twice: the last row wins": [...without(BASE, S("001", 1, "one")), S("001", 1, "b")],
+  "MODIFY with a field left out writes its initial value": [...BASE, S("001", 8, "")],
 };
 
 for (const {dialect, make} of ENGINES) describe(`writes as IR, on ${dialect}`, function () {
@@ -75,10 +79,21 @@ describe("writes as IR: the pairs and the refusals", () => {
     expect(out.params.map((p) => p.value)).to.deep.equal(["new", "001"]);
   });
 
+  it("an INSERT FROM TABLE carries how many rows it was given, for the host to raise when fewer were written", () => {
+    const stmt = CASES.find((one) => one.name.startsWith("INSERT FROM TABLE with a duplicate:")).stmt();
+    expect(stmt).to.include({onDuplicate: "raise", expected: 3});
+    expect(lower(stmt, "sqlite").sql).to.match(/ON CONFLICT DO NOTHING$/);
+  });
+
   it("refuses what it cannot write, and a skipping INSERT on hana", () => {
     expect(() => insertRows("T", ["A"], [])).to.throw(WriteError, /no rows/);
     expect(() => insertRows("T", ["A", "B"], [[lit(1, T.int)]])).to.throw(WriteError, /one value per column/);
-    expect(() => insertRows("T", ["A"], [[lit(1, T.int)]], {onDuplicate: "maybe"})).to.throw(WriteError, /error or ignore/);
+    expect(() => insertRows("T", ["A"], [[lit(1, T.int)]], {onDuplicate: "maybe"})).to.throw(WriteError, /error, raise or ignore/);
+    expect(() => insertFrom("T", ["A"], {rel: "scan", table: "S"}, {onDuplicate: "ignor"})).to.throw(WriteError, /error, raise or ignore/);
+    expect(() => upsert("T", ["A", "B"], [[lit(1, T.int)]], ["A"])).to.throw(WriteError, /one value per column/);
+    expect(() => bindValue(null, T.int)).to.throw(WriteError, /NULL value/);
+    expect(bindValue(undefined, {abap: "C", len: 3})).to.include({value: ""});
+    expect(bindValue("a  ", T.str)).to.include({value: "a  "});
     expect(() => update("T", [], undefined)).to.throw(WriteError, /sets nothing/);
     expect(() => upsert("T", ["A"], [[lit(1, T.int)]], [])).to.throw(WriteError, /key columns/);
     expect(() => upsert("T", ["A"], [[lit(1, T.int)]], ["B"])).to.throw(WriteError, /among its columns/);

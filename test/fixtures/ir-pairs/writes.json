@@ -1290,13 +1290,476 @@
       }
     },
     {
-      "name": "MODIFY of key columns only",
+      "name": "INSERT FROM TABLE with a duplicate: the others written, the host raises",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 3,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "b",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "dup",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 4,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "c",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "raise",
+        "expected": 3
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?), (?, 1, ?), (?, 4, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "dup",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p4",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p5",
+              "value": "c",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?), (?, 1, ?), (?, 4, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "dup",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p4",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p5",
+              "value": "c",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 3, $2::varchar(10)), ($3::varchar(3), 1, $4::varchar(10)), ($5::varchar(3), 4, $6::varchar(10)) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "dup",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p4",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p5",
+              "value": "c",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "refused": "INSERT that skips duplicate keys is not rendered for hana yet"
+        }
+      }
+    },
+    {
+      "name": "INSERT FROM TABLE with a duplicate inside the table: the first written",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 5,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "first",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 5,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "second",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "raise",
+        "expected": 2
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 5, ?), (?, 5, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "first",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "second",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 5, ?), (?, 5, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "first",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "second",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 5, $2::varchar(10)), ($3::varchar(3), 5, $4::varchar(10)) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "first",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "second",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "refused": "INSERT that skips duplicate keys is not rendered for hana yet"
+        }
+      }
+    },
+    {
+      "name": "INSERT FROM a select, skipping duplicate keys",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "from": {
+          "rel": "project",
+          "input": {
+            "rel": "scan",
+            "table": "T"
+          },
+          "items": [
+            {
+              "as": "MANDT",
+              "expr": {
+                "node": "col",
+                "name": "MANDT",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              }
+            },
+            {
+              "as": "ID",
+              "expr": {
+                "node": "bin",
+                "op": "+",
+                "left": {
+                  "node": "col",
+                  "name": "ID",
+                  "type": {
+                    "abap": "I"
+                  }
+                },
+                "right": {
+                  "node": "lit",
+                  "value": 1,
+                  "type": {
+                    "abap": "I"
+                  }
+                },
+                "type": {
+                  "abap": "I"
+                }
+              }
+            },
+            {
+              "as": "TXT",
+              "expr": {
+                "node": "col",
+                "name": "TXT",
+                "type": {
+                  "abap": "C",
+                  "len": 10
+                }
+              }
+            }
+          ]
+        },
+        "onDuplicate": "ignore"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT * FROM (SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\") WHERE true ON CONFLICT DO NOTHING",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" ON CONFLICT DO NOTHING",
+          "params": []
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" ON CONFLICT DO NOTHING",
+          "params": []
+        },
+        "hana": {
+          "refused": "INSERT that skips duplicate keys is not rendered for hana yet"
+        }
+      }
+    },
+    {
+      "name": "MODIFY with a key twice: the last row wins",
       "statement": {
         "write": "upsert",
         "table": "T",
         "columns": [
           "MANDT",
-          "ID"
+          "ID",
+          "TXT"
         ],
         "rows": [
           [
@@ -1314,8 +1777,104 @@
               "type": {
                 "abap": "I"
               }
+            },
+            {
+              "node": "lit",
+              "value": "b",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
             }
-          ],
+          ]
+        ],
+        "key": [
+          "MANDT",
+          "ID"
+        ]
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 1, $2::varchar(10)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?) WITH PRIMARY KEY",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "b",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "MODIFY with a field left out writes its initial value",
+      "statement": {
+        "write": "upsert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
           [
             {
               "node": "lit",
@@ -1331,6 +1890,14 @@
               "type": {
                 "abap": "I"
               }
+            },
+            {
+              "node": "lit",
+              "value": "",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
             }
           ]
         ],
@@ -1341,7 +1908,7 @@
       },
       "lowered": {
         "sqlite": {
-          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES (?, 1), (?, 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 8, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
           "params": [
             {
               "name": "p0",
@@ -1351,14 +1918,14 @@
             },
             {
               "name": "p1",
-              "value": "001",
-              "type": "C(3)",
+              "value": "",
+              "type": "C(10)",
               "isNull": false
             }
           ]
         },
         "duckdb": {
-          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES (?, 1), (?, 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 8, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
           "params": [
             {
               "name": "p0",
@@ -1368,14 +1935,14 @@
             },
             {
               "name": "p1",
-              "value": "001",
-              "type": "C(3)",
+              "value": "",
+              "type": "C(10)",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES ($1::varchar(3), 1), ($2::varchar(3), 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 8, $2::varchar(10)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
           "params": [
             {
               "name": "p0",
@@ -1385,14 +1952,14 @@
             },
             {
               "name": "p1",
-              "value": "001",
-              "type": "C(3)",
+              "value": "",
+              "type": "C(10)",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\") SELECT ?, 1 FROM DUMMY UNION ALL SELECT ?, 8 FROM DUMMY",
+          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 8, ?) WITH PRIMARY KEY",
           "params": [
             {
               "name": "p0",
@@ -1402,8 +1969,8 @@
             },
             {
               "name": "p1",
-              "value": "001",
-              "type": "C(3)",
+              "value": "",
+              "type": "C(10)",
               "isNull": false
             }
           ]

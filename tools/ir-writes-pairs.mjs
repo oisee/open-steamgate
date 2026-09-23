@@ -35,7 +35,15 @@ export const CASES = [
   {name: "UPDATE every row of a client", stmt: () => update("T", [{col: "TXT", expr: lit("x", SCHEMA.TXT)}], eq("MANDT", "001"))},
   {name: "DELETE one row by key", stmt: () => remove("T", and(eq("MANDT", "001"), eq("ID", 2)))},
   {name: "MODIFY: one row updated, one inserted", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 1, txt: "uno"}, {mandt: "001", id: 7, txt: "seven"}), KEY)},
-  {name: "MODIFY of key columns only", stmt: () => upsert("T", KEY, bindRows(KEY, SCHEMA, [{mandt: "001", id: 1}, {mandt: "001", id: 8}]), KEY)},
+  {name: "INSERT FROM TABLE with a duplicate: the others written, the host raises", stmt: () => insertRows("T", COLS,
+    rows({mandt: "001", id: 3, txt: "b"}, {mandt: "001", id: 1, txt: "dup"}, {mandt: "001", id: 4, txt: "c"}), {onDuplicate: "raise"})},
+  {name: "INSERT FROM TABLE with a duplicate inside the table: the first written", stmt: () => insertRows("T", COLS,
+    rows({mandt: "001", id: 5, txt: "first"}, {mandt: "001", id: 5, txt: "second"}), {onDuplicate: "raise"})},
+  {name: "INSERT FROM a select, skipping duplicate keys", stmt: () => insertFrom("T", COLS, project(scan("T"),
+    [{as: "MANDT", expr: col("MANDT", SCHEMA.MANDT)}, {as: "ID", expr: bin("+", col("ID", SCHEMA.ID), lit(1, SCHEMA.ID), SCHEMA.ID)}, {as: "TXT", expr: col("TXT", SCHEMA.TXT)}]),
+    {onDuplicate: "ignore"})},
+  {name: "MODIFY with a key twice: the last row wins", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 1, txt: "a"}, {mandt: "001", id: 1, txt: "b"}), KEY)},
+  {name: "MODIFY with a field left out writes its initial value", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 8}), KEY)},
 ];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
