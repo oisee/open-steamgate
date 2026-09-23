@@ -41,6 +41,10 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // call chains whose head is a call on me: m( )->n( ), me->m( )->n( ),
+  // zif_x~m( )->n( ), cl_x=>m( )->n( ), as statements and as operands; the
+  // head runs before the argument of the tail (log ...mfnxtx...), A4H
+  ZCL_GOGEN_T_CHAINS: "a0 b+0 c0 d2 d2 <d2> <d2> f.x g+0 if log:mambmb+mcmdmemfnxtxmgmg+ng+0mh",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

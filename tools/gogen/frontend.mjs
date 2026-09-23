@@ -1943,14 +1943,15 @@ function call(chain, ctx, statement, hint) {
     mc = kids[2];
   } else if (kids.length === 3 && upper(kids[0].concatTokens()) === "ME" && isTok(kids[1], "->")) {
     mc = kids[2];
-  } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
+  } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall) && !isExpr(kids[0], Expressions.MethodCall)) {
     receiver = isExpr(kids[0], Expressions.FieldChain) || isExpr(kids[0], Expressions.SourceField) ? fieldChain(kids[0], ctx) : null;
     if (receiver === null || receiver.type.k !== "ref") throw new Unsupported(`call through ${kids[0].concatTokens()}`);
     if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[2];
-  } else if (kids.length > 3 && isTok(kids[kids.length - 2], "->") && isExpr(kids[kids.length - 1], Expressions.MethodCall)) {
-    // a->b( )->c( ): the receiver is what the chain before the last -> returns
+  } else if ((kids.length > 3 || isExpr(kids[0], Expressions.MethodCall)) && isTok(kids[kids.length - 2], "->") && isExpr(kids[kids.length - 1], Expressions.MethodCall)) {
+    // a->b( )->c( ): the receiver is what the chain before the last -> returns;
+    // so is m( )->n( ) and zif_x~m( )->n( ), whose head is a call on me
     const head = kids.slice(0, -2);
     const prefix = {getChildren: () => head, concatTokens: () => head.map((k) => k.concatTokens()).join(""),
       findFirstExpression: (t) => head.map((k) => (isTok(k) ? undefined : isExpr(k, t) ? k : k.findFirstExpression(t))).find(Boolean)};
