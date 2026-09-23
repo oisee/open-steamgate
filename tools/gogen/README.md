@@ -260,19 +260,39 @@ after a dump does not replace the dump. `DELETE <name> FROM ...` goes to
 the database only when `<name>` is not a variable: an internal table named
 like a TABL is the internal table's, as on A4H (`ZCL_GOGEN_T_DELNAME`).
 
-`INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a table do **not** compile,
-by decision: their SQL has to come from the shared relational IR
-(`tools/sqlscript-ir.mjs`, lowered by `tools/sqlscript-lower.mjs`), and it
-has no write node. `effects()` there already expects `{rel: "insert" |
-"update" | "delete" | "merge"}`; there is no constructor and `lower()`
-answers `relation <kind> not lowered`. Each such statement is a stub whose
-message names the node it waits on. What they must do was measured on A4H
-and sits beside `ZCL_GOGEN_T_DBW` in `semantics.mjs`: sy-subrc 4 for a
-duplicate key or a missing row, sy-dbcnt the rows written, MANDT the logon
-client whatever the work area holds, and `INSERT ... FROM TABLE` with a
-duplicate raises `CX_SY_OPEN_SQL_DB` after writing every other row. Four
-of those rules the transpiler's runtime gets wrong (ANORMALIES
-`dbwrite-*`).
+`INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a table compile through the
+write nodes of the shared relational IR (`tools/ir-writes.mjs`, 2026-09-23).
+`UPDATE ... SET ... WHERE` and `DELETE FROM ... WHERE` are lowered at build
+time by `lower()`; a write whose rows are a work area or an internal table is
+built with ir-writes' constructors, lowered once to refuse what the IR
+refuses, and its rows are rendered at run time by `go/abap/irsql.go`, a port
+of the SQLite rendering checked byte for byte against
+`test/fixtures/ir-pairs/writes.json` (14 of 14). sy-subrc and sy-dbcnt are
+A4H's (`ZCL_GOGEN_T_DBW` in `semantics.mjs`): a duplicate key of a work
+area is 4/0, `INSERT FROM TABLE` writes every other row and raises
+`CX_SY_OPEN_SQL_DB` with sy untouched, `ACCEPTING DUPLICATE KEYS` is 4 and
+the rows written, `UPDATE` / `DELETE FROM` a work area or a table go by the
+primary key one row at a time with the counts summed, MANDT is the logon
+client whatever the work area holds, and a field the work area does not set
+is its initial value, never NULL. Four of those rules the transpiler's
+runtime gets wrong (ANORMALIES `dbwrite-*`). A column of kind p, f, x or
+xstring is not written yet (a stub). The JS emitter has no database and
+refuses each such statement.
+
+`col IN range` is `rangesPredicate` of `tools/ir-ranges.mjs`: the build
+lowers the statement with a `/*@range:<id>*/` marker where the range goes,
+and `go/abap/ranges.go`, a port checked against `ranges.json` (44 of 44:
+33 renderings byte for byte, 11 outcomes), fills it at run time. Replayed
+on SQLite against A4H's own measurement (`a4h-ranges.json`, 80 cases): 65
+select A4H's rows, 7 raise what A4H raised (an uncatchable
+`SAPSQL_IN_ITAB_ILLEGAL_*` dump, a catchable `CX_SY_OPEN_SQL_DATA_ERROR` /
+`CX_SY_DYNAMIC_OSQL_SEMANTICS`), 8 are refused by name (`NOT_COMPILED`).
+The Go host keeps the store as HANA does: `PRAGMA case_sensitive_like` on,
+CHAR columns right-trimmed after the seed (`go/abap/dbstore.go`). `SELECT
+COUNT(*)` compiles; sy-dbcnt is the count, sy-subrc 4 when it is 0; `SELECT
+... INTO TABLE` sets sy-dbcnt to the rows and `SELECT SINGLE` to 1 or 0
+(A4H, `ZCL_GOGEN_T_SELCNT`). A WHERE takes comparisons, `IN` a range, `AND`,
+`OR`, `NOT` and parentheses.
 
 ## What this does not show
 
@@ -284,8 +304,9 @@ of those rules the transpiler's runtime gets wrong (ANORMALIES
   and length (a move by layout); a character field takes its column cut to
   its length. `COMMIT WORK` / `ROLLBACK WORK` close the dialog step's
   database transaction. `INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a
-  table wait for the write nodes of the relational IR; every other SQL form
-  is a `NotCompiled` stub.
+  table compile (above); every other SQL form (`FOR ALL ENTRIES`, `JOIN`,
+  `GROUP BY`, dynamic clauses, `IS NULL` / `IS INITIAL`) is a
+  `NotCompiled` stub.
 - `d`, `t` and `n` are declared, copied and compared with initial; `p` is
   declared and copied only; no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
   EXCEPTION ... MESSAGE`, no T100 or OTR texts in `get_text( )`.

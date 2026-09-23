@@ -1462,3 +1462,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: **needs an issue** in `abaplint/abaplint` (a syntax check for OPTIONAL on an AMDP method's scalar parameter); not yet filed -- goes out through the critic gate.
 - Upstream version containing a fix: none yet (the workaround lives in our compiler; abaplint has no check to fix)
 - Regression-test location: `test/sqlscript-procedure-scope.mjs` ("OPTIONAL on a scalar is refused in the kernel's words …"), `test/sqlscript-procedure-source.mjs`, `test/amdp-cleanroom-corpus.mjs`
+
+### ANOMALY-2026-09-23-ranges-expand-in — the transpiler runtime's `col IN range` knows five row forms, ORs them all, and reads a CP pattern as LIKE unescaped
+
+- Status: `workaround`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/expand_in.js`, `expandIN`)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... WHERE col IN rt_range` (a ranges table of SIGN / OPTION / LOW / HIGH)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_selcnt.clas.abap` (I CP 'A*' with E EQ 'AB'); through the gateway, `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$filter=Seats%20gt%201` (the demo DPC turns the filter into a range)
+- Exact command used to run it: `curl` against a running OSG (`npm start`, the transpiler runtime) and `node tools/gogen/gateway.mjs --compare <origin> <path>` for the Go backend; the runtime's source read in `node_modules/@abaplint/runtime/build/src/expand_in.js`
+- Expected SAP behaviour: measured on A4H by foreman-dell (`test/fixtures/ir-pairs/a4h-ranges.json`, 80 cases): every SIGN I / E and OPTION EQ NE GT GE LT LE BT NB CP NP; I rows OR'ed, AND NOT the OR of the E rows; CP with `+` for one character, `#` escaping, a literal `%` / `_` matched literally; a lower-case or initial SIGN / OPTION an uncatchable dump
+- Actual open-abap behaviour: only `I EQ`, `I NE`, `I GE`, `I LE`, `I CP` are rendered; any other row (every E row, GT, LT, BT, NB, NP) throws `IN, <sign> <option> not supported`, which OSG answers as a 500 (`$filter=Seats gt 1`, `Status ne 'A'`, `TravelId ge ... and TravelId le ...`: 500 on OSG, 200 with A4H's rows through the Go backend). CP becomes `LIKE` with `*` replaced by `%` and nothing else: `+` and `#` are not read, and a literal `%` or `_` in the pattern is a wildcard (A4H's `50%_off*` would match `50X_off`). Every row, I or E, is joined with OR
+- Impact on open-steamgate: an OData `$filter` whose range has any other form fails the request on the Node host; a CP pattern with `_`, `%`, `+` or `#` selects other rows than a system
+- Smallest safe workaround: the Go backend (`tools/gogen`) carries the IR's rangesPredicate (`tools/ir-ranges.mjs`, ported in `go/abap/ranges.go`, checked against `ranges.json` and replayed against `a4h-ranges.json`); the Node host has none
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `expandIN`)
+- Regression-test location: `tools/gogen/go/abap/ranges_test.go` (the rules), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELCNT / ZCL_GOGEN_T_SELDUMP
+- Upstream version containing a fix: none yet
