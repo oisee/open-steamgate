@@ -41,6 +41,14 @@ if (echo) {
   const db = await osgDatabase(program);
   statements = db.statements;
   console.log(db.summary);
+  // SMW0: the W3MI objects of the layers (the BSP apps' pages among them)
+  // beside the binary in media/, their WWWPARAMS rows with the real sizes
+  const {layers} = await import("./osg-build.mjs");
+  const {collectMedia, writeMedia, replaceWwwparams} = await import("./media.mjs");
+  const media = collectMedia(layers.filter(existsSync));
+  statements = replaceWwwparams(statements, media);
+  writeMedia(media, join(here, ".out", "media"));
+  console.log(`media: ${media.length} W3MI objects, ${Math.round(media.reduce((n, o) => n + o.size, 0) / 1024)} KB -> .out/media`);
   // the SICF nodes of the tree, as the Node hosts mount them, minus the
   // paths src/icf/nodes.json gives to another front, minus a handler class
   // this program does not have (it would answer CX_SY_CREATE_OBJECT_ERROR)

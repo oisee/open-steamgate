@@ -299,7 +299,24 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
+	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	flag.Parse()
+
+	if *media == "" {
+		if exe, err := os.Executable(); err == nil {
+			if d := filepath.Join(filepath.Dir(exe), "media"); fileExists(filepath.Join(d, "w3mi.json")) {
+				*media = d
+			}
+		}
+	}
+	if *media != "" {
+		if err := abap.SetMediaDir(*media); err != nil {
+			log.Fatalf("media: %v", err)
+		}
+		log.Printf("media: %s", *media)
+	} else {
+		log.Printf("media: none (every WWWDATA_IMPORT is IMPORT_ERROR)")
+	}
 
 	if *dbFile == "" {
 		if err := abap.OpenDB(dbScript); err != nil {
@@ -422,4 +439,9 @@ func main() {
 	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	log.Fatal(server.ListenAndServe())
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
