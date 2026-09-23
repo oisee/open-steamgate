@@ -94,9 +94,25 @@ export function compileProgram({folders, objects, tolerant = false}) {
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
   program.supplied = suppliedParams(reg, program.wanted);
   const ctx0 = {reg, program};
+  // the local classes of the owners that have them compiled (LOCAL_CLASSES),
+  // named OWNER:LOCAL: wanted before any class compiles, so the owner's
+  // CREATE OBJECT ... TYPE lcl_x finds its class
+  program.locals = new Map();
+  LOCAL_DEFS.clear();
+  const localDefs = [];
+  for (const obj of reg.getObjects()) {
+    if (!(obj instanceof abaplint.Objects.Class) || !wanted.includes(obj.getName().toLowerCase()) || !LOCAL_CLASSES.has(upper(obj.getName()))) continue;
+    for (const l of localClasses(reg, obj)) {
+      program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
+      program.wanted.add(l.name);
+      LOCAL_DEFS.set(l.name, l.def);
+      localDefs.push(l);
+    }
+  }
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
   }
+  for (const l of localDefs) program.classes.push(classIr(ctx0, l));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
@@ -228,6 +244,40 @@ function componentInterfaces(reg, intf, seen = new Set()) {
   return [...seen];
 }
 
+/*
+ * Local classes (a class's locals_imp), compiled only for the owners named
+ * here: the ICF shim creates its server object as a local class. Each is
+ * compiled as a class named OWNER:LOCAL (no ABAP name can hold the colon, so
+ * CREATE OBJECT ... TYPE (name) never reaches one), out of an object that
+ * answers what classIr asks of a global class. A local class with a
+ * superclass or a constructor of its own is refused: neither is looked up
+ * outside the registry yet.
+ */
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM"]);
+// the definitions of the local classes compiled, by their compiled name
+const LOCAL_DEFS = new Map();
+
+function localClasses(reg, obj) {
+  const owner = upper(obj.getName());
+  const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
+  const out = [];
+  for (const file of obj.getABAPFiles()) {
+    if (file === obj.getMainABAPFile()) continue;
+    for (const info of file.getInfo().listClassDefinitions()) {
+      const local = upper(info.name);
+      const def = findScope(top, "class_definition", local)?.findClassDefinition(local);
+      if (def === undefined) continue;
+      out.push({
+        name: `${owner}:${local}`, owner, local, obj, def, file,
+        getName: () => `${owner}:${local}`,
+        getMainABAPFile: () => file,
+        getDefinition: () => def,
+      });
+    }
+  }
+  return out;
+}
+
 /** kept for the numeric bench sample: one folder, every class in it */
 export function readClass(folder) {
   const objects = [...new Set(readdirSync(folder).map((f) => f.split(".")[0]))];
@@ -242,7 +292,70 @@ const NATIVE = new Map([
   // get_text( ) of an exception without a T100 message or a text id: the
   // fallback text, which A4H gives too (2026-09-23); anything else dumps
   ["CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "Native_GET_TEXT_FOR_MESSAGE"],
+  // the ICF entity's text body: UTF-8 both ways, as open-abap-core's
+  // CL_ABAP_CONV_IN_CE / _OUT_CE do it (TextDecoder with fatal, so bytes that
+  // are not UTF-8 raise CX_SY_CONVERSION_CODEPAGE); those two classes take
+  // generic parameters, which the subset has no signature for
+  ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
+  ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
 ]);
+
+/*
+ * The kernel lines of the ICF shim (express-icf-shim's cl_express_icf_shim,
+ * WRITE '@KERNEL ...' JavaScript on Node) as host functions of the Go
+ * runtime (go/abap/icf.go); the ABAP around them compiles as it is. Keyed
+ * by method and the line's text. INPUT.req and INPUT.res are the method's
+ * REQ and RES, which the host binds to its exchange (abap.ICFExchange);
+ * INPUT.class travels in that exchange too. An argument is a name, a
+ * component (LS_FIELD-NAME), "&" before a place the function writes, and
+ * ":kind" the type it must have. A line of the shim not listed here stays
+ * a stub that dumps, as every other @KERNEL line does.
+ *   {fn, args}            one statement
+ *   {loop, args, binds}   a JavaScript for (...) { over what fn returns,
+ *                         each pair written to the binds; its body is the
+ *                         statements up to the line {end}
+ *   {bound}               a line of that loop whose work the binds do
+ */
+const KERNEL = new Map([
+  ["CL_EXPRESS_ICF_SHIM=>RUN|lv_classname.set(INPUT.class);", {fn: "abap.ICFClass", args: ["REQ:data", "&LV_CLASSNAME:string"]}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_xstr.set(INPUT.req.body.toString(\"hex\").toUpperCase());", {fn: "abap.ICFRequestBody", args: ["REQ:data", "&LV_XSTR:xstring"]}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_str.set(INPUT.req.method);", {fn: "abap.ICFRequestMethod", args: ["REQ:data", "&LV_STR:string"]}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|for (const h in INPUT.req.headers) {", {loop: "abap.ICFRequestHeaders", args: ["REQ:data"], binds: ["LV_NAME", "LV_VALUE"]}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_name.set(h);", {bound: "LV_NAME"}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.headers[h]);", {bound: "LV_VALUE"}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|}", {end: true}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.url);", {fn: "abap.ICFRequestURL", args: ["REQ:data", "&LV_VALUE:string"]}],
+  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.path);", {fn: "abap.ICFRequestPath", args: ["REQ:data", "&LV_VALUE:string"]}],
+  ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.append(ls_field.get().name.get(), ls_field.get().value.get());", {fn: "abap.ICFResponseAppend", args: ["RES:data", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
+  ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.status(lv_code.get()).send(Buffer.from(lv_xstr.get(), \"hex\"));", {fn: "abap.ICFResponseSend", args: ["RES:data", "LV_CODE:i", "LV_XSTR:xstring"]}],
+]);
+
+/** the line of a WRITE '@KERNEL ...' as the JavaScript it holds, else undefined */
+function kernelText(node) {
+  if (!(node instanceof Nodes.StatementNode) || !isStmt(node, Statements.Write)) return undefined;
+  const m = /^WRITE\s+'@KERNEL(.*)'\s*\.?$/is.exec(node.concatTokens());
+  return m === null ? undefined : m[1].replace(/''/g, "'").trim();
+}
+
+function kernelOf(node, ctx) {
+  const text = kernelText(node);
+  return text === undefined ? undefined : KERNEL.get(`${ctx.className}=>${ctx.method}|${text}`);
+}
+
+/** the arguments of a host function (see KERNEL), resolved in the method */
+function nativeArgs(specs, ctx) {
+  return specs.map((spec) => {
+    const m = /^(&?)([\w\/~]+)(?:-([\w]+))?:(\w+)$/.exec(spec);
+    if (m === null) throw new Error(`host function argument ${spec}`);
+    let value = variable(m[2], ctx);
+    if (m[3] !== undefined) {
+      const f = fieldOf(ctx, value.type, m[3], `${ctx.className}=>${ctx.method}`);
+      value = {e: "field", base: value, name: f.name, type: f.type};
+    }
+    if (value.type.k !== m[4]) throw new Unsupported(`host function argument ${spec} is a ${value.type.k}`);
+    return {ref: m[1] === "&", value};
+  });
+}
 
 /* --------------------------------------------------------------------- types */
 
@@ -353,10 +466,12 @@ function classIr(ctx0, obj) {
   program.currentTypes = new Set([...file.getRaw().matchAll(/\bTYPES\s*:?\s*(?:BEGIN\s+OF\s+)?([\w\/]+)/gi)].map((m) => upper(m[1])));
   for (const m of file.getRaw().matchAll(/,\s*(?:BEGIN\s+OF\s+)?([\w\/]+)\s+TYPE\b/gi)) program.currentTypes.add(upper(m[1]));
   const def = obj.getDefinition();
-  const spaghetti = new abaplint.SyntaxLogic(reg, obj).run().spaghetti;
+  // a local class (localClasses) is read in the scopes of its owner
+  const spaghetti = new abaplint.SyntaxLogic(reg, obj.obj ?? obj).run().spaghetti;
   const tree = new Rearranger().run("CLAS", file.getStructure());
   const className = upper(obj.getName());
-  const scopeName = className;
+  const scopeName = obj.local ?? className;
+  if (obj.local !== undefined && def.getSuperClass()) throw new Error(`${className}: a local class with a superclass is not compiled (LOCAL_CLASSES)`);
 
   // attributes and constants live in the class implementation scope
   const implScope = findScope(spaghetti.getTop(), "class_implementation", scopeName);
@@ -457,7 +572,11 @@ function classIr(ctx0, obj) {
   cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
   cls.signatures = signatures;
   const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
-  for (const node of tree.findAllStructures(Structures.Method)) {
+  // a local class's methods are the ones of its own CLASS ... IMPLEMENTATION
+  const methodNodes = obj.local === undefined ? tree.findAllStructures(Structures.Method)
+    : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(ci.findFirstExpression(Expressions.ClassName).concatTokens()) === obj.local)
+      .flatMap((ci) => ci.findAllStructures(Structures.Method));
+  for (const node of methodNodes) {
     const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
     const sig = signatures.get(name);
     const skip = (why) => {
@@ -473,13 +592,19 @@ function classIr(ctx0, obj) {
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
     if (NATIVE.has(`${className}=>${name}`)) {
-      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE.get(`${className}=>${name}`)}],
+      const native = NATIVE.get(`${className}=>${name}`);
+      // {fn, args}: the host function takes the places and values named
+      // (attributes and parameters, "&" for a place it writes) instead of
+      // the parameters in their order
+      const st = typeof native === "string" ? {s: "native", fn: native}
+        : {s: "native", fn: native.fn, args: nativeArgs(native.args, {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: new Map(), fieldSymbols: new Map()})};
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [st],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
-      const ctx = {program, reg, className, scopeName, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
+      const ctx = {program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
@@ -532,7 +657,8 @@ function classIr(ctx0, obj) {
   // a constructor that did not compile: the object can still be created, so
   // the classes that create it compile, but none of its methods runs on a
   // state the constructor never set -- they all raise, with the reason
-  const hasCtor = tree.findAllStructures(Structures.Method).some((n) => upper(n.findFirstExpression(Expressions.MethodName).concatTokens()) === "CONSTRUCTOR");
+  const hasCtor = methodNodes.some((n) => upper(n.findFirstExpression(Expressions.MethodName).concatTokens()) === "CONSTRUCTOR");
+  if (hasCtor && obj.local !== undefined) throw new Error(`${className}: a local class with a constructor is not compiled (LOCAL_CLASSES)`);
   if (hasCtor && cls.constructor === null) {
     const why = program.skipped.find((x) => x.startsWith(`${className}=>CONSTRUCTOR:`))?.replace(/^[^:]+: /, "") ?? "?";
     cls.ctorBroken = why;
@@ -637,6 +763,35 @@ function blockList(children, ctx) {
   const out = [];
   for (let i = 0; i < children.length; i += 1) {
     const child = children[i];
+    // a host loop (KERNEL): the statements up to its closing line are its body
+    const k = kernelOf(child, ctx);
+    if (k?.loop !== undefined) {
+      const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
+      const j = children.findIndex((c, x) => x > i && kernelOf(c, ctx)?.end === true);
+      const inner = children.slice(i + 1, j);
+      const where = `${ctx.className}=>${ctx.method} (${pos.file}:${pos.row})`;
+      if (j < 0 || ctx.kernelLoop !== undefined || inner.some((c) => !(c instanceof Nodes.StatementNode) || /^(EXIT|CONTINUE|RETURN|CHECK)\b/i.test(c.concatTokens()))) {
+        ctx.program.partial.push(`${where}: a kernel loop without its end, nested, or with control flow`);
+        out.push({s: "stub", where, reason: "a kernel loop without its end, nested, or with control flow", pos});
+        if (j < 0) break;
+        i = j;
+        continue;
+      }
+      try {
+        const binds = k.binds.map((b) => variable(b, ctx));
+        if (binds.some((b) => b.type.k !== "string")) throw new Unsupported(`kernel loop binds ${k.binds.join(", ")}: not strings`);
+        ctx.kernelLoop = k;
+        out.push({s: "kernel_loop", fn: k.loop, args: nativeArgs(k.args, ctx), binds, body: blockList(inner, ctx), pos});
+      } catch (e) {
+        if (!(e instanceof Unsupported)) throw e;
+        ctx.program.partial.push(`${where}: ${e.message}`);
+        out.push({s: "stub", where, reason: e.message.slice(0, 200), pos});
+      } finally {
+        ctx.kernelLoop = undefined;
+      }
+      i = j;
+      continue;
+    }
     // one statement (or one IF, LOOP, TRY ...) the subset does not cover
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
@@ -1160,6 +1315,10 @@ function statement(node, ctx) {
   // writes its kernel parts in JS as WRITE '@KERNEL ...', and skipping one would
   // run the ABAP around it on values nobody set
   if (isStmt(node, Statements.Write)) {
+    // a kernel line the host implements (KERNEL)
+    const k = kernelOf(node, ctx);
+    if (k?.fn !== undefined) return {s: "native", fn: k.fn, args: nativeArgs(k.args, ctx), stmt: true};
+    if (k?.bound !== undefined && ctx.kernelLoop?.binds.includes(k.bound)) return {s: "nop"};
     if (/'@KERNEL/i.test(node.concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
     return {s: "nop"};
   }
@@ -2347,7 +2506,9 @@ function createObject(node, ctx) {
   }
   const clsNode = node.findDirectExpression(Expressions.ClassName);
   if (!clsNode && target.type.intf) throw new Unsupported(`CREATE OBJECT of an interface reference without TYPE: ${text}`);
-  const cls = clsNode ? upper(clsNode.concatTokens()) : target.type.name;
+  const written = clsNode ? upper(clsNode.concatTokens()) : target.type.name;
+  // a local class of this class's owner (LOCAL_CLASSES), by its compiled name
+  const cls = ctx.program.locals?.get(`${ctx.owner ?? ctx.className}|${written}`) ?? written;
   if (!ctx.program.wanted.has(cls)) throw new Unsupported(`CREATE OBJECT ${cls}: the class is not compiled in this program`);
   const sig = constructorSignature(ctx, cls);
   const given = new Map();
@@ -2854,7 +3015,7 @@ let REG = null;
 function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {
-    const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition();
+    const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition() ?? LOCAL_DEFS.get(c);
     if ((def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf || (REG && componentInterfaces(REG, upper(i.name)).includes(intf)))) return true;
   }
   return false;

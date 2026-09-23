@@ -682,8 +682,21 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
+      // a host function with arguments of its own (frontend NATIVE / KERNEL):
+      // "&" places are pointers it writes; a kernel line inside a body (stmt)
+      // returns nothing
+      if (st.args) {
+        const call = `${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")})`;
+        return [`${t}${!st.stmt && m.returning ? "return " : ""}${call}`];
+      }
       return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
+    // a JavaScript for (...) { of kernel code, as a range over what the host
+    // function returns; each pair is written to the binds before the body
+    case "kernel_loop":
+      return [`${t}for _, kv := range ${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")}) {`,
+        ...st.binds.map((b, i) => `${t}\t${place(b, ctx)} = kv[${i}]`),
+        ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];
     case "raise":
       return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
     case "raise_classic":
