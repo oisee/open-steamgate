@@ -25,7 +25,8 @@ function zero(t) {
   switch (t.k) {
     case "i": case "f": return "0";
     case "int8": return "0n";
-    case "string": case "c": case "x": return `""`;
+    case "string": case "c": case "xstring": return `""`;
+    case "x": return JSON.stringify("\u0000".repeat(t.len));
     case "table": return "[]";
     case "struct": return `new_${t.go}()`;
     case "ref": return "null";
@@ -299,6 +300,15 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "xstrlen": return `${expr(e.x, ctx)}.length`;
+    case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
+    case "substr": {
+      const off = e.off ? expr(e.off, ctx) : "0";
+      const len = e.len ? expr(e.len, ctx) : "-1";
+      if (e.base.k === "x" || e.base.k === "xstring") return `abap.SubX(${expr(e.x, ctx)}, ${off}, ${len})`;
+      if (e.base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${e.base.len}, ${off}, ${len})`;
+      return `abap.SubS(${expr(e.x, ctx)}, ${off}, ${len})`;
+    }
     case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
     case "call": {
       if (e.args.some((a) => a.dir !== "importing" && a.place)) throw new Error("EXPORTING in an expression call");
@@ -322,7 +332,7 @@ function templateValue(v, ctx, opts) {
     case "i": return `abap.FmtI(${x})`;
     case "f": return `abap.FmtF(${x})`;
     case "string": case "c": return x;
-    case "x": return `abap.XToHex(${x})`;
+    case "x": case "xstring": return `abap.XToHex(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
   }
 }
@@ -340,6 +350,7 @@ function conv(e, ctx) {
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
+    case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;

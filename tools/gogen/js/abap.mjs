@@ -229,3 +229,24 @@ export function XToI(v) {
   for (let i = 0; i < v.length; i++) r = r * 256 + v.charCodeAt(i);
   return r;
 }
+
+const rangeError = () => { throw new AbapError("CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"); };
+// v+off(len) of a string in characters; len -1 is the rest; out of range raises
+export function SubS(v, off, len) {
+  const r = [...v];
+  if (off < 0 || off > r.length) rangeError();
+  if (len < 0) return r.slice(off).join("");
+  if (off + len > r.length) rangeError();
+  return r.slice(off, off + len).join("");
+}
+// v+off(len) of a c field of length n: read padded, stored trimmed
+export const SubC = (v, n, off, len) => SubS(v.padEnd(n, " ").slice(0, n), off, len).replace(/ +$/, "");
+// bytes of an x or xstring (one char per byte)
+export function SubX(v, off, len) {
+  if (off < 0 || off > v.length) rangeError();
+  if (len < 0) return v.slice(off);
+  if (off + len > v.length) rangeError();
+  return v.slice(off, off + len);
+}
+export const XFit = (v, n) => (v.length >= n ? v.slice(0, n) : v + "\u0000".repeat(n - v.length));
+export const Uccpi = (v) => String.fromCodePoint(v).replace(/ +$/, "");

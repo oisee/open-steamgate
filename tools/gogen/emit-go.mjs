@@ -23,7 +23,7 @@ export function goType(t) {
     case "i": return "int32";
     case "int8": return "int64";
     case "f": return "float64";
-    case "string": case "c": case "x": return "string";
+    case "string": case "c": case "x": case "xstring": return "string";
     case "table": return `[]${goType(t.row)}`;
     case "struct": return t.go;
     case "ref": return t.intf ? typeName(t.name) : `*${typeName(t.name)}`;
@@ -31,7 +31,9 @@ export function goType(t) {
   }
 }
 
-const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "string" || t.k === "c" || t.k === "x" ? `""` : t.k === "struct" ? `${t.go}{}` : "nil");
+// an x field is always its full length: initial is that many 00 bytes
+const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
+  : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : "nil");
 
 export function emitGo(program, pkg = "main") {
   const classes = Array.isArray(program) ? program : program.classes;
@@ -333,6 +335,15 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
+    case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
+    case "substr": {
+      const off = e.off ? expr(e.off, ctx) : "0";
+      const len = e.len ? expr(e.len, ctx) : "-1";
+      if (e.base.k === "x" || e.base.k === "xstring") return `abap.SubX(${expr(e.x, ctx)}, ${off}, ${len})`;
+      if (e.base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${e.base.len}, ${off}, ${len})`;
+      return `abap.SubS(${expr(e.x, ctx)}, ${off}, ${len})`;
+    }
     case "new": return `New_${typeName(e.cls)}(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
     case "call": {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? expr(a.value, ctx)
@@ -359,7 +370,7 @@ function templateValue(v, ctx, opts) {
     case "int8": return `abap.FmtI8(${x})`;
     case "f": return `abap.FmtF(${x})`;
     case "string": case "c": return x;
-    case "x": return `abap.XToHex(${x})`;
+    case "x": case "xstring": return `abap.XToHex(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
   }
 }
@@ -383,6 +394,7 @@ function conv(e, ctx) {
     case "x2s": return `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
+    case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;

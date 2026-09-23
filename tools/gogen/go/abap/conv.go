@@ -425,3 +425,59 @@ func XToI(v string) int32 {
 	}
 	return r
 }
+
+func rangeError() { panic(ArithmeticError{"CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"}) }
+
+// SubS is v+off(len) of a string, counted in characters; len -1 is the
+// rest. Out of range raises, as ABAP does.
+func SubS(v string, off, length int32) string {
+	r := []rune(v)
+	n := int32(len(r))
+	if off < 0 || off > n {
+		rangeError()
+	}
+	if length < 0 {
+		return string(r[off:])
+	}
+	if off+length > n {
+		rangeError()
+	}
+	return string(r[off : off+length])
+}
+
+// SubC is v+off(len) of a c field of length n: read with its trailing
+// blanks, stored trimmed again.
+func SubC(v string, n, off, length int32) string {
+	r := []rune(v)
+	for int32(len(r)) < n {
+		r = append(r, ' ')
+	}
+	return strings.TrimRight(SubS(string(r[:n]), off, length), " ")
+}
+
+// SubX is v+off(len) of an x or xstring, counted in bytes.
+func SubX(v string, off, length int32) string {
+	n := int32(len(v))
+	if off < 0 || off > n {
+		rangeError()
+	}
+	if length < 0 {
+		return v[off:]
+	}
+	if off+length > n {
+		rangeError()
+	}
+	return v[off : off+length]
+}
+
+// XFit moves bytes into an x field of n bytes: cut, or padded right with 00.
+func XFit(v string, n int) string {
+	if len(v) >= n {
+		return v[:n]
+	}
+	return v + strings.Repeat("\x00", n-len(v))
+}
+
+// Uccpi is cl_abap_conv_in_ce=>uccpi: the character of a code point, as a
+// c(1) (a blank is stored as the empty c).
+func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }

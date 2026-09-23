@@ -28,6 +28,7 @@ export const INT8 = {k: "int8"};
 export const S = {k: "string"};
 const C = (len) => ({k: "c", len});
 const X = (len) => ({k: "x", len});
+const XS = {k: "xstring"};
 
 const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
 const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
@@ -50,7 +51,7 @@ const charlike = (t) => t.k === "c" || t.k === "string";
  * one or more folders of abapGit files. `files` narrows each folder to the
  * objects wanted, so a big pack can be read without parsing all of it.
  */
-export function compileProgram({folders, objects}) {
+export function compileProgram({folders, objects, tolerant = false}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
@@ -69,10 +70,15 @@ export function compileProgram({folders, objects}) {
   REG = reg;
   const ours = (fn) => wanted.includes(fn.split("/").pop().split(".")[0].toLowerCase());
   const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
-  if (errors.length > 0) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
+  // tolerant (a survey): an object with syntax errors is left out and named,
+  // instead of refusing the whole program
+  const broken = new Set();
+  if (errors.length > 0 && !tolerant) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
+  for (const e of errors) broken.add(e.getFilename().split("/").pop().split(".")[0].toLowerCase());
+  if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
-    interfaces: new Set(), reg, sigs: new Map()};
+    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken]};
   const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
@@ -109,6 +115,10 @@ function typeOf(t, where, program) {
   if (t instanceof BasicTypes.StringType) return S;
   if (t instanceof BasicTypes.CharacterType) return C(t.getLength());
   if (t instanceof BasicTypes.HexType) return X(t.getLength());
+  if (t instanceof BasicTypes.XStringType) return XS;
+  // a parameter TYPE c takes the length of what is passed: stored without
+  // trailing blanks like any c, so a length no value reaches
+  if (t instanceof BasicTypes.CGenericType) return C(262143);
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
@@ -855,6 +865,12 @@ function fieldChain(n, ctx) {
     } else if (isTok(kids[i], "->") && upper(kids[i - 1].concatTokens()) === "ME") {
       place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: findAttribute(ctx, upper(kids[i + 1].concatTokens())).type};
       i += 1;
+    } else if (isExpr(kids[i], Expressions.FieldOffset) || isExpr(kids[i], Expressions.FieldLength)) {
+      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
+      if (off !== null) i += 1;
+      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
+      if (i < kids.length - 1) throw new Unsupported(`field chain ${n.concatTokens()}`);
+      return substring(place, off, len, n);
     } else {
       throw new Unsupported(`field chain ${n.concatTokens()}`);
     }
@@ -862,8 +878,35 @@ function fieldChain(n, ctx) {
   return place;
 }
 
+/** the number after + or inside ( ) of v+off(len); null for (*) */
+function offsetValue(node, ctx) {
+  const v = node.getChildren()[1];
+  if (isTok(v, "*")) return null;
+  if (v instanceof Nodes.TokenNode) {
+    if (!/^\d+$/.test(tokenStr(v))) throw new Unsupported(`offset ${node.concatTokens()}`);
+    return {e: "int", value: Number(tokenStr(v)), type: I};
+  }
+  return convert(fieldChain(v, ctx), I);
+}
+
+/**
+ * v+off(len): characters of a string or c, bytes of an xstring or x. Out of
+ * range raises CX_SY_RANGE_OUT_OF_BOUNDS. A c field is read as its full
+ * length (trailing blanks included) and the part is stored trimmed again.
+ */
+function substring(base, off, len, node) {
+  const k = base.type.k;
+  if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${node.concatTokens()}`);
+  const litLen = len?.e === "int" ? len.value : undefined;
+  const type = k === "string" ? S : k === "xstring" ? XS : k === "c" ? C(litLen ?? base.type.len) : X(litLen ?? base.type.len);
+  return {e: "substr", x: base, off, len, base: base.type, type};
+}
+
+const CHAR_UTILITIES = {NEWLINE: "\n", CR_LF: "\r\n", HORIZONTAL_TAB: "\t"};
+
 /** zif_x=>c_y or zcl_x=>attr */
 function resolveStatic(owner, attr, ctx) {
+  if (owner === "CL_ABAP_CHAR_UTILITIES" && CHAR_UTILITIES[attr] !== undefined) return {e: "chars", value: CHAR_UTILITIES[attr], type: C(1)};
   const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
   const clas = ctx.reg.getObject("CLAS", owner)?.getDefinition();
   const def = intf ?? clas;
@@ -1078,7 +1121,7 @@ function template(n, ctx) {
         }
       }
       // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
-      if (!["i", "int8", "f", "string", "c", "x"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      if (!["i", "int8", "f", "string", "c", "x", "xstring"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
       parts.push({value: v, opts});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);
@@ -1140,6 +1183,13 @@ function call(chain, ctx, statement, hint) {
   if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
     return {e: "strlen", x: source(direct, ctx), type: I};
   }
+  if (receiver === null && name === "XSTRLEN" && !ctx.signatures.has(name)) {
+    const x = source(direct, ctx);
+    if (x.type.k !== "xstring" && x.type.k !== "x") throw new Unsupported(`xstrlen( ) of a ${x.type.k}`);
+    return {e: "xstrlen", x, type: I};
+  }
+  // the character of a code point (a blank is the empty c, as stored)
+  if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
   // through an interface reference, a method is the interface's: I~M
   const qualified = owner !== null && receiver?.type.intf && !name.includes("~") ? `${owner}~${name}` : name;
   const sig = owner === null ? ctx.signatures.get(name) : methodSignature(ctx, owner, qualified);
@@ -1238,6 +1288,9 @@ export function convert(expr, to) {
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give
   if (to.k === "x" && from.k === "i") return ok("i2x");
+  // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
+  if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
+  if (to.k === "xstring" && from.k === "x") return {...expr, type: to};
   // x -> i: an x shorter than four bytes is filled with 00 on the left, so
   // it reads unsigned (measured on A4H: FF gives 255); four and more bytes
   // are not measured
