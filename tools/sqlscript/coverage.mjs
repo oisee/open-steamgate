@@ -27,10 +27,15 @@ import {definitionsDisagree} from "../amdp-extract.mjs";
 import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
 import {parseTableFunction} from "./table-function-ddls.mjs";
 import {typedParameters} from "./signature-schemas.mjs";
+import {compileProcedure} from "../sqlscript-to-procedure-ir.mjs";
 import {ddicCatalogue} from "../sqlscript-ddic-catalogue.mjs";
 import {registryFromDdls, registryFromClass} from "./table-function-registry.mjs";
+import {teachingPackages} from "./corpus-config.mjs";
 
-const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
+/** the teaching packages, named in the gitignored .local/corpus-names.json (corpus content stays local) */
+let teaching;
+const isTeaching = (pkg) => (teaching ??= teachingPackages())(pkg);
+
 
 /** the bodies of a class, each with the signature its method declares --
  *  because fifteen of the refusals were the signature and not the body --
@@ -115,7 +120,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   const ddic = new FolderDdic(existingFolders([RELEASED_DDIC, ...(options.ddic ?? [])]));
   for (const zip of zips) {
     const pkg = zip.replace(/\.zip$/, "");
-    const which = TEACHING.test(pkg) ? "teaching" : "working";
+    const which = isTeaching(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
       for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push({...one, pkg});
     }
@@ -262,11 +267,25 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const wanted = new Map();
     let wantsSeveral = 0;
     const wantedByPackage = new Map();
+    // the runtime's own compiler, beside the relational binder: a body with
+    // CALL, IF or DECLARE can only ever count here, and its refusals say
+    // what the runtime would refuse (measurement only)
+    let compiled = 0;
+    const compileRefusals = new Map();
     let loweredByText = 0;
     let strictByText = 0;
     const strictByDialect = Object.fromEntries(DIALECT_NAMES.map((one) => [one, 0]));
     let strictEverywhere = 0;
-    for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg, signatureSource} of bodies) {
+    for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg, signatureSource, types} of bodies) {
+      if (signature !== undefined) {
+        try {
+          compileProcedure({...signature, body}, types ?? new Map(), {catalogue, resolveType, store: ddic});
+          compiled += 1;
+        } catch (error) {
+          const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 70);
+          compileRefusals.set(why, (compileRefusals.get(why) ?? 0) + 1);
+        }
+      }
       let tokens = [];
       let tree;
       try {
@@ -350,6 +369,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       strictByText,
       strictByDialect,
       strictEverywhere,
+      compiled,
+      compileRefusals: [...compileRefusals.entries()].sort((a, b) => b[1] - a[1]),
       strictRefusals: [...strictOnly.entries()].sort((a, b) => b[1] - a[1]),
       wanted: [...wanted.entries()].sort((a, b) => b[1] - a[1]),
       wantsSeveral,
@@ -407,7 +428,11 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
-    console.log(`  lowered  ${r.loweredStrict}  (${r.shareStrict}% -- on duckdb with every column typed: the only number worth quoting)`);
+    // quoted first: what the runtime's own compiler accepts. The binder's
+    // numbers below say what lowers to SQL, which is not yet what runs.
+    console.log(`  compiles as a procedure  ${r.compiled}  (${Math.round((r.compiled / Math.max(1, r.bodies)) * 100)}% -- the runtime's compiler: the number to quote)`);
+    for (const [reason, count] of r.compileRefusals.slice(0, 8)) console.log(`  ${String(count).padStart(5)}  procedure: ${reason}`);
+    console.log(`  lowered  ${r.loweredStrict}  (${r.shareStrict}% -- the relational binder on duckdb, every column typed; lowers, not yet runs)`);
     console.log(`           ${r.strictEverywhere} of them lower on every dialect (${DIALECT_NAMES.join(", ")}); per dialect: ${DIALECT_NAMES.map((one) => `${one} ${r.strictByDialect[one]}`).join(", ")}`);
     console.log(`           ${r.lowered} when a column nobody described may be STRING (${r.share}%), ${r.loweredHana} of those on hana`);
     if (r.strictByText > 0 || r.loweredByText > 0) console.log(`           of which on a signature read as text: ${r.strictByText} strict, ${r.loweredByText} lowered`);

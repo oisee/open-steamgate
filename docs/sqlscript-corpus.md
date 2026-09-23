@@ -23,19 +23,18 @@ joined to `TADIR`). Three of them are ours.
 
 | package | classes | what it is |
 | --- | --- | --- |
-| `SABAPDEMOS` (+ `SABAP_DEMOS_*`) | 31 | the demos of the ABAP documentation |
-| `SABP_COMPILER_TEST` (+ `SABP_COMPILER`) | 23 | kernel compiler test fixtures |
-| `S_INTSCN_LM_*`, `SHDB_HEMI`, `RS_ANA_UMM_*` | 33 | machine learning / predictive |
-| `SABP_UNIT_DOUBLE_*_DEMO` | 7 | test-double demos for ABAP Unit |
-| `SYCM_APS` | 8 | custom-code analysis |
-| `SWF_FLEX_*`, `SWD`, `SWX`, `SWH` | 11 | workflow |
+| the ABAP documentation's demo packages | 31 | the demos of the ABAP documentation |
+| the compiler's test packages | 23 | kernel compiler test fixtures |
+| several machine-learning packages | 33 | machine learning / predictive |
+| the ABAP Unit test-double demos | 7 | test-double demos for ABAP Unit |
+| a custom-code analysis package | 8 | custom-code analysis |
+| workflow packages | 11 | workflow |
 | everything else (48 packages) | ~79 | dictionary, CTS, security, MDG, search, ... |
 | `$ZADT_VSP`, `$Z80_00`, `$ZADT_AMDP` | 3 | ours |
 
 **`GENFLAG` is empty for all 195.** Nothing here is marked generated in
 `TADIR`, and there is **not one BW transformation routine**: the four
-BW-adjacent classes (`BW4_PREVIEW_TEST`, `BW4_PT_CHARTS`, `RS2HANA_AUTH`,
-`RSROA_VAR`) are none of them a transformation routine, and this sandbox has
+BW-adjacent classes are none of them a transformation routine, and this sandbox has
 no BW content activated at all. So the warning does not materialise here.
 
 ## The bias I predicted, and the measurement that refuted it
@@ -45,7 +44,7 @@ before the count and is wrong; erasing it would send the next reader down the
 same path.
 
 What I argued: about 60 of the 195 -- a third -- are demos and compiler test
-fixtures (`SABAPDEMOS`, `SABP_COMPILER_TEST`, the unit-double demos). They are
+fixtures (the documentation demos, the compiler tests, the unit-double demos). They are
 written on purpose to cover the corners of the language, so they would make
 rare constructs look common, and a histogram over them would say "support
 everything equally" -- the mirror image of the generated-code bias, and in the
@@ -177,7 +176,7 @@ upper-case name followed by a bracket, so a few keywords -- `INSERT`,
   corpus would likely be simpler and narrower, not wider.
 - **How the packages were chosen:** all of them. Every package on the sandbox
   holding at least one class that implements `IF_AMDP_MARKER_HDB` was
-  exported -- 66 of the 67. The one missing is `SABP_COMPILER` (one class),
+  exported -- 66 of the 67. The one missing is a compiler package (one class),
   whose export timed out; it is a teaching package, so its absence moves the
   teaching numbers and not the working ones. This is not an alphabetical or
   otherwise systematic sample: it is the whole set.
@@ -447,7 +446,7 @@ or a quoted identifier (SQLScript). Counting settles it without a probe:
 | containing a double quote | 232 |
 | containing something shaped like a quoted identifier | **189** |
 
-`"STATUS"`, `"OBJECT"`, `"CL_MD_SUBSTN_READ_GRAPH=>SET_GRAPH_WORK_SPACE_READ"`
+`"STATUS"`, `"OBJECT"`, `"CL_X=>METHOD"`
 -- names, in SQL positions, in 189 bodies. So the ABAP scanner does **not**
 treat `"` as a comment inside an AMDP body, and a lexer that did would
 destroy two bodies in five. The caution was right and is now a measurement.
@@ -490,7 +489,7 @@ dialect and the body would run and answer something else.
 | working, lowered | 16 (4%) | 18 (5%) | **31 (9%)** |
 | teaching, lowered | 17 | 17 | 18 |
 
-1a unlocked two bodies (`S_DAAG_PARTITIONING`, `iv_schema_name : char25`,
+1a unlocked two bodies (one package's two methods, `iv_schema_name : char25`,
 resolved through the released DOMA/DTEL dump) and moved the rest into true
 refusals. 1b read 97 table-function signatures off the exports (12 DDLS are
 not in them) and unlocked thirteen. **Lowered is not runnable**: those
@@ -528,7 +527,7 @@ own `TYPES` or a `TTYP` → `TABL` of the dictionary.
 Two things were under the walk that reads a table, both older than this
 branch. `osd-type-graph` skipped every `DD03P` row whose name begins with a
 dot -- `.INCLUDE`, `.INCLU--AP`, `.INCLU-XXX` -- and 349 of the 1970 tables
-have one; the runtime catalogue was missing **2966 columns** (`SWD_VERSION`:
+have one; the runtime catalogue was missing **2966 columns** (one workflow table:
 1 field seen, 77 there), and a column not in the schema is what the
 non-strict binder reads as STRING. And its cycle guard was a set for the run
 rather than for the path, so a structure included twice or a data element
@@ -561,13 +560,13 @@ standard tables of other packages -- `SCARR`, `SFLIGHT`, `TADIR`, `SPFLI`,
 `SWWCNTP0` -- and 97 of the 230 `USING` names are in no export at all. The
 instrument now prints the **wanted** list: absent tables ranked by the
 bodies they would let be typed, with the bodies that need two or more
-flagged. Today it is short -- `USOBHASH` 2, `ADR12` 2, then ones -- because
+flagged. Today it is short -- two tables with 2 bodies each, then ones -- because
 most of the 34 guessing bodies fail strict on something else first
 (`NULL`, aliases, expressions). Exporting those tables from the sandbox is
 a decision, not a build step; the list is what to decide with.
 
 The `.INCLU-XXX` rule was read off the export rather than assumed:
-`DEMO_WEEK` includes `DEMO_DAY` five times as `.INCLU-_MO` … `.INCLU-_FR`,
+a demo table includes one day structure five times as `.INCLU-_MO` … `.INCLU-_FR`,
 and its columns are `WORK_MO`, `FREE_MO`, … -- the suffix is appended to
 every included field. Expanding without it would have produced column names
 that look right and are not.
@@ -584,8 +583,8 @@ nothing else. Four kinds:
 
 | kind | bodies | what it was |
 | --- | ---: | --- |
-| tables in no dictionary here | 14 | `USING` names standard tables of other packages; by package: **CMS_VDM 8 bodies / 8 tables**, SUSR_IS_UI 2/1, S_ADDRESS_VDM 2/1, MDG_PROCESS_ANALYTICS 1/3 |
-| the binder, ours | 13 | an alias **without AS** (`from :it_parent_guid a`), NULL and TRUE read as columns called NULL and TRUE, a table qualified by its own name (`demo_cs_spfli.mandt`), ORDER BY over a projected alias (`row_nr`) |
+| tables in no dictionary here | 14 | `USING` names standard tables of other packages; by package: **one package 8 bodies / 8 tables**, then 2/1, 2/1, 1/3 |
+| the binder, ours | 13 | an alias **without AS** (`FROM :it_x a`), NULL and TRUE read as columns called NULL and TRUE, a table qualified by its own name (`t.mandt` with no alias), ORDER BY over a projected alias (`row_nr`) |
 | HANA's own views | 7 | `sys.m_host_information`, `"PUBLIC"."TABLES"`, `M_*` -- not portable in principle |
 | the rest | – | `$ABAP.TYPE` casts, functions without a measured rendering |
 
@@ -608,7 +607,7 @@ on. TRUE / FALSE are refused by name: HANA has BOOLEAN and SQLite has not.
 The second column shrinks because a guess became a named refusal, which is
 the direction it should move. What is left in it is the 14 bodies whose
 tables an export would bring, and the **wanted** list now prints them per
-package: `CMS_VDM 8/8` is one decision. The tables of HANA's own views are
+package: one package's 8/8 is one decision. The tables of HANA's own views are
 kept out of that list.
 
 Two things learned on the way, both about instruments. The "diamond" the
@@ -627,7 +626,7 @@ grammar learned the bracket: 23 bodies, "a table function call in FROM is
 parsed but not lowered yet".*
 
 Looking at the 23 before writing anything: 15 call one class's functions
-(`cl_islm_ml_engine_int_util=>convert_configuration` and two siblings),
+(one utility class's table function and two siblings),
 declared in the **class** -- `CLASS-METHODS … IMPORTING value(it_configuration)
 TYPE … RETURNING value(rt) TYPE …`, `METHOD … BY DATABASE FUNCTION` -- and
 called with the caller's own IN table as the argument; 1 calls a DDLS table
@@ -657,7 +656,7 @@ only with scalar arguments; on DuckDB and SQLite it is "not compiled for
 would have to be a table variable, which one statement does not have.
 
 Two things were under it. abaplint reads no class definition at all out of
-the ISLM classes, so their methods had **no parameters**, and the body's
+the classes of one package, so their methods had **no parameters**, and the body's
 own `:it_configuration` was an unknown variable. The first cause I named
 (a multi-line `USING` list) was wrong -- tried in isolation it parses; the
 measured one is the **OPTIONS clause**: `OPTIONS SUPPRESS SYNTAX ERRORS`,
@@ -671,7 +670,7 @@ yields no parameters for that method) -- and the instrument cross-checks that re
 abaplint on every class abaplint does read, so its trust is a printed
 number rather than an assumption. And DEFAULT did not count as OPTIONAL:
 `iv_convertvalues TYPE i DEFAULT 0` is why every call of
-`convert_configuration` passes one argument.
+that function passes one argument.
 
 | working corpus | every column typed | lowered with guesses |
 | --- | ---: | ---: |
@@ -699,3 +698,70 @@ under a user). An untyped macro parameter takes the type of whatever is
 bound; declare them typed. And DuckDB has no blank-padded CHAR: `'A  ' =
 'A'` is false, which settles the DuckDB column of the trailing-blank
 conformance case before the HXE column exists.
+
+### The wanted tables, read off the sandbox: 14 → 27
+
+*2026-09-23. Alice's standing permission for A4H reads, with foreman-dell
+as the critic of the plan.*
+
+The wanted list named 17 standard tables in no dictionary we had. Exporting
+their packages was the wrong granularity: the owning packages hold 424 to
+2225 objects each, far past the 500 we agreed as
+the stop line, and a package export brings same-package includes only. The
+route taken reads the **runtime dictionary** instead: one `vsp query DD03L`
+per table (active version). DD03L on the system already carries the fields
+of every include expanded as rows of their own, each with DATATYPE / LENG /
+DECIMALS inline -- so there is no closure to walk over DTEL, DOMA and
+included structures, and the `.INCLUDE` rows are dropped when the table is
+written in abapGit shape, or the type graph would splice them a second
+time. The definitions (no contents) live in `.local/a4h-ddic/`, never
+tracked, and `coverage.mjs --ddic .local/a4h-ddic` reads them unchanged.
+
+| | every column typed | on all four dialects |
+| --- | ---: | ---: |
+| working, before | 14 (4%) | 6 |
+| working, with the 17 tables | **27 (7%)** | 18 |
+| teaching, before | 16 | 14 |
+| teaching, with the 17 tables | **18** | 16 |
+
+The wanted list is empty except TADIR (one teaching body), left out on
+purpose. The next strict line was the binder's: a bare `NULL AS x`, whose
+type on HANA comes from the other branch of a UNION or from the declared
+output it is assigned to. Typed that way: working, every column typed,
+**27 -> 32**.
+
+### What the runtime compiles: 0 → 13, and the number to quote from now on
+
+*2026-09-23. foreman-dell: "0 of 364 is the most important number of the branch".*
+
+Every figure above counted what the **relational binder** lowers to SQL.
+`compileProcedure` -- the compiler `amdp-gen` and the runtime use -- had
+never been pointed at the corpus. Pointed at it, it accepted **none**:
+
+| working corpus | compiles as a procedure |
+| --- | ---: |
+| `main` after #23 | 0 |
+| + dictionary-typed table parameters, DDLS RETURNS as the output | 1 |
+| + a final `RETURN`, a body wrapped whole in `BEGIN … END` | **13 (4%)** |
+
+The refusals, looked at before anything was built: 222 bodies stop in the
+grammar (the binder's boundary too); 126 have no output in the class at all,
+and 77 of those are CDS table functions whose output is the DDLS `RETURNS`;
+table-typed parameters named table types of the **dictionary**, which the
+compiler did not read; and every table function ends in `RETURN`, which it
+did not compile, inside a `BEGIN … END` around the whole body, which it
+refused. Each is now handled narrowly:
+
+- a dictionary table type (TTYP → TABL) is admitted only when every field's
+  DDIC datatype is one of the measured ones (CHAR, DATS, TIMS, INT4, STRG,
+  DEC); anything else refuses the parameter by name;
+- a `RETURN` only as the last statement, only into a table output;
+- only the outermost block, plain or `SEQUENTIAL EXECUTION`, is unwrapped.
+
+Tested as procedures on DuckDB and SQLite; `gen/amdp` for this tree differs
+from `main` in one refusal's wording only. The coverage report now prints
+this number first; the binder's numbers follow it and say "lowers, not yet
+runs". Next walls, working corpus: CLNT parameters (`mandt`, `abap.clnt`,
+24 bodies -- milestone 3, the CHAR input case), and signatures with more
+than one output (19 left after the table functions; 28 of the multi-output
+ones are two tables).

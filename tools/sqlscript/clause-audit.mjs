@@ -92,7 +92,7 @@ export const ALTERNATIVES = [
  *
  * The first version asked a simpler question -- "does the output contain a
  * keyword as an identifier?" -- and on a real corpus it cried wolf on its
- * first run: `cl_islm_ml_engine_int_util` projects a column genuinely named
+ * first run: a utility class of the corpus projects a column genuinely named
  * ORDER, and `"ORDER" AS "IS_ORDER"` is correct SQL over a correct plan.
  * SAP tables are full of such names -- ORDER, VALUE, CLIENT, KEY -- so the
  * check would have fired on hundreds of good bodies, and a check that cries

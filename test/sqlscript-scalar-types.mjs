@@ -192,9 +192,18 @@ describe("a dictionary read off folders of abapGit XML", () => {
 
 describe("the procedure compiler admits only the measured types, dictionary or not", () => {
   it("still refuses what it refused before the shared reader existed", () => {
-    for (const type of ["NUMC5", "N LENGTH 5", "X LENGTH 16", "XSTRING", "INT8", "abap.clnt", "abap.char(10)"]) {
+    for (const type of ["NUMC5", "N LENGTH 5", "X LENGTH 16", "XSTRING", "INT8", "abap.clnt", "abap.numc(3)", "abap.raw(16)"]) {
       expect(() => irTypeFromAbap(type), type).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
     }
+  });
+
+  it("admits a CDS built-in of a measured datatype, as a DDLS RETURNS spells it", () => {
+    expect(irTypeFromAbap("abap.char(10)")).to.deep.equal({abap: "C", len: 10});
+    expect(irTypeFromAbap("abap.int4")).to.deep.equal({abap: "I"});
+    expect(irTypeFromAbap("abap.dec(15,2)")).to.deep.equal({abap: "P", len: 15, dec: 2});
+    expect(irTypeFromAbap("abap.string")).to.deep.equal({abap: "STRING"});
+    expect(irTypeFromAbap("abap.dats")).to.deep.equal({abap: "C", len: 8});
+    expect(irTypeFromAbap("abap.tims")).to.deep.equal({abap: "C", len: 6});
   });
 
   it("admits a data element only with a dictionary, and only when it resolves to a measured datatype", () => {

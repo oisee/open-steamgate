@@ -886,7 +886,7 @@ ENDLOOP.
   source the code already used — `StatusVH` now maps its query operation to
   `ZSTG_STATUS_SH` in `src/demo/zstg_demo.stg.yaml`, so segw-gen writes the
   `INTERFACES` line into the generated `_DPC`, which is where SEGW puts it.
-  Measured before deciding where: SAP's own `/IWBEP/CL_GWSAMPLE_BAS_DPC`
+  Measured before deciding where: the DPC of [GWSAMPLE_BASIC](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html)
   declares three interfaces (`IF_SB_DPC_COMM_SERVICES`,
   `IF_SB_GENDPC_SHLP_DATA`, `IF_SB_GEN_DPC_INJECTION`); eight corpus DPCs
   declare the first and third and **none** declares the second, and none of
@@ -923,9 +923,9 @@ twice out loud before reading the code that answers it.
   times. 39 observations, no occurrences, several vendors
 - **And it is still not enough to act on.** All 39 could share a binding
   style; the case that would settle it is a SAP-delivered service with a
-  DDIC-bound date. Tried on A4H: `/IWFND/GWDEMO_SP2` answers 403 and
-  `/IWBEP/TEA_TEST_COMP_APP` 500 for this user, and
-  `EPM_DEVELOPER_SCENARIO_SRV` and `GWSAMPLE_BASIC` are not activated. So
+  DDIC-bound date. Tried on A4H: a Gateway demo service answers 403 and
+  a test application service 500 for this user, and the EPM-RFC-SAMPLE
+  service and GWSAMPLE_BASIC are not activated. So
   the measurement is blocked on an authorisation, not on an argument, and
   nothing changes until it is not
 - What fable-osd's numbers do settle: `Precision` on `Edm.DateTime` is
@@ -1240,9 +1240,9 @@ for `zosd_status_app`, which has been deployed for a day.
 - Not a configuration matter: the same file fails identically under `syntax.version` `v702`, `v750`, `v755`, `v757`, `v758`, `open-abap` and `Cloud` (the extractor uses the default, `Newest`), so no version setting in `abaplint.json` parses the clause — the grammar lacks it (checked 2026-09-23 at foreman-dell's request).
 - Expected SAP behaviour: all four OPTIONS forms are documented AMDP syntax (`SUPPRESS SYNTAX ERRORS`, `DETERMINISTIC` for functions, `CDS SESSION CLIENT` for CDS table functions); the class activates.
 - Actual open-abap behaviour: the METHOD statement fails to parse, the method body is read as ABAP statements (more parser errors on `declare`, on a column name), and **`getClassDefinition()` answers `undefined` for the whole class**, so every method of it has no parameters.
-- Impact on open-steamgate: measured on the A4H AMDP export, 17 of 181 AMDP classes lose their definition, 12 of them on exactly this clause (`SUPPRESS SYNTAX ERRORS` ×11, `DETERMINISTIC` ×1; the other 5 are GRAPH WORKSPACE and LLANG). Among them the ISLM classes whose functions 15 corpus bodies call. The extractor (`tools/amdp-extract.mjs`) then had no signature for any of their methods, and a body's own `:it_configuration` was refused as an unknown table variable.
+- Impact on open-steamgate: measured on the A4H AMDP export, 17 of 181 AMDP classes lose their definition, 12 of them on exactly this clause (`SUPPRESS SYNTAX ERRORS` ×11, `DETERMINISTIC` ×1; the other 5 are GRAPH WORKSPACE and LLANG). Among them the classes of one package whose functions 15 corpus bodies call. The extractor (`tools/amdp-extract.mjs`) then had no signature for any of their methods, and a body's own `:it_configuration` was refused as an unknown table variable.
 - Smallest safe workaround: `tools/amdp-extract.mjs` reads the method definitions as text (`definitionsByText`) when abaplint hands back no class definition, and for a single method abaplint dropped from a definition it did read; a section the reader cannot read whole yields no parameters for that method; the coverage instrument cross-checks that reader against abaplint on every class abaplint does read and prints the count of disagreements, so the fallback is measured where it is not the only source. It is gated, not preferred: abaplint resolves what the text reader cannot (types from includes, aliases, inheritance), and a runtime refusal on disagreement would make abaplint's right answer depend on the weaker parser (foreman-dell).
-- The same clause in the **definition** has the same effect on that one method: `METHODS m AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.` is a parser error, the class definition survives without `m`, and `m` has no parameters (`CL_DEMO_AMDP_ABAP_TYPES`, `CL_DEMO_AMDP_SESSION_CLIENT`, the `CL_ABAP_AMDP_MC_*` compiler fixtures: 10 methods on the export, found by the cross-check below). `METHODS: a …, b ….` chains are fine.
+- The same clause in the **definition** has the same effect on that one method: `METHODS m AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.` is a parser error, the class definition survives without `m`, and `m` has no parameters (two documentation demo classes and a family of compiler fixtures: 10 methods on the export, found by the cross-check below). `METHODS: a …, b ….` chains are fine.
 - Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
 - Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
 - Upstream version containing a fix: `unknown`

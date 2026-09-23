@@ -71,6 +71,24 @@ describe("NULL is a literal, not a column", () => {
     expect(() => bind("SELECT n + NULL AS v FROM src;")).to.throw(BindError, /NULL .* has no type here/);
   });
 
+  it("takes the type of the same column in another UNION branch, as HANA does", () => {
+    const rel = bind("SELECT 'x' AS k, NULL AS n FROM dummy UNION ALL SELECT k, n FROM src;").rel;
+    const first = rel.inputs[0].items[1].expr;
+    expect(first).to.include({node: "lit", value: null});
+    expect(first.type).to.deep.equal({abap: "I"});
+    expect(first.untyped).to.equal(undefined);
+    expect(() => bind("SELECT k, NULL AS n FROM src UNION ALL SELECT k, NULL AS n FROM src;"))
+      .to.throw(BindError, /NULL AS n has no type here/);
+  });
+
+  it("takes the type of the declared output column it is assigned to", () => {
+    const out = {parameters: [{name: "et_rows", direction: "OUT", abapType: "tt_rows", kind: "table", schema: {K: {abap: "C", len: 4}, CONTEXT: {abap: "STRING"}}}]};
+    const ir = toIr(parse(new Body(), lex("et_rows = SELECT k, NULL AS context FROM src;")), {catalogue: CATALOGUE, signature: out, strictColumns: true});
+    expect(ir.rel.items[1].expr.type).to.deep.equal({abap: "STRING"});
+    expect(() => toIr(parse(new Body(), lex("et_rows = SELECT k, NULL AS other FROM src;")), {catalogue: CATALOGUE, signature: out, strictColumns: true}))
+      .to.throw(BindError, /NULL AS other has no type here/);
+  });
+
   it("refuses a CASE whose every branch is NULL, and the BOOLEAN literals, by name", () => {
     expect(() => bind("SELECT CASE WHEN n > 1 THEN NULL ELSE NULL END AS v FROM src;")).to.throw(BindError, /every branch is NULL/);
     expect(() => bind("SELECT TRUE AS v FROM src;")).to.throw(BindError, /BOOLEAN literal TRUE is not portable yet/);

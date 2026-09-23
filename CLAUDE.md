@@ -82,6 +82,19 @@ editor), not the Gateway.
 - **Public repo — no live identifiers.** No real hostnames, usernames, IPs,
   transport IDs, or customer namespaces in any tracked file. Operational scratch
   goes under `.local/` (gitignored).
+- **The SAP corpus stays local** (Alice, 2026-09-23). Exports and dictionary
+  reads from the sandbox (`.local/a4h-export`, `.local/a4h-ddic`) are ours to
+  measure against, not to publish: tracked files carry shapes and numbers,
+  never the corpus's object names (classes, tables, table types, packages,
+  CDS), fragments of its source or DDIC content from it. Field and parameter
+  names are fine, and so is an object abapedia.org publishes, with a link.
+  The names live in `.local/corpus-names.json` (the teaching/working split
+  the instruments read is there too) and in `.local/leak-identifiers.json`,
+  so `npm run leak` catches their return. The private share and handovers
+  on it may name them. History already in `main` is not rewritten. Scope:
+  this rule is about the AMDP corpus; the SAP-delivered SEGW sample projects
+  under `.local/corpus-sap`, which docs name as oracles, predate it and are
+  not revisited by it -- whether they fall under it too is Alice's call.
 
 ## First move (Sprint 0)
 

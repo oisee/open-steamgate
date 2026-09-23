@@ -13,11 +13,15 @@
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {join} from "node:path";
+import {teachingPackages} from "./sqlscript/corpus-config.mjs";
+
+/** the teaching packages, named in the gitignored .local/corpus-names.json (corpus content stays local) */
+let teaching;
+const isTeaching = (pkg) => (teaching ??= teachingPackages())(pkg);
 
 // Packages written to teach or to test the compiler. They cover the corners of
 // the language on purpose, so they over-represent rare constructs exactly as
 // much as generated code under-represents them.
-const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
 // One entry is one row of the table. The pattern runs against the SQLScript
 // body with comments stripped; `ref` points into the surface list.
@@ -116,7 +120,7 @@ let classesWithAmdp = 0;
 
 for (const zip of zips) {
   const pkg = zip.replace(/\.zip$/, "");
-  const which = TEACHING.test(pkg) ? "teaching" : "working";
+  const which = isTeaching(pkg) ? "teaching" : "working";
   const dir = join(scratch, pkg);
   for (const file of classesIn(join(root, zip), dir)) {
     const source = readFileSync(file, "utf8");

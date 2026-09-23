@@ -1873,7 +1873,7 @@ B.19 HANA, AMDP and where each machine stands                            [S]
         for instead of reading every class:
         ├─ **195 classes implement the marker** - which corroborates the
         │  194 recorded earlier from a different route. 167 SAP standard,
-        │  22 `CL_ABAP_AMDP_MC_*` compiler fixtures, 3 partner namespace,
+        │  22 compiler fixtures, 3 partner namespace,
         │  and **3 customer classes**
         ├─ **the three customer ones are the interesting part, and they
         │  are all ours**: `ZADT_CL_AMDP_TEST`, `ZCL_VSP_00_AMDP_TEST` and
@@ -1916,10 +1916,9 @@ B.19 HANA, AMDP and where each machine stands                            [S]
         release 758, and **194 AMDP classes, 191 of them SAP standard**,
         readable through ADT (measured 2026-09-18). A separate HXE is a
         clean laboratory, not the source of truth
-     ├─ what a real one looks like, read off A4H: `method … by database
-        procedure for hdb language sqlscript using CdsFrwk_Open_So_Items_
-        By_TaxR.` with a one-line body selecting from a **CDS view with a
-        parameter**. A large part of the standard's AMDP is a thin wrapper
+     ├─ what a real one looks like, read off A4H: a `method … by database
+        procedure … using <a CDS view>.` with a one-line body selecting
+        from a **CDS view with a parameter**. A large part of the standard's AMDP is a thin wrapper
         over CDS rather than a table-variable engine, and CDS we already
         generate and read - so the portable share may be much larger than
         it looks. **Measure it before designing anything**: read all 194,
