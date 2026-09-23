@@ -33,6 +33,25 @@ const EXPECT = {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
+  // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
+  // masked tail goes and blanks come in on the left; a blank stops it
+  // (A4H 2026-09-23, $batch parts end their body this way)
+  // a generic EXPORTING (TYPE any) is the caller's variable, by reference:
+  // not cleared on entry, written in place; MOVE-CORRESPONDING into it
+  // converts component by component; CLEAR clears the caller's structure
+  // (A4H 2026-09-23; the entry provider's read_entry_data does all three)
+  ZCL_GOGEN_T_GENEXP: "set:5/x/keep corr:42/hel/keep clear:42/hel/[]",
+  // not A4H values: standard ABAP the Travels path needed (review of
+  // ultra/travels). Two flat structures of one technical type move by
+  // position, names aside; DEFAULT names a constant of the class, bare or
+  // as cls=>c. The conversions are open-abap's kernel code as Go host
+  // functions: UTF-8 and 4103 (UTF-16LE) there and back, N cuts the text
+  // before it is encoded; the JS emitter has no host function for them and
+  // refuses
+  ZCL_GOGEN_T_TRAVMISC: "move:pq/42/rst back:pq/5/rst dflt:dx/7 v/7 dx/1",
+  ZCL_GOGEN_T_TRAVCONV: {Go: "u8:61C3A4E282AC>same u16:6100E400AC20>same cut8:6162 cut16:610062006300",
+    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+  ZCL_GOGEN_T_SHIFT: "1:4[__ab] 2:4[_ab_] 3:2[ab] 4:0[] 5:4[_aNb] 6:1[_] 7:4[abN_] 8:5[___ab]",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in
   // the superclass's constructor me->name( ) is the superclass's own
@@ -249,7 +268,7 @@ const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER"];
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

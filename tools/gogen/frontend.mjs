@@ -95,6 +95,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
   program.supplied = suppliedParams(reg, program.wanted);
+  PROGRAM = program;
   const ctx0 = {reg, program};
   // the local classes of the owners that have them compiled (LOCAL_CLASSES),
   // named OWNER:LOCAL: wanted before any class compiles, so the owner's
@@ -434,6 +435,25 @@ function callFunction(node, ctx, text) {
   return {s: "call_fm", name, fn: fm.fn, args, exceptions};
 }
 
+/**
+ * instance methods of the kernel whose ABAP signature is generic (TYPE
+ * simple, xsequence), so the subset cannot type them: the host function
+ * does the work and receives the object (me) first, and the signature it
+ * is called with is written here. A caller whose argument does not fit the
+ * written type is refused by the ordinary conversion rules.
+ * UTF-8 / UTF-16LE text <-> bytes: cl_abap_conv_out_ce / cl_abap_conv_in_ce.
+ */
+const NATIVE_ME = new Map([
+  ["CL_ABAP_CONV_OUT_CE=>CONVERT", {fn: "Native_CONV_OUT_CONVERT", params: [["DATA", "importing", "string"], ["N", "importing", "i", true], ["BUFFER", "exporting", "xstring"]]}],
+  ["CL_ABAP_CONV_IN_CE=>CONVERT", {fn: "Native_CONV_IN_CONVERT", params: [["INPUT", "importing", "xstring"], ["N", "importing", "i", true], ["DATA", "exporting", "string"]]}],
+]);
+const nativeMeSig = (program, key, name) => {
+  const n = NATIVE_ME.get(key);
+  const T = {string: S, xstring: XS, i: I};
+  const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
+  return {name, static: false, private: false, abstract: false, params: withSupplied(program, key, own), returning: null};
+};
+
 /* --------------------------------------------------------------------- types */
 
 function typeOf(t, where, program) {
@@ -579,11 +599,12 @@ function classIr(ctx0, obj) {
   const addSig = (m, prefix, isStatic) => {
     const name = prefix + upper(m.getName());
     const where = `${className}=>${name}`;
+    if (NATIVE_ME.has(where)) { signatures.set(name, nativeMeSig(program, where, name)); return; }
     try {
       const p = m.getParameters();
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
       const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
-        default: defaultOf(p, x), defaultOwner: prefix ? prefix.slice(0, -1) : className, optional: optional.has(upper(x.getName()))});
+        default: defaultOf(p, x), defaultOwner: prefix ? prefix.slice(0, -1) : className, defOwner: prefix ? prefix.slice(0, -1) : className, optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
         ...p.getChanging().map((x) => param(x, "changing"))];
@@ -668,6 +689,11 @@ function classIr(ctx0, obj) {
     if (sig.unsupported) { skip(sig.unsupported); continue; }
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
+    if (NATIVE_ME.has(`${className}=>${name}`)) {
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE_ME.get(`${className}=>${name}`).fn, me: true}],
+        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      continue;
+    }
     if (NATIVE.has(`${className}=>${name}`)) {
       const native = NATIVE.get(`${className}=>${name}`);
       // {fn, args}: the host function takes the places and values named
@@ -817,7 +843,10 @@ function registerConst(program, name, id, className) {
   if (value !== null && typeof value === "object" && type.k === "struct") {
     const fields = program.structs.get(type.go)?.fields ?? [];
     const byName = new Map(Object.entries(value).map(([k, v]) => [upper(k), v]));
-    if (fields.length === 0 || fields.some((f) => !SCALAR.includes(f.type.k) || typeof byName.get(f.name) === "object")) return undefined;
+    // an n component (MSGNO of a T100 key) whose VALUE is exactly its digits:
+    // the characters are the value; any other n VALUE is not measured
+    const nDigits = (f) => f.type.k === "n" && byName.has(f.name) && new RegExp(`^[0-9]{${f.type.len}}$`).test(unquote(byName.get(f.name)));
+    if (fields.length === 0 || fields.some((f) => (!SCALAR.includes(f.type.k) && !nDigits(f)) || typeof byName.get(f.name) === "object")) return undefined;
     program.consts.set(go, {go, type, value: Object.fromEntries(fields.map((f) => [f.name, byName.has(f.name) ? unquote(byName.get(f.name)) : undefined]))});
     return go;
   }
@@ -1141,6 +1170,18 @@ function statement(node, ctx) {
     return {s: "describe_kind", x: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"}), target};
   }
   // CONDENSE x [NO-GAPS]
+  // SHIFT s RIGHT DELETING TRAILING mask on a string, measured on A4H
+  // (ZCL_GOGEN_T_SHIFT, 2026-09-23): the trailing characters that are in the
+  // mask go and as many blanks come in on the left, so the length stays; a
+  // blank not in the mask stops it. Every other SHIFT form is refused.
+  if (isStmt(node, Statements.Shift)) {
+    if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
+    const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+    if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
+    return {s: "shift_right_trailing", target, mask: convert(mask, S)};
+  }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`CONDENSE of a ${target.type.k}`);
@@ -1491,6 +1532,11 @@ function moveCorresponding(node, ctx, text) {
   const from = source(node.findDirectExpression(Expressions.Source), ctx);
   const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
   const to = lvalue(tNode, ctx);
+  if ((from.type.k === "data" || to.type.k === "data") && ["data", "struct"].includes(from.type.k) && ["data", "struct"].includes(to.type.k)) {
+    // generic on one side or both: component by component at run time,
+    // through bindings to the two structures
+    return {s: "move_corr_data", from: convert(from, {k: "data"}), to: convert(to, {k: "data"})};
+  }
   if (from.type.k !== "struct" || to.type.k !== "struct") throw new Unsupported(`MOVE-CORRESPONDING from a ${from.type.k} to a ${to.type.k}`);
   // each component names source and target again, so both must be places
   // that cost nothing and do nothing when named twice: a variable, an
@@ -1865,6 +1911,10 @@ function items(node) {
       if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
       out.push({group: kids[i + 1]});
       i += 2;
+    } else if (isExpr(k, Expressions.MethodCallChain) && isTok(kids[i + 1], "-") && isExpr(kids[i + 2], Expressions.ComponentChain)) {
+      // m( )-comp: a component of what the call returns
+      out.push({node: k, comps: kids[i + 2]});
+      i += 2;
     } else if (isExpr(k, Expressions.ArithOperator)) {
       out.push({op: upper(k.concatTokens())});
     } else if (isTok(k) && ["&&", "&"].includes(tokenStr(k))) {
@@ -1887,6 +1937,7 @@ function leafTypes(node, ctx) {
       else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
       else if (it.group) walk(it.group);
       else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
+      else if (it.node && it.comps) out.push(componentsOf(sourceOperand(it.node, ctx), it.comps, ctx).type);
       else if (it.node) out.push(sourceOperand(it.node, ctx).type);
     }
   };
@@ -1938,6 +1989,17 @@ function source(node, ctx, outer, hint = outer) {
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
+/** a ComponentChain (a-b-c) read off a structured value */
+function componentsOf(v, chain, ctx) {
+  for (const c of chain.getChildren()) {
+    if (isTok(c, "-")) continue;
+    if (!isExpr(c, Expressions.ComponentName)) throw new Unsupported(`component chain ${chain.concatTokens()}`);
+    const f = fieldOf(ctx, v.type, c.concatTokens(), chain.concatTokens());
+    v = {e: "field", base: v, name: f.name, type: f.type};
+  }
+  return v;
+}
+
 function arith(node, ctx, calc, hint) {
   const its = items(node);
   let negate = false;
@@ -1953,7 +2015,8 @@ function arith(node, ctx, calc, hint) {
     }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    const v = sourceOperand(item.node, ctx, item.hint);
+    let v = sourceOperand(item.node, ctx, item.hint);
+    if (item.comps) v = componentsOf(v, item.comps, ctx);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -2004,6 +2067,8 @@ function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
+  // the logon client: the transpiler runtime's constant (abap.Mandt)
+  if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
   // space: the c(1) blank, stored without its blank like every c value
@@ -2211,6 +2276,7 @@ function constructor(c, ctx, inferred) {
 function methodSignature(ctx, owner, name) {
   const key = `${owner}=>${name}`;
   if (ctx.program.sigs.has(key)) return ctx.program.sigs.get(key);
+  if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return ctx.program.sigs.get(key); }
   let sig;
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
@@ -2223,7 +2289,7 @@ function methodSignature(ctx, owner, name) {
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
     const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
-      defaultOwner: defOwner, optional: optional.has(upper(x.getName()))});
+      optional: optional.has(upper(x.getName())), defaultOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner, defOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
       ...p.getChanging().map((x) => param(x, "changing"))];
@@ -2715,7 +2781,10 @@ function selectSingle(sel, ctx, text) {
   if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SINGLE INTO form: ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   const target = lvalue(tnode, ctx);
-  const okCol = (c, f) => ["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i");
+  // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
+  // storage: it goes into an xstring field only
+  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring")
+    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
   let assign;
   if (target.type.k === "struct") {
     const fields = ctx.program.structs.get(target.type.go)?.fields ?? [];
@@ -2755,6 +2824,18 @@ function assignStatement(node, ctx, text) {
   const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
   const fsType = ctx.fieldSymbols?.get(fsName);
   if (!fsType) throw new Unsupported(`ASSIGN to ${fsName || "?"}`);
+  if (fsType.k === "struct" && !/\b(CASTING|INCREMENT|RANGE|COMPONENT)\b/i.test(text)) {
+    // ASSIGN ref->* TO <typed>: the reference must point at a value of that
+    // structure; one of another Go type (an ABAP-compatible structure of
+    // another name included) is refused at run time, not moved by layout
+    const inner = node.findDirectExpression(Expressions.AssignSource)?.getChildren().filter((c) => !isTok(c));
+    const kids = inner?.length === 1 && isExpr(inner[0], Expressions.Source) && inner[0].findDirectExpression(Expressions.Dereference) ? inner[0].getChildren() : null;
+    if (kids?.length === 2) {
+      const ref = sourceOperand(kids[0], ctx);
+      if (ref.type.k !== "dref") throw new Unsupported(`->* of a ${ref.type.k}`);
+      return {s: "assign_deref_typed", fs: {e: "fs", name: fsName, type: fsType}, ref, text};
+    }
+  }
   if (fsType.k !== "data") throw new Unsupported(`ASSIGN to a typed field symbol: ${text}`);
   if (/\b(CASTING|INCREMENT|RANGE)\b/i.test(text)) throw new Unsupported(`ASSIGN form: ${text}`);
   const fs = {e: "fs", name: fsName, type: fsType};
@@ -3185,6 +3266,12 @@ function call(chain, ctx, statement, hint) {
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};
+    // a generic EXPORTING / CHANGING (TYPE any, data): the callee writes
+    // through a binding to the caller's typed variable, as ABAP passes it by
+    // reference; an ANY TABLE takes only a table
+    if (p.type.k === "data" && !p.byValue && t.type.k !== "data" && t.type.k !== "dref" && (!p.type.table || t.type.k === "table")) {
+      return {dir: p.dir, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
+    }
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, place: t, type: p.type};
   });
@@ -3211,6 +3298,9 @@ function defaultValue(p, ctx) {
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
   if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
   if (/^abap_false$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
+  // a constant: CLS=>C, or C of the class or interface the method is declared in
+  const named = /^([\w\/]+)=>(\w+)$/.exec(t) ?? (/^\w+$/.test(t) && p.defOwner ? [t, p.defOwner, t] : null);
+  if (named) return convert(resolveStatic(upper(named[1]), upper(named[2]), ctx), p.type);
   throw new Unsupported(`DEFAULT ${t}`);
 }
 
@@ -3290,6 +3380,19 @@ export function convert(expr, to) {
   if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
+  // two structures of one technical type (the same components in the same
+  // order, each of the same type and length; names may differ): a move is
+  // component by component in order, as ABAP moves compatible structures.
+  // Anything else between structures (a layout move of another shape) is
+  // refused. A T100 key constant into TEXTID is the case that needs it.
+  if (from.k === "struct" && to.k === "struct" && PROGRAM) {
+    const ff = PROGRAM.structs.get(from.go)?.fields;
+    const tf = PROGRAM.structs.get(to.go)?.fields;
+    const flat = (t) => !["struct", "table", "ref", "data", "dref", "exc"].includes(t.k);
+    if (ff && tf && ff.length === tf.length && ff.every((f, i) => flat(f.type) && sameType(f.type, tf[i].type) && (f.type.len ?? null) === (tf[i].type.len ?? null))) {
+      return {e: "conv", kind: "struct_layout", from, to, x: expr, type: to, pairs: tf.map((f, i) => [f.name, ff[i].name])};
+    }
+  }
   if (from.k === "ref" && to.k === "ref") {
     // up-cast: a class into an interface it implements, or any reference into
     // the same interface; a down-cast needs CAST and is refused
@@ -3309,6 +3412,7 @@ function downCast(x, to, text) {
 }
 
 let REG = null;
+let PROGRAM = null;
 function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {

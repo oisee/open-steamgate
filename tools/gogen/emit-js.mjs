@@ -10,7 +10,16 @@
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
-import {ident, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
+import {ident as goIdent, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
+
+// Go's identifiers, and an _ after a word JavaScript reserves (a parameter
+// named IN made the module a syntax error)
+const JS_RESERVED = new Set(("await catch class const debugger delete do enum export extends finally function in instanceof let "
+  + "super this throw try typeof void while with yield arguments eval implements private protected public static").split(" "));
+const ident = (name) => {
+  const id = goIdent(name);
+  return JS_RESERVED.has(id) ? `${id}_` : id;
+};
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
@@ -283,7 +292,7 @@ function place(p, ctx) {
       const [cls, attr] = p.go.split("__");
       return `${cls}.${ident(attr)}`;
     }
-    case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
+    case "field": return `${["var", "attr", "static", "field", "fs", "row", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "fs": return ident(p.name);
     case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
@@ -339,6 +348,12 @@ function stmt(st, ctx, d) {
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
         `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
     }
+    case "move_corr_data":
+      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)});`];
+    case "shift_right_trailing": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
+    }
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
@@ -348,6 +363,8 @@ function stmt(st, ctx, d) {
         `${t}  if (c !== null) { ${ident(st.fs.name)} = c; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
     case "assign_deref":
       return [`${t}{`, `${t}  const r = ${expr(st.ref, ctx)};`, `${t}  if (r !== null) { ${ident(st.fs.name)} = r; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    case "assign_deref_typed":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.text}: a typed field symbol over a data reference is Go-only`)});`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)};`];
     // a move into generic data writes into the slot it is bound to
@@ -560,7 +577,7 @@ function callStmt(e, ctx, t) {
     return b;
   });
   const lines = [`${t}{`];
-  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.place ? place(a.place, ctx) : zero(a.type)}};`);
+  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
   lines.push(`${t}  ${callee(e, ctx)}(${["s", ...args].join(", ")});`);
   for (const {b, a} of boxes) if (a.place) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
   lines.push(`${t}}`);
@@ -601,6 +618,7 @@ function expr(e, ctx) {
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.sy.${e.field.toLowerCase()}`;
+    case "sy_mandt": return "abap.Mandt";
     case "int": return String(e.value);
     case "float": return String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
@@ -642,13 +660,14 @@ function expr(e, ctx) {
     }
     case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
     case "call": {
-      if (e.args.some((a) => a.dir !== "importing" && a.place)) {
+      if (e.args.some((a) => a.dir !== "importing" && (a.place || a.wrap))) {
         // EXPORTING / CHANGING of a functional call: boxes, written back
         // after the call, inside an arrow so the call stays an expression
         const pre = [];
         const post = [];
         const args = e.args.map((a, i) => {
           if (a.dir === "importing") return importingArg(a, ctx);
+          if (a.wrap) return `{v: ${expr(a.wrap, ctx)}}`;
           if (!a.place) return `{v: ${zero(a.type)}}`;
           const b = `box${ctx.loop++}_${i}`;
           pre.push(`const ${b} = {v: ${place(a.place, ctx)}};`);
@@ -703,6 +722,8 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "struct_layout":
+      return `((v) => ({${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}}))(${x})`;
     case "num":
       if (from === "i" && to === "f") return x;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

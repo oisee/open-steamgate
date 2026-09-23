@@ -254,6 +254,7 @@ export function emitGo(program, pkg = "main") {
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
+  out.push(...nativeCodepage(classes));
   // descriptors first: their Copy asks for clone functions
   const descs = descFuncs();
   out.push(...cloneFuncs());
@@ -281,6 +282,31 @@ function nativeMessageText(program) {
       ? [`\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().${ident("TEXTID")} != "" {`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
       : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
     `\treturn "An exception was raised."`, "}", ""];
+}
+
+/*
+ * cl_abap_conv_out_ce->convert and cl_abap_conv_in_ce->convert, kernel code
+ * in open-abap: text to bytes and back in the encoding create( ) chose
+ * (mv_js_encoding: utf8 or utf16le / utf-16le). The work is abap.EncodeText /
+ * abap.DecodeText; N and bytes that are no valid text are refused, not guessed.
+ */
+function nativeCodepage(classes) {
+  const out = [];
+  const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
+  const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.name === p);
+  if (has("Native_CONV_OUT_CONVERT")) {
+    const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "SUP_N");
+    out.push(`func Native_CONV_OUT_CONVERT(s *abap.Session, me *CL_ABAP_CONV_OUT_CE, data string, n int32, buffer *string${withSup ? ", sup_n string" : ""}) {`,
+      ...(withSup ? ["\tif sup_n != \"\" {", "\t\tdata = abap.SubS(data, 0, n)", "\t}"] : ["\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_OUT_CE=>CONVERT", "N given"))`, "\t}"]),
+      `\t*buffer = abap.EncodeText(me.${ident("MV_JS_ENCODING")}, data)`, "}", "");
+  }
+  if (has("Native_CONV_IN_CONVERT")) {
+    const withSup = sup("CL_ABAP_CONV_IN_CE", "CONVERT", "SUP_N");
+    out.push(`func Native_CONV_IN_CONVERT(s *abap.Session, me *CL_ABAP_CONV_IN_CE, input string, n int32, data *string${withSup ? ", sup_n string" : ""}) {`,
+      "\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "N given (open-abap ignores it)"))`, "\t}",
+      `\t*data = abap.DecodeText(me.${ident("MV_JS_ENCODING")}, me.${ident("MV_IGNORE_CERR")} != "", input)`, "}", "");
+  }
+  return out;
 }
 
 /*
@@ -480,6 +506,7 @@ function constLiteral(c) {
   // int8: the digits as written, a JS number would round 9223372036854775807
   if (c.type.k === "int8") return String(BigInt(String(c.value).trim()));
   if (c.type.k === "f") return String(Number(c.value));
+  if (c.type.k === "n") return JSON.stringify(String(c.value));
   if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
   if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes(c.value, c.type.len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
   throw new Error(`constant of type ${c.type.k}`);
@@ -554,7 +581,7 @@ function place(p, ctx) {
     case "attr": return `me.${ident(p.name)}`;
     case "static": return p.go;
     case "const": return p.go;
-    case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
+    case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
     case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
       return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
@@ -720,7 +747,7 @@ function stmtLines(st, ctx, d) {
         const call = `${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")})`;
         return [`${t}${!st.stmt && m.returning ? "return " : ""}${call}`];
       }
-      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
+      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...(st.me ? ["me"] : []), ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
     // a JavaScript for (...) { of kernel code, as a range over what the host
     // function returns; each pair is written to the binds before the body
@@ -870,6 +897,9 @@ function stmtLines(st, ctx, d) {
         `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref":
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "assign_deref_typed":
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})`,
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];
     // a move into generic data writes into the slot it is bound to
@@ -881,6 +911,12 @@ function stmtLines(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
+    case "move_corr_data":
+      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)})`];
+    case "shift_right_trailing": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)})`];
+    }
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -903,7 +939,7 @@ function stmtLines(st, ctx, d) {
       const rowGo = goType(st.target.type.row);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
       return [`${t}${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -920,7 +956,7 @@ function stmtLines(st, ctx, d) {
       // a character field takes the column cut to its length
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
+        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
@@ -1030,6 +1066,7 @@ function expr(e, ctx) {
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.Sy.${e.field}`;
+    case "sy_mandt": return "abap.Mandt";
     case "int": return `int32(${e.value})`;
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
@@ -1068,7 +1105,7 @@ function expr(e, ctx) {
     case "new": return `New_${typeName(e.cls)}(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
     case "call": {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
-        : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
+        : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
       if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       if (e.owner) return `${funcName(e.owner, e.method)}(${args.join(", ")})`;
       if (e.static) return `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
@@ -1127,6 +1164,8 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "struct_layout":
+      return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
     case "num":
       if (from === "i" && to === "f") return `float64(${x})`;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

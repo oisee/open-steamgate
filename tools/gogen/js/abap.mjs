@@ -839,3 +839,30 @@ export function IsInitialDeep(v, z) {
   if (typeof z === "string") return v === z || v === "";
   return v === z;
 }
+
+// SHIFT s RIGHT DELETING TRAILING mask on a string (see go/abap/shift.go)
+export function ShiftRightTrailing(s, mask) {
+  if ([...mask].length !== 1) throw new AbapError("NOT_COMPILED", "SHIFT RIGHT DELETING TRAILING: a mask of other than one character");
+  const r = [...s];
+  let n = r.length;
+  while (n > 0 && mask.includes(r[n - 1])) n -= 1;
+  return " ".repeat(r.length - n) + r.slice(0, n).join("");
+}
+
+// sy-mandt: the transpiler runtime's logon client (see go/abap/select.go, ANORMALIES)
+export const Mandt = "123";
+
+// MOVE-CORRESPONDING over generic data (see go/abap/movecorr.go)
+export function MoveCorrespondingData(dst, src) {
+  if (dst === null) throw notAssigned("MOVE-CORRESPONDING into a field symbol");
+  if (src === null) throw notAssigned("MOVE-CORRESPONDING from a field symbol");
+  const isStruct = (t) => t && (t.kind === "u" || t.kind === "v");
+  if (!isStruct(dst.t) || !isStruct(src.t)) throw new AbapError("NOT_COMPILED", "MOVE-CORRESPONDING: generic data that is not a structure");
+  const deep = (t) => ["u", "v", "h"].includes(t.kind);
+  for (const dc of dst.t.comps) {
+    const sc = src.t.comps.find((x) => x.name === dc.name);
+    if (!sc) continue;
+    if (deep(dc.t) || deep(sc.t)) throw new AbapError("NOT_COMPILED", `MOVE-CORRESPONDING: a deep component ${dc.name}`);
+    MoveData(Component(dst, dc.name), Component(src, sc.name));
+  }
+}
