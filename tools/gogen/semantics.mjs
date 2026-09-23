@@ -17,6 +17,11 @@ const EXPECT = {
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H
   ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",
+  // a division by zero raises; the harness reports it with the ABAP line
+  // the stack names (the line directives of emit-go)
+  // not an A4H value: what each emitter must report. Go names the ABAP
+  // line through its line directives; the JS emitter has no source map yet
+  ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]);
@@ -27,7 +32,7 @@ mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "semantics");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
-writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t"fmt"\n\n\t"osg/gogen/abap"\n)\n\nfunc main() {\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v\\n", r)\n\t\t\t}\n\t\t}()\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}))\n\t}()`).join("\n")}\n}\n`);
+writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n// abapLine is the first frame of the stack that is ABAP source\nfunc abapLine() string {\n\tfor _, l := range strings.Split(string(debug.Stack()), "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine())\n\t\t\t}\n\t\t}()\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}))\n\t}()`).join("\n")}\n}\n`);
 execFileSync("gofmt", ["-w", dir]);
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go")}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));
@@ -39,9 +44,10 @@ for (const line of goOut.trim().split("\n")) {
   let js;
   try { js = m[cls].RUN({sy: {index: 0, tabix: 0, subrc: 0}}); } catch (e) { js = `ERROR ${e.message}`; }
   for (const [who, got] of [["Go", go], ["JS", js]]) {
-    const ok = got === EXPECT[cls];
+    const want = typeof EXPECT[cls] === "string" ? EXPECT[cls] : EXPECT[cls][who];
+    const ok = got === want;
     if (!ok) bad += 1;
-    console.log(`${ok ? "ok  " : "FAIL"} ${who} ${cls}: ${got}${ok ? "" : `\n     A4H: ${EXPECT[cls]}`}`);
+    console.log(`${ok ? "ok  " : "FAIL"} ${who} ${cls}: ${got}${ok ? "" : `\n     want: ${want}`}`);
   }
 }
 process.exit(bad ? 1 : 0);

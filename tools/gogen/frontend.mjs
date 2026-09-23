@@ -306,7 +306,7 @@ function classIr(ctx0, obj) {
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, calls: ctx.calls ?? []};
+        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
@@ -415,17 +415,18 @@ function block(node, ctx) {
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
     // silently: execution never passes the stub
+    const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
     try {
-      if (child instanceof Nodes.StructureNode) out.push(structure(child, ctx));
+      if (child instanceof Nodes.StructureNode) out.push({...structure(child, ctx), pos});
       else if (child instanceof Nodes.StatementNode) {
         const s = statement(child, ctx);
-        if (s !== undefined) out.push(s);
+        if (s !== undefined) out.push({...s, pos});
       }
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
-      const where = `${ctx.className}=>${ctx.method}`;
+      const where = `${ctx.className}=>${ctx.method} (${pos.file}:${pos.row})`;
       ctx.program.partial.push(`${where}: ${e.message}`);
-      out.push({s: "stub", where, reason: e.message.slice(0, 200)});
+      out.push({s: "stub", where, reason: e.message.slice(0, 200), pos});
     }
   }
   return out;

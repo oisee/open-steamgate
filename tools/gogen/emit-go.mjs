@@ -132,6 +132,8 @@ export function emitGo(program, pkg = "main") {
   }
   out.push(...dispatcher(classes));
   out.push(...cloneFuncs());
+  // a RESET line becomes a //line back to this file at the line after it
+  for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
   return out.join("\n") + "\n";
 }
 
@@ -182,13 +184,14 @@ function signature(cls, m, inInterface = false) {
 }
 
 function method(cls, m) {
-  const lines = [`${signature(cls, m)} {`, "\t_ = s"];
+  const lines = [...(m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (!m.static) lines.push("\t_ = me");
   for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} *${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
   lines.push("\treturn", "}");
+  if (m.pos) lines.push(RESET);
   return lines;
 }
 
@@ -268,7 +271,20 @@ function withBuilders(body, ctx, t, emitLoop) {
   return [...pre, ...lines, ...post];
 }
 
+/*
+ * ABAP positions: every statement carries a line directive (block form) in front
+ * of it, so a panic, a stack trace, a pprof profile or delve name the ABAP
+ * line, not the generated one. Code that is not ABAP gets its own lines back
+ * (the RESET marker, replaced once the file is assembled).
+ */
+const RESET = "\u0000reset-position";
 function stmt(st, ctx, d) {
+  const lines = stmtLines(st, ctx, d);
+  if (st.pos && lines.length > 0) lines[0] = lines[0].replace(/^(\t*)/, `$1/*line ${st.pos.file}:${st.pos.row}*/ `);
+  return lines;
+}
+
+function stmtLines(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
     case "assign":
