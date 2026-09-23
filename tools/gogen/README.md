@@ -161,9 +161,17 @@ What it took, each measured before it was written:
 - x fields: `i MOD 256` into x LENGTH 1, `BIT-XOR`, x -> i unsigned, all
   measured on A4H.
 
-Peak memory of a whole recording (harness keeps every frame): Go 10-430 MB,
-JS 60-1330 MB. Speed is not tuned yet: string templates are concatenated
-with `+` in Go, and V8's ropes beat it on the JSON-heavy scenes.
+Speed, 2026-09-23, each runtime alone on one machine with the same tool
+(`tools/o4d-profile.mjs`: the median of 60 frames a scene over the demo's
+own WebSocket channel, full frame with `FRAME_TO_JSON`, 26 scenes; the
+stands are `o4dserve.mjs` / `o4dserve-js.mjs` in front of an OSG server):
+JS from the IR is x2.9 the transpiler runtime (faster on every scene,
+x1.2-x8.8), Go x5.8 (x1.5-x29) and x1.9 the IR's JS. A first comparison
+against `demo.mjs`'s in-process averages said x1.5 and "slower on four
+scenes"; that was two instruments, not two runtimes. Go was ten times
+slower than JS on the JSON-heavy scenes until a loop that only appends to
+a local string got a `strings.Builder`. Peak memory of a whole recording
+(harness keeps every frame): Go 10-430 MB, JS 60-1330 MB.
 
 ## Semantics: what the two backends answer
 
