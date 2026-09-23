@@ -52,9 +52,11 @@ CLASS zcl_gogen_t_jsgeneric IMPLEMENTATION.
     DATA lv_k TYPE c LENGTH 1.
     DATA lv_name TYPE string.
     DATA lf TYPE ty_flat.
+    DATA lv_c2 TYPE c LENGTH 2.
     FIELD-SYMBOLS <c> TYPE any.
     FIELD-SYMBOLS <r> TYPE any.
     FIELD-SYMBOLS <t> TYPE ANY TABLE.
+    FIELD-SYMBOLS <row> TYPE ty_row.
 
     " ASSIGN COMPONENT: read, write back, lower case, unknown
     ls-name = 'x'.
@@ -168,5 +170,41 @@ CLASS zcl_gogen_t_jsgeneric IMPLEMENTATION.
     IF <t> IS INITIAL AND ls-name IS INITIAL.
       rv = |{ rv }cleared:{ lines( lt ) }|.
     ENDIF.
+
+    " a typed field symbol seen as generic data: CLEAR and a move write the
+    " row itself, and the typed field symbol sees it; a generic value read
+    " into a shorter c is cut
+    ls = VALUE #( name = `p` n = 1 ).
+    APPEND ls TO lt.
+    ls = VALUE #( name = `q` n = 2 ).
+    APPEND ls TO lt.
+    ls = VALUE #( name = `s` n = 3 ).
+    LOOP AT lt ASSIGNING <row>.
+      ASSIGN <row> TO <c>.
+      IF sy-tabix = 1.
+        CLEAR <c>.
+      ELSE.
+        <c> = ls.
+      ENDIF.
+      rv = |{ rv } row:{ <row>-name }{ <row>-n }|.
+    ENDLOOP.
+    LOOP AT lt INTO ls.
+      rv = |{ rv }/{ ls-name }{ ls-n }|.
+    ENDLOOP.
+    ls-name = `xyz`.
+    ASSIGN COMPONENT 'NAME' OF STRUCTURE ls TO <c>.
+    lv_c2 = <c>.
+    rv = |{ rv } c2:{ lv_c2 }|.
+
+    " CLEAR of a typed field symbol clears the row it holds
+    LOOP AT lt ASSIGNING <row>.
+      IF sy-tabix = 2.
+        CLEAR <row>.
+      ENDIF.
+    ENDLOOP.
+    rv = |{ rv } clr:{ lines( lt ) }|.
+    LOOP AT lt INTO ls.
+      rv = |{ rv }/{ ls-name }{ ls-n }|.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

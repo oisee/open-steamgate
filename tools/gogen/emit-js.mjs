@@ -133,7 +133,14 @@ function bind(p, ctx) {
     }
   };
   const at = path(p);
-  const b = `{get: () => ${at}, set: ($v) => { ${at} = $v; }, t: ${desc(p.type)}}`;
+  // a typed field symbol as a whole is a value held, not a slot: a structure
+  // or table in it is written in place (abap.MoveData / ClearData do so
+  // anyway); an elementary one has no slot the JS side could write to
+  const whole = p.e === "fs";
+  const set = !whole ? `($v) => { ${at} = $v; }`
+    : composite(p.type) ? `($v) => { abap.Overwrite(${desc(p.type)}, ${at}, $v); }`
+      : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`a write through generic data bound to the typed field symbol ${p.name} of an elementary type: the JS backend holds its value, not its slot`)}); }`;
+  const b = `{get: () => ${at}, set: ${set}, t: ${desc(p.type)}}`;
   return caps.length ? `(() => { ${caps.join(" ")} return ${b}; })()` : b;
 }
 
@@ -216,7 +223,7 @@ function staticRegistry(program) {
         if (p.dir !== "importing") { lines.push(`  const ${v} = {v: ${zero(p.type)}};`); return v; }
         if (p.suppliedOf) { lines.push(`  const ${v} = ${JSON.stringify(p.suppliedOf)} in a ? "X" : "";`); return v; }
         const d = `a[${JSON.stringify(p.name)}]`;
-        const read = p.type.k === "i" ? `abap.DataI(${d})` : ["string", "c", "d", "t"].includes(p.type.k) ? `abap.DataString(${d})`
+        const read = ["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
           : p.type.k === "data" ? d : composite(p.type) && p.byValue ? `abap.copy(${d}.get())` : `${d}.get()`;
         const absent = p.optional && p.default === undefined ? zero(p.type)
           : `abap.paramMissing(${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)})`;
@@ -279,7 +286,11 @@ function stmt(st, ctx, d) {
       // a field symbol is the row itself: assigning to it writes into the row
       if (st.target.e === "fs") return [`${t}Object.assign(${ident(st.target.name)}, ${moved(st.value, ctx)});`];
       return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
-    case "clear": return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
+    case "clear":
+      // a field symbol is the row itself: clearing it clears the row
+      if (st.target.e === "fs" && st.target.type.k === "struct") return [`${t}Object.assign(${ident(st.target.name)}, ${zero(st.target.type)});`];
+      if (st.target.e === "fs" && st.target.type.k === "table") return [`${t}${ident(st.target.name)}.length = 0;`];
+      return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
       return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`];
@@ -600,10 +611,17 @@ function expr(e, ctx) {
     // a typed slot seen as generic data: a binding to it; a value that is no
     // place gets a slot of its own
     case "wrap": return isPlace(e.x) ? bind(e.x, ctx) : `abap.cell(${expr(e.x, ctx)}, ${desc(e.x.type)})`;
-    case "unwrap": return e.type.k === "i" ? `abap.DataI(${expr(e.x, ctx)})` : `abap.DataString(${expr(e.x, ctx)})`;
+    case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `abap.Lines(${expr(e.x, ctx)})`;
     default: throw new Error(`no JS for expression ${e.e}`);
   }
+}
+
+/** a generic value read into a typed one: an i, or a string fitted to a c's length */
+function unwrapTo(t, d) {
+  if (t.k === "i") return `abap.DataI(${d})`;
+  if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
+  return `abap.DataString(${d})`;
 }
 
 function templatePart(v, ctx, opts) {

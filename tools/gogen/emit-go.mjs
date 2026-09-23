@@ -293,7 +293,7 @@ function staticRegistry(program, classes) {
         const v = `v${i}`;
         if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
         if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
-        const read = (d) => (p.type.k === "i" ? `abap.DataI(${d})` : ["string", "c", "d", "t"].includes(p.type.k) ? `abap.DataString(${d})`
+        const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
           : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
         const absent = p.optional && p.default === undefined ? zero(p.type)
           : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { panic(abap.ArithmeticError{Class: "CX_SY_DYN_CALL_PARAM_MISSING", Op: ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}}) }()`;
@@ -891,10 +891,17 @@ function expr(e, ctx) {
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
     // a typed slot seen as generic data: its address and its descriptor
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
-    case "unwrap": return e.type.k === "i" ? `abap.DataI(${expr(e.x, ctx)})` : `abap.DataString(${expr(e.x, ctx)})`;
+    case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;
     default: throw new Error(`no Go for expression ${e.e}`);
   }
+}
+
+/** a generic value read into a typed one: an i, or a string fitted to a c's length */
+function unwrapTo(t, d) {
+  if (t.k === "i") return `abap.DataI(${d})`;
+  if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
+  return `abap.DataString(${d})`;
 }
 
 function templatePart(v, ctx, opts) {

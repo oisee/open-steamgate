@@ -470,6 +470,25 @@ export function IsInitialData(d) {
   }
 }
 
+// A structure or table written through generic data is written in place, as
+// Go writes through the pointer: the object in the slot stays the same
+// object, so a typed field symbol holding it (LOOP ASSIGNING, READ TABLE
+// ASSIGNING) and a binding that fixed it (the row, the object of a
+// reference, a typed field symbol) still see it afterwards. A nested
+// structure or table is written in place too. src is a fresh value.
+export function Overwrite(t, dst, src) {
+  if (t.kind === "h") {
+    dst.length = 0;
+    for (const r of src) dst.push(r);
+    return;
+  }
+  for (const c of t.comps) {
+    const k = c.t.kind;
+    if ((k === "u" || k === "v" || k === "h") && dst[c.key] !== null && typeof dst[c.key] === "object") Overwrite(c.t, dst[c.key], src[c.key]);
+    else dst[c.key] = src[c.key];
+  }
+}
+
 // dst = src for a generic dst: converted to the type of the slot dst is bound
 // to and written there, never rebound. The pairs of go/abap MoveData; any
 // other dumps NOT_COMPILED rather than guess.
@@ -481,7 +500,7 @@ export function MoveData(dst, src) {
   const v = src.get();
   switch (dk) {
     case "u": case "v": case "h":
-      if (dst.t === src.t) return dst.set(copy(v));
+      if (dst.t === src.t) return Overwrite(dst.t, dst.get(), copy(v));
       break;
     case "I":
       if (sk === "I") return dst.set(v);
@@ -528,7 +547,7 @@ export function ClearData(d) {
     case "P": return d.set("0");
     case "X": return d.set("\u0000".repeat(d.t.len));
     case "l": return d.set(null);
-    case "u": case "v": case "h": return d.set(d.t.zero());
+    case "u": case "v": case "h": return Overwrite(d.t, d.get(), d.t.zero());
     default: throw new AbapError("NOT_COMPILED", `CLEAR: generic data of type kind ${d.t.kind}`);
   }
 }
