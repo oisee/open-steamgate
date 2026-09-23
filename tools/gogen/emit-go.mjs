@@ -26,15 +26,18 @@ export function goType(t) {
     case "string": case "c": case "x": case "xstring": return "string";
     case "table": return `[]${goType(t.row)}`;
     case "struct": return t.go;
-    case "ref": return t.intf ? typeName(t.name) : POLY.has(t.name) ? `I_${typeName(t.name)}` : `*${typeName(t.name)}`;
+    case "ref": return t.name === "OBJECT" ? "any" : t.intf ? typeName(t.name) : POLY.has(t.name) ? `I_${typeName(t.name)}` : `*${typeName(t.name)}`;
     case "exc": return "*abap.Exception";
+    case "data": case "dref": return "abap.Data";
+    case "d": case "t": case "p": return "string";
     default: throw new Error(`no Go type for ${t.k}`);
   }
 }
 
 // an x field is always its full length: initial is that many 00 bytes
 const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
-  : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : "nil");
+  : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
+    : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? `"0"` : "nil");
 
 /*
  * ABAP tables are values: an assignment copies them, deep, with the tables
@@ -50,6 +53,8 @@ let CLONES = new Map();
 // interface I_<class>, so it can hold any subclass; a leaf class stays *T
 let POLY = new Set();
 let CLASSES = new Map();
+// descriptors of the types generic data binds to, generated at the end
+let DESCS = new Map();
 let STRUCTDEFS = new Map();
 function needsCopy(t) {
   if (t?.k === "table") return true;
@@ -66,6 +71,54 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"
 function copied(text, t, e) {
   return needsCopy(t) && (e === undefined || PLACES.has(e.e)) ? `${cloneName(t)}(${text})` : text;
 }
+/** the descriptor of a type, for generic data: built-in for elementary types, generated for the rest */
+function desc(t) {
+  switch (t.k) {
+    case "i": return "abap.TI";
+    case "int8": return "abap.TInt8";
+    case "f": return "abap.TF";
+    case "string": return "abap.TString";
+    case "xstring": return "abap.TXString";
+    case "c": return `abap.TC(${t.len ?? 0})`;
+    case "x": return `abap.TX(${t.len ?? 0})`;
+    case "d": return "abap.TD";
+    case "p": return `abap.TP(${t.len ?? 8}, ${t.dec ?? 0})`;
+    case "t": return "abap.TT";
+    case "dref": return "abap.TRef";
+    case "ref": case "exc": return "abap.TObj";
+    case "struct": case "table": {
+      const key = goType(t);
+      if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
+      return DESCS.get(key).name;
+    }
+    default: throw new Error(`no descriptor for ${t.k}`);
+  }
+}
+function descFuncs() {
+  const out = [];
+  const done = new Set();
+  const inits = [];
+  for (let again = true; again;) {
+    again = false;
+    for (const [key, d] of [...DESCS]) {
+      if (done.has(key)) continue;
+      done.add(key);
+      again = true;
+      const t = d.type;
+      out.push(`var ${d.name} = &abap.Type{}`);
+      if (t.k === "table") {
+        const g = goType(t);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }}`);
+      } else {
+        const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'u', Comps: []abap.Comp{${fs.map((f) => `{Name: ${JSON.stringify(String(f.name).toUpperCase())}, T: ${desc(f.type)}, Get: func(p any) any { return &p.(*${t.go}).${ident(f.name)} }}`).join(", ")}}}`);
+      }
+    }
+  }
+  if (out.length === 0) return [];
+  return [...out, "", "func init() {", ...inits, "}", ""];
+}
+
 function cloneFuncs() {
   const out = [];
   const done = new Set();
@@ -92,6 +145,7 @@ export function emitGo(program, pkg = "main") {
   const classes = Array.isArray(program) ? program : program.classes;
   const structs = Array.isArray(program) ? new Map() : program.structs;
   CLONES = new Map();
+  DESCS = new Map();
   STRUCTDEFS = structs;
   CLASSES = new Map(classes.map((c) => [c.name, c]));
   POLY = new Set(classes.map((c) => c.super).filter(Boolean));
@@ -159,8 +213,10 @@ export function emitGo(program, pkg = "main") {
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   out.push(...dispatcher(classes));
+  out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.s === "native"))) out.push(...nativeRtti(program));
   out.push(...cloneFuncs());
+  out.push(...descFuncs());
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
   return out.join("\n") + "\n";
@@ -203,6 +259,42 @@ function nativeRtti(program) {
   return out;
 }
 
+/**
+ * CALL METHOD (class)=>m: every compiled class is known by name, and each
+ * static method whose name some dynamic call uses gets an adapter that reads
+ * its arguments out of generic data by name. A class the registry has but the
+ * program did not compile dumps instead of passing for an unknown one.
+ */
+function staticRegistry(program, classes) {
+  const wanted = program.dynStatics ?? new Set();
+  if (wanted.size === 0) return [];
+  const out = ["func init() {", `\tabap.KnownClasses(${goStrings(classes.map((c) => c.name))}, ${goStrings([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))})`];
+  for (const cls of classes) {
+    for (const m of [...cls.methods, ...(cls.stubs ?? [])]) {
+      if (!m.static || !wanted.has(m.name) || !definable(program, m)) continue;
+      const lines = [];
+      const args = m.params.map((p, i) => {
+        const v = `v${i}`;
+        if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
+        if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
+        const read = (d) => (p.type.k === "i" ? `abap.DataI(${d})` : ["string", "c", "d", "t"].includes(p.type.k) ? `abap.DataString(${d})`
+          : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
+        const absent = p.optional && p.default === undefined ? zero(p.type)
+          : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { panic(abap.ArithmeticError{Class: "CX_SY_DYN_CALL_PARAM_MISSING", Op: ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}}) }()`;
+        lines.push(`\t\tvar ${v} ${byRef(p) ? "*" : ""}${goType(p.type)}`, `\t\tif d, ok := a[${JSON.stringify(p.name)}]; ok {`, `\t\t\t${v} = ${read("d")}`, `\t\t} else {`,
+          `\t\t\t${v} = ${byRef(p) && p.optional && p.default === undefined ? `new(${goType(p.type)})` : absent}`, `\t\t}`);
+        return v;
+      });
+      out.push(`\tabap.RegisterStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${goStrings(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, func(s *abap.Session, a map[string]abap.Data) {`,
+        ...lines, `\t\t${funcName(cls.name, m.name)}(${["s", ...args].join(", ")})`, "\t})");
+    }
+  }
+  out.push("}", "");
+  return out;
+}
+
+const goStrings = (xs) => `[]string{${xs.map((x) => JSON.stringify(x)).join(", ")}}`;
+
 function ancestorsOf(cls) {
   const out = [];
   for (let c = cls; c.super && CLASSES.has(c.super);) { c = CLASSES.get(c.super); out.push(c); }
@@ -235,7 +327,7 @@ export function definable(program, m) {
     if (!t) return true;
     if (t.k === "struct") return program.structs.has(t.go);
     if (t.k === "table") return ok(t.row);
-    if (t.k === "ref") return t.intf ? program.interfaceMethods?.has(t.name) : true;
+    if (t.k === "ref") return t.name === "OBJECT" || (t.intf ? program.interfaceMethods?.has(t.name) : true);
     return true;
   };
   return m.params.every((p) => ok(p.type)) && ok(m.returning?.type);
@@ -294,7 +386,7 @@ function method(cls, m) {
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (!m.static) lines.push("\t_ = me");
   for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
-  for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} *${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
+  for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "" : "*"}${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
   lines.push("\treturn", "}");
@@ -351,7 +443,7 @@ function place(p, ctx) {
     case "static": return p.go;
     case "const": return p.go;
     case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
-    case "fs": return `(*${ident(p.name)})`;
+    case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
     case "refattr": return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
       const b = place(p.base, ctx);
@@ -477,7 +569,7 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
-      return [`${t}return ${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
+      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
     case "raise_classic":
       return [`${t}panic(abap.ClassicException{Name: ${JSON.stringify(st.name)}, Method: ${JSON.stringify(st.method)}})`];
@@ -602,6 +694,31 @@ function stmtLines(st, ctx, d) {
     }
     case "assert":
       return [`${t}if !(${cond(st.cond, ctx)}) {`, `${t}\tpanic(abap.ArithmeticError{Class: "ASSERTION_FAILED", Op: ${JSON.stringify(st.text)}})`, `${t}}`];
+    case "assign_comp":
+      return [`${t}if c, ok := abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)}); ok {`, `${t}\t${ident(st.fs.name)} = c`, `${t}\ts.Sy.Subrc = 0`,
+        `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "assign_deref":
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "assign_data":
+      return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];
+    case "get_ref":
+      return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
+    case "describe_kind":
+      return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
+    case "condense": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
+    }
+    case "loop_data": return withBuilders(st.body, ctx, t, () => {
+      const n = ctx.loop++;
+      const tb = `tab${n}`;
+      return [`${t}{`, `${t}\t${tb} := ${expr(st.table, ctx)}`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tfor i${n} := 0; i${n} < abap.Lines(${tb}); i${n}++ {`,
+        `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\t${ident(st.fs)} = abap.Row(${tb}, i${n})`,
+        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
+    });
+    case "call_dyn_static":
+      return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}})`];
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
     case "read_key": {
@@ -729,6 +846,10 @@ function expr(e, ctx) {
       return fromPtr && toIface && e.x.e !== "me" && e.x.e !== "new" ? `abap.Up[${goType(e.type)}](${x})` : x;
     }
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
+    // a typed slot seen as generic data: its address and its descriptor
+    case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
+    case "unwrap": return e.type.k === "i" ? `abap.DataI(${expr(e.x, ctx)})` : `abap.DataString(${expr(e.x, ctx)})`;
+    case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;
     default: throw new Error(`no Go for expression ${e.e}`);
   }
 }
@@ -746,8 +867,9 @@ function templateValue(v, ctx, opts) {
     case "i": return `abap.FmtI(${x})`;
     case "int8": return `abap.FmtI8(${x})`;
     case "f": return `abap.FmtF(${x})`;
-    case "string": case "c": return x;
+    case "string": case "c": case "d": case "t": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
+    case "data": return `abap.FmtData(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
   }
 }
@@ -806,7 +928,11 @@ function cond(c, ctx) {
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     // in parentheses: a composite literal right before the { of an if does not parse
-    case "initial": return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
+    case "initial":
+      if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
+      if (c.x.type.k === "dref") return `(${expr(c.x, ctx)}.P == nil)`;
+      return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
+    case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;

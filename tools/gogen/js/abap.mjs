@@ -358,3 +358,6 @@ export function CP(a, p, cpat) {
   return j === ps.length;
 }
 export function CA(a, b) { return b !== "" && [...a].some((c) => b.includes(c)); }
+
+export function notCompiled(why) { throw new AbapError("NOT_COMPILED", why); }
+export function Condense(s, noGaps) { return noGaps ? s.replaceAll(" ", "") : s.split(" ").filter((x) => x !== "").join(" "); }

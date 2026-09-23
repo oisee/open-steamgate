@@ -1,6 +1,9 @@
 package abap
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // A class CREATE OBJECT ... TYPE (name) can make: a typed nil to check the
 // fit with, and a constructor without arguments.
@@ -85,4 +88,67 @@ func Classic(s *Session, method string, m map[string]int32, others int32) {
 		}
 	}
 	panic(r)
+}
+
+// CALL METHOD (class)=>m: the classes the program compiled, the ones the
+// registry has (so a class that exists but was not compiled dumps instead of
+// reading as unknown), and adapters for the static methods dynamic calls name.
+var (
+	compiledClasses = map[string]bool{}
+	registryClasses = map[string]bool{}
+	statics         = map[string]staticEntry{}
+)
+
+type staticEntry struct {
+	params map[string]bool
+	call   func(*Session, map[string]Data)
+}
+
+func KnownClasses(compiled, known []string) {
+	for _, c := range compiled {
+		compiledClasses[c] = true
+	}
+	for _, c := range known {
+		registryClasses[c] = true
+	}
+}
+
+func RegisterStatic(name string, params []string, call func(*Session, map[string]Data)) {
+	e := staticEntry{params: map[string]bool{}, call: call}
+	for _, p := range params {
+		e.params[p] = true
+	}
+	statics[name] = e
+}
+
+// CallStatic runs a static method named at run time. The class name is taken
+// as written, as for CREATE OBJECT ... TYPE (name) (measured there).
+func CallStatic(s *Session, class, method string, args map[string]Data) {
+	c := strings.TrimRight(class, " ")
+	if !compiledClasses[c] {
+		if registryClasses[c] {
+			panic(NotCompiled("CALL METHOD ("+c+")=>"+method, "the class exists but is not compiled in this program"))
+		}
+		panic(ArithmeticError{"CX_SY_DYN_CALL_ILLEGAL_CLASS", "CALL METHOD (" + c + ")=>" + method})
+	}
+	e, ok := statics[c+"=>"+method]
+	if !ok {
+		panic(ArithmeticError{"CX_SY_DYN_CALL_ILLEGAL_METHOD", "CALL METHOD (" + c + ")=>" + method})
+	}
+	for n := range args {
+		if !e.params[n] {
+			panic(ArithmeticError{"CX_SY_DYN_CALL_PARAM_NOT_FOUND", c + "=>" + method + " " + n})
+		}
+	}
+	e.call(s, args)
+}
+
+// Local RFC destinations: CALL FUNCTION ... DESTINATION to one of these runs
+// the module in this process ('NONE' on a Gateway). The transpiler runtime
+// keeps them in abap.context.RFCDestinations; CALL FUNCTION is not compiled
+// yet, so nothing reads this table so far.
+var localDestinations sync.Map
+
+func RegisterLocalDestination(s *Session, name string) {
+	localDestinations.Store(strings.TrimRight(name, " "), true)
 }

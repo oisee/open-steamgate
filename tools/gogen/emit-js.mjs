@@ -35,7 +35,10 @@ function zero(t) {
     case "x": return JSON.stringify("\u0000".repeat(t.len));
     case "table": return "[]";
     case "struct": return `new_${t.go}()`;
-    case "ref": case "exc": return "null";
+    case "ref": case "exc": case "data": case "dref": return "null";
+    case "d": return `"00000000"`;
+    case "p": return `"0"`;
+    case "t": return `"000000"`;
     default: throw new Error(`no zero for ${t.k}`);
   }
 }
@@ -43,6 +46,8 @@ const composite = (t) => t.k === "struct" || t.k === "table";
 const isPlace = (e) => ["var", "attr", "static", "field", "fs", "row", "refattr"].includes(e.e);
 
 let STRUCTS = new Map();
+// generic data (TYPE any, REF TO data) runs in the Go backend only so far
+const GENERIC = `abap.notCompiled("generic data: the JS emitter has no descriptors yet")`;
 
 export function emitJs(program, runtimeUrl = "./abap.mjs") {
   STRUCTS = program.structs;
@@ -181,6 +186,12 @@ function stmt(st, ctx, d) {
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
         `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
     }
+    case "condense": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
+    }
+    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static":
+      return [`${t}${GENERIC};`];
     case "native":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
     case "raise_classic":
@@ -436,6 +447,7 @@ function expr(e, ctx) {
     case "me": return "me";
     case "upcast": return expr(e.x, ctx);
     case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
+    case "wrap": case "unwrap": case "lines_data": return GENERIC;
     default: throw new Error(`no JS for expression ${e.e}`);
   }
 }
@@ -452,8 +464,9 @@ function templateValue(v, ctx, opts) {
   switch (v.type.k) {
     case "i": return `abap.FmtI(${x})`;
     case "f": return `abap.FmtF(${x})`;
-    case "string": case "c": return x;
+    case "string": case "c": case "d": case "t": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
+    case "data": return GENERIC;
     default: throw new Error(`template part ${v.type.k}`);
   }
 }
@@ -506,7 +519,8 @@ function cond(c, ctx) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
-    case "initial": return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
+    case "initial": return c.x.type.k === "data" || c.x.type.k === "dref" ? GENERIC : `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
+    case "assigned": return c.fs.type.k === "data" ? GENERIC : `${ident(c.fs.name)} !== null`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;

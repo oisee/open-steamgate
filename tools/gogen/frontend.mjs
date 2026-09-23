@@ -90,6 +90,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
+  program.supplied = suppliedParams(reg, program.wanted);
   const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
@@ -183,6 +184,37 @@ function aliasTarget(reg, owner, name) {
   return undefined;
 }
 
+/**
+ * p IS SUPPLIED: the callee must know whether its caller passed p, so every
+ * parameter some implementation asks about gets a hidden SUP_<p> ('X' or ''),
+ * filled in at each call. Keyed by the class that declares the method, so a
+ * redefinition and the class interface keep one signature.
+ */
+function suppliedParams(reg, wanted) {
+  const out = new Map();
+  for (const obj of reg.getObjects()) {
+    if (!(obj instanceof abaplint.Objects.Class) || !wanted.has(upper(obj.getName()))) continue;
+    const st = obj.getMainABAPFile()?.getStructure();
+    for (const m of st?.findAllStructures(Structures.Method) ?? []) {
+      const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
+      if (found.length === 0) continue;
+      const name = upper(m.findFirstExpression(Expressions.MethodName).concatTokens());
+      if (name.includes("~")) continue;
+      const key = `${declaringClass(reg, upper(obj.getName()), name, "method") ?? upper(obj.getName())}=>${name}`;
+      out.set(key, new Set([...(out.get(key) ?? []), ...found]));
+    }
+  }
+  return out;
+}
+
+/** the hidden SUP_<p> parameters of a method, after its own */
+function withSupplied(program, key, params) {
+  const set = program.supplied?.get(key);
+  if (!set) return params;
+  const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
+  return [...params, ...hidden];
+}
+
 /** the interfaces an interface includes, transitively */
 function componentInterfaces(reg, intf, seen = new Set()) {
   for (const c of reg.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
@@ -202,11 +234,26 @@ export function readClass(folder) {
 const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+  ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
 ]);
 
 /* --------------------------------------------------------------------- types */
 
 function typeOf(t, where, program) {
+  // generic data: TYPE any / data / ANY TABLE, and data references. A
+  // generic value is a binding to a typed slot (abap.Data in Go)
+  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType) return {k: "data"};
+  if (t instanceof BasicTypes.TableType && (t.getRowType() instanceof BasicTypes.AnyType || t.getRowType() instanceof BasicTypes.DataType)) return {k: "data", table: true};
+  if (t instanceof BasicTypes.DataReference) return {k: "dref"};
+  // REF TO object: the root of every class, any object fits
+  if (t instanceof BasicTypes.GenericObjectReferenceType) return {k: "ref", name: "OBJECT", intf: true};
+  // d and t: their characters, initial all zeros
+  if (t instanceof BasicTypes.DateType) return {k: "d", len: 8};
+  // p: declared, initial, copied and compared with initial only, as its
+  // decimal text; any arithmetic or conversion is refused until packed
+  // numbers are measured on A4H
+  if (t instanceof BasicTypes.PackedType) return {k: "p", len: t.getLength(), dec: t.getDecimals()};
+  if (t instanceof BasicTypes.TimeType) return {k: "t", len: 6};
   if (t instanceof BasicTypes.IntegerType) return I;
   if (t instanceof BasicTypes.FloatType) return F;
   if (t instanceof BasicTypes.Integer8Type) return INT8;
@@ -335,10 +382,11 @@ function classIr(ctx0, obj) {
       const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
         default: defaultOf(p, x), optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
+      const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
+        ...p.getChanging().map((x) => param(x, "changing"))];
       signatures.set(name, {
         name, static: isStatic, private: m.getVisibility?.() === 1, abstract: m.isAbstract?.() ?? false,
-        params: [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
-          ...p.getChanging().map((x) => param(x, "changing"))],
+        params: prefix ? own : withSupplied(program, `${declaringClass(reg, className, name, "method") ?? className}=>${name}`, own),
         returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), where, program)},
       });
     } catch (e) {
@@ -422,7 +470,7 @@ function classIr(ctx0, obj) {
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
         if (vname.startsWith("<")) {
-          if (t.k !== "struct") throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
+          if (t.k !== "struct" && t.k !== "data") throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
           ctx.fieldSymbols.set(vname, t);
         } else {
           ctx.locals.set(vname, t);
@@ -581,7 +629,8 @@ function block(node, ctx) {
  */
 const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
   "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
-  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR"];
+  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
+  "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND"];
 
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
@@ -674,6 +723,12 @@ function structure(node, ctx) {
     const text = st.concatTokens();
     if (/\b(REFERENCE|GROUP|USING|CASTING)\b/i.test(text)) throw new Unsupported(`LOOP form: ${text}`);
     const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
+    if (table.type.k === "data") {
+      // LOOP AT <generic table> ASSIGNING <generic>: row by row, bound
+      const nm = /ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1];
+      if (!nm || ctx.fieldSymbols.get(upper(nm))?.k !== "data" || /\b(WHERE|FROM|TO|INTO)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
+      return {s: "loop_data", table, fs: upper(nm), body: bodyOf(node, ctx)};
+    }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
     const fsNode = lt.findFirstExpression(Expressions.FSTarget) ?? lt.findFirstExpression(Expressions.TargetFieldSymbol);
@@ -685,6 +740,7 @@ function structure(node, ctx) {
       fs = upper(nm);
     } else {
       into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
+      if (!sameType(into.type, table.type.row)) throw new Unsupported(`LOOP ... INTO a ${into.type.k} over rows of ${table.type.row.k}`);
     }
     void fsNode;
     const bound = (kw) => {
@@ -731,6 +787,26 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
+  if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
+  // GET REFERENCE OF x INTO r: r is bound to x itself
+  if (isStmt(node, Statements.GetReference)) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "dref") throw new Unsupported(`GET REFERENCE INTO a ${target.type.k}`);
+    return {s: "get_ref", target, value: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"})};
+  }
+  // DESCRIBE FIELD x TYPE k: the type kind (cl_abap_typedescr=>typekind_*)
+  if (isStmt(node, Statements.Describe)) {
+    if (!/^DESCRIBE\s+FIELD\s+\S+\s+TYPE\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`DESCRIBE form: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`DESCRIBE ... TYPE into a ${target.type.k}`);
+    return {s: "describe_kind", x: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"}), target};
+  }
+  // CONDENSE x [NO-GAPS]
+  if (isStmt(node, Statements.Condense)) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`CONDENSE of a ${target.type.k}`);
+    return {s: "condense", target, noGaps: /\bNO\s*-\s*GAPS\b/i.test(text)};
+  }
   // ASSERT: a false condition ends the program (ASSERTION_FAILED, a runtime
   // error no CATCH reaches); no checkpoint group, so always active
   if (isStmt(node, Statements.Assert)) {
@@ -813,6 +889,7 @@ function statement(node, ctx) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
     const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
       const fsName = upper(/<[\w]+>/.exec(text)?.[0] ?? "");
@@ -894,6 +971,25 @@ function statement(node, ctx) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
     if (!n) throw new Unsupported(`RAISE form: ${text}`);
     return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+  }
+  // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
+  // through the program's registry of static methods
+  if (isStmt(node, Statements.Call) && node.findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
+    const ms = node.findDirectExpression(Expressions.MethodSource);
+    const kids = ms.getChildren();
+    if (kids.length !== 3 || !isTok(kids[1], "=>") || !isExpr(kids[2], Expressions.AttributeName)) throw new Unsupported(`CALL METHOD form: ${text}`);
+    const inner = kids[0].getChildren().filter((c) => !isTok(c));
+    if (inner.length !== 1) throw new Unsupported(`CALL METHOD form: ${text}`);
+    const cls = convert(sourceOperand(inner[0], ctx), S);
+    const body = node.findDirectExpression(Expressions.MethodCallBody);
+    const mp = body?.findDirectExpression(Expressions.MethodParameters);
+    if (mp && /\b(IMPORTING|CHANGING|RECEIVING|EXCEPTIONS)\b/i.test(mp.concatTokens())) throw new Unsupported(`CALL METHOD by name with ${mp.concatTokens()}`);
+    if (body && !mp) throw new Unsupported(`CALL METHOD form: ${text}`);
+    const args = (mp?.findAllExpressions(Expressions.ParameterS) ?? []).map((p) => ({name: upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()),
+      value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})}));
+    const method = upper(kids[2].concatTokens());
+    (ctx.program.dynStatics ??= new Set()).add(method);
+    return {s: "call_dyn_static", cls, method, args};
   }
   if (isStmt(node, Statements.Call)) {
     const chain = node.findDirectExpression(Expressions.MethodCallChain);
@@ -1428,6 +1524,7 @@ function constructor(c, ctx, inferred) {
       }
     }
     const args = sig.map((p) => {
+      if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
       const src = given.get(p.name);
       if (src === undefined) {
         if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
@@ -1463,9 +1560,10 @@ function methodSignature(ctx, owner, name) {
     const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
       optional: optional.has(upper(x.getName()))});
     const ret = p.getReturning();
+    const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
+      ...p.getChanging().map((x) => param(x, "changing"))];
     sig = {name, static: m.isStatic?.() ?? false,
-      params: [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
-        ...p.getChanging().map((x) => param(x, "changing"))],
+      params: intf ? own : withSupplied(ctx.program, `${declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner}=>${meth}`, own),
       returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), key, ctx.program)}};
   } catch (e) {
     if (!(e instanceof Unsupported)) throw e;
@@ -1508,6 +1606,38 @@ function declaringClass(reg, cls, name, kind) {
 }
 
 /**
+ * ASSIGN into a generic field symbol: a component of a structure by name
+ * (sy-subrc 4 when there is none), what a data reference points to
+ * (sy-subrc 4 when it is initial; not measured), or a value, bound.
+ */
+function assignStatement(node, ctx, text) {
+  const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+  const fsType = ctx.fieldSymbols?.get(fsName);
+  if (!fsType) throw new Unsupported(`ASSIGN to ${fsName || "?"}`);
+  if (fsType.k !== "data") throw new Unsupported(`ASSIGN to a typed field symbol: ${text}`);
+  if (/\b(CASTING|INCREMENT|RANGE)\b/i.test(text)) throw new Unsupported(`ASSIGN form: ${text}`);
+  const fs = {e: "fs", name: fsName, type: fsType};
+  const src = node.findDirectExpression(Expressions.AssignSource);
+  const parts = src.getChildren().filter((c) => !isTok(c));
+  if (/^ASSIGN\s+COMPONENT\b/i.test(text)) {
+    if (parts.length !== 2) throw new Unsupported(`ASSIGN COMPONENT form: ${text}`);
+    const name = sourceOperand(parts[0].getFirstChild(), ctx);
+    if (!["string", "c"].includes(name.type.k)) throw new Unsupported(`ASSIGN COMPONENT by a ${name.type.k}`);
+    return {s: "assign_comp", fs, name: convert(name, S), from: convert(source(parts[1], ctx), {k: "data"})};
+  }
+  if (parts.length !== 1 || !isExpr(parts[0], Expressions.Source)) throw new Unsupported(`ASSIGN form: ${text}`);
+  const inner = parts[0];
+  if (inner.findDirectExpression(Expressions.Dereference)) {
+    const kids = inner.getChildren();
+    if (kids.length !== 2) throw new Unsupported(`ASSIGN form: ${text}`);
+    const ref = sourceOperand(kids[0], ctx);
+    if (ref.type.k !== "dref") throw new Unsupported(`->* of a ${ref.type.k}`);
+    return {s: "assign_deref", fs, ref};
+  }
+  return {s: "assign_data", fs, value: convert(source(inner, ctx), fsType)};
+}
+
+/**
  * CREATE OBJECT o [TYPE cls | TYPE (name)] [EXPORTING ...]. A static class
  * is NEW. A class given by name goes through the program's class registry and
  * takes no arguments. The runtime checks that the result fits o, as the kernel
@@ -1537,6 +1667,7 @@ function createObject(node, ctx) {
     given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
   }
   const args = sig.map((p) => {
+    if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
     const src = given.get(p.name);
     if (src === undefined) {
       if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
@@ -1559,8 +1690,9 @@ function constructorSignature(ctx, clsName) {
   const p = m.getParameters();
   if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
   const optional = new Set((p.getOptional?.() ?? []).map(upper));
-  return p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
+  const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
     type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), optional: optional.has(upper(x.getName()))}));
+  return withSupplied(ctx.program, `${declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName}=>CONSTRUCTOR`, own);
 }
 
 function valueBody(body, to, ctx, text) {
@@ -1716,6 +1848,7 @@ function call(chain, ctx, statement, hint) {
   if (receiver === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
     const t = source(direct, ctx);
+    if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
     if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
     return {e: "lines", table: t, type: I};
   }
@@ -1822,6 +1955,10 @@ function call(chain, ctx, statement, hint) {
     void exp;
   }
   const args = sig.params.map((p) => {
+    if (p.suppliedOf) {
+      const yes = given.has(p.suppliedOf) || targets.has(p.suppliedOf);
+      return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: yes ? "X" : "", type: p.type}};
+    }
     if (p.dir === "importing") {
       const s = given.get(p.name);
       if (s === undefined) {
@@ -1880,6 +2017,18 @@ function builtin(name, direct, named, ctx) {
  * that is not listed is refused, not approximated.
  */
 export function convert(expr, to) {
+  // a typed value where a generic one is expected is bound, not copied; a
+  // generic one where a type is expected is read through its descriptor
+  if (to.k === "data" && expr.type.k === "data") return expr;
+  if (to.k === "dref" && expr.type.k === "dref") return expr;
+  if (to.k === "data") {
+    if (to.table && expr.type.k !== "table") throw new Unsupported(`a ${expr.type.k} where ANY TABLE is expected`);
+    return {e: "wrap", x: expr, type: to};
+  }
+  if (expr.type.k === "data") {
+    if (!["string", "c", "i", "d", "t"].includes(to.k)) throw new Unsupported(`a generic value moved into a ${to.k}`);
+    return {e: "unwrap", x: expr, type: to};
+  }
   const from = expr.type;
   if (sameType(from, to)) return expr;
   const ok = (kind) => ({e: "conv", kind, from, to, x: expr, type: to});
@@ -1905,7 +2054,7 @@ export function convert(expr, to) {
   if (from.k === "ref" && to.k === "ref") {
     // up-cast: a class into an interface it implements, or any reference into
     // the same interface; a down-cast needs CAST and is refused
-    if (to.intf && implementsIntf(expr, from.name, to.name)) return {e: "upcast", x: expr, type: to};
+    if (to.intf && (to.name === "OBJECT" || implementsIntf(expr, from.name, to.name))) return {e: "upcast", x: expr, type: to};
     if (!to.intf && !from.intf && REG && ancestors(REG, from.name).includes(to.name)) return {e: "upcast", x: expr, type: to};
     throw new Unsupported(`reference ${from.name} -> ${to.name}`);
   }
@@ -1970,8 +2119,24 @@ function compare(node, ctx) {
   const not = kids.length > 0 && isTok(kids[0], "NOT");
   const sources = node.findDirectExpressions(Expressions.Source);
   const text = upper(node.concatTokens());
+  if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
+    const nm = upper(/^(?:NOT\s+)?(\S+)\s+IS\b/.exec(text)?.[1] ?? "");
+    if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);
+    const r = {c: "not", x: {c: "initial", x: {e: "var", name: `SUP_${nm}`, type: C(1)}}};
+    return /\bIS\s+NOT\s+SUPPLIED\b/.test(text) !== not ? {c: "not", x: r} : r;
+  }
+  if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {
+    const nm = /<[\w]+>/.exec(text)?.[0];
+    if (!nm || !ctx.fieldSymbols.has(nm)) throw new Unsupported(`IS ASSIGNED: ${text}`);
+    const r = {c: "assigned", fs: {e: "fs", name: nm, type: ctx.fieldSymbols.get(nm)}};
+    return /\bIS\s+NOT\s+ASSIGNED\b/.test(text) !== not ? {c: "not", x: r} : r;
+  }
   if (/\bIS\s+(NOT\s+)?BOUND\b/.test(text) && sources.length === 1) {
     const v = source(sources[0], ctx);
+    if (v.type.k === "dref") {
+      const r = {c: "initial", x: v};
+      return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
+    }
     if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
     const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
