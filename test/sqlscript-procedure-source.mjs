@@ -74,12 +74,14 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     const source = readFileSync(new URL("../src/amdp/zcl_osd_amdp_demo.clas.abap", import.meta.url), "utf8");
     const extracted = extract(source, "zcl_osd_amdp_demo.clas.abap");
     const method = extracted.methods.find((one) => one.name.toUpperCase() === "SQUARES");
-    for (const extra of [
-      {name: "ET_OTHER", direction: "OUT", abapType: "tt_square"},
-      {name: "CV_OTHER", direction: "INOUT", abapType: "i"},
+    // a second OUT table is carried now, and one the body never assigns is
+    // refused in HANA's words rather than dropped; an INOUT is still refused
+    for (const [extra, message] of [
+      [{name: "ET_OTHER", direction: "OUT", abapType: "tt_square"}, /some out table variable is not assigned: ET_OTHER/],
+      [{name: "CV_OTHER", direction: "INOUT", abapType: "i"}, /exactly one OUT or RETURNING/],
     ]) {
       expect(() => compileProcedure({...method, parameters: [...method.parameters, extra]}, extracted.types))
-        .to.throw(UnsupportedSqlScript, /exactly one OUT or RETURNING/);
+        .to.throw(UnsupportedSqlScript, message);
     }
   });
 

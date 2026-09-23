@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, T} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -20,8 +20,9 @@ export class UnsupportedSqlScript extends Error {
 const upper = (name) => String(name).toUpperCase();
 
 export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType,
-  catalogue = {}}) =>
+  outputs, catalogue = {}}) =>
   ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType,
+    ...(Array.isArray(outputs) ? {outputs: outputs.map((one) => ({name: upper(one.name), schema: one.schema}))} : {}),
     catalogue});
 export const declareScalar = (name, type, initial, source) =>
   ({stmt: "declare-scalar", name: upper(name), type, initial, source});
@@ -632,8 +633,30 @@ export async function runProcedure(program, {
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
       trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
   }
-  const result = relations.get(program.output);
-  if (result === undefined) throw new UnsupportedSqlScript(`output relation ${program.output} was not assigned`);
+  // An OUT table the path taken did not assign is an empty table (measured
+  // on A4H: the caller's rows are replaced by none); one assigned nowhere in
+  // the body does not compile there, and the compiler refuses it the same way
+  const emptyOf = (schema) => project(filter(scan("DUMMY"), bin("=", lit(1, T.int), lit(0, T.int), T.bool)),
+    Object.entries(schema).map(([name, type]) => ({as: name, expr: lit(type.abap === "I" || type.abap === "INT8" || type.abap === "P" ? 0 : "", type)})));
+  if (Array.isArray(program.outputs) && program.outputs.length > 1) {
+    if (deferRelation) {
+      throw new UnsupportedSqlScript(`a nested CALL of ${program.outputs.length} outputs is not carried; a CALL hands on one relation`);
+    }
+    const outputs = {};
+    let statements = 0;
+    let bound = 0;
+    for (const one of program.outputs) {
+      const answer = await finishOne(one.name, one.schema, relations.get(one.name) ?? emptyOf(one.schema));
+      outputs[one.name] = {rows: answer.rows, columns: answer.columns, outputSchema: one.schema};
+      statements += answer.trace.databaseStatements;
+      bound += answer.trace.boundParameters;
+    }
+    return {outputs, trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
+      databaseStatements: statements, boundParameters: bound}};
+  }
+  return finishOne(program.output, program.outputSchema, relations.get(program.output) ?? emptyOf(program.outputSchema));
+
+  async function finishOne(outputName, outputSchema, result) {
   // A native AMDP procedure converts the final SELECT into the declared ABAP
   // OUT-table types. Window ranking is the first place this is observable:
   // both HANA and DuckDB naturally produce BIGINT, while the method declares
@@ -643,13 +666,13 @@ export async function runProcedure(program, {
   let actualOutput;
   try { actualOutput = schemaOf(result, inputCatalogue); }
   catch (error) { throw new UnsupportedSqlScript(`cannot prove output schema: ${error.message}`); }
-  const expectedNames = Object.keys(program.outputSchema);
+  const expectedNames = Object.keys(outputSchema);
   if (JSON.stringify(Object.keys(actualOutput)) !== JSON.stringify(expectedNames)) {
     throw new UnsupportedSqlScript("output relation columns do not match the AMDP signature");
   }
   const converted = expectedNames.map((name) => {
     const actual = actualOutput[name];
-    const expected = program.outputSchema[name];
+    const expected = outputSchema[name];
     const source = col(name, actual);
     if (JSON.stringify(actual) === JSON.stringify(expected)) return {as: name, expr: source};
     // A CHAR expression already satisfies an ABAP STRING output without a
@@ -684,15 +707,15 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
-  const int2Columns = Object.entries(program.outputSchema).filter(([, type]) => isInt2(type)).map(([column]) => column);
+  const int2Columns = Object.entries(outputSchema).filter(([, type]) => isInt2(type)).map(([column]) => column);
   if (deferRelation) {
     // a nested CALL hands its relation to the caller unevaluated, so the
     // range check at this boundary has no rows to look at; refused rather
     // than letting an out-of-range value through where HANA raises
     if (int2Columns.length > 0) {
-      throw new UnsupportedSqlScript(`output ${program.output} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
+      throw new UnsupportedSqlScript(`output ${outputName} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
     }
-    return {relation: output, outputSchema: program.outputSchema,
+    return {relation: output, outputSchema: outputSchema,
       trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
         nestedCalls, databaseStatements: 0, boundParameters: 0}};
   }
@@ -709,14 +732,15 @@ export async function runProcedure(program, {
   const answer = await client.native({...compiled, expect: "rows"});
   for (const row of answer.rows) {
     for (const column of int2Columns) {
-      if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${program.output}.${column}`);
+      if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${outputName}.${column}`);
     }
   }
   return {
     rows: answer.rows,
     columns: answer.columns,
-    outputSchema: program.outputSchema,
+    outputSchema: outputSchema,
     trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
       databaseStatements: 1, boundParameters: compiled.params.length},
   };
+  }
 }

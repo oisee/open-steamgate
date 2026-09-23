@@ -160,6 +160,19 @@ function outputFrom(method, types, resolve, store) {
     return {name: "RESULT", kind: "relation", schema};
   }
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
+  // several OUT tables (measured on A4H: each is what the path taken
+  // assigned, an empty table where it assigned none); every one of them must
+  // be a resolved table -- a scalar OUT beside them is not carried yet
+  if (outputs.length > 1 && outputs.every((one) => one.direction === "OUT")) {
+    const tables = outputs.map((one) => {
+      const schema = structuredTable(one.abapType, types, resolve, store);
+      if (schema === undefined) {
+        throw new UnsupportedSqlScript(`output ${one.name} is not a resolved structured table type; a scalar OUT beside table OUTs is not carried yet`);
+      }
+      return {name: upper(one.name), schema};
+    });
+    return {name: tables[0].name, kind: "relation", schema: tables[0].schema, outputs: tables};
+  }
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
   }
@@ -183,6 +196,9 @@ export function compileProcedure(method, types, options = {}) {
   const store = options.store;
   const tree = parse(new Body(), lex(method.body));
   const output = outputFrom(method, types, resolve, store);
+  const outputNames = new Set((output.outputs ?? [output]).map((one) => one.name));
+  const outputSchemaOf = (name) => (output.kind !== "relation" ? undefined
+    : (output.outputs ?? [output]).find((one) => one.name === name)?.schema);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
   const relationCandidates = inputParameters
     .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve, store)}))
@@ -419,7 +435,7 @@ export function compileProcedure(method, types, options = {}) {
         const set = child(node, "SetOperation");
         if (set !== undefined) {
           // the output's declared schema types a bare NULL assigned to it
-          const rel = bind(set, "relation", name === output.name && output.kind === "relation" ? output.schema : undefined);
+          const rel = bind(set, "relation", outputSchemaOf(name));
           try { relationSchemas[name] = schemaOf(rel, catalogue); }
           catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
           result.push(assignRelation(name, rel, node));
@@ -433,6 +449,9 @@ export function compileProcedure(method, types, options = {}) {
       } else if (node.node === "ProcedureCall") {
         if (output.kind !== "relation") {
           throw new UnsupportedSqlScript("initial nested CALL requires a table output", node);
+        }
+        if (Array.isArray(output.outputs)) {
+          throw new UnsupportedSqlScript("a nested CALL inside a procedure of several outputs is not carried yet", node);
         }
         const procedureNode = child(node, "ColumnRef");
         const procedureLeaves = terminalLeaves(procedureNode);
@@ -466,7 +485,7 @@ export function compileProcedure(method, types, options = {}) {
           ? (statements[0].children ?? []).find((one) => one.node !== "word")
           : undefined;
         const assignsOutput = statement?.node === "Assignment"
-          && nameOf(child(statement, "Name")) === output.name;
+          && outputNames.has(nameOf(child(statement, "Name")));
         if (JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"]) || !assignsOutput) {
           throw new UnsupportedSqlScript(
             "initial block support requires BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output", node);
@@ -603,7 +622,23 @@ export function compileProcedure(method, types, options = {}) {
     if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body))) {
       throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
     }
+    // every OUT table must be assigned somewhere in the body, or HANA does not
+    // compile the procedure (measured on A4H, in its words)
+    if (Array.isArray(output.outputs)) {
+      const assigned = new Set();
+      const walk = (statements) => {
+        for (const one of statements) {
+          if (one.stmt === "assign-relation") assigned.add(one.name);
+          if (one.stmt === "while") walk(one.body ?? []);
+          if (one.stmt === "if") { for (const branch of one.branches ?? []) walk(branch.body ?? []); walk(one.otherwise ?? []); }
+        }
+      };
+      walk(body);
+      const missing = output.outputs.find((one) => !assigned.has(one.name));
+      if (missing !== undefined) throw new UnsupportedSqlScript(`some out table variable is not assigned: ${missing.name}`);
+    }
     return procedure({parameters, relationParameters, body, output: output.name,
+      ...(Array.isArray(output.outputs) ? {outputs: output.outputs} : {}),
       outputSchema: output.kind === "relation" ? output.schema : undefined,
       outputType: output.kind === "scalar" ? output.type : undefined,
       catalogue});

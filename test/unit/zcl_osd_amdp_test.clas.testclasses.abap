@@ -8,6 +8,7 @@ CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS nested_amdp_stays_relational FOR TESTING RAISING cx_static_check.
     METHODS open_sql_luw_is_shared FOR TESTING RAISING cx_static_check.
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
+    METHODS two_outputs_come_back FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_amdp IMPLEMENTATION.
@@ -153,4 +154,28 @@ CLASS ltcl_amdp IMPLEMENTATION.
                                         msg = 'the fourth square' ).
   ENDMETHOD.
 
+  METHOD two_outputs_come_back.
+    DATA lt_amount TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lt_small TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lt_large TYPE zcl_osd_amdp_demo=>tt_amount.
+
+    IF sy-dbsys <> 'HDB' AND sy-dbsys <> 'duckdb'.
+      RETURN.
+    ENDIF.
+
+    lt_amount = VALUE #( ( amount = 3 ) ( amount = 12 ) ( amount = 7 ) ( amount = 40 ) ).
+    lt_large = VALUE #( ( amount = 999 ) ).
+    zcl_osd_amdp_demo=>split_amounts( EXPORTING it_amount = lt_amount
+                                                iv_limit  = 10
+                                      IMPORTING et_small  = lt_small
+                                                et_large  = lt_large ).
+    SORT lt_small BY amount.
+    SORT lt_large BY amount.
+    cl_abap_unit_assert=>assert_equals( act = lt_small
+                                        exp = VALUE zcl_osd_amdp_demo=>tt_amount( ( amount = 3 ) ( amount = 7 ) )
+                                        msg = 'the first OUT table' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_large
+                                        exp = VALUE zcl_osd_amdp_demo=>tt_amount( ( amount = 12 ) ( amount = 40 ) )
+                                        msg = 'the second OUT table, the caller''s row replaced' ).
+  ENDMETHOD.
 ENDCLASS.
