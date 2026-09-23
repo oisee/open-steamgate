@@ -111,7 +111,7 @@ function descFuncs() {
       out.push(`var ${d.name} = &abap.Type{}`);
       if (t.k === "table") {
         const g = goType(t);
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${copyZero(t)}}`);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${t.hashed ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${zero(t.row)}); return &(*p.(*${g}))[len(*p.(*${g}))-1] }, `}${copyZero(t)}}`);
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
         // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
@@ -679,6 +679,15 @@ function stmtLines(st, ctx, d) {
       const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
         `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
+    }
+    case "call_fm": {
+      // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
+      // every actual as generic data, the module's classic exceptions by name
+      const call = `${st.fn}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
+      if (!st.exceptions) return [`${t}${call}`];
+      const m = Object.entries(st.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
+        `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     case "native": {
       const m = ctx.method;

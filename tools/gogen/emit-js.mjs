@@ -461,6 +461,8 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}{ const r = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
     }
+    // CALL FUNCTION of a host module: the JS emitter has no host for them
+    case "call_fm": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`CALL FUNCTION '${st.name}': the JS emitter has no host function modules`)});`];
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
