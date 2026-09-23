@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-23-w3mi-edges — WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING differ from A4H at their edges
+
+- Status: `open` (the Go host of tools/gogen answers as A4H does; the open-abap-core functions do not)
+- Discovery date: `2026-09-23`
+- Affected versions: open-abap-core `zw3mi` and `zscms` function groups as held in `.local/lars/open-abap-core` (fork branch with #1218)
+- Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'WWWDATA_IMPORT'`, `CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_w3mi.clas.abap` (A4H ran the same calls over an object of its own, found with a SELECT on WWWPARAMS)
+- Exact command used to run it: A4H ABAP Unit probe ZCL_GOGEN_T_W3MI in `$ZOSG_TMP_0230` (deleted); locally `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `miss:2/1 rel:1/0 hit:0 rowsdiff:0 pad:00/255 exact:0/X five:5/X zero:0 over:0/0 neg:0/0 empty:0/0`. An unknown object is `IMPORT_ERROR` and **MIME keeps the rows it had**; a `RELID` other than `MI` is `WRONG_OBJECT_TYPE`; `SCMS_BINARY_TO_XSTRING` with `INPUT_LENGTH` 0 or negative returns an **empty** buffer, with more than there is the whole of it, with an empty table an empty (cleared) buffer.
+- Actual open-abap behaviour: `WWWDATA_IMPORT` clears MIME before it looks the object up, so a miss empties the caller's table; it never reads `RELID`; `SCMS_BINARY_TO_XSTRING` cuts only when `0 < INPUT_LENGTH * 2 < length`, so 0 or a negative length returns **everything**.
+- Impact on open-steamgate: small. The packs pass the size WWWPARAMS holds, which is never 0 for a real object; a caller that retries into the same table after a miss sees it emptied.
+- Smallest safe workaround: none needed in `src/`; the Go host (`tools/gogen/go/abap/w3mi.go`) implements the measured rules.
+- Upstream issue: not drafted; it belongs with the pending open-abap-core PRs for these two function groups.
+- Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_W3MI`)
+- Upstream version containing a fix: unknown
+
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 **A POSTed form field is not there.** On a system, ICF fills the form fields of
