@@ -268,6 +268,8 @@ export const Uccp = (v) => (v.length === 0 ? 32 : v.codePointAt(0));
 // SPLIT ... INTO TABLE as A4H does it
 export function Split(v, sep) {
   if (v === "") return [];
+  // an empty separator does not split (measured: abc is one row)
+  if (sep === "") return [v];
   const parts = v.split(sep);
   if (v.endsWith(sep)) parts.pop();
   return parts;
@@ -296,7 +298,8 @@ export function FindStmt(s, p, regex, icase, n) {
   }
   // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
   if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
-  const m = new RegExp(p, icase ? "iu" : "u").exec(s);
+  // ^ and $ are line anchors on A4H (FIND REGEX `^b` IN |a\nb| finds it)
+  const m = new RegExp(p, icase ? "imu" : "mu").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
   return [true, [...s.slice(0, m.index)].length, [...m[0]].length, subs];
@@ -361,3 +364,161 @@ export function CA(a, b) { return b !== "" && [...a].some((c) => b.includes(c));
 
 export function notCompiled(why) { throw new AbapError("NOT_COMPILED", why); }
 export function Condense(s, noGaps) { return noGaps ? s.replaceAll(" ", "") : s.split(" ").filter((x) => x !== "").join(" "); }
+
+// ---- strings (measured on A4H 2026-09-23, see go/abap/strings.go) ----
+const nc = (where, why) => new AbapError("NOT_COMPILED", `${where}: ${why}`);
+// a c value at its full length: SPLIT's separator keeps its trailing blanks
+export const PadC = (v, n) => { const c = [...v].length; return c < n ? v + " ".repeat(n - c) : v; };
+// SPLIT v AT sep INTO t1 .. tn: the last target takes the rest
+export function SplitInto(v, sep, n) {
+  const out = new Array(n).fill("");
+  if (v === "") return out;
+  if (sep === "") { out[0] = v; return out; }
+  const parts = v.split(sep);
+  for (let i = 0; i < n && i < parts.length; i++) out[i] = i === n - 1 ? parts.slice(i).join(sep) : parts[i];
+  return out;
+}
+export const SplitSubrc = (pieces, lens) => (pieces.some((p, i) => lens[i] >= 0 && [...p].length > lens[i]) ? 4 : 0);
+// every match of an ABAP regex, in REPLACE ALL's order (see rxAll in Go).
+// A JS RegExp is leftmost-first where ABAP's POSIX is leftmost-longest, as
+// in FindStmt: an alternation whose shorter branch matches first differs.
+function rxAll(s, p, icase, first) {
+  if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
+  let re;
+  try { re = new RegExp(p, icase ? "gimu" : "gmu"); } catch { throw new AbapError("CX_SY_INVALID_REGEX", p); }
+  const out = [];
+  let pos = 0;
+  while (pos <= s.length) {
+    re.lastIndex = pos;
+    const m = re.exec(s);
+    if (!m) break;
+    out.push(m);
+    if (first) break;
+    const end = m.index + m[0].length;
+    if (end > m.index) { pos = end; if (pos === s.length) break; continue; }
+    if (m.index >= s.length) break;
+    pos = m.index + (s.codePointAt(m.index) > 0xffff ? 2 : 1);
+  }
+  return out;
+}
+function plainAll(s, sub, icase, first) {
+  if (icase) return rxAll(s, sub.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), true, first);
+  const out = [];
+  for (let pos = 0; pos <= s.length;) {
+    const i = s.indexOf(sub, pos);
+    if (i < 0) break;
+    const m = [sub]; m.index = i; out.push(m);
+    if (first) break;
+    pos = i + sub.length;
+  }
+  return out;
+}
+function rxWith(wth, m) {
+  if (!/[$\\]/.test(wth)) return wth;
+  const r = [...wth];
+  let b = "";
+  for (let i = 0; i < r.length; i++) {
+    if (r[i] === "\\" && i + 1 < r.length) { b += r[++i]; continue; }
+    if (r[i] === "$" && /[0-9]/.test(r[i + 1] ?? "")) {
+      if (/[0-9]/.test(r[i + 2] ?? "")) throw nc("REPLACE REGEX", `a replacement $nn of two digits is not measured: ${wth}`);
+      b += m[Number(r[++i])] ?? "";
+      continue;
+    }
+    if (r[i] === "$" && r[i + 1] === "&") { b += m[0]; i++; continue; }
+    if (r[i] === "$" || r[i] === "\\") throw nc("REPLACE REGEX", `a replacement ${r.slice(i).join("")} is not measured`);
+    b += r[i];
+  }
+  return b;
+}
+function splice(s, ms, wth) {
+  let b = "", last = 0;
+  for (const m of ms) { b += s.slice(last, m.index) + wth(m); last = m.index + m[0].length; }
+  return b + s.slice(last);
+}
+export const NoLength = -2147483648;
+// REPLACE ... IN [SECTION ...] v WITH w; [value, sy-subrc]
+export function ReplaceStmt(v, p, wth, regex, all, icase, off, ln, cLen) {
+  if (cLen >= 0) v = PadC(v, cLen);
+  const cs = [...v];
+  const n = cs.length;
+  if (ln === NoLength) ln = n - off;
+  else if (ln < 0) throw nc("REPLACE", "a SECTION of negative LENGTH is not measured");
+  if (off < 0 || off > n || off + ln > n) rangeError();
+  const head = cs.slice(0, off).join(""), sec = cs.slice(off, off + ln).join(""), tail = cs.slice(off + ln).join("");
+  let ms;
+  if (regex) ms = rxAll(sec, p, icase, !all);
+  else {
+    if (p === "" && all) throw new AbapError("CX_SY_REPLACE_INFINITE_LOOP", "REPLACE ALL OCCURRENCES OF ''");
+    ms = plainAll(sec, p, icase, !all);
+  }
+  if (ms.length === 0) return [cLen >= 0 ? v.replace(/ +$/, "") : v, 4];
+  const out = head + splice(sec, ms, (m) => (regex ? rxWith(wth, m) : wth)) + tail;
+  if (cLen >= 0) {
+    const oc = [...out];
+    if (oc.length > cLen) {
+      return [CFit(out, cLen), oc.slice(cLen).join("").replace(/ +$/, "") === "" ? 0 : 2];
+    }
+    return [out.replace(/ +$/, ""), 0];
+  }
+  return [out, 0];
+}
+// replace( val sub|regex with occ )
+export function ReplaceFn(v, p, wth, regex, occ) {
+  if (p === "") {
+    if (regex) throw nc("replace( )", "an empty regex is not measured");
+    throw new AbapError("CX_SY_STRG_PAR_VAL", "replace");
+  }
+  let ms = regex ? rxAll(v, p, false, occ === 1) : plainAll(v, p, false, occ === 1);
+  if (occ > 0) ms = occ <= ms.length ? [ms[occ - 1]] : [];
+  else if (occ < 0) ms = -occ <= ms.length ? [ms[ms.length + occ]] : [];
+  return splice(v, ms, (m) => (regex ? rxWith(wth, m) : wth));
+}
+export function Repeat(v, occ) {
+  if (occ < 0) throw new AbapError("CX_SY_STRG_PAR_VAL", "repeat");
+  return v.repeat(occ);
+}
+export function CondenseFn(v, del, from, to) {
+  let r = [...v];
+  while (r.length && del.includes(r[0])) r.shift();
+  while (r.length && del.includes(r[r.length - 1])) r.pop();
+  if (from === "") return r.join("");
+  const rep = to === "" ? "" : [...to][0];
+  let b = "", inRun = false;
+  for (const c of r) {
+    if (from.includes(c)) { if (!inRun) b += rep; inRun = true; continue; }
+    inRun = false; b += c;
+  }
+  return b;
+}
+export function ShiftFn(v, left, kind, n, sub) {
+  const r = [...v];
+  const l = r.length;
+  if (kind === "") return left ? v.replace(/^ +/, "") : v.replace(/ +$/, "");
+  if (kind === "places") {
+    if (n < 0 || n > l) rangeError();
+    return (left ? r.slice(n) : r.slice(0, l - n)).join("");
+  }
+  if (kind === "circular") {
+    if (n < 0) throw nc("shift( )", "a negative circular is not measured");
+    if (n > l) rangeError();
+    return left ? r.slice(n).join("") + r.slice(0, n).join("") : r.slice(l - n).join("") + r.slice(0, l - n).join("");
+  }
+  if (sub === "") throw nc("shift( )", "an empty sub is not measured");
+  while (left && v.startsWith(sub)) v = v.slice(sub.length);
+  while (!left && v.endsWith(sub)) v = v.slice(0, v.length - sub.length);
+  return v;
+}
+export function ToMixed(v, sep, hasCase, cs, min) {
+  if ([...sep].length !== 1) throw nc("to_mixed( )", "a sep that is not one character is not measured");
+  if (min < 1) throw nc("to_mixed( )", "a min below 1 is not measured");
+  const r = [...v];
+  let b = "";
+  for (let i = 0; i < r.length; i++) {
+    if (i === 0) {
+      if (!hasCase) b += r[0];
+      else { const c = [...cs][0] ?? ""; b += c !== "" && c === c.toUpperCase() && c !== c.toLowerCase() ? r[0].toUpperCase() : r[0].toLowerCase(); }
+    } else if (r[i] === sep && i >= min && i + 1 < r.length) b += r[++i].toUpperCase();
+    else b += r[i].toLowerCase();
+  }
+  return b;
+}

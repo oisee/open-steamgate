@@ -650,6 +650,13 @@ function stmtLines(st, ctx, d) {
         `${t}\t${tb}[${n}-1] = ${copied(expr(st.value, ctx), st.value.type, st.value)}`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)})`];
+    case "split_into": return [`${t}{`, `${t}\tspl := abap.SplitInto(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length})`,
+      `${t}\ts.Sy.Subrc = abap.SplitSubrc(spl, []int{${st.lens.join(", ")}})`,
+      ...st.targets.map((x) => `${t}\t${place(x.target, ctx)} = ${expr(x.value, ctx)}`), `${t}}`];
+    case "replace": {
+      const p = place(st.target, ctx);
+      return [`${t}${p}, s.Sy.Subrc = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen})`];
+    }
     case "stub": return [`${t}panic(abap.NotCompiled(${JSON.stringify(st.where)}, ${JSON.stringify(st.reason)}))`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
@@ -810,6 +817,9 @@ function expr(e, ctx) {
     }
     case "const": return e.go;
     case "temp": return e.name;
+    case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
+    case "flag": return String(e.value);
+    case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.Sy.${e.field}`;
     case "int": return `int32(${e.value})`;
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);

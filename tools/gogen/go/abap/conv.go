@@ -538,6 +538,10 @@ func Split(v, sep string) []string {
 	if v == "" {
 		return []string{}
 	}
+	// an empty separator does not split (measured: abc is one row)
+	if sep == "" {
+		return []string{v}
+	}
 	parts := strings.Split(v, sep)
 	if strings.HasSuffix(v, sep) {
 		parts = parts[:len(parts)-1]

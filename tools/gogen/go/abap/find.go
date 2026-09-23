@@ -47,9 +47,11 @@ func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []stri
 }
 
 func compileABAP(p string, icase bool) *regexp.Regexp {
-	key := p
+	// ^ and $ are the start and end of a line (measured: FIND REGEX `^b`
+	// IN |a\nb| finds it), so the pattern compiles multi-line
+	key := "(?m)" + p
 	if icase {
-		key = "(?i)" + p
+		key = "(?mi)" + p
 	}
 	if r, ok := regexCache.Load(key); ok {
 		return r.(*regexp.Regexp)

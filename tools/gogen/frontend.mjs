@@ -632,7 +632,9 @@ function block(node, ctx) {
 const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
   "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
   "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
-  "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND"];
+  "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND",
+  // the string functions (repeat( ) replace( ): a parameter out of range)
+  "CX_SY_STRG_PAR_VAL"];
 
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
@@ -957,16 +959,7 @@ function statement(node, ctx) {
     const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
     return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
   }
-  if (isStmt(node, Statements.Replace)) {
-    const m = /^REPLACE\s+ALL\s+OCCURRENCES\s+OF\s+(.+?)\s+IN\s+(\S+)\s+WITH\s+(.+?)\s*\.?$/i.exec(text);
-    if (m === null || /\b(REGEX|PCRE|IGNORING|RESPECTING|IN\s+SECTION|IN\s+BYTE)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
-    const srcs = node.findDirectExpressions(Expressions.Source);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    if (target.type.k !== "string") throw new Unsupported(`REPLACE in a ${target.type.k}: trailing blanks of c are not settled here`);
-    const [of, wth] = srcs.length >= 2 ? [srcs[0], srcs[srcs.length - 1]] : [null, null];
-    if (of === null) throw new Unsupported(`REPLACE operands: ${text}`);
-    return {s: "replace_all", target, of: convert(source(of, ctx), S), with: convert(source(wth, ctx), S)};
-  }
+  if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text);
   if (isStmt(node, Statements.Translate)) {
     const m = /\bTO\s+(UPPER|LOWER)\s+CASE\b/i.exec(text);
     if (m === null) throw new Unsupported(`TRANSLATE form: ${text}`);
@@ -1016,15 +1009,8 @@ function statement(node, ctx) {
     const [idx, val] = node.findDirectExpressions(Expressions.Source);
     return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
   }
-  if (isStmt(node, Statements.Split)) {
-    // measured on A4H: an empty string gives no rows, and one empty last
-    // piece after a trailing separator is dropped (a| -> [a], a|| -> [a,''])
-    if (!/\bINTO\s+TABLE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
-    const [str, sep] = node.findDirectExpressions(Expressions.Source);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
-    return {s: "split", table, x: convert(source(str, ctx), S), sep: convert(source(sep, ctx), S)};
-  }
+  if (isStmt(node, Statements.Split)) return splitStatement(node, ctx, text);
+  if (isStmt(node, Statements.MoveCorresponding)) return moveCorresponding(node, ctx, text);
   if (isStmt(node, Statements.Find)) {
     // FIND [FIRST OCCURRENCE OF] [REGEX] p IN s [IGNORING CASE] [SUBMATCHES a b ...]
     // [MATCH OFFSET o] [MATCH LENGTH l]; measured on A4H: POSIX leftmost-
@@ -1073,6 +1059,157 @@ function statement(node, ctx) {
     return {s: "nop"};
   }
   throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
+}
+
+/* ------------------------------------------------------------ strings (A4H) */
+
+// A c operand keeps its trailing blanks where ABAP keeps them: the
+// separator of SPLIT (measured, 'a ' splits `a b` into '' and 'b'). A c
+// value is stored without them, so its declared length pads it back.
+function padded(x) {
+  const v = convert(x, S);
+  return x.type.k === "c" ? {e: "padc", x: v, n: x.type.len, type: S} : v;
+}
+
+function splitStatement(node, ctx, text) {
+  // measured on A4H: an empty string gives no rows, and one empty last
+  // piece after a trailing separator is dropped (a| -> [a], a|| -> [a,'']);
+  // an empty separator does not split; a c separator keeps its blanks
+  if (/\bIN\s+BYTE\s+MODE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
+  const [strNode, sepNode] = node.findDirectExpressions(Expressions.Source);
+  const str = source(strNode, ctx);
+  if (!charlike(str.type)) throw new Unsupported(`SPLIT of a ${str.type.k}`);
+  const sepX = source(sepNode, ctx);
+  if (!charlike(sepX.type)) throw new Unsupported(`SPLIT AT a ${sepX.type.k}`);
+  const x = convert(str, S);
+  const sep = padded(sepX);
+  const targets = node.findDirectExpressions(Expressions.Target);
+  if (/\bINTO\s+TABLE\b/i.test(text)) {
+    const table = lvalue(targets[0], ctx);
+    if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
+    return {s: "split", table, x, sep};
+  }
+  // INTO t1 t2 ...: measured, the last target takes the rest (a,b,c,d into
+  // two is a / b,c,d), missing pieces clear their targets, a piece longer
+  // than its c field is cut and sy-subrc is 4
+  const places = targets.map((t) => lvalue(t, ctx));
+  for (const t of places) if (t.type.k !== "string" && t.type.k !== "c") throw new Unsupported(`SPLIT INTO a ${t.type.k}`);
+  return {s: "split_into", x, sep, lens: places.map((t) => (t.type.k === "c" ? t.type.len : -1)),
+    targets: places.map((t, i) => ({target: t, value: convert({e: "temp", name: `spl[${i}]`, type: S}, t.type)}))};
+}
+
+function replaceStatement(node, ctx, text) {
+  // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
+  // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
+  // measured on A4H 2026-09-23, see abap.ReplaceStmt
+  if (/\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text) || !/\bOF\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
+  const kids = node.getChildren();
+  const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
+  if (words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
+  const ft = node.findDirectExpression(Expressions.FindType);
+  const kind = ft ? upper(ft.concatTokens()) : "";
+  if (kind && kind !== "REGEX" && kind !== "SUBSTRING") throw new Unsupported(`REPLACE ${kind}`);
+  const regex = kind === "REGEX";
+  let pat = null, off = null, len = null, wth = null, mode = "pat";
+  for (let i = 0; i < kids.length; i += 1) {
+    const w = words[i];
+    if (w === "OFFSET") { mode = "off"; continue; }
+    if (w === "LENGTH") { mode = "len"; continue; }
+    if (w === "WITH") { mode = "with"; continue; }
+    if (!isExpr(kids[i], Expressions.Source)) continue;
+    if (mode === "pat" && pat === null) pat = kids[i];
+    else if (mode === "off") off = kids[i];
+    else if (mode === "len") len = kids[i];
+    else if (mode === "with") wth = kids[i];
+  }
+  if (pat === null || wth === null) throw new Unsupported(`REPLACE operands: ${text}`);
+  if (regex && (off || len)) throw new Unsupported(`REPLACE REGEX IN SECTION: what an anchor sees there is not measured: ${text}`);
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`REPLACE in a ${target.type.k}`);
+  const p = source(pat, ctx);
+  const w = source(wth, ctx);
+  if (!charlike(p.type) || !charlike(w.type)) throw new Unsupported(`REPLACE operands of ${p.type.k} / ${w.type.k}`);
+  return {s: "replace", target, pattern: convert(p, S), with: convert(w, S), regex, all: words.includes("ALL"),
+    icase: /\bIGNORING\s+CASE\b/i.test(text), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null,
+    cLen: target.type.k === "c" ? target.type.len : -1};
+}
+
+// MOVE-CORRESPONDING a TO b between structures: every component of b whose
+// name a has too gets a's value by the conversion rules, the others are
+// left alone, sy-subrc too (measured on A4H). A component that is itself a
+// structure or a table on either side is not flat and is refused.
+function moveCorresponding(node, ctx, text) {
+  if (/\b(EXPANDING|KEEPING)\b/i.test(text)) throw new Unsupported(`MOVE-CORRESPONDING form: ${text}`);
+  const from = source(node.findDirectExpression(Expressions.Source), ctx);
+  const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
+  const to = lvalue(tNode, ctx);
+  if (from.type.k !== "struct" || to.type.k !== "struct") throw new Unsupported(`MOVE-CORRESPONDING from a ${from.type.k} to a ${to.type.k}`);
+  const src = structOf(ctx, from.type);
+  const dst = structOf(ctx, to.type);
+  if (!src || !dst) throw new Unsupported(`MOVE-CORRESPONDING: a structure not in the program`);
+  const body = [];
+  for (const f of dst.fields) {
+    const g = src.fields.find((x) => x.name === f.name);
+    if (!g) continue;
+    if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`MOVE-CORRESPONDING with a deep component ${f.name}`);
+    body.push({s: "assign", target: {e: "field", base: to, name: f.name, type: f.type}, value: convert({e: "field", base: from, name: g.name, type: g.type}, f.type)});
+  }
+  return {s: "seq", body};
+}
+
+// the built-in string functions: repeat( ) replace( ) condense( )
+// shift_left( ) shift_right( ) to_mixed( ), measured on A4H 2026-09-23. A c
+// argument loses its trailing blanks (replace( ) with sub = ' ' raises for
+// an empty sub), which is how a c value is stored here already.
+const STRING_FNS = {
+  REPEAT: ["VAL", "OCC"], REPLACE: ["VAL", "SUB", "REGEX", "WITH", "OCC"], CONDENSE: ["VAL", "DEL", "FROM", "TO"],
+  SHIFT_LEFT: ["VAL", "PLACES", "CIRCULAR", "SUB"], SHIFT_RIGHT: ["VAL", "PLACES", "CIRCULAR", "SUB"], TO_MIXED: ["VAL", "SEP", "CASE", "MIN"],
+};
+function stringFn(name, direct, named, ctx, text) {
+  const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
+  const given = new Map(ps.map((p) => [upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source)]));
+  if (direct) given.set("VAL", direct);
+  for (const k of given.keys()) if (!STRING_FNS[name].includes(k)) throw new Unsupported(`${name.toLowerCase()}( ) with ${k.toLowerCase()}: ${text}`);
+  if (!given.has("VAL")) throw new Unsupported(`${name.toLowerCase()}( ) without val: ${text}`);
+  const chars = (k) => {
+    const x = source(given.get(k), ctx);
+    if (!charlike(x.type)) throw new Unsupported(`${name.toLowerCase()}( ) ${k.toLowerCase()} of a ${x.type.k}`);
+    return convert(x, S);
+  };
+  const int = (k) => convert(source(given.get(k), ctx, I), I);
+  const val = chars("VAL");
+  if (name === "REPEAT") {
+    if (!given.has("OCC")) throw new Unsupported(`repeat( ) without occ: ${text}`);
+    return {e: "str_fn", fn: "Repeat", args: [val, int("OCC")], type: S};
+  }
+  if (name === "REPLACE") {
+    if (given.has("SUB") === given.has("REGEX") || !given.has("WITH")) throw new Unsupported(`replace( ) form: ${text}`);
+    const regex = given.has("REGEX");
+    return {e: "str_fn", fn: "ReplaceFn", args: [val, chars(regex ? "REGEX" : "SUB"), chars("WITH"), {e: "flag", value: regex},
+      given.has("OCC") ? int("OCC") : {e: "int", value: 1, type: I}], type: S};
+  }
+  if (name === "CONDENSE") {
+    // a c del / from / to: whether its trailing blanks count is not measured,
+    // so only a literal without any, or a string, is taken
+    const set = (k) => {
+      if (!given.has(k)) return {e: "str", value: " ", type: S};
+      const x = source(given.get(k), ctx);
+      if (x.type.k === "c" && !(x.e === "chars" && !/ $/.test(given.get(k).concatTokens().replace(/'$/, "")))) throw new Unsupported(`condense( ) ${k.toLowerCase()} of a c field: ${text}`);
+      if (!charlike(x.type)) throw new Unsupported(`condense( ) ${k.toLowerCase()} of a ${x.type.k}`);
+      return convert(x, S);
+    };
+    return {e: "str_fn", fn: "CondenseFn", args: [val, set("DEL"), set("FROM"), set("TO")], type: S};
+  }
+  if (name === "SHIFT_LEFT" || name === "SHIFT_RIGHT") {
+    const kinds = ["PLACES", "CIRCULAR", "SUB"].filter((k) => given.has(k));
+    if (kinds.length > 1) throw new Unsupported(`${name.toLowerCase()}( ) form: ${text}`);
+    const kind = kinds[0] ?? "";
+    return {e: "str_fn", fn: "ShiftFn", args: [val, {e: "flag", value: name === "SHIFT_LEFT"}, {e: "str", value: kind.toLowerCase(), type: S},
+      kind === "PLACES" || kind === "CIRCULAR" ? int(kind) : {e: "int", value: 0, type: I}, kind === "SUB" ? chars("SUB") : {e: "str", value: "", type: S}], type: S};
+  }
+  // TO_MIXED
+  return {e: "str_fn", fn: "ToMixed", args: [val, given.has("SEP") ? chars("SEP") : {e: "str", value: "_", type: S}, {e: "flag", value: given.has("CASE")},
+    given.has("CASE") ? chars("CASE") : {e: "str", value: "", type: S}, given.has("MIN") ? int("MIN") : {e: "int", value: 1, type: I}], type: S};
 }
 
 function initialValue(node, ctx) {
@@ -1361,6 +1498,8 @@ function fieldChain(n, ctx) {
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
+  // space: the c(1) blank, stored without its blank like every c value
+  if (text === "SPACE") return {e: "chars", value: "", type: C(1)};
   let place;
   let i = 0;
   if (isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>")) {
@@ -1975,6 +2114,7 @@ function call(chain, ctx, statement, hint) {
     if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
     return {e: "lines", table: t, type: I};
   }
+  if (receiver === null && owner === null && STRING_FNS[name] && !ctx.signatures.has(name)) return stringFn(name, direct, named, ctx, chain.concatTokens());
   if (receiver === null && owner === null && ["TO_LOWER", "TO_UPPER"].includes(name) && !ctx.signatures.has(name)) {
     const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
     return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(argNode, ctx), S), type: S};
