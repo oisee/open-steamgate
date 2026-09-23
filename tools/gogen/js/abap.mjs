@@ -160,3 +160,49 @@ export function copy(v) {
   }
   return v;
 }
+
+export function Idx(n, i) {
+  if (i < 1 || i > n) throw new AbapError("CX_SY_ITAB_LINE_NOT_FOUND", "table expression");
+  return i - 1;
+}
+
+export function PowF(a, b) {
+  if (a < 0 && b !== Math.trunc(b)) throw new AbapError("CX_SY_ARG_OUT_OF_DOMAIN", "**");
+  if (a === 0 && b < 0) throw new AbapError("CX_SY_ZERODIVIDE", "**");
+  return a ** b;
+}
+
+// WIDTH / ALIGN / PAD, as measured on A4H: padded, never cut
+export function Pad(v, width, align, pad) {
+  const n = [...v].length;
+  if (n >= width) return v;
+  const fill = width - n;
+  if (align === "RIGHT") return pad.repeat(fill) + v;
+  if (align === "CENTER") return pad.repeat(fill >> 1) + v + pad.repeat(fill - (fill >> 1));
+  return v + pad.repeat(fill);
+}
+
+// DECIMALS = n of an f, as measured on A4H (see go/abap FmtFDec)
+export function FmtFDec(v, n) {
+  const neg = v < 0 || Object.is(v, -0);
+  const a = Math.abs(v);
+  let intPart;
+  let frac;
+  if (a >= 1e21) { intPart = FmtF(a); frac = "0".repeat(100); }
+  else { [intPart, frac] = a.toFixed(100).split("."); }
+  const digits = intPart.replace(/^0+/, "").length;
+  if (digits > 0 && n > 17 - digits) n = Math.max(0, 17 - digits);
+  const b = (intPart + frac.slice(0, n)).split("");
+  if (frac[n] >= "5") {
+    let i = b.length - 1;
+    for (; i >= 0; i--) {
+      if (b[i] === "9") { b[i] = "0"; continue; }
+      b[i] = String(Number(b[i]) + 1);
+      break;
+    }
+    if (i < 0) b.unshift("1");
+  }
+  const s = b.join("");
+  const ip = s.slice(0, s.length - n).replace(/^0+/, "") || "0";
+  return (neg ? "-" : "") + ip + (n > 0 ? `.${s.slice(s.length - n)}` : "");
+}

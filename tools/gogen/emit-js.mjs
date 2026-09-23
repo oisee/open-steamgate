@@ -10,7 +10,7 @@
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
-import {ident, funcName} from "./emit-go.mjs";
+import {ident, funcName, referencedClasses} from "./emit-go.mjs";
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
@@ -26,7 +26,7 @@ function zero(t) {
   }
 }
 const composite = (t) => t.k === "struct" || t.k === "table";
-const isPlace = (e) => ["var", "attr", "static", "field"].includes(e.e);
+const isPlace = (e) => ["var", "attr", "static", "field", "fs", "row"].includes(e.e);
 
 let STRUCTS = new Map();
 
@@ -43,6 +43,8 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`const ${c.go} = ${v};`);
   }
   out.push("");
+  const compiledNames = new Set(program.classes.map((c) => c.name));
+  for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
   for (const cls of program.classes) {
     const inst = (cls.attributes ?? []).filter((a) => !a.static && !a.unsupported);
     out.push(`export class ${typeName(cls.name)} {`, "  constructor() {");
@@ -51,8 +53,15 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
       out.push(`  static ${ident(a.name)} = ${zero(a.type)};`);
     }
+    const cp = cls.constructor?.params ?? [];
+    out.push(`  static NEW(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
+      ...(cls.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
     for (const m of all) out.push(...method(cls, m));
+    for (const m of cls.stubs ?? []) {
+      if (m.name === "CONSTRUCTOR") continue;
+      out.push(`  ${m.static ? "static " : ""}${typeName(m.name)}() { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: ${m.reason}`)}); }`);
+    }
     out.push("}", "");
   }
   return out.join("\n") + "\n";
@@ -66,6 +75,7 @@ function method(cls, m) {
   const ret = m.returning ? ident(m.returning.name) : null;
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
+  for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
   const ctx = {cls, loop: 0, ret};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
@@ -84,6 +94,11 @@ function place(p, ctx) {
       return `${cls}.${ident(attr)}`;
     }
     case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
+    case "fs": return ident(p.name);
+    case "row": {
+      const b = place(p.base, ctx);
+      return `${b}[abap.Idx(${b}.length, ${expr(p.index, ctx)})]`;
+    }
     default: throw new Error(`not a place: ${p.e}`);
   }
 }
@@ -94,7 +109,10 @@ const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e
 function stmt(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
-    case "assign": return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
+    case "assign":
+      // a field symbol is the row itself: assigning to it writes into the row
+      if (st.target.e === "fs") return [`${t}Object.assign(${ident(st.target.name)}, ${moved(st.value, ctx)});`];
+      return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
     case "clear": return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
@@ -159,14 +177,36 @@ function stmt(st, ctx, d) {
     case "loop": {
       const n = ctx.loop++;
       const tb = expr(st.table, ctx);
-      const row = composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`;
+      const start = st.from ? `Math.max(${expr(st.from, ctx)} - 1, 0)` : "0";
+      const limit = st.to ? ` && i${n} < ${expr(st.to, ctx)}` : "";
+      const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}]`
+        : `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`}`;
       return [
         `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
-        `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`,
-        `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${place(st.into, ctx)} = ${row};`,
+        `${t}  for (let i${n} = ${start}; i${n} < ${tb}.length${limit}; i${n}++) {`,
+        `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${bind};`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`,
       ];
+    }
+    case "nop": return [];
+    case "sort": {
+      const tb = place(st.table, ctx);
+      const cmp = st.keys.map((k) => `if (x.${ident(k.name)} !== y.${ident(k.name)}) return (x.${ident(k.name)} < y.${ident(k.name)} ? -1 : 1) * ${k.desc ? -1 : 1};`);
+      return [`${t}${tb}.sort((x, y) => { ${cmp.join(" ")} return 0; });`];
+    }
+    case "delete_index": {
+      const n = `idx${ctx.loop++}`;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}.splice(${n} - 1, 1); s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    }
+    case "insert_index": {
+      const n = `idx${ctx.loop++}`;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length + 1) { ${tb}.splice(${n} - 1, 0, ${moved(st.value, ctx)}); s.sy.subrc = 0; s.sy.tabix = ${n}; }`,
+        `${t}  else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "exit": return [`${t}break;`];
     case "continue": return [`${t}continue;`];
@@ -192,7 +232,11 @@ function callStmt(e, ctx, t) {
   return lines;
 }
 
-const callee = (e, ctx) => (e.static ? `${typeName(ctx.cls.name)}.${typeName(e.method)}` : `me.${typeName(e.method)}`);
+const callee = (e, ctx) => {
+  if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}`;
+  if (e.owner) return `${typeName(e.owner)}.${typeName(e.method)}`;
+  return e.static ? `${typeName(ctx.cls.name)}.${typeName(e.method)}` : `me.${typeName(e.method)}`;
+};
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
@@ -200,7 +244,13 @@ const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": return place(e, ctx);
+    case "bool": return `(${cond(e.cond, ctx)} ? "X" : ${JSON.stringify(e.blank)})`;
+    case "cond": {
+      let out = e.else ? expr(e.else, ctx) : zero(e.type);
+      for (const b of [...e.branches].reverse()) out = `(${cond(b.cond, ctx)} ? ${expr(b.value, ctx)} : ${out})`;
+      return out;
+    }
     case "const": return e.go;
     case "temp": return e.name;
     case "sy": return `s.sy.${e.field.toLowerCase()}`;
@@ -208,7 +258,7 @@ function expr(e, ctx) {
     case "float": return String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
     case "template": {
-      const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx)));
+      const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
     case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
@@ -223,11 +273,13 @@ function expr(e, ctx) {
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") throw new Error("int8 arithmetic in JS: not in this emitter yet");
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
     case "conv": return conv(e, ctx);
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "new": return `${typeName(e.cls)}.NEW(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
     case "call": {
       if (e.args.some((a) => a.dir !== "importing" && a.place)) throw new Error("EXPORTING in an expression call");
       const args = e.args.map((a) => (a.dir === "importing" ? expr(a.value, ctx) : `{v: ${zero(a.type)}}`));
@@ -237,8 +289,15 @@ function expr(e, ctx) {
   }
 }
 
-function templatePart(v, ctx) {
+function templatePart(v, ctx, opts) {
+  let out = templateValue(v, ctx, opts);
+  if (opts.width !== undefined) out = `abap.Pad(${out}, ${opts.width}, ${JSON.stringify(opts.align ?? "LEFT")}, ${JSON.stringify(opts.pad ?? " ")})`;
+  return out;
+}
+
+function templateValue(v, ctx, opts) {
   const x = expr(v, ctx);
+  if (opts.decimals !== undefined) return `abap.FmtFDec(${x}, ${opts.decimals})`;
   switch (v.type.k) {
     case "i": return `abap.FmtI(${x})`;
     case "f": return `abap.FmtF(${x})`;

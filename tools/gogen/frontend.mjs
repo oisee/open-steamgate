@@ -54,22 +54,38 @@ export function compileProgram({folders, objects}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  // every file of the folders is loaded, so a class sees what it refers to;
+  // only the objects named are compiled, and only their syntax errors count
   const wanted = objects.map((o) => o.toLowerCase());
-  for (const folder of folders) {
-    for (const f of readdirSync(folder).sort()) {
-      const base = f.split(".")[0].toLowerCase();
-      if (wanted.length > 0 && !wanted.includes(base)) continue;
-      reg.addFile(new abaplint.MemoryFile(f, readFileSync(join(folder, f), "utf8")));
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
+      const path = join(dir, e.name);
+      if (e.isDirectory()) walk(path);
+      else if (/\.(abap|xml)$/i.test(e.name)) reg.addFile(new abaplint.MemoryFile(e.name, readFileSync(path, "utf8")));
     }
-  }
+  };
+  for (const folder of folders) walk(folder);
   reg.parse();
-  const errors = reg.findIssues().filter((i) => i.getKey() === "check_syntax" || i.getKey() === "parser_error");
+  REG = reg;
+  const ours = (fn) => wanted.includes(fn.split("/").pop().split(".")[0].toLowerCase());
+  const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
   if (errors.length > 0) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
 
-  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: []};
+  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
+    interfaces: new Set(), reg, sigs: new Map()};
   const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class) program.classes.push(classIr(ctx0, obj));
+    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
+  }
+  // every interface used as a reference type: its methods whose signature
+  // types, which is what a class must provide to satisfy it
+  program.interfaceMethods = new Map();
+  const ictx = {reg, program};
+  for (const name of [...program.interfaces]) {
+    const all = reg.getObject("INTF", name).getDefinition().getMethodDefinitions();
+    const sigs = (Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, name, `${name}~${upper(m.getName())}`))
+      .filter((x) => !x.unsupported);
+    program.interfaceMethods.set(name, sigs);
   }
   return program;
 }
@@ -104,7 +120,13 @@ function typeOf(t, where, program) {
     }
     return {k: "struct", go};
   }
-  if (t instanceof BasicTypes.ObjectReferenceType) return {k: "ref", name: upper(t.getIdentifierName())};
+  if (t instanceof BasicTypes.ObjectReferenceType) {
+    const name = upper(t.getIdentifierName());
+    const intf = program.reg?.getObject("INTF", name) !== undefined;
+    if (!intf && program.reg?.getObject("CLAS", name) === undefined) throw new Unsupported(`${where}: REF TO ${name}, which is not in the program`);
+    if (intf) program.interfaces.add(name);
+    return {k: "ref", name, intf};
+  }
   throw new Unsupported(`${where}: type ${t.constructor.name} is outside the subset`);
 }
 
@@ -175,24 +197,41 @@ function classIr(ctx0, obj) {
     for (const m of (Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, false);
   }
 
-  const cls = {name: className, attributes, methods: [], constructor: null};
+  const cls = {name: className, attributes, methods: [], constructor: null, stubs: [],
+    interfaces: def.getImplementing().map((i) => upper(i.name))};
+  const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   for (const node of tree.findAllStructures(Structures.Method)) {
     const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
     const sig = signatures.get(name);
-    const skip = (why) => { program.skipped.push(`${className}=>${name}: ${why}`); signatures.set(name, {name, unsupported: why}); };
+    const skip = (why) => {
+      program.skipped.push(`${className}=>${name}: ${why}`);
+      if (typed.has(name)) cls.stubs.push({...typed.get(name), reason: why});
+      signatures.set(name, {name, unsupported: why});
+    };
     if (sig === undefined) { skip("no signature"); continue; }
     if (sig.unsupported) { skip(sig.unsupported); continue; }
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
       const ctx = {program, reg, className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
+      ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
         if (known.has(vname)) continue;
-        ctx.locals.set(vname, typeOf(id.getType(), `${className}=>${name} ${vname}`, program));
+        const t = typeOf(id.getType(), `${className}=>${name} ${vname}`, program);
+        // a field symbol points into a row: only rows of structures, whose
+        // reference both backends can hold (a pointer, an object)
+        if (vname.startsWith("<")) {
+          if (t.k !== "struct") throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
+          ctx.fieldSymbols.set(vname, t);
+        } else {
+          ctx.locals.set(vname, t);
+        }
       }
       const body = node.findDirectStructure(Structures.Body);
+      ctx.inits = [];
       const compiled = body === undefined ? [] : block(body, ctx);
-      const ir = {...sig, locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
+      compiled.unshift(...ctx.inits);
+      const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? []};
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
@@ -209,6 +248,7 @@ function classIr(ctx0, obj) {
       if (bad && !m.dropped) {
         m.dropped = true; changed = true;
         program.skipped.push(`${className}=>${m.name}: calls ${bad}, which was skipped`);
+        if (typed.has(m.name)) cls.stubs.push({...typed.get(m.name), reason: `calls ${bad}`});
         signatures.set(m.name, {name: m.name, unsupported: `calls ${bad}`});
       }
     }
@@ -266,6 +306,12 @@ const bodyOf = (n, ctx) => {
 };
 
 function structure(node, ctx) {
+  if (isStruct(node, Structures.Types)) return {s: "nop"};
+  if (isStruct(node, Structures.Data)) {
+    if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
+    return {s: "nop"};
+  }
+  if (isStruct(node, Structures.Constants)) throw new Unsupported(`CONSTANTS BEGIN OF: ${node.concatTokens().slice(0, 60)}`);
   if (isStruct(node, Structures.If)) {
     const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
     for (const e of node.findDirectStructures(Structures.ElseIf)) {
@@ -300,21 +346,42 @@ function structure(node, ctx) {
   }
   if (isStruct(node, Structures.Loop)) {
     const st = node.findDirectStatement(Statements.Loop);
-    if (/\b(WHERE|FROM|TO|ASSIGNING|REFERENCE|GROUP|USING)\b/i.test(st.concatTokens())) throw new Unsupported(`LOOP form: ${st.concatTokens()}`);
+    const text = st.concatTokens();
+    if (/\b(WHERE|REFERENCE|GROUP|USING|CASTING)\b/i.test(text)) throw new Unsupported(`LOOP form: ${text}`);
     const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
-    const into = lvalue(st.findFirstExpression(Expressions.LoopTarget).findFirstExpression(Expressions.Target), ctx);
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
-    return {s: "loop", table, into, rowType: table.type.row, body: bodyOf(node, ctx)};
+    const lt = st.findFirstExpression(Expressions.LoopTarget);
+    const fsNode = lt.findFirstExpression(Expressions.FSTarget) ?? lt.findFirstExpression(Expressions.TargetFieldSymbol);
+    let into = null;
+    let fs = null;
+    if (/\bASSIGNING\b/i.test(lt.concatTokens())) {
+      const nm = /<[\w]+>/.exec(lt.concatTokens())?.[0];
+      if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
+      fs = upper(nm);
+    } else {
+      into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
+    }
+    void fsNode;
+    const bound = (kw) => {
+      const e = st.getChildren();
+      const at = e.findIndex((c) => isTok(c, kw));
+      return at < 0 ? null : convert(source(e[at + 1], ctx, I), I);
+    };
+    return {s: "loop", table, into, fs, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
 
 function statement(node, ctx) {
   const text = node.concatTokens();
-  if (isStmt(node, Statements.Data)) {
-    if (/\bVALUE\b/i.test(text)) throw new Unsupported(`DATA with VALUE: ${text}`);
-    return undefined; // declared from the scope, initial like ABAP
+  if (isStmt(node, Statements.Data) || isStmt(node, Statements.Constant)) {
+    // declared from the scope; a VALUE is set once at the start of the
+    // method, as ABAP does, not where the statement stands (inside a loop
+    // it would reset the field on every pass)
+    if (/\bVALUE\b/i.test(text)) ctx.inits.push(initialValue(node, ctx));
+    return undefined;
   }
+  if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
@@ -339,6 +406,38 @@ function statement(node, ctx) {
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
     return {s: "read_index", table, index, into};
   }
+  if (isStmt(node, Statements.Sort)) {
+    const m = /^SORT\s+(\S+)\s+BY\s+(.*?)\s*\.?$/i.exec(text);
+    if (m === null || /\b(STABLE|AS TEXT)\b/i.test(text)) throw new Unsupported(`SORT form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target) ?? node.findFirstExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported("SORT of a table that is not of structures");
+    const keys = [];
+    const words = m[2].trim().split(/\s+/);
+    for (let i = 0; i < words.length; i += 1) {
+      const f = fieldOf(ctx, table.type.row, words[i], text);
+      let desc = false;
+      if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
+      keys.push({name: f.name, type: f.type, desc});
+    }
+    return {s: "sort", table, keys};
+  }
+  if (isStmt(node, Statements.DeleteInternal)) {
+    if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
+    const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};
+  }
+  if (isStmt(node, Statements.InsertInternal)) {
+    const m = /\bINDEX\b/i.test(text);
+    if (!m || /\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
+    const srcs = node.findDirectExpressions(Expressions.Source).concat(node.findDirectExpressions(Expressions.SimpleSource4));
+    const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? srcs[0];
+    const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
+  }
   if (isStmt(node, Statements.Translate)) {
     const m = /\bTO\s+(UPPER|LOWER)\s+CASE\b/i.exec(text);
     if (m === null) throw new Unsupported(`TRANSLATE form: ${text}`);
@@ -358,6 +457,21 @@ function statement(node, ctx) {
   throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
 }
 
+function initialValue(node, ctx) {
+  const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());
+  const type = ctx.locals.get(name);
+  if (type === undefined) throw new Unsupported(`${name}: a VALUE for something that is not a local`);
+  const val = node.findFirstExpression(Expressions.Value);
+  const src = val?.getChildren().find((c) => !isTok(c));
+  if (src === undefined) throw new Unsupported(`VALUE of ${name}`);
+  let v;
+  if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
+  else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
+  else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
+  if (type.k === "struct" || type.k === "table") throw new Unsupported(`VALUE for a ${type.k}`);
+  return {s: "assign", target: {e: "var", name, type}, value: convert(v, type)};
+}
+
 /* ------------------------------------------------------------ names, lvalues */
 
 /**
@@ -367,6 +481,7 @@ function statement(node, ctx) {
  */
 function variable(name, ctx) {
   const n = upper(name);
+  if (ctx.fieldSymbols?.has(n)) return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
   const p = ctx.sig.params.find((x) => x.name === n);
   if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing"};
   if (ctx.sig.returning?.name === n) return {e: "var", name: n, type: ctx.sig.returning.type};
@@ -402,7 +517,7 @@ function lvalue(target, ctx) {
   if (isExpr(first, Expressions.InlineData)) {
     place = variable(first.findFirstExpression(Expressions.TargetField).concatTokens(), ctx);
     i = 1;
-  } else if (isExpr(first, Expressions.TargetField)) {
+  } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
     i = 1;
   } else if (isTok(first, "ME")) {
@@ -413,7 +528,9 @@ function lvalue(target, ctx) {
     throw new Unsupported(`target ${target.concatTokens()}`);
   }
   for (; i < kids.length; i += 1) {
-    if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
+    if (isExpr(kids[i], Expressions.TableExpression)) {
+      place = rowOf(place, kids[i], ctx);
+    } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
@@ -422,6 +539,14 @@ function lvalue(target, ctx) {
     }
   }
   return place;
+}
+
+/** tab[ n ]: the row at an index; a missing row raises CX_SY_ITAB_LINE_NOT_FOUND */
+function rowOf(place, te, ctx) {
+  if (place.type.k !== "table") throw new Unsupported(`a table expression on a ${place.type.k}`);
+  const inner = te.getChildren().filter((c) => !isTok(c));
+  if (inner.length !== 1 || !isExpr(inner[0], Expressions.Source)) throw new Unsupported(`table expression with a key: ${te.concatTokens()}`);
+  return {e: "row", base: place, index: convert(source(inner[0], ctx, I), I), type: place.type.row};
 }
 
 /* --------------------------------------------------------------- expressions */
@@ -441,7 +566,10 @@ function items(node) {
   const out = [];
   for (let i = 0; i < kids.length; i += 1) {
     const k = kids[i];
-    if (isTok(k) && CONSTRUCTORS.has(upper(tokenStr(k))) && isExpr(kids[i + 1], Expressions.TypeNameOrInfer)) {
+    if (isTok(k) && ["XSDBOOL", "BOOLC"].includes(upper(tokenStr(k))) && isTok(kids[i + 1], "(") && isExpr(kids[i + 2], Expressions.Cond)) {
+      out.push({bool: upper(tokenStr(k)), cond: kids[i + 2]});
+      i += 3;
+    } else if (isTok(k) && CONSTRUCTORS.has(upper(tokenStr(k))) && isExpr(kids[i + 1], Expressions.TypeNameOrInfer)) {
       // KW type ( body ) -- the body may be absent: VALUE #( )
       let j = i + 2;
       if (!isTok(kids[j]) || tokenStr(kids[j]) !== "(") throw new Unsupported(`constructor shape: ${node.concatTokens()}`);
@@ -474,6 +602,7 @@ function leafTypes(node, ctx) {
   const walk = (n) => {
     for (const it of items(n)) {
       if (it.ctor) out.push(constructor(it.ctor, ctx).type);
+      else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
       else if (it.group) walk(it.group);
       else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
       else if (it.node) out.push(sourceOperand(it.node, ctx).type);
@@ -491,8 +620,8 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * calculation type of all its leaves plus `outer` (the target, or the other
  * side of a comparison), as ABAP computes it.
  */
-function source(node, ctx, outer) {
-  if (!hasArith(node)) return arith(node, ctx, undefined);
+function source(node, ctx, outer, hint = outer) {
+  if (!hasArith(node)) return arith(node, ctx, undefined, hint);
   const types = [...leafTypes(node, ctx), ...(outer === undefined ? [] : [outer])];
   if (types.some((t) => t.k === "f")) return arith(node, ctx, F);
   if (types.some((t) => t.k === "c" || t.k === "string" || t.k === "x")) {
@@ -503,17 +632,22 @@ function source(node, ctx, outer) {
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
-function arith(node, ctx, calc) {
+function arith(node, ctx, calc, hint) {
   const its = items(node);
   let negate = false;
   while (its.length > 0 && its[0].sign !== undefined) {
     if (its.shift().sign === "-") negate = !negate;
   }
   const value = (item, t) => {
-    if (item.ctor) { const v = constructor(item.ctor, ctx); return t === undefined ? v : convert(v, t); }
+    if (item.ctor) { const v = constructor(item.ctor, ctx, item.hint); return t === undefined ? v : convert(v, t); }
+    if (item.bool) {
+      // xsdbool: a c(1) 'X' or blank; boolc: a string 'X' or ' '
+      const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
+      return t === undefined ? v : convert(v, t);
+    }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    const v = sourceOperand(item.node, ctx);
+    const v = sourceOperand(item.node, ctx, item.hint);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -521,11 +655,12 @@ function arith(node, ctx, calc) {
     expr = {e: "concat", l: convert(value(its[0]), S), r: convert(value(its[2]), S), type: S};
   } else if (its.length === 3 && its[1].op !== undefined) {
     const op = its[1].op;
-    if (op === "**") throw new Unsupported("** (power)");
     if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
+    if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
     expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
   } else if (its.length === 1) {
-    expr = value(its[0], calc);
+    // a lone constructor takes its # from where the value goes
+    expr = value({...its[0], hint}, calc);
   } else {
     throw new Unsupported(`expression shape: ${node.concatTokens()}`);
   }
@@ -535,7 +670,7 @@ function arith(node, ctx, calc) {
 }
 
 /** one operand: a field chain, a literal, a call, a template, a constructor */
-function sourceOperand(n, ctx) {
+function sourceOperand(n, ctx, hint) {
   if (isExpr(n, Expressions.Source)) return source(n, ctx);
   if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) return fieldChain(n, ctx);
   if (isExpr(n, Expressions.Constant)) {
@@ -553,7 +688,7 @@ function sourceOperand(n, ctx) {
     if (text.startsWith("`")) return {e: "str", value: text.slice(1, -1).replaceAll("``", "`"), type: S};
     throw new Unsupported(`literal ${text}`);
   }
-  if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx, false);
+  if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx, false, hint);
   if (isExpr(n, Expressions.StringTemplate)) return template(n, ctx);
   throw new Unsupported(`operand ${n.get().constructor.name}: ${n.concatTokens()}`);
 }
@@ -571,7 +706,7 @@ function fieldChain(n, ctx) {
     const attr = upper(kids[2].concatTokens());
     place = resolveStatic(owner, attr, ctx);
     i = 3;
-  } else if (isExpr(kids[0], Expressions.SourceField)) {
+  } else if (isExpr(kids[0], Expressions.SourceField) || isExpr(kids[0], Expressions.SourceFieldSymbol)) {
     place = variable(kids[0].concatTokens(), ctx);
     i = 1;
   } else if (isTok(kids[0], "ME") || (isExpr(kids[0], Expressions.SourceField) && upper(kids[0].concatTokens()) === "ME")) {
@@ -581,7 +716,9 @@ function fieldChain(n, ctx) {
     throw new Unsupported(`field chain ${n.concatTokens()}`);
   }
   for (; i < kids.length; i += 1) {
-    if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
+    if (isExpr(kids[i], Expressions.TableExpression)) {
+      place = rowOf(place, kids[i], ctx);
+    } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), n.concatTokens());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
@@ -626,6 +763,9 @@ function namedType(typeNode, ctx, inferred) {
   const t = upper(text);
   const builtin = {I, F, STRING: S, INT8, D: C(8), T: C(6)}[t];
   if (builtin) return builtin;
+  const local = ctx.scope.findType?.(t) ?? ctx.reg.getObject("CLAS", ctx.className)?.getDefinition()?.getTypeDefinitions().getByName(t);
+  if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
+  if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
   const m = /^(\w+)=>(\w+)$/.exec(t);
   if (m) {
     const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? ctx.reg.getObject("CLAS", m[1])?.getDefinition();
@@ -647,7 +787,97 @@ function constructor(c, ctx, inferred) {
     const to = namedType(c.typeNode, ctx, inferred);
     return valueBody(c.body, to, ctx, c.text);
   }
+  if (c.kw === "COND") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    const kids = c.body?.getChildren() ?? [];
+    const branches = [];
+    let otherwise = null;
+    for (let i = 0; i < kids.length; i += 1) {
+      if (isTok(kids[i], "WHEN")) {
+        const cnd = cond(kids[i + 1], ctx);
+        if (!isTok(kids[i + 2], "THEN")) throw new Unsupported(`COND shape: ${c.text}`);
+        branches.push({cond: cnd, value: convert(source(kids[i + 3], ctx, to), to)});
+        i += 3;
+      } else if (isTok(kids[i], "ELSE")) {
+        otherwise = convert(source(kids[i + 1], ctx, to), to);
+        i += 1;
+      } else {
+        throw new Unsupported(`COND part ${kids[i].concatTokens()}: ${c.text}`);
+      }
+    }
+    return {e: "cond", branches, else: otherwise, type: to};
+  }
+  if (c.kw === "NEW") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    if (to.k !== "ref") throw new Unsupported(`NEW of a ${to.k}: ${c.text}`);
+    if (!ctx.program.wanted.has(to.name)) throw new Unsupported(`NEW ${to.name}: the class is not compiled in this program`);
+    const sig = constructorSignature(ctx, to.name);
+    const given = new Map();
+    const body = c.body;
+    if (body !== null) {
+      if (isExpr(body, Expressions.Source)) {
+        const imp = sig.filter((p) => p.dir === "importing");
+        given.set(imp.find((p) => p.default === undefined)?.name ?? imp[0]?.name, body);
+      } else {
+        for (const p of body.findAllExpressions(Expressions.ParameterS)) {
+          given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+        }
+      }
+    }
+    const args = sig.map((p) => {
+      const src = given.get(p.name);
+      if (src === undefined) {
+        if (p.default === undefined) throw new Unsupported(`NEW ${to.name}: ${p.name} not supplied`);
+        return {dir: "importing", value: defaultValue(p, ctx)};
+      }
+      return {dir: "importing", value: convert(source(src, ctx, p.type), p.type)};
+    });
+    return {e: "new", cls: to.name, args, type: to};
+  }
   throw new Unsupported(`${c.kw} constructor expression`);
+}
+
+/**
+ * The signature of a method of any class or interface of the registry, by
+ * owner and name ("M", or "I~M" for an interface method). Cached; an
+ * untypeable signature is a named refusal at the call.
+ */
+function methodSignature(ctx, owner, name) {
+  const key = `${owner}=>${name}`;
+  if (ctx.program.sigs.has(key)) return ctx.program.sigs.get(key);
+  let sig;
+  try {
+    const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
+    const defOwner = intf ?? owner;
+    const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? ctx.reg.getObject("CLAS", defOwner)?.getDefinition();
+    if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
+    const all = def.getMethodDefinitions();
+    const m = (Array.isArray(all) ? all : all.getAll()).find((x) => upper(x.getName()) === meth);
+    if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
+    const p = m.getParameters();
+    const param = (x, dir) => ({name: upper(x.getName()), dir, type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x)});
+    const ret = p.getReturning();
+    sig = {name, static: m.isStatic?.() ?? false,
+      params: [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
+        ...p.getChanging().map((x) => param(x, "changing"))],
+      returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), key, ctx.program)}};
+  } catch (e) {
+    if (!(e instanceof Unsupported)) throw e;
+    sig = {name, unsupported: e.message};
+  }
+  ctx.program.sigs.set(key, sig);
+  return sig;
+}
+
+/** the importing parameters of a class's constructor, read off its definition */
+function constructorSignature(ctx, clsName) {
+  const def = ctx.reg.getObject("CLAS", clsName)?.getDefinition();
+  const m = def?.getMethodDefinitions().getByName("CONSTRUCTOR");
+  if (m === undefined) return [];
+  const p = m.getParameters();
+  if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
+  return p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing",
+    type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x)}));
 }
 
 function valueBody(body, to, ctx, text) {
@@ -685,11 +915,24 @@ function template(n, ctx) {
       const txt = templateText(tokenStr(c));
       if (txt !== "") parts.push({text: txt});
     } else if (isExpr(c, Expressions.StringTemplateSource)) {
-      if (c.findDirectExpression(Expressions.StringTemplateFormatting)) throw new Unsupported(`template formatting option: ${c.concatTokens()}`);
       const v = source(c.findDirectExpression(Expressions.Source), ctx);
+      const fmt = c.findDirectExpression(Expressions.StringTemplateFormatting);
+      const opts = {};
+      if (fmt) {
+        const words = fmt.concatTokens().split(/\s*=\s*|\s+/);
+        for (let i = 0; i < words.length; i += 2) {
+          const k = upper(words[i]);
+          const val = words[i + 1];
+          if (k === "DECIMALS" && /^\d+$/.test(val) && v.type.k === "f") opts.decimals = Number(val);
+          else if (k === "WIDTH" && /^\d+$/.test(val)) opts.width = Number(val);
+          else if (k === "ALIGN" && /^(LEFT|RIGHT|CENTER)$/i.test(val)) opts.align = upper(val);
+          else if (k === "PAD" && /^'.'$/.test(val)) opts.pad = val.slice(1, 2);
+          else throw new Unsupported(`template formatting ${k} = ${val} for a ${v.type.k}`);
+        }
+      }
       // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
       if (!["i", "int8", "f", "string", "c", "x"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
-      parts.push({value: v});
+      parts.push({value: v, opts});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);
     }
@@ -705,16 +948,28 @@ const FUNCTIONS = {
   NMAX: "max", NMIN: "max",
 };
 
-function call(chain, ctx, statement) {
+function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
+  if (isExpr(kids[0], Expressions.NewObject)) {
+    if (kids.length !== 1) throw new Unsupported(`a call on a new object: ${chain.concatTokens()}`);
+    const nk = kids[0].getChildren();
+    const body = nk.slice(3, -1).find((c) => !isTok(c)) ?? null;
+    return constructor({kw: "NEW", typeNode: nk[1], body, text: chain.concatTokens()}, ctx, hint);
+  }
   let receiver = null;
+  let owner = null;
   let mc;
   if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
     mc = kids[0];
   } else if (kids.length === 3 && isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>") && isExpr(kids[2], Expressions.MethodCall)) {
-    if (upper(kids[0].concatTokens()) !== ctx.className) throw new Unsupported(`call into another class ${kids[0].concatTokens()}`);
+    if (upper(kids[0].concatTokens()) !== ctx.className) owner = upper(kids[0].concatTokens());
     mc = kids[2];
   } else if (kids.length === 3 && upper(kids[0].concatTokens()) === "ME" && isTok(kids[1], "->")) {
+    mc = kids[2];
+  } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
+    receiver = isExpr(kids[0], Expressions.FieldChain) || isExpr(kids[0], Expressions.SourceField) ? fieldChain(kids[0], ctx) : null;
+    if (receiver === null || receiver.type.k !== "ref") throw new Unsupported(`call through ${kids[0].concatTokens()}`);
+    owner = receiver.type.name;
     mc = kids[2];
   } else {
     throw new Unsupported(`call chain ${chain.concatTokens()}`);
@@ -734,10 +989,12 @@ function call(chain, ctx, statement) {
   if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
     return {e: "strlen", x: source(direct, ctx), type: I};
   }
-  const sig = ctx.signatures.get(name);
+  const sig = owner === null ? ctx.signatures.get(name) : methodSignature(ctx, owner, name);
   if (sig === undefined) throw new Unsupported(`unknown method ${name}`);
-  if (sig.unsupported) throw new Unsupported(`${name} was skipped: ${sig.unsupported}`);
+  if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
   if (!statement && sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
+  if (owner !== null && receiver === null && !sig.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
+  if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw new Unsupported(`${owner}=>${name}: ${owner} is not compiled in this program`);
   const importing = sig.params.filter((p) => p.dir === "importing");
   const given = new Map();
   const targets = new Map();
@@ -778,15 +1035,17 @@ function call(chain, ctx, statement) {
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, place: t, type: p.type};
   });
-  if (!sig.static && ctx.sig.static) throw new Unsupported(`${name}: an instance method called from a static one`);
-  (ctx.calls = ctx.calls ?? []).push(name);
-  return {e: "call", method: name, static: sig.static, args, type: sig.returning?.type ?? {k: "void"}};
+  if (owner === null && !sig.static && ctx.sig.static) throw new Unsupported(`${name}: an instance method called from a static one`);
+  if (owner === null) (ctx.calls = ctx.calls ?? []).push(name);
+  return {e: "call", method: name, static: sig.static, owner, receiver, args, type: sig.returning?.type ?? {k: "void"}};
 }
 
 function defaultValue(p, ctx) {
   const t = p.default;
   if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
+  if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
+  if (/^abap_false$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
   throw new Unsupported(`DEFAULT ${t}`);
 }
 
@@ -827,7 +1086,20 @@ export function convert(expr, to) {
   if (to.k === "x" && from.k === "i") return ok("i2x");
   if (numeric(to) && charlike(from)) return ok("c2n");
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
+  if (from.k === "ref" && to.k === "ref") {
+    // up-cast: a class into an interface it implements, or any reference into
+    // the same interface; a down-cast needs CAST and is refused
+    if (to.intf && implementsIntf(expr, from.name, to.name)) return {...expr, type: to};
+    throw new Unsupported(`reference ${from.name} -> ${to.name}`);
+  }
   throw new Unsupported(`conversion ${from.k} -> ${to.k}`);
+}
+
+let REG = null;
+function implementsIntf(expr, cls, intf) {
+  if (cls === intf) return true;
+  const def = REG?.getObject("CLAS", cls)?.getDefinition() ?? REG?.getObject("INTF", cls)?.getDefinition();
+  return (def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf);
 }
 
 /* ---------------------------------------------------------------- conditions */
@@ -867,6 +1139,12 @@ function compare(node, ctx) {
   const not = kids.some((c) => isTok(c, "NOT"));
   const sources = node.findDirectExpressions(Expressions.Source);
   const text = upper(node.concatTokens());
+  if (/\bIS\s+(NOT\s+)?BOUND\b/.test(text) && sources.length === 1) {
+    const v = source(sources[0], ctx);
+    if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
+    const r = {c: "initial", x: v};
+    return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
+  }
   if (/\bIS\s+(NOT\s+)?INITIAL\b/.test(text) && sources.length === 1) {
     const v = source(sources[0], ctx);
     const r = {c: "initial", x: v};

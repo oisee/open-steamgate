@@ -283,3 +283,100 @@ func FmtF(v float64) string {
 	}
 	return out
 }
+
+// Idx turns a 1-based table index into a slice index, raising what a table
+// expression raises for a missing row.
+func Idx(n int, i int32) int {
+	if i < 1 || int(i) > n {
+		panic(ArithmeticError{"CX_SY_ITAB_LINE_NOT_FOUND", "table expression"})
+	}
+	return int(i) - 1
+}
+
+// InsertAt is INSERT ... INDEX i for a checked 1-based index.
+func InsertAt[T any](s []T, i int32, v T) []T {
+	var zero T
+	s = append(s, zero)
+	copy(s[i:], s[i-1:])
+	s[i-1] = v
+	return s
+}
+
+// PowF is ** with calculation type f.
+func PowF(a, b float64) float64 {
+	if a < 0 && b != math.Trunc(b) {
+		panic(ArithmeticError{"CX_SY_ARG_OUT_OF_DOMAIN", "**"})
+	}
+	if a == 0 && b < 0 {
+		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "**"})
+	}
+	return math.Pow(a, b)
+}
+
+// Pad is WIDTH / ALIGN / PAD of a template, as measured on A4H: the text
+// already formatted is padded, never cut (-5 in WIDTH 3 PAD '0' is 0-5).
+func Pad(v string, width int, align, pad string) string {
+	n := utf8.RuneCountInString(v)
+	if n >= width {
+		return v
+	}
+	fill := width - n
+	switch align {
+	case "RIGHT":
+		return strings.Repeat(pad, fill) + v
+	case "CENTER":
+		return strings.Repeat(pad, fill/2) + v + strings.Repeat(pad, fill-fill/2)
+	}
+	return v + strings.Repeat(pad, fill)
+}
+
+// FmtFDec is DECIMALS = n of an f in a template, as measured on A4H: the
+// exact binary value rounded half away from zero (2.5 -> 3, 1.005 -> 1.00,
+// 0.15 -> 0.1), the sign kept (-0.4 -> -0), no more than seventeen
+// significant digits (1E20 has no fraction).
+func FmtFDec(v float64, n int) string {
+	neg := v < 0 || (v == 0 && math.Signbit(v))
+	exact := strconv.FormatFloat(math.Abs(v), 'f', 1100, 64)
+	intPart, frac, _ := strings.Cut(exact, ".")
+	digits := len(strings.TrimLeft(intPart, "0"))
+	if digits > 0 && n > 17-digits {
+		n = max(0, 17-digits)
+	}
+	keep := intPart + frac[:n]
+	up := frac[n] >= '5'
+	b := []byte(keep)
+	if up {
+		i := len(b) - 1
+		for ; i >= 0; i-- {
+			if b[i] == '9' {
+				b[i] = '0'
+				continue
+			}
+			b[i]++
+			break
+		}
+		if i < 0 {
+			b = append([]byte{'1'}, b...)
+		}
+	}
+	s := string(b)
+	ip, fp := s[:len(s)-n], s[len(s)-n:]
+	ip = strings.TrimLeft(ip, "0")
+	if ip == "" {
+		ip = "0"
+	}
+	out := ip
+	if n > 0 {
+		out += "." + fp
+	}
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
+// NotCompiled is what a method that did not compile raises when called: the
+// class exists and its other methods run, this one names why it cannot.
+func NotCompiled(method, reason string) ArithmeticError {
+	return ArithmeticError{"NOT_COMPILED", method + ": " + reason}
+}

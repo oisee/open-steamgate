@@ -19,3 +19,35 @@ func TestFmtF(t *testing.T) {
 		}
 	}
 }
+
+// DECIMALS, WIDTH / PAD, measured on A4H 2026-09-23
+func TestFmtFDec(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want [4]string
+	}{
+		{2.5, [4]string{"3", "2.5", "2.50", "2.500"}}, {3.5, [4]string{"4", "3.5", "3.50", "3.500"}},
+		{-2.5, [4]string{"-3", "-2.5", "-2.50", "-2.500"}}, {0.125, [4]string{"0", "0.1", "0.13", "0.125"}},
+		{1.005, [4]string{"1", "1.0", "1.00", "1.005"}}, {359.9999, [4]string{"360", "360.0", "360.00", "360.000"}},
+		{0.0049, [4]string{"0", "0.0", "0.00", "0.005"}}, {-0.4, [4]string{"-0", "-0.4", "-0.40", "-0.400"}},
+		{1e20, [4]string{"100000000000000000000", "100000000000000000000", "100000000000000000000", "100000000000000000000"}},
+		{123.4567, [4]string{"123", "123.5", "123.46", "123.457"}}, {1.0 / 3, [4]string{"0", "0.3", "0.33", "0.333"}},
+		{0.15, [4]string{"0", "0.1", "0.15", "0.150"}},
+	}
+	for _, c := range cases {
+		for n := 0; n < 4; n++ {
+			if got := FmtFDec(c.v, n); got != c.want[n] {
+				t.Errorf("FmtFDec(%v, %d) = %q, A4H %q", c.v, n, got, c.want[n])
+			}
+		}
+	}
+	pads := []struct{ got, want string }{
+		{Pad(FmtI(5), 2, "RIGHT", "0"), "05"}, {Pad(FmtI(255), 2, "RIGHT", "0"), "255"}, {Pad(FmtI(-5), 3, "RIGHT", "0"), "0-5"},
+		{Pad("f", 2, "RIGHT", "0"), "0f"}, {Pad("a", 2, "RIGHT", "0"), "0a"}, {Pad(FmtI(7), 3, "LEFT", " "), "7  "},
+	}
+	for _, p := range pads {
+		if p.got != p.want {
+			t.Errorf("Pad = %q, A4H %q", p.got, p.want)
+		}
+	}
+}
