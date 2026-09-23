@@ -27,6 +27,9 @@ type Type struct {
 	// Zero clears one. Generated with the descriptor.
 	Copy func(dst, src any)
 	Zero func(p any)
+	// Append adds an initial row to a standard table and returns it; nil
+	// for a hashed table, whose rows only a keyed INSERT may add
+	Append func(p any) any
 }
 
 type Comp struct {

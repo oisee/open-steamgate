@@ -359,6 +359,81 @@ function nativeArgs(specs, ctx) {
   });
 }
 
+/**
+ * Function modules whose work is the host's: the kernel services of a
+ * system that open-abap-core writes as '@KERNEL' JavaScript, called with
+ * CALL FUNCTION '<literal>'. Each maps its formal parameters to the side
+ * they are passed from (exporting: the caller's EXPORTING, importing: the
+ * caller's IMPORTING, tables) and names the host function, which takes
+ * every actual parameter as generic data and raises the module's classic
+ * exceptions by name. A parameter the map does not name, a DESTINATION, an
+ * IN UPDATE TASK or a name that is not a literal is refused.
+ *
+ * WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING are SMW0's (go/abap/w3mi.go),
+ * their rules measured on A4H 2026-09-23 (ZCL_GOGEN_T_W3MI in semantics.mjs).
+ */
+const NATIVE_FM = new Map([
+  ["WWWDATA_IMPORT", {fn: "abap.WWWDATA_IMPORT", params: {KEY: "exporting", MIME: "tables"}}],
+  ["SCMS_BINARY_TO_XSTRING", {fn: "abap.SCMS_BINARY_TO_XSTRING",
+    params: {INPUT_LENGTH: "exporting", FIRST_LINE: "exporting", LAST_LINE: "exporting", BUFFER: "importing", BINARY_TAB: "tables"}}],
+]);
+
+/** CALL FUNCTION of a module the host implements (NATIVE_FM) */
+function callFunction(node, ctx, text) {
+  const nameNode = node.findDirectExpression(Expressions.FunctionName);
+  const lit = /^'([^']+)'$/.exec(nameNode?.concatTokens() ?? "");
+  if (lit === null) throw new Unsupported(`CALL FUNCTION by a name that is not a literal: ${text}`);
+  const name = upper(lit[1]);
+  const fm = NATIVE_FM.get(name);
+  if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
+  if (/\b(DESTINATION|IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
+  const fp = node.findDirectExpression(Expressions.FunctionParameters);
+  const args = [];
+  let exceptions = null;
+  const side = (pname, want) => {
+    const got = fm.params[pname];
+    if (got === undefined) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the host's signature`);
+    if (got !== want) throw new Unsupported(`CALL FUNCTION '${name}': ${pname} passed as ${want}, it is ${got}`);
+  };
+  if (fp !== undefined) {
+    const kids = fp.getChildren();
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (isExpr(k, Expressions.FunctionExporting)) {
+        for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
+          const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+          side(pname, "exporting");
+          args.push({name: pname, value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})});
+        }
+      } else if (isExpr(k, Expressions.ParameterListT)) {
+        const kw = upper(kids[i - 1]?.concatTokens() ?? "");
+        const dir = kw === "IMPORTING" ? "importing" : kw === "TABLES" ? "tables" : null;
+        if (dir === null) throw new Unsupported(`CALL FUNCTION '${name}': ${kw} parameters`);
+        for (const p of k.findDirectExpressions(Expressions.ParameterT)) {
+          const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+          side(pname, dir);
+          const target = lvalue(p.findDirectExpression(Expressions.Target), ctx);
+          if (dir === "tables" && target.type.k !== "table") throw new Unsupported(`CALL FUNCTION '${name}': TABLES ${pname} is a ${target.type.k}`);
+          if (target.type.hashed) throw new Unsupported(`CALL FUNCTION '${name}': TABLES ${pname} is a hashed table`);
+          args.push({name: pname, value: convert(target, {k: "data"})});
+        }
+      } else if (isExpr(k, Expressions.ParameterListExceptions)) {
+        exceptions = {map: {}, others: 0};
+        for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
+          const v = x.findDirectExpression(Expressions.Integer);
+          if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
+          const nm = x.findDirectExpression(Expressions.ParameterName);
+          if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
+          else exceptions.others = Number(v.concatTokens());
+        }
+      } else if (!(k instanceof Nodes.TokenNode)) {
+        throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+      }
+    }
+  }
+  return {s: "call_fm", name, fn: fm.fn, args, exceptions};
+}
+
 /* --------------------------------------------------------------------- types */
 
 function typeOf(t, where, program) {
@@ -1252,6 +1327,7 @@ function statement(node, ctx) {
     (ctx.program.dynStatics ??= new Set()).add(method);
     return {s: "call_dyn_static", cls, method, args};
   }
+  if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {
     const chain = node.findDirectExpression(Expressions.MethodCallChain);
     if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
@@ -2025,6 +2101,12 @@ function resolveStatic(owner, attr, ctx) {
     const a = findAttribute(ctx, attr);
     if (a) return a;
   }
+  // an alias of an interface for a constant of an interface it includes
+  // (IF_APC_WSP_EXTENSION=>CO_CONNECT_MODE_REJECT for
+  // IF_APC_WSP_EXTENSION_COMMON~CO_CONNECT_MODE_REJECT)
+  const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
+  const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
+  if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
   throw new Unsupported(`${owner}=>${attr}`);
 }
 

@@ -447,6 +447,62 @@ at `$metadata` (a stub in `ZCL_STG_DISPATCHER=>RUN`: `handle( ... )-data`);
 the BSP pages stop at a `SELECT` form in `ZCL_OSD_BSP`, the webgui at
 `SELECT ... ENDSELECT`, the RFC catalogue at `GET_TYPE_ID`'s kernel line.
 Those are the compiler's next steps, not the host's.
+## SMW0 media and APC for a Go host, 2026-09-23
+
+Two host services a server built from this compiler mounts.
+
+**SMW0.** `CALL FUNCTION '<literal>'` of a module the host implements
+(`NATIVE_FM` in the front end) compiles into a Go call that takes every
+actual as generic data and raises the module's classic exceptions by name;
+the JS emitter refuses it. `go/abap/w3mi.go` answers `WWWDATA_IMPORT` and
+`SCMS_BINARY_TO_XSTRING` out of a media directory beside the binary
+(`abap.SetMediaDir`, a flag of the host): `node media.mjs --out <dir>
+<folder> ...` copies every W3MI object's data file there with an index
+`w3mi.json` (object id, as the object's XML names it, to file and size),
+and `media.mjs` also gives the `WWWPARAMS` rows with the real filesize
+(`replaceWwwparams`: the transpiler's `DatabaseSetup` writes 0 for an
+object whose data file it was not handed; `node --test media.test.mjs`
+holds it against `PopulateTables`' own rows, and it throws rather than
+duplicate when it recognises no row of an object). What a system answers at the
+edges was measured on A4H first and is pinned (`ZCL_GOGEN_T_W3MI`,
+ANORMALIES w3mi-edges: open-abap-core differs in three places).
+`node mediacheck.mjs` reads the 31 objects of o4d and zork (11.9 MB, the
+three MP3s and ZORK-MINI-Z3 among them) through compiled ABAP of the
+packs' loader shape and compares them with the files: 31 of 31 equal, and
+an unknown object sy-subrc 1, in 37 ms. The packs' own loaders stop before
+the call, at `SELECT ... WHERE col = value INTO TABLE` (the o4d handler,
+Zork's game loader) and `CONCATENATE ... IN BYTE MODE` (Zork), which the
+subset does not have yet.
+
+**APC.** `go/apc` is the socket part of the framework as an
+`http.Handler` (`apc.Channel`) for `/sap/bc/apc/sap/<app>`, in a package of
+its own so that a program without a push channel links no WebSocket
+library; the dialog step (`abap.APCStep`, `abap.WorkProcess`) stays in
+`go/abap`. The ABAP part stays ABAP, open-abap-apc's `ZCL_APC_HOST`
+(handler by name, `open` = ON_ACCEPT + ON_START, `message`, `close`,
+`drain`), which the Node hosts drive too. A program adapts it in a few
+lines (`cmd/o4dserve` `apcHost`). A request that is not a WebSocket
+handshake (426/400/405) or comes from another origin than the page's own
+or `OriginPatterns` (403) is answered before any ABAP runs. One Session per
+socket, each call one dialog step under `abap.WorkProcess` and
+`DialogStep`, ON_START before the upgrade and its messages written after
+it (open before drain), a rejection 403, binary frames refused with 1003,
+a broken write closed as 1006. A host that serves HTTP from the same
+process takes `abap.WorkProcess` for its own steps (or gives the channel a
+`Step` holding its lock). The ZO4D stand runs on it with the handler's own
+ON_MESSAGE (`-origins` for a page served from elsewhere); `cmd/apcprobe`
+(length and sha256 of every message) finds it equal to the stand at
+98d4d1c for the config, the scenario, 300 frames and the JSON and control
+commands.
+
+**What this is not yet.** The media host is proved through a stand-in of
+the loaders' shape (`testdata-media/zcl_gogen_t_w3miload`), not through the
+packs' own `ZCL_O4D_HTTP_HANDLER=>GET_*_FROM_SMW0` and
+`ZCL_ORK_00_GAME_LOADER_SMW0`, which still stop at `SELECT ... WHERE` and
+`CONCATENATE IN BYTE MODE`; no build calls `media.mjs` yet (the osgo build
+is the host's), and there is no Go Zork APC stand. The tiles do not read
+their media through Go today; once `SELECT ... WHERE` lands, `mediacheck`
+is to be rerun against the packs' loader methods themselves.
 
 ## Next, if this is pursued
 
