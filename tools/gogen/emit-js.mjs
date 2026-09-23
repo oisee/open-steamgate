@@ -89,6 +89,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     const ctorAt = chain.find((c) => c.constructor || c.ctorParams);
     const cp = ctorAt ? (ctorAt.constructor?.params ?? ctorAt.ctorParams ?? []) : [];
     out.push(`  static $is = new Set(${JSON.stringify(isOf(cls))});`);
+    out.push(`  static $abap = ${JSON.stringify(cls.name)};`);
     out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
       ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
@@ -104,7 +105,23 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
       : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>CONSTRUCTOR: CREATE OBJECT by name of a class whose constructor has parameters`)}); }`;
     out.push(`abap.registerClass(${JSON.stringify(cls.name)}, ${JSON.stringify(isOf(cls))}, ${make});`, "");
   }
+  const supers = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  if (supers.length) out.push(`abap.registerSupers(${JSON.stringify(Object.fromEntries(supers))});`, "");
   return out.join("\n") + "\n";
+}
+
+/* class-based exceptions: see catchCond in emit-go.mjs */
+function catchCondJs(c) {
+  const parts = [];
+  if (c.covers.length) parts.push(`(xE instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(xE.cls))`);
+  if (c.own.length) parts.push(`(xE instanceof abap.Raised && (${c.own.map((x) => `abap.isA(xE.cls, ${JSON.stringify(x)})`).join(" || ")}))`);
+  return parts.length ? parts.join(" || ") : "false";
+}
+
+function catchIntoJs(c, t) {
+  if (!c.into) return "";
+  // a ref INTO takes the object; an exception value is the error itself
+  return `${t}    ${ident(c.into)} = ${c.intoKind === "ref" ? "xE.obj" : "xE"};\n`;
 }
 
 function method(cls, m) {
@@ -116,7 +133,7 @@ function method(cls, m) {
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
-  const ctx = {cls, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
+  const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
@@ -193,6 +210,14 @@ function stmt(st, ctx, d) {
     case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static": case "select_table":
       return [`${t}${GENERIC};`];
     case "native":
+      // see nativeMessageText in emit-go.mjs
+      if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {
+        // the names as the Go side derives them, so a renamed parameter or
+        // attribute fails here as it fails there
+        const x = ident(ctx.method.params[0].name);
+        return [`${t}if (${x} === null || ${x}.constructor.$is.has("IF_T100_MESSAGE") || !${x}.constructor.$is.has("CX_ROOT") || ${x}.${ident("TEXTID")} !== "") throw new abap.AbapError("NOT_COMPILED", "CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE: T100 and OTR texts are not read here");`,
+          `${t}return "An exception was raised.";`];
+      }
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
     case "raise_classic":
       return [`${t}throw new abap.ClassicException(${JSON.stringify(st.name)}, ${JSON.stringify(st.method)});`];
@@ -271,10 +296,19 @@ function stmt(st, ctx, d) {
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
-      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (e instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(e.cls)) {\n${c.into ? `${t}    ${ident(c.into)} = e;\n` : ""}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
-      return [`${t}try {`, ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}} catch (e) {`,
-        `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ throw e; }`, `${t}}`];
+      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
+      // a CLEANUP runs only when a TRY further out takes the exception: see
+      // emit-go; the CATCHes of this TRY are registered while its body runs
+      const cleanup = st.cleanup ? `if (abap.classBased(xE) && abap.handled(s, xE)) {\n${st.cleanup.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  } ` : "";
+      const n = ctx.loop++;
+      const guard = st.catches.length ? `(xE) => ${st.catches.map((c) => `(${catchCondJs(c)})`).join(" || ")}` : null;
+      const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
+      const tail = [`${t}} catch (xE) {`, ...(guard ? [`${t}  abap.popHandler(s, xH${n});`] : []),
+        `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ ${cleanup}throw xE; }`];
+      if (!guard) return [`${t}try {`, ...body, ...tail, `${t}}`];
+      return [`${t}{`, `${t}const xH${n} = abap.pushHandler(s, ${guard});`, `${t}try {`, ...body, ...tail, `${t}} finally {`, `${t}  abap.popHandler(s, xH${n});`, `${t}}`, `${t}}`];
     }
+    case "raise": return [`${t}throw abap.raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")});`];
     case "sort": {
       const tb = place(st.table, ctx);
       const cmp = st.keys.map((k) => `if (x.${ident(k.name)} !== y.${ident(k.name)}) return (x.${ident(k.name)} < y.${ident(k.name)} ? -1 : 1) * ${k.desc ? -1 : 1};`);
@@ -418,7 +452,7 @@ function expr(e, ctx) {
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
-    case "exc_text": return `${expr(e.x, ctx)}.message`;
+    case "exc_text": return `abap.excText(s, ${expr(e.x, ctx)})`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `${expr(e.x, ctx)}.length`;

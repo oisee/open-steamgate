@@ -119,6 +119,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
   }
   program.rtti = rttiTable(reg, program);
+  program.exceptionSupers = exceptionSupers(reg, program);
   return program;
 }
 
@@ -238,6 +239,9 @@ const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
+  // get_text( ) of an exception without a T100 message or a text id: the
+  // fallback text, which A4H gives too (2026-09-23); anything else dumps
+  ["CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "Native_GET_TEXT_FOR_MESSAGE"],
 ]);
 
 /* --------------------------------------------------------------------- types */
@@ -634,8 +638,8 @@ function block(node, ctx) {
  * TRY / CATCH, the part a runtime can honour today: the exceptions the
  * runtime itself raises (arithmetic, conversion, table line, offset). Which
  * of them a CATCH covers is decided here, by the class hierarchy abaplint
- * knows; an exception object (INTO), CLEANUP and leaving the method from
- * inside a TRY are refused by name, not approximated.
+ * knows. Exception objects of compiled classes (RAISE EXCEPTION) are taken
+ * by the class hierarchy at run time; see tryBlock.
  */
 const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
   "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
@@ -671,24 +675,59 @@ function leaves(stmts, inLoop = false) {
 }
 
 function tryBlock(node, ctx) {
-  if (node.findDirectStructure(Structures.Cleanup)) throw new Unsupported("TRY with CLEANUP");
   const body = bodyOf(node, ctx);
+  const seen = [];
   const catches = node.findDirectStructures(Structures.Catch).map((c) => {
     const st = c.findDirectStatement(Statements.Catch);
-    // CATCH ... INTO x: x is an exception object whose one method here is
-    // get_text( ) (its text is the class and the operation, not A4H's text)
+    const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
+    // a class after a CATCH of its superclass does not activate on a system
+    // (A4H 2026-09-23: "a CATCH clause already exists ... uses the superclass")
+    const shadow = names.find((n) => seen.some((e) => isSubclass(ctx.reg, n, e)));
+    if (shadow) throw new Unsupported(`CATCH ${shadow} after a CATCH of its superclass`);
+    seen.push(...names);
+    const covers = RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n)));
+    // exception objects (RAISE EXCEPTION): taken when the raised class is one
+    // of the names or inherits from one, decided at run time
+    const own = caughtClasses(ctx, names).length > 0 ? names : [];
+    // CATCH ... INTO x: when the CATCH covers exceptions the runtime raises,
+    // x is an exception value whose one method here is get_text( ) (a raised
+    // object's own get_text, else the class and the operation, not A4H's
+    // text); when it covers only raised objects, x keeps its declared
+    // reference type and receives the object itself
     let into = null;
+    let intoKind = null;
     if (/\bINTO\b/i.test(st.concatTokens())) {
       const target = st.findDirectExpression(Expressions.Target);
       const nm = upper((target.findFirstExpression(Expressions.TargetField) ?? target).concatTokens());
       if (!ctx.locals.has(nm)) throw new Unsupported(`CATCH ... INTO ${nm}: not a local`);
-      ctx.locals.set(nm, EXC);
+      const declared = ctx.locals.get(nm);
+      if (covers.length > 0) {
+        ctx.locals.set(nm, EXC);
+        intoKind = "exc";
+      } else {
+        if (declared.k !== "ref") throw new Unsupported(`CATCH ... INTO ${nm}: a ${declared.k} (also the INTO of a CATCH of runtime exceptions)`);
+        if (!declared.intf && declared.name !== "OBJECT" && !ctx.program.wanted.has(declared.name)) throw new Unsupported(`CATCH ... INTO ${nm}: REF TO ${declared.name}, which is not compiled`);
+        intoKind = "ref";
+      }
       into = nm;
     }
-    const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
-    return {classes: names, into, covers: RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n))), body: bodyOf(c, ctx)};
+    return {classes: names, into, intoKind, intoType: into ? ctx.locals.get(into) : null, covers, own, body: bodyOf(c, ctx)};
   });
-  return {s: "try", body, catches};
+  // CLEANUP: runs when a class-based exception leaves the TRY body for a
+  // handler further out, inner CLEANUPs first, then the handler (A4H
+  // 2026-09-23); not for one raised inside a CATCH of the same TRY. For an
+  // exception nobody catches no CLEANUP runs: the kernel looks for a handler
+  // before it unwinds and dumps at the RAISE when there is none (A4H
+  // 2026-09-23, ZCL_GOGEN_T_UNCAUGHT); the emitters ask the session's
+  // active CATCHes (abap.Session.Handled)
+  const cl = node.findDirectStructure(Structures.Cleanup);
+  let cleanup = null;
+  if (cl) {
+    if (/\bINTO\b/i.test(cl.findDirectStatement(Statements.Cleanup)?.concatTokens() ?? "")) throw new Unsupported("CLEANUP INTO");
+    cleanup = bodyOf(cl, ctx);
+    if (leaves(cleanup, false)) throw new Unsupported("RETURN, EXIT or CONTINUE out of a CLEANUP");
+  }
+  return {s: "try", body, catches, cleanup};
 }
 
 const bodyOf = (n, ctx) => {
@@ -981,6 +1020,8 @@ function statement(node, ctx) {
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
+  // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
+  if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
@@ -2098,6 +2139,72 @@ function createObject(node, ctx) {
   });
   const made = {e: "new", cls, args, type: {k: "ref", name: cls}};
   return {s: "assign", target, value: !target.type.intf && target.type.name === cls ? made : convert(made, target.type)};
+}
+
+/*
+ * RAISE EXCEPTION of a class-based exception: the object is made as CREATE
+ * OBJECT makes it (TYPE cls EXPORTING ...) or is one that exists (RAISE
+ * EXCEPTION obj, the same object arrives in the CATCH: A4H 2026-09-23).
+ * The class must be compiled in the program; RESUMABLE, SHORTDUMP and the
+ * MESSAGE forms are refused.
+ */
+function raiseException(node, ctx, text) {
+  if (/^RAISE\s+(RESUMABLE|SHORTDUMP)\b/i.test(text)) throw new Unsupported(`RAISE ${text.split(/\s+/)[1].toUpperCase()}: ${text.slice(0, 80)}`);
+  if (/^RAISE\s+EXCEPTION\s+TYPE\s+\S+\s+(MESSAGE|USING\s+MESSAGE)\b/i.test(text)) throw new Unsupported(`RAISE EXCEPTION with MESSAGE: ${text.slice(0, 80)}`);
+  const clsNode = node.findDirectExpression(Expressions.ClassName);
+  if (clsNode) {
+    const cls = upper(clsNode.concatTokens());
+    if (!ctx.program.wanted.has(cls)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
+    const params = node.findDirectExpression(Expressions.ParameterListS);
+    const given = new Map();
+    for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
+      given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+    }
+    const sig = constructorSignature(ctx, cls);
+    for (const n of given.keys()) if (!sig.some((p) => p.name === n)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: no constructor parameter ${n}`);
+    const args = sig.map((p) => {
+      if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
+      const src = given.get(p.name);
+      if (src === undefined) {
+        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+        throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: ${p.name} not supplied`);
+      }
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(src, ctx, p.type), p.type)};
+    });
+    return {s: "raise", value: {e: "new", cls, args, type: {k: "ref", name: cls}}, cls};
+  }
+  const src = node.findDirectExpression(Expressions.Source) ?? node.findDirectExpression(Expressions.SimpleSource2);
+  if (!src) throw new Unsupported(`RAISE EXCEPTION form: ${text.slice(0, 80)}`);
+  const value = source(src, ctx);
+  if (value.type.k !== "ref" || value.type.name === "OBJECT") throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k === "ref" ? "REF TO object" : value.type.k}`);
+  return {s: "raise", value, cls: null};
+}
+
+/**
+ * The superclass of every compiled exception class (and of its ancestors,
+ * compiled or not), for a CATCH to walk at run time: the object raised is
+ * told by its class, which a RAISE EXCEPTION obj only knows then.
+ */
+function exceptionSupers(reg, program) {
+  const out = {};
+  for (const c of program.classes) {
+    const chain = [c.name, ...ancestors(reg, c.name)];
+    if (!chain.includes("CX_ROOT")) continue;
+    for (let i = 0; i + 1 < chain.length; i += 1) out[chain[i]] = chain[i + 1];
+  }
+  return out;
+}
+
+/**
+ * The classes a CATCH takes that are raised as objects: every compiled class
+ * that is one of the named classes or inherits from one (by the hierarchy
+ * abaplint knows, so an ancestor outside the program still counts).
+ */
+function caughtClasses(ctx, names) {
+  const own = [];
+  for (const w of ctx.program.wanted) if (names.some((n) => isSubclass(ctx.reg, w, n))) own.push(w);
+  return own.sort();
 }
 
 /** the importing parameters of a class's constructor, read off its definition */

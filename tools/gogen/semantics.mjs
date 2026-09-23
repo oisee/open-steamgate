@@ -116,11 +116,39 @@ const EXPECT = {
   // and every reference reads ($ZOSG_TMP_0121, 2026-09-23). Go gave the
   // subclass a second field until then: get:0 ... get:7
   ZCL_GOGEN_T_IADUP: "get:5 a:6 c:6 s:6 b:7 get:5",
+  // class-based exceptions (A4H, the exception classes local to the probe,
+  // the same code otherwise): a CATCH by hierarchy with the attributes read
+  // INTO, the first CATCH that fits, CLEANUP inner then outer then the
+  // handler, no CLEANUP for one raised inside a CATCH of the same TRY,
+  // get_text( ) of a class without a text, RAISE EXCEPTION obj hands over
+  // the object itself (a handler's change stays in it), previous, cx_no_check
+  // through a method without RAISING, an INTO not taken stays initial,
+  // cx_root taking a raised object and a runtime one, a runtime exception
+  // passing a CLEANUP. Not in the local copy: RAISE EXCEPTION of an initial
+  // reference, which aborts on A4H ("Access using a 'ZERO' object reference
+  // is not possible", CATCH cx_root does not take it), and a CATCH after one
+  // of its superclass, which does not activate
+  ZCL_GOGEN_T_RAISE: "h:7 first:sub clean:i1-ci-co-h3 incatch:ch text:[An exception was raised.] same:18 prev:18 nocheck again:19 untaken:initial root:[An exception was raised.] root:zerodivide rt:ch",
+  // an exception that no TRY takes: the kernel looks for a handler before it
+  // unwinds, finds none and dumps at the RAISE (UNCAUGHT_EXCEPTION, line 16),
+  // and no CLEANUP on the way runs; the CLEANUP of the first part does run,
+  // a handler being there. A4H 2026-09-23, $ZOSG_TMP_0118: the same code in
+  // an RFC module (no handler above it) with each CLEANUP writing a committed
+  // row; the rows of the handled part came, none of the other, the dump named
+  // the RAISE. What the Go harness names is the stack of the first panic
+  ZCL_GOGEN_T_UNCAUGHT: {Go: "ERROR UNCAUGHT_EXCEPTION ZCX_GOGEN_T_RNOCHK at zcl_gogen_t_uncaught.clas.abap:16", JS: "ERROR UNCAUGHT_EXCEPTION ZCX_GOGEN_T_RNOCHK"},
+  // runs after it in the same process and reads the static its CLEANUPs
+  // would have written to
+  ZCL_GOGEN_T_UNCAUGHT_READ: "log:s-c-h",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
-const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]);
-const program = compileProgram({folders: [join(here, "testdata"), core], objects});
+// sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
+const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
+// the roots of the exception classes, and get_text( )'s helper, compiled
+// out of open-abap-core as the gateway compiles them
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER"];
+const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));
@@ -130,7 +158,7 @@ mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "semantics");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
-writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n// abapLine is the first frame of the stack that is ABAP source\nfunc abapLine() string {\n\tfor _, l := range strings.Split(string(debug.Stack()), "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine())\n\t\t\t}\n\t\t}()\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}))\n\t}()`).join("\n")}\n}\n`);
+writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}))\n\t}()`).join("\n")}\n}\n`);
 execFileSync("gofmt", ["-w", dir]);
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go")}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));

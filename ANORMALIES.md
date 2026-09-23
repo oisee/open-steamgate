@@ -1233,6 +1233,7 @@ for `zosd_status_app`, which has been deployed for a day.
 - Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE, _STRLINES)
 - Upstream version containing a fix: `unknown`
 ### ANOMALY-2026-09-23-interface-data-value — abaplint accepts `VALUE` on an interface's `DATA`
+### ANOMALY-2026-09-23-catch-after-superclass — abaplint accepts a `CATCH` of a class after a `CATCH` of its superclass
 
 - Status: `open`
 - Discovery date: `2026-09-23`
@@ -1262,4 +1263,13 @@ for `zosd_status_app`, which has been deployed for a day.
 - Smallest safe workaround: the front end's own check (`intfRefAttribute`, `classRefIntfAttribute` in `tools/gogen/frontend.mjs`)
 - Upstream: **needs an issue** in abaplint (keep READ-ONLY in an interface attribute's meta and check writes against it)
 - Regression-test location: the READ-ONLY writes that do activate are in ZCL_GOGEN_T_IA (`tools/gogen/semantics.mjs`); the refusals are the check over `tools/gogen/testdata-refused/` in the same script (ZCL_GOGEN_T_RF lines 13, 14 and 17)
+- Affected ABAP statement, runtime API or adapter: `TRY ... CATCH zcx_base ... CATCH zcx_sub ... ENDTRY` where `zcx_sub` inherits from `zcx_base`
+- Minimal ABAP reproducer: two exception classes, `zcx_base INHERITING FROM cx_static_check` and `zcx_sub INHERITING FROM zcx_base`, and `TRY. RAISE EXCEPTION TYPE zcx_sub. CATCH zcx_base. r = 'base'. CATCH zcx_sub. r = 'sub'. ENDTRY.`
+- Exact command used to run it: the front end of `tools/gogen` (`compileProgram`, which runs abaplint's syntax check first) on that class
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0117, 2026-09-23, deleted after): the class does not activate, "The exception class LCX_SUB cannot be used in the CATCH clause, since a CATCH clause already exists in the same TRY BLOCK and this clause uses the superclass LCX_BASE."
+- Actual open-abap behaviour: abaplint reports nothing and the program compiles; the second `CATCH` can never be taken
+- Impact on open-steamgate: none on the served path (the gateway's `TRY`s list subclasses first); a program that would not activate on a system runs here
+- Smallest safe workaround: `tools/gogen` refuses such a `TRY` (a statement stub, `CATCH x after a CATCH of its superclass`); the transpiler path has no workaround
+- Upstream: **needs an issue** in abaplint (a syntax error in `5_syntax/structures/try.js` or the `CATCH` statement check)
+- Regression-test location: none that runs: the pinned probe `ZCL_GOGEN_T_RAISE` in `tools/gogen/semantics.mjs` leaves the line out because it cannot be activated on A4H
 - Upstream version containing a fix: none yet
