@@ -1,20 +1,18 @@
-// ABAP -> IR, for the Go backend spike (docs: tools/gogen/README.md).
+// ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
 //
-// The front half is not ours and is not rewritten: @abaplint/core parses and
-// type-checks, and the transpiler's own Rearranger turns a flat Source into a
-// binary tree with ABAP's operator precedence. What this file adds is the IR:
-// every expression carries its type, every arithmetic expression carries the
-// ABAP *calculation type*, and every conversion is an explicit node. A backend
-// then has nothing left to decide about semantics -- that is the point of
-// putting an IR between the tree and the text.
+// The front half is not ours: @abaplint/core parses, type-checks and builds
+// the scopes; the transpiler's Rearranger turns a flat Source into a binary
+// tree with ABAP's operator precedence. What this file adds is the IR. Every
+// expression carries its type, every arithmetic expression carries the ABAP
+// calculation type (the target included, measured on A4H: ANORMALIES), and
+// every conversion is an explicit node. A backend has no semantics left to
+// decide.
 //
-// The subset is deliberately small and everything outside it is a named
-// refusal (Unsupported), never a guess: i and f scalars, standard tables of
-// them, DO / WHILE / LOOP AT ... INTO / IF, APPEND, READ TABLE ... INDEX,
-// static method calls, sin / cos / sqrt / abs / lines, sy-index / sy-tabix /
-// sy-subrc.
+// Everything outside the subset is a named refusal (Unsupported), never a
+// guess. A method whose body or signature is outside it is skipped and says
+// why; a method that calls a skipped one is refused in turn.
 import {createRequire} from "node:module";
-import {readFileSync, readdirSync} from "node:fs";
+import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
@@ -24,89 +22,224 @@ const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
 export class Unsupported extends Error {}
 
-const I = {k: "i"};
-const F = {k: "f"};
-
-function typeOf(abapType, where) {
-  if (abapType instanceof BasicTypes.IntegerType) return I;
-  if (abapType instanceof BasicTypes.FloatType) return F;
-  if (abapType instanceof BasicTypes.TableType) {
-    if (abapType.getAccessType() !== "STANDARD") throw new Unsupported(`${where}: only STANDARD tables`);
-    return {k: "table", row: typeOf(abapType.getRowType(), where)};
-  }
-  throw new Unsupported(`${where}: type ${abapType.constructor.name} is outside the subset`);
-}
+export const I = {k: "i"};
+export const F = {k: "f"};
+export const INT8 = {k: "int8"};
+export const S = {k: "string"};
+const C = (len) => ({k: "c", len});
+const X = (len) => ({k: "x", len});
 
 const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
 const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
 const isStruct = (n, cls) => n instanceof Nodes.StructureNode && n.get() instanceof cls;
+const isTok = (n, s) => n instanceof Nodes.TokenNode && (s === undefined || upper(n.getFirstToken().getStr()) === s);
 const tokenStr = (n) => n.getFirstToken().getStr();
 const upper = (s) => String(s).toUpperCase();
+const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
-/** the ABAP calculation type of a set of operand types: f wins, else i */
-const calcOf = (types) => (types.some((t) => t.k === "f") ? F : I);
+export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row))
+  && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
+  && (a.k !== "ref" || a.name === b.name);
+const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
+const charlike = (t) => t.k === "c" || t.k === "string";
 
-export function readClass(folder) {
-  const reg = new abaplint.Registry();
-  for (const f of readdirSync(folder).sort()) {
-    reg.addFile(new abaplint.MemoryFile(f, readFileSync(join(folder, f), "utf8")));
+/* ------------------------------------------------------------------- program */
+
+/**
+ * Compile the named classes (and whatever interfaces they implement) out of
+ * one or more folders of abapGit files. `files` narrows each folder to the
+ * objects wanted, so a big pack can be read without parsing all of it.
+ */
+export function compileProgram({folders, objects}) {
+  const config = abaplint.Config.getDefault().get();
+  config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
+  const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  const wanted = objects.map((o) => o.toLowerCase());
+  for (const folder of folders) {
+    for (const f of readdirSync(folder).sort()) {
+      const base = f.split(".")[0].toLowerCase();
+      if (wanted.length > 0 && !wanted.includes(base)) continue;
+      reg.addFile(new abaplint.MemoryFile(f, readFileSync(join(folder, f), "utf8")));
+    }
   }
   reg.parse();
   const errors = reg.findIssues().filter((i) => i.getKey() === "check_syntax" || i.getKey() === "parser_error");
-  if (errors.length > 0) throw new Error(errors.map((e) => e.getMessage()).join("\n"));
-  const classes = [];
+  if (errors.length > 0) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
+
+  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: []};
+  const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
-    if (!(obj instanceof abaplint.Objects.Class)) continue;
-    classes.push(classIr(reg, obj));
+    if (obj instanceof abaplint.Objects.Class) program.classes.push(classIr(ctx0, obj));
   }
-  return classes;
+  return program;
 }
 
-function classIr(reg, obj) {
+/** kept for the numeric bench sample: one folder, every class in it */
+export function readClass(folder) {
+  const objects = [...new Set(readdirSync(folder).map((f) => f.split(".")[0]))];
+  return compileProgram({folders: [folder], objects}).classes;
+}
+
+/* --------------------------------------------------------------------- types */
+
+function typeOf(t, where, program) {
+  if (t instanceof BasicTypes.IntegerType) return I;
+  if (t instanceof BasicTypes.FloatType) return F;
+  if (t instanceof BasicTypes.Integer8Type) return INT8;
+  if (t instanceof BasicTypes.StringType) return S;
+  if (t instanceof BasicTypes.CharacterType) return C(t.getLength());
+  if (t instanceof BasicTypes.HexType) return X(t.getLength());
+  if (t instanceof BasicTypes.TableType) {
+    if (t.getAccessType() !== "STANDARD") throw new Unsupported(`${where}: only STANDARD tables`);
+    return {k: "table", row: typeOf(t.getRowType(), where, program)};
+  }
+  if (t instanceof BasicTypes.StructureType) {
+    const comps = t.getComponents();
+    const q = t.getQualifiedName();
+    const go = q ? goName(q) : `S_${comps.map((c) => c.name).join("_").slice(0, 40).toUpperCase()}`;
+    if (!program.structs.has(go)) {
+      const st = {k: "struct", go, fields: []};
+      program.structs.set(go, st); // before the fields: a struct may nest itself through a table
+      st.fields = comps.map((c) => ({name: upper(c.name), type: typeOf(c.type, `${where}-${c.name}`, program)}));
+    }
+    return {k: "struct", go};
+  }
+  if (t instanceof BasicTypes.ObjectReferenceType) return {k: "ref", name: upper(t.getIdentifierName())};
+  throw new Unsupported(`${where}: type ${t.constructor.name} is outside the subset`);
+}
+
+const structOf = (ctx, t) => ctx.program.structs.get(t.go);
+const fieldOf = (ctx, t, name, where) => {
+  if (t.k !== "struct") throw new Unsupported(`${where}: component ${name} of a non-structure`);
+  const f = structOf(ctx, t).fields.find((x) => x.name === upper(name));
+  if (f === undefined) throw new Unsupported(`${where}: no component ${name}`);
+  return f;
+};
+
+/* --------------------------------------------------------------------- class */
+
+function classIr(ctx0, obj) {
+  const {reg, program} = ctx0;
   const file = obj.getMainABAPFile();
   const def = obj.getDefinition();
   const spaghetti = new abaplint.SyntaxLogic(reg, obj).run().spaghetti;
   const tree = new Rearranger().run("CLAS", file.getStructure());
   const className = upper(obj.getName());
 
-  // signatures first: a call site needs the callee's parameter order and types
-  const signatures = new Map();
-  for (const m of def.getMethodDefinitions().getAll()) {
-    const where = `${className}=>${upper(m.getName())}`;
-    if (!m.isStatic()) throw new Unsupported(`${where}: instance methods are outside the subset`);
-    const p = m.getParameters();
-    if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${where}: only IMPORTING and RETURNING`);
-    const ret = p.getReturning();
-    signatures.set(upper(m.getName()), {
-      name: upper(m.getName()),
-      params: p.getImporting().map((x) => ({name: upper(x.getName()), type: typeOf(x.getType(), where)})),
-      returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), where)},
-    });
+  // attributes and constants live in the class implementation scope
+  const implScope = findScope(spaghetti.getTop(), "class_implementation");
+  const attributes = [];
+  for (const [name, id] of Object.entries(implScope?.getData().vars ?? {})) {
+    if (name === "ME" || name === "SUPER") continue;
+    const meta = id.getMeta();
+    if (id instanceof abaplint.Types.ClassConstant || (meta.includes("read_only") && meta.includes("static") && name.includes("~"))) {
+      registerConst(program, name, id, className);
+      continue;
+    }
+    try {
+      attributes.push({name, type: typeOf(id.getType(), `${className} ${name}`, program), static: meta.includes("static")});
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      attributes.push({name, unsupported: e.message});
+    }
   }
 
-  const methods = [];
+  // signatures: the class's own methods plus the interfaces' it implements
+  const signatures = new Map();
+  const addSig = (m, prefix, isStatic) => {
+    const name = prefix + upper(m.getName());
+    const where = `${className}=>${name}`;
+    try {
+      const p = m.getParameters();
+      const param = (x, dir) => ({name: upper(x.getName()), dir, type: typeOf(x.getType(), where, program),
+        default: defaultOf(p, x)});
+      const ret = p.getReturning();
+      signatures.set(name, {
+        name, static: isStatic,
+        params: [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
+          ...p.getChanging().map((x) => param(x, "changing"))],
+        returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), where, program)},
+      });
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      signatures.set(name, {name, unsupported: e.message});
+    }
+  };
+  for (const m of def.getMethodDefinitions().getAll()) addSig(m, "", m.isStatic());
+  for (const intf of def.getImplementing()) {
+    const idef = reg.getObject("INTF", intf.name)?.getDefinition();
+    if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
+    const all = idef.getMethodDefinitions();
+    for (const m of (Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, false);
+  }
+
+  const cls = {name: className, attributes, methods: [], constructor: null};
   for (const node of tree.findAllStructures(Structures.Method)) {
     const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
     const sig = signatures.get(name);
-    const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
-    const vars = scope.getData().vars;
-    const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
-    const locals = [];
-    const types = new Map();
-    for (const p of sig.params) types.set(p.name, p.type);
-    if (sig.returning) types.set(sig.returning.name, sig.returning.type);
-    for (const [vname, ident] of Object.entries(vars)) {
-      if (known.has(vname)) continue;
-      const t = typeOf(ident.getType(), `${className}=>${name} ${vname}`);
-      locals.push({name: vname, type: t});
-      types.set(vname, t);
+    const skip = (why) => { program.skipped.push(`${className}=>${name}: ${why}`); signatures.set(name, {name, unsupported: why}); };
+    if (sig === undefined) { skip("no signature"); continue; }
+    if (sig.unsupported) { skip(sig.unsupported); continue; }
+    try {
+      const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
+      const ctx = {program, reg, className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
+      const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
+      for (const [vname, id] of Object.entries(scope.getData().vars)) {
+        if (known.has(vname)) continue;
+        ctx.locals.set(vname, typeOf(id.getType(), `${className}=>${name} ${vname}`, program));
+      }
+      const body = node.findDirectStructure(Structures.Body);
+      const compiled = body === undefined ? [] : block(body, ctx);
+      const ir = {...sig, locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
+        body: compiled, calls: ctx.calls ?? []};
+      if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      skip(e.message);
     }
-    locals.sort((a, b) => a.name.localeCompare(b.name));
-    const ctx = {className, method: name, types, signatures};
-    const body = node.findDirectStructure(Structures.Body);
-    methods.push({...sig, locals, body: body === undefined ? [] : block(body, ctx)});
   }
-  return {name: className, methods};
+  // a compiled method that calls one that did not compile cannot run
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const m of cls.methods) {
+      const bad = m.calls?.find((c) => signatures.get(c)?.unsupported);
+      if (bad && !m.dropped) {
+        m.dropped = true; changed = true;
+        program.skipped.push(`${className}=>${m.name}: calls ${bad}, which was skipped`);
+        signatures.set(m.name, {name: m.name, unsupported: `calls ${bad}`});
+      }
+    }
+  }
+  cls.methods = cls.methods.filter((m) => !m.dropped);
+  return cls;
+}
+
+function findScope(node, stype) {
+  if (node.getIdentifier().stype === stype) return node;
+  for (const c of node.getChildren()) {
+    const f = findScope(c, stype);
+    if (f) return f;
+  }
+  return undefined;
+}
+
+function defaultOf(params, x) {
+  const d = params.getParameterDefault?.(x.getName());
+  return d === undefined ? undefined : d.concatTokens();
+}
+
+/** an interface or class constant, by its ABAP name (ZIF_X~C_Y) */
+function registerConst(program, name, id, className) {
+  const go = goName(name.includes("~") ? name : `${className}=>${name}`);
+  if (program.consts.has(go)) return go;
+  let type;
+  try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
+  let value = id.getValue?.();
+  if (typeof value !== "string" && typeof value !== "number") return undefined; // structured constants: not yet
+  value = String(value).replace(/^'(.*)'$/s, "$1").replace(/^`(.*)`$/s, "$1");
+  program.consts.set(go, {go, type, value});
+  return go;
 }
 
 /* ---------------------------------------------------------------- statements */
@@ -125,278 +258,592 @@ function block(node, ctx) {
   return out;
 }
 
+const bodyOf = (n, ctx) => {
+  const b = n.findDirectStructure(Structures.Body);
+  return b === undefined ? [] : block(b, ctx);
+};
+
 function structure(node, ctx) {
-  const bodyOf = (n) => {
-    const b = n.findDirectStructure(Structures.Body);
-    return b === undefined ? [] : block(b, ctx);
-  };
   if (isStruct(node, Structures.If)) {
-    const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node)}];
+    const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
     for (const e of node.findDirectStructures(Structures.ElseIf)) {
-      branches.push({cond: cond(e.findDirectStatement(Statements.ElseIf).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(e)});
+      branches.push({cond: cond(e.findDirectStatement(Statements.ElseIf).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(e, ctx)});
     }
     const els = node.findDirectStructure(Structures.Else);
-    return {s: "if", branches, else: els === undefined ? null : bodyOf(els)};
+    return {s: "if", branches, else: els === undefined ? null : bodyOf(els, ctx)};
+  }
+  if (isStruct(node, Structures.Case)) {
+    const subjectNode = node.findDirectStatement(Statements.Case).findDirectExpression(Expressions.Source);
+    const subject = source(subjectNode, ctx);
+    const tmp = `case${ctx.temps++}`;
+    const branches = [];
+    let others = null;
+    for (const w of node.findDirectStructures(Structures.When)) {
+      const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
+      if (st.get() instanceof Statements.WhenOthers || /\bOTHERS\b/i.test(st.concatTokens())) { others = bodyOf(w, ctx); continue; }
+      const values = st.findDirectExpressions(Expressions.Source).map((s) => source(s, ctx));
+      const conds = values.map((v) => compareValues("=", {e: "temp", name: tmp, type: subject.type}, v, ctx));
+      branches.push({cond: conds.reduce((l, r) => ({c: "or", l, r})), body: bodyOf(w, ctx)});
+    }
+    return {s: "case", temp: tmp, subject, branches, else: others};
   }
   if (isStruct(node, Structures.Do)) {
     const st = node.findDirectStatement(Statements.Do);
-    if (st.concatTokens().toUpperCase().includes("VARYING")) throw new Unsupported("DO ... VARYING");
+    if (/\bVARYING\b/i.test(st.concatTokens())) throw new Unsupported("DO ... VARYING");
     const times = st.findDirectExpression(Expressions.Source);
-    return {s: "do", times: times === undefined ? null : convert(source(times, ctx, I), I), body: bodyOf(node)};
+    return {s: "do", times: times === undefined ? null : convert(source(times, ctx, I), I), body: bodyOf(node, ctx)};
   }
   if (isStruct(node, Structures.While)) {
-    return {s: "while", cond: cond(node.findDirectStatement(Statements.While).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node)};
+    return {s: "while", cond: cond(node.findDirectStatement(Statements.While).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)};
   }
   if (isStruct(node, Structures.Loop)) {
     const st = node.findDirectStatement(Statements.Loop);
-    const text = st.concatTokens().toUpperCase();
-    if (/\b(WHERE|FROM|TO|ASSIGNING|REFERENCE|GROUP|USING)\b/.test(text)) throw new Unsupported(`LOOP form: ${st.concatTokens()}`);
-    const table = variable(st.findFirstExpression(Expressions.LoopSource).concatTokens(), ctx);
-    const into = variable(st.findFirstExpression(Expressions.LoopTarget).findFirstExpression(Expressions.Target).concatTokens(), ctx);
-    if (table.type.k !== "table" || !sameType(table.type.row, into.type)) throw new Unsupported("LOOP INTO a target of another type");
-    return {s: "loop", table: table.name, into: into.name, rowType: into.type, body: bodyOf(node)};
+    if (/\b(WHERE|FROM|TO|ASSIGNING|REFERENCE|GROUP|USING)\b/i.test(st.concatTokens())) throw new Unsupported(`LOOP form: ${st.concatTokens()}`);
+    const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
+    const into = lvalue(st.findFirstExpression(Expressions.LoopTarget).findFirstExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
+    return {s: "loop", table, into, rowType: table.type.row, body: bodyOf(node, ctx)};
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
 
 function statement(node, ctx) {
+  const text = node.concatTokens();
   if (isStmt(node, Statements.Data)) {
-    if (node.findDirectExpression(Expressions.Value) !== undefined || /\bVALUE\b/i.test(node.concatTokens())) {
-      throw new Unsupported(`DATA with VALUE: ${node.concatTokens()}`);
-    }
-    return undefined; // declared from the scope, zero-initialised like ABAP's initial value
+    if (/\bVALUE\b/i.test(text)) throw new Unsupported(`DATA with VALUE: ${text}`);
+    return undefined; // declared from the scope, initial like ABAP
   }
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
-    const target = variable(targets[0].concatTokens(), ctx);
-    if (target.type.k === "table") throw new Unsupported("table assignment (needs copy-on-write)");
+    const target = lvalue(targets[0], ctx);
     const src = node.findDirectExpression(Expressions.Source);
-    // the calculation type of an assignment includes the TARGET: iv_a / iv_b
-    // into an f is computed in f, and into an i in i with rounding
-    return {s: "assign", target: target.name, value: convert(source(src, ctx, target.type), target.type)};
+    // the calculation type of an assignment includes the TARGET
+    return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
   if (isStmt(node, Statements.Append)) {
-    const text = node.concatTokens().toUpperCase();
-    if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/.test(text)) throw new Unsupported(`APPEND form: ${node.concatTokens()}`);
-    const table = variable(node.findDirectExpression(Expressions.Target).concatTokens(), ctx);
-    const value = node.findDirectExpression(Expressions.SimpleSource4);
-    return {s: "append", table: table.name, value: convert(source(value, ctx, table.type.row), table.type.row)};
+    if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
+    const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.ReadTable)) {
-    const text = node.concatTokens().toUpperCase();
-    if (!/\bINDEX\b/.test(text) || /\b(WITH KEY|ASSIGNING|REFERENCE|TRANSPORTING|BINARY)\b/.test(text)) {
-      throw new Unsupported(`READ TABLE form: ${node.concatTokens()}`);
+    if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|ASSIGNING|REFERENCE|TRANSPORTING|BINARY)\b/i.test(text)) {
+      throw new Unsupported(`READ TABLE form: ${text}`);
     }
-    const table = variable(node.findDirectExpression(Expressions.SimpleSource2).concatTokens(), ctx);
+    const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
-    const into = variable(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target).concatTokens(), ctx);
-    return {s: "read_index", table: table.name, index, into: into.name};
+    const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
+    return {s: "read_index", table, index, into};
+  }
+  if (isStmt(node, Statements.Translate)) {
+    const m = /\bTO\s+(UPPER|LOWER)\s+CASE\b/i.exec(text);
+    if (m === null) throw new Unsupported(`TRANSLATE form: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
+    return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
+  }
+  if (isStmt(node, Statements.Call)) {
+    const chain = node.findDirectExpression(Expressions.MethodCallChain);
+    if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
+    return {s: "call", call: call(chain, ctx, true)};
   }
   if (isStmt(node, Statements.Exit)) return {s: "exit"};
   if (isStmt(node, Statements.Continue)) return {s: "continue"};
   if (isStmt(node, Statements.Return)) return {s: "return"};
-  if (isStmt(node, Statements.Clear)) {
-    const v = variable(node.findDirectExpression(Expressions.Target).concatTokens(), ctx);
-    return {s: "clear", target: v.name, type: v.type};
+  if (isStmt(node, Statements.Clear)) return {s: "clear", target: lvalue(node.findDirectExpression(Expressions.Target), ctx)};
+  throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
+}
+
+/* ------------------------------------------------------------ names, lvalues */
+
+/**
+ * Where an ABAP name lives: a local, a parameter (EXPORTING and CHANGING are
+ * pointers in Go), an attribute of the instance, a static attribute or a
+ * constant. The IR says which; the backend spells it.
+ */
+function variable(name, ctx) {
+  const n = upper(name);
+  const p = ctx.sig.params.find((x) => x.name === n);
+  if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing"};
+  if (ctx.sig.returning?.name === n) return {e: "var", name: n, type: ctx.sig.returning.type};
+  if (ctx.locals.has(n)) return {e: "var", name: n, type: ctx.locals.get(n)};
+  const attr = findAttribute(ctx, n);
+  if (attr) return attr;
+  throw new Unsupported(`${ctx.method}: ${name} is not a local, parameter or attribute of the subset`);
+}
+
+function findAttribute(ctx, n) {
+  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
+  const id = impl?.getData().vars[n];
+  if (id === undefined) return undefined;
+  if (id instanceof abaplint.Types.ClassConstant || n.includes("~")) {
+    const go = registerConst(ctx.program, n, id, ctx.className);
+    if (go === undefined) throw new Unsupported(`constant ${n} is outside the subset`);
+    return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
-  throw new Unsupported(`statement ${node.get().constructor.name}: ${node.concatTokens()}`);
+  const type = typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
+  if (id.getMeta().includes("static")) return {e: "static", go: goName(`${ctx.className}=>${n}`), type};
+  return {e: "attr", name: n, type};
+}
+
+/** a Target (or InlineData) as an assignable place */
+function lvalue(target, ctx) {
+  const kids = target.getChildren();
+  let place;
+  let i = 0;
+  const first = kids[0];
+  if (isExpr(first, Expressions.InlineData)) {
+    place = variable(first.findFirstExpression(Expressions.TargetField).concatTokens(), ctx);
+    i = 1;
+  } else if (isExpr(first, Expressions.TargetField)) {
+    place = variable(first.concatTokens(), ctx);
+    i = 1;
+  } else if (isTok(first, "ME")) {
+    if (!isTok(kids[1], "->")) throw new Unsupported(`target ${target.concatTokens()}`);
+    place = {e: "attr", name: upper(kids[2].concatTokens()), type: findAttribute(ctx, upper(kids[2].concatTokens())).type};
+    i = 3;
+  } else {
+    throw new Unsupported(`target ${target.concatTokens()}`);
+  }
+  for (; i < kids.length; i += 1) {
+    if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
+      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
+      place = {e: "field", base: place, name: f.name, type: f.type};
+      i += 1;
+    } else {
+      throw new Unsupported(`target ${target.concatTokens()}`);
+    }
+  }
+  return place;
 }
 
 /* --------------------------------------------------------------- expressions */
 
-const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row));
-
-function variable(text, ctx) {
-  const name = upper(text);
-  const type = ctx.types.get(name);
-  if (type === undefined) throw new Unsupported(`${ctx.method}: ${text} is not a local, parameter or RETURNING`);
-  return {name, type};
-}
-
-const SY = {"SY-INDEX": "index", "SY-TABIX": "tabix", "SY-SUBRC": "subrc"};
-const FUNCTIONS = {SIN: F, COS: F, SQRT: F, EXP: F, LOG: F, ABS: null};
+const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc"};
+const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**
- * Collect the operand types of one arithmetic expression: the leaves of the
- * operator tree, NOT the arguments of a call inside it (an argument is an
- * expression of its own, with its own calculation type).
+ * The children of one Source, split into operands and operators. An operand
+ * is one node, a parenthesised group `( Source )`, or a constructor
+ * expression `CONV t( ... )` / `VALUE t( ... )`, which the parser leaves
+ * inline in the same Source as the operator after it: `CONV f( w ) / 2` is
+ * one Source of seven children.
  */
+function items(node) {
+  const kids = node.getChildren();
+  const out = [];
+  for (let i = 0; i < kids.length; i += 1) {
+    const k = kids[i];
+    if (isTok(k) && CONSTRUCTORS.has(upper(tokenStr(k))) && isExpr(kids[i + 1], Expressions.TypeNameOrInfer)) {
+      // KW type ( body ) -- the body may be absent: VALUE #( )
+      let j = i + 2;
+      if (!isTok(kids[j]) || tokenStr(kids[j]) !== "(") throw new Unsupported(`constructor shape: ${node.concatTokens()}`);
+      let body = null;
+      if (!(isTok(kids[j + 1]) && tokenStr(kids[j + 1]) === ")")) { body = kids[j + 1]; j += 1; }
+      if (!isTok(kids[j + 1]) || tokenStr(kids[j + 1]) !== ")") throw new Unsupported(`constructor shape: ${node.concatTokens()}`);
+      out.push({ctor: {kw: upper(tokenStr(k)), typeNode: kids[i + 1], body, text: node.concatTokens()}});
+      i = j + 1;
+    } else if (isTok(k) && tokenStr(k) === "(") {
+      const close = kids[i + 2];
+      if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
+      out.push({group: kids[i + 1]});
+      i += 2;
+    } else if (isExpr(k, Expressions.ArithOperator)) {
+      out.push({op: upper(k.concatTokens())});
+    } else if (isTok(k) && ["&&", "&"].includes(tokenStr(k))) {
+      out.push({concat: true});
+    } else if (isTok(k) && ["-", "+"].includes(tokenStr(k)) && out.length === 0) {
+      out.push({sign: tokenStr(k)});
+    } else {
+      out.push({node: k});
+    }
+  }
+  return out;
+}
+
+/** the leaves of one arithmetic expression: calls count as leaves, their arguments do not */
 function leafTypes(node, ctx) {
   const out = [];
   const walk = (n) => {
-    for (const c of n.getChildren()) {
-      if (isExpr(c, Expressions.Source)) walk(c);
-      else if (isExpr(c, Expressions.ArithOperator)) continue;
-      else if (c instanceof Nodes.TokenNode) continue;
-      else out.push(leafType(c, ctx));
+    for (const it of items(n)) {
+      if (it.ctor) out.push(constructor(it.ctor, ctx).type);
+      else if (it.group) walk(it.group);
+      else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
+      else if (it.node) out.push(sourceOperand(it.node, ctx).type);
     }
   };
   walk(node);
   return out;
 }
 
-function leafType(n, ctx) {
-  if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) {
-    const text = upper(n.concatTokens());
-    if (SY[text] !== undefined) return I;
-    return variable(text, ctx).type;
-  }
-  if (isExpr(n, Expressions.Constant)) {
-    if (n.findDirectExpression(Expressions.Integer) !== undefined) return I;
-    throw new Unsupported(`literal ${n.concatTokens()}: only integer literals (a text literal makes the calculation type p)`);
-  }
-  if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx).type;
-  throw new Unsupported(`operand ${n.get().constructor.name}`);
-}
+const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
+  || (isExpr(c, Expressions.Source) && hasArith(c)));
 
 /**
- * One Source as IR, with every arithmetic node typed in `calc`. `outer` is the
- * type the value flows into (the target of an assignment, the other side of a
- * comparison) and is part of the calculation type, as in ABAP.
+ * One Source as IR. When it is arithmetic, every operator runs in the
+ * calculation type of all its leaves plus `outer` (the target, or the other
+ * side of a comparison), as ABAP computes it.
  */
 function source(node, ctx, outer) {
-  const calc = calcOf([...leafTypes(node, ctx), ...(outer === undefined ? [] : [outer])]);
-  return arith(node, ctx, calc);
+  if (!hasArith(node)) return arith(node, ctx, undefined);
+  const types = [...leafTypes(node, ctx), ...(outer === undefined ? [] : [outer])];
+  if (types.some((t) => t.k === "f")) return arith(node, ctx, F);
+  if (types.some((t) => t.k === "c" || t.k === "string" || t.k === "x")) {
+    throw new Unsupported(`calculation type p (a character operand and no f): ${node.concatTokens()}`);
+  }
+  if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
+  if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
+  throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
 function arith(node, ctx, calc) {
-  const kids = node.getChildren();
-  // unary sign in front of an operand
+  const its = items(node);
   let negate = false;
-  let at = 0;
-  while (at < kids.length && kids[at] instanceof Nodes.TokenNode && ["-", "+"].includes(tokenStr(kids[at]))) {
-    if (tokenStr(kids[at]) === "-") negate = !negate;
-    at += 1;
+  while (its.length > 0 && its[0].sign !== undefined) {
+    if (its.shift().sign === "-") negate = !negate;
   }
-  // the rearranged children are operand (ArithOperator operand)?, where an
-  // operand is one node or a parenthesised group `( Source )` of three
-  const items = [];
-  for (let i = at; i < kids.length; i += 1) {
-    const k = kids[i];
-    if (k instanceof Nodes.TokenNode && tokenStr(k) === "(") {
-      const close = kids[i + 2];
-      if (!isExpr(kids[i + 1], Expressions.Source) || !(close instanceof Nodes.TokenNode) || tokenStr(close) !== ")") {
-        throw new Unsupported(`parenthesis shape: ${node.concatTokens()}`);
-      }
-      items.push({group: kids[i + 1]});
-      i += 2;
-    } else {
-      items.push({node: k});
-    }
-  }
-  const value = (item) => (item.group !== undefined ? arith(item.group, ctx, calc) : operand(item.node, ctx, calc));
+  const value = (item, t) => {
+    if (item.ctor) { const v = constructor(item.ctor, ctx); return t === undefined ? v : convert(v, t); }
+    if (item.group !== undefined) return arith(item.group, ctx, t);
+    if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
+    const v = sourceOperand(item.node, ctx);
+    return t === undefined ? v : convert(v, t);
+  };
   let expr;
-  if (items.length === 3 && isExpr(items[1].node, Expressions.ArithOperator)) {
-    const op = upper(items[1].node.concatTokens());
+  if (its.length === 3 && its[1].concat) {
+    expr = {e: "concat", l: convert(value(its[0]), S), r: convert(value(its[2]), S), type: S};
+  } else if (its.length === 3 && its[1].op !== undefined) {
+    const op = its[1].op;
     if (op === "**") throw new Unsupported("** (power)");
-    expr = {e: "bin", op, l: value(items[0]), r: value(items[2]), type: calc};
-  } else if (items.length === 1) {
-    expr = value(items[0]);
+    if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
+    expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
+  } else if (its.length === 1) {
+    expr = value(its[0], calc);
   } else {
     throw new Unsupported(`expression shape: ${node.concatTokens()}`);
   }
-  return negate ? {e: "neg", x: expr, type: calc} : expr;
+  if (!negate) return expr;
+  if (!numeric(expr.type)) throw new Unsupported("unary minus on a non-number");
+  return {e: "neg", x: expr, type: expr.type};
 }
 
-/** a leaf or a nested Source, converted into the calculation type */
-function operand(n, ctx, calc) {
-  if (isExpr(n, Expressions.Source)) return arith(n, ctx, calc);
-  if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) {
-    const text = upper(n.concatTokens());
-    if (SY[text] !== undefined) return convert({e: "sy", field: SY[text], type: I}, calc);
-    const v = variable(text, ctx);
-    return convert({e: "var", name: v.name, type: v.type}, calc);
-  }
+/** one operand: a field chain, a literal, a call, a template, a constructor */
+function sourceOperand(n, ctx) {
+  if (isExpr(n, Expressions.Source)) return source(n, ctx);
+  if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) return fieldChain(n, ctx);
   if (isExpr(n, Expressions.Constant)) {
     const int = n.findDirectExpression(Expressions.Integer);
-    if (int === undefined) throw new Unsupported(`literal ${n.concatTokens()}`);
-    const value = Number(int.concatTokens());
-    return calc.k === "f" ? {e: "float", value, type: F} : {e: "int", value, type: I};
+    if (int !== undefined) {
+      const value = Number(int.concatTokens());
+      if (!Number.isSafeInteger(value) || Math.abs(value) > 2147483647) throw new Unsupported(`integer literal ${value}`);
+      return {e: "int", value, type: I};
+    }
+    const text = n.concatTokens();
+    if (text.startsWith("'")) {
+      const v = text.slice(1, -1).replaceAll("''", "'");
+      return {e: "chars", value: v.replace(/ +$/, ""), type: C(Math.max(1, v.length))};
+    }
+    if (text.startsWith("`")) return {e: "str", value: text.slice(1, -1).replaceAll("``", "`"), type: S};
+    throw new Unsupported(`literal ${text}`);
   }
-  if (isExpr(n, Expressions.MethodCallChain)) return convert(call(n, ctx), calc);
+  if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx, false);
+  if (isExpr(n, Expressions.StringTemplate)) return template(n, ctx);
   throw new Unsupported(`operand ${n.get().constructor.name}: ${n.concatTokens()}`);
 }
 
-function call(chain, ctx) {
-  const mc = chain.findDirectExpression(Expressions.MethodCall);
-  const className = chain.findDirectExpression(Expressions.ClassName);
-  if (mc === undefined || chain.getChildren().length > (className ? 3 : 1)) throw new Unsupported(`call chain ${chain.concatTokens()}`);
+function fieldChain(n, ctx) {
+  const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
+  const text = upper(n.concatTokens());
+  if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
+  if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
+  if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
+  let place;
+  let i = 0;
+  if (isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>")) {
+    const owner = upper(kids[0].concatTokens());
+    const attr = upper(kids[2].concatTokens());
+    place = resolveStatic(owner, attr, ctx);
+    i = 3;
+  } else if (isExpr(kids[0], Expressions.SourceField)) {
+    place = variable(kids[0].concatTokens(), ctx);
+    i = 1;
+  } else if (isTok(kids[0], "ME") || (isExpr(kids[0], Expressions.SourceField) && upper(kids[0].concatTokens()) === "ME")) {
+    place = {e: "attr", name: upper(kids[2].concatTokens()), type: findAttribute(ctx, upper(kids[2].concatTokens())).type};
+    i = 3;
+  } else {
+    throw new Unsupported(`field chain ${n.concatTokens()}`);
+  }
+  for (; i < kids.length; i += 1) {
+    if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
+      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), n.concatTokens());
+      place = {e: "field", base: place, name: f.name, type: f.type};
+      i += 1;
+    } else if (isTok(kids[i], "->") && upper(kids[i - 1].concatTokens()) === "ME") {
+      place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: findAttribute(ctx, upper(kids[i + 1].concatTokens())).type};
+      i += 1;
+    } else {
+      throw new Unsupported(`field chain ${n.concatTokens()}`);
+    }
+  }
+  return place;
+}
+
+/** zif_x=>c_y or zcl_x=>attr */
+function resolveStatic(owner, attr, ctx) {
+  const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
+  const clas = ctx.reg.getObject("CLAS", owner)?.getDefinition();
+  const def = intf ?? clas;
+  if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);
+  const c = def.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
+  if (c !== undefined) {
+    const go = registerConst(ctx.program, `${owner}~${attr}`, c, owner);
+    if (go === undefined) throw new Unsupported(`constant ${owner}=>${attr} is outside the subset`);
+    return {e: "const", go, type: ctx.program.consts.get(go).type};
+  }
+  if (owner === ctx.className) {
+    const a = findAttribute(ctx, attr);
+    if (a) return a;
+  }
+  throw new Unsupported(`${owner}=>${attr}`);
+}
+
+/* ------------------------------------------------------------- constructors */
+
+function namedType(typeNode, ctx, inferred) {
+  if (typeNode === undefined) throw new Unsupported("a constructor without a type");
+  const text = typeNode.concatTokens();
+  if (text === "#") {
+    if (inferred === undefined) throw new Unsupported("# without a type to infer from here");
+    return inferred;
+  }
+  const t = upper(text);
+  const builtin = {I, F, STRING: S, INT8, D: C(8), T: C(6)}[t];
+  if (builtin) return builtin;
+  const m = /^(\w+)=>(\w+)$/.exec(t);
+  if (m) {
+    const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? ctx.reg.getObject("CLAS", m[1])?.getDefinition();
+    const td = owner?.getTypeDefinitions().getByName(m[2]);
+    if (td === undefined) throw new Unsupported(`type ${text}`);
+    return typeOf(td.getType(), text, ctx.program);
+  }
+  throw new Unsupported(`type ${text}`);
+}
+
+function constructor(c, ctx, inferred) {
+  if (c.kw === "CONV") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    if (c.body === null || c.body.getChildren().length !== 1) throw new Unsupported(`CONV with LET or empty: ${c.text}`);
+    // the type of CONV takes part in the calculation type of its argument
+    return convert(source(c.body.findDirectExpression(Expressions.Source), ctx, to), to);
+  }
+  if (c.kw === "VALUE") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    return valueBody(c.body, to, ctx, c.text);
+  }
+  throw new Unsupported(`${c.kw} constructor expression`);
+}
+
+function valueBody(body, to, ctx, text) {
+  if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
+  const fields = [];
+  for (const c of body?.getChildren() ?? []) {
+    if (!isExpr(c, Expressions.FieldAssignment)) throw new Unsupported(`VALUE body: ${text}`);
+    const name = upper(c.findDirectExpression(Expressions.FieldSub).concatTokens());
+    if (name.includes("-")) throw new Unsupported(`VALUE with a nested component path: ${name}`);
+    const f = fieldOf(ctx, to, name, text);
+    const src = c.findDirectExpression(Expressions.Source);
+    const its = items(src);
+    let v;
+    if (its.length === 1 && its[0].ctor && its[0].ctor.typeNode.concatTokens() === "#") {
+      v = constructor(its[0].ctor, ctx, f.type);
+    } else {
+      v = convert(source(src, ctx, f.type), f.type);
+    }
+    fields.push({name, value: v});
+  }
+  return {e: "struct", type: to, fields};
+}
+
+/* ------------------------------------------------------------------- templates */
+
+function templateText(raw) {
+  const t = raw.replace(/^[|}]/, "").replace(/[{|]$/, "");
+  return t.replace(/\\([{}|\\nrt])/g, (m, c) => ({n: "\n", r: "\r", t: "\t"})[c] ?? c);
+}
+
+function template(n, ctx) {
+  const parts = [];
+  for (const c of n.getChildren()) {
+    if (c instanceof Nodes.TokenNode) {
+      const txt = templateText(tokenStr(c));
+      if (txt !== "") parts.push({text: txt});
+    } else if (isExpr(c, Expressions.StringTemplateSource)) {
+      if (c.findDirectExpression(Expressions.StringTemplateFormatting)) throw new Unsupported(`template formatting option: ${c.concatTokens()}`);
+      const v = source(c.findDirectExpression(Expressions.Source), ctx);
+      if (v.type.k === "f") throw new Unsupported("f in a string template: the format is not measured yet");
+      if (!["i", "int8", "string", "c", "x"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      parts.push({value: v});
+    } else {
+      throw new Unsupported(`template part ${c.get().constructor.name}`);
+    }
+  }
+  return {e: "template", parts, type: S};
+}
+
+/* ------------------------------------------------------------------------ calls */
+
+const FUNCTIONS = {
+  SIN: "f", COS: "f", TAN: "f", SQRT: "f", EXP: "f", LOG: "f", LOG10: "f",
+  ABS: "same", SIGN: "same", FLOOR: "same", CEIL: "same", TRUNC: "same", FRAC: "same",
+  NMAX: "max", NMIN: "max",
+};
+
+function call(chain, ctx, statement) {
+  const kids = chain.getChildren();
+  let receiver = null;
+  let mc;
+  if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
+    mc = kids[0];
+  } else if (kids.length === 3 && isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>") && isExpr(kids[2], Expressions.MethodCall)) {
+    if (upper(kids[0].concatTokens()) !== ctx.className) throw new Unsupported(`call into another class ${kids[0].concatTokens()}`);
+    mc = kids[2];
+  } else if (kids.length === 3 && upper(kids[0].concatTokens()) === "ME" && isTok(kids[1], "->")) {
+    mc = kids[2];
+  } else {
+    throw new Unsupported(`call chain ${chain.concatTokens()}`);
+  }
   const name = upper(mc.findDirectExpression(Expressions.MethodName).concatTokens());
   const param = mc.findDirectExpression(Expressions.MethodCallParam);
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);
+  const full = param?.findDirectExpression(Expressions.MethodParameters);
 
-  if (className === undefined && (FUNCTIONS[name] !== undefined || name === "LINES")) {
-    if (direct === undefined) throw new Unsupported(`${name}( ) with named arguments`);
-    if (name === "LINES") {
-      const t = variable(direct.concatTokens(), ctx);
-      if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
-      return {e: "lines", table: t.name, type: I};
-    }
-    if (name === "ABS") {
-      const arg = source(direct, ctx);
-      return {e: "fn", name, args: [arg], type: arg.type};
-    }
-    return {e: "fn", name, args: [convert(source(direct, ctx, F), F)], type: F};
+  if (receiver === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx);
+  if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
+    const t = source(direct, ctx);
+    if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
+    return {e: "lines", table: t, type: I};
   }
-  if (className !== undefined && upper(className.concatTokens()) !== ctx.className) {
-    throw new Unsupported(`call into another class ${className.concatTokens()}`);
+  if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
+    return {e: "strlen", x: source(direct, ctx), type: I};
   }
   const sig = ctx.signatures.get(name);
   if (sig === undefined) throw new Unsupported(`unknown method ${name}`);
-  if (sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
-  let args;
+  if (sig.unsupported) throw new Unsupported(`${name} was skipped: ${sig.unsupported}`);
+  if (!statement && sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
+  const importing = sig.params.filter((p) => p.dir === "importing");
+  const given = new Map();
+  const targets = new Map();
   if (direct !== undefined) {
-    if (sig.params.length !== 1) throw new Unsupported(`${name}: one unnamed argument for ${sig.params.length} parameters`);
-    args = [convert(source(direct, ctx, sig.params[0].type), sig.params[0].type)];
+    if (importing.length < 1) throw new Unsupported(`${name}: an argument for no parameter`);
+    given.set(importing.filter((p) => p.default === undefined)[0]?.name ?? importing[0].name, direct);
   } else if (named !== undefined) {
-    const given = new Map();
     for (const p of named.findDirectExpressions(Expressions.ParameterS)) {
       given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
     }
-    args = sig.params.map((p) => {
-      const s = given.get(p.name);
-      if (s === undefined) throw new Unsupported(`${name}: parameter ${p.name} not supplied (OPTIONAL is outside the subset)`);
-      return convert(source(s, ctx, p.type), p.type);
-    });
-  } else {
-    if (sig.params.length !== 0) throw new Unsupported(`${name}: called without its parameters`);
-    args = [];
+  } else if (full !== undefined) {
+    const text = full.concatTokens();
+    if (/\b(CHANGING|RECEIVING|EXCEPTIONS)\b/i.test(text)) throw new Unsupported(`call with ${text}`);
+    const exp = full.findDirectExpression(Expressions.MethodParameters) ?? full;
+    for (const list of full.findAllExpressions(Expressions.ParameterListS)) {
+      for (const p of list.findDirectExpressions(Expressions.ParameterS)) {
+        given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+      }
+    }
+    for (const list of full.findAllExpressions(Expressions.ParameterListT)) {
+      for (const p of list.findDirectExpressions(Expressions.ParameterT)) {
+        targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), lvalue(p.findDirectExpression(Expressions.Target), ctx));
+      }
+    }
+    void exp;
   }
-  return {e: "call", method: name, args, type: sig.returning.type};
+  const args = sig.params.map((p) => {
+    if (p.dir === "importing") {
+      const s = given.get(p.name);
+      if (s === undefined) {
+        if (p.default === undefined) throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
+        return {dir: "importing", value: defaultValue(p, ctx)};
+      }
+      return {dir: "importing", value: convert(source(s, ctx, p.type), p.type)};
+    }
+    const t = targets.get(p.name);
+    if (t === undefined) return {dir: p.dir, place: null, type: p.type};
+    if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
+    return {dir: p.dir, place: t, type: p.type};
+  });
+  if (!sig.static && ctx.sig.static) throw new Unsupported(`${name}: an instance method called from a static one`);
+  (ctx.calls = ctx.calls ?? []).push(name);
+  return {e: "call", method: name, static: sig.static, args, type: sig.returning?.type ?? {k: "void"}};
 }
 
-/** an explicit conversion node where the types differ, nothing where they agree */
-function convert(expr, to) {
-  if (sameType(expr.type, to)) return expr;
-  if (expr.type.k === "i" && to.k === "f") return {e: "conv", from: I, to: F, x: expr, type: F};
-  if (expr.type.k === "f" && to.k === "i") return {e: "conv", from: F, to: I, x: expr, type: I};
-  throw new Unsupported(`conversion ${expr.type.k} -> ${to.k}`);
+function defaultValue(p, ctx) {
+  const t = p.default;
+  if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
+  if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
+  throw new Unsupported(`DEFAULT ${t}`);
+}
+
+function builtin(name, direct, named, ctx) {
+  const kind = FUNCTIONS[name];
+  if (kind === "max") {
+    if (named === undefined) throw new Unsupported(`${name}( ) without val1 / val2`);
+    const vals = named.findDirectExpressions(Expressions.ParameterS).map((p) => source(p.findDirectExpression(Expressions.Source), ctx));
+    const t = vals.some((v) => v.type.k === "f") ? F : vals.every((v) => v.type.k === "i") ? I : null;
+    if (t === null) throw new Unsupported(`${name}( ) over ${vals.map((v) => v.type.k).join(",")}`);
+    return {e: "fn", name, args: vals.map((v) => convert(v, t)), type: t};
+  }
+  const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
+  if (argNode === undefined) throw new Unsupported(`${name}( ) arguments`);
+  if (kind === "f") return {e: "fn", name, args: [convert(source(argNode, ctx, F), F)], type: F};
+  const arg = source(argNode, ctx);
+  if (!numeric(arg.type)) throw new Unsupported(`${name}( ) of a ${arg.type.k}`);
+  return {e: "fn", name, args: [arg], type: arg.type};
+}
+
+/* ------------------------------------------------------------------- conversion */
+
+/**
+ * An explicit conversion node where the types differ, nothing where they
+ * agree. The kinds are the ones ABAP's conversion rules separate; a pair
+ * that is not listed is refused, not approximated.
+ */
+export function convert(expr, to) {
+  const from = expr.type;
+  if (sameType(from, to)) return expr;
+  const ok = (kind) => ({e: "conv", kind, from, to, x: expr, type: to});
+  if (numeric(from) && numeric(to)) return ok("num");
+  if (to.k === "string" && from.k === "c") return ok("c2s");
+  if (to.k === "c" && charlike(from)) return ok("s2c");
+  // i -> string and x -> string are conversion rules not measured yet (the
+  // sign of an i goes to the END there, unlike in a template): refused
+  // until an A4H probe says what they give
+  if (to.k === "x" && from.k === "i") return ok("i2x");
+  if (numeric(to) && charlike(from)) return ok("c2n");
+  if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
+  throw new Unsupported(`conversion ${from.k} -> ${to.k}`);
 }
 
 /* ---------------------------------------------------------------- conditions */
 
 function cond(node, ctx) {
-  const kids = node.getChildren();
-  // Cond is a chain: operand (AND|OR operand)*; AND binds tighter than OR
   const parts = [];
   const ops = [];
-  for (const k of kids) {
+  for (const k of node.getChildren()) {
     if (k instanceof Nodes.TokenNode) ops.push(upper(tokenStr(k)));
     else parts.push(k);
   }
   const one = (n) => {
     if (isExpr(n, Expressions.Compare)) return compare(n, ctx);
     if (isExpr(n, Expressions.CondSub)) {
-      const not = n.getChildren().some((c) => c instanceof Nodes.TokenNode && upper(tokenStr(c)) === "NOT");
+      const not = n.getChildren().some((c) => isTok(c, "NOT"));
       const inner = cond(n.findDirectExpression(Expressions.Cond), ctx);
       return not ? {c: "not", x: inner} : inner;
     }
     throw new Unsupported(`condition part ${n.get().constructor.name}`);
   };
-  // group ANDs first, then ORs
-  let orList = [];
+  const orList = [];
   let current = one(parts[0]);
   for (let i = 0; i < ops.length; i += 1) {
     const next = one(parts[i + 1]);
@@ -408,16 +855,43 @@ function cond(node, ctx) {
   return orList.reduce((l, r) => ({c: "or", l, r}));
 }
 
+const OPS = {EQ: "=", NE: "<>", LT: "<", LE: "<=", GT: ">", GE: ">="};
+
 function compare(node, ctx) {
   const kids = node.getChildren();
-  const not = kids.some((c) => c instanceof Nodes.TokenNode && upper(tokenStr(c)) === "NOT");
+  const not = kids.some((c) => isTok(c, "NOT"));
   const sources = node.findDirectExpressions(Expressions.Source);
+  const text = upper(node.concatTokens());
+  if (/\bIS\s+(NOT\s+)?INITIAL\b/.test(text) && sources.length === 1) {
+    const v = source(sources[0], ctx);
+    const r = {c: "initial", x: v};
+    return /\bIS\s+NOT\s+INITIAL\b/.test(text) !== not ? {c: "not", x: r} : r;
+  }
   const opNode = node.findDirectExpression(Expressions.CompareOperator);
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
-  const op = ({EQ: "=", NE: "<>", LT: "<", LE: "<=", GT: ">", GE: ">="})[upper(opNode.concatTokens())] ?? upper(opNode.concatTokens());
+  const opText = upper(opNode.concatTokens());
+  const op = OPS[opText] ?? opText;
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
-  // the comparison type covers both sides
-  const calc = calcOf([...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)]);
-  const cmp = {c: "cmp", op, l: arith(sources[0], ctx, calc), r: arith(sources[1], ctx, calc), type: calc};
-  return not ? {c: "not", x: cmp} : cmp;
+  const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
+  let r;
+  if (types.some(numeric)) {
+    // numbers compare numerically; a character operand is converted to the
+    // numeric type (f when any operand is f)
+    const calc = types.some((t) => t.k === "f") ? F : types.some((t) => t.k === "int8") ? INT8 : I;
+    if (types.some(charlike) && calc.k !== "f") throw new Unsupported(`comparison of i with characters: ${node.concatTokens()}`);
+    r = {c: "cmp", op, l: convert(arith(sources[0], ctx, hasArith(sources[0]) ? calc : undefined), calc), r: convert(arith(sources[1], ctx, hasArith(sources[1]) ? calc : undefined), calc), type: calc};
+  } else {
+    r = compareValues(op, source(sources[0], ctx), source(sources[1], ctx), ctx);
+  }
+  return not ? {c: "not", x: r} : r;
+}
+
+/** character comparisons: c ignores trailing blanks, which the stored form already has */
+function compareValues(op, l, r, ctx) {
+  if (numeric(l.type) || numeric(r.type)) {
+    const calc = l.type.k === "f" || r.type.k === "f" ? F : I;
+    return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
+  }
+  if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
 }
