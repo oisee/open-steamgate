@@ -41,6 +41,15 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // generic data: ASSIGN COMPONENT read and written back (a lower-case name
+  // is found, an unknown one is sy-subrc 4 and leaves the field symbol as it
+  // was), LOOP over ANY TABLE writing through the field symbol, DESCRIBE
+  // FIELD kinds (a structure with a string in it is v, a flat one u), GET
+  // REFERENCE + ->* written, ASSIGN of an initial reference sy-subrc 4 with
+  // the field symbol kept, IS SUPPLIED, CALL METHOD (class)=>m, a binding
+  // that outlives a move into its structure, c fitting, i into a string,
+  // CLEAR through generic data. The A4H class had the same source.
+  ZCL_GOGEN_T_JSGENERIC: "comp:0/1/5/0/low/4/low lines:2 p11 q22 kinds:IFgCXDTvhl ref:0/3/42/4/asg/ini/set notini/ini sup:a-b-A+b-a-B+A+B+ dyn:<d1><7><noclass> flat:u moved:m9 m9 q22 fit:xy/5-/cleared:0",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
