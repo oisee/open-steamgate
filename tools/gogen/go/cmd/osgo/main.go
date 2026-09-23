@@ -135,14 +135,18 @@ func odataDump(w http.ResponseWriter, r *http.Request, dump any, frames []string
 	if len(frames) > 0 {
 		where = frames[0]
 	}
-	body, _ := json.Marshal(map[string]any{"error": map[string]any{
+	// JSON.stringify's text: no HTML escaping
+	var body strings.Builder
+	enc := json.NewEncoder(&body)
+	enc.SetEscapeHTML(false)
+	enc.Encode(map[string]any{"error": map[string]any{
 		"code":       "STG/RUNTIME",
 		"message":    map[string]string{"lang": "en", "value": dumpText(dump)},
 		"innererror": map[string]any{"where": where, "frames": frames},
 	}})
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(500)
-	w.Write(body)
+	w.Write([]byte(strings.TrimSuffix(body.String(), "\n")))
 }
 
 // a SICF node's 500 (tools/osd-icf.mjs mountServices)
@@ -194,9 +198,7 @@ func serveStatic(prefix, dir string, next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Bad Request", 400)
 			return
 		}
-		if rel == "" {
-			rel = "/"
-		}
+		// the mount itself (/app) is its folder without the slash: redirected
 		clean := path.Clean("/" + rel)
 		for _, seg := range strings.Split(clean, "/") {
 			if strings.HasPrefix(seg, ".") {
@@ -217,6 +219,8 @@ func serveStatic(prefix, dir string, next http.HandlerFunc) http.HandlerFunc {
 					to += "?" + r.URL.RawQuery
 				}
 				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+				w.Header().Set("Content-Security-Policy", "default-src 'none'")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.Header().Set("Location", to)
 				w.WriteHeader(301)
 				fmt.Fprintf(w, "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Redirecting</title>\n</head>\n<body>\n<pre>Redirecting to %s</pre>\n</body>\n</html>\n", html.EscapeString(to))
