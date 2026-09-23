@@ -975,3 +975,29 @@ is not an INTEGER (host string scalars), and single ones a scalar output
 that is not a table, a system view, an untyped column. The rest still stop
 in the grammar, further on. Multiple outputs are now worth building: 16
 bodies wait on them, against 0 when they were first measured.
+
+### Several OUT tables, and five domains: 21 → 25
+
+*2026-09-23. Multiple outputs, measured on A4H first
+(`docs/sqlscript-hana-observed.md`), then the dictionary gaps the newly
+compiled signatures reached.*
+
+Several OUT tables compile and run: each OUT is what the body assigned, an
+empty table where the path taken assigned none, an OUT assigned nowhere is
+refused as HANA refuses it. The results travel back through the AMDP
+destination into ABAP, one target per OUT, which the demo class now
+exercises (`split_amounts`, ABAP Unit on DuckDB).
+
+On its own that moved no body -- the 23 bodies it reached stopped at the
+next thing: 13 at table-type fields whose domain no dictionary here held.
+Five domains and one data element read from the sandbox (definitions only,
+gitignored) resolved them.
+
+| | before | after |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 21 | **25** |
+| teaching, compiles as a procedure | 3 | 3 |
+
+What the moved bodies stop at now: a UTCL timestamp field (10, a datatype
+not measured yet), a non-INTEGER DECLARE (6, host string scalars), a table
+function not in the registry (6), a scalar OUT beside table OUTs.

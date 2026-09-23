@@ -567,3 +567,20 @@ meaning: `tools/ir-ranges.mjs` renders BT / NB as `(>= AND <=)` where the
 kernel sends `BETWEEN ? AND ?`, and inlines an INTEGER where the kernel
 binds it. The pairs file says so, so that a port does not "fix" them. LOW and HIGH are converted to the
 column's type (a NUMC column gets `0005`..`0010` for `5`..`10`).
+
+## Several OUT tables (measured on A4H, 2026-09-23)
+
+A throwaway class with AMDP procedures, called through `execute_abap`,
+deleted afterwards.
+
+| case | on A4H |
+| --- | --- |
+| an OUT table assigned in one branch of an IF, the other branch taken | an empty table; the caller's rows are replaced |
+| an OUT table assigned nowhere in the body | does not compile: `some out table variable is not assigned: ET_A` |
+| a scalar OUT the path taken did not assign | its initial value (0), the caller's value replaced |
+| an OUT read in the body (`:et_a`) and assigned again | allowed; a reader sees the value before the reassignment |
+
+The portable compiler carries several OUT tables: each is what the body
+assigned, an empty relation where the path assigned none, and an OUT
+assigned nowhere is refused in HANA's words. A scalar OUT beside table OUTs
+and a nested CALL inside such a procedure are refused by name for now.

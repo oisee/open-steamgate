@@ -42,6 +42,14 @@ CLASS zcl_osd_amdp_demo DEFINITION
       IMPORTING VALUE(it_amount) TYPE tt_amount
       EXPORTING VALUE(et_total)  TYPE tt_total.
 
+*   Two OUT tables from one body: each is what the body assigned (an OUT
+*   the path taken leaves alone arrives empty -- measured on A4H).
+    CLASS-METHODS split_amounts
+      IMPORTING VALUE(it_amount) TYPE tt_amount
+                VALUE(iv_limit)  TYPE i
+      EXPORTING VALUE(et_small)  TYPE tt_amount
+                VALUE(et_large)  TYPE tt_amount.
+
     CLASS-METHODS total_amount_nested
       IMPORTING VALUE(it_amount) TYPE tt_amount
       EXPORTING VALUE(et_total)  TYPE tt_total.
@@ -97,6 +105,13 @@ CLASS zcl_osd_amdp_demo IMPLEMENTATION.
                   SELECT :lv_i AS id, 'square of ' || :lv_i AS label, :lv_i * :lv_i AS square FROM DUMMY;
       lv_i = :lv_i + 1;
     END WHILE;
+  ENDMETHOD.
+
+  METHOD split_amounts BY DATABASE PROCEDURE FOR HDB
+                       LANGUAGE SQLSCRIPT
+                       OPTIONS READ-ONLY.
+    et_small = SELECT amount FROM :it_amount WHERE amount < :iv_limit;
+    et_large = SELECT amount FROM :it_amount WHERE amount >= :iv_limit;
   ENDMETHOD.
 
   METHOD total_amount BY DATABASE PROCEDURE FOR HDB

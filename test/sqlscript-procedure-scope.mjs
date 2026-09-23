@@ -576,3 +576,98 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
     expect(() => program("et_rows = select id, txt into rv from src;", "EXPORTING VALUE(et_rows) TYPE tt_rows")).to.throw(/SELECT \.\.\. INTO fills scalars; it is a statement, not a relation/);
   });
 });
+
+// several OUT tables, as measured on A4H (docs/sqlscript-hana-observed.md):
+// an OUT the path taken did not assign is an empty table, an OUT assigned
+// nowhere does not compile, and an OUT may be read and assigned again
+const MULTI_CLASS = (signature, body) => `CLASS cl_m DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    TYPES: BEGIN OF ty_n, n TYPE i, END OF ty_n.
+    TYPES tt_n TYPE STANDARD TABLE OF ty_n WITH EMPTY KEY.
+    TYPES: BEGIN OF ty_t, txt TYPE c LENGTH 10, END OF ty_t.
+    TYPES tt_t TYPE STANDARD TABLE OF ty_t WITH EMPTY KEY.
+    CLASS-METHODS m ${signature}.
+ENDCLASS.
+CLASS cl_m IMPLEMENTATION.
+  METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    ${body}
+  ENDMETHOD.
+ENDCLASS.`;
+
+for (const {dialect, make} of ENGINES) describe(`several OUT tables as measured on A4H, as procedures on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "SRC" ("ID" INTEGER, "TXT" VARCHAR)', expect: "none"});
+    await client.native({sql: 'INSERT INTO "SRC" VALUES (1, \'one\'), (5, \'five\')', expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  const program = (signature, body) => {
+    const {methods, types} = extract(MULTI_CLASS(signature, body), "cl_m.clas.abap");
+    return compileProcedure(methods[0], types, {catalogue: CATALOGUE});
+  };
+  const run = (prog, inputs = {}) => runProcedure(prog, {client, dialect, inputs, inputCatalogue: CATALOGUE});
+  const values = (answer, name, column) => answer.outputs[name].rows.map((r) => r[column]);
+
+  it("each OUT is what the path assigned, and an OUT the path left alone is empty", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_t) TYPE tt_t",
+      `IF :iv = 1 THEN
+         et_a = select id as n from src;
+       ELSE
+         et_a = select id as n from src where id > 1;
+         et_t = select txt from src;
+       END IF;`);
+    expect(prog.outputs.map((one) => one.name)).to.deep.equal(["ET_A", "ET_T"]);
+    const first = await run(prog, {IV: 1});
+    expect(values(first, "ET_A", "N").sort()).to.deep.equal([1, 5]);
+    expect(first.outputs.ET_T.rows).to.deep.equal([]);
+    const second = await run(prog, {IV: 2});
+    expect(values(second, "ET_A", "N")).to.deep.equal([5]);
+    expect(values(second, "ET_T", "TXT").sort()).to.deep.equal(["five", "one"]);
+  });
+
+  it("an OUT may be read in the body and assigned again; the reader sees the value before", async () => {
+    const prog = program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_b) TYPE tt_n",
+      `et_a = select id as n from src;
+       et_b = select n * 10 as n from :et_a;
+       et_a = select n from :et_a where n = 5;`);
+    const answer = await run(prog);
+    expect(values(answer, "ET_A", "N")).to.deep.equal([5]);
+    expect(values(answer, "ET_B", "N").sort((a, b) => a - b)).to.deep.equal([10, 50]);
+  });
+
+  it("a single OUT assigned nowhere is refused too, as HANA refuses it", () => {
+    expect(() => program("EXPORTING VALUE(et_a) TYPE tt_n", "DECLARE i INTEGER = 0; i = 1;"))
+      .to.throw(UnsupportedSqlScript, /some out table variable is not assigned: ET_A/);
+  });
+
+  it("an OUT assigned only in THEN, or only in a WHILE that never runs, compiles and is empty where not assigned", async () => {
+    const inThen = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et_a) TYPE tt_n",
+      "IF :iv = 1 THEN et_a = select id as n from src; END IF;");
+    expect((await run(inThen, {IV: 1})).rows).to.have.length(2);
+    expect((await run(inThen, {IV: 2})).rows).to.deep.equal([]);
+    const inLoop = program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_t) TYPE tt_t",
+      "et_t = select txt from src; WHILE 1 = 0 DO et_a = select id as n from src; END WHILE;");
+    const answer = await run(inLoop);
+    expect(answer.outputs.ET_A.rows).to.deep.equal([]);
+    expect(answer.outputs.ET_T.rows).to.have.length(2);
+  });
+
+  it("an unassigned OUT is answered without the database: no rows, its declared columns", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_t) TYPE tt_t",
+      "IF :iv = 1 THEN et_a = select id as n from src; ELSE et_t = select txt from src; END IF;");
+    const answer = await run(prog, {IV: 1});
+    expect(answer.outputs.ET_T).to.deep.include({rows: [], columns: [{name: "TXT"}]});
+    expect(answer.trace.databaseStatements).to.equal(1);
+  });
+
+  it("refuses an OUT assigned nowhere, in HANA's words, and a scalar OUT beside table OUTs", () => {
+    expect(() => program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_b) TYPE tt_n", "et_a = select id as n from src;"))
+      .to.throw(UnsupportedSqlScript, /some out table variable is not assigned: ET_B/);
+    expect(() => program("EXPORTING VALUE(ev) TYPE i VALUE(et_a) TYPE tt_n", "et_a = select id as n from src; ev = 1;"))
+      .to.throw(UnsupportedSqlScript, /a scalar OUT beside table OUTs is not carried yet/);
+  });
+});
