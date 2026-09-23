@@ -41,6 +41,18 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // DATA of an interface is one field of the object: written through an
+  // interface reference and read through the class reference and back,
+  // through a reference to an included interface (zif_ia2, measured with
+  // local interfaces in a test include), in the class as zif~attr and
+  // me->zif~attr, in a subclass too; READ-ONLY written inside the class
+  // through me and through a reference of the class's type, and in the
+  // subclass. The A4H probe also showed what does not activate, which the
+  // front end refuses rather than compiles: VALUE on an interface DATA (so
+  // init:0), a write to READ-ONLY through an interface reference (inside
+  // the class too) or from outside the class, and lo_i->zif_ia~attr on a
+  // reference to zif_ia itself
+  ZCL_GOGEN_T_IA: "init:0 o:7 i:8 bump:9,90,90,9 pair:3p inner:in,in,two alias:shared other:0, first:9,shared sub:42,1049,43,7 ro:2",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
