@@ -108,6 +108,66 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
     expect((await run(prog, {}, {IT_ROWS: ROWS})).rows).to.deep.equal([]);
   });
 
+  it("a CHAR input is bound as the kernel binds it: right-trimmed, leading blank kept, '' when initial", async () => {
+    // the rule measured on A4H (docs/sqlscript-hana-observed.md), against a
+    // column holding right-trimmed values as a dictionary column does
+    const prog = program("IMPORTING VALUE(iv_txt) TYPE c LENGTH 10 OPTIONAL EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select id, txt from src where txt = :iv_txt;");
+    expect((await run(prog, {IV_TXT: "five"})).rows.map((r) => r.ID)).to.deep.equal([5]);
+    expect((await run(prog, {IV_TXT: "five      "})).rows.map((r) => r.ID)).to.deep.equal([5]);
+    expect((await run(prog, {IV_TXT: " five"})).rows).to.deep.equal([]);
+    expect((await run(prog)).rows).to.deep.equal([]);
+    const initial = program("IMPORTING VALUE(iv_txt) TYPE c LENGTH 10 OPTIONAL EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, case when :iv_txt = '' then 'empty' else 'not' end as txt from dummy;");
+    expect((await run(initial)).rows).to.deep.equal([{ID: 0, TXT: "empty"}]);
+    const defaulted = program("IMPORTING VALUE(iv_txt) TYPE c LENGTH 10 DEFAULT 'one  ' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select id, txt from src where txt = :iv_txt;");
+    // the compiled DEFAULT is already right-trimmed, not only at the bind
+    expect(defaulted.parameters[0].default).to.equal("one");
+    expect((await run(defaulted)).rows.map((r) => r.ID)).to.deep.equal([1]);
+  });
+
+  it("an omitted date or time input is its zero digits, not '' (measured on A4H)", async () => {
+    const dated = program("IMPORTING VALUE(iv_d) TYPE d OPTIONAL EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;");
+    expect(dated.parameters[0].default).to.equal("00000000");
+    expect((await run(dated)).rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
+    expect((await run(dated, {IV_D: "20260923"})).rows).to.deep.equal([{ID: 0, TXT: "20260923"}]);
+    const timed = program("IMPORTING VALUE(iv_t) TYPE t OPTIONAL EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_t as txt from dummy;");
+    expect(timed.parameters[0].default).to.equal("000000");
+    expect((await run(timed)).rows).to.deep.equal([{ID: 0, TXT: "000000"}]);
+    // an explicit initial is the zeros too, and a non-date is refused
+    expect((await run(dated, {IV_D: ""})).rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
+    expect((await run(timed, {IV_T: "      "})).rows).to.deep.equal([{ID: 0, TXT: "000000"}]);
+    let failure;
+    try { await run(dated, {IV_D: "2026"}); } catch (error) { failure = error; }
+    expect(failure?.message).to.match(/IV_D is not 8 digits, so not a date/);
+    const required = program("IMPORTING VALUE(iv_d) TYPE dats EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;");
+    expect(required.parameters[0].kind).to.equal("DATS");
+    expect((await run(required, {IV_D: ""})).rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
+  });
+
+  it("a RAW input is its n bytes as canonical hex: padded with zero bytes, initial all zeros, compared exactly", async () => {
+    await client.native({sql: 'CREATE TABLE "RAWS" ("ID" INTEGER, "K" VARCHAR)', expect: "none"});
+    await client.native({sql: 'INSERT INTO "RAWS" VALUES (1, \'0123456789ABCDEF0123456789ABCDEF\'), (2, \'00FF0000000000000000000000000000\'), (3, \'00000000000000000000000000000000\')', expect: "none"});
+    const {methods, types} = extract(CLASS("IMPORTING VALUE(iv_k) TYPE x LENGTH 16 OPTIONAL EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select id, 'x' as txt from raws where k = :iv_k;"), "cl_t.clas.abap");
+    const prog = compileProcedure(methods[0], types, {catalogue: {...CATALOGUE, RAWS: {ID: {abap: "I"}, K: {abap: "X", len: 16}}}});
+    const find = async (inputs) => (await runProcedure(prog, {client, dialect, inputs,
+      inputCatalogue: {...CATALOGUE, RAWS: {ID: {abap: "I"}, K: {abap: "X", len: 16}}}})).rows.map((r) => r.ID);
+    expect(await find({IV_K: "0123456789abcdef0123456789abcdef"})).to.deep.equal([1]);
+    expect(await find({IV_K: "00FF"})).to.deep.equal([2]);
+    expect(await find({})).to.deep.equal([3]);
+    let failure;
+    try { await find({IV_K: "0123456789ABCDEF0123456789ABCDEF00"}); } catch (error) { failure = error; }
+    expect(failure?.message).to.match(/IV_K is longer than its 16 bytes/);
+    failure = undefined;
+    try { await find({IV_K: "XYZ0"}); } catch (error) { failure = error; }
+    expect(failure?.message).to.match(/IV_K is not a RAW value as hex text/);
+  });
+
   it("a bare NULL in one UNION branch takes the other branch's type, and answers NULL", async () => {
     const prog = program("IMPORTING VALUE(it_rows) TYPE tt_rows EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select 0 as id, null as txt from dummy union all select id, txt from :it_rows where id = 5;");
@@ -152,7 +212,8 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
     dir = mkdtempSync(join(tmpdir(), "osd-proc-ddic-"));
     writeFileSync(join(dir, "zde_id.dtel.xml"), dtel("ZDE_ID", "INT4", 10));
     writeFileSync(join(dir, "zde_txt.dtel.xml"), dtel("ZDE_TXT", "CHAR", 10));
-    writeFileSync(join(dir, "zde_clnt.dtel.xml"), dtel("ZDE_CLNT", "CLNT", 3));
+    writeFileSync(join(dir, "zde_clnt.dtel.xml"), dtel("ZDE_CLNT", "NUMC", 3));
+    writeFileSync(join(dir, "zde_day.dtel.xml"), dtel("ZDE_DAY", "DATS", 8));
     writeFileSync(join(dir, "zs_row.tabl.xml"), tabl("ZS_ROW", [["ID", "ZDE_ID"], ["TXT", "ZDE_TXT"]]));
     writeFileSync(join(dir, "zt_rows.ttyp.xml"), ttyp("ZT_ROWS", "ZS_ROW"));
     writeFileSync(join(dir, "zs_clnt.tabl.xml"), tabl("ZS_CLNT", [["MANDT", "ZDE_CLNT"], ["ID", "ZDE_ID"]]));
@@ -186,7 +247,7 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
 
   it("a dictionary table type with a field outside the measured datatypes is refused by name", () => {
     expect(() => compile(DICT_CLASS("IMPORTING VALUE(it_rows) TYPE zt_clnt EXPORTING VALUE(et_rows) TYPE zt_rows",
-      "et_rows = select id, 'x' as txt from :it_rows;"))).to.throw(UnsupportedSqlScript, /table type zt_clnt: MANDT is CLNT, outside the measured portable datatypes/i);
+      "et_rows = select id, 'x' as txt from :it_rows;"))).to.throw(UnsupportedSqlScript, /table type zt_clnt: MANDT is NUMC, outside the measured portable datatypes/i);
   });
 
   it("a table function wrapped in BEGIN ... END answers through RETURN, its output typed from the DDLS RETURNS it names", async () => {
@@ -196,6 +257,14 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
     const prog = compile(source, {returns: tf.returns, parameters: tf.parameters});
     const {rows} = await runProcedure(prog, {client, dialect, inputCatalogue: CATALOGUE});
     expect(rows.map((r) => r.ID)).to.deep.equal([1, 5]);
+  });
+
+  it("a date input typed by a data element of the dictionary gets the date rule too", async () => {
+    const prog = compile(DICT_CLASS("IMPORTING VALUE(iv_d) TYPE zde_day OPTIONAL EXPORTING VALUE(et_rows) TYPE zt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;"));
+    expect(prog.parameters[0]).to.include({kind: "DATS", default: "00000000"});
+    const {rows} = await runProcedure(prog, {client, dialect, inputs: {IV_D: ""}, inputCatalogue: CATALOGUE});
+    expect(rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
   });
 
   it("refuses a dictionary table type whose row is a data element, or whose include does not resolve", () => {

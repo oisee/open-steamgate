@@ -224,10 +224,15 @@ describe("the typed SQLScript procedural IR", function () {
 
     const optionalChar = procedure({parameters: [{name: "IV", type: T.char(3), optional: true}],
       output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    // a fixed-length character input is admitted since the A4H measurement
+    // (2026-09-23); an omitted optional one is '' like ABAP's initial value
+    expect((await runProcedure(optionalChar)).value).to.equal(1);
+    const malformedChar = procedure({parameters: [{name: "IV", type: {abap: "C"}, optional: true}],
+      output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
     failure = undefined;
-    try { await runProcedure(optionalChar); } catch (error) { failure = error; }
+    try { await runProcedure(malformedChar); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
+    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER, STRING, fixed-length character or fixed-length RAW type/);
 
     const malformedOptional = procedure({parameters: [{name: "IV", type: T.str, optional: "false"}],
       output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
@@ -261,14 +266,17 @@ describe("the typed SQLScript procedural IR", function () {
     failure = undefined;
     try { await runProcedure(malformedString); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
+    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER, STRING, fixed-length character or fixed-length RAW type/);
 
+    // a required CHAR(3) input is bound right-trimmed, and one longer than
+    // its field is refused rather than cut (measured on A4H, 2026-09-23)
     const requiredChar = procedure({parameters: [{name: "IV", type: T.char(3)}],
       output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
+    expect((await runProcedure(requiredChar, {inputs: {IV: "ab   "}})).value).to.equal(1);
     failure = undefined;
-    try { await runProcedure(requiredChar, {inputs: {IV: "bad"}}); } catch (error) { failure = error; }
+    try { await runProcedure(requiredChar, {inputs: {IV: "abcd"}}); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/scalar inputs require the exact ABAP INTEGER or STRING type/);
+    expect(failure.message).to.match(/IV is longer than its 3 characters/);
 
     const relationalScalar = procedure({output: "RV", outputType: T.int, body: [
       assignRelation("TMP", project(scan("DUMMY"), [{as: "ID", expr: lit(1, T.int)}])),
