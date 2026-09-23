@@ -261,3 +261,26 @@ export function Find(v, sub, off) {
 }
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
+// i into a string, as A4H moves it: 42 is "42 ", -5 is "5-"
+export const IToString = (v) => (v < 0 ? `${-v}-` : `${v} `);
+// code point of a character; the blank c, stored empty, is 32
+export const Uccp = (v) => (v.length === 0 ? 32 : v.codePointAt(0));
+// SPLIT ... INTO TABLE as A4H does it
+export function Split(v, sep) {
+  if (v === "") return [];
+  const parts = v.split(sep);
+  if (v.endsWith(sep)) parts.pop();
+  return parts;
+}
+// an unseeded cl_abap_random_int: any number in [min, max]
+let seeded = false;
+let state = 0;
+// harnesses only: the same xorshift32 as the Go runtime
+export function SeedRandom(seed) { seeded = true; state = seed >>> 0; }
+export function RandomInt(min, max) {
+  if (!seeded) return min + Math.floor(Math.random() * (max - min + 1));
+  state ^= state << 13; state >>>= 0;
+  state ^= state >>> 17;
+  state ^= state << 5; state >>>= 0;
+  return min + (state % (max - min + 1));
+}

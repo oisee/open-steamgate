@@ -27,6 +27,7 @@ export function goType(t) {
     case "table": return `[]${goType(t.row)}`;
     case "struct": return t.go;
     case "ref": return t.intf ? typeName(t.name) : `*${typeName(t.name)}`;
+    case "exc": return "*abap.Exception";
     default: throw new Error(`no Go type for ${t.k}`);
   }
 }
@@ -228,6 +229,10 @@ function stmt(st, ctx, d) {
     case "read_index": {
       const n = `idx${ctx.loop++}`;
       const tb = expr(st.table, ctx);
+      if (st.fs) {
+        return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
+          `${t}\t${ident(st.fs)} = &${tb}[${n}-1]`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+      }
       return [
         `${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
         `${t}\t${place(st.into, ctx)} = ${tb}[${n}-1]`,
@@ -303,20 +308,30 @@ function stmt(st, ctx, d) {
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
       const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : `${place(st.into, ctx)} = ${tb}[i${n}]`;
+      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[i${n}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := max(${start}, 0); i${n} < len(${tb})${limit}; i${n}++ {`,
+        ...(skip ? [skip] : []),
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
         `${t}\t\t${bind}`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
       ];
     });
+    case "modify_index": {
+      const n = `idx${ctx.loop++}`;
+      const tb = place(st.table, ctx);
+      return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
+        `${t}\t${tb}[${n}-1] = ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
+    case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)})`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
       // a panic of the runtime is an ABAP exception; a CATCH takes the
       // classes the front end found it covers, anything else goes on
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ok && (${c.covers.length ? c.covers.map((x) => `e.Class == ${JSON.stringify(x)}`).join(" || ") : "false"}):`,
+        ...(c.into ? [`${t}\t\t\t\t${ident(c.into)} = &abap.Exception{Class: e.Class, Op: e.Op}`] : []),
         ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
       return [`${t}func() {`, `${t}\tdefer func() {`, `${t}\t\tif r := recover(); r != nil {`, `${t}\t\t\te, ok := r.(abap.ArithmeticError)`,
         `${t}\t\t\t_ = e`, `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, `${t}\t\t\t\tpanic(r)`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
@@ -401,6 +416,9 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
+    case "exc_text": return `${expr(e.x, ctx)}.Text()`;
+    case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;

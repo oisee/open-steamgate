@@ -29,7 +29,7 @@ function zero(t) {
     case "x": return JSON.stringify("\u0000".repeat(t.len));
     case "table": return "[]";
     case "struct": return `new_${t.go}()`;
-    case "ref": return "null";
+    case "ref": case "exc": return "null";
     default: throw new Error(`no zero for ${t.k}`);
   }
 }
@@ -127,6 +127,10 @@ function stmt(st, ctx, d) {
     case "read_index": {
       const n = `idx${ctx.loop++}`;
       const tb = expr(st.table, ctx);
+      if (st.fs) {
+        return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
+          `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${ident(st.fs)} = ${tb}[${n} - 1]; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
+      }
       const row = composite(st.into.type) ? `abap.copy(${tb}[${n} - 1])` : `${tb}[${n} - 1]`;
       return [
         `${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
@@ -190,15 +194,23 @@ function stmt(st, ctx, d) {
       return [
         `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
         `${t}  for (let i${n} = ${start}; i${n} < ${tb}.length${limit}; i${n}++) {`,
+        ...(st.where ? [`${t}    if (!(${st.where.map((w) => `${tb}[i${n}].${ident(w.name)} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`).join(" && ")})) continue;`] : []),
         `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${bind};`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`,
       ];
     }
     case "nop": return [];
+    case "modify_index": {
+      const n = `idx${ctx.loop++}`;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
+    }
+    case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
-      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (e instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(e.cls)) {\n${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
+      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (e instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(e.cls)) {\n${c.into ? `${t}    ${ident(c.into)} = e;\n` : ""}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
       return [`${t}try {`, ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}} catch (e) {`,
         `${t}  ${arms.join("")}${arms.length ? " else " : ""}{ throw e; }`, `${t}}`];
     }
@@ -306,6 +318,9 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
+    case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
+    case "exc_text": return `${expr(e.x, ctx)}.message`;
+    case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `${expr(e.x, ctx)}.length`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
@@ -357,6 +372,7 @@ function conv(e, ctx) {
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
+    case "i2s": return `abap.IToString(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;

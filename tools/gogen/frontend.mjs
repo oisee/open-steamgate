@@ -29,6 +29,7 @@ export const S = {k: "string"};
 const C = (len) => ({k: "c", len});
 const X = (len) => ({k: "x", len});
 const XS = {k: "xstring"};
+const EXC = {k: "exc"};
 
 const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
 const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
@@ -381,7 +382,11 @@ function registerConst(program, name, id, className) {
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
   let value = id.getValue?.();
   if (typeof value !== "string" && typeof value !== "number") return undefined; // structured constants: not yet
-  value = String(value).replace(/^'(.*)'$/s, "$1").replace(/^`(.*)`$/s, "$1");
+  // a quote inside a literal is written twice: '#''"' is #'" (the Zork
+  // alphabet shifted by one character after it until this was read right)
+  value = String(value);
+  if (/^'.*'$/s.test(value)) value = value.slice(1, -1).replaceAll("''", "'");
+  else if (/^`.*`$/s.test(value)) value = value.slice(1, -1).replaceAll("``", "`");
   program.consts.set(go, {go, type, value});
   return go;
 }
@@ -437,9 +442,18 @@ function tryBlock(node, ctx) {
   const body = bodyOf(node, ctx);
   const catches = node.findDirectStructures(Structures.Catch).map((c) => {
     const st = c.findDirectStatement(Statements.Catch);
-    if (/\bINTO\b/i.test(st.concatTokens())) throw new Unsupported(`CATCH ... INTO: ${st.concatTokens()}`);
+    // CATCH ... INTO x: x is an exception object whose one method here is
+    // get_text( ) (its text is the class and the operation, not A4H's text)
+    let into = null;
+    if (/\bINTO\b/i.test(st.concatTokens())) {
+      const target = st.findDirectExpression(Expressions.Target);
+      const nm = upper((target.findFirstExpression(Expressions.TargetField) ?? target).concatTokens());
+      if (!ctx.locals.has(nm)) throw new Unsupported(`CATCH ... INTO ${nm}: not a local`);
+      ctx.locals.set(nm, EXC);
+      into = nm;
+    }
     const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
-    return {classes: names, covers: RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n))), body: bodyOf(c, ctx)};
+    return {classes: names, into, covers: RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n))), body: bodyOf(c, ctx)};
   });
   if (leaves(body) || catches.some((c) => leaves(c.body))) throw new Unsupported("RETURN, EXIT or CONTINUE leaving a TRY");
   return {s: "try", body, catches};
@@ -493,7 +507,7 @@ function structure(node, ctx) {
   if (isStruct(node, Structures.Loop)) {
     const st = node.findDirectStatement(Statements.Loop);
     const text = st.concatTokens();
-    if (/\b(WHERE|REFERENCE|GROUP|USING|CASTING)\b/i.test(text)) throw new Unsupported(`LOOP form: ${text}`);
+    if (/\b(REFERENCE|GROUP|USING|CASTING)\b/i.test(text)) throw new Unsupported(`LOOP form: ${text}`);
     const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
@@ -513,7 +527,27 @@ function structure(node, ctx) {
       const at = e.findIndex((c) => isTok(c, kw));
       return at < 0 ? null : convert(source(e[at + 1], ctx, I), I);
     };
-    return {s: "loop", table, into, fs, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
+    // WHERE comp op value [AND ...]: a row that fails it is not a pass
+    let where = null;
+    const cc = st.findDirectExpression(Expressions.ComponentCond);
+    if (cc) {
+      if (table.type.row.k !== "struct") throw new Unsupported("LOOP WHERE over a table not of structures");
+      where = [];
+      for (const k of cc.getChildren()) {
+        if (isTok(k, "AND")) continue;
+        if (!isExpr(k, Expressions.ComponentCompare) || k.getChildren().length !== 3) throw new Unsupported(`LOOP WHERE form: ${cc.concatTokens()}`);
+        const [comp, opN, src] = k.getChildren();
+        const f = fieldOf(ctx, table.type.row, comp.concatTokens(), text);
+        const opT = upper(opN.concatTokens());
+        const op = OPS[opT] ?? opT;
+        if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`LOOP WHERE operator ${op}`);
+        const v = source(src, ctx, f.type);
+        const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
+        if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("LOOP WHERE comparing characters with a number");
+        where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc});
+      }
+    }
+    return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
@@ -557,11 +591,16 @@ function statement(node, ctx) {
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.ReadTable)) {
-    if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|ASSIGNING|REFERENCE|TRANSPORTING|BINARY)\b/i.test(text)) {
+    if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
     const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
+    if (/\bASSIGNING\b/i.test(text)) {
+      const fsName = upper(/<[\w]+>/.exec(text)?.[0] ?? "");
+      if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
+      return {s: "read_index", table, index, fs: fsName};
+    }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
     return {s: "read_index", table, index, into};
   }
@@ -632,6 +671,24 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Exit)) return {s: "exit"};
   if (isStmt(node, Statements.Continue)) return {s: "continue"};
   if (isStmt(node, Statements.Return)) return {s: "return"};
+  // FIELD-SYMBOLS: declared from the scope like DATA
+  if (isStmt(node, Statements.FieldSymbol)) return undefined;
+  if (isStmt(node, Statements.ModifyInternal)) {
+    if (!/^MODIFY\s+\S+\s+INDEX\s+.+\s+FROM\s+/i.test(text) || /\bTRANSPORTING\b/i.test(text)) throw new Unsupported(`MODIFY form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("MODIFY of a non-table");
+    const [idx, val] = node.findDirectExpressions(Expressions.Source);
+    return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
+  }
+  if (isStmt(node, Statements.Split)) {
+    // measured on A4H: an empty string gives no rows, and one empty last
+    // piece after a trailing separator is dropped (a| -> [a], a|| -> [a,''])
+    if (!/\bINTO\s+TABLE\b/i.test(text)) throw new Unsupported(`SPLIT form: ${text}`);
+    const [str, sep] = node.findDirectExpressions(Expressions.Source);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
+    return {s: "split", table, x: convert(source(str, ctx), S), sep: convert(source(sep, ctx), S)};
+  }
   if (isStmt(node, Statements.Clear)) return {s: "clear", target: lvalue(node.findDirectExpression(Expressions.Target), ctx)};
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
   if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => ({s: "clear", target: lvalue(t, ctx)}))};
@@ -811,6 +868,8 @@ function leafTypes(node, ctx) {
 const BIT_OPS = new Set(["BIT-AND", "BIT-OR", "BIT-XOR"]);
 const hasBitOp = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && BIT_OPS.has(upper(c.concatTokens())))
   || (isExpr(c, Expressions.Source) && hasBitOp(c)));
+const hasPow = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && c.concatTokens() === "**")
+  || (isExpr(c, Expressions.Source) && hasPow(c)));
 const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
   || (isExpr(c, Expressions.Source) && hasArith(c)));
 
@@ -835,7 +894,9 @@ function source(node, ctx, outer, hint = outer) {
   // both give FF, 300 gives 2C)
   const target = outer?.k === "x" ? I : outer;
   const types = [...leafTypes(node, ctx), ...(target === undefined ? [] : [target])];
-  if (types.some((t) => t.k === "f")) return arith(node, ctx, F);
+  // ** computes in f when the operands are integers (measured on A4H:
+  // 2 ** 31 into i overflows "converting from '2.14748e+09'")
+  if (types.some((t) => t.k === "f") || hasPow(node)) return arith(node, ctx, F);
   if (types.some((t) => t.k === "c" || t.k === "string" || t.k === "x")) {
     throw new Unsupported(`calculation type p (a character operand and no f): ${node.concatTokens()}`);
   }
@@ -1216,6 +1277,24 @@ const FUNCTIONS = {
 
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
+  // x->get_text( ) of an exception caught INTO x
+  if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
+    const v = kids[0].concatTokens();
+    if (ctx.locals?.get(upper(v))?.k === "exc") {
+      if (upper(kids[2].findDirectExpression(Expressions.MethodName).concatTokens()) !== "GET_TEXT") throw new Unsupported(`exception method ${kids[2].concatTokens()}`);
+      return {e: "exc_text", x: {e: "var", name: upper(v), type: EXC}, type: S};
+    }
+  }
+  // cl_abap_random_int=>create( [seed] min max )->get_next( ): a system seeds
+  // an unseeded generator at random, so a number, not a sequence, is the
+  // contract; a SEED makes the sequence the contract and is refused
+  if (/^cl_abap_random_int=>create\(.*\)->get_next\(\s*\)$/i.test(chain.concatTokens())) {
+    const create = chain.findFirstExpression(Expressions.MethodCall);
+    const ps = create.findFirstExpression(Expressions.ParameterListS)?.findDirectExpressions(Expressions.ParameterS) ?? [];
+    const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    if (arg("SEED") || !arg("MIN") || !arg("MAX") || ps.length !== 2) throw new Unsupported(`cl_abap_random_int form: ${chain.concatTokens()}`);
+    return {e: "random", min: convert(source(arg("MIN"), ctx, I), I), max: convert(source(arg("MAX"), ctx, I), I), type: I};
+  }
   if (isExpr(kids[0], Expressions.NewObject)) {
     if (kids.length !== 1) throw new Unsupported(`a call on a new object: ${chain.concatTokens()}`);
     const nk = kids[0].getChildren();
@@ -1272,6 +1351,18 @@ function call(chain, ctx, statement, hint) {
     return {e: "xstrlen", x, type: I};
   }
   // the character of a code point (a blank is the empty c, as stored)
+  // the code point of a character; a blank c is stored empty and is 32
+  if (owner === "CL_ABAP_CONV_OUT_CE" && name === "UCCPI") return {e: "uccp", x: convert(source(direct, ctx), S), type: I};
+  if (receiver === null && owner === null && name === "SUBSTRING" && !ctx.signatures.has(name)) {
+    const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
+    const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    if (!arg("VAL") || ps.some((x) => !["VAL", "OFF", "LEN"].includes(upper(x.findDirectExpression(Expressions.ParameterName).concatTokens())))) {
+      throw new Unsupported(`substring( ) form: ${chain.concatTokens()}`);
+    }
+    const val = convert(source(arg("VAL"), ctx), S);
+    return {e: "substr", x: val, base: S, off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null,
+      len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
+  }
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
   // through an interface reference, a method is the interface's: I~M
   const qualified = owner !== null && receiver?.type.intf && !name.includes("~") ? `${owner}~${name}` : name;
@@ -1293,7 +1384,7 @@ function call(chain, ctx, statement, hint) {
     }
   } else if (full !== undefined) {
     const text = full.concatTokens();
-    if (/\b(CHANGING|RECEIVING|EXCEPTIONS)\b/i.test(text)) throw new Unsupported(`call with ${text}`);
+    if (/\b(RECEIVING|EXCEPTIONS)\b/i.test(text)) throw new Unsupported(`call with ${text}`);
     const exp = full.findDirectExpression(Expressions.MethodParameters) ?? full;
     for (const list of full.findAllExpressions(Expressions.ParameterListS)) {
       for (const p of list.findDirectExpressions(Expressions.ParameterS)) {
@@ -1370,6 +1461,9 @@ export function convert(expr, to) {
   // i -> string and x -> string are conversion rules not measured yet (the
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give
+  // i -> string, measured on A4H: the digits and then a place for the sign,
+  // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
+  if (to.k === "string" && from.k === "i") return ok("i2s");
   if (to.k === "x" && from.k === "i") return ok("i2x");
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");

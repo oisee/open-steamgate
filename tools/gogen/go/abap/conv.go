@@ -512,3 +512,34 @@ func CO(a, b string) bool {
 
 // CS: a contains b, ignoring case; an empty b is always found.
 func CS(a, b string) bool { return b == "" || strings.Contains(strings.ToUpper(a), strings.ToUpper(b)) }
+
+// IToString is the move of an i into a string, measured on A4H: the digits
+// and then the place of the sign, 42 is "42 " and -5 is "5-".
+func IToString(v int32) string {
+	if v < 0 {
+		return strconv.FormatInt(-int64(v), 10) + "-"
+	}
+	return strconv.FormatInt(int64(v), 10) + " "
+}
+
+// Uccp is cl_abap_conv_out_ce=>uccpi: the code point of a character; the
+// blank c, stored empty, is 32 (measured on A4H).
+func Uccp(v string) int32 {
+	for _, r := range v {
+		return int32(r)
+	}
+	return 32
+}
+
+// Split is SPLIT v AT sep INTO TABLE, measured on A4H: an empty v gives no
+// rows, and one empty piece after a trailing separator is dropped.
+func Split(v, sep string) []string {
+	if v == "" {
+		return []string{}
+	}
+	parts := strings.Split(v, sep)
+	if strings.HasSuffix(v, sep) {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
+}

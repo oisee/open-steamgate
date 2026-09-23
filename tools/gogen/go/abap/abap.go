@@ -163,3 +163,12 @@ func abs64(v int64) int64 {
 	}
 	return v
 }
+
+// Exception is what CATCH ... INTO receives: the class and where it was
+// raised. Text is not the system's message text (not measured).
+type Exception struct {
+	Class string
+	Op    string
+}
+
+func (e *Exception) Text() string { return e.Class + " in " + e.Op }
