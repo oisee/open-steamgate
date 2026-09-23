@@ -1246,3 +1246,24 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
 - Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-sin-cos-libm — `sin` / `cos` are the C library's on a system and V8's (fdlibm) here, and differ in the last bit
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` as installed (the transpiled `sin( )` / `cos( )` are JavaScript's `Math.sin` / `Math.cos`), Node 24 (V8 14.6)
+- Affected ABAP statement, runtime API or adapter: the built-in functions `sin( )` and `cos( )` with an argument of type f
+- Minimal ABAP reproducer:
+  ```abap
+  DATA lv_x TYPE f.
+  lv_x = `-4843.784971815272`.
+  cl_abap_unit_assert=>fail( msg = |{ sin( lv_x ) }| quit = if_aunit_constants=>no ).
+  ```
+- Exact command used to run it: an ABAP Unit probe on A4H (throwaway package, deleted after), six arguments chosen where glibc and V8 disagree, each printed with seventeen digits by a string template.
+- Expected SAP behaviour: A4H answers `0.52345430641087753` for the argument above, and for all six arguments the value is bit-equal to glibc's `sin` (checked against glibc 2.43 on the host, CPython `math.sin`) and different from V8's in every one.
+- Actual open-abap behaviour: `Math.sin` gives `0.5234543064108774`, one unit in the last place away. V8 carries fdlibm (`src/base/ieee754.cc`), which is accurate to under one ulp but not the same function as glibc's; on 200 000 random arguments up to 5e6 the two disagree on a large share of them.
+- Impact on open-steamgate: invisible in any single value, decisive in a chain. ZO4D's `constellation`, `ignition` and `ignite_emit` build their stars and particles from `seed = frac( sin( seed * 12345 + i ) * 43758 )`: the first difference in the last bit is multiplied by 43758 and then by 12345 on the next link, and from there the field is a different one. The same build also closes the one open line of `copperbars`. `docs/frame-comparison.md` had recorded the ignition chain as the limit of comparing two floating-point implementations; it is this, and it is reproducible: a build that calls glibc's `sin` / `cos` (the Go spike on `spike/go-backend`, cgo, `-tags libm`) matches all four scenes frame for frame.
+- Smallest safe workaround: none in the runtime today. A port of glibc's `sin` / `cos` (sysdeps/ieee754/dbl-64/s_sin.c with its tables) to JavaScript would make `Math.sin` unnecessary where agreement with a system matters; whether a system on another platform uses another C library is not measured (A4H is Linux x86-64).
+- Upstream issue: none. Nothing is fixed here, and a different `sin` is a design question for the runtime, not a defect with a small patch.
+- Regression-test location: none yet; the six measured values belong in the test that comes with a fix.
+- Upstream version containing a fix: `unknown`
