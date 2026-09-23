@@ -238,6 +238,30 @@ of the gateway waits on `REF TO data` (5 methods: reading and writing
 entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
 `CONDENSE`, `COMMIT` / `ROLLBACK`, and the database.
 
+## Database writes and the LUW, 2026-09-23
+
+`COMMIT WORK [AND WAIT]` and `ROLLBACK WORK` compile: `go/abap/luw.go` keeps
+one database transaction per dialog step, and a host runs a step through
+`abap.DialogStep`, which commits when the work returns and rolls back when
+it dumps (the rule of `tools/osd-dialog-step.mjs`, the kernel's and not the
+application's). sy-subrc 0 and sy-dbcnt untouched, measured on A4H. The JS
+emitter has no database and refuses both. 3313 -> 3306 statement stubs in
+the gateway, 65 -> 62 in the closure of `DISPATCH`.
+
+`INSERT` / `UPDATE` / `MODIFY` / `DELETE` on a table do **not** compile,
+by decision: their SQL has to come from the shared relational IR
+(`tools/sqlscript-ir.mjs`, lowered by `tools/sqlscript-lower.mjs`), and it
+has no write node. `effects()` there already expects `{rel: "insert" |
+"update" | "delete" | "merge"}`; there is no constructor and `lower()`
+answers `relation <kind> not lowered`. Each such statement is a stub whose
+message names the node it waits on. What they must do was measured on A4H
+and sits beside `ZCL_GOGEN_T_DBW` in `semantics.mjs`: sy-subrc 4 for a
+duplicate key or a missing row, sy-dbcnt the rows written, MANDT the logon
+client whatever the work area holds, and `INSERT ... FROM TABLE` with a
+duplicate raises `CX_SY_OPEN_SQL_DB` after writing every other row. Four
+of those rules the transpiler's runtime gets wrong (ANORMALIES
+`dbwrite-*`).
+
 ## What this does not show
 
 - A request that reads data: every `SELECT` is a `NotCompiled` stub, and

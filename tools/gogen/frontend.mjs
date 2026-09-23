@@ -797,6 +797,14 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
+  if (isStmt(node, Statements.InsertDatabase)) return dbWriteStatement("insert", node, ctx, text);
+  if (isStmt(node, Statements.UpdateDatabase)) return dbWriteStatement("update", node, ctx, text);
+  if (isStmt(node, Statements.ModifyDatabase)) return dbWriteStatement("merge", node, ctx, text);
+  if (isStmt(node, Statements.DeleteDatabase)) return dbWriteStatement("delete", node, ctx, text);
+  // DELETE dbtab FROM wa parses as DeleteInternal (abaplint cannot tell it
+  // from DELETE itab FROM idx without the dictionary)
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+FROM\s+/i.test(text)
+    && ctx.reg.getObject("TABL", upper(text.split(/\s+/)[1]))) return dbWriteStatement("delete", node, ctx, text);
   // GET REFERENCE OF x INTO r: r is bound to x itself
   if (isStmt(node, Statements.GetReference)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -1739,6 +1747,33 @@ function selectStatement(node, ctx, text) {
 function luwStatement(node, text) {
   if (!/^(COMMIT\s+WORK(\s+AND\s+WAIT)?|ROLLBACK\s+WORK)\s*\.?$/i.test(text)) throw new Unsupported(`LUW form: ${text}`);
   return {s: isStmt(node, Statements.Commit) ? "commit_work" : "rollback_work"};
+}
+
+/**
+ * INSERT / UPDATE / MODIFY / DELETE on a database table. The SQL of a
+ * statement comes from the shared relational IR (sqlscript-ir.mjs, lowered
+ * by sqlscript-lower.mjs) and is never written here by hand. As of
+ * 2026-09-23 the IR has no node for a write: effects() anticipates
+ * {rel: "insert" | "update" | "delete" | "merge"}, but there is neither a
+ * constructor nor a lowering, and lower() answers "relation <kind> not
+ * lowered". Until it has them every such statement is a stub, and the
+ * message names the node it waits on. What each must do once it exists was
+ * measured on A4H (testdata/zcl_gogen_t_dbw, ANORMALIES
+ * dbwrite-*): sy-subrc 4 for a duplicate key / a missing row, sy-dbcnt the
+ * rows written, MANDT the logon client whatever the work area says, and
+ * INSERT FROM TABLE with a duplicate raises CX_SY_OPEN_SQL_DB after writing
+ * every other row.
+ */
+function dbWriteStatement(kind, node, ctx, text) {
+  const verb = text.split(/\s+/)[0].toUpperCase();
+  const name = upper((node.findFirstExpression(Expressions.DatabaseTable) ?? node.findFirstExpression(Expressions.Target))?.concatTokens() ?? "");
+  if (!ctx.reg.getObject("TABL", name)) throw new Unsupported(`${verb} ${name || "?"}: not a table of the dictionary in this program`);
+  try {
+    lowerRelation({rel: kind, table: name.toLowerCase()}, "sqlite");
+  } catch (e) {
+    throw new Unsupported(`${verb} ${name}: the relational IR has no ${kind} node (${e.message})`);
+  }
+  throw new Unsupported(`${verb} ${name}: the relational IR lowers ${kind} now, and nothing here emits it yet`);
 }
 
 /**
