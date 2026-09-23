@@ -1397,23 +1397,59 @@ function statement(node, ctx) {
     // [MATCH OFFSET o] [MATCH LENGTH l]; measured on A4H: POSIX leftmost-
     // longest, offsets in characters, a failed FIND leaves every target alone,
     // a submatch target without a group (or of a group that did not take
-    // part) becomes initial
+    // part) becomes initial.
+    // ultra/sadl (A4H 2026-09-24, ZCL_GOGEN_T_FINDSEC): IN SECTION [OFFSET o]
+    // [LENGTH l] OF s for a substring in a string (MATCH OFFSET counts from
+    // the start of s, not of the section), and IN TABLE itab of strings
+    // [MATCH LINE n] (row by row, the first row with a match). REGEX IN
+    // SECTION stays refused: what ^ and $ see there is not measured.
     const kids = node.getChildren();
     const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
-    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|SECTION|IN\s+TABLE|IN\s+BYTE\s+MODE)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
+    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
     if (kind && kind !== "REGEX") throw new Unsupported(`FIND ${kind}`);
-    const [pat, subj] = node.findDirectExpressions(Expressions.Source);
-    const targets = [];
-    let mode = null;
-    const out = {s: "find", regex: kind === "REGEX", pattern: convert(source(pat, ctx), S), subject: convert(source(subj, ctx), S),
+    const inTable = words.some((w, i) => w === "IN" && words[i + 1] === "TABLE");
+    const section = words.includes("SECTION");
+    if (section && (kind === "REGEX" || inTable)) throw new Unsupported(`FIND form: ${text}`);
+    // the Sources in order: pattern, [section offset], [section length], subject
+    const srcs = [];
+    let smode = "pat";
+    for (let i = 0; i < kids.length; i += 1) {
+      const w = words[i];
+      if (w === "SECTION") { smode = "sec"; continue; }
+      if (smode === "sec" && w === "OFFSET") { smode = "secoff"; continue; }
+      if (smode !== "pat" && smode !== "subj" && w === "LENGTH") { smode = "seclen"; continue; }
+      if (smode !== "pat" && w === "OF") { smode = "subj"; continue; }
+      if (isExpr(kids[i], Expressions.Source)) srcs.push({mode: smode === "pat" && srcs.length > 0 ? "subj" : smode, node: kids[i]});
+    }
+    const pat = srcs.find((x) => x.mode === "pat")?.node;
+    const subj = srcs.find((x) => x.mode === "subj")?.node;
+    if (!pat || !subj) throw new Unsupported(`FIND operands: ${text}`);
+    const patX = source(pat, ctx);
+    if (!charlike(patX.type)) throw new Unsupported(`FIND of a ${patX.type.k}`);
+    const out = {s: "find", regex: kind === "REGEX", pattern: convert(patX, S),
       icase: /\bIGNORING\s+CASE\b/i.test(text), subs: [], off: null, len: null};
+    if (inTable) {
+      const tb = source(subj, ctx);
+      if (tb.type.k !== "table" || tb.type.row.k !== "string") throw new Unsupported(`FIND IN TABLE of a ${tb.type.k === "table" ? `table of ${tb.type.row.k}` : tb.type.k}`);
+      out.table = tb;
+    } else if (section) {
+      const sx = source(subj, ctx);
+      if (sx.type.k !== "string") throw new Unsupported(`FIND IN SECTION of a ${sx.type.k}`);
+      out.subject = sx;
+      const so = srcs.find((x) => x.mode === "secoff")?.node;
+      const sl = srcs.find((x) => x.mode === "seclen")?.node;
+      out.secOff = so ? convert(source(so, ctx, I), I) : null;
+      out.secLen = sl ? convert(source(sl, ctx, I), I) : null;
+    } else out.subject = convert(source(subj, ctx), S);
+    let mode = null;
     for (let i = 0; i < kids.length; i += 1) {
       const w = words[i];
       if (w === "SUBMATCHES") { mode = "sub"; continue; }
       if (w === "MATCH" && words[i + 1] === "OFFSET") { mode = "off"; i += 1; continue; }
       if (w === "MATCH" && words[i + 1] === "LENGTH") { mode = "len"; i += 1; continue; }
+      if (w === "MATCH" && words[i + 1] === "LINE") { mode = "line"; i += 1; continue; }
       if (w) { mode = null; continue; }
       if (!isExpr(kids[i], Expressions.Target) || mode === null) continue;
       const t = lvalue(kids[i], ctx);
@@ -1421,11 +1457,11 @@ function statement(node, ctx) {
         if (!charlike(t.type)) throw new Unsupported(`SUBMATCHES into a ${t.type.k}`);
         out.subs.push({target: t, value: convert({e: "temp", name: `fsub[${out.subs.length}]`, type: S}, t.type)});
       } else {
-        if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode === "off" ? "OFFSET" : "LENGTH"} into a ${t.type.k}`);
+        if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode.toUpperCase()} into a ${t.type.k}`);
+        if (mode === "line" && !inTable) throw new Unsupported(`MATCH LINE without IN TABLE: ${text}`);
         out[mode] = t;
       }
     }
-    void targets;
     return out;
   }
   if (isStmt(node, Statements.Clear)) {
@@ -3401,6 +3437,16 @@ export function convert(expr, to) {
   // length (overflow when the digits do not fit, as ABAP raises)
   if (to.k === "p" && to.dec === 0 && (from.k === "i" || from.k === "int8")) return ok("i2p");
   if (to.k === "p" && to.dec === 0 && from.k === "p" && from.dec === 0) return ok("p2p");
+  // a character literal of digits only into a p without decimals (ultra/
+  // sadl: CONSTANTS ... TYPE timestamp VALUE '20260912010000', iv_timestamp
+  // = '...'): the digits are the value, decided here at build time; a sign,
+  // a blank, a point or more digits than the p holds is a conversion rule
+  // (or an overflow) not taken here
+  if (to.k === "p" && to.dec === 0 && expr.e === "chars" && /^[0-9]{1,31}$/.test(expr.value)) {
+    const digits = expr.value.replace(/^0+(?=\d)/, "");
+    if (digits.length > 2 * to.len - 1) throw new Unsupported(`the literal '${expr.value}' does not fit p LENGTH ${to.len}`);
+    return {e: "str", value: digits, type: to};
+  }
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
   if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");
@@ -3547,6 +3593,14 @@ function compare(node, ctx) {
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;
+  // packed without decimals against packed or an integer (ultra/sadl, the
+  // SADL MPCs' timestamps): compared as numbers, the operands as they are
+  // (the digits of a p value are exact); an arithmetic operand is refused
+  const pInt = (t) => (t.k === "p" && t.dec === 0) || t.k === "i" || t.k === "int8";
+  if (types.some((t) => t.k === "p") && types.every(pInt) && !hasArith(sources[0]) && !hasArith(sources[1])) {
+    r = {c: "cmp", op, l: convert(source(sources[0], ctx), P31), r: convert(source(sources[1], ctx), P31), type: P31};
+    return not ? {c: "not", x: r} : r;
+  }
   if (types.some(numeric)) {
     // numbers compare numerically; a character operand is converted to the
     // numeric type (f when any operand is f)

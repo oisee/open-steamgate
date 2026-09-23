@@ -30,6 +30,9 @@ func AddP(a, b string) string { return pOut(new(big.Int).Add(pInt(a), pInt(b)), 
 func SubP(a, b string) string { return pOut(new(big.Int).Sub(pInt(a), pInt(b)), 31, "-") }
 func MulP(a, b string) string { return pOut(new(big.Int).Mul(pInt(a), pInt(b)), 31, "*") }
 
+// CmpP compares two packed values: -1, 0 or 1.
+func CmpP(a, b string) int { return pInt(a).Cmp(pInt(b)) }
+
 // IToP is an integer as a packed value (i and int8 both reach it widened).
 func IToP[T int32 | int64](i T) string { return strconv.FormatInt(int64(i), 10) }
 

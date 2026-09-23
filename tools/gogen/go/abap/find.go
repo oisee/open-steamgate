@@ -20,8 +20,10 @@ var regexCache sync.Map
 func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []string) {
 	subs := make([]string, n)
 	if !regex {
+		// an empty substring is found at the start, length 0 (A4H
+		// 2026-09-24, ZCL_GOGEN_T_FINDSEC x1 x2: 0/0/0)
 		if p == "" {
-			return false, 0, 0, subs
+			return true, 0, 0, subs
 		}
 		hay, needle := s, p
 		if icase {
@@ -117,4 +119,48 @@ func checkLines(p, s, where string) {
 	if strings.ContainsAny(s, "\r\u2028\u2029") && lineAnchors(p) {
 		panic(NotCompiled(where, "^ or $ in a text with a line end other than \\n is not measured: "+p))
 	}
+}
+
+// FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a
+// substring (not a regex), measured on A4H 2026-09-24 (ZCL_GOGEN_T_FINDSEC):
+// the match offset counts from the start of s; an offset below 0 or past the
+// end, a length below -1, or a section past the end raise
+// CX_SY_RANGE_OUT_OF_BOUNDS; a length of -1 is the rest of s, as if none
+// were given (measured: -1 finds, -3 raises); an offset at the end is an
+// empty section, where only an empty pattern is found (at the offset,
+// length 0). A match must lie inside the section.
+func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, int32, []string) {
+	r := []rune(s)
+	if off < 0 || off > int32(len(r)) || n < -1 {
+		rangeError()
+	}
+	end := int32(len(r))
+	if n >= 0 {
+		if off+n > end {
+			rangeError()
+		}
+		end = off + n
+	}
+	ok, o, l, subs := FindStmt(string(r[off:end]), p, false, icase, nsub)
+	if !ok {
+		return false, 0, 0, subs
+	}
+	return true, off + o, l, subs
+}
+
+// FindTable is FIND [REGEX] p IN TABLE itab (rows of strings), measured on
+// A4H 2026-09-24 (ZCL_GOGEN_T_FINDSEC q..w2): each row on its own (no match
+// across rows), the first row with a match wins; its line (from 1), offset,
+// length and submatches, as FindStmt gives them for that row. An empty table
+// is not found. An empty substring pattern is not measured here and dumps.
+func FindTable(rows []string, p string, regex, icase bool, nsub int) (bool, int32, int32, int32, []string) {
+	if !regex && p == "" {
+		panic(NotCompiled("FIND IN TABLE", "an empty pattern in a table is not measured"))
+	}
+	for i, row := range rows {
+		if ok, o, l, subs := FindStmt(row, p, regex, icase, nsub); ok {
+			return true, int32(i + 1), o, l, subs
+		}
+	}
+	return false, 0, 0, 0, make([]string, nsub)
 }

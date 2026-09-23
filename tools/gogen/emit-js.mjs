@@ -527,8 +527,13 @@ function stmt(st, ctx, d) {
         `${t}    if (${cond}) { ${bind} s.sy.subrc = 0; s.sy.tabix = ${st.hashed ? "0" : `i${n} + 1`}; break; }`, `${t}  }`, `${t}}`];
     }
     case "find": {
-      const lines = [`${t}{`, `${t}  const [fok, foff, flen, fsub] = abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length});`,
+      // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
+      const call = st.table ? `const [fok, fline, foff, flen, fsub] = abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length});`
+        : "secOff" in st ? `const [fok, foff, flen, fsub] = abap.FindSection(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.icase}, ${st.secOff ? expr(st.secOff, ctx) : "0"}, ${st.secLen ? expr(st.secLen, ctx) : "-1"}, ${st.subs.length});`
+          : `const [fok, foff, flen, fsub] = abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length});`;
+      const lines = [`${t}{`, `${t}  ${call}`,
         `${t}  if (fok) {`, `${t}    s.sy.subrc = 0;`];
+      if (st.line) lines.push(`${t}    ${place(st.line, ctx)} = fline;`);
       if (st.off) lines.push(`${t}    ${place(st.off, ctx)} = foff;`);
       if (st.len) lines.push(`${t}    ${place(st.len, ctx)} = flen;`);
       for (const x of st.subs) lines.push(`${t}    ${place(x.target, ctx)} = ${expr(x.value, ctx)};`);
@@ -774,7 +779,9 @@ function cond(c, ctx) {
     case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
+    case "cmp":
+      if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
+      return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;
