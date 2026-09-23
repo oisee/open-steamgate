@@ -93,6 +93,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
   program.supplied = suppliedParams(reg, program.wanted);
+  PROGRAM = program;
   const ctx0 = {reg, program};
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
@@ -622,7 +623,10 @@ function registerConst(program, name, id, className) {
   if (value !== null && typeof value === "object" && type.k === "struct") {
     const fields = program.structs.get(type.go)?.fields ?? [];
     const byName = new Map(Object.entries(value).map(([k, v]) => [upper(k), v]));
-    if (fields.length === 0 || fields.some((f) => !SCALAR.includes(f.type.k) || typeof byName.get(f.name) === "object")) return undefined;
+    // an n component (MSGNO of a T100 key) whose VALUE is exactly its digits:
+    // the characters are the value; any other n VALUE is not measured
+    const nDigits = (f) => f.type.k === "n" && byName.has(f.name) && new RegExp(`^[0-9]{${f.type.len}}$`).test(unquote(byName.get(f.name)));
+    if (fields.length === 0 || fields.some((f) => (!SCALAR.includes(f.type.k) && !nDigits(f)) || typeof byName.get(f.name) === "object")) return undefined;
     program.consts.set(go, {go, type, value: Object.fromEntries(fields.map((f) => [f.name, byName.has(f.name) ? unquote(byName.get(f.name)) : undefined]))});
     return go;
   }
@@ -2888,6 +2892,19 @@ export function convert(expr, to) {
   if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
+  // two structures of one technical type (the same components in the same
+  // order, each of the same type and length; names may differ): a move is
+  // component by component in order, as ABAP moves compatible structures.
+  // Anything else between structures (a layout move of another shape) is
+  // refused. A T100 key constant into TEXTID is the case that needs it.
+  if (from.k === "struct" && to.k === "struct" && PROGRAM) {
+    const ff = PROGRAM.structs.get(from.go)?.fields;
+    const tf = PROGRAM.structs.get(to.go)?.fields;
+    const flat = (t) => !["struct", "table", "ref", "data", "dref", "exc"].includes(t.k);
+    if (ff && tf && ff.length === tf.length && ff.every((f, i) => flat(f.type) && sameType(f.type, tf[i].type) && (f.type.len ?? null) === (tf[i].type.len ?? null))) {
+      return {e: "conv", kind: "struct_layout", from, to, x: expr, type: to, pairs: tf.map((f, i) => [f.name, ff[i].name])};
+    }
+  }
   if (from.k === "ref" && to.k === "ref") {
     // up-cast: a class into an interface it implements, or any reference into
     // the same interface; a down-cast needs CAST and is refused
@@ -2907,6 +2924,7 @@ function downCast(x, to, text) {
 }
 
 let REG = null;
+let PROGRAM = null;
 function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {

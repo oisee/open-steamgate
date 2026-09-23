@@ -506,6 +506,7 @@ function constLiteral(c) {
   // int8: the digits as written, a JS number would round 9223372036854775807
   if (c.type.k === "int8") return String(BigInt(String(c.value).trim()));
   if (c.type.k === "f") return String(Number(c.value));
+  if (c.type.k === "n") return JSON.stringify(String(c.value));
   if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
   if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes(c.value, c.type.len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
   throw new Error(`constant of type ${c.type.k}`);
@@ -1098,6 +1099,8 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "struct_layout":
+      return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
     case "num":
       if (from === "i" && to === "f") return `float64(${x})`;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

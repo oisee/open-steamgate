@@ -705,6 +705,8 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "struct_layout":
+      return `((v) => ({${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}}))(${x})`;
     case "num":
       if (from === "i" && to === "f") return x;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

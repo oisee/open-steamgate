@@ -36,6 +36,11 @@ const EXPECT = {
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
   // (A4H 2026-09-23, $batch parts end their body this way)
+  // a generic EXPORTING (TYPE any) is the caller's variable, by reference:
+  // not cleared on entry, written in place; MOVE-CORRESPONDING into it
+  // converts component by component; CLEAR clears the caller's structure
+  // (A4H 2026-09-23; the entry provider's read_entry_data does all three)
+  ZCL_GOGEN_T_GENEXP: "set:5/x/keep corr:42/hel/keep clear:42/hel/[]",
   ZCL_GOGEN_T_SHIFT: "1:4[__ab] 2:4[_ab_] 3:2[ab] 4:0[] 5:4[_aNb] 6:1[_] 7:4[abN_] 8:5[___ab]",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in
