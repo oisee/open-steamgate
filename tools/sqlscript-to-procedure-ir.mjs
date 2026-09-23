@@ -187,8 +187,18 @@ export function compileProcedure(method, types, options = {}) {
   const relationCandidates = inputParameters
     .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve, store)}))
     .filter(({schema}) => schema !== undefined);
-  if (relationCandidates.some(({one}) => one.optional === true)) {
-    throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER or STRING scalars");
+  // OPTIONAL, as the kernel reads it on an AMDP method (measured on A4H,
+  // 2026-09-23): on a scalar input it does not compile -- only DEFAULT makes
+  // a scalar optional -- and on a table input it does, an omitted table
+  // arriving as an empty one. The first is refused in the kernel's words;
+  // the second is measured and not carried yet.
+  const methodName = upper(method.name ?? "");
+  for (const one of inputParameters) {
+    if (one.optional !== true || one.default !== undefined) continue;
+    if (relationCandidates.some((candidate) => candidate.one === one)) {
+      throw new UnsupportedSqlScript(`OPTIONAL table input ${one.name}: omitted it is an empty table (measured on A4H); not carried yet`);
+    }
+    throw new UnsupportedSqlScript(`Use DEFAULT instead of OPTIONAL for the optional parameter "${upper(one.name)}" of the AMDP method "${methodName}"`);
   }
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
@@ -240,12 +250,11 @@ export function compileProcedure(method, types, options = {}) {
           throw new UnsupportedSqlScript(`DEFAULT '${given.default}' for ${one.name} is not ${zeros.length} digits, so not a ${zeros.length === 8 ? "date" : "time"}`);
         }
       }
-      const initial = one.optional === true && given.default === undefined && zeros !== undefined ? {default: zeros} : {};
       // the kind travels with the parameter, not in the IR type (which the
       // lowering reads as plain C(n)): the runtime binds an explicit initial
       // date/time as its zero digits and refuses a value that is not digits
       const kind = zeros === undefined ? {} : {kind: zeros.length === 8 ? "DATS" : "TIMS"};
-      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...given, ...initial, ...kind};
+      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...given, ...kind};
     });
   // INTEGER, STRING, and fixed-length character (CHAR, CLNT, DATS, TIMS all
   // arrive as C(n)): what the kernel binds for C was measured on A4H --
