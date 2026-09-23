@@ -5,6 +5,7 @@
 // implementation of SQLScript typing and one list of explicit refusals.
 import {T, lit, scan, project, union, schemaOf} from "./sqlscript-ir.mjs";
 import {toIr, BindError} from "./sqlscript/to-ir.mjs";
+import {scalarTypeOf, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
 import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
@@ -42,7 +43,22 @@ const isBareNull = (node) => {
   return leaves.length === 1 && leaves[0].node === "identifier" && upper(leaves[0].value) === "NULL";
 };
 
-export function irTypeFromAbap(type) {
+/**
+ * The ABAP type text of a procedure's signature into an IR type -- the
+ * **measured** set only. scalar-types.mjs reads more (NUMC, RAW, INT8, the
+ * CDS built-ins) for the corpus instruments, where a type that binds is a
+ * type that can be counted; here a type that compiles is a type that runs,
+ * and NUMC's leading zeros or bytes on SQLite have not been measured. So the
+ * literal forms admitted are the ones this function admitted before the
+ * shared reader existed, and a data element -- only when a caller hands in
+ * a dictionary -- is admitted when it resolves to one of the same datatypes.
+ * Everything else is the refusal it always was.
+ */
+// exactly the datatypes the literal forms above map to, nothing wider: CLNT,
+// CUKY, CURR and the rest wait for the CHAR-input conformance case (trailing
+// blanks on HXE against DuckDB) before a data element of theirs is admitted
+const MEASURED_DATATYPES = new Set(["CHAR", "DATS", "TIMS", "INT4", "STRG", "DEC"]);
+export function irTypeFromAbap(type, resolve) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
   if (["STRING", "SSTRING"].includes(text)) return T.str;
@@ -52,26 +68,36 @@ export function irTypeFromAbap(type) {
   if (length !== undefined) return T.char(Number(length));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
   if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
+  if (resolve !== undefined && /^[A-Z_\/][\w\/]*$/.test(text)) {
+    const found = resolve(text);
+    if (found !== undefined && MEASURED_DATATYPES.has(upper(found.DATATYPE))) {
+      try {
+        return scalarTypeOf(text, resolve);
+      } catch (error) {
+        if (!(error instanceof UnresolvedScalarType)) throw error;
+      }
+    }
+  }
   throw new UnsupportedSqlScript(`ABAP type ${type || "<empty>"} has no portable SQLScript mapping`);
 }
 
-function structuredTable(abapType, types) {
+function structuredTable(abapType, types, resolve) {
   const table = types.get(upper(abapType));
   const row = table?.kind === "table" ? types.get(table.of) : undefined;
   if (row?.kind !== "structure") return undefined;
-  return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType)]));
+  return Object.fromEntries(row.components.map((one) => [upper(one.name), irTypeFromAbap(one.abapType, resolve)]));
 }
 
-function outputFrom(method, types) {
+function outputFrom(method, types, resolve) {
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
   }
   const parameter = outputs[0];
-  const schema = structuredTable(parameter.abapType, types);
+  const schema = structuredTable(parameter.abapType, types, resolve);
   if (schema !== undefined) return {name: upper(parameter.name), kind: "relation", schema};
   if (parameter.direction === "RETURNING") {
-    const type = irTypeFromAbap(parameter.abapType);
+    const type = irTypeFromAbap(parameter.abapType, resolve);
     if (type.abap !== "I") {
       throw new UnsupportedSqlScript("initial scalar RETURNING support is limited to ABAP INTEGER exactly");
     }
@@ -83,11 +109,12 @@ function outputFrom(method, types) {
 /** Compile one extracted AMDP method without changing its source body. */
 export function compileProcedure(method, types, options = {}) {
   const catalogue = options.catalogue ?? {};
+  const resolve = options.resolveType;
   const tree = parse(new Body(), lex(method.body));
-  const output = outputFrom(method, types);
+  const output = outputFrom(method, types, resolve);
   const inputParameters = method.parameters.filter((one) => one.direction === "IN");
   const relationCandidates = inputParameters
-    .map((one) => ({one, schema: structuredTable(one.abapType, types)}))
+    .map((one) => ({one, schema: structuredTable(one.abapType, types, resolve)}))
     .filter(({schema}) => schema !== undefined);
   if (relationCandidates.some(({one}) => one.optional === true)) {
     throw new UnsupportedSqlScript("initial OPTIONAL support is limited to ABAP INTEGER or STRING scalars");
@@ -95,11 +122,29 @@ export function compileProcedure(method, types, options = {}) {
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
   const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
+  // a DEFAULT is carried as its literal, never as the initial value: an
+  // omitted `DEFAULT 10` filled with 0 answers a different question
+  const defaultOf = (one, type) => {
+    if (one.default === undefined) return {};
+    const text = String(one.default);
+    if (type.abap === "I" && /^-?\d+$/.test(text)) return {optional: true, default: Number(text)};
+    if (type.abap === "STRING" && /^'(?:[^']|'')*'$/.test(text)) {
+      const value = text.slice(1, -1).replaceAll("''", "'");
+      // 'ab  ' is a text-field literal, and ABAP drops its trailing blanks on
+      // the way into a STRING; whether that is what reaches the procedure
+      // has not been measured, so a default with trailing blanks is refused
+      // rather than trimmed or kept by guess (foreman-dell, 2026-09-23)
+      if (/\s$/.test(value)) throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} ends in blanks; a text-field literal into STRING is not measured yet`);
+      return {optional: true, default: value};
+    }
+    throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} is not a literal of its type this compiler carries`);
+  };
   const parameters = inputParameters
     .filter((one) => !relationNames.has(upper(one.name)))
-    .map((one) => one.optional === true
-      ? {name: upper(one.name), type: irTypeFromAbap(one.abapType), optional: true}
-      : {name: upper(one.name), type: irTypeFromAbap(one.abapType)});
+    .map((one) => {
+      const type = irTypeFromAbap(one.abapType, resolve);
+      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...defaultOf(one, type)};
+    });
   if (parameters.some((one) => !["I", "STRING"].includes(one.type.abap))) {
     throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
   }

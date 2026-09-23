@@ -456,3 +456,246 @@ This does not make the surrounding point wrong: the language being parsed is
 **SQLScript as ABAP hands it over**, and `*` in column one is a comment
 because ABAP says so and SQLScript does not. The reference for that class of
 question is what reaches the database, not the book.
+
+### The signature was the instrument's, not the corpus's: 18 → 31 lowered
+
+*2026-09-22, branch `feat/amdp-corpus-width`. Measured with
+`tools/sqlscript/coverage.mjs`, which now prints the dictionaries it was
+given, because the numbers below depend on them.*
+
+The top of the "parsed and then refused" list read `unknown scalar
+:p_sapclient` (12), `:p_clnt` (6), `:i_db_schema` (3). Not one of those was
+a property of a body. The coverage instrument handed the binder **no scalar
+types at all**: `toIr` took them only from an option the procedure compiler
+sets, and derived nothing from the signature it was given. So every scalar
+parameter of every method was "unknown" -- the histogram measured the
+instrument again (foreman-dell, reading `coverage.mjs:125` against
+`to-ir.mjs:92`).
+
+Two things were behind the one line, and they came apart on looking:
+
+| | bodies | what it was |
+| --- | ---: | --- |
+| `:p_sapclient`, `:p_clnt` | 24 | methods declared `FOR TABLE FUNCTION x`: the class has no signature, the DDLS has it (`with parameters @Environment.systemField: #CLIENT P_SAPClient : abap.clnt`) |
+| `:i_db_schema`, `:iv_schema_name`, `:ip_client`, ... | 12 | ordinary signatures typed by **data elements** (`db_schema`, `char25`, `mandt`), which need a dictionary |
+
+Both are now read, and the rule for what cannot be read is the one that
+matters: a type no dictionary resolves is a **named refusal** ("data element
+DB_SCHEMA is not in any dictionary this run was given"), never STRING. A
+client field read as text would compare and pad differently on every
+dialect and the body would run and answer something else.
+
+| | before | signature scalars (1a) | + DDLS table functions (1b) |
+| --- | ---: | ---: | ---: |
+| working, lowered | 16 (4%) | 18 (5%) | **31 (9%)** |
+| teaching, lowered | 17 | 17 | 18 |
+
+1a unlocked two bodies (`S_DAAG_PARTITIONING`, `iv_schema_name : char25`,
+resolved through the released DOMA/DTEL dump) and moved the rest into true
+refusals. 1b read 97 table-function signatures off the exports (12 DDLS are
+not in them) and unlocked thirteen. **Lowered is not runnable**: those
+thirteen take a `CLNT` input, and the portable runtime still admits only
+INTEGER and STRING inputs. CHAR inputs wait for a conformance case with
+trailing blanks measured on HXE against DuckDB, because ABAP pads, HANA
+compares without the padding and DuckDB with it; `systemField: CLIENT` is a
+flag on the parameter and binds nothing (`sy-mandt` is 123 here and 001 on
+A4H, ANORMALIES).
+
+The dictionaries are folders of abapGit XML with the `input_folder` rule --
+the later folder wins a shared name and says so: the released dump, then
+`--ddic` folders, then the package's own export, which was taken off the
+system that runs the code. On this machine: 26 names taken over, 21 + 5
+resolutions answered by dump + exports.
+
+What the honest list says next, working corpus: 23 × a table function call
+in `FROM` (the callee's RETURNS is now read off its DDLS, indexed by name
+and by `implemented by method`, which is what that slice needs), 6 + 3 ×
+`IT_CONFIGURATION` (an `IN` table whose type the class does not hold),
+5 × `CURRENT_SCHEMA`, 4 × `CALL`.
+
+### The catalogue, closed over the dictionary: 31 → 41 lowered, and 7 of them honestly
+
+*2026-09-22, later. Same branch, same instrument, one more column in it.*
+
+The bodies read three things the instrument described with nothing: the
+tables their `USING` names, their table parameters, and through both every
+data element and include. The exports carry 1980 `TABL` and 726 `TTYP`
+beside the classes, so the folder dictionary indexes them too and the
+catalogue is built per body the way `amdp-gen` builds it for the tree:
+`USING` tables through `ddicCatalogue`, table parameters through the class's
+own `TYPES` or a `TTYP` → `TABL` of the dictionary.
+
+Two things were under the walk that reads a table, both older than this
+branch. `osd-type-graph` skipped every `DD03P` row whose name begins with a
+dot -- `.INCLUDE`, `.INCLU--AP`, `.INCLU-XXX` -- and 349 of the 1970 tables
+have one; the runtime catalogue was missing **2966 columns** (`SWD_VERSION`:
+1 field seen, 77 there), and a column not in the schema is what the
+non-strict binder reads as STRING. And its cycle guard was a set for the run
+rather than for the path, so a structure included twice or a data element
+used by two fields came back `CYCLE`. Both fixed with tests; the generated
+RFC dispatcher, which reads the same graph, is byte-identical before and
+after. An include that does not resolve is a missing *set* of columns whose
+names nobody knows, so that table is refused whole (90 of the 349).
+
+**The number that matters is the strict one.** foreman-dell asked for a
+second column: the same body bound with `strictColumns`, every column
+required to be in a typed scope. It says how many bodies lower only because
+a column nobody described was read as STRING:
+
+| working corpus | lowered | of which every column typed |
+| --- | ---: | ---: |
+| after 1b | 31 (9%) | *not measured* |
+| after 2a | 41 (11%) | **7 (2%)** |
+
+So the headline moved from 31 to 41, and 34 of the 41 are guesses. The
+strict column is now printed first and quoted as the number; the other one
+is there so the gap stays visible. A column whose data element is in no
+dictionary is carried **marked** and refused by name when a body reads it
+(or when `SELECT *` would carry it), the rule scalars already had -- so a
+table is not refused for a field nobody touches.
+
+What the strict refusals name, working corpus: `MANDT` ×8, `NULL` ×4,
+`ROW_NR` ×2, `HOST` ×2. The `MANDT` ones are not a dictionary gap in the
+data element (it is in the dump) but in the **table**: `USING` names
+standard tables of other packages -- `SCARR`, `SFLIGHT`, `TADIR`, `SPFLI`,
+`SWWCNTP0` -- and 97 of the 230 `USING` names are in no export at all. The
+instrument now prints the **wanted** list: absent tables ranked by the
+bodies they would let be typed, with the bodies that need two or more
+flagged. Today it is short -- `USOBHASH` 2, `ADR12` 2, then ones -- because
+most of the 34 guessing bodies fail strict on something else first
+(`NULL`, aliases, expressions). Exporting those tables from the sandbox is
+a decision, not a build step; the list is what to decide with.
+
+The `.INCLU-XXX` rule was read off the export rather than assumed:
+`DEMO_WEEK` includes `DEMO_DAY` five times as `.INCLU-_MO` … `.INCLU-_FR`,
+and its columns are `WORK_MO`, `FREE_MO`, … -- the suffix is appended to
+every included field. Expanding without it would have produced column names
+that look right and are not.
+
+### The strict histogram, read body by body: 7 → 10, and 41 → 27 guesses
+
+*2026-09-23, early. Slices (b) and (c) of the same branch.*
+
+With the strict column in place the honest question became "why do the
+other 34 lower only by guessing", and the answer came from reading each
+one (`strict-why`, a probe over `coverage.measure().bodies`) rather than
+from the histogram line, which said `column X is not present` 33 times and
+nothing else. Four kinds:
+
+| kind | bodies | what it was |
+| --- | ---: | --- |
+| tables in no dictionary here | 14 | `USING` names standard tables of other packages; by package: **CMS_VDM 8 bodies / 8 tables**, SUSR_IS_UI 2/1, S_ADDRESS_VDM 2/1, MDG_PROCESS_ANALYTICS 1/3 |
+| the binder, ours | 13 | an alias **without AS** (`from :it_parent_guid a`), NULL and TRUE read as columns called NULL and TRUE, a table qualified by its own name (`demo_cs_spfli.mandt`), ORDER BY over a projected alias (`row_nr`) |
+| HANA's own views | 7 | `sys.m_host_information`, `"PUBLIC"."TABLES"`, `M_*` -- not portable in principle |
+| the rest | – | `$ABAP.TYPE` casts, functions without a measured rendering |
+
+The binder kind is fixed and the view kind is refused by name -- schema
+qualifier `SYS` / `PUBLIC` / `_SYS_*`, and an unqualified `M_*` only when
+the catalogue does not describe it, because the dictionary has old
+matchcode views named so. `sys.dummy` stays DUMMY. NULL is an untyped
+literal that a CAST, a CASE branch or a comparison types; a bare `NULL AS
+x` is refused ("CAST(NULL AS <type>) says which"), and a final walk over
+the IR refuses any NULL that reached the end untyped, so a path nobody
+remembered (a function argument, arithmetic) cannot pass `type: undefined`
+on. TRUE / FALSE are refused by name: HANA has BOOLEAN and SQLite has not.
+
+| working corpus | every column typed | lowered with guesses |
+| --- | ---: | ---: |
+| after 2a | 7 (2%) | 41 (11%) |
+| after (b): binder | 10 (3%) | 36 |
+| after (c): views refused | **10 (3%)** | **27 (7%)** |
+
+The second column shrinks because a guess became a named refusal, which is
+the direction it should move. What is left in it is the 14 bodies whose
+tables an export would bring, and the **wanted** list now prints them per
+package: `CMS_VDM 8/8` is one decision. The tables of HANA's own views are
+kept out of that list.
+
+Two things learned on the way, both about instruments. The "diamond" the
+include expansion seemed to produce -- 16 tables with a doubled field --
+was the expansion's own marker rows for two unresolved includes, both
+named `.INCLUDE`; DDIC does not activate a real duplicate, and the
+measurement was of the marker. And a false ambiguity: a table read bare in
+both branches of a UNION was "a source twice without an alias", because
+the set lived on the body rather than on the SELECT. Both found by the
+count moving the wrong way and reading one body.
+
+### 2b: a table function called in FROM, bound against a registry: 10 → 14
+
+*2026-09-23, morning. The line that had topped the working list since the
+grammar learned the bracket: 23 bodies, "a table function call in FROM is
+parsed but not lowered yet".*
+
+Looking at the 23 before writing anything: 15 call one class's functions
+(`cl_islm_ml_engine_int_util=>convert_configuration` and two siblings),
+declared in the **class** -- `CLASS-METHODS … IMPORTING value(it_configuration)
+TYPE … RETURNING value(rt) TYPE …`, `METHOD … BY DATABASE FUNCTION` -- and
+called with the caller's own IN table as the argument; 1 calls a DDLS table
+function; 1 calls `sys.series_generate_date`. A registry built from DDLS
+alone would have moved 15 bodies from one refusal to another.
+
+So the registry has both sources (`tools/sqlscript/table-function-registry.mjs`):
+every `define table function` the dictionary holds, keyed by its name and
+by `implemented by method`; and every `BY DATABASE FUNCTION` method with a
+RETURNING table type, keyed `CLASS=>METHOD`, its RETURNING type read through
+the class's TYPES or the dictionary. On this export: **147 declarations**,
+95 of them DDLS (an earlier figure of 242 counted registry keys, and a DDLS
+with `implemented by method` is keyed twice). The binder looks the callee up as the body spells it -- `"CL=>M"`
+and the DDLS entity are different objects on HANA, so nothing is normalised
+-- binds each argument against the declared parameter (a scalar against the
+parameter's resolved type, refused on a mismatch or when no dictionary
+types the parameter; a table only as a table variable or an IN table of
+this body), lets a
+trailing OPTIONAL or DEFAULT parameter be omitted as the corpus does, and
+refuses by name: a callee not in the registry, a count that does not fit,
+a table argument that is an expression, a system function (`SYS.*`). The
+result carries the callee's declared RETURNS as its schema.
+
+Lowering renders the call as the source spells it, **on HANA only** and
+only with scalar arguments; on DuckDB and SQLite it is "not compiled for
+<dialect>", and a table-valued argument is refused everywhere: on HANA it
+would have to be a table variable, which one statement does not have.
+
+Two things were under it. abaplint reads no class definition at all out of
+the ISLM classes, so their methods had **no parameters**, and the body's
+own `:it_configuration` was an unknown variable. The first cause I named
+(a multi-line `USING` list) was wrong -- tried in isolation it parses; the
+measured one is the **OPTIONS clause**: `OPTIONS SUPPRESS SYNTAX ERRORS`,
+`DETERMINISTIC` and `CDS SESSION CLIENT` are all refused by the statement
+grammar, and with the METHOD statement the whole class definition goes
+(ANOMALY-2026-09-23-amdp-method-options: 17 of 181 AMDP classes in the
+export, 12 on this clause). The extractor reads the definitions as text
+when abaplint hands back none, and for a method abaplint dropped from a
+definition it did read (`definitionsByText`; a section it cannot read whole
+yields no parameters for that method) -- and the instrument cross-checks that reader against
+abaplint on every class abaplint does read, so its trust is a printed
+number rather than an assumption. And DEFAULT did not count as OPTIONAL:
+`iv_convertvalues TYPE i DEFAULT 0` is why every call of
+`convert_configuration` passes one argument.
+
+| working corpus | every column typed | lowered with guesses |
+| --- | ---: | ---: |
+| after (c) | 10 (3%) | 27 |
+| after 2b | **14 (4%)** | 32 |
+
+Of the 23 bodies, the call was the *first* refusal and rarely the only one:
+now that it binds, 8 stop at `CALL` (a procedure call statement), 7 at a
+bare `NULL AS x`, 2 at `:im_obj` whose data element is in no dictionary
+here, and exactly **one** at the table-valued argument itself. The
+histogram moved to the next honest line, which is what a slice is for.
+
+**The DuckDB route, measured by foreman-dell (DuckDB 1.5.5, `@duckdb/node-api`).**
+Scalar-input table functions: yes -- `CREATE MACRO f(p) AS TABLE SELECT …`,
+called as `FROM f(?)` with a bound parameter, inlined by the planner with
+the caller's filters pushed into the scan, nesting works, named and
+defaulted arguments work, cost against an inlined subquery 1.008×. A
+relation parameter: **no** -- `CREATE MACRO f(tbl) AS TABLE SELECT * FROM
+tbl` fails at CREATE, `f((SELECT …))` fails ("cannot contain subqueries");
+what works is `query_table(name)` over a table, a view or **the caller's
+CTE**, so an IN table has to be named first. A direct self-reference fails
+at CREATE, a two-macro cycle only at call ("max expression depth"), so the
+cycle guard is ours. Dependencies are not tracked (DROP MACRO succeeds
+under a user). An untyped macro parameter takes the type of whatever is
+bound; declare them typed. And DuckDB has no blank-padded CHAR: `'A  ' =
+'A'` is false, which settles the DuckDB column of the trailing-blank
+conformance case before the HXE column exists.

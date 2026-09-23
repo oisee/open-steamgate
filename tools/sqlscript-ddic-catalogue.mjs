@@ -4,25 +4,24 @@
 // knows neither ObjectStore nor abapGit XML; it only needs
 // `{TABLE: {COLUMN: type}}`.  Conversely, DDIC resolution already exists in
 // osd-type-graph.mjs and must not be reimplemented by the AMDP generator.
-import {T} from "./sqlscript-ir.mjs";
+import {irTypeOfDdic, unresolvedType, UnresolvedScalarType} from "./sqlscript/scalar-types.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 
 function irType(field, table) {
+  if (field.INCLUDE !== undefined) {
+    // a missing include is a missing *set* of columns whose names nobody
+    // knows, so refusing on reference cannot work: the table is refused
+    throw new Error(`DDIC ${table}: include ${field.INCLUDE} did not resolve (${field.REASON}), so the table's schema would be partial`);
+  }
   const type = field.TYPE ?? field;
-  const datatype = String(type.DATATYPE ?? "").toUpperCase();
-  const length = Number(type.LENG ?? 0);
-  const decimals = Number(type.DECIMALS ?? 0);
-  if (["CHAR", "CLNT", "CUKY", "LANG", "UNIT", "ACCP", "NUMC", "DATS", "TIMS", "LCHR"].includes(datatype)) {
-    return T.char(length);
+  try {
+    return irTypeOfDdic(type, `DDIC ${table}.${field.NAME}`);
+  } catch (error) {
+    if (!(error instanceof UnresolvedScalarType)) throw error;
+    // one column's element is not in this dictionary: the column is carried
+    // marked, and a body is refused by its name when it reads it
+    return unresolvedType(`${table}.${field.NAME}: ${type.REASON ?? error.message}`);
   }
-  if (["INT1", "INT2", "INT4"].includes(datatype)) return T.int;
-  if (datatype === "INT8") return T.int8;
-  if (["DEC", "CURR", "QUAN", "DF16_DEC", "DF34_DEC"].includes(datatype)) {
-    return T.dec(length, decimals);
-  }
-  if (["STRG", "SSTR"].includes(datatype)) return T.str;
-  if (["RAW", "LRAW", "RSTR"].includes(datatype)) return T.bytes(length || undefined);
-  throw new Error(`DDIC ${table}.${field.NAME}: datatype ${datatype || "<unresolved>"} has no portable IR type`);
 }
 
 /** All transparent/structure TABL objects visible through an ObjectStore.

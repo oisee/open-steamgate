@@ -44,7 +44,7 @@
 // approximating. Refusing is a feature: an engine that quietly returns a
 // different number is the failure this project has already paid for twice.
 
-const DIALECTS = {
+export const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     // HANA infers a bare `?` from its immediate context. In `? || ?` that
@@ -499,7 +499,26 @@ export function lower(rel, dialectName, options = {}) {
     if (r.rel === "alias") return `(${select(r.input)}) AS ${d.quote(r.name)}`;
     if (r.rel === "scan") return String(r.table).toUpperCase() === "DUMMY" ? d.dummy : d.quote(r.table);
     if (r.rel === "ref") return refOf(r.handle);
+    if (r.rel === "tfcall") return tableFunctionFrom(r);
     return `(${select(r)}) AS ${d.quote(`t${alias++}`)}`;
+  };
+
+  /** A table function called in FROM. Only HANA has the callee as an object
+   *  of that name; every other dialect refuses until the callee is compiled
+   *  for it (the DuckDB table-macro route is being measured, 2026-09-23). A
+   *  table-valued argument is refused everywhere: on HANA it has to be a
+   *  table variable, which this SQL does not have. */
+  const tableFunctionFrom = (r) => {
+    if (dialectName !== "hana") {
+      throw new Refused(`the table function ${r.name} is not compiled for ${dialectName}: only HANA has it as an object of that name`);
+    }
+    const args = r.args.map((arg) => {
+      if (arg.kind === "relation") {
+        throw new Refused(`a table-valued argument to ${r.name} is not lowered yet: on HANA it must be a table variable, which one statement does not have`);
+      }
+      return expr(arg.expr);
+    });
+    return `${d.quote(r.name)}(${args.join(", ")})`;
   };
 
   const joinFrom = (r) => {
@@ -553,6 +572,7 @@ export function lower(rel, dialectName, options = {}) {
       case "scan":
       case "ref":
       case "alias":
+      case "tfcall":
         return `SELECT * FROM ${from(r)}`;
       case "filter":
         // **A filter over an aggregate is a HAVING, and has to be rendered
