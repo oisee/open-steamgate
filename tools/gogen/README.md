@@ -122,6 +122,49 @@ The f format of a string template was measured on A4H before it was
 written (fifteen values, `go/abap/fmtf_test.go`): seventeen significant
 digits, always positional, trailing zeros dropped.
 
+### The whole demo, 2026-09-23
+
+`node tools/gogen/demo.mjs [scene ...]` compiles all of ZO4D (83 classes:
+the APC handler, the demo director, every effect) into one Go binary and one
+JS module, and plays every A4H recording through the handler's own path
+(`BUILD_RENDER_CTX`, `GET_EFFECT_AT_BAR`, `RENDER_FRAME`, `FRAME_TO_JSON`).
+Each scene runs in a process of its own under a 4 GB / 120 s ceiling, since
+a loop the compiler gets wrong grows a table without end (one did, and took
+the WSL machine with it).
+
+| | frames equal to A4H | scenes equal frame for frame |
+| --- | ---: | ---: |
+| Go (sin/cos from glibc, `-tags libm`) | 3392 of 3840 | 22 of 25 |
+| JS from the same IR (V8's sin/cos) | 3007 of 3840 | 18 of 25 |
+
+The three scenes left on Go (amiga_ball, amiga_ball_2, sierpinski, plus the
+sierpinski half of glitch) draw the same triangles in another order: `SORT
+... BY z` without `STABLE`, equal keys, and the kernel's order within a tie
+is not insertion order nor its reverse (`[3,2,1,0] [6,7,5,4] ...`). ABAP
+promises nothing there; `docs/frame-comparison.md` already puts the fix in
+the demo (a second key), not in a runtime.
+
+What it took, each measured before it was written:
+- attribute `VALUE`s set when the object is made (a `mv_scale` left at 0
+  stepped a `WHILE` by 0);
+- `x IS NOT INITIAL` read its `NOT` twice;
+- `DATA(x) = frac( f )` is an f: abaplint types the six numeric built-ins by
+  a fixed return (#4302), the IR types the declaration from its source;
+- **sin and cos are glibc's on A4H.** The seed chains of constellation and
+  ignition (`seed = frac( sin( seed * 12345 + i ) * 43758 )`) diverge from
+  V8 at exactly the step where glibc and fdlibm differ, and a build that
+  calls glibc through cgo reproduces them frame for frame. Go's own
+  `math.Sin` differs from both in the last bit for 43 % of arguments; the
+  pure-Go default is a port of fdlibm, bit-equal to V8 on 194 621
+  arguments. A pure port of glibc's sin would give JS and cgo-free Go the
+  same answer as A4H.
+- x fields: `i MOD 256` into x LENGTH 1, `BIT-XOR`, x -> i unsigned, all
+  measured on A4H.
+
+Peak memory of a whole recording (harness keeps every frame): Go 10-430 MB,
+JS 60-1330 MB. Speed is not tuned yet: string templates are concatenated
+with `+` in Go, and V8's ropes beat it on the JSON-heavy scenes.
+
 ## Semantics: what the two backends answer
 
 Every row below was measured on A4H with ABAP Unit (2026-09-23).
@@ -142,9 +185,8 @@ without an overflow is a question for Lars, not a patch.
 
 ## What this does not show
 
-- Two scenes out of about forty, each read in isolation: the handler, the
-  demo director and the scene switching are not compiled, the context is
-  built by the harness.
+- The handler's `frame` command itself is not compiled: it parses its JSON
+  with FIND and offsets, so the harness does its three lines.
 - No database, no `p`, no exceptions beyond arithmetic and conversion, no
   dynamic calls, no references to interfaces (the harness calls the class).
   Those are the expensive parts of a real runtime port (`@abaplint/runtime`
@@ -158,9 +200,7 @@ without an overflow is a question for Lars, not a patch.
 
 ## Next, if this is pursued
 
-1. The rest of the recorded scenes (copperbars, joydivision, cell16/24,
-   ignite_emit, ...) and then the demo's director, so the harness no longer
-   builds the context.
+1. Done: the whole demo (above).
 2. Zork: one closed interpreter of 3k lines, strings, `xstring` and a deep
    call graph, compared by transcript.
 3. Only then the IR inside the transpiler, gradually: an IR node may be an
