@@ -9,7 +9,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
-import {runProcedure, UnsupportedSqlScript, Int2OutOfRange} from "../tools/sqlscript-procedure-ir.mjs";
+import {runProcedure, UnsupportedSqlScript, Int2OutOfRange, SelectIntoRows} from "../tools/sqlscript-procedure-ir.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
 import {scan} from "../tools/sqlscript-ir.mjs";
 import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
@@ -487,5 +487,68 @@ for (const {dialect, make} of ENGINES) describe(`INT2 as measured on A4H, as pro
     let caught;
     try { await run(prog, {IV: 20000}); } catch (error) { caught = error; }
     expect(caught).to.be.instanceOf(Int2OutOfRange);
+  });
+});
+
+// SELECT ... INTO as measured on A4H (docs/sqlscript-hana-observed.md): one
+// row assigns, none raises unless DEFAULT is given, two raise always, a NULL
+// assigns NULL, several columns fill several scalars; COUNT is BIGINT and
+// assigns to an INTEGER scalar
+for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on A4H, as procedures on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "SRC" ("ID" INTEGER, "TXT" VARCHAR)', expect: "none"});
+    await client.native({sql: 'INSERT INTO "SRC" VALUES (1, \'one\'), (5, \'five\'), (20, \'twenty\')', expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  const program = (body, signature = "IMPORTING VALUE(iv) TYPE i RETURNING VALUE(rv) TYPE i") => {
+    const {methods, types} = extract(CLASS(signature, body), "cl_t.clas.abap");
+    return compileProcedure(methods[0], types, {catalogue: CATALOGUE});
+  };
+  const run = (prog, iv) => runProcedure(prog, {client, dialect, inputs: {IV: iv}, inputCatalogue: CATALOGUE});
+  const raises = async (prog, iv) => {
+    let caught;
+    try { await run(prog, iv); } catch (error) { caught = error; }
+    return caught;
+  };
+
+  it("one row assigns its columns, in order, to declared scalars", async () => {
+    const one = program("DECLARE lv INTEGER; SELECT id INTO lv FROM src WHERE id = :iv; rv = :lv;");
+    expect((await run(one, 5)).value).to.equal(5);
+    const two = program("DECLARE la INTEGER; DECLARE lb INTEGER; SELECT id, id * 10 INTO la, lb FROM src WHERE id = :iv; rv = :la + :lb;");
+    expect((await run(two, 5)).value).to.equal(55);
+  });
+
+  it("no row raises, as HANA does, unless DEFAULT is given; two rows raise even with DEFAULT", async () => {
+    const plain = program("SELECT id INTO rv FROM src WHERE id = :iv;");
+    expect(await raises(plain, 7)).to.be.instanceOf(SelectIntoRows).and.have.property("message").that.match(/found no row/);
+    expect(await raises(plain, 5)).to.be.undefined;
+    const many = program("SELECT id INTO rv FROM src WHERE id > :iv;");
+    expect((await raises(many, 0))?.message).to.match(/found more than one row/);
+    const defaulted = program("SELECT id INTO rv DEFAULT 42 FROM src WHERE id = :iv;");
+    expect((await run(defaulted, 7)).value).to.equal(42);
+    expect((await run(defaulted, 5)).value).to.equal(5);
+    const defaultedMany = program("SELECT id INTO rv DEFAULT 42 FROM src WHERE id > :iv;");
+    expect(await raises(defaultedMany, 0)).to.be.instanceOf(SelectIntoRows);
+  });
+
+  it("COUNT is BIGINT and fills an INTEGER scalar, always one row; MAX of no rows is NULL", async () => {
+    const counted = program("SELECT count(*) INTO rv FROM src WHERE id > :iv;");
+    expect((await run(counted, 100)).value).to.equal(0);
+    expect((await run(counted, 0)).value).to.equal(3);
+    const maxed = program("SELECT max(id) INTO rv FROM src WHERE id > :iv;");
+    expect((await run(maxed, 0)).value).to.equal(20);
+    expect((await run(maxed, 100)).value).to.equal(null);
+  });
+
+  it("refuses a target that is not declared, a type that differs, a count that differs, and INTO where rows are wanted", () => {
+    expect(() => program("SELECT id INTO nobody FROM src WHERE id = :iv; rv = 1;")).to.throw(/SELECT \.\.\. INTO undeclared scalar NOBODY/);
+    expect(() => program("SELECT txt INTO rv FROM src WHERE id = :iv;")).to.throw(/column TXT is C, the scalar I; not an identical measured type/);
+    expect(() => program("SELECT id, txt INTO rv FROM src WHERE id = :iv;")).to.throw(/names 1 target\(s\) for 2 column\(s\)/);
+    expect(() => program("DECLARE la INTEGER; SELECT id, id INTO rv, la FROM src WHERE id = :iv;")).to.throw(/reads 2 columns under 1 distinct names/);
+    expect(() => program("et_rows = select id, txt into rv from src;", "EXPORTING VALUE(et_rows) TYPE tt_rows")).to.throw(/SELECT \.\.\. INTO fills scalars; it is a statement, not a relation/);
   });
 });

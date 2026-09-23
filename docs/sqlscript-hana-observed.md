@@ -484,3 +484,37 @@ INT2 inputs and outputs are refused.
 So an AMDP scalar is optional only through `DEFAULT`, and the portable
 compiler refuses a scalar `OPTIONAL` in the same words. A table
 `OPTIONAL` is refused by name until it is carried as an empty relation.
+
+## SELECT ... INTO, and the types of COUNT, MIN and MAX (measured on A4H, 2026-09-23)
+
+Two throwaway classes with AMDP procedures and ABAP Unit drivers, in their
+own packages, deleted afterwards.
+
+| `SELECT … INTO v` | on A4H |
+| --- | --- |
+| exactly one row | assigns it |
+| no row | `CX_AMDP_EXECUTION_FAILED` |
+| two rows | `CX_AMDP_EXECUTION_FAILED` |
+| `INTO v DEFAULT 42`, no row | 42 |
+| `INTO v DEFAULT 42`, two rows | `CX_AMDP_EXECUTION_FAILED` |
+| `COUNT(*) INTO v`, v INTEGER | always one row; 0, 1, 2 |
+| `INTO la, lb` | the columns in order |
+| a NULL in the row | the variable becomes NULL |
+| `'a  '` into an NVARCHAR variable | `a  `, blanks kept |
+
+The portable runtime asks the engine for two rows and decides the same way;
+its error names the exception HANA raises.
+
+For the result types, one expression was run over a one-row INTEGER table:
+`X * 2147483647 + X * 2147483647`. With `X` = `COUNT(*)` or `COUNT(k)` the
+answer is 4294967294; with `MAX(k)`, `MIN(k)` or `SUM(k)` the procedure
+raises. So COUNT is wider than INTEGER (BIGINT), and MIN, MAX and SUM of an
+INTEGER stay INTEGER. `AVG` of 1 and 2 is `1.500000`. A plain INTEGER
+column in the same expression did **not** overflow, so HANA widens column
+arithmetic and not an aggregate's: the comparison stands between the
+aggregates, not against the column.
+
+The binder types COUNT as INT8 and MIN / MAX as their argument; a BIGINT
+fills an INTEGER scalar through `SELECT … INTO`, range-checked. SUM stays
+untyped: DuckDB widens `SUM(INTEGER)` where HANA overflows, and that
+difference has no answer in the lowering yet. AVG stays untyped too.

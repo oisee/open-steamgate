@@ -33,6 +33,12 @@ export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
 export const ifElse = (branches, otherwise = [], source) =>
   ({stmt: "if", branches, otherwise, source});
+// `SELECT ... INTO a, b [DEFAULT x, y]`: the relation, the scalars it
+// fills in column order, and the DEFAULT values for the no-row case
+export const selectInto = (rel, targets, defaults, source) =>
+  ({stmt: "select-into", rel, targets: targets.map(upper), ...(defaults === undefined ? {} : {defaults}), source});
+/** what HANA raises for SELECT ... INTO with no row (and no DEFAULT) or more than one */
+export class SelectIntoRows extends Error {}
 export const callProcedure = (name, input, output, source) =>
   ({stmt: "call-procedure", procedure: upper(name), input: upper(input), output: upper(output), source});
 
@@ -511,6 +517,51 @@ export async function runProcedure(program, {
         value = scalarForType(value, current.type, statement.name);
         scalars.set(statement.name, {type: current.type, value});
         assignedScalars.add(statement.name);
+      } else if (statement.stmt === "select-into") {
+        // measured on A4H: one row assigns, none raises unless DEFAULT is
+        // given, two raise always (CX_AMDP_EXECUTION_FAILED); a NULL in the
+        // row assigns NULL. Two rows are asked for, which is enough to tell.
+        if (client?.native === undefined) {
+          throw new UnsupportedSqlScript("SELECT ... INTO needs the database, and this run has none", statement);
+        }
+        const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
+        assertExpandedRelationBudget(statement.rel, budget);
+        const frozen = freezeRelation(statement.rel, relations, scalars, session);
+        assertExpandedRelationBudget(frozen, budget);
+        let compiled;
+        try { compiled = lower(limit(frozen, 2), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+        catch (error) {
+          if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+          throw error;
+        }
+        const answer = await client.native({...compiled, expect: "rows"});
+        let values;
+        if (answer.rows.length > 1) {
+          throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found more than one row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+        } else if (answer.rows.length === 0) {
+          if (statement.defaults === undefined) {
+            throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found no row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+          }
+          values = statement.defaults.map((expr) => {
+            assertPortableHostExpression(expr, "SELECT ... INTO DEFAULT", scalars);
+            return evaluateScalar(expr, scalars);
+          });
+        } else {
+          const columns = Object.keys(schemaOf(frozen, inputCatalogue));
+          values = columns.map((column) => answer.rows[0][column] ?? null);
+        }
+        statement.targets.forEach((target, i) => {
+          const current = scalars.get(target);
+          if (current === undefined) throw new UnsupportedSqlScript(`SELECT ... INTO undeclared scalar ${target}`, statement);
+          if (values[i] !== null && current.type?.abap === "I" && current.type.bits === undefined) {
+            const n = Number(values[i]);
+            if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) {
+              throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: ${values[i]} does not fit an INTEGER; the overflow is not measured, so it is refused`, statement);
+            }
+          }
+          scalars.set(target, {type: current.type, value: scalarForType(values[i], current.type, target)});
+          assignedScalars.add(target);
+        });
       } else if (statement.stmt === "assign-relation") {
         // Reject hostile/deep input before recursive freezing or effects()
         // can exhaust the JavaScript stack. A var reference is cheap here;

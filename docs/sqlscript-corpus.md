@@ -942,3 +942,32 @@ Three bodies went from an INT2 field to compiling. The others moved on:
 four to a column the scope does not type, three to a table function the
 registry does not hold, one to another untyped column, one to a field
 still unresolved.
+
+### SELECT ... INTO: the largest parse bucket, 149 → 183 read
+
+*2026-09-23. The bodies the grammar stopped were re-bucketed by the
+statement they stopped in, not by the token (with a local script, kept out
+of the repository, over the corpus). The largest group was `SELECT … INTO` scalars, 53 bodies,
+nearly all `SELECT COUNT(*) INTO lv FROM …`. Measured on A4H first.*
+
+`SELECT … INTO a, b [DEFAULT x, y]` parses and compiles into a step of its
+own: the engine is asked for two rows, one assigns, none raises unless a
+DEFAULT is given, two raise always, as on A4H. The targets must be declared
+scalars of the columns' types; a BIGINT fills an INTEGER, range-checked; two
+columns of one name are refused, since they collapse into one key. The same
+step fixed an old grammar defect: a body whose statements went on after a
+bare `SELECT …;` could not be read at all, because the first reading of the
+body matched that prefix and committed.
+
+| | before | after |
+| --- | ---: | ---: |
+| working, parsed | 149 | **183** |
+| teaching, parsed | 69 | 71 |
+| working, compiles as a procedure | 21 | 21 |
+
+No new body compiles yet. Of the 34 that now read: 16 have more than one
+output, 5 a table parameter with a field still unresolved, 4 a scalar that
+is not an INTEGER (host string scalars), and single ones a scalar output
+that is not a table, a system view, an untyped column. The rest still stop
+in the grammar, further on. Multiple outputs are now worth building: 16
+bodies wait on them, against 0 when they were first measured.
