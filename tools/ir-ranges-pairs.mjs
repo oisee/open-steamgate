@@ -10,6 +10,7 @@ import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {rangesPredicate, lowerPredicate} from "./ir-ranges.mjs";
+import {runsAs} from "./osd-main.mjs";
 
 const C10 = {abap: "C", len: 10};
 const N4 = {abap: "C", len: 4};
@@ -47,7 +48,7 @@ const render = () => JSON.stringify({
   pairs: pairs(),
 }, undefined, 2) + "\n";
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (runsAs("ir-ranges-pairs.mjs")) {
   const text = render();
   if (process.argv.includes("--check")) {
     const current = existsSync(PAIRS_FILE) ? readFileSync(PAIRS_FILE, "utf8") : "";
