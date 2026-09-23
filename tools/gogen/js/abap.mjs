@@ -284,3 +284,31 @@ export function RandomInt(min, max) {
   state ^= state << 5; state >>>= 0;
   return min + (state % (max - min + 1));
 }
+// FIND [REGEX] p IN s: [found, offset, length, submatches]. A JS RegExp is
+// leftmost-first where ABAP's POSIX is leftmost-longest: an alternation whose
+// shorter branch matches first (a|ab) differs; the Go runtime is the exact one.
+export function FindStmt(s, p, regex, icase, n) {
+  const subs = new Array(n).fill("");
+  if (!regex) {
+    if (p === "") return [false, 0, 0, subs];
+    const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
+    return i < 0 ? [false, 0, 0, subs] : [true, [...s.slice(0, i)].length, [...p].length, subs];
+  }
+  if (/\*\?|\+\?|\?\?|\(\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
+  const m = new RegExp(p, icase ? "iu" : "u").exec(s);
+  if (!m) return [false, 0, 0, subs];
+  for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
+  return [true, [...s.slice(0, m.index)].length, [...m[0]].length, subs];
+}
+
+// CREATE OBJECT ... TYPE (name): every compiled class registers what it is
+// (its own name and its interfaces) and a constructor without arguments. The
+// fit is checked before the constructor runs, as in the kernel.
+const classes = new Map();
+export function registerClass(name, is, make) { classes.set(name, {is: new Set(is), make}); }
+export function createAs(s, name, target) {
+  const c = classes.get(String(name).replace(/ +$/, ""))  // as written: lower case is unknown (A4H);
+  if (c === undefined) throw new AbapError("CX_SY_CREATE_OBJECT_ERROR", `CREATE OBJECT TYPE (${name})`);
+  if (!c.is.has(target)) throw new AbapError("CX_SY_MOVE_CAST_ERROR", `CREATE OBJECT TYPE (${name})`);
+  return c.make(s);
+}

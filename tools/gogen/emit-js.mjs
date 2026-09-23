@@ -69,6 +69,10 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
       out.push(`  ${m.static ? "static " : ""}${typeName(m.name)}() { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: ${m.reason}`)}); }`);
     }
     out.push("}", "");
+    // CREATE OBJECT ... TYPE (name) passes no arguments
+    const make = cp.length === 0 ? `(s) => ${typeName(cls.name)}.$new(s)`
+      : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>CONSTRUCTOR: CREATE OBJECT by name of a class whose constructor has parameters`)}); }`;
+    out.push(`abap.registerClass(${JSON.stringify(cls.name)}, ${JSON.stringify([cls.name, ...(cls.interfaces ?? [])])}, ${make});`, "");
   }
   return out.join("\n") + "\n";
 }
@@ -226,11 +230,37 @@ function stmt(st, ctx, d) {
       const v = `ins${ctx.loop++}`;
       if (!st.unique) return [`${t}${tb}.push(${moved(st.value, ctx)}); s.sy.subrc = 0;`];
       return [`${t}{`, `${t}  const ${v} = ${moved(st.value, ctx)};`,
-        `${t}  if (${tb}.includes(${v})) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
+        `${t}  if (${st.keys ? `${tb}.some((r) => ${st.keys.map((k) => `r.${ident(k)} === ${v}.${ident(k)}`).join(" && ")})` : `${tb}.includes(${v})`}) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
     }
     case "replace_all": {
       const p = place(st.target, ctx);
       return [`${t}{ const r = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
+    }
+    case "create_dyn":
+      return [`${t}${place(st.target, ctx)} = abap.createAs(s, ${expr(st.name, ctx)}, ${JSON.stringify(st.target.type.name)});`];
+    case "read_key": {
+      const tb = expr(st.table, ctx);
+      const n = ctx.loop++;
+      const cond = st.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
+      const bind = st.fs ? `${ident(st.fs)} = r${n};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(r${n})` : `r${n}`};` : "";
+      return [`${t}{`, `${t}  s.sy.subrc = 4;`, `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`,
+        `${t}    if (${cond}) { ${bind} s.sy.subrc = 0; s.sy.tabix = ${st.hashed ? "0" : `i${n} + 1`}; break; }`, `${t}  }`, `${t}}`];
+    }
+    case "find": {
+      const lines = [`${t}{`, `${t}  const [fok, foff, flen, fsub] = abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length});`,
+        `${t}  if (fok) {`, `${t}    s.sy.subrc = 0;`];
+      if (st.off) lines.push(`${t}    ${place(st.off, ctx)} = foff;`);
+      if (st.len) lines.push(`${t}    ${place(st.len, ctx)} = flen;`);
+      for (const x of st.subs) lines.push(`${t}    ${place(x.target, ctx)} = ${expr(x.value, ctx)};`);
+      lines.push(`${t}  } else { s.sy.subrc = 4; }`, `${t}}`);
+      return lines;
+    }
+    case "delete_where": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const keep = st.where.map((w) => `r${n}.${ident(w.name)} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`).join(" && ");
+      return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
+        `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;

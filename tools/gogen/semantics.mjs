@@ -21,6 +21,9 @@ const EXPECT = {
   // the stack names (the line directives of emit-go)
   // not an A4H value: what each emitter must report. Go names the ABAP
   // line through its line directives; the JS emitter has no source map yet
+  // CREATE OBJECT TYPE (name): the name as written, so lower case is an
+  // unknown class, as is a class that does not exist
+  ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

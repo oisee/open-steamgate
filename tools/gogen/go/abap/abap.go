@@ -9,7 +9,10 @@
 // where every operation first finds out what its operands are.
 package abap
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // Sy holds the system fields one session writes. On a system they belong to
 // the roll area; here they belong to the Session, so two sessions on two
@@ -176,3 +179,29 @@ func (e *Exception) Text() string { return e.Class + " in " + e.Op }
 // Ptr passes a value that is not a variable where a pointer is expected (a
 // composite IMPORTING by reference given an expression).
 func Ptr[T any](v T) *T { return &v }
+
+// Rethrown is a panic a TRY did not catch and passed on, with the stack of
+// where it was first raised (a re-panic would otherwise report the TRY).
+type Rethrown struct {
+	V     any
+	Stack string
+}
+
+func (r *Rethrown) Error() string { return fmt.Sprint(r.V) }
+
+// Repanic passes an uncaught panic on, keeping its first stack.
+func Repanic(r any, stack []byte) {
+	if _, ok := r.(*Rethrown); ok {
+		panic(r)
+	}
+	panic(&Rethrown{V: r, Stack: string(stack)})
+}
+
+// AsError is the ABAP exception inside a recovered value, unwrapped.
+func AsError(r any) (ArithmeticError, bool) {
+	if w, ok := r.(*Rethrown); ok {
+		r = w.V
+	}
+	e, ok := r.(ArithmeticError)
+	return e, ok
+}

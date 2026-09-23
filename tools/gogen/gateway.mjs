@@ -29,20 +29,50 @@ writeFileSync(join(dir, "main.go"), `package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"osg/gogen/abap"
 )
+
+// the ABAP frames of the stack, innermost first
+func abapStack(r any) string {
+	stack := string(debug.Stack())
+	if w, ok := r.(*abap.Rethrown); ok {
+		stack = w.Stack
+	}
+	// the frames above the (last) panic are the handlers; the origin is below it
+	if i := strings.LastIndex(stack, "panic("); i > 0 {
+		stack = stack[i:]
+	}
+	var out []string
+	for _, l := range strings.Split(stack, "\\n") {
+		l = strings.TrimSpace(l)
+		if i := strings.Index(l, ".abap:"); i > 0 {
+			if j := strings.IndexAny(l[i:], " +"); j > 0 {
+				l = l[:i+j]
+			}
+			out = append(out, l[strings.LastIndex(l, "/")+1:])
+		}
+	}
+	if len(out) > 8 {
+		out = out[:8]
+	}
+	return strings.Join(out, " <- ")
+}
 
 func main() {
 	s := &abap.Session{}
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("DUMP", r)
+			fmt.Println("  at", abapStack(r))
 			os.Exit(1)
 		}
 	}()
 	ZCL_STG_SEGW_REGISTRY_REGISTER(s)
-	res := ZCL_STG_DISPATCHER_DISPATCH(s, "GET", ${JSON.stringify(path)}, nil, "localhost", "", "", "")
+	opts := []IHTTPNVP{}
+	res := ZCL_STG_DISPATCHER_DISPATCH(s, "GET", ${JSON.stringify(path)}, &opts, "localhost", "", "", "")
 	fmt.Printf("%d %s\\n%s\\n%s\\n", res.status, res.reason, res.content_type, res.body)
 }
 `);
@@ -51,7 +81,7 @@ const t1 = performance.now();
 try {
   execFileSync("go", ["build", "-o", join(here, ".out", "gateway"), "./cmd/gateway"], {cwd: join(here, "go"), stdio: ["ignore", "pipe", "pipe"]});
 } catch (e) {
-  const lines = String(e.stderr).split("\n").filter((l) => l.includes(".go:"));
+  const lines = String(e.stderr).split("\n").filter((l) => /\.(go|abap):\d/.test(l));
   console.log(`go build failed, ${lines.length} errors; first:\n${lines.slice(0, 25).join("\n")}`);
   process.exit(1);
 }

@@ -458,7 +458,8 @@ function block(node, ctx) {
  * inside a TRY are refused by name, not approximated.
  */
 const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
-  "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN"];
+  "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
+  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR"];
 
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
@@ -571,28 +572,31 @@ function structure(node, ctx) {
       return at < 0 ? null : convert(source(e[at + 1], ctx, I), I);
     };
     // WHERE comp op value [AND ...]: a row that fails it is not a pass
-    let where = null;
     const cc = st.findDirectExpression(Expressions.ComponentCond);
-    if (cc) {
-      if (table.type.row.k !== "struct") throw new Unsupported("LOOP WHERE over a table not of structures");
-      where = [];
-      for (const k of cc.getChildren()) {
-        if (isTok(k, "AND")) continue;
-        if (!isExpr(k, Expressions.ComponentCompare) || k.getChildren().length !== 3) throw new Unsupported(`LOOP WHERE form: ${cc.concatTokens()}`);
-        const [comp, opN, src] = k.getChildren();
-        const f = fieldOf(ctx, table.type.row, comp.concatTokens(), text);
-        const opT = upper(opN.concatTokens());
-        const op = OPS[opT] ?? opT;
-        if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`LOOP WHERE operator ${op}`);
-        const v = source(src, ctx, f.type);
-        const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
-        if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("LOOP WHERE comparing characters with a number");
-        where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc});
-      }
-    }
+    const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
     return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
+}
+
+/** WHERE comp op value [AND ...] over the rows of a table of structures */
+function whereOf(cc, rowType, ctx, text) {
+  if (rowType.k !== "struct") throw new Unsupported("WHERE over a table not of structures");
+  const where = [];
+  for (const k of cc.getChildren()) {
+    if (isTok(k, "AND")) continue;
+    if (!isExpr(k, Expressions.ComponentCompare) || k.getChildren().length !== 3) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
+    const [comp, opN, src] = k.getChildren();
+    const f = fieldOf(ctx, rowType, comp.concatTokens(), text);
+    const opT = upper(opN.concatTokens());
+    const op = OPS[opT] ?? opT;
+    if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
+    const v = source(src, ctx, f.type);
+    const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
+    if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
+    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc});
+  }
+  return where;
 }
 
 function statement(node, ctx) {
@@ -605,6 +609,7 @@ function statement(node, ctx) {
     return undefined;
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
+  if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
@@ -632,6 +637,45 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
+  }
+  if (isStmt(node, Statements.ReadTable) && /\bWITH\s+(TABLE\s+)?KEY\b/i.test(text)) {
+    // READ TABLE t [INTO wa | ASSIGNING <fs> | TRANSPORTING NO FIELDS] WITH [TABLE] KEY c = v ...:
+    // the first row whose components equal the values (each converted to the
+    // component's type); sy-subrc 0 / 4, sy-tabix the row (0 for a HASHED
+    // table), the target left alone when nothing is found
+    if (/\b(BINARY|REFERENCE|CASTING|COMPARING)\b/i.test(text) || (/\bTRANSPORTING\b/i.test(text) && !/\bTRANSPORTING\s+NO\s+FIELDS\b/i.test(text))) {
+      throw new Unsupported(`READ TABLE form: ${text}`);
+    }
+    const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    if (table.type.k !== "table") throw new Unsupported("READ TABLE of a non-table");
+    const cc = node.findDirectExpression(Expressions.ComponentCompareSimple);
+    if (!cc) throw new Unsupported(`READ TABLE key form: ${text}`);
+    const kids = cc.getChildren();
+    const keys = [];
+    for (let i = 0; i + 2 < kids.length + 1; i += 3) {
+      const comp = kids[i];
+      if (!comp || !isTok(kids[i + 1], "=")) throw new Unsupported(`READ TABLE key form: ${cc.concatTokens()}`);
+      const cname = upper(comp.concatTokens());
+      if (cname === "TABLE_LINE") {
+        keys.push({line: true, value: convert(source(kids[i + 2], ctx, table.type.row), table.type.row)});
+      } else {
+        const f = fieldOf(ctx, table.type.row, cname, text);
+        keys.push({name: f.name, value: convert(source(kids[i + 2], ctx, f.type), f.type)});
+      }
+    }
+    const rt = node.findFirstExpression(Expressions.ReadTableTarget);
+    let into = null;
+    let fs = null;
+    if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
+      fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
+      if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
+    } else if (rt) {
+      const tgt = rt.findFirstExpression(Expressions.Target);
+      if (!tgt) throw new Unsupported(`READ TABLE target form: ${rt.concatTokens()}`);
+      into = lvalue(tgt, ctx);
+      if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
+    }
+    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed};
   }
   if (isStmt(node, Statements.ReadTable)) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
@@ -662,6 +706,13 @@ function statement(node, ctx) {
     }
     return {s: "sort", table, keys};
   }
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
+    const cc = node.findDirectExpression(Expressions.ComponentCond);
+    if (!cc) throw new Unsupported(`DELETE form: ${text}`);
+    return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -674,10 +725,11 @@ function statement(node, ctx) {
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
     const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
-    if (table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE")) {
-      throw new Unsupported(`INSERT INTO TABLE with key ${table.type.hashed.join(",")}`);
-    }
-    return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed};
+    // a unique key: a row with the same key is not inserted (sy-subrc 4)
+    const keys = table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE") ? table.type.hashed : null;
+    if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
+    for (const k of keys ?? []) fieldOf(ctx, table.type.row, k, text);
+    return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
     const m = /\bINDEX\b/i.test(text);
@@ -731,6 +783,42 @@ function statement(node, ctx) {
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
     return {s: "split", table, x: convert(source(str, ctx), S), sep: convert(source(sep, ctx), S)};
+  }
+  if (isStmt(node, Statements.Find)) {
+    // FIND [FIRST OCCURRENCE OF] [REGEX] p IN s [IGNORING CASE] [SUBMATCHES a b ...]
+    // [MATCH OFFSET o] [MATCH LENGTH l]; measured on A4H: POSIX leftmost-
+    // longest, offsets in characters, a failed FIND leaves every target alone,
+    // a submatch target without a group (or of a group that did not take
+    // part) becomes initial
+    const kids = node.getChildren();
+    const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
+    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|SECTION|IN\s+TABLE|IN\s+BYTE\s+MODE)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
+    const ft = node.findDirectExpression(Expressions.FindType);
+    const kind = ft ? upper(ft.concatTokens()) : "";
+    if (kind && kind !== "REGEX") throw new Unsupported(`FIND ${kind}`);
+    const [pat, subj] = node.findDirectExpressions(Expressions.Source);
+    const targets = [];
+    let mode = null;
+    const out = {s: "find", regex: kind === "REGEX", pattern: convert(source(pat, ctx), S), subject: convert(source(subj, ctx), S),
+      icase: /\bIGNORING\s+CASE\b/i.test(text), subs: [], off: null, len: null};
+    for (let i = 0; i < kids.length; i += 1) {
+      const w = words[i];
+      if (w === "SUBMATCHES") { mode = "sub"; continue; }
+      if (w === "MATCH" && words[i + 1] === "OFFSET") { mode = "off"; i += 1; continue; }
+      if (w === "MATCH" && words[i + 1] === "LENGTH") { mode = "len"; i += 1; continue; }
+      if (w) { mode = null; continue; }
+      if (!isExpr(kids[i], Expressions.Target) || mode === null) continue;
+      const t = lvalue(kids[i], ctx);
+      if (mode === "sub") {
+        if (!charlike(t.type)) throw new Unsupported(`SUBMATCHES into a ${t.type.k}`);
+        out.subs.push({target: t, value: convert({e: "temp", name: `fsub[${out.subs.length}]`, type: S}, t.type)});
+      } else {
+        if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode === "off" ? "OFFSET" : "LENGTH"} into a ${t.type.k}`);
+        out[mode] = t;
+      }
+    }
+    void targets;
+    return out;
   }
   if (isStmt(node, Statements.Clear)) return {s: "clear", target: lvalue(node.findDirectExpression(Expressions.Target), ctx)};
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
@@ -1235,6 +1323,48 @@ function methodSignature(ctx, owner, name) {
   }
   ctx.program.sigs.set(key, sig);
   return sig;
+}
+
+/**
+ * CREATE OBJECT o [TYPE cls | TYPE (name)] [EXPORTING ...]. A static class
+ * is NEW. A class given by name goes through the program's class registry and
+ * takes no arguments. The runtime checks that the result fits o, as the kernel
+ * does: CX_SY_CREATE_OBJECT_ERROR for an unknown class, CX_SY_MOVE_CAST_ERROR
+ * for one that does not fit.
+ */
+function createObject(node, ctx) {
+  const text = node.concatTokens();
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (target.type.k !== "ref") throw new Unsupported(`CREATE OBJECT into a ${target.type.k}`);
+  const params = node.findDirectExpression(Expressions.ParameterListS);
+  if (node.findDirectExpression(Expressions.ParameterListExceptions)) throw new Unsupported(`CREATE OBJECT with EXCEPTIONS: ${text}`);
+  const dyn = node.findDirectExpression(Expressions.Dynamic);
+  if (dyn) {
+    if (params) throw new Unsupported(`CREATE OBJECT by name with EXPORTING: ${text}`);
+    const inner = dyn.getChildren().filter((c) => !isTok(c));
+    if (inner.length !== 1) throw new Unsupported(`CREATE OBJECT TYPE ${dyn.concatTokens()}`);
+    return {s: "create_dyn", target, name: convert(sourceOperand(inner[0], ctx), {k: "string"})};
+  }
+  const clsNode = node.findDirectExpression(Expressions.ClassName);
+  if (!clsNode && target.type.intf) throw new Unsupported(`CREATE OBJECT of an interface reference without TYPE: ${text}`);
+  const cls = clsNode ? upper(clsNode.concatTokens()) : target.type.name;
+  if (!ctx.program.wanted.has(cls)) throw new Unsupported(`CREATE OBJECT ${cls}: the class is not compiled in this program`);
+  const sig = constructorSignature(ctx, cls);
+  const given = new Map();
+  for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
+    given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+  }
+  const args = sig.map((p) => {
+    const src = given.get(p.name);
+    if (src === undefined) {
+      if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+      if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+      throw new Unsupported(`CREATE OBJECT ${cls}: ${p.name} not supplied`);
+    }
+    return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(src, ctx, p.type), p.type)};
+  });
+  const made = {e: "new", cls, args, type: {k: "ref", name: cls}};
+  return {s: "assign", target, value: !target.type.intf && target.type.name === cls ? made : convert(made, target.type)};
 }
 
 /** the importing parameters of a class's constructor, read off its definition */
