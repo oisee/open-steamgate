@@ -29,9 +29,11 @@
 //   - SIGN and OPTION as ABAP has them, upper case; anything else (lower
 //     case, an initial row) is a dump on A4H, SAPSQL_IN_ITAB_ILLEGAL_SIGN or
 //     _OPTION, and is RangesDump here -- never "no restriction";
-//   - a value longer than the column is CX_SY_OPEN_SQL_DATA_ERROR, and a CP
-//     pattern longer than twice the column is CX_SY_DYNAMIC_OSQL_SEMANTICS
-//     (both measured on A4H), RangesDataError here;
+//   - a value longer than the column is CX_SY_OPEN_SQL_DATA_ERROR (measured),
+//     and a CP pattern longer than twice the column is
+//     CX_SY_DYNAMIC_OSQL_SEMANTICS -- measured at one width only (CHAR10: 20
+//     and 12 pass, 46 raises), so "twice" is an extrapolation from CHAR10 --
+//     RangesDataError here;
 //   - LOW / HIGH are bound as the column binds (measured on A4H,
 //     docs/sqlscript-hana-observed.md): a CHAR value right-trimmed, a NUMC
 //     one zero-padded to its length, an INTEGER as a number.
@@ -117,7 +119,7 @@ export function likePattern(pattern) {
 }
 
 /** one row of the ranges, as a condition that is true when it matches */
-function rowCondition(expr, type, kind, row) {
+function rowCondition(expr, type, kind, row, lowLen) {
   const option = String(row.OPTION ?? "");
   if (!["EQ", "NE", "GT", "GE", "LT", "LE", "BT", "NB", "CP", "NP"].includes(option)) {
     throw new RangesDump(`range OPTION ${JSON.stringify(row.OPTION ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H`, "SAPSQL_IN_ITAB_ILLEGAL_OPTION");
@@ -134,11 +136,16 @@ function rowCondition(expr, type, kind, row) {
     if (type?.abap !== "C" && type?.abap !== "STRING") throw new RangesError(`${option} over a column of type ${type?.abap} is not carried`);
     const lowText = String(row.LOW ?? "");
     const highText = String(row.HIGH ?? "").replace(/ +$/, "");
-    if (type.abap === "STRING" && highText !== "") throw new RangesError(`${option} with a HIGH over a STRING column is not measured`);
-    // LOW at its declared width, then HIGH (measured on A4H)
-    const source = type.abap === "C" && highText !== "" ? lowText.padEnd(type.len, " ") + highText : lowText;
+    if (type.abap === "STRING" && highText !== "") throw new RangesError(`${option} with a HIGH over a STRING column is not measured`, "high over string");
+    // LOW at the declared width of the RANGE's LOW (not the column's), then
+    // HIGH (measured on A4H: 'X' + 44 blanks + '*' for a char45 range on a
+    // CHAR10 column). Without that width a HIGH has no single reading
+    if (highText !== "" && !Number.isInteger(lowLen)) {
+      throw new RangesError(`${option} with a HIGH needs the declared width of the range's LOW (option lowLen)`, "high without lowLen");
+    }
+    const source = type.abap === "C" && highText !== "" ? lowText.padEnd(lowLen, " ") + highText : lowText;
     if (type.abap === "C" && source.replace(/ +$/, "").length > 2 * type.len) {
-      throw new RangesDataError(`CP pattern ${JSON.stringify(source.replace(/ +$/, ""))} is longer than twice the column's ${type.len}: CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H`, "CX_SY_DYNAMIC_OSQL_SEMANTICS");
+      throw new RangesDataError(`CP pattern ${JSON.stringify(source.replace(/ +$/, ""))} is longer than twice the column's ${type.len} (the limit measured at CHAR10, extrapolated): CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H`, "CX_SY_DYNAMIC_OSQL_SEMANTICS");
     }
     const items = cpItems(source);
     const wild = (one) => one.any === true || one.one === true;
@@ -173,7 +180,8 @@ function rowCondition(expr, type, kind, row) {
  * @param column  an IR expression (usually col(name, type)) or a column name
  * @param type    the column's IR type ({abap: "C", len} / {abap: "I"} / STRING)
  * @param rows    [{SIGN, OPTION, LOW, HIGH}] -- keys in any case
- * @param options {kind: "NUMC"} when a C column is NUMC
+ * @param options {kind: "NUMC"} when a C column is NUMC; {lowLen} the declared
+ *                width of the range's LOW, needed for a CP / NP with a HIGH
  */
 export function rangesPredicate(column, type, rows, options = {}) {
   const expr = typeof column === "string" ? col(upper(column), type) : column;
@@ -183,8 +191,8 @@ export function rangesPredicate(column, type, rows, options = {}) {
   // exactly I or E: lower case or an initial row is a dump on A4H, not a no-op
   const unknown = normal.find((row) => !["I", "E"].includes(row.SIGN));
   if (unknown !== undefined) throw new RangesDump(`range SIGN ${JSON.stringify(unknown.SIGN ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_SIGN, an uncatchable dump on A4H`, "SAPSQL_IN_ITAB_ILLEGAL_SIGN");
-  const include = sign("I").map((row) => rowCondition(expr, type, options.kind, row));
-  const exclude = sign("E").map((row) => rowCondition(expr, type, options.kind, row));
+  const include = sign("I").map((row) => rowCondition(expr, type, options.kind, row, options.lowLen));
+  const exclude = sign("E").map((row) => rowCondition(expr, type, options.kind, row, options.lowLen));
   const included = include.length === 0 ? undefined : or(include);
   const excluded = exclude.length === 0 ? undefined : not(or(exclude));
   if (included !== undefined && excluded !== undefined) return and(included, excluded);

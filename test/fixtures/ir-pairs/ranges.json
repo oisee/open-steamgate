@@ -1,5 +1,5 @@
 {
-  "note": "rangesPredicate(COL, type, rows) lowered per dialect by tools/ir-ranges-pairs.mjs; a port must give the same {sql, params} bytes",
+  "note": "rangesPredicate(COL, type, rows, {kind, lowLen}) lowered per dialect by tools/ir-ranges-pairs.mjs; a port must give the same {sql, params} bytes. Two deliberate differences from the kernel's text, same meaning: BT / NB render as (>= AND <=), where the kernel sends BETWEEN; an INTEGER value is inlined, where the kernel binds it. A port copies these as they are.",
   "pairs": [
     {
       "name": "empty ranges: no restriction",
@@ -1334,6 +1334,7 @@
         "abap": "C",
         "len": 10
       },
+      "lowLen": 10,
       "rows": [
         {
           "SIGN": "I",
@@ -1383,6 +1384,398 @@
               "name": "p0",
               "value": "X%        Z",
               "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I NP with a HIGH matches every row",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "lowLen": 10,
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "NP",
+          "LOW": "X*",
+          "HIGH": "Z"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" NOT LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP with a literal # beside a literal %",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "5%##*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5#%##%",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5#%##%",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" LIKE $1::text ESCAPE $2::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5#%##%",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5#%##%",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP of 12 characters does not raise",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "ABCDEFGHIJK*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJK%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJK%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJK%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJK%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP of exactly twice the column does not raise",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "ABCDEFGHIJKLMNOPQRS*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJKLMNOPQRS%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJKLMNOPQRS%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJKLMNOPQRS%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "ABCDEFGHIJKLMNOPQRS%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I LT on CHAR",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "LT",
+          "LOW": "0"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" < $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I GE the initial value on CHAR",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "GE",
+          "LOW": ""
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" >= ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" >= ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" >= $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" >= ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "",
+              "type": "C(10)",
               "isNull": false
             }
           ]
@@ -1635,6 +2028,85 @@
       "outcome": {
         "error": "RangesDump",
         "abap": "SAPSQL_IN_ITAB_ILLEGAL_OPTION"
+      }
+    },
+    {
+      "name": "an unknown SIGN is a dump",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "X",
+          "OPTION": "EQ",
+          "LOW": "A"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDump",
+        "abap": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+      }
+    },
+    {
+      "name": "an unknown OPTION is a dump",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "ZZ",
+          "LOW": "A"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDump",
+        "abap": "SAPSQL_IN_ITAB_ILLEGAL_OPTION"
+      }
+    },
+    {
+      "name": "a CP with a HIGH in a wider range raises",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "lowLen": 45,
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "X*",
+          "HIGH": "Z"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDataError",
+        "abap": "CX_SY_DYNAMIC_OSQL_SEMANTICS"
+      }
+    },
+    {
+      "name": "a CP with a HIGH and no range width is refused",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "X*",
+          "HIGH": "Z"
+        }
+      ],
+      "outcome": {
+        "error": "Refused",
+        "reason": "high without lowLen"
       }
     },
     {

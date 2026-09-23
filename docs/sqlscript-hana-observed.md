@@ -542,8 +542,9 @@ case selects was measured separately by foreman-dell on a table of its own
 | EQ (a HIGH is ignored), BT, NE | `col = ?`, `col BETWEEN ? AND ?`, `col <> ?` |
 | NP, or SIGN E | `NOT col LIKE ?` |
 
-From that and the result sets: the CP pattern is LOW at its declared width
-with HIGH after it (so `X*` with HIGH `Z` asks for `X`, anything, blanks,
+From that and the result sets: the CP pattern is LOW at the declared width
+of the range's LOW (not the column's: a char45 range on a CHAR10 column put
+44 blanks between `X` and `*`) with HIGH after it (so `X*` with HIGH `Z` asks for `X`, anything, blanks,
 `Z`, and finds nothing); a trailing `#` escapes a padding blank (`A#` is
 `= 'A'`); trailing blanks do not count. `tools/ir-ranges.mjs` renders the
 same shapes. The special OR form serves blanks that meet the padding and
@@ -556,6 +557,13 @@ Measured by foreman-dell and adopted: SIGN and OPTION are exactly `I` / `E`
 and the ten options in upper case; a lower-case one, an unknown one or an
 initial row is an uncatchable dump (`SAPSQL_IN_ITAB_ILLEGAL_SIGN` /
 `_OPTION`), never "no restriction". A value longer than the column raises
-`CX_SY_OPEN_SQL_DATA_ERROR`; a CP pattern longer than twice the column
-raises `CX_SY_DYNAMIC_OSQL_SEMANTICS`. LOW and HIGH are converted to the
+`CX_SY_OPEN_SQL_DATA_ERROR`; a CP pattern too long raises
+`CX_SY_DYNAMIC_OSQL_SEMANTICS` -- measured at one width only (on CHAR10, 12
+and 20 characters pass, 46 raise), so "longer than twice the column" is an
+extrapolation from CHAR10 and is labelled so in the code.
+
+Two differences from the kernel's text are deliberate and do not change the
+meaning: `tools/ir-ranges.mjs` renders BT / NB as `(>= AND <=)` where the
+kernel sends `BETWEEN ? AND ?`, and inlines an INTEGER where the kernel
+binds it. The pairs file says so, so that a port does not "fix" them. LOW and HIGH are converted to the
 column's type (a NUMC column gets `0005`..`0010` for `5`..`10`).

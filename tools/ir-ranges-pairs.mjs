@@ -41,13 +41,23 @@ export const CASES = [
   {name: "I CP ending in a lone # escapes a padding blank", type: C10, rows: [r("I", "CP", "A#")]},
   {name: "I CP of * alone is no restriction", type: C10, rows: [r("I", "CP", "*")]},
   {name: "I NP of * alone matches nothing", type: C10, rows: [r("I", "NP", "*")]},
-  {name: "I CP with a HIGH after LOW at full width", type: C10, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "I CP with a HIGH after LOW at full width", type: C10, lowLen: 10, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "I NP with a HIGH matches every row", type: C10, lowLen: 10, rows: [r("I", "NP", "X*", "Z")]},
+  {name: "I CP with a literal # beside a literal %", type: C10, rows: [r("I", "CP", "5%##*")]},
+  {name: "I CP of 12 characters does not raise", type: C10, rows: [r("I", "CP", "ABCDEFGHIJK*")]},
+  {name: "I CP of exactly twice the column does not raise", type: C10, rows: [r("I", "CP", "ABCDEFGHIJKLMNOPQRS*")]},
+  {name: "I LT on CHAR", type: C10, rows: [r("I", "LT", "0")]},
+  {name: "I GE the initial value on CHAR", type: C10, rows: [r("I", "GE", "")]},
   {name: "E NP", type: C10, rows: [r("E", "NP", "X*")]},
   {name: "I EQ, NUMC zero-padded", type: N4, kind: "NUMC", rows: [r("I", "EQ", "7")]},
   {name: "I BT, NUMC zero-padded to the column", type: N4, kind: "NUMC", rows: [r("I", "BT", "5", "10")]},
   // the refusals, so a port checks them against this file too
   {name: "a lower-case SIGN is a dump", type: C10, rows: [r("i", "EQ", "A")]},
   {name: "a lower-case OPTION is a dump", type: C10, rows: [r("I", "eq", "A")]},
+  {name: "an unknown SIGN is a dump", type: C10, rows: [r("X", "EQ", "A")]},
+  {name: "an unknown OPTION is a dump", type: C10, rows: [r("I", "ZZ", "A")]},
+  {name: "a CP with a HIGH in a wider range raises", type: C10, lowLen: 45, rows: [r("I", "CP", "X*", "Z")]},
+  {name: "a CP with a HIGH and no range width is refused", type: C10, rows: [r("I", "CP", "X*", "Z")]},
   {name: "an initial row is a dump, not no restriction", type: C10, rows: [r("", "", "")]},
   {name: "a value longer than the column raises", type: C10, rows: [r("I", "EQ", "ABCDEFGHIJK")]},
   {name: "a CP pattern past twice the column raises", type: C10, rows: [r("I", "CP", "ABCDEFGHIJKLMNOPQRSTU*")]},
@@ -58,21 +68,22 @@ export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
 function outcome(one) {
   let pred;
-  try { pred = rangesPredicate("COL", one.type, one.rows, {kind: one.kind}); }
+  try { pred = rangesPredicate("COL", one.type, one.rows, {kind: one.kind, lowLen: one.lowLen}); }
   catch (error) { return {outcome: errorCode(error)}; }
   return {lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, lowerPredicate(pred, dialect)]))};
 }
 
 export function pairs() {
   return CASES.map((one) => ({
-    name: one.name, column: "COL", type: one.type, ...(one.kind === undefined ? {} : {kind: one.kind}), rows: one.rows,
+    name: one.name, column: "COL", type: one.type, ...(one.kind === undefined ? {} : {kind: one.kind}),
+    ...(one.lowLen === undefined ? {} : {lowLen: one.lowLen}), rows: one.rows,
     ...outcome(one),
   }));
 }
 
 export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "ranges.json");
 const render = () => JSON.stringify({
-  note: "rangesPredicate(COL, type, rows) lowered per dialect by tools/ir-ranges-pairs.mjs; a port must give the same {sql, params} bytes",
+  note: "rangesPredicate(COL, type, rows, {kind, lowLen}) lowered per dialect by tools/ir-ranges-pairs.mjs; a port must give the same {sql, params} bytes. Two deliberate differences from the kernel's text, same meaning: BT / NB render as (>= AND <=), where the kernel sends BETWEEN; an INTEGER value is inlined, where the kernel binds it. A port copies these as they are.",
   pairs: pairs(),
 }, undefined, 2) + "\n";
 

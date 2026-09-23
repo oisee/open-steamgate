@@ -14,11 +14,12 @@ const ENGINES = [
   {dialect: "sqlite", make: () => new FileSqliteClient({path: ":memory:"})},
 ];
 // CHAR held right-trimmed, as a dictionary CHAR column is on HANA (measured)
-const TEXT = ["A", "B", "C", "D", "M", "N", "T1", "T1*x", "Tab1*z", "T a1", "50%_off!", "50xyoff!", "X1", "Y1"];
+const TEXT = ["A", "B", "C", "D", "M", "N", "T1", "T1*x", "Tab1*z", "T a1", "50%_off!", "50xyoff!", "5%#x", "5%x", "#x", "X1", "Y1"];
 const NUMS = [1, 2, 3, 4, 5, 6];
 const NUMC = ["0004", "0005", "0007", "0010", "0011", "0070", "7"];
-// the rows each case must select, as ABAP means it (checked against A4H by
-// foreman-dell's measurement, .local/a4h-ranges-2026-09-23.json)
+// the rows each case must select, as ABAP means it: the rules come from
+// foreman-dell's A4H measurement and the plan-cache shapes; these rows are
+// this fixture's own, and not every case here was run on A4H itself
 const EXPECTED = {
   "empty ranges: no restriction": TEXT,
   "I EQ": ["A"],
@@ -45,6 +46,13 @@ const EXPECTED = {
   "I CP of * alone is no restriction": TEXT,
   "I NP of * alone matches nothing": [],
   "I CP with a HIGH after LOW at full width": [],
+  "I NP with a HIGH matches every row": TEXT,
+  // % and # both literal, so ESCAPE is on and # has to be doubled
+  "I CP with a literal # beside a literal %": ["5%#x"],
+  "I CP of 12 characters does not raise": [],
+  "I CP of exactly twice the column does not raise": [],
+  "I LT on CHAR": ["#x"],
+  "I GE the initial value on CHAR": TEXT,
   "E NP": ["X1"],
   "I EQ, NUMC zero-padded": ["0007"],
   "I BT, NUMC zero-padded to the column": ["0005", "0007", "0010"],
@@ -66,9 +74,10 @@ for (const {dialect, make} of ENGINES) describe(`ABAP ranges as IR, on ${dialect
   after(async () => { await client.disconnect(); });
 
   for (const one of CASES.filter((c) => EXPECTED[c.name] !== undefined)) {
+    const options = {kind: one.kind, lowLen: one.lowLen};
     it(`${one.name} selects what ABAP means`, async () => {
       const table = one.type.abap === "I" ? "N" : one.kind === "NUMC" ? "Z" : "T";
-      const {rows} = await client.native({...lower(filter(scan(table), rangesPredicate("COL", one.type, one.rows, {kind: one.kind})), dialect), expect: "rows"});
+      const {rows} = await client.native({...lower(filter(scan(table), rangesPredicate("COL", one.type, one.rows, options)), dialect), expect: "rows"});
       expect(rows.map((r) => (typeof r.COL === "bigint" ? Number(r.COL) : r.COL)).sort()).to.deep.equal([...EXPECTED[one.name]].sort());
     });
   }
@@ -83,6 +92,10 @@ describe("ABAP ranges as IR: the pairs, the marker, the refusals", () => {
     const refusals = {
       "a lower-case SIGN is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_SIGN"},
       "a lower-case OPTION is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_OPTION"},
+      "an unknown SIGN is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_SIGN"},
+      "an unknown OPTION is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_OPTION"},
+      "a CP with a HIGH in a wider range raises": {error: "RangesDataError", abap: "CX_SY_DYNAMIC_OSQL_SEMANTICS"},
+      "a CP with a HIGH and no range width is refused": {error: "Refused", reason: "high without lowLen"},
       "an initial row is a dump, not no restriction": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_SIGN"},
       "a value longer than the column raises": {error: "RangesDataError", abap: "CX_SY_OPEN_SQL_DATA_ERROR"},
       "a CP pattern past twice the column raises": {error: "RangesDataError", abap: "CX_SY_DYNAMIC_OSQL_SEMANTICS"},
@@ -138,7 +151,8 @@ describe("ABAP ranges as IR: the pairs, the marker, the refusals", () => {
     expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "ABCDEFG*"}])).to.throw(RangesDataError, /CX_SY_DYNAMIC_OSQL_SEMANTICS/);
     // A4H renders a special form or binds a value the plan cache does not keep
     expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: " *"}])).to.throw(RangesError, /blanks that meet the padding/);
-    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "X", HIGH: "*"}])).to.throw(RangesError, /blanks that meet the padding/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "X", HIGH: "*"}], {lowLen: 3})).to.throw(RangesError, /blanks that meet the padding/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "X", HIGH: "*"}])).to.throw(RangesError, /needs the declared width of the range's LOW/);
     expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "+"}])).to.throw(RangesError, /matches the initial value/);
     expect(() => rangesPredicate("C", {abap: "I"}, [{SIGN: "I", OPTION: "CP", LOW: "1*"}])).to.throw(RangesError, /CP over a column of type I/);
     expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "EQ", LOW: "7a"}], {kind: "NUMC"})).to.throw(RangesError, /not NUMC digits/);
