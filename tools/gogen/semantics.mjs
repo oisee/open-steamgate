@@ -23,6 +23,15 @@ const EXPECT = {
   // line through its line directives; the JS emitter has no source map yet
   // CREATE OBJECT TYPE (name): the name as written, so lower case is an
   // unknown class, as is a class that does not exist
+  // DELETE <name> FROM n on an internal table named like a TABL is the
+  // internal table's statement: A4H answered "lines:1  subrc:0" (over an
+  // itab named T000). DELETE itab FROM idx is not in the subset yet, so both
+  // emitters refuse it as an internal DELETE form; what this pins is that it
+  // is not sent to the database (before the fix: "the relational IR has no
+  // delete node")
+  ZCL_GOGEN_T_DELNAME: {
+    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in
@@ -152,6 +161,28 @@ const EXPECT = {
   // it), a generic value read into a shorter c cut, CLEAR of a typed field
   // symbol clearing its row. The A4H class had the same source.
   ZCL_GOGEN_T_JSGENERIC: "comp:0/1/5/0/low/4/low lines:2 p11 q22 kinds:IFgCXDTvhl ref:0/3/42/4/asg/ini/set notini/ini sup:a-b-A+b-a-B+A+B+ dyn:<d1><7><noclass> flat:u moved:m9 m9 q22 fit:xy/5-/cleared:0 row:0 row:s3/0/s3 c2:xy clr:2/0/0",
+  // COMMIT WORK / ROLLBACK WORK set sy-subrc 0 (A4H: from 7, with rows
+  // written in between, sy-dbcnt left as it was). The JS emitter has no
+  // database and refuses both rather than make them no-ops
+  ZCL_GOGEN_T_LUW: {Go: "miss:4 rb:0 cw:0 cww:0", JS: "ERROR NOT_COMPILED in COMMIT / ROLLBACK WORK: the JS emitter has no database"},
+  // database writes: both backends refuse honestly, because the relational
+  // IR (tools/sqlscript-ir.mjs) has no insert / update / delete / merge node
+  // yet. A4H answered, as "sy-subrc/sy-dbcnt" after each statement (i ->
+  // string, hence the blank after each number):
+  //   ins:0 /1  dup:4 /0  tabcx:0 /0  rows3  acc:4 /2  rows5  updmiss:4 /0
+  //   upd:0 /1  set2:0 /2  set0:4 /0  updtab:4 /1  modins:0 /1  modupd:0 /1
+  //   modtab:0 /2  delmiss:4 /0  del:0 /1  delw0:4 /0  delw2:0 /2
+  //   deltab:4 /1  insm:0 /1  mandt001 insempty:0 /0  rows4  rb:0 /4  after0
+  // (mandt001: A4H's logon client, the work area said 999). A second run
+  // with sy-subrc = sy-dbcnt = 7 before INSERT FROM TABLE of A(dup) B C
+  // A(dup) D gave "tabcx:7 /7": CX_SY_OPEN_SQL_DB, sy untouched, and B, C
+  // and D written all the same; FROM TABLE with the same key twice wrote
+  // one row and raised. That is the string this must turn into once the IR
+  // has the nodes (with the local transpiler it is not: ANORMALIES
+  // dbwrite-*).
+  ZCL_GOGEN_T_DBW: {
+    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered) at zcl_gogen_t_dbw.clas.abap:26",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DBW=>RUN (zcl_gogen_t_dbw.clas.abap:26): DELETE ZGOGEN_T_DBW: the relational IR has no delete node (relation delete not lowered)"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

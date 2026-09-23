@@ -1273,6 +1273,71 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: **needs an issue** in abaplint (a syntax error in `5_syntax/structures/try.js` or the `CATCH` statement check)
 - Regression-test location: none that runs: the pinned probe `ZCL_GOGEN_T_RAISE` in `tools/gogen/semantics.mjs` leaves the line out because it cannot be activated on A4H
 ### ANOMALY-2026-09-23-describe-deep-structure — `DESCRIBE FIELD ... TYPE` of a deep structure is `u` in the transpiler runtime, `v` on a system
+### ANOMALY-2026-09-23-dbwrite-insert-table-duplicate — `INSERT dbtab FROM TABLE` with a duplicate key returns sy-subrc 4 instead of raising
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, `@abaplint/database-sqlite`
+- Affected ABAP statement, runtime API or adapter: `INSERT dbtab FROM TABLE itab` without `ACCEPTING DUPLICATE KEYS` (`runtime/src/statements/insert_database.ts`)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap` (table `zgogen_t_dbw.tabl.xml` beside it): row A present, then `INSERT zgogen_t_dbw FROM TABLE lt` with B, A, C inside a `TRY ... CATCH cx_sy_open_sql_db`
+- Exact command used to run it: the class and the table transpiled on their own with open-abap-core as the one lib (`npx abap_transpile`) and `run` called over `SQLiteDatabaseClient`, in a scratch folder
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0140, 2026-09-23, deleted after): `CX_SY_OPEN_SQL_DB` is raised, sy-subrc and sy-dbcnt are left as they were (7/7 before, 7/7 in the CATCH), and **every row without a duplicate is written all the same** (B, C, and a D after a second duplicate). Two rows with the same key inside the table: one written, then the exception. With `ACCEPTING DUPLICATE KEYS`: sy-subrc 4, sy-dbcnt the rows written, no exception. An empty table: 0/0
+- Actual open-abap behaviour: no exception; every statement behaves as with `ACCEPTING DUPLICATE KEYS` (`tab:4 /2`), because the runtime inserts row by row and folds the sy-subrc of each into a maximum
+- Impact on open-steamgate: a DPC that relies on the exception to reject a batch (or on a `CATCH` to report it) sees success with sy-subrc 4 and goes on
+- Smallest safe workaround: none in code; do not rely on the exception
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (the A4H answer is in the comment above its EXPECT; the gogen backends refuse database writes until the relational IR has the nodes)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-update-from-table — `UPDATE dbtab FROM TABLE itab` is compiled as `UPDATE dbtab FROM wa`
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `UPDATE dbtab FROM TABLE itab`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `updtab`
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H, rows A (present) and Y (absent): sy-subrc 4, sy-dbcnt 1, A updated
+- Actual open-abap behaviour: the generated code reads the key fields off the table itself (`lt.get().mandt`) and dies with `Error: table, no header line`
+- Impact on open-steamgate: any mass update dumps
+- Smallest safe workaround: `LOOP AT itab INTO wa. UPDATE dbtab FROM wa. ENDLOOP.` (sy-subrc / sy-dbcnt then need summing by hand)
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-delete-from-wa — `DELETE dbtab FROM wa` is compiled as a DELETE on an internal table
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` as used by `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `DELETE dbtab FROM wa`, which abaplint's parser classifies as `DeleteInternal` (it cannot tell it from `DELETE itab FROM idx` without the dictionary)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `delmiss` and `del`
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: a missing key gives sy-subrc 4, sy-dbcnt 0; a present one 0 / 1
+- Actual open-abap behaviour: `abap.statements.deleteInternal(zgogen_t_dbw, {from: ls})`, which throws `ReferenceError: zgogen_t_dbw is not defined`
+- Impact on open-steamgate: the form dumps wherever it is used; the gogen front end sees the same `DeleteInternal` and checks the dictionary for the name before treating it as a database delete
+- Smallest safe workaround: `DELETE FROM dbtab WHERE <key> = wa-<key> ...`
+- Upstream: **needs an issue** in abaplint (the statement) or the transpiler (resolve by the dictionary)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-delete-from-table — `DELETE dbtab FROM TABLE itab` matches every field, and reports the last row only
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/delete_database.ts`)
+- Affected ABAP statement, runtime API or adapter: `DELETE dbtab FROM TABLE itab` (and `DELETE dbtab FROM wa` once it compiles)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `deltab`: rows D (present, `val` 11 in the database, 18 in the work area) and Q (absent)
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: the rows are found by their **primary key**: D deleted, sy-subrc 4 (Q), sy-dbcnt 1
+- Actual open-abap behaviour: the WHERE is built from every component of the row, so D is not found because its `val` differs; sy-subrc and sy-dbcnt are those of the last row alone (4 / 0)
+- Impact on open-steamgate: a mass delete with work areas that carry anything but the key deletes nothing and says so only through sy-subrc
+- Smallest safe workaround: clear the non-key fields of the rows first, or delete with `WHERE` on the key
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-select-count-dbcnt — sy-dbcnt after `SELECT COUNT(*) ... INTO n` is 1 here and the count on a system
 
 - Status: `open`
 - Discovery date: `2026-09-23`
@@ -1287,3 +1352,15 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: **needs an issue** in abaplint/transpiler (runtime `describe`)
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSGENERIC (`kinds:...vhl ... flat:u`)
 - Upstream version containing a fix: none yet
+- Affected ABAP statement, runtime API or adapter: `SELECT COUNT(*) FROM dbtab INTO n`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, the `rb` note (ROLLBACK WORK leaves sy-dbcnt alone, measured, so it shows what the SELECT before it set)
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: sy-dbcnt 4 after counting 4 rows
+- Actual open-abap behaviour: sy-dbcnt 1 (one result row)
+- Impact on open-steamgate: none known; found on the way, not looked for
+- Smallest safe workaround: read the count, not sy-dbcnt
+- Upstream: **needs an issue** in abaplint/transpiler, after one more measurement that counts a number other than the rows of the previous statement
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+
+The same run also showed an `INSERT` taking `mandt` from the work area (999 written; A4H writes the logon client, 001 there): that is ANOMALY-2026-09-11-no-implicit-mandt, not a new entry.

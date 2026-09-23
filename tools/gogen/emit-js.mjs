@@ -440,6 +440,10 @@ function stmt(st, ctx, d) {
       ];
     }
     case "nop": return [];
+    // the JS runtime has no database (select_table is not emitted either),
+    // so there is no LUW to end: refused, not a no-op
+    case "commit_work": case "rollback_work":
+      return [`${t}abap.notCompiled("COMMIT / ROLLBACK WORK: the JS emitter has no database");`];
     case "modify_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
