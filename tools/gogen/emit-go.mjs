@@ -695,10 +695,6 @@ function stmtLines(st, ctx, d) {
           : [`${t}\tif !abap.Contains(${tb}, ${v}) {`]),
         `${t}\t\t${tb} = append(${tb}, ${v})`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
     }
-    case "replace_all": {
-      const p = place(st.target, ctx);
-      return [`${t}${p}, s.Sy.Subrc = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)})`];
-    }
     case "assert":
       return [`${t}if !(${cond(st.cond, ctx)}) {`, `${t}\tpanic(abap.ArithmeticError{Class: "ASSERTION_FAILED", Op: ${JSON.stringify(st.text)}})`, `${t}}`];
     case "assign_comp":

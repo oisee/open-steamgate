@@ -287,10 +287,6 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const ${v} = ${moved(st.value, ctx)};`,
         `${t}  if (${st.keys ? `${tb}.some((r) => ${st.keys.map((k) => `r.${ident(k)} === ${v}.${ident(k)}`).join(" && ")})` : `${tb}.includes(${v})`}) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
     }
-    case "replace_all": {
-      const p = place(st.target, ctx);
-      return [`${t}{ const r = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
-    }
     case "assert":
       return [`${t}if (!(${cond(st.cond, ctx)})) throw new abap.AbapError("ASSERTION_FAILED", ${JSON.stringify(st.text)});`];
     case "create_dyn":

@@ -65,6 +65,7 @@ func SplitSubrc(pieces []string, lens []int) int32 {
 // is the submatch index slice of Go's regexp, in bytes. first stops at one.
 func rxAll(s, p string, icase, first bool) [][]int {
 	re := compileABAP(p, icase)
+	checkLines(p, s, "REPLACE REGEX")
 	var out [][]int
 	pos := 0
 	for pos <= len(s) {
@@ -123,9 +124,9 @@ func compileABAPAfter(p string, icase bool) *regexp.Regexp {
 	if r, ok := regexCache.Load(key); ok {
 		return r.(*regexp.Regexp)
 	}
-	flags := "(?m)"
+	flags := "(?ms)"
 	if icase {
-		flags = "(?mi)"
+		flags = "(?msi)"
 	}
 	re := regexp.MustCompile(flags + "(?s:.)(" + p + ")")
 	re.Longest()

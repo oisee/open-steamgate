@@ -75,12 +75,25 @@ const EXPECT = {
     + " replfirstempty:-abc/0 repneg:CX_SY_STRG_PAR_VAL replfnempty:CX_SY_STRG_PAR_VAL"
     + " shiftneg:CX_SY_RANGE_OUT_OF_BOUNDS shiftbig:CX_SY_RANGE_OUT_OF_BOUNDS r:CX_SY_RANGE_OUT_OF_BOUNDS src5:CX_SY_RANGE_OUT_OF_BOUNDS slc3:abc"
     + " slc4:CX_SY_RANGE_OUT_OF_BOUNDS sectbig:CX_SY_RANGE_OUT_OF_BOUNDS sectok:a-c/0 sectlong:CX_SY_RANGE_OUT_OF_BOUNDS",
-  // REPLACE ALL OCCURRENCES OF an empty pattern (here ' ', a c blank, which
-  // is empty) raises CX_SY_REPLACE_INFINITE_LOOP on A4H, where CATCH cx_root
-  // takes it; open-abap-core has no such class, so no CATCH can name it here
-  // and the copy lets it go (ANORMALIES 2026-09-23-replace-infinite-loop)
-  ZCL_GOGEN_T_STRLOOP: {Go: "ERROR CX_SY_REPLACE_INFINITE_LOOP in REPLACE ALL OCCURRENCES OF '' at zcl_gogen_t_strloop.clas.abap:10",
-    JS: "ERROR CX_SY_REPLACE_INFINITE_LOOP in REPLACE ALL OCCURRENCES OF ''"},
+  // REPLACE ALL OCCURRENCES OF an empty pattern (' ', a c blank, is empty)
+  // raises CX_SY_REPLACE_INFINITE_LOOP, which CATCH cx_dynamic_check and
+  // CATCH cx_root take on A4H (probe ZCL_GOGEN_T_STRCR in $ZOSG_TMP_0131);
+  // open-abap-core has no such class, so the front end holds its superclass
+  // (RUNTIME_CX_SUPER). A4H ran this copy with a third TRY that caught
+  // cx_sy_replace_infinite_loop by name (x3:loop); abaplint refuses a CATCH
+  // naming a class it does not know, so that TRY is not in the copy
+  ZCL_GOGEN_T_STRLOOP: "x1:dyn x2:root a b",
+  // lines and dot, and condense( ) with c arguments, A4H 2026-09-23 (probe
+  // ZCL_GOGEN_T_STRCR, $ZOSG_TMP_0131): ^ after \n, $ before \n and at the
+  // end, . matches \r and \n, \f and \v end no line; a c del / from / to
+  // loses its trailing blanks (space, ' ', a c(1) field of a blank are empty)
+  ZCL_GOGEN_T_STRLINES: "n1:-a|-|-b n2:a-|b- n3:a-|-|b- dot:---- ff:4/0 vt:4 c1:[ xa bx ] c2:[ab] c3:[a  b] c4:[ a b ] c5:[a b] c7:[ a b ]",
+  // not an A4H value: A4H answers f1:0 here ($ matches before the \r of a
+  // CRLF, and not between \r and \n; a\n\rb has ^ after its \r, a\rb does
+  // not). Neither Go's (?m) nor JS's m says that, so an anchored pattern on
+  // a text with \r, U+2028 or U+2029 is NOT_COMPILED in both backends
+  ZCL_GOGEN_T_STRCRLF: {Go: "ERROR NOT_COMPILED in FIND REGEX: ^ or $ in a text with a line end other than \\n is not measured: a$ at zcl_gogen_t_strcrlf.clas.abap:11",
+    JS: "ERROR NOT_COMPILED in FIND REGEX: ^ or $ in a text with a line end other than \\n is not measured: a$"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

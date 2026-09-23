@@ -209,11 +209,6 @@ export function FmtFDec(v, n) {
   return (neg ? "-" : "") + ip + (n > 0 ? `.${s.slice(s.length - n)}` : "");
 }
 
-export function ReplaceAll(v, of, wth) {
-  if (of === "" || !v.includes(of)) return [v, 4];
-  return [v.split(of).join(wth), 0];
-}
-
 // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length
 export function BitX(op, a, b) {
   let out = "";
@@ -298,11 +293,41 @@ export function FindStmt(s, p, regex, icase, n) {
   }
   // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
   if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
-  // ^ and $ are line anchors on A4H (FIND REGEX `^b` IN |a\nb| finds it)
-  const m = new RegExp(p, icase ? "imu" : "mu").exec(s);
+  const m = abapRegExp(p, s, icase, "", "FIND REGEX").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
   return [true, [...s.slice(0, m.index)].length, [...m[0]].length, subs];
+}
+
+// An ABAP regex as a JS RegExp, with the lines of the Go runtime: ^ and $
+// are the start and end of a line and . is any character (A4H 2026-09-23),
+// where lines end at \n only. JS's m flag also ends one at \r, U+2028 and
+// U+2029, so the anchors are rewritten rather than flagged; an anchored
+// pattern on a text holding one of those is NOT_COMPILED, as in Go
+// (checkLines: A4H's own rule there is not Go's and not JS's).
+function abapRegExp(p, s, icase, g, where) {
+  let out = "", anchored = false;
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === "\\") { out += c + (p[i + 1] ?? ""); i++; continue; }
+    if (c === "^") { out += "(?:^|(?<=\n))"; anchored = true; continue; }
+    if (c === "$") { out += "(?:$|(?=\n))"; anchored = true; continue; }
+    if (c !== "[") { out += c; continue; }
+    let j = i + 1;
+    if (p[j] === "^") j++;
+    if (p[j] === "]") j++;
+    for (; j < p.length && p[j] !== "]"; j++) {
+      if (p[j] === "[" && ":=.".includes(p[j + 1] ?? "x")) {
+        const end = p[j + 1];
+        for (j += 2; j + 1 < p.length && !(p[j] === end && p[j + 1] === "]"); j++);
+        j++;
+      }
+    }
+    out += p.slice(i, j + 1);
+    i = j;
+  }
+  if (anchored && /[\r\u2028\u2029]/.test(s)) throw nc(where, `^ or $ in a text with a line end other than \\n is not measured: ${p}`);
+  try { return new RegExp(out, (icase ? "i" : "") + g + "su"); } catch { throw new AbapError("CX_SY_INVALID_REGEX", p); }
 }
 
 // CREATE OBJECT ... TYPE (name): every compiled class registers what it is
@@ -384,8 +409,7 @@ export const SplitSubrc = (pieces, lens) => (pieces.some((p, i) => lens[i] >= 0 
 // in FindStmt: an alternation whose shorter branch matches first differs.
 function rxAll(s, p, icase, first) {
   if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
-  let re;
-  try { re = new RegExp(p, icase ? "gimu" : "gmu"); } catch { throw new AbapError("CX_SY_INVALID_REGEX", p); }
+  const re = abapRegExp(p, s, icase, "g", "REPLACE REGEX");
   const out = [];
   let pos = 0;
   while (pos <= s.length) {

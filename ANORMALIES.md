@@ -1226,9 +1226,9 @@ for `zosd_status_app`, which has been deployed for a day.
   6. `repeat( val = ' ' occ = 3 )` is empty, because a c argument loses its trailing blanks; open-abap gives three blanks.
   7. `replace( ... occ = 2 )` replaces the second occurrence and `occ = -1` the last; open-abap replaces nothing for either (`r2:abca-cabc rm1:abcabca-c` against `abcabcabc` twice).
   8. `shift_right( )` is implemented; open-abap raises `Error("shift_right todo")`.
-  Also measured and the same on both: POSIX leftmost-longest is not JavaScript's leftmost-first (`a|aX` in `aXbX`), a known difference of the regex engine, noted in `tools/gogen/semantics.mjs` and not counted here.
-- Impact on open-steamgate: the SEGW generator and the gateway call `replace( ... occ = 0 )`, `repeat( )` and two-target `SPLIT` on string targets, where the two runtimes agree; nothing on the served path is known to hit the eight differences. The Go backend (`tools/gogen`) follows A4H in all eight.
+  Not counted here: `a|aX` in `aXbX` takes `aX` on A4H (POSIX, leftmost-longest) and `a` in JavaScript's `RegExp` (leftmost-first). That is the regex engine, shared by the open-abap runtime and by gogen's JS backend, noted in `tools/gogen/semantics.mjs`, and not an open-abap anomaly.
+- Impact on open-steamgate: the SEGW generator and the gateway call `replace( ... occ = 0 )`, `repeat( )` and two-target `SPLIT` on string targets, where the two runtimes agree; nothing on the served path is known to hit the eight differences. The Go backend (`tools/gogen`) follows A4H in all eight; for item 5 its front end holds the superclass A4H gives the class (`CX_DYNAMIC_CHECK`), so `CATCH cx_dynamic_check` and `CATCH cx_root` take it there too (`ZCL_GOGEN_T_STRLOOP`).
 - Smallest safe workaround: none needed on the served path; do not rely on `IN SECTION`, `occ` other than 0 or 1, or `$0` in code that also runs on open-abap
 - Upstream issue: **needs an issue** in `abaplint/transpiler` (the runtime items) and one in `open-abap-core` (the missing class); not sent, the critic pass the upstream rule asks for comes first
-- Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE)
+- Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE, _STRLINES)
 - Upstream version containing a fix: `unknown`

@@ -634,12 +634,18 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
   "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND",
   // the string functions (repeat( ) replace( ): a parameter out of range)
-  "CX_SY_STRG_PAR_VAL"];
+  "CX_SY_STRG_PAR_VAL",
+  // REPLACE ALL OCCURRENCES OF an empty pattern; open-abap-core has no such
+  // class, so its superclass is written down below as A4H defines it
+  "CX_SY_REPLACE_INFINITE_LOOP"];
+// the superclass of a runtime exception the registry does not hold, read
+// off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK)
+const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK"};
 
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
     if (c === ancestor) return true;
-    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass()?.toUpperCase();
+    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
   }
   return false;
 }
@@ -1144,6 +1150,12 @@ function moveCorresponding(node, ctx, text) {
   const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
   const to = lvalue(tNode, ctx);
   if (from.type.k !== "struct" || to.type.k !== "struct") throw new Unsupported(`MOVE-CORRESPONDING from a ${from.type.k} to a ${to.type.k}`);
+  // each component names source and target again, so both must be places
+  // that cost nothing and do nothing when named twice: a variable, an
+  // attribute, a field symbol or a component of one (a table expression, a
+  // dereference or a call would run once per component where ABAP runs it once)
+  const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
+  if (!plain(from) || !plain(to)) throw new Unsupported(`MOVE-CORRESPONDING of something other than a variable or its component: ${text}`);
   const src = structOf(ctx, from.type);
   const dst = structOf(ctx, to.type);
   if (!src || !dst) throw new Unsupported(`MOVE-CORRESPONDING: a structure not in the program`);
@@ -1189,15 +1201,11 @@ function stringFn(name, direct, named, ctx, text) {
       given.has("OCC") ? int("OCC") : {e: "int", value: 1, type: I}], type: S};
   }
   if (name === "CONDENSE") {
-    // a c del / from / to: whether its trailing blanks count is not measured,
-    // so only a literal without any, or a string, is taken
-    const set = (k) => {
-      if (!given.has(k)) return {e: "str", value: " ", type: S};
-      const x = source(given.get(k), ctx);
-      if (x.type.k === "c" && !(x.e === "chars" && !/ $/.test(given.get(k).concatTokens().replace(/'$/, "")))) throw new Unsupported(`condense( ) ${k.toLowerCase()} of a c field: ${text}`);
-      if (!charlike(x.type)) throw new Unsupported(`condense( ) ${k.toLowerCase()} of a ${x.type.k}`);
-      return convert(x, S);
-    };
+    // a c del / from / to loses its trailing blanks (A4H 2026-09-23, probe
+    // ZCL_GOGEN_T_STRCR: del = space, del = ' ', del = a c(1) field holding
+    // a blank and from = space all strip or match nothing; to = space
+    // replaces a run with nothing), which is how a c value is stored here
+    const set = (k) => (given.has(k) ? chars(k) : {e: "str", value: " ", type: S});
     return {e: "str_fn", fn: "CondenseFn", args: [val, set("DEL"), set("FROM"), set("TO")], type: S};
   }
   if (name === "SHIFT_LEFT" || name === "SHIFT_RIGHT") {
@@ -1570,7 +1578,7 @@ function substring(base, off, len, node) {
   return {e: "substr", x: base, off, len, base: base.type, type};
 }
 
-const CHAR_UTILITIES = {NEWLINE: "\n", CR_LF: "\r\n", HORIZONTAL_TAB: "\t"};
+const CHAR_UTILITIES = {NEWLINE: "\n", CR_LF: "\r\n", HORIZONTAL_TAB: "\t", FORM_FEED: "\f", VERTICAL_TAB: "\v"};
 
 /** zif_x=>c_y or zcl_x=>attr */
 function resolveStatic(owner, attr, ctx) {
