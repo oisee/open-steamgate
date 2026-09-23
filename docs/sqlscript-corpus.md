@@ -765,3 +765,45 @@ runs". Next walls, working corpus: CLNT parameters (`mandt`, `abap.clnt`,
 24 bodies -- milestone 3, the CHAR input case), and signatures with more
 than one output (19 left after the table functions; 28 of the multi-output
 ones are two tables).
+
+### Character inputs at the runtime gate: 13 → 15, and what is under them
+
+*2026-09-23. The rule measured on A4H (docs/sqlscript-hana-observed.md), put
+where the runtime binds.*
+
+The procedure compiler and the runtime admitted INTEGER and STRING inputs
+only. They now admit a fixed-length character input `C(n)` -- CHAR, and
+CLNT, DATS and TIMS, which all arrive as `C(n)` -- bound as the kernel
+binds it: trailing blanks removed, a leading blank kept, `''` when initial
+and not NULL, a value longer than the field refused rather than cut, a
+text-literal DEFAULT right-trimmed. The trim happens **only at the input
+boundary**: a scalar the body declares is an NVARCHAR, and HANA keeps its
+blanks. CLNT joined the measured datatypes. Tested as procedures on DuckDB
+and SQLite against a column of right-trimmed values.
+
+| | compiles as a procedure |
+| --- | ---: |
+| working, before | 13 |
+| working, after | **15** |
+| teaching, before / after | 0 / 2 |
+
+What moved, counted per body against `main` rather than read off the
+histogram: of the two working bodies that newly compile, one has a client
+parameter and the other a character, date or RAW input that was refused
+before; the two teaching ones have no client parameter.
+
+The 47 working bodies with a client parameter, before and after:
+
+| | `main` | this change |
+| --- | ---: | ---: |
+| compile | 0 | 1 |
+| stop in the grammar | 22 | 22 |
+| refused on a parameter type | 22 | 20 |
+| other refusals | 3 | 4 |
+
+So the client input was rarely the only thing missing: of the 22 refused
+on it, one now compiles, one moved to an unknown column, and 20 name
+another element type not measured yet (NUMC among them, and the GUIDs of
+one package, which RAW now admits as inputs but which stop elsewhere). RAW
+was measured the same day (docs/sqlscript-hana-observed.md) and is admitted
+the same way. The grammar is the next bulk.

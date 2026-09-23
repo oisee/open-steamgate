@@ -192,7 +192,7 @@ describe("a dictionary read off folders of abapGit XML", () => {
 
 describe("the procedure compiler admits only the measured types, dictionary or not", () => {
   it("still refuses what it refused before the shared reader existed", () => {
-    for (const type of ["NUMC5", "N LENGTH 5", "X LENGTH 16", "XSTRING", "INT8", "abap.clnt", "abap.numc(3)", "abap.raw(16)"]) {
+    for (const type of ["NUMC5", "N LENGTH 5", "XSTRING", "INT8", "abap.numc(3)", "abap.rawstring", "abap.fltp"]) {
       expect(() => irTypeFromAbap(type), type).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
     }
   });
@@ -204,15 +204,19 @@ describe("the procedure compiler admits only the measured types, dictionary or n
     expect(irTypeFromAbap("abap.string")).to.deep.equal({abap: "STRING"});
     expect(irTypeFromAbap("abap.dats")).to.deep.equal({abap: "C", len: 8});
     expect(irTypeFromAbap("abap.tims")).to.deep.equal({abap: "C", len: 6});
+    // fixed RAW is measured since 2026-09-23 (n bytes, initial all zeros)
+    expect(irTypeFromAbap("abap.raw(16)")).to.deep.equal({abap: "X", len: 16});
+    expect(irTypeFromAbap("X LENGTH 16")).to.deep.equal({abap: "X", len: 16});
   });
 
   it("admits a data element only with a dictionary, and only when it resolves to a measured datatype", () => {
     const resolve = (name) => ({TABNAME: {DATATYPE: "CHAR", LENG: 30, DECIMALS: 0}, MANDT: {DATATYPE: "CLNT", LENG: 3, DECIMALS: 0}, ZNUM: {DATATYPE: "NUMC", LENG: 5, DECIMALS: 0}})[name];
     expect(irTypeFromAbap("tabname", resolve)).to.deep.equal({abap: "C", len: 30});
     expect(() => irTypeFromAbap("tabname")).to.throw(UnsupportedSqlScript);
-    // CLNT is CHAR(3) everywhere we have looked, and it is still not admitted
-    // until the CHAR-input conformance case has measured trailing blanks
-    expect(() => irTypeFromAbap("mandt", resolve)).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
+    // CLNT is admitted since it was measured on A4H (2026-09-23): a client
+    // input arrives as its three characters, right-trimmed like CHAR
+    expect(irTypeFromAbap("mandt", resolve)).to.deep.equal({abap: "C", len: 3});
+    expect(irTypeFromAbap("abap.clnt")).to.deep.equal({abap: "C", len: 3});
     expect(() => irTypeFromAbap("znum", resolve)).to.throw(UnsupportedSqlScript, /no portable SQLScript mapping/);
   });
 });

@@ -58,7 +58,12 @@ const isBareNull = (node) => {
 // exactly the datatypes the literal forms above map to, nothing wider: CLNT,
 // CUKY, CURR and the rest wait for the CHAR-input conformance case (trailing
 // blanks on HXE against DuckDB) before a data element of theirs is admitted
-const MEASURED_DATATYPES = new Set(["CHAR", "DATS", "TIMS", "INT4", "STRG", "DEC"]);
+// CLNT joined the set on 2026-09-23, measured on A4H: a client input
+// arrives as its three characters, right-trimmed like CHAR
+// (docs/sqlscript-hana-observed.md)
+// RAW joined the same day: a fixed RAW input is its n bytes, initial as n
+// zero bytes, compared byte-wise (docs/sqlscript-hana-observed.md)
+const MEASURED_DATATYPES = new Set(["CHAR", "CLNT", "DATS", "TIMS", "INT4", "STRG", "DEC", "RAW"]);
 export function irTypeFromAbap(type, resolve) {
   const text = upper(type).trim();
   if (["I", "INT4", "INTEGER"].includes(text)) return T.int;
@@ -67,6 +72,8 @@ export function irTypeFromAbap(type, resolve) {
   if (["T", "TIMS"].includes(text)) return T.char(6);
   const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));
+  const raw = /^X\s+LENGTH\s+(\d+)$/.exec(text)?.[1];
+  if (raw !== undefined) return T.bytes(Number(raw));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);
   if (packed !== null) return T.dec(Number(packed[1] ?? 16), Number(packed[2] ?? 2));
   // a CDS built-in, as a DDLS RETURNS list spells it: admitted when its
@@ -186,6 +193,13 @@ export function compileProcedure(method, types, options = {}) {
     if (one.default === undefined) return {};
     const text = String(one.default);
     if (type.abap === "I" && /^-?\d+$/.test(text)) return {optional: true, default: Number(text)};
+    if (type.abap === "C" && /^'(?:[^']|'')*'$/.test(text)) {
+      // a text literal into a CHAR parameter: ABAP holds it right-trimmed, which
+      // is what the kernel binds (measured); longer than the field is refused
+      const value = text.slice(1, -1).replaceAll("''", "'").replace(/ +$/, "");
+      if (value.length > type.len) throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} is longer than its ${type.len} characters`);
+      return {optional: true, default: value};
+    }
     if (type.abap === "STRING" && /^'(?:[^']|'')*'$/.test(text)) {
       const value = text.slice(1, -1).replaceAll("''", "'");
       // 'ab  ' is a text-field literal, and ABAP drops its trailing blanks on
@@ -197,14 +211,34 @@ export function compileProcedure(method, types, options = {}) {
     }
     throw new UnsupportedSqlScript(`DEFAULT ${text} for ${one.name} is not a literal of its type this compiler carries`);
   };
+  // a date or time input is C(8) / C(6) in the IR, but its initial value is
+  // its zero digits, not '' (measured on A4H): an OPTIONAL one without a
+  // DEFAULT is given that initial value here, so the runtime binds it
+  const zeroDigits = (one) => {
+    const text = upper(one.abapType).trim();
+    const datatype = ["D", "DATS"].includes(text) ? "DATS" : ["T", "TIMS"].includes(text) ? "TIMS"
+      : /^ABAP\.(DATS|TIMS)$/.exec(text)?.[1] ?? upper(resolve?.(text)?.DATATYPE ?? "");
+    return datatype === "DATS" ? "00000000" : datatype === "TIMS" ? "000000" : undefined;
+  };
   const parameters = inputParameters
     .filter((one) => !relationNames.has(upper(one.name)))
     .map((one) => {
       const type = irTypeFromAbap(one.abapType, resolve);
-      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...defaultOf(one, type)};
+      const given = defaultOf(one, type);
+      const zeros = zeroDigits(one);
+      const initial = one.optional === true && given.default === undefined && zeros !== undefined ? {default: zeros} : {};
+      // the kind travels with the parameter, not in the IR type (which the
+      // lowering reads as plain C(n)): the runtime binds an explicit initial
+      // date/time as its zero digits and refuses a value that is not digits
+      const kind = zeros === undefined ? {} : {kind: zeros.length === 8 ? "DATS" : "TIMS"};
+      return {name: upper(one.name), type, ...(one.optional === true ? {optional: true} : {}), ...given, ...initial, ...kind};
     });
-  if (parameters.some((one) => !["I", "STRING"].includes(one.type.abap))) {
-    throw new UnsupportedSqlScript("initial portable procedure inputs support only INTEGER or STRING scalars");
+  // INTEGER, STRING, and fixed-length character (CHAR, CLNT, DATS, TIMS all
+  // arrive as C(n)): what the kernel binds for C was measured on A4H --
+  // right-trimmed, '' when initial -- and runProcedure binds the same
+  if (parameters.some((one) => !["I", "STRING", "C", "X"].includes(one.type.abap)
+      || (["C", "X"].includes(one.type.abap) && !(Number.isInteger(one.type.len) && one.type.len > 0)))) {
+    throw new UnsupportedSqlScript("portable procedure inputs support INTEGER, STRING, fixed-length character and fixed-length RAW scalars only");
   }
   const scalarTypes = Object.fromEntries(parameters.map((one) => [one.name, one.type]));
   const arrayValues = Object.create(null);

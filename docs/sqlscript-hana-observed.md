@@ -408,3 +408,29 @@ length; DATS and TIMS as their fixed-width digits (`00000000` initial);
 STRING unchanged. DuckDB and SQLite compare VARCHAR without padding, like
 HANA, so with the trim at the bind no rewriting of comparisons is needed
 (foreman-dell's DuckDB column: `'A  ' = 'A'` is false there).
+
+## What the kernel binds for a RAW AMDP input (measured on A4H, 2026-09-23)
+
+Same method: a throwaway `$TMP` class and an ABAP Unit driver, deleted
+afterwards.
+
+| ABAP parameter type | value passed | what the procedure sees |
+| --- | --- | --- |
+| a RAW 16 data element | `0123…CDEF` | 16 bytes; `BINTOHEX` gives the upper-case hex |
+| a RAW 16 data element | initial | **16 zero bytes** -- not NULL, not empty |
+| `x LENGTH 4` | initial | 4 zero bytes |
+
+The comparison is byte-wise: the input equals `X'0123…CDEF'` and
+`HEXTOBIN('0123…cdef')` in either case of hex, and not `X''`. Going the
+other way, a shorter VARBINARY returned into an `x LENGTH 16` component
+arrives padded with zero bytes on the right, and an empty one as 16 zero
+bytes.
+
+An ABAP `x LENGTH 16` input is always 16 bytes, so a shorter value can only
+come from a JavaScript caller of the portable runtime. For that case the
+runtime applies ABAP's own assignment rule for `x`: a shorter value moved
+into a longer field is padded with hex `00` on the right. The ABAP database
+seam here holds fixed RAW as canonical upper-case hex text, so the portable
+bind is: the value as upper-case hex, padded with `00` on the right to the
+field's length, initial all zeros, a longer value or one that is not hex
+refused. String equality on that canonical form is byte equality.

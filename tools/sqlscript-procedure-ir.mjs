@@ -52,10 +52,58 @@ function scalarForType(value, type, name) {
   if (type?.abap === "STRING" && typeof value !== "string") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript string`);
   }
+
   if (type?.abap === "BOOL" && typeof value !== "boolean") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript boolean`);
   }
   return value;
+}
+
+/** What the kernel binds for a fixed-length character INPUT, measured on
+ *  A4H: trailing blanks removed, a leading blank kept, initial as ''
+ *  (docs/sqlscript-hana-observed.md). Only at the input boundary: a scalar
+ *  the body declares is an NVARCHAR, and HANA keeps its blanks. Today the
+ *  host evaluates INTEGER scalars only, so no character value is ever built
+ *  inside a program; when string scalars arrive, the trim must stay here and
+ *  not move into scalarForType, and that is the test to write with them.
+ *  A value longer than the field is not one ABAP could have passed: refused,
+ *  not cut. */
+function boundCharacter(value, type, name) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new UnsupportedSqlScript(`${name} is not a character value`);
+  const trimmed = value.replace(/ +$/, "");
+  if (trimmed.length > type.len) throw new UnsupportedSqlScript(`${name} is longer than its ${type.len} characters`);
+  return trimmed;
+}
+
+/** A fixed RAW input, measured on A4H: always its n bytes, initial as n zero
+ *  bytes, compared byte-wise. The ABAP database seam holds RAW as canonical
+ *  upper-case hex text, so that is the bound form: a shorter value is padded
+ *  with zero bytes on the right (as ABAP pads x), a longer one or one that
+ *  is not hex is refused. */
+function boundBytes(value, type, name) {
+  if (value == null) return null;
+  if (typeof value !== "string" || !/^([0-9A-Fa-f]{2})*$/.test(value)) {
+    throw new UnsupportedSqlScript(`${name} is not a RAW value as hex text`);
+  }
+  if (value.length > type.len * 2) throw new UnsupportedSqlScript(`${name} is longer than its ${type.len} bytes`);
+  return value.toUpperCase().padEnd(type.len * 2, "0");
+}
+
+/** A date or time input, measured on A4H: always its 8 / 6 digits, the
+ *  initial value as zeros ('00000000', '000000'), never ''. An empty or
+ *  blank value from the caller is the initial value; anything that is not
+ *  that many digits is refused rather than passed as a date. */
+function boundDateTime(value, kind, name) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new UnsupportedSqlScript(`${name} is not a ${kind === "DATS" ? "date" : "time"} value`);
+  const width = kind === "DATS" ? 8 : 6;
+  const trimmed = value.trim();
+  if (trimmed === "") return "0".repeat(width);
+  if (!new RegExp(`^\\d{${width}}$`).test(trimmed)) {
+    throw new UnsupportedSqlScript(`${name} is not ${width} digits, so not a ${kind === "DATS" ? "date" : "time"}`);
+  }
+  return trimmed;
 }
 
 function booleanOrNull(value, context) {
@@ -346,9 +394,12 @@ export async function runProcedure(program, {
     if (parameter.optional !== undefined && typeof parameter.optional !== "boolean") {
       throw new UnsupportedSqlScript(`portable scalar input ${name} has a malformed OPTIONAL flag`);
     }
-    const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type) : [];
-    if (typeKeys.length !== 1 || typeKeys[0] !== "abap" || !["I", "STRING"].includes(parameter.type.abap)) {
-      throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER or STRING type");
+    const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type).sort() : [];
+    const exactScalar = typeKeys.length === 1 && typeKeys[0] === "abap" && ["I", "STRING"].includes(parameter.type.abap);
+    const fixedChar = typeKeys.join() === "abap,len" && ["C", "X"].includes(parameter.type.abap)
+      && Number.isInteger(parameter.type.len) && parameter.type.len > 0;
+    if (!exactScalar && !fixedChar) {
+      throw new UnsupportedSqlScript("portable scalar inputs require the exact ABAP INTEGER, STRING, fixed-length character or fixed-length RAW type");
     }
     if (!supplied.has(name) && parameter.optional !== true) throw new UnsupportedSqlScript(`missing input ${name}`);
     if (parameter.default !== undefined && typeof parameter.default !== (parameter.type?.abap === "I" ? "number" : "string")) {
@@ -357,9 +408,15 @@ export async function runProcedure(program, {
     // an omitted input takes its DEFAULT when the signature has one, and
     // ABAP's initial value only for a bare OPTIONAL
     const initial = parameter.default !== undefined ? parameter.default
-      : parameter.type?.abap === "I" ? 0 : parameter.type?.abap === "STRING" ? "" : null;
+      : parameter.type?.abap === "I" ? 0 : ["STRING", "C"].includes(parameter.type?.abap) ? ""
+        : parameter.type?.abap === "X" ? "0".repeat(parameter.type.len * 2) : null;
     const raw = supplied.has(name) ? supplied.get(name) : initial;
-    const value = scalarForType(raw, parameter.type, name);
+    if (parameter.kind !== undefined && !["DATS", "TIMS"].includes(parameter.kind)) {
+      throw new UnsupportedSqlScript(`portable scalar input ${name} has an unknown kind ${parameter.kind}`);
+    }
+    const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
+      : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
+      : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);
     scalars.set(name, {type: parameter.type, value});
   }
   if (program.outputType !== undefined) {
