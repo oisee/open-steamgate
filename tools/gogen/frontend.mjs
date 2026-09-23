@@ -356,10 +356,11 @@ function classIr(ctx0, obj) {
   const spaghetti = new abaplint.SyntaxLogic(reg, obj).run().spaghetti;
   const tree = new Rearranger().run("CLAS", file.getStructure());
   const className = upper(obj.getName());
+  const scopeName = className;
 
   // attributes and constants live in the class implementation scope
-  const implScope = findScope(spaghetti.getTop(), "class_implementation");
-  const defScope = findScope(spaghetti.getTop(), "class_definition");
+  const implScope = findScope(spaghetti.getTop(), "class_implementation", scopeName);
+  const defScope = findScope(spaghetti.getTop(), "class_definition", scopeName);
   const attributes = [];
   const ownAttrs = new Set(def.getAttributes().getAll().map((a) => upper(a.getName())));
   const classVars = {...(defScope?.getData().vars ?? {}), ...(implScope?.getData().vars ?? {})};
@@ -390,7 +391,7 @@ function classIr(ctx0, obj) {
       const p = m.getParameters();
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
       const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
-        default: defaultOf(p, x), optional: optional.has(upper(x.getName()))});
+        default: defaultOf(p, x), defaultOwner: prefix ? prefix.slice(0, -1) : className, optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
         ...p.getChanging().map((x) => param(x, "changing"))];
@@ -478,7 +479,7 @@ function classIr(ctx0, obj) {
     }
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
-      const ctx = {program, reg, className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
+      const ctx = {program, reg, className, scopeName, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
@@ -542,10 +543,26 @@ function classIr(ctx0, obj) {
   return cls;
 }
 
-function findScope(node, stype) {
+// the scope of that kind, the one of the class named when a name is given
+// (a class with local classes has one class_implementation per class, and
+// the locals come first); without a match by name, the first of the kind
+function findScope(node, stype, name) {
+  if (name !== undefined) {
+    const named = findScopeNamed(node, stype, upper(name));
+    if (named) return named;
+  }
   if (node.getIdentifier().stype === stype) return node;
   for (const c of node.getChildren()) {
     const f = findScope(c, stype);
+    if (f) return f;
+  }
+  return undefined;
+}
+
+function findScopeNamed(node, stype, name) {
+  if (node.getIdentifier().stype === stype && upper(node.getIdentifier().sname) === name) return node;
+  for (const c of node.getChildren()) {
+    const f = findScopeNamed(c, stype, name);
     if (f) return f;
   }
   return undefined;
@@ -609,13 +626,17 @@ function registerConst(program, name, id, className) {
 
 /* ---------------------------------------------------------------- statements */
 
+// the statements and control structures of a body, Normal and Body unwrapped
+const flatChildren = (node) => node.getChildren().flatMap((c) => (c instanceof Nodes.StructureNode && (isStruct(c, Structures.Normal) || isStruct(c, Structures.Body)) ? flatChildren(c) : [c]));
+
 function block(node, ctx) {
+  return blockList(flatChildren(node), ctx);
+}
+
+function blockList(children, ctx) {
   const out = [];
-  for (const child of node.getChildren()) {
-    if (child instanceof Nodes.StructureNode && (isStruct(child, Structures.Normal) || isStruct(child, Structures.Body))) {
-      out.push(...block(child, ctx));
-      continue;
-    }
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
     // one statement (or one IF, LOOP, TRY ...) the subset does not cover
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
@@ -652,7 +673,9 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   "CX_SY_STRG_PAR_VAL",
   // REPLACE ALL OCCURRENCES OF an empty pattern; open-abap-core has no such
   // class, so its superclass is written down below as A4H defines it
-  "CX_SY_REPLACE_INFINITE_LOOP"];
+  "CX_SY_REPLACE_INFINITE_LOOP",
+  // the ICF entity's get_cdata over bytes that are not UTF-8 (abap.ICFGetCData)
+  "CX_SY_CONVERSION_CODEPAGE"];
 // the superclass of a runtime exception the registry does not hold, read
 // off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK)
 const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK"};
@@ -1341,8 +1364,8 @@ function isVariableName(name, ctx) {
   const n = upper(name);
   if (n === "ME" || ctx.fieldSymbols?.has(n)) return true;
   if (ctx.sig.params.some((x) => x.name === n) || ctx.sig.returning?.name === n || ctx.locals.has(n)) return true;
-  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
-  const defs = findScope(ctx.spaghetti.getTop(), "class_definition");
+  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation", ctx.scopeName ?? ctx.className);
+  const defs = findScope(ctx.spaghetti.getTop(), "class_definition", ctx.scopeName ?? ctx.className);
   return (impl?.getData().vars[n] ?? defs?.getData().vars[n]) !== undefined;
 }
 
@@ -1350,8 +1373,8 @@ function findAttribute(ctx, n) {
   if (n === "ME" || n === "SUPER") return undefined;
   // instance and static attributes are declared in the class definition's
   // scope, constants and interface constants show in the implementation's
-  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
-  const defs = findScope(ctx.spaghetti.getTop(), "class_definition");
+  const impl = findScope(ctx.spaghetti.getTop(), "class_implementation", ctx.scopeName ?? ctx.className);
+  const defs = findScope(ctx.spaghetti.getTop(), "class_definition", ctx.scopeName ?? ctx.className);
   const id = impl?.getData().vars[n] ?? defs?.getData().vars[n];
   if (id === undefined) return undefined;
   if (n.includes("~") && !(id instanceof abaplint.Types.ClassConstant) && !id.getMeta().includes("static")) return ownIntfAttribute(ctx, n);
@@ -1951,7 +1974,7 @@ function methodSignature(ctx, owner, name) {
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
     const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
-      optional: optional.has(upper(x.getName()))});
+      defaultOwner: defOwner, optional: optional.has(upper(x.getName()))});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
       ...p.getChanging().map((x) => param(x, "changing"))];
@@ -2721,7 +2744,14 @@ function call(chain, ctx, statement, hint) {
 }
 
 function defaultValue(p, ctx) {
-  const t = p.default;
+  let t = p.default;
+  // a constant of the class or interface that declares the method, by its
+  // plain name: its VALUE, a literal
+  if (/^[a-z_][\w]*$/i.test(t) && !/^abap_(true|false)$/i.test(t) && p.defaultOwner !== undefined) {
+    const def = ctx.reg.getObject("INTF", p.defaultOwner)?.getDefinition() ?? ctx.reg.getObject("CLAS", p.defaultOwner)?.getDefinition();
+    const c = def?.getAttributes().getConstants().find((x) => upper(x.getName()) === upper(t));
+    if (c !== undefined && typeof c.getValue() === "string") t = c.getValue();
+  }
   if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
   if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
