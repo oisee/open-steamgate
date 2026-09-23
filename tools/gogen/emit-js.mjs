@@ -190,7 +190,7 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];
     }
-    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static":
+    case "assign_comp": case "assign_deref": case "assign_data": case "get_ref": case "describe_kind": case "loop_data": case "call_dyn_static": case "select_table":
       return [`${t}${GENERIC};`];
     case "native":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];

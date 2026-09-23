@@ -37,6 +37,10 @@ const EXPECT = {
   // CP / NP / CA / NA; A4H gave "... ca:X1---X", the 1 being sy-fdpos,
   // which the local copy does not read
   ZCL_GOGEN_T_CP: "cp:XX-X--XX-XX-XX-XX ca:X---X",
+  // not an A4H value: the language rule WHEN a OR b OR c, which the front
+  // end read as WHEN a alone until 2026-09-23 (the alternatives after the
+  // first sit in Or nodes), and which a wrong OData type came out of
+  ZCL_GOGEN_T_WHEN: "abc abc abc d -",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

@@ -11,6 +11,8 @@
 // Everything outside the subset is a named refusal (Unsupported), never a
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
+import * as RIR from "../sqlscript-ir.mjs";
+import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
@@ -703,7 +705,12 @@ function structure(node, ctx) {
     for (const w of node.findDirectStructures(Structures.When)) {
       const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
       if (st.get() instanceof Statements.WhenOthers || /\bOTHERS\b/i.test(st.concatTokens())) { others = bodyOf(w, ctx); continue; }
-      const values = st.findDirectExpressions(Expressions.Source).map((s) => source(s, ctx));
+      // WHEN a OR b OR c: the alternatives after the first sit in Or nodes
+      // (only the first was read until 2026-09-23, silently)
+      const alts = [...st.findDirectExpressions(Expressions.Source), ...st.findDirectExpressions(Expressions.Or).map((o) => o.findDirectExpression(Expressions.Source))];
+      const expected = 1 + st.findDirectExpressions(Expressions.Or).length;
+      if (alts.length !== expected || alts.some((x) => !x) || st.getChildren().filter((c) => !isTok(c)).length !== expected) throw new Unsupported(`WHEN form: ${st.concatTokens()}`);
+      const values = alts.map((s) => source(s, ctx));
       const conds = values.map((v) => compareValues("=", {e: "temp", name: tmp, type: subject.type}, v, ctx));
       branches.push({cond: conds.reduce((l, r) => ({c: "or", l, r})), body: bodyOf(w, ctx)});
     }
@@ -788,6 +795,7 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
+  if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   // GET REFERENCE OF x INTO r: r is bound to x itself
   if (isStmt(node, Statements.GetReference)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -1606,6 +1614,121 @@ function declaringClass(reg, cls, name, kind) {
 }
 
 /**
+ * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
+ * [WHERE f IN range AND f op value ...] [ORDER BY f ...]: the form the
+ * gateway's DPCs use. The relation goes to the shared relational IR and is
+ * lowered to SQL at build time (emit side); a range arrives at run time and
+ * is expanded there. MANDT is filtered with the logon client when the table
+ * has one, as a system does implicitly.
+ */
+function selectStatement(node, ctx, text) {
+  const sel = node.findDirectExpression(Expressions.Select);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
+  const tableName = upper(from[0].concatTokens());
+  const tabl = ctx.reg.getObject("TABL", tableName);
+  if (!tabl) throw new Unsupported(`SELECT FROM ${tableName}: not a table of the dictionary in this program`);
+  let tType;
+  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`SELECT FROM ${tableName}: its type does not resolve`); }
+  const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
+  const colType = (n) => {
+    const c = columns.get(n);
+    if (!c) throw new Unsupported(`SELECT: ${tableName} has no column ${n}`);
+    return typeOf(c.type, `${tableName}-${n}`, ctx.program);
+  };
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  const names = /^\s*\*\s*$/.test(fl?.concatTokens() ?? "") ? [...columns.keys()]
+    : (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
+      const n = f.findDirectExpression(Expressions.SQLFieldName);
+      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
+      return upper(n.concatTokens());
+    });
+  if (names.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
+  const cols = names.map((n) => ({name: n, type: colType(n)}));
+  const into = sel.findDirectExpression(Expressions.SQLIntoTable);
+  if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
+  const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
+  const target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
+  if (target.type.k !== "table") throw new Unsupported(`SELECT INTO TABLE of a ${target.type.k}`);
+  const elementary = target.type.row.k !== "struct";
+  if (elementary && (corresponding || names.length !== 1 || !["c", "string", "i"].includes(target.type.row.k))) throw new Unsupported(`SELECT INTO TABLE of ${target.type.row.k} rows: ${text}`);
+  const rowFields = new Map((ctx.program.structs.get(target.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
+  const rowOrder = ctx.program.structs.get(target.type.row.go)?.fields ?? [];
+  // where each column goes: by name for CORRESPONDING, else by position
+  const assign = elementary ? [{line: true, type: target.type.row}] : cols.map((c, i) => {
+    const f = corresponding ? rowFields.get(c.name) : rowOrder[i];
+    if (!f) return null;
+    if (!["c", "string", "i", "d", "t", "n"].includes(c.type.k) || !["c", "string", "i", "d", "t"].includes(f.type.k)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+    if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+    return {field: f.name, type: f.type};
+  });
+  const where = [];
+  const cond = sel.findDirectExpression(Expressions.SQLCond);
+  if (cond) {
+    const parts = cond.getChildren();
+    for (let i = 0; i < parts.length; i += 1) {
+      const p = parts[i];
+      if (isTok(p, "AND")) continue;
+      if (!isExpr(p, Expressions.SQLCompare)) throw new Unsupported(`SELECT WHERE form: ${cond.concatTokens()}`);
+      const f = p.findDirectExpression(Expressions.SQLFieldName);
+      const inn = p.findDirectExpression(Expressions.SQLIn);
+      if (!f || !inn || /\bNOT\b/i.test(p.concatTokens())) throw new Unsupported(`SELECT WHERE compare: ${p.concatTokens()}`);
+      const col = upper(f.concatTokens());
+      const srcs = inn.findDirectExpressions(Expressions.SQLSource);
+      if (srcs.length !== 1 || inn.getChildren().length !== 2) throw new Unsupported(`SELECT WHERE IN form: ${p.concatTokens()}`);
+      const range = sourceOperand(srcs[0].getFirstChild().getFirstChild(), ctx);
+      if (range.type.k !== "table" || range.type.row.k !== "struct") throw new Unsupported(`IN of a ${range.type.k}`);
+      const rf = new Set((ctx.program.structs.get(range.type.row.go)?.fields ?? []).map((x) => String(x.name).toUpperCase()));
+      if (!["SIGN", "OPTION", "LOW", "HIGH"].every((x) => rf.has(x))) throw new Unsupported(`IN of a table that is not a ranges table`);
+      where.push({col, type: colType(col), range});
+    }
+  }
+  const order = [];
+  const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
+  if (ob) {
+    if (/PRIMARY\s+KEY/i.test(ob.concatTokens())) throw new Unsupported("ORDER BY PRIMARY KEY");
+    const kids = ob.getChildren().filter((c) => !isTok(c, "ORDER") && !isTok(c, "BY") && !isTok(c, ","));
+    for (let i = 0; i < kids.length; i += 1) {
+      if (!isExpr(kids[i], Expressions.SQLField)) throw new Unsupported(`ORDER BY form: ${ob.concatTokens()}`);
+      const desc = isTok(kids[i + 1], "DESCENDING");
+      if (isTok(kids[i + 1], "DESCENDING") || isTok(kids[i + 1], "ASCENDING")) i += 1;
+      const col = upper(kids[i].concatTokens());
+      colType(col);
+      order.push({col, desc});
+    }
+  }
+  for (const w of where) {
+    const rt = (ctx.program.structs.get(w.range.type.row.go)?.fields ?? []);
+    for (const f of rt) if (["LOW", "HIGH"].includes(String(f.name).toUpperCase()) && !["c", "string", "i"].includes(f.type.k)) throw new Unsupported(`IN: a range whose ${f.name} is a ${f.type.k}`);
+  }
+  // the relation, in the shared relational IR (osg-i7's), lowered to SQLite
+  // here at build time; each range sits where a marker parameter is, until
+  // the IR carries a node of its own for a predicate that arrives at run time
+  const irType = (t) => (t.k === "i" ? RIR.T.int : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
+  const low = (n) => n.toLowerCase();
+  let pred = null;
+  const and = (p) => { pred = pred === null ? p : RIR.bin("AND", pred, p, RIR.T.bool); };
+  if (columns.has("MANDT")) and(RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool));
+  where.forEach((w, i) => and(RIR.lit(`@@range:${i}@@`, RIR.T.bool)));
+  let rel = RIR.scan(low(tableName));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.project(rel, cols.map((c) => ({as: low(c.name), expr: RIR.col(low(c.name), irType(c.type))})));
+  if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: low(o.col), desc: o.desc})));
+  let lowered;
+  try { lowered = lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`SELECT: the relational IR refused it: ${e.message}`); }
+  const args = [];
+  const slots = [];
+  lowered.params.forEach((p, k) => {
+    const m = /^@@range:(\d+)@@$/.exec(String(p.value ?? ""));
+    if (m) { const w = where[Number(m[1])]; slots.push({index: k, col: `"${low(w.col)}"`, range: w.range}); args.push({nil: true}); return; }
+    if (p.name === "SY-MANDT") { args.push({mandt: true}); return; }
+    args.push({value: p.value});
+  });
+  return {s: "select_table", table: tableName, cols, assign, target, sql: lowered.sql, args, slots};
+}
+
+/**
  * ASSIGN into a generic field symbol: a component of a structure by name
  * (sy-subrc 4 when there is none), what a data reference points to
  * (sy-subrc 4 when it is initial; not measured), or a value, bound.
@@ -1759,7 +1882,7 @@ function template(n, ctx) {
         }
       }
       // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
-      if (!["i", "int8", "f", "string", "c", "x", "xstring"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      if (!["i", "int8", "f", "string", "c", "x", "xstring", "data", "d", "t"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
       parts.push({value: v, opts});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);
@@ -1904,7 +2027,10 @@ function call(chain, ctx, statement, hint) {
     sig = methodSignature(ctx, at, name);
     if (sig.static) owner = at;
   } else {
-    sig = owner === null ? ctx.signatures.get(qualified) : methodSignature(ctx, owner, qualified);
+    // an alias the class inherits names an interface method its superclass
+    // implements: the signature is the interface's
+    sig = owner === null ? (ctx.signatures.get(qualified) ?? (alias ? methodSignature(ctx, ctx.className, qualified) : undefined))
+      : methodSignature(ctx, owner, qualified);
   }
   // a static method named through a subclass is the declaring class's function
   if (owner !== null && receiver === null && sig?.static && !qualified.includes("~")) owner = declaringClass(ctx.reg, owner, name, "method") ?? owner;

@@ -719,6 +719,28 @@ function stmtLines(st, ctx, d) {
     });
     case "call_dyn_static":
       return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}})`];
+    case "select_table": {
+      // INTO TABLE replaces the table; each row is scanned column by column
+      // and moved into the target's fields (by name with CORRESPONDING)
+      const n = ctx.loop++;
+      const tgt = place(st.target, ctx);
+      const rowGo = goType(st.target.type.row);
+      const args = st.args.map((a) => (a.nil ? "nil" : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value))));
+      const slots = st.slots.map((sl) => {
+        const fields = new Map((STRUCTDEFS.get(sl.range.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
+        const txt = (nm) => (fields.get(nm).type.k === "i" ? `abap.FmtI(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
+        return `{Index: ${sl.index}, Col: ${JSON.stringify(sl.col)}, Rows: func() []abap.RangeRow { var out []abap.RangeRow; for _, r := range ${expr(sl.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident(fields.get("SIGN").name)}, Option: r.${ident(fields.get("OPTION").name)}, Low: ${txt("LOW")}, High: ${txt("HIGH")}}) }; return out }()}`;
+      });
+      const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
+      const moves = st.assign.map((a, i) => (a === null ? null
+        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+      return [`${t}${tgt} = nil`,
+        `${t}if abap.Select(s, ${JSON.stringify(st.sql)}, []any{${args.join(", ")}}, []abap.Slot{${slots.join(", ")}}, func(scan func(dest ...any) error) {`,
+        `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
+        `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
+        `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, r)`,
+        `${t}}) > 0 {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
     case "read_key": {
