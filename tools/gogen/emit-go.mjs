@@ -61,7 +61,7 @@ export function emitGo(program, pkg = "main") {
     for (const a of inst) out.push(`\t${ident(a.name)} ${goType(a.type)}`);
     out.push("}", "");
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
-      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}`);
+      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${a.value === undefined ? "" : ` = ${constLiteral(a)}`}`);
     }
     for (const m of cls.methods) out.push(...method(cls, m), "");
     // a method that did not compile still exists, and says why when called
@@ -72,7 +72,7 @@ export function emitGo(program, pkg = "main") {
     // NEW: a new object, its constructor run with the arguments
     const cp = cls.constructor?.params ?? cls.ctorParams ?? [];
     out.push(`func New_${typeName(cls.name)}(${["s *abap.Session", ...cp.map((p) => `${ident(p.name)} ${goType(p.type)}`)].join(", ")}) *${typeName(cls.name)} {`,
-      `\to := &${typeName(cls.name)}{}`,
+      `\to := &${typeName(cls.name)}{${inst.filter((a) => a.value !== undefined).map((a) => `${ident(a.name)}: ${constLiteral(a)}`).join(", ")}}`,
       ...(cls.constructor ? [`\to.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")})`] : []),
       "\treturn o", "}", "");
     if (cls.constructor) out.push(...method(cls, {...cls.constructor, name: "CONSTRUCTOR", static: false}), "");

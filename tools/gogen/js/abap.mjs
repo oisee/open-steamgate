@@ -153,7 +153,9 @@ export function FmtF(v) {
 // value semantics: a structure or table moved out of a place is copied
 export function copy(v) {
   if (Array.isArray(v)) return v.map(copy);
-  if (v !== null && typeof v === "object") {
+  // a structure is a plain object and is copied; an object of a class is a
+  // reference and is shared, as ABAP moves a TYPE REF TO
+  if (v !== null && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) {
     const o = {};
     for (const k in v) o[k] = copy(v[k]);
     return o;

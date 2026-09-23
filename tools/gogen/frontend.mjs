@@ -183,7 +183,8 @@ function classIr(ctx0, obj) {
       continue;
     }
     try {
-      attributes.push({name, type: typeOf(id.getType(), `${className} ${name}`, program), static: meta.includes("static")});
+      const type = typeOf(id.getType(), `${className} ${name}`, program);
+      attributes.push({name, type, static: meta.includes("static"), value: attributeValue(id, type, `${className} ${name}`)});
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
       attributes.push({name, unsupported: e.message});
@@ -314,6 +315,27 @@ function defaultOf(params, x) {
 }
 
 /** an interface or class constant, by its ABAP name (ZIF_X~C_Y) */
+/**
+ * The VALUE of an attribute, set when the object is made (static: when the
+ * class is loaded) and not left at the type's initial value: a rotozoom
+ * with `mv_scale TYPE i VALUE 8` left at 0 stepped its WHILE by 0 and
+ * appended rows until the machine ran out of memory (2026-09-23).
+ * Literals only; anything else is refused, not guessed.
+ */
+function attributeValue(id, type, where) {
+  const raw = id.getValue?.();
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string" && typeof raw !== "number") throw new Unsupported(`${where}: structured VALUE`);
+  const text = String(raw);
+  const quoted = /^'.*'$/s.test(text) || /^`.*`$/s.test(text);
+  if (!quoted && !/^-?\d+(\.\d+)?$/.test(text)) throw new Unsupported(`${where}: VALUE ${text}`);
+  let value = quoted ? text.slice(1, -1).replaceAll(text[0] === "'" ? "''" : "``", text[0]) : text;
+  if (type.k === "c") value = value.slice(0, type.len).replace(/ +$/, "");
+  else if (!["i", "int8", "f", "string"].includes(type.k)) throw new Unsupported(`${where}: VALUE for type ${type.k}`);
+  if (type.k !== "c" && type.k !== "string" && !Number.isFinite(Number(value))) throw new Unsupported(`${where}: VALUE ${text}`);
+  return value;
+}
+
 function registerConst(program, name, id, className) {
   const go = goName(name.includes("~") ? name : `${className}=>${name}`);
   if (program.consts.has(go)) return go;
@@ -1259,7 +1281,10 @@ const OPS = {EQ: "=", NE: "<>", LT: "<", LE: "<=", GT: ">", GE: ">="};
 
 function compare(node, ctx) {
   const kids = node.getChildren();
-  const not = kids.some((c) => isTok(c, "NOT"));
+  // only a leading NOT negates the whole comparison; the NOT of IS NOT
+  // INITIAL / IS NOT BOUND is read from the text below (counting both made
+  // `x IS NOT INITIAL` true for an empty x)
+  const not = kids.length > 0 && isTok(kids[0], "NOT");
   const sources = node.findDirectExpressions(Expressions.Source);
   const text = upper(node.concatTokens());
   if (/\bIS\s+(NOT\s+)?BOUND\b/.test(text) && sources.length === 1) {

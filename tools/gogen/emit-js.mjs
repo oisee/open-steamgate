@@ -14,6 +14,13 @@ import {ident, funcName, referencedClasses} from "./emit-go.mjs";
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
+/** a constant's or an attribute's VALUE as a JS literal */
+function literal(c) {
+  if (c.type.k === "i" || c.type.k === "f") return String(Number(c.value));
+  if (c.type.k === "int8") return `${BigInt(c.value)}n`;
+  return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
+}
+
 function zero(t) {
   switch (t.k) {
     case "i": case "f": return "0";
@@ -38,23 +45,20 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`export function new_${st.go}() {`, `  return {${st.fields.map((f) => `${ident(f.name)}: ${zero(f.type)}`).join(", ")}};`, "}");
   }
   out.push("");
-  for (const c of program.consts.values()) {
-    const v = c.type.k === "i" || c.type.k === "f" ? String(Number(c.value)) : JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
-    out.push(`const ${c.go} = ${v};`);
-  }
+  for (const c of program.consts.values()) out.push(`const ${c.go} = ${literal(c)};`);
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
   for (const cls of program.classes) {
     const inst = (cls.attributes ?? []).filter((a) => !a.static && !a.unsupported);
     out.push(`export class ${typeName(cls.name)} {`, "  constructor() {");
-    for (const a of inst) out.push(`    this.${ident(a.name)} = ${zero(a.type)};`);
+    for (const a of inst) out.push(`    this.${ident(a.name)} = ${a.value === undefined ? zero(a.type) : literal(a)};`);
     out.push("  }");
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
-      out.push(`  static ${ident(a.name)} = ${zero(a.type)};`);
+      out.push(`  static ${ident(a.name)} = ${a.value === undefined ? zero(a.type) : literal(a)};`);
     }
     const cp = cls.constructor?.params ?? cls.ctorParams ?? [];
-    out.push(`  static NEW(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
+    out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
       ...(cls.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
     for (const m of all) out.push(...method(cls, m));
@@ -295,7 +299,7 @@ function expr(e, ctx) {
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
-    case "new": return `${typeName(e.cls)}.NEW(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
+    case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
     case "call": {
       if (e.args.some((a) => a.dir !== "importing" && a.place)) throw new Error("EXPORTING in an expression call");
       const args = e.args.map((a) => (a.dir === "importing" ? expr(a.value, ctx) : `{v: ${zero(a.type)}}`));
