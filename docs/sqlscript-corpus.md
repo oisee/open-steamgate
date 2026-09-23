@@ -654,13 +654,20 @@ only with scalar arguments; on DuckDB and SQLite it is "not compiled for
 would have to be a table variable, which one statement does not have.
 
 Two things were under it. abaplint reads no class definition at all out of
-the ISLM classes (it stops on a multi-line `USING cl_a=>m1 cl_b=>m2.` list
-after `BY DATABASE FUNCTION`), so their methods had **no parameters**, and
-the body's own `:it_configuration` was an unknown variable. The extractor
-now reads the definitions as text when abaplint hands back none
-(`definitionsByText`), never wrong parameters, at worst none. And DEFAULT
-did not count as OPTIONAL: `iv_convertvalues TYPE i DEFAULT 0` is why every
-call of `convert_configuration` passes one argument.
+the ISLM classes, so their methods had **no parameters**, and the body's
+own `:it_configuration` was an unknown variable. The first cause I named
+(a multi-line `USING` list) was wrong -- tried in isolation it parses; the
+measured one is the **OPTIONS clause**: `OPTIONS SUPPRESS SYNTAX ERRORS`,
+`DETERMINISTIC` and `CDS SESSION CLIENT` are all refused by the statement
+grammar, and with the METHOD statement the whole class definition goes
+(ANOMALY-2026-09-23-amdp-method-options: 17 of 181 AMDP classes in the
+export, 12 on this clause). The extractor reads the definitions as text
+when abaplint hands back none (`definitionsByText`), never wrong parameters,
+at worst none -- and the instrument cross-checks that reader against
+abaplint on every class abaplint does read, so its trust is a printed
+number rather than an assumption. And DEFAULT did not count as OPTIONAL:
+`iv_convertvalues TYPE i DEFAULT 0` is why every call of
+`convert_configuration` passes one argument.
 
 | working corpus | every column typed | lowered with guesses |
 | --- | ---: | ---: |

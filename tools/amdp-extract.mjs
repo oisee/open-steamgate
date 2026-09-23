@@ -162,24 +162,50 @@ export function definitionsByText(source) {
   const text = source.split("\n").map((line) => line.replace(/^\*.*$/, "").replace(/"[^\n]*$/, "")).join("\n");
   const out = new Map();
   const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
-  for (const m of text.matchAll(/\b(?:CLASS-)?METHODS\s+([\w~]+)\b([\s\S]*?)\s*\.(?=\s)/gi)) {
-    const name = m[1].toUpperCase();
-    const rest = m[2];
-    if (/^\s*FOR\s+TABLE\s+FUNCTION/i.test(rest) || /^\s*(REDEFINITION|ABSTRACT|FINAL)?\s*$/i.test(rest)) continue;
-    const params = [];
-    let current;
-    const words = rest.replace(/\s+/g, " ").trim();
-    const sections = words.split(/\b(IMPORTING|EXPORTING|CHANGING|RETURNING|RAISING|EXCEPTIONS)\b/i);
-    for (let i = 1; i < sections.length; i += 2) {
-      current = direction[sections[i].toLowerCase()];
-      if (current === undefined) continue;
-      for (const p of sections[i + 1].matchAll(/(?:VALUE\s*\(\s*([\w\/]+)\s*\)|REFERENCE\s*\(\s*([\w\/]+)\s*\)|\b([\w\/]+))\s+TYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)((?:\s+(?:OPTIONAL|DEFAULT\s+\S+))*)/gi)) {
-        const pname = p[1] ?? p[2] ?? p[3];
-        if (/^(IMPORTING|EXPORTING|CHANGING|RETURNING|OPTIONAL|DEFAULT|TYPE)$/i.test(pname)) continue;
-        params.push({name: pname, direction: current, abapType: p[4].trim(), optional: /\b(OPTIONAL|DEFAULT)\b/i.test(p[5] ?? "")});
+  /** split a chained `METHODS: a ..., b ....` on the commas outside parentheses */
+  const chain = (body) => {
+    const parts = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of body) {
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth -= 1;
+      if (ch === "," && depth === 0) {
+        parts.push(current);
+        current = "";
+      } else {
+        current += ch;
       }
     }
-    if (!out.has(name)) out.set(name, params);
+    parts.push(current);
+    return parts;
+  };
+  for (const m of text.matchAll(/\b(?:CLASS-)?METHODS\b(:?)([\s\S]*?)\s*\.(?=\s|$)/gi)) {
+    const declarations = m[1] === ":" ? chain(m[2]) : [m[2]];
+    for (const declaration of declarations) {
+      const head = /^\s*([\w~]+)\b([\s\S]*)$/.exec(declaration);
+      if (head === null) continue;
+      const name = head[1].toUpperCase();
+      const rest = head[2];
+      if (/^\s*FOR\s+TABLE\s+FUNCTION/i.test(rest) || /^\s*(REDEFINITION|ABSTRACT|FINAL)?\s*$/i.test(rest)) continue;
+      const params = [];
+      let current;
+      const words = rest.replace(/\s+/g, " ").trim();
+      // `AMDP OPTIONS READ-ONLY CDS SESSION CLIENT clnt` may precede the
+      // sections; it lands before the first section keyword and is skipped
+      const sections = words.split(/\b(IMPORTING|EXPORTING|CHANGING|RETURNING|RAISING|EXCEPTIONS)\b/i);
+      for (let i = 1; i < sections.length; i += 2) {
+        current = direction[sections[i].toLowerCase()];
+        if (current === undefined) continue;
+        // a type text is a name, `sy-mandt` / `spfli-carrid` (a table field), `REF TO x`, with LENGTH / DECIMALS
+        for (const p of sections[i + 1].matchAll(/(?:VALUE\s*\(\s*([\w\/]+)\s*\)|REFERENCE\s*\(\s*([\w\/]+)\s*\)|\b([\w\/]+))\s+TYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)((?:\s+(?:OPTIONAL|DEFAULT\s+\S+))*)/gi)) {
+          const pname = p[1] ?? p[2] ?? p[3];
+          if (/^(IMPORTING|EXPORTING|CHANGING|RETURNING|OPTIONAL|DEFAULT|TYPE)$/i.test(pname)) continue;
+          params.push({name: pname, direction: current, abapType: p[4].trim(), optional: /\b(OPTIONAL|DEFAULT)\b/i.test(p[5] ?? "")});
+        }
+      }
+      if (!out.has(name)) out.set(name, params);
+    }
   }
   return out;
 }
@@ -201,13 +227,20 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   const defs = new Map();
   const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
   const classDefinition = obj.getClassDefinition?.();
+  const definitionSource = classDefinition === undefined ? "text" : "abaplint";
+  /** methods whose signature the text reader supplied, by name */
+  const byText = new Set();
+  const textDefinitions = definitionsByText(source);
   if (classDefinition === undefined) {
     // abaplint could not read the class definition -- on a class off a
-    // system that is usually a statement inside a SQLScript body it takes
-    // for ABAP (the ISLM classes, 2026-09-23) -- and then every method had
-    // no parameters, so a body's own IN table looked like an unknown
-    // variable. The definition text is still there: read it as text.
-    for (const [name, params] of definitionsByText(source)) defs.set(name, params);
+    // system that is an AMDP OPTIONS clause it does not know, in the
+    // implementation (ANOMALY-2026-09-23-amdp-method-options) -- and then
+    // every method had no parameters, so a body's own IN table looked
+    // like an unknown variable. The definition text is still there.
+    for (const [name, params] of textDefinitions) {
+      defs.set(name, params);
+      byText.add(name);
+    }
   }
   for (const m of classDefinition?.methods ?? []) {
     const params = [];
@@ -227,7 +260,10 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
       // A double quote starts an ABAP comment. Words in that prose are not
       // declaration modifiers (`" not OPTIONAL` must stay required).
       const declaration = after.split('"', 1)[0];
-      const typeMatch = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(declaration);
+      // a type text may be a table field, `sy-mandt` / `spfli-carrid`: the
+      // cross-check against the text reader found this regex cutting them
+      // to `SY` and `SPFLI` (27 methods on the A4H export, 2026-09-23)
+      const typeMatch = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(declaration);
       const abapType = typeMatch?.[1] ?? "";
       const modifiers = typeMatch === null ? "" : declaration.slice(typeMatch.index + typeMatch[0].length);
       // OPTIONAL and DEFAULT both make a parameter one a caller may omit
@@ -235,6 +271,17 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
         optional: /\b(OPTIONAL|DEFAULT)\b/i.test(modifiers)});
     }
     defs.set(String(m.name).toUpperCase(), params);
+  }
+  // the same clause in the DEFINITION (`METHODS m AMDP OPTIONS READ-ONLY
+  // IMPORTING ...`) drops that one method from abaplint's class definition
+  // while the rest survive; the text reader has it, and says so
+  if (classDefinition !== undefined) {
+    for (const [name, params] of textDefinitions) {
+      if (!defs.has(name) && params.length > 0) {
+        defs.set(name, params);
+        byText.add(name);
+      }
+    }
   }
 
   // `CLASS-METHODS get_x FOR TABLE FUNCTION p_x_tf.` -- a method whose
@@ -273,6 +320,7 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
         .join("\n").trim();
       const tableFunction = tableFunctions.get(open.name.toUpperCase());
       out.push({...open, bodyFrom: undefined, body, parameters: defs.get(open.name.toUpperCase()) ?? [],
+        signatureSource: byText.has(open.name.toUpperCase()) ? "text" : definitionSource,
         ...(tableFunction === undefined ? {} : {tableFunction})});
       open = undefined;
     }
@@ -283,7 +331,31 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   const types = new Map();
   for (const extra of extraTypeSources) for (const [k, v] of localTypes(extra)) types.set(k, v);
   for (const [k, v] of localTypes(source)) types.set(k, v);
-  return {className: obj.getName(), methods: out, types};
+  return {className: obj.getName(), methods: out, types, definitionSource};
+}
+
+/**
+ * The text reader against abaplint, on a class abaplint does read: the
+ * methods whose parameter lists (name, direction, type text, OPTIONAL)
+ * differ. Zero is what makes the text reader trustworthy where it is the
+ * only source (ANOMALY-2026-09-23-amdp-method-options); a difference is
+ * counted by the instrument and never decided at runtime.
+ */
+export function definitionsDisagree(source, filename = "x.clas.abap") {
+  const parsed = extract(source, filename);
+  if (parsed.definitionSource !== "abaplint") return {compared: 0, differing: []};
+  const byText = definitionsByText(source);
+  const differing = [];
+  let compared = 0;
+  const shape = (params) => params.map((p) => `${String(p.name).toUpperCase()} ${p.direction} ${String(p.abapType).toUpperCase().replace(/\s+/g, " ")}${p.optional ? " OPTIONAL" : ""}`).join("; ");
+  for (const m of parsed.methods) {
+    if (m.signatureSource === "text") continue;
+    const text = byText.get(String(m.name).toUpperCase());
+    if (text === undefined) continue;
+    compared += 1;
+    if (shape(m.parameters) !== shape(text)) differing.push({method: m.name, abaplint: shape(m.parameters), text: shape(text)});
+  }
+  return {compared, differing};
 }
 
 /** the CREATE PROCEDURE a cut body needs in order to run in HANA */

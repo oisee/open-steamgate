@@ -21,6 +21,7 @@ import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
 import {lower} from "../sqlscript-lower.mjs";
 import * as extractor from "../amdp-extract.mjs";
+import {definitionsDisagree} from "../amdp-extract.mjs";
 import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
 import {parseTableFunction} from "./table-function-ddls.mjs";
 import {typedParameters} from "./signature-schemas.mjs";
@@ -39,15 +40,33 @@ export function bodiesOf(source, filename) {
     const cls = extract(source, filename);
     const methods = cls?.methods ?? [];
     if (methods.length > 0) {
-      return methods.map((m) => ({body: m.body, signature: m, types: cls.types, className: cls.className, language: (m.language || "SQLSCRIPT").toUpperCase()}));
+      // the text reader is checked against abaplint wherever abaplint reads
+      // the class, so where it is the only reader its trust is a number
+      const check = definitionsDisagree(source, filename);
+      return methods.map((m) => ({body: m.body, signature: m, types: cls.types, className: cls.className,
+        signatureSource: m.signatureSource ?? cls.definitionSource, crossCheck: check, language: (m.language || "SQLSCRIPT").toUpperCase()}));
     }
   } catch {
     // a class the extractor cannot read still has bodies worth counting
   }
   const out = [];
-  const re = /METHOD\s+[\w~]+\s+BY\s+DATABASE\s+(?:PROCEDURE|FUNCTION|GRAPH\s+WORKSPACE)\b([\s\S]*?)\.\s*([\s\S]*?)ENDMETHOD\s*\./gi;
+  // a METHOD statement abaplint cannot parse (ANOMALY-2026-09-23-amdp-method-options)
+  // is not a MethodImplementation, so its body is read here by text -- and
+  // its signature too, from the definition, marked as read by text
+  const textDefinitions = extractor.definitionsByText(source);
+  const className = filename.replace(/\.clas\.abap$/i, "").toUpperCase();
+  const re = /METHOD\s+([\w~]+)\s+BY\s+DATABASE\s+(?:PROCEDURE|FUNCTION|GRAPH\s+WORKSPACE)\b([\s\S]*?)\.\s*([\s\S]*?)ENDMETHOD\s*\./gi;
   for (const m of source.matchAll(re)) {
-    out.push({body: m[2], signature: undefined, language: (/LANGUAGE\s+(\w+)/i.exec(m[1])?.[1] ?? "SQLSCRIPT").toUpperCase()});
+    const name = m[1];
+    const params = textDefinitions.get(name.toUpperCase());
+    const usings = (/\bUSING\b([^.]*)/i.exec(m[2])?.[1] ?? "").split(/[\s,]+/).filter(Boolean);
+    out.push({
+      body: m[3],
+      signature: params === undefined ? undefined : {name, parameters: params, usings, dbKind: /FUNCTION/i.test(m[0].slice(0, 80)) ? "FUNCTION" : "PROCEDURE", signatureSource: "text"},
+      signatureSource: "text",
+      className,
+      language: (/LANGUAGE\s+(\w+)/i.exec(m[2])?.[1] ?? "SQLSCRIPT").toUpperCase(),
+    });
   }
   return out;
 }
@@ -150,7 +169,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   const registrySkipped = [...fromDdls.unreadable];
   const byClass = new Map();
   for (const one of [...corpora.teaching, ...corpora.working]) {
-    if (one.className === undefined) continue;
+    if (one.className === undefined || one.signature === undefined) continue;
     if (!byClass.has(one.className)) byClass.set(one.className, {types: one.types, methods: []});
     byClass.get(one.className).methods.push(one.signature);
   }
@@ -158,6 +177,19 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const got = registryFromClass(className, methods, {types, store: ddic, resolve: resolveType});
     Object.assign(tableFunctions, got.registry);
     registrySkipped.push(...got.skipped);
+  }
+  // the cross-check, once per class
+  const crossCheck = {classes: 0, methodsCompared: 0, differing: []};
+  const checkedClasses = new Set();
+  let classesByText = 0;
+  for (const one of [...corpora.teaching, ...corpora.working]) {
+    if (one.className === undefined || checkedClasses.has(one.className)) continue;
+    checkedClasses.add(one.className);
+    if (one.signatureSource === "text") classesByText += 1;
+    if (one.crossCheck === undefined || one.crossCheck.compared === 0) continue;
+    crossCheck.classes += 1;
+    crossCheck.methodsCompared += one.crossCheck.compared;
+    for (const d of one.crossCheck.differing) crossCheck.differing.push(`${one.className}=>${d.method}: abaplint [${d.abaplint}] text [${d.text}]`);
   }
   const usingFailures = new Map();
   const parameterFailures = new Map();
@@ -224,7 +256,9 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const wanted = new Map();
     let wantsSeveral = 0;
     const wantedByPackage = new Map();
-    for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg} of bodies) {
+    let loweredByText = 0;
+    let strictByText = 0;
+    for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg, signatureSource} of bodies) {
       let tokens = [];
       let tree;
       try {
@@ -245,6 +279,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         ir = toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions});
         lower(ir.rel, "duckdb");
         loweredCount += 1;
+        if (signatureSource === "text") loweredByText += 1;
       } catch (error) {
         const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
         afterParse.set(why, (afterParse.get(why) ?? 0) + 1);
@@ -261,6 +296,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         try {
           lower(toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions, strictColumns: true}).rel, "duckdb");
           loweredStrict += 1;
+          if (signatureSource === "text") strictByText += 1;
         } catch (error) {
           const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
           strictOnly.set(why, (strictOnly.get(why) ?? 0) + 1);
@@ -289,6 +325,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       lowered: loweredCount,
       loweredHana,
       loweredStrict,
+      loweredByText,
+      strictByText,
       strictRefusals: [...strictOnly.entries()].sort((a, b) => b[1] - a[1]),
       wanted: [...wanted.entries()].sort((a, b) => b[1] - a[1]),
       wantsSeveral,
@@ -303,6 +341,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   report.bodies = corpora;
   report.catalogueFailures = {using: [...usingFailures.keys()], parameters: [...parameterFailures.keys()]};
   report.registry = {size: Object.keys(tableFunctions).length, ddls: Object.values(fromDdls.registry).length, skipped: registrySkipped};
+  report.signatures = {classesByText, crossCheck};
   report.scratch = scratch;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
   return report;
@@ -322,7 +361,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, scratch, catalogueFailures, registry, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, scratch, catalogueFailures, registry, signatures, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
@@ -335,6 +374,9 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     (tableFunctions.missing.length === 0 ? "" : `; not usable: ${tableFunctions.missing.join(", ")}`));
   console.log(`table functions a body may call: ${registry.size} names (${registry.ddls} DDLS entries, the rest AMDP functions of the classes read)` +
     (registry.skipped.length === 0 ? "" : `; ${registry.skipped.length} not registered, e.g. ${registry.skipped.slice(0, 3).join("; ")}`));
+  console.log(`signatures: ${signatures.classesByText} classes read as text because abaplint gave no definition (ANOMALY-2026-09-23-amdp-method-options); ` +
+    `text reader cross-checked against abaplint on ${signatures.crossCheck.classes} classes / ${signatures.crossCheck.methodsCompared} methods: ${signatures.crossCheck.differing.length} differ` +
+    (signatures.crossCheck.differing.length === 0 ? "" : `\n  ${signatures.crossCheck.differing.slice(0, 6).join("\n  ")}`));
   if (catalogueFailures.using.length > 0) console.log(`USING tables in the export refused whole (an include did not resolve): ${catalogueFailures.using.length}\n  ${catalogueFailures.using.slice(0, 8).join("\n  ")}`);
   if (catalogueFailures.parameters.length > 0) console.log(`table parameters not typed: ${catalogueFailures.parameters.length}\n  ${catalogueFailures.parameters.slice(0, 8).join("\n  ")}`);
   for (const [which, r] of Object.entries(corporaReport)) {
@@ -343,6 +385,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     console.log(`  parsed   ${r.parsed}`);
     console.log(`  lowered  ${r.loweredStrict}  (${r.shareStrict}% -- on duckdb with every column typed: the only number worth quoting)`);
     console.log(`           ${r.lowered} when a column nobody described may be STRING (${r.share}%), ${r.loweredHana} of those on hana`);
+    if (r.strictByText > 0 || r.loweredByText > 0) console.log(`           of which on a signature read as text: ${r.strictByText} strict, ${r.loweredByText} lowered`);
     for (const [reason, count] of r.strictRefusals.slice(0, 6)) console.log(`  ${String(count).padStart(5)}  strict: ${reason}`);
     if (r.wanted.length > 0) {
       console.log(`  wanted: tables in no dictionary here, by the bodies that lower only by guessing and name them (${r.wantsSeveral} of those need two or more):`);

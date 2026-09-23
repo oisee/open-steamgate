@@ -11,7 +11,9 @@ import {extract} from "../tools/amdp-extract.mjs";
 import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
 import {signatureScalars} from "../tools/sqlscript/scalar-types.mjs";
 import {registryFromDdls, registryFromClass} from "../tools/sqlscript/table-function-registry.mjs";
-import {localTypes, definitionsByText} from "../tools/amdp-extract.mjs";
+import {localTypes, definitionsByText, definitionsDisagree} from "../tools/amdp-extract.mjs";
+import {readFileSync} from "node:fs";
+import {fileURLToPath} from "node:url";
 
 const DDLS = `@AccessControl.authorizationCheck: #NOT_REQUIRED
 @ClientHandling.type: #CLIENT_DEPENDENT
@@ -183,6 +185,13 @@ describe("method definitions read as text, when abaplint hands back no class def
   METHODS two IMPORTING iv_a TYPE string iv_b TYPE c LENGTH 10 CHANGING cv_c TYPE i EXPORTING et_rows TYPE tt_rows RAISING cx_x.
 ENDCLASS.`);
     expect([...defs.keys()]).to.deep.equal(["BUILD", "TWO"]);
+    const chained = definitionsByText(`CLASS-METHODS:
+      a IMPORTING VALUE(iv_a) TYPE sy-mandt VALUE(iv_b) TYPE spfli-carrid EXPORTING et TYPE tt_x,
+      b AMDP OPTIONS READ-ONLY CDS SESSION CLIENT clnt IMPORTING VALUE(clnt) TYPE sy-mandt EXPORTING VALUE(rows) TYPE tt_rows RAISING cx_amdp_error,
+      c FOR TABLE FUNCTION p_x.`);
+    expect([...chained.keys()]).to.deep.equal(["A", "B"]);
+    expect(chained.get("A").map((p) => [p.name, p.abapType])).to.deep.equal([["iv_a", "sy-mandt"], ["iv_b", "spfli-carrid"], ["et", "tt_x"]]);
+    expect(chained.get("B").map((p) => [p.name, p.direction, p.abapType])).to.deep.equal([["clnt", "IN", "sy-mandt"], ["rows", "OUT", "tt_rows"]]);
     expect(defs.get("BUILD").map((p) => [p.name, p.direction, p.abapType, p.optional])).to.deep.equal([
       ["IT_CONFIGURATION", "IN", "ISLM_T_ENG_CONTEXT_CONFIG", false], ["IV_N", "IN", "i", true], ["ET_CONFIG_EXT", "RETURNING", "ISLM_T_EXT", false]]);
     expect(defs.get("TWO").map((p) => [p.name, p.direction, p.abapType])).to.deep.equal([
@@ -208,5 +217,67 @@ ENDCLASS.`;
     const {methods} = extract(source, "cl_apl.clas.abap");
     expect(methods[0].parameters.map((p) => [p.name, p.direction, p.abapType])).to.deep.equal([["it_configuration", "IN", "tt_cfg"], ["et_ext", "RETURNING", "tt_ext"]]);
     expect(methods[0].usings).to.deep.equal(["cl_util=>convert_configuration", "cl_other=>get_model_algorithm"]);
+  });
+});
+
+describe("the text reader, checked against abaplint where abaplint reads the class", () => {
+  it("agrees with abaplint on every method of the extractor's own fixture class", () => {
+    const source = readFileSync(fileURLToPath(new URL("fixtures/amdp/zcl_vsp_00_amdp_test.clas.abap.txt", import.meta.url)), "utf8");
+    const {compared, differing} = definitionsDisagree(source, "zcl_vsp_00_amdp_test.clas.abap");
+    expect(compared).to.be.greaterThan(0);
+    expect(differing).to.deep.equal([]);
+  });
+
+  it("marks where a signature came from, and compares nothing on a class abaplint could not read", () => {
+    // the implementation-side clause drops the whole class definition; the
+    // second, plain method is what makes abaplint still find one body
+    const source = `CLASS cl_apl DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS build IMPORTING VALUE(it_configuration) TYPE tt_cfg RETURNING VALUE(et_ext) TYPE tt_ext.
+    CLASS-METHODS plain IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(et_rows) TYPE tt_rows.
+ENDCLASS.
+CLASS cl_apl IMPLEMENTATION.
+  METHOD build BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS SUPPRESS SYNTAX ERRORS.
+    return select key, value from :it_configuration;
+  ENDMETHOD.
+  METHOD plain BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    et_rows = select :iv_n as n from dummy;
+  ENDMETHOD.
+ENDCLASS.`;
+    const parsed = extract(source, "cl_apl.clas.abap");
+    expect(parsed.definitionSource).to.equal("text");
+    const plainMethod = parsed.methods.find((m) => /plain/i.test(m.name));
+    expect(plainMethod.signatureSource).to.equal("text");
+    expect(plainMethod.parameters.map((p) => p.name)).to.deep.equal(["iv_n", "et_rows"]);
+    expect(definitionsDisagree(source, "cl_apl.clas.abap")).to.deep.equal({compared: 0, differing: []});
+    const fixed = extract(source.replace("OPTIONS SUPPRESS SYNTAX ERRORS", "OPTIONS READ-ONLY"), "cl_apl.clas.abap");
+    expect(fixed.definitionSource).to.equal("abaplint");
+    expect(fixed.methods.map((m) => m.signatureSource)).to.deep.equal(["abaplint", "abaplint"]);
+  });
+
+  it("takes the text reader for one method abaplint dropped from a definition it otherwise read, and says so", () => {
+    const source = `CLASS cl_opt DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS with_options AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(et_rows) TYPE tt_rows.
+    CLASS-METHODS plain IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(et_rows) TYPE tt_rows.
+ENDCLASS.
+CLASS cl_opt IMPLEMENTATION.
+  METHOD with_options BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    et_rows = select :iv_n as n from dummy;
+  ENDMETHOD.
+  METHOD plain BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    et_rows = select :iv_n as n from dummy;
+  ENDMETHOD.
+ENDCLASS.`;
+    const parsed = extract(source, "cl_opt.clas.abap");
+    expect(parsed.definitionSource).to.equal("abaplint");
+    const byName = Object.fromEntries(parsed.methods.map((m) => [m.name.toUpperCase(), m]));
+    expect(byName.WITH_OPTIONS.signatureSource).to.equal("text");
+    expect(byName.WITH_OPTIONS.parameters.map((p) => p.name)).to.deep.equal(["iv_n", "et_rows"]);
+    expect(byName.PLAIN.signatureSource).to.equal("abaplint");
+    // and the cross-check compares only what abaplint read
+    expect(definitionsDisagree(source, "cl_opt.clas.abap")).to.deep.equal({compared: 1, differing: []});
   });
 });

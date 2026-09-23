@@ -1213,3 +1213,35 @@ for `zosd_status_app`, which has been deployed for a day.
 - Where the fix goes: `irTypeFromAbap` and the DDIC catalogue's `DEC`
   mapping (`LENG` of a DEC field in DD03P is already digits, not bytes, so
   only the literal `P LENGTH n` form is affected).
+
+### ANOMALY-2026-09-23-amdp-method-options — abaplint drops the whole class definition when an AMDP method uses an OPTIONS clause other than READ-ONLY
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55 (as installed; `npm ls @abaplint/core`)
+- Affected ABAP statement, runtime API or adapter: `METHOD … BY DATABASE PROCEDURE|FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS …` — the statement accepts `OPTIONS READ-ONLY` and nothing else; `OPTIONS SUPPRESS SYNTAX ERRORS`, `OPTIONS READ-ONLY SUPPRESS SYNTAX ERRORS`, `OPTIONS DETERMINISTIC` and `OPTIONS CDS SESSION CLIENT p_clnt` are all reported as "Statement does not exist in the configured ABAP version (or a parser error)". `LANGUAGE LLANG` and `BY DATABASE GRAPH WORKSPACE` are refused the same way.
+- Minimal ABAP reproducer:
+  ```abap
+  CLASS cl_x DEFINITION PUBLIC.
+    PUBLIC SECTION.
+      INTERFACES if_amdp_marker_hdb.
+      CLASS-METHODS m IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.
+  ENDCLASS.
+  CLASS cl_x IMPLEMENTATION.
+    METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS SUPPRESS SYNTAX ERRORS
+    USING ztab.
+      ev = 1;
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+  With `OPTIONS READ-ONLY` in place of `OPTIONS SUPPRESS SYNTAX ERRORS` the same file parses and `getClassDefinition()` lists one method.
+- Exact command used to run it: `new abaplint.Registry().addFile(new MemoryFile("cl_x.clas.abap", src)).parse()`, then `getFirstObject().getClassDefinition()` is `undefined` and `findIssues()` carries a `parser_error` on the METHOD line.
+- Expected SAP behaviour: all four OPTIONS forms are documented AMDP syntax (`SUPPRESS SYNTAX ERRORS`, `DETERMINISTIC` for functions, `CDS SESSION CLIENT` for CDS table functions); the class activates.
+- Actual open-abap behaviour: the METHOD statement fails to parse, the method body is read as ABAP statements (more parser errors on `declare`, on a column name), and **`getClassDefinition()` answers `undefined` for the whole class**, so every method of it has no parameters.
+- Impact on open-steamgate: measured on the A4H AMDP export, 17 of 181 AMDP classes lose their definition, 12 of them on exactly this clause (`SUPPRESS SYNTAX ERRORS` ×11, `DETERMINISTIC` ×1; the other 5 are GRAPH WORKSPACE and LLANG). Among them the ISLM classes whose functions 15 corpus bodies call. The extractor (`tools/amdp-extract.mjs`) then had no signature for any of their methods, and a body's own `:it_configuration` was refused as an unknown table variable.
+- Smallest safe workaround: `tools/amdp-extract.mjs` reads the method definitions as text (`definitionsByText`) **only** when abaplint hands back no class definition; the coverage instrument cross-checks that reader against abaplint on every class abaplint does read and prints the count of disagreements, so the fallback is measured where it is not the only source. It is gated, not preferred: abaplint resolves what the text reader cannot (types from includes, aliases, inheritance), and a runtime refusal on disagreement would make abaplint's right answer depend on the weaker parser (foreman-dell).
+- The same clause in the **definition** has the same effect on that one method: `METHODS m AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.` is a parser error, the class definition survives without `m`, and `m` has no parameters (`CL_DEMO_AMDP_ABAP_TYPES`, `CL_DEMO_AMDP_SESSION_CLIENT`, the `CL_ABAP_AMDP_MC_*` compiler fixtures: 10 methods on the export, found by the cross-check below). `METHODS: a …, b ….` chains are fine.
+- Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
+- Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
+- Upstream version containing a fix: `unknown`

@@ -75,7 +75,7 @@ export function registryFromClass(className, methods, where) {
   const registry = {};
   const skipped = [];
   for (const m of methods) {
-    if (String(m.dbKind).toUpperCase() !== "FUNCTION") continue;
+    if (m === undefined || String(m.dbKind).toUpperCase() !== "FUNCTION") continue;
     const returning = (m.parameters ?? []).find((p) => p.direction === "RETURNING");
     if (returning === undefined) {
       // a table function implementing a DDLS has its RETURNS there
