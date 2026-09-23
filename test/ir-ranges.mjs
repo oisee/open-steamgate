@@ -4,7 +4,7 @@ import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
-import {rangesPredicate, hostPred, likePattern, lowerPredicate, RangesError} from "../tools/ir-ranges.mjs";
+import {rangesPredicate, hostPred, likePattern, lowerPredicate, RangesError, RangesDump, RangesDataError} from "../tools/ir-ranges.mjs";
 import {CASES, PAIRS_FILE, render} from "../tools/ir-ranges-pairs.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
 import {filter, scan, project, order, col, T} from "../tools/sqlscript-ir.mjs";
@@ -14,24 +14,40 @@ const ENGINES = [
   {dialect: "sqlite", make: () => new FileSqliteClient({path: ":memory:"})},
 ];
 // CHAR held right-trimmed, as a dictionary CHAR column is on HANA (measured)
-const TEXT = ["A", "B", "C", "D", "M", "N", "T1", "T1*x", "Tab1*z", "50%_off!", "50xyoff!", "X1", "Y1"];
+const TEXT = ["A", "B", "C", "D", "M", "N", "T1", "T1*x", "Tab1*z", "T a1", "50%_off!", "50xyoff!", "X1", "Y1"];
 const NUMS = [1, 2, 3, 4, 5, 6];
-// the rows each case must select, as ABAP means it
+const NUMC = ["0004", "0005", "0007", "0010", "0011", "0070", "7"];
+// the rows each case must select, as ABAP means it (checked against A4H by
+// foreman-dell's measurement, .local/a4h-ranges-2026-09-23.json)
 const EXPECTED = {
   "empty ranges: no restriction": TEXT,
   "I EQ": ["A"],
   "I EQ, CHAR with trailing blanks": ["A"],
+  "I EQ with a HIGH, which EQ ignores": ["A"],
   "I EQ twice": ["A", "B"],
   "E EQ only": TEXT.filter((v) => v !== "A"),
   "I BT and E EQ": ["A", "B", "D", "M"],
+  "I BT with LOW above HIGH": [],
   "I NB": TEXT.filter((v) => !(v >= "B" && v <= "D")),
-  "I NE GT GE LT LE": NUMS,
+  "I NE": [1, 2, 4, 5, 6],
+  "I GT": [4, 5, 6],
+  "I GE": [3, 4, 5, 6],
+  "I LT": [1, 2],
+  "I LE": [1, 2, 3],
   // T, anything, 1, a literal *, one character: "Tab1*z" too
   "I CP with * + and an escaped *": ["T1*x", "Tab1*z"],
   "I CP with a literal % and _": ["50%_off!"],
-  "I CP with trailing blanks": ["T1", "T1*x", "Tab1*z"],
+  "I CP with trailing blanks": ["T1", "T1*x", "Tab1*z", "T a1"],
+  "I CP with a blank inside": ["T a1"],
+  "I CP without a wildcard is an equality": ["B"],
+  "I CP with an escaped * only is an equality": ["T1*x"],
+  "I CP ending in a lone # escapes a padding blank": ["A"],
+  "I CP of * alone is no restriction": TEXT,
+  "I NP of * alone matches nothing": [],
+  "I CP with a HIGH after LOW at full width": [],
   "E NP": ["X1"],
   "I EQ, NUMC zero-padded": ["0007"],
+  "I BT, NUMC zero-padded to the column": ["0005", "0007", "0010"],
 };
 
 for (const {dialect, make} of ENGINES) describe(`ABAP ranges as IR, on ${dialect}`, function () {
@@ -45,7 +61,7 @@ for (const {dialect, make} of ENGINES) describe(`ABAP ranges as IR, on ${dialect
     await client.native({sql: 'CREATE TABLE "N" ("COL" INTEGER)', expect: "none"});
     for (const v of NUMS) await client.native({sql: `INSERT INTO "N" VALUES (${v})`, expect: "none"});
     await client.native({sql: 'CREATE TABLE "Z" ("COL" VARCHAR)', expect: "none"});
-    for (const v of ["0007", "0070", "7"]) await client.native({sql: 'INSERT INTO "Z" VALUES (?)', params: [{name: "p", value: v, type: "STRING"}], expect: "none"});
+    for (const v of NUMC) await client.native({sql: 'INSERT INTO "Z" VALUES (?)', params: [{name: "p", value: v, type: "STRING"}], expect: "none"});
   });
   after(async () => { await client.disconnect(); });
 
@@ -81,17 +97,37 @@ describe("ABAP ranges as IR: the pairs, the marker, the refusals", () => {
     expect(() => lower(filter(scan("T"), hostPred("r 0", "S", C)), "sqlite")).to.throw(/not a plain name/);
   });
 
-  it("translates a CP pattern: * any, + one, # escapes, % and _ literal", () => {
-    expect(likePattern("a#+b+c*%_##")).to.equal("a+b_c%#%#_##");
-    expect(() => likePattern("abc#")).to.throw(RangesError, /ends in the escape character/);
+  it("translates a CP pattern: * any, + one, # escapes, and ESCAPE only when a literal % or _ needs it", () => {
+    expect(likePattern("a#+b+c*")).to.deep.equal({text: "a+b_c%", escape: false});
+    expect(likePattern("a%_#*")).to.deep.equal({text: "a#%#_*", escape: true});
+    expect(likePattern("A#")).to.deep.equal({text: "A", escape: false});
   });
 
-  it("refuses what it cannot mean: an unknown OPTION or SIGN, CP over a number, a value too long or not NUMC digits", () => {
+  it("renders what the kernel sends on A4H: an equality without a wildcard, 1 = 1 for *, LIKE, ESCAPE only when needed", () => {
+    const C = {abap: "C", len: 10};
+    const sql = (option, low, high) => lowerPredicate(rangesPredicate("COL", C, [{SIGN: "I", OPTION: option, LOW: low, HIGH: high}]), "sqlite").sql;
+    expect(sql("CP", "DE")).to.equal('("COL" = ?)');
+    expect(sql("CP", "D#*")).to.equal('("COL" = ?)');
+    expect(sql("CP", "*")).to.equal("(1 = 1)");
+    expect(sql("CP", "D*")).to.equal('("COL" LIKE ?)');
+    expect(sql("CP", "5%*")).to.equal('("COL" LIKE ? ESCAPE ?)');
+    expect(sql("NP", "X*")).to.equal('("COL" NOT LIKE ?)');
+  });
+
+  it("refuses what A4H dumps on, raises what A4H raises, and names the forms it does not reconstruct", () => {
     const C = {abap: "C", len: 3};
-    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "ZZ", LOW: "A"}])).to.throw(RangesError, /OPTION "ZZ"/);
-    expect(() => rangesPredicate("C", C, [{SIGN: "X", OPTION: "EQ", LOW: "A"}])).to.throw(RangesError, /SIGN "X"/);
+    // an uncatchable dump on A4H, never "no restriction"
+    expect(() => rangesPredicate("C", C, [{SIGN: "i", OPTION: "EQ", LOW: "A"}])).to.throw(RangesDump, /SAPSQL_IN_ITAB_ILLEGAL_SIGN/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "eq", LOW: "A"}])).to.throw(RangesDump, /SAPSQL_IN_ITAB_ILLEGAL_OPTION/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "", OPTION: "", LOW: ""}])).to.throw(RangesDump, /ILLEGAL_SIGN/);
+    // catchable exceptions on A4H
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "EQ", LOW: "ABCD"}])).to.throw(RangesDataError, /CX_SY_OPEN_SQL_DATA_ERROR/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "ABCDEFG*"}])).to.throw(RangesDataError, /CX_SY_DYNAMIC_OSQL_SEMANTICS/);
+    // A4H renders a special form or binds a value the plan cache does not keep
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: " *"}])).to.throw(RangesError, /blanks that meet the padding/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "X", HIGH: "*"}])).to.throw(RangesError, /blanks that meet the padding/);
+    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "CP", LOW: "+"}])).to.throw(RangesError, /matches the initial value/);
     expect(() => rangesPredicate("C", {abap: "I"}, [{SIGN: "I", OPTION: "CP", LOW: "1*"}])).to.throw(RangesError, /CP over a column of type I/);
-    expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "EQ", LOW: "ABCD"}])).to.throw(RangesError, /longer than the column's 3/);
     expect(() => rangesPredicate("C", C, [{SIGN: "I", OPTION: "EQ", LOW: "7a"}], {kind: "NUMC"})).to.throw(RangesError, /not NUMC digits/);
   });
 });

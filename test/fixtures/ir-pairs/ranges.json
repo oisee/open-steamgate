@@ -151,6 +151,68 @@
       }
     },
     {
+      "name": "I EQ with a HIGH, which EQ ignores",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "EQ",
+          "LOW": "A",
+          "HIGH": "Z"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" = $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "I EQ twice",
       "column": "COL",
       "type": {
@@ -417,6 +479,92 @@
       }
     },
     {
+      "name": "I BT with LOW above HIGH",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "BT",
+          "LOW": "M",
+          "HIGH": "A"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "M",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "M",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "((\"COL\" >= $1::varchar(10)) AND (\"COL\" <= $2::varchar(10)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "M",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "M",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "I NB",
       "column": "COL",
       "type": {
@@ -503,7 +651,7 @@
       }
     },
     {
-      "name": "I NE GT GE LT LE",
+      "name": "I NE",
       "column": "COL",
       "type": {
         "abap": "I"
@@ -512,44 +660,152 @@
         {
           "SIGN": "I",
           "OPTION": "NE",
-          "LOW": 1
-        },
-        {
-          "SIGN": "I",
-          "OPTION": "GT",
-          "LOW": 2
-        },
-        {
-          "SIGN": "I",
-          "OPTION": "GE",
           "LOW": 3
-        },
-        {
-          "SIGN": "I",
-          "OPTION": "LT",
-          "LOW": 4
-        },
-        {
-          "SIGN": "I",
-          "OPTION": "LE",
-          "LOW": 5
         }
       ],
       "lowered": {
         "sqlite": {
-          "sql": "(((((\"COL\" <> 1) OR (\"COL\" > 2)) OR (\"COL\" >= 3)) OR (\"COL\" < 4)) OR (\"COL\" <= 5))",
+          "sql": "(\"COL\" <> 3)",
           "params": []
         },
         "duckdb": {
-          "sql": "(((((\"COL\" <> 1) OR (\"COL\" > 2)) OR (\"COL\" >= 3)) OR (\"COL\" < 4)) OR (\"COL\" <= 5))",
+          "sql": "(\"COL\" <> 3)",
           "params": []
         },
         "postgres": {
-          "sql": "(((((\"COL\" <> 1) OR (\"COL\" > 2)) OR (\"COL\" >= 3)) OR (\"COL\" < 4)) OR (\"COL\" <= 5))",
+          "sql": "(\"COL\" <> 3)",
           "params": []
         },
         "hana": {
-          "sql": "(((((\"COL\" <> 1) OR (\"COL\" > 2)) OR (\"COL\" >= 3)) OR (\"COL\" < 4)) OR (\"COL\" <= 5))",
+          "sql": "(\"COL\" <> 3)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I GT",
+      "column": "COL",
+      "type": {
+        "abap": "I"
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "GT",
+          "LOW": 3
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" > 3)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"COL\" > 3)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"COL\" > 3)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"COL\" > 3)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I GE",
+      "column": "COL",
+      "type": {
+        "abap": "I"
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "GE",
+          "LOW": 3
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" >= 3)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"COL\" >= 3)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"COL\" >= 3)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"COL\" >= 3)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I LT",
+      "column": "COL",
+      "type": {
+        "abap": "I"
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "LT",
+          "LOW": 3
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" < 3)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"COL\" < 3)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"COL\" < 3)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"COL\" < 3)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I LE",
+      "column": "COL",
+      "type": {
+        "abap": "I"
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "LE",
+          "LOW": 3
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" <= 3)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"COL\" <= 3)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"COL\" <= 3)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"COL\" <= 3)",
           "params": []
         }
       }
@@ -570,68 +826,44 @@
       ],
       "lowered": {
         "sqlite": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%1*_",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "duckdb": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%1*_",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text ESCAPE $2::text)",
+          "sql": "(\"COL\" LIKE $1::text)",
           "params": [
             {
               "name": "p0",
               "value": "T%1*_",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%1*_",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
@@ -740,68 +972,416 @@
       ],
       "lowered": {
         "sqlite": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "duckdb": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text ESCAPE $2::text)",
+          "sql": "(\"COL\" LIKE $1::text)",
           "params": [
             {
               "name": "p0",
               "value": "T%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(\"COL\" LIKE ? ESCAPE ?)",
+          "sql": "(\"COL\" LIKE ?)",
           "params": [
             {
               "name": "p0",
               "value": "T%",
               "type": "STRING",
               "isNull": false
-            },
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP with a blank inside",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "T a*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
             {
-              "name": "p1",
-              "value": "#",
+              "name": "p0",
+              "value": "T a%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T a%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T a%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T a%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP without a wildcard is an equality",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "B"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "B",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "B",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" = $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "B",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "B",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP with an escaped * only is an equality",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "T1#*x"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T1*x",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T1*x",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" = $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T1*x",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "T1*x",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP ending in a lone # escapes a padding blank",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "A#"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" = $1::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "A",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I CP of * alone is no restriction",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(1 = 1)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(1 = 1)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(1 = 1)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(1 = 1)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I NP of * alone matches nothing",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "NP",
+          "LOW": "*"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(1 = 0)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(1 = 0)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(1 = 0)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(1 = 0)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "I CP with a HIGH after LOW at full width",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "X*",
+          "HIGH": "Z"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"COL\" LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"COL\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "X%        Z",
               "type": "STRING",
               "isNull": false
             }
@@ -825,68 +1405,44 @@
       ],
       "lowered": {
         "sqlite": {
-          "sql": "(NOT (\"COL\" NOT LIKE ? ESCAPE ?))",
+          "sql": "(NOT (\"COL\" NOT LIKE ?))",
           "params": [
             {
               "name": "p0",
               "value": "X%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "duckdb": {
-          "sql": "(NOT (\"COL\" NOT LIKE ? ESCAPE ?))",
+          "sql": "(NOT (\"COL\" NOT LIKE ?))",
           "params": [
             {
               "name": "p0",
               "value": "X%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(NOT (\"COL\" NOT LIKE $1::text ESCAPE $2::text))",
+          "sql": "(NOT (\"COL\" NOT LIKE $1::text))",
           "params": [
             {
               "name": "p0",
               "value": "X%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(NOT (\"COL\" NOT LIKE ? ESCAPE ?))",
+          "sql": "(NOT (\"COL\" NOT LIKE ?))",
           "params": [
             {
               "name": "p0",
               "value": "X%",
-              "type": "STRING",
-              "isNull": false
-            },
-            {
-              "name": "p1",
-              "value": "#",
               "type": "STRING",
               "isNull": false
             }
@@ -949,6 +1505,93 @@
             {
               "name": "p0",
               "value": "0007",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "I BT, NUMC zero-padded to the column",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 4
+      },
+      "kind": "NUMC",
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "BT",
+          "LOW": "5",
+          "HIGH": "10"
+        }
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0005",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0010",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0005",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0010",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "((\"COL\" >= $1::varchar(4)) AND (\"COL\" <= $2::varchar(4)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0005",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0010",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "((\"COL\" >= ?) AND (\"COL\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0005",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0010",
               "type": "C(4)",
               "isNull": false
             }

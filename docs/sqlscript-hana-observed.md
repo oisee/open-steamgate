@@ -522,3 +522,40 @@ stay typed STRING, the binder's default for a call it has not measured, so
 widens `SUM(INTEGER)` where HANA overflows, and that difference has no answer
 in the lowering yet. An unnamed expression is called `V` in the binder's
 messages; two of them in one select are refused as two items of one name.
+
+## What the kernel sends for `col IN ranges` (read off A4H's plan cache, 2026-09-23)
+
+The SQL a range table becomes was read from `M_SQL_PLAN_CACHE` right after
+each SELECT, one case per statement (a distinct table alias through a
+dynamic FROM kept the statements apart; the bound values are not kept by
+the plan cache, so what is below is the statement's shape). Which rows each
+case selects was measured separately by foreman-dell on a table of its own
+(the result sets agree with the shapes).
+
+| range row | what the kernel sends |
+| --- | --- |
+| CP `D*`, `+`, `A+`, `T*   `, `D E*`, `D*` with HIGH `Z` | `col LIKE ?` |
+| CP with a literal `%` or `_` (`5%*`) | `col LIKE ? ESCAPE ?`, and only then |
+| CP with no wildcard left: `DE`, `A#`, `D#*`, an initial LOW | `col = ?` |
+| CP `*` | `1 = 1` |
+| CP with a leading blank (` *`), `X` with HIGH `*` | `(col LIKE ? OR col LIKE ? AND (N'_' <> ? OR col <> N''))` |
+| EQ (a HIGH is ignored), BT, NE | `col = ?`, `col BETWEEN ? AND ?`, `col <> ?` |
+| NP, or SIGN E | `NOT col LIKE ?` |
+
+From that and the result sets: the CP pattern is LOW at its declared width
+with HIGH after it (so `X*` with HIGH `Z` asks for `X`, anything, blanks,
+`Z`, and finds nothing); a trailing `#` escapes a padding blank (`A#` is
+`= 'A'`); trailing blanks do not count. `tools/ir-ranges.mjs` renders the
+same shapes. The special OR form serves blanks that meet the padding and
+the initial value stored as `''`; its bound values would be needed to copy
+it, so such a pattern is refused by name, and so is `+` alone, which
+matched the initial value through a plain `LIKE ?` -- the difference is in
+a value the plan cache does not keep.
+
+Measured by foreman-dell and adopted: SIGN and OPTION are exactly `I` / `E`
+and the ten options in upper case; a lower-case one, an unknown one or an
+initial row is an uncatchable dump (`SAPSQL_IN_ITAB_ILLEGAL_SIGN` /
+`_OPTION`), never "no restriction". A value longer than the column raises
+`CX_SY_OPEN_SQL_DATA_ERROR`; a CP pattern longer than twice the column
+raises `CX_SY_DYNAMIC_OSQL_SEMANTICS`. LOW and HIGH are converted to the
+column's type (a NUMC column gets `0005`..`0010` for `5`..`10`).
