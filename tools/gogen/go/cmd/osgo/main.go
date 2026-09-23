@@ -301,6 +301,7 @@ func main() {
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	flag.Parse()
+	abap.HostFacts = append(abap.HostFacts, "host\tosgo: net/http in front of cl_express_icf_shim, one dialog step per request", buildFacts)
 
 	if *media == "" {
 		if exe, err := os.Executable(); err == nil {
@@ -323,12 +324,14 @@ func main() {
 			log.Fatalf("database: %v", err)
 		}
 		log.Printf("database: in memory, seeded")
+		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), in memory, seeded at start")
 	} else {
 		seeded, err := abap.OpenDBFile(*dbFile, dbScript)
 		if err != nil {
 			log.Fatalf("database: %v", err)
 		}
 		log.Printf("database: %s (WAL)%s", *dbFile, map[bool]string{true: ", new: seeded", false: ", as it was"}[seeded])
+		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), file "+filepath.Base(*dbFile)+", WAL")
 	}
 	func() {
 		defer func() {

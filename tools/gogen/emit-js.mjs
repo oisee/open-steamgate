@@ -620,6 +620,7 @@ function expr(e, ctx) {
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.sy.${e.field.toLowerCase()}`;
     case "sy_mandt": return "abap.Mandt";
+    case "sy_host": return `abap.${e.name}`;
     case "int": return String(e.value);
     case "float": return String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);

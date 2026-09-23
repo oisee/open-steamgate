@@ -300,6 +300,9 @@ const NATIVE = new Map([
   // CL_ABAP_CONV_IN_CE / _OUT_CE do it (TextDecoder with fatal, so bytes that
   // are not UTF-8 raise CX_SY_CONVERSION_CODEPAGE); those two classes take
   // generic parameters, which the subset has no signature for
+  // what the host is: runtime, platform, memory, one "name<TAB>value" line
+  // each (go/abap/sysinfo.go; on Node the class's own @KERNEL lines)
+  ["ZCL_OSD_SYSINFO=>ENVIRONMENT", {fn: "abap.SysInfoEnv", args: []}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
 ]);
@@ -2075,6 +2078,13 @@ function fieldChain(n, ctx) {
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
+  // who the system is and its clock, as the host says (abap.SysID / UName,
+  // the identity tools/osd-identity.mjs gives the Node boot: OSG, DEVELOPER;
+  // date and time in UTC, as the transpiler runtime has them)
+  if (text === "SY-SYSID") return {e: "sy_host", name: "SysID", type: C(8)};
+  if (text === "SY-UNAME") return {e: "sy_host", name: "UName", type: C(12)};
+  if (text === "SY-DATUM") return {e: "sy_host", name: "Datum()", type: {k: "d"}};
+  if (text === "SY-UZEIT") return {e: "sy_host", name: "Uzeit()", type: {k: "t"}};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
   // space: the c(1) blank, stored without its blank like every c value
@@ -3364,6 +3374,11 @@ export function convert(expr, to) {
   // before 15821015 (15821004 is 577736, 15821015 is 577737), an invalid
   // date is 0 (abap.DToI)
   if (to.k === "i" && from.k === "d") return ok("d2i");
+  // d / t into characters: the eight / six digits as they are (both are
+  // held as their digits already); into a c they are cut or padded as any
+  // characters are
+  if (to.k === "string" && (from.k === "d" || from.k === "t")) return {...expr, type: to};
+  if (to.k === "c" && (from.k === "d" || from.k === "t")) return ok("s2c");
   // c -> n for a literal of exactly the field's digits only: the characters
   // are the value (anything else, blanks, signs, other lengths, is a
   // conversion rule not measured here)

@@ -1068,6 +1068,7 @@ function expr(e, ctx) {
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.Sy.${e.field}`;
     case "sy_mandt": return "abap.Mandt";
+    case "sy_host": return `abap.${e.name}`;
     case "int": return `int32(${e.value})`;
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);

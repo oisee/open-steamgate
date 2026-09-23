@@ -882,3 +882,7 @@ export const PFit = (a, n, arith) => {
   if ((v < 0n ? -v : v).toString().length > 2 * n - 1) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p");
   return v.toString();
 };
+export const SysID = "OSG";
+export const UName = "DEVELOPER";
+export const Datum = () => new Date().toISOString().slice(0, 10).replaceAll("-", "");
+export const Uzeit = () => new Date().toISOString().slice(11, 19).replaceAll(":", "");

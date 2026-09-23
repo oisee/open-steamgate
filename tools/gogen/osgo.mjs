@@ -105,6 +105,9 @@ ${notServed.map((s) => `\t{Path: ${JSON.stringify(s.path)}, Handler: ${JSON.stri
 
 const packTiles = ${JSON.stringify(JSON.stringify(tiles))}
 
+// what the build was, for ZCL_OSD_SYSINFO's environment tab
+const buildFacts = ${JSON.stringify(`build\t${program.classes.length} classes compiled, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled; built ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`)}
+
 var packWebapps = map[string]string{
 ${webapps.map((w) => `\t${JSON.stringify(w.path)}: ${JSON.stringify(w.dir)},`).join("\n")}
 }
