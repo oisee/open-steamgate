@@ -138,6 +138,8 @@ describe("a table function called in FROM", () => {
     "CL_X=>GET_ROWS": {name: "CL_X=>GET_ROWS", source: "class", parameters: [{name: "IV_A", kind: "scalar", abapType: "string", type: {abap: "STRING"}}, {name: "IV_N", kind: "scalar", abapType: "i", type: {abap: "I"}}], returns: {K: {abap: "C", len: 4}, V: {abap: "STRING"}}},
     "CL_X=>DARK": {name: "CL_X=>DARK", source: "class", parameters: [{name: "IV_Z", kind: "scalar", abapType: "zunknown", type: {abap: "UNRESOLVED", reason: "CL_X=>DARK.iv_z: ZUNKNOWN is not a data element"}}], returns: {K: {abap: "C", len: 4}}},
     "CL_X=>CONVERT": {name: "CL_X=>CONVERT", source: "class", parameters: [{name: "IT_ROWS", kind: "table", abapType: "tt_rows", schema: {K: {abap: "C", len: 4}}}, {name: "IV_MODE", kind: "scalar", abapType: "i", type: {abap: "I"}, optional: true}], returns: {K: {abap: "C", len: 4}}},
+    // an OPTIONAL parameter before a required one: the named-argument gap case
+    "CL_X=>GAPPED": {name: "CL_X=>GAPPED", source: "class", parameters: [{name: "IV_OPT", kind: "scalar", abapType: "i", type: {abap: "I"}, optional: true}, {name: "IV_REQ", kind: "scalar", abapType: "i", type: {abap: "I"}}], returns: {K: {abap: "C", len: 4}}},
   };
   const sig = {parameters: [{name: "iv_a", direction: "IN", abapType: "string"}, {name: "it_guid", direction: "IN", abapType: "tt_g", kind: "table", schema: GUIDS}]};
   const call = (body, options = {}) => toIr(parse(new Body(), lex(body)), {catalogue: {...CATALOGUE, IT_GUID: GUIDS}, signature: sig, relationSchemas: {IT_GUID: GUIDS}, tableFunctions: registry, strictColumns: true, ...options});
@@ -180,6 +182,27 @@ describe("a table function called in FROM", () => {
     expect(nulled.type).to.deep.equal({abap: "STRING"});
     expect(nulled.untyped).to.equal(undefined);
     expect(() => call('RETURN SELECT k FROM "CL_X=>DARK"(1);')).to.throw(BindError, /argument iv_z of CL_X=>DARK has no resolved type \(CL_X=>DARK.iv_z: ZUNKNOWN/);
+  });
+
+  it("binds named arguments by the parameter's name, in any order, for a quoted or an unquoted callee", () => {
+    const quoted = call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_n => 1, iv_a => :iv_a);');
+    expect(quoted.rel.input.args.map((a) => a.name)).to.deep.equal(["IV_A", "IV_N"]);
+    const bare = call("RETURN SELECT k FROM CL_X=>GET_ROWS ( iv_a => :iv_a, iv_n => 2 );");
+    expect(bare.rel.input.name).to.equal("CL_X=>GET_ROWS");
+    expect(lower(bare.rel, "hana").sql).to.contain('"CL_X=>GET_ROWS"(');
+    expect(call('RETURN SELECT k FROM "CL_X=>CONVERT"(it_rows => :it_guid);').rel.input.args).to.have.length(1);
+  });
+
+  it("refuses named arguments that are mixed, unknown, repeated, or leave out a required one", () => {
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(:iv_a, iv_n => 1);')).to.throw(BindError, /positional and named arguments together/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_a => :iv_a, iv_z => 1);')).to.throw(BindError, /has no parameter iv_z/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_a => :iv_a, iv_a => :iv_a);')).to.throw(BindError, /argument iv_a of CL_X=>GET_ROWS is given twice/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_n => 1);')).to.throw(BindError, /argument iv_a of CL_X=>GET_ROWS is missing/);
+    // a trailing required one left out is named the same way, not counted
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(iv_a => :iv_a);')).to.throw(BindError, /argument iv_n of CL_X=>GET_ROWS is missing/);
+    // an optional one before a named one has no positional spelling yet
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GAPPED"(iv_req => 1);')).to.throw(BindError, /leaving out an optional argument before a named one is not lowered/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GAPPED"(iv_opt => 1);')).to.throw(BindError, /argument iv_req of CL_X=>GAPPED is missing/);
   });
 
   it("binds a table argument to a table variable or an IN table parameter, and refuses anything else", () => {

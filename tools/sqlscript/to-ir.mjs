@@ -234,6 +234,24 @@ export function toIr(tree, options = {}) {
     if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
     return undefined;
   };
+  /** the common table expressions in scope, by name */
+  let ctes = new Map();
+  /** names of this WITH's CTEs not bound yet: a reference to one is a forward reference */
+  let laterCtes = new Set();
+  /** Select nodes whose TOP the enclosing statement applies after its ORDER BY */
+  const deferredTop = new Set();
+  const directWord = (node, word) => (node.children ?? []).some((c) => c.node === "word" && String(c.value).toUpperCase() === word);
+  /** the TOP count of a Select, or undefined; refused unless it is an INTEGER literal or parameter */
+  const topOf = (sel) => {
+    const children = sel.children ?? [];
+    const at = children.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "TOP");
+    if (at < 0) return undefined;
+    const count = children[at + 1]?.node === "Expr" ? expression(children[at + 1]) : undefined;
+    if (count?.type?.abap !== "I" || !["lit", "param"].includes(count?.node)) {
+      throw new BindError("TOP requires a literal or scalar INTEGER count", sel);
+    }
+    return count;
+  };
   /** table names used as qualifiers without an alias, per SELECT; a name used twice in one FROM is ambiguous and stays so */
   let implicitSources = new Set();
   let ambiguousSources = new Set();
@@ -694,10 +712,12 @@ export function toIr(tree, options = {}) {
    *  by name. The name is kept as the source spells it, because on HANA
    *  `"CL=>M"` and the DDLS entity are different objects. */
   function tableFunction(call) {
+    const method = kid(call, "MethodName");
     const ref = kid(call, "ColumnRef");
-    const names = ref === undefined ? [] : kids(ref, "Name");
-    const parts = names.map(nameOf);
-    const spelled = names.map((one) => String(leaf(one)?.value ?? ""));
+    const names = method !== undefined ? kids(method, "Name") : ref === undefined ? [] : kids(ref, "Name");
+    // an unquoted `CL=>M` is one name, spelled as the source spells it
+    const parts = method !== undefined ? [names.map(nameOf).join("=>")] : names.map(nameOf);
+    const spelled = method !== undefined ? [names.map((one) => String(leaf(one)?.value ?? "")).join("=>")] : names.map((one) => String(leaf(one)?.value ?? ""));
     if (parts.length >= 2) {
       const schema = parts[0];
       if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
@@ -710,7 +730,33 @@ export function toIr(tree, options = {}) {
     if (fn === undefined) {
       throw new BindError(`table function call ${name} is not in the registry of this run`, call);
     }
-    const argNodes = kids(call, "Expr");
+    // positional or named, never both: a mix has no single reading
+    const named = kids(call, "NamedArgument");
+    const positional = kids(call, "Expr");
+    if (named.length > 0 && positional.length > 0) {
+      throw new BindError(`table function ${name} is called with positional and named arguments together`, call);
+    }
+    let argNodes = positional;
+    if (named.length > 0) {
+      const byName = new Map();
+      for (const one of named) {
+        const argName = nameOf(kid(one, "Name"));
+        if (byName.has(argName)) throw new BindError(`argument ${argName.toLowerCase()} of ${name} is given twice`, one);
+        if (!fn.parameters.some((p) => p.name === argName)) {
+          throw new BindError(`table function ${name} has no parameter ${argName.toLowerCase()}`, one);
+        }
+        byName.set(argName, kid(one, "Expr"));
+      }
+      // named arguments in the declared order; an omitted one must be
+      // OPTIONAL or DEFAULT, and only a trailing run may be left out
+      const upto = fn.parameters.reduce((last, p, i) => (byName.has(p.name) ? i : last), -1);
+      const gap = fn.parameters.find((p) => !byName.has(p.name) && p.optional !== true);
+      if (gap !== undefined) throw new BindError(`argument ${gap.name.toLowerCase()} of ${name} is missing`, call);
+      if (fn.parameters.slice(0, upto + 1).some((p) => !byName.has(p.name))) {
+        throw new BindError(`${name}: leaving out an optional argument before a named one is not lowered`, call);
+      }
+      argNodes = fn.parameters.slice(0, upto + 1).map((p) => byName.get(p.name));
+    }
     // a trailing OPTIONAL / DEFAULT parameter may be left out, as the corpus
     // does (a table function called with its table argument only, the
     // DEFAULT 0); the callee's own default then applies on the engine
@@ -843,6 +889,16 @@ export function toIr(tree, options = {}) {
       throw new BindError(`a schema-qualified source ${schema}.${table} is not lowered: the catalogue knows tables by name only`, node);
     }
     const table = nameOf(node);
+    // a CTE defined later is not in scope yet, so the name is a table's, as
+    // in plain SQL; with no such table it is a forward reference, said so
+    if (laterCtes.has(table) && !ctes.has(table) && catalogue[table] === undefined) {
+      throw new BindError(`CTE ${table.toLowerCase()} used before it is defined`, node);
+    }
+    if (ctes.has(table)) {
+      // a common table expression of the enclosing WITH, by its name
+      const cte = ctes.get(table);
+      return finish(cte, schemaOf(cte, catalogue), table);
+    }
     if (table.startsWith("M_") && catalogue[table] === undefined) {
       // an unqualified M_* the dictionary knows is an ordinary object (old
       // matchcode views are named so); one it does not is HANA's monitoring
@@ -1172,6 +1228,12 @@ export function toIr(tree, options = {}) {
       rel = order(rel, keys.map((k) => {
         const projected = aliasOf(k);
         if (projected !== undefined) return {col: projected, desc: hasWord(k, "DESC")};
+        // the statement's ORDER BY sees the projected columns only, so a
+        // source qualifier (`ORDER BY a.id`) has nothing to resolve against;
+        // said by name rather than as a column that "is not present"
+        if (node.node !== "Select" && terminalLeaves(k).some((leaf) => leaf.value === ".")) {
+          throw new BindError("ORDER BY a qualified source column is not lowered yet", k);
+        }
         const e = expression(k);
         if (e.node !== "col") {
           throw new BindError("ORDER BY over an expression is not lowered yet", k);
@@ -1179,6 +1241,12 @@ export function toIr(tree, options = {}) {
         return {col: e.name, desc: hasWord(k, "DESC")};
       }));
     }
+    // TOP is a word of the Select itself (direct child), and it applies after
+    // the ORDER BY: when the ORDER BY sits on the enclosing statement, the
+    // statement applies the TOP (topOf, relationBody) and the select skips it
+    // (LIMIT belongs to the enclosing statement, which refuses it beside a TOP)
+    const top = node.node === "Select" && !deferredTop.has(node) ? topOf(node) : undefined;
+    if (top !== undefined) rel = limit(rel, top);
     if (hasWord(node, "LIMIT")) {
       const after = (node.children ?? []);
       const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
@@ -1204,7 +1272,53 @@ export function toIr(tree, options = {}) {
     if (node === undefined) {
       throw new BindError("a relation was expected here and the tree has none");
     }
+    // `WITH a AS (...), b AS (...)`: each definition is bound in order (a
+    // later one may read an earlier one) and inlined where its name stands,
+    // like a table variable -- a CTE is not a barrier either. The names are
+    // scoped to this statement: the map is restored when it is done.
+    const cteDefs = kids(node, "CteDef");
+    if (directWord(node, "RECURSIVE")) throw new BindError("WITH RECURSIVE is not lowered", node);
+    if (cteDefs.length > 0) {
+      const outerCtes = ctes;
+      const outerLater = laterCtes;
+      ctes = new Map(outerCtes);
+      try {
+        for (const [at, def] of cteDefs.entries()) {
+          const cteName = nameOf(kid(def, "Name"));
+          laterCtes = new Set(cteDefs.slice(at + 1).map((one) => nameOf(kid(one, "Name"))));
+          if (ctes.has(cteName) && !outerCtes.has(cteName)) throw new BindError(`WITH names ${cteName.toLowerCase()} twice`, def);
+          let body = relation(kid(def, "SetOperation"));
+          const renames = kids(def, "Name").slice(1).map(nameOf);
+          if (renames.length > 0) {
+            const shape = Object.entries(schemaOf(body, catalogue));
+            if (shape.length !== renames.length) {
+              throw new BindError(`WITH ${cteName.toLowerCase()} names ${renames.length} column(s) for a select of ${shape.length}`, def);
+            }
+            if (new Set(renames).size !== renames.length) throw new BindError(`WITH ${cteName.toLowerCase()} names a column twice`, def);
+            body = project(body, shape.map(([from, type], i) => ({as: renames[i], expr: col(from, type)})));
+          }
+          ctes.set(cteName, body);
+        }
+        laterCtes = outerLater;
+        return relationBody(node);
+      } finally {
+        ctes = outerCtes;
+        laterCtes = outerLater;
+      }
+    }
+    return relationBody(node);
+  }
+
+  function relationBody(node) {
     const selects = kids(node, "Select");
+    // `SELECT TOP n ... ORDER BY ...` reads the ORDER BY onto the statement:
+    // sort first, then take n, as HANA does
+    const selectTop = selects.length === 1 ? topOf(selects[0]) : undefined;
+    if (selectTop !== undefined && directWord(node, "LIMIT")) {
+      throw new BindError("a select with both TOP and LIMIT has no single reading", node);
+    }
+    const top = kids(node, "OrderKey").length > 0 ? selectTop : undefined;
+    if (top !== undefined) deferredTop.add(selects[0]);
     const finishSet = (rel) => {
       const outerWords = new Set((node.children ?? []).filter((one) => one.node === "word")
         .map((one) => String(one.value).toUpperCase()));
@@ -1221,7 +1335,13 @@ export function toIr(tree, options = {}) {
     };
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
-    if (selects.length === 1) return finishSet(select(selects[0]));
+    if (selects.length === 1) {
+      const rel = finishSet(select(selects[0]));
+      return top === undefined ? rel : limit(rel, top);
+    }
+    if (selects.some((one) => topOf(one) !== undefined)) {
+      throw new BindError("TOP inside a branch of a set operation is not lowered", node);
+    }
     // **Which set operation it was is a word, and the word was never read.**
     //
     // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were

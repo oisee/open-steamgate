@@ -218,8 +218,27 @@ export class UnnestCall extends Expression {
 export class TableFunctionCall extends Expression {
   getRunnable() {
     // `sys.series_generate_date( ... )` -- a built-in table function is
-    // reached through its schema, so the name is a ColumnRef and not a Name
-    return seq(new ColumnRef(), "(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")");
+    // reached through its schema, so the name is a ColumnRef and not a Name.
+    // `CL_X=>GET_ROWS( ... )` without quotes -- an AMDP method named the way
+    // the corpus writes it -- is tried first, because a ColumnRef stops at `=>`.
+    // Arguments are positional or named (`p_clnt => :p_clnt`), never mixed:
+    // the binder refuses a mix by name.
+    const arg = altPrio(new NamedArgument(), new Expr());
+    return seq(altPrio(new MethodName(), new ColumnRef()), "(", opt(seq(arg, star(seq(",", arg)))), ")");
+  }
+}
+
+/** `CL_X=>METHOD` written without quotes */
+export class MethodName extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Name());
+  }
+}
+
+/** `p_clnt => :p_clnt` -- an argument bound to a parameter by its name */
+export class NamedArgument extends Expression {
+  getRunnable() {
+    return seq(new Name(), "=>", new Expr());
   }
 }
 
@@ -242,7 +261,9 @@ export class Select extends Expression {
     // DISTINCT. `altPrio` commits to the first branch that matches, which is
     // the keyword. Found by fable-osd running the same body on HANA twice,
     // once through HANA's own compiler and once through our lowering.
-    return seq(str("SELECT"),
+    // `SELECT TOP 1 ...` is HANA's spelling of a LIMIT; the binder treats it
+    // as one, after the ORDER BY of the same select
+    return seq(str("SELECT"), opt(seq(str("TOP"), new Expr())),
       altPrio(seq(str("DISTINCT"), new SelectItem(), star(seq(",", new SelectItem()))),
         seq(new SelectItem(), star(seq(",", new SelectItem())))),
       // `FROM a, b` is a cross join written with a comma, and the corpus uses
@@ -290,9 +311,19 @@ export class OrderKey extends Expression {
 }
 
 /** UNION, which the corpus puts third and both local engines needed */
+/** `name AS ( SELECT ... )` -- one common table expression of a WITH */
+export class CteDef extends Expression {
+  getRunnable() {
+    // the column list `x (a, b) AS (...)` renames the projected columns in order
+    return seq(new Name(), opt(seq("(", new Name(), star(seq(",", new Name())), ")")), str("AS"), "(", new SetOperation(), ")");
+  }
+}
+
 export class SetOperation extends Expression {
   getRunnable() {
-    return seq(new Select(),
+    // `WITH a AS ( ... ), b AS ( ... ) SELECT ...` -- the names are in scope
+    // for the statement that follows, and for the definitions after their own
+    return seq(opt(seq(str("WITH"), opt(str("RECURSIVE")), new CteDef(), star(seq(",", new CteDef())))), new Select(),
       star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
       opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));

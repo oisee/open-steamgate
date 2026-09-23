@@ -147,6 +147,18 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
       "et_rows = select 0 as id, :iv_d as txt from dummy;");
     expect(required.parameters[0].kind).to.equal("DATS");
     expect((await run(required, {IV_D: ""})).rows).to.deep.equal([{ID: 0, TXT: "00000000"}]);
+    // a date DEFAULT is checked when the method compiles, not first used
+    const withDefault = program("IMPORTING VALUE(iv_d) TYPE d DEFAULT '20260101' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;");
+    expect((await run(withDefault)).rows).to.deep.equal([{ID: 0, TXT: "20260101"}]);
+    expect(() => program("IMPORTING VALUE(iv_d) TYPE d DEFAULT '2026' EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select 0 as id, :iv_d as txt from dummy;")).to.throw(UnsupportedSqlScript, /DEFAULT '2026' for iv_d is not 8 digits/);
+    // a program handed over with a bad kind, or a kind on the wrong width, is refused
+    for (const [bad, message] of [[{...required.parameters[0], kind: "NUMC"}, /unknown kind NUMC/], [{...required.parameters[0], type: {abap: "C", len: 6}}, /is a DATS but not C\(8\)/]]) {
+      failure = undefined;
+      try { await runProcedure({...required, parameters: [bad]}, {client, dialect, inputs: {IV_D: "20260101"}, inputCatalogue: CATALOGUE}); } catch (error) { failure = error; }
+      expect(failure?.message).to.match(message);
+    }
   });
 
   it("a RAW input is its n bytes as canonical hex: padded with zero bytes, initial all zeros, compared exactly", async () => {
@@ -182,6 +194,79 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
     const dummy = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select 7 as id, 'seven' as txt from sys.dummy;");
     expect((await run(dummy)).rows).to.deep.equal([{ID: 7, TXT: "seven"}]);
+  });
+
+  it("ABAP_BOOL, the type pool ABAP's c LENGTH 1, is bound as a CHAR 1", async () => {
+    const prog = program("IMPORTING VALUE(iv_flag) TYPE abap_bool EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select id, txt from src where :iv_flag = 'X';");
+    expect(prog.parameters[0].type).to.include({abap: "C", len: 1});
+    expect((await run(prog, {IV_FLAG: "X"})).rows).to.have.length(3);
+    expect((await run(prog, {IV_FLAG: " "})).rows).to.deep.equal([]);
+  });
+
+  it("WITH: a chain of common table expressions, each seeing the ones before it", async () => {
+    const prog = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      `et_rows = with small as (select id, txt from src where id < 10),
+        smaller as (select id, txt from small where id > 1)
+        select id, txt from smaller;`);
+    expect((await run(prog)).rows.map((r) => r.ID)).to.deep.equal([5]);
+  });
+
+  it("WITH: a name defined twice is refused, and a CTE is not visible outside its select", () => {
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with a as (select id, txt from src), a as (select id, txt from src) select id, txt from a;"))
+      .to.throw(/WITH names a twice/);
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      `lt_x = with a as (select id, txt from src) select id, txt from a;
+       et_rows = select id, txt from a;`)).to.throw(/not present|unknown|not a table/i);
+  });
+
+  it("WITH: a CTE shadows a table of the same name, a self-join on a CTE reads it twice, a column list renames", async () => {
+    const shadow = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with src as (select id, txt from src where id = 5) select id, txt from src;");
+    expect((await run(shadow)).rows.map((r) => r.ID)).to.deep.equal([5]);
+    const self = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      `et_rows = with s as (select id, txt from src where id < 10)
+        select a.id, b.txt from s a inner join s b on a.id = b.id order by id;`);
+    expect((await run(self)).rows.map((r) => [r.ID, r.TXT])).to.deep.equal([[1, "one"], [5, "five"]]);
+    const renamed = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with s (id, txt) as (select txt, id from src) select txt as id, id as txt from s where txt > 1 order by txt;");
+    expect((await run(renamed)).rows.map((r) => r.ID)).to.deep.equal([5, 20]);
+  });
+
+  it("WITH: RECURSIVE, a column-count mismatch and a forward reference are refused by name", () => {
+    const refuse = (body, message) => expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows", body)).to.throw(message);
+    refuse("et_rows = with recursive a as (select id, txt from src) select id, txt from a;", /WITH RECURSIVE is not lowered/);
+    refuse("et_rows = with a (x) as (select id, txt from src) select id, txt from src;", /names 1 column\(s\) for a select of 2/);
+    refuse("et_rows = with a as (select id, txt from b), b as (select id, txt from src) select id, txt from a;", /CTE b used before it is defined/);
+    refuse("et_rows = with a (id, id) as (select id, txt from src) select id, txt from src;", /names a column twice/);
+    refuse("et_rows = select a.id, a.txt from src as a order by a.id;", /ORDER BY a qualified source column is not lowered yet/);
+  });
+
+  it("WITH: a name of a CTE defined later is still a table's, as in plain SQL", async () => {
+    const prog = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with a as (select id, txt from src where id = 1), src as (select id, txt from src where id = 5) select id, txt from a;");
+    expect((await run(prog)).rows.map((r) => r.ID)).to.deep.equal([1]);
+  });
+
+  it("TOP n takes n rows after the ORDER BY, as HANA does", async () => {
+    const prog = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 2 id, txt from src order by id desc;");
+    expect((await run(prog)).rows.map((r) => r.ID)).to.deep.equal([20, 5]);
+    const param = program("IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top :iv_n id, txt from src order by id;");
+    expect((await run(param, {IV_N: 1})).rows.map((r) => r.ID)).to.deep.equal([1]);
+  });
+
+  it("TOP with LIMIT, TOP inside a UNION branch and a non-integer TOP are refused by name", () => {
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 2 id, txt from src order by id limit 1;")).to.throw(/both TOP and LIMIT/);
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 2 id, txt from src limit 1;")).to.throw(/both TOP and LIMIT/);
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 1 id, txt from src union all select id, txt from src;")).to.throw(/TOP inside a branch/);
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 'x' id, txt from src order by id;")).to.throw(/TOP requires/);
   });
 });
 
@@ -295,5 +380,5 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
     expect(() => compile(source, {returns: [{name: "id", abapType: "i"}, {name: "txt", abapType: "c LENGTH 10"}], parameters: []}))
       .to.throw(UnsupportedSqlScript, /Return is outside the initial portable procedural subset/);
   });
-});
 
+});
