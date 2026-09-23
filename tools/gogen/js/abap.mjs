@@ -848,3 +848,19 @@ export function ShiftRightTrailing(s, mask) {
   while (n > 0 && mask.includes(r[n - 1])) n -= 1;
   return " ".repeat(r.length - n) + r.slice(0, n).join("");
 }
+
+// MOVE-CORRESPONDING over generic data (see go/abap/movecorr.go)
+export const Mandt = "123";
+export function MoveCorrespondingData(dst, src) {
+  if (dst === null) throw notAssigned("MOVE-CORRESPONDING into a field symbol");
+  if (src === null) throw notAssigned("MOVE-CORRESPONDING from a field symbol");
+  const isStruct = (t) => t && (t.kind === "u" || t.kind === "v");
+  if (!isStruct(dst.t) || !isStruct(src.t)) throw new AbapError("NOT_COMPILED", "MOVE-CORRESPONDING: generic data that is not a structure");
+  const deep = (t) => ["u", "v", "h"].includes(t.kind);
+  for (const dc of dst.t.comps) {
+    const sc = src.t.comps.find((x) => x.name === dc.name);
+    if (!sc) continue;
+    if (deep(dc.t) || deep(sc.t)) throw new AbapError("NOT_COMPILED", `MOVE-CORRESPONDING: a deep component ${dc.name}`);
+    MoveData(Component(dst, dc.name), Component(src, sc.name));
+  }
+}

@@ -339,6 +339,8 @@ function stmt(st, ctx, d) {
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
         `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
     }
+    case "move_corr_data":
+      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)});`];
     case "shift_right_trailing": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
@@ -558,7 +560,7 @@ function callStmt(e, ctx, t) {
     return b;
   });
   const lines = [`${t}{`];
-  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.place ? place(a.place, ctx) : zero(a.type)}};`);
+  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
   lines.push(`${t}  ${callee(e, ctx)}(${["s", ...args].join(", ")});`);
   for (const {b, a} of boxes) if (a.place) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
   lines.push(`${t}}`);
@@ -599,6 +601,7 @@ function expr(e, ctx) {
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.sy.${e.field.toLowerCase()}`;
+    case "sy_mandt": return "abap.Mandt";
     case "int": return String(e.value);
     case "float": return String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
@@ -640,13 +643,14 @@ function expr(e, ctx) {
     }
     case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
     case "call": {
-      if (e.args.some((a) => a.dir !== "importing" && a.place)) {
+      if (e.args.some((a) => a.dir !== "importing" && (a.place || a.wrap))) {
         // EXPORTING / CHANGING of a functional call: boxes, written back
         // after the call, inside an arrow so the call stays an expression
         const pre = [];
         const post = [];
         const args = e.args.map((a, i) => {
           if (a.dir === "importing") return importingArg(a, ctx);
+          if (a.wrap) return `{v: ${expr(a.wrap, ctx)}}`;
           if (!a.place) return `{v: ${zero(a.type)}}`;
           const b = `box${ctx.loop++}_${i}`;
           pre.push(`const ${b} = {v: ${place(a.place, ctx)}};`);

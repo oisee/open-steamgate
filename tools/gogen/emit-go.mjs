@@ -866,6 +866,8 @@ function stmtLines(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
+    case "move_corr_data":
+      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)})`];
     case "shift_right_trailing": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)})`];
@@ -998,6 +1000,7 @@ function expr(e, ctx) {
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.Sy.${e.field}`;
+    case "sy_mandt": return "abap.Mandt";
     case "int": return `int32(${e.value})`;
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
@@ -1036,7 +1039,7 @@ function expr(e, ctx) {
     case "new": return `New_${typeName(e.cls)}(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
     case "call": {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
-        : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
+        : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
       if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       if (e.owner) return `${funcName(e.owner, e.method)}(${args.join(", ")})`;
       if (e.static) return `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;

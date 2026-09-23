@@ -1262,6 +1262,11 @@ function moveCorresponding(node, ctx, text) {
   const from = source(node.findDirectExpression(Expressions.Source), ctx);
   const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
   const to = lvalue(tNode, ctx);
+  if ((from.type.k === "data" || to.type.k === "data") && ["data", "struct"].includes(from.type.k) && ["data", "struct"].includes(to.type.k)) {
+    // generic on one side or both: component by component at run time,
+    // through bindings to the two structures
+    return {s: "move_corr_data", from: convert(from, {k: "data"}), to: convert(to, {k: "data"})};
+  }
   if (from.type.k !== "struct" || to.type.k !== "struct") throw new Unsupported(`MOVE-CORRESPONDING from a ${from.type.k} to a ${to.type.k}`);
   // each component names source and target again, so both must be places
   // that cost nothing and do nothing when named twice: a variable, an
@@ -1792,6 +1797,8 @@ function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
+  // the logon client: the transpiler runtime's constant (abap.Mandt)
+  if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
   if (text === "ABAP_TRUE") return {e: "chars", value: "X", type: C(1)};
   if (text === "ABAP_FALSE") return {e: "chars", value: "", type: C(1)};
   // space: the c(1) blank, stored without its blank like every c value
@@ -2777,6 +2784,12 @@ function call(chain, ctx, statement, hint) {
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};
+    // a generic EXPORTING / CHANGING (TYPE any, data): the callee writes
+    // through a binding to the caller's typed variable, as ABAP passes it by
+    // reference; an ANY TABLE takes only a table
+    if (p.type.k === "data" && !p.byValue && t.type.k !== "data" && t.type.k !== "dref" && (!p.type.table || t.type.k === "table")) {
+      return {dir: p.dir, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
+    }
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, place: t, type: p.type};
   });
