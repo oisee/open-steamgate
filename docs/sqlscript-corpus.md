@@ -876,3 +876,51 @@ refusal is not a construct but the procedure's shape. 46 bodies
 more than one output table is the next runtime milestone, ahead of more
 grammar. Parameter types (67) and unresolved output table types (23) are
 the dictionary's share.
+
+### A table function is found by the entity it defines: 17 → 18
+
+*2026-09-23. Measured before building: of the 83 working bodies with more
+than one output, 72 do not parse and only 2 would pass their signature,
+and those 2 need INT2. So multiple outputs, planned next, would have moved
+no body. The measurement pointed elsewhere.*
+
+Twelve table functions parsed and still stopped at "exactly one OUT or
+RETURNING output", because no RETURNS list reached them. Their DDLS was
+reported "not in the export". For five of them it was never missing:
+**a DDL source's file name need not be the entity it defines.** The AMDP
+names the entity in `FOR TABLE FUNCTION`, and the dictionary looked it up
+by file name. The folder dictionary now also indexes a DDLS by its
+`define ... <entity>` name, with the file name still taken first
+(`test/sqlscript-table-function.mjs`). The twelve sources and the 22 data
+elements their RETURNS lists name were read from the sandbox, definitions
+only, into the gitignored `.local/a4h-ddic`.
+
+| | before | after |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 17 | **18** |
+| teaching, compiles as a procedure | 3 | 3 |
+
+**Which change moved the body.** The one body that now compiles names a
+table function whose DDL source is called like its entity. It moved
+because its source was read from the sandbox, not because of the entity
+lookup. The five bodies the lookup reaches stop further on, at NUMC (3), a
+HANA system view and a RAW data element. The twelfth DDLS also needed `--`
+comments stripped: a source written on a system uses them, and its
+commented-out parameter list was read as a parameter. One quote-aware
+comment stripper now serves the entity lookup and the table-function
+reader (`tools/ddls-entity.mjs`).
+
+All twelve bodies now reach their signature and stop here:
+
+| now stops at | bodies |
+| --- | ---: |
+| a column typed INT2 (`xunumber`) | 4 |
+| NUMC in a RETURNS list | 3 |
+| INT8 in a RETURNS list | 1 |
+| a RAW data element in a RETURNS list | 1 |
+| a HANA system view | 1 |
+| a column the scope does not type | 1 |
+| compiles | 1 |
+
+INT2 blocks table parameters in 38 bodies across the corpus and now these
+4 as well. It is the next measurement on the sandbox.

@@ -15,6 +15,7 @@
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {parseDDLS} from "./cds2ddic.mjs";
+import {entityOf} from "./ddls-entity.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 
@@ -440,6 +441,28 @@ export class ObjectStore {
     return index;
   }
 
+  #ddlsEntities() {
+    const entries = this.#entries();
+    if (this.ddlsEntityIndex === undefined || this.ddlsEntityIndexOf !== entries) {
+      // as the folder dictionary does: two sources defining one entity are
+      // not valid on a system, so neither is taken
+      const byEntity = new Map();
+      const twice = new Set();
+      for (const entry of entries.values()) {
+        if (entry.type !== "DDLS") continue;
+        let entity;
+        try { entity = entityOf(readFileSync(join(this.root, entry.file), "utf8")); } catch { entity = undefined; }
+        if (entity === undefined || entity === String(entry.name).toUpperCase()) continue;
+        if (byEntity.has(entity)) twice.add(entity);
+        byEntity.set(entity, entry);
+      }
+      for (const entity of twice) byEntity.delete(entity);
+      this.ddlsEntityIndex = byEntity;
+      this.ddlsEntityIndexOf = entries;
+    }
+    return this.ddlsEntityIndex;
+  }
+
   #entries() {
     if (this.index === undefined) {
       this.build();
@@ -513,7 +536,12 @@ export class ObjectStore {
   }
 
   read(type, name, include = "main") {
-    const entry = this.find(type, name);
+    // a DDLS may be read by the entity it defines, when that is not its
+    // object name (FOR TABLE FUNCTION names the entity). Only a read: a
+    // write or a delete resolves its target by object name, never by entity,
+    // or it would land in another object's file (foreman-dell, 2026-09-23)
+    const entry = this.find(type, name)
+      ?? (String(type).toUpperCase() === "DDLS" ? this.#ddlsEntities().get(String(name).toUpperCase()) : undefined);
     if (entry === undefined) {
       throw new NotFound(type, name);
     }
@@ -924,6 +952,7 @@ export class ObjectStore {
 
   // a write means the parse is stale, here and for anyone sharing this tree
   #forget() {
+    this.ddlsEntityIndex = undefined;
     this.parsed = undefined;
     PARSED.delete(this.root);
   }

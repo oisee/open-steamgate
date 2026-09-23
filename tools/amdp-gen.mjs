@@ -148,9 +148,10 @@ const progXml = (name) => `<?xml version="1.0" encoding="utf-8"?>
 </abapGit>
 `;
 
-export function generate(folders, out = DEFAULT_OUT) {
+export function generate(folders, out = DEFAULT_OUT, options = {}) {
   const extras = typeSources(folders);
-  const store = new ObjectStore({root: process.cwd()});
+  // the runtime's object store; a test hands one over a fixture root
+  const store = options.store ?? new ObjectStore({root: process.cwd()});
   const procedures = [];
   const written = [];
   rmSync(out, {recursive: true, force: true});

@@ -23,32 +23,7 @@
 // nothing more: which client a portable run binds there is a runtime
 // decision with a measured trap behind it (sy-mandt is 123 here and 001 on
 // A4H), and it is not made by a parser.
-/** comments out, quote-aware: `'see http://x'` in an annotation is not a comment */
-function stripComments(text) {
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === "'") {
-      const end = text.indexOf("'", i + 1);
-      const stop = end < 0 ? text.length : end + 1;
-      out += text.slice(i, stop);
-      i = stop;
-    } else if (ch === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      i = end < 0 ? text.length : end + 2;
-      out += " ";
-    } else if (ch === "/" && text[i + 1] === "/") {
-      const end = text.indexOf("\n", i);
-      i = end < 0 ? text.length : end;
-      out += " ";
-    } else {
-      out += ch;
-      i += 1;
-    }
-  }
-  return out;
-}
+import {stripComments} from "../ddls-entity.mjs";
 
 /** the text inside the first `{ ... }` from `at`, braces matched by depth */
 function braced(text, at) {
@@ -64,7 +39,6 @@ function braced(text, at) {
   }
   return undefined;
 }
-
 /** split on commas or semicolons that are not inside parentheses */
 function splitTopLevel(text, separator) {
   const out = [];

@@ -9,6 +9,7 @@ import {join} from "node:path";
 import {parseTableFunction} from "../tools/sqlscript/table-function-ddls.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
 import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
+import {entityOf} from "../tools/ddls-entity.mjs";
 import {signatureScalars} from "../tools/sqlscript/scalar-types.mjs";
 import {registryFromDdls, registryFromClass} from "../tools/sqlscript/table-function-registry.mjs";
 import {localTypes, definitionsByText, definitionsDisagree} from "../tools/amdp-extract.mjs";
@@ -120,6 +121,90 @@ describe("the folder dictionary hands a DDLS back by name", () => {
     const ddic = new FolderDdic([dir]);
     expect(ddic.read("DDLS", "P_X_TF").source).to.equal(DDLS);
     expect(ddic.read("DDLS", "P_NOBODY")).to.equal(undefined);
+  });
+
+  it("finds a DDLS by the entity it defines when that is not its file name, and the file name still wins", () => {
+    const other = mkdtempSync(join(tmpdir(), "osd-folder-entity-"));
+    try {
+      // the AMDP names the entity in FOR TABLE FUNCTION, never the DDL source
+      const source = "// define table function NOT_THIS\n@EndUserText.label: 'x'\ndefine table function P_Entity_Tf\nreturns { k : abap.char(4); }\nimplemented by method cl_x=>m;";
+      writeFileSync(join(other, "p_source_name.ddls.asddls"), source);
+      writeFileSync(join(other, "p_x_tf.ddls.asddls"), "define table function P_Something_Else returns { k : abap.char(4); } implemented by method cl_y=>m;");
+      const ddic = new FolderDdic([other]);
+      expect(ddic.read("DDLS", "P_ENTITY_TF").source).to.equal(source);
+      expect(ddic.find("DDLS", "p_entity_tf")).to.not.equal(undefined);
+      expect(ddic.read("DDLS", "P_SOURCE_NAME").source).to.equal(source);
+      expect(ddic.read("DDLS", "NOT_THIS")).to.equal(undefined);
+      expect(ddic.read("DDLS", "P_X_TF").source).to.contain("P_Something_Else");
+    } finally {
+      rmSync(other, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("the entity a DDL source defines", () => {
+  it("reads every define form, with root, and skips //, -- and block comments", () => {
+    expect(entityOf("define table function P_A returns { k : abap.int4; }")).to.equal("P_A");
+    expect(entityOf("define root view entity P_B as select from t { key a }")).to.equal("P_B");
+    expect(entityOf("define view P_C as select from t { a }")).to.equal("P_C");
+    expect(entityOf("define table entity P_D { key a : abap.int4; }")).to.equal("P_D");
+    expect(entityOf("define hierarchy P_E as parent child hierarchy( source x child to parent association _p )")).to.equal("P_E");
+    expect(entityOf("define abstract entity P_F { a : abap.int4; }")).to.equal("P_F");
+    expect(entityOf("define custom entity P_G { key a : abap.int4; }")).to.equal("P_G");
+    expect(entityOf("// define view NOT_1\n-- define view NOT_2\n/* define view NOT_3 */ define view P_H as select from t { a }")).to.equal("P_H");
+  });
+
+  it("does not take a comment marker inside a quoted annotation for a comment", () => {
+    const source = "@EndUserText.label: 'a /* b'\ndefine table function P_Q returns { k : abap.int4; } // */";
+    expect(entityOf(source)).to.equal("P_Q");
+    expect(parseTableFunction(source).name).to.equal("P_Q");
+  });
+
+  it("reads a table function whose DDLS carries -- comments in its parameter list", () => {
+    const tf = parseTableFunction(`define table function P_R
+--with parameters
+--  clnt : abap.clnt
+  returns { key client : mandt; v : abap.int4; }
+implemented by method cl_x=>m;`);
+    expect(tf.parameters).to.deep.equal([]);
+    expect(tf.returns.map((c) => c.name)).to.deep.equal(["client", "v"]);
+  });
+});
+
+describe("the folder dictionary's entity index", () => {
+  const withFolder = (files, run) => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-entity-"));
+    try {
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+      return run(dir);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  };
+  const tf = (entity) => `define table function ${entity} returns { k : abap.int4; } implemented by method cl_x=>m;`;
+
+  it("takes the file name first: an entity named like another source's file does not shadow that file", () => {
+    withFolder({"p_one.ddls.asddls": tf("P_TWO"), "p_two.ddls.asddls": tf("P_THREE")}, (dir) => {
+      const ddic = new FolderDdic([dir]);
+      expect(ddic.read("DDLS", "P_TWO").source).to.contain("P_THREE");
+      expect(ddic.read("DDLS", "P_THREE").source).to.contain("P_THREE");
+    });
+  });
+
+  it("takes neither of two sources defining one entity, and says so", () => {
+    withFolder({"p_a.ddls.asddls": tf("P_SAME"), "p_b.ddls.asddls": tf("P_SAME")}, (dir) => {
+      const ddic = new FolderDdic([dir]);
+      expect(ddic.read("DDLS", "P_SAME")).to.equal(undefined);
+      expect(ddic.describe().join("\n")).to.contain("1 DDLS entities defined by two sources (neither taken)");
+    });
+  });
+
+  it("drops the entity of a source a later folder shadows by file name", () => {
+    withFolder({"p_file.ddls.asddls": tf("P_OLD_ENTITY")}, (first) => withFolder({"p_file.ddls.asddls": tf("P_NEW_ENTITY")}, (second) => {
+      const ddic = new FolderDdic([first, second]);
+      expect(ddic.read("DDLS", "P_OLD_ENTITY")).to.equal(undefined);
+      expect(ddic.read("DDLS", "P_NEW_ENTITY").source).to.contain("P_NEW_ENTITY");
+    }));
   });
 });
 
