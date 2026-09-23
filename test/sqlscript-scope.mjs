@@ -22,10 +22,21 @@ describe("a source alias without AS", () => {
   });
 });
 
+describe("a schema-qualified source is not mistaken for a table with an alias", () => {
+  it("reads sys.m_host as a qualified name, never as table SYS aliased M_HOST", () => {
+    expect(() => bind("SELECT host FROM sys.m_host;")).to.throw(BindError, /SYS.M_HOST is a HANA system view/);
+    expect(() => bind('SELECT a FROM "SAPABAP1"."T";')).to.throw(BindError, /schema-qualified source SAPABAP1.T is not lowered/);
+  });
+});
+
 describe("a table without an alias is its own qualifier", () => {
   it("resolves src.k when src is the one source of that name", () => {
     expect(sql("SELECT src.mandt AS client, src.k FROM src;")).to.contain('"SRC"."MANDT"');
     expect(sql("SELECT src.k, other.m FROM src INNER JOIN other ON src.k = other.k;")).to.contain('"OTHER"."M"');
+  });
+
+  it("counts ambiguity per FROM: the two branches of a UNION may each read the table bare", () => {
+    expect(sql("SELECT src.k FROM src WHERE src.n = 1 UNION ALL SELECT src.k FROM src WHERE src.n = 2;")).to.contain("UNION ALL");
   });
 
   it("stays ambiguous and loud for a self-join without aliases", () => {
@@ -50,6 +61,12 @@ describe("NULL is a literal, not a column", () => {
     expect(sql("SELECT k FROM src WHERE n = NULL;")).to.contain("=");
   });
 
+  it("never leaves the binder untyped: a NULL in a function argument or arithmetic is refused by name", () => {
+    expect(() => bind("SELECT COALESCE(k, NULL) AS v FROM src;")).to.throw(BindError, /COALESCE/);
+    expect(() => bind("SELECT LENGTH(NULL) AS v FROM src;")).to.throw(BindError, /NULL .* has no type here/);
+    expect(() => bind("SELECT n + NULL AS v FROM src;")).to.throw(BindError, /NULL .* has no type here/);
+  });
+
   it("refuses a CASE whose every branch is NULL, and the BOOLEAN literals, by name", () => {
     expect(() => bind("SELECT CASE WHEN n > 1 THEN NULL ELSE NULL END AS v FROM src;")).to.throw(BindError, /every branch is NULL/);
     expect(() => bind("SELECT TRUE AS v FROM src;")).to.throw(BindError, /BOOLEAN literal TRUE is not portable yet/);
@@ -64,5 +81,32 @@ describe("ORDER BY sees the projection's aliases", () => {
 
   it("still refuses a key that is neither a source column nor an alias", () => {
     expect(() => bind("SELECT k FROM src ORDER BY nobody;")).to.throw(BindError, /column NOBODY is not present/);
+  });
+});
+
+describe("HANA's own views are refused by name, not guessed", () => {
+  it("refuses a source qualified by SYS, PUBLIC or _SYS_*, quoted or not", () => {
+    expect(() => bind("SELECT host FROM sys.m_host_information;")).to.throw(BindError, /SYS.M_HOST_INFORMATION is a HANA system view, not portable/);
+    expect(() => bind('SELECT a FROM "PUBLIC"."TABLES" AS tab;')).to.throw(BindError, /PUBLIC.TABLES is a HANA system view/);
+    expect(() => bind("SELECT a FROM _sys_bi.m_time_dimension;")).to.throw(BindError, /_SYS_BI.M_TIME_DIMENSION is a HANA system view/);
+  });
+
+  it("keeps sys.dummy as the one-row source every dialect has", () => {
+    expect(sql("SELECT 1 AS one FROM sys.dummy;")).to.match(/SELECT 1 AS "ONE"/);
+  });
+
+  it("binds an unqualified M_* the catalogue describes, and refuses one it does not as a monitoring view", () => {
+    const ir = toIr(parse(new Body(), lex("SELECT k FROM m_mat1l;")), {catalogue: {M_MAT1L: {K: {abap: "C", len: 4}}}, strictColumns: true});
+    expect(lower(ir.rel, "duckdb").sql).to.contain('"M_MAT1L"');
+    expect(() => bind("SELECT host FROM m_host;")).to.throw(BindError, /M_HOST is a HANA monitoring view \(M_\*\), not portable/);
+  });
+});
+
+describe("an alias that shadows a source column", () => {
+  it("wins in ORDER BY, as it does on every engine the suite runs", () => {
+    const rel = bind("SELECT n + 1 AS n, k FROM src ORDER BY n;").rel;
+    expect(rel.rel).to.equal("order");
+    expect(rel.keys).to.deep.equal([{col: "N", desc: false}]);
+    expect(rel.input.rel).to.equal("project");
   });
 });

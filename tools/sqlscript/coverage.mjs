@@ -169,7 +169,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     // from the system would have to bring, ranked below by what it unlocks
     one.absentUsings = (one.signature?.usings ?? [])
       .map((name) => String(name).toUpperCase())
-      .filter((name) => !name.includes("=>") && ddic.find("TABL", name) === undefined && ddic.find("DDLS", name) === undefined);
+      .filter((name) => !name.includes("=>") && !name.includes(".") && !name.startsWith("M_")
+        && ddic.find("TABL", name) === undefined && ddic.find("DDLS", name) === undefined);
   }
 
   const report = {};

@@ -571,3 +571,51 @@ The `.INCLU-XXX` rule was read off the export rather than assumed:
 and its columns are `WORK_MO`, `FREE_MO`, … -- the suffix is appended to
 every included field. Expanding without it would have produced column names
 that look right and are not.
+
+### The strict histogram, read body by body: 7 → 10, and 41 → 27 guesses
+
+*2026-09-23, early. Slices (b) and (c) of the same branch.*
+
+With the strict column in place the honest question became "why do the
+other 34 lower only by guessing", and the answer came from reading each
+one (`strict-why`, a probe over `coverage.measure().bodies`) rather than
+from the histogram line, which said `column X is not present` 33 times and
+nothing else. Four kinds:
+
+| kind | bodies | what it was |
+| --- | ---: | --- |
+| tables in no dictionary here | 14 | `USING` names standard tables of other packages; by package: **CMS_VDM 8 bodies / 8 tables**, SUSR_IS_UI 2/1, S_ADDRESS_VDM 2/1, MDG_PROCESS_ANALYTICS 1/3 |
+| the binder, ours | 13 | an alias **without AS** (`from :it_parent_guid a`), NULL and TRUE read as columns called NULL and TRUE, a table qualified by its own name (`demo_cs_spfli.mandt`), ORDER BY over a projected alias (`row_nr`) |
+| HANA's own views | 7 | `sys.m_host_information`, `"PUBLIC"."TABLES"`, `M_*` -- not portable in principle |
+| the rest | – | `$ABAP.TYPE` casts, functions without a measured rendering |
+
+The binder kind is fixed and the view kind is refused by name -- schema
+qualifier `SYS` / `PUBLIC` / `_SYS_*`, and an unqualified `M_*` only when
+the catalogue does not describe it, because the dictionary has old
+matchcode views named so. `sys.dummy` stays DUMMY. NULL is an untyped
+literal that a CAST, a CASE branch or a comparison types; a bare `NULL AS
+x` is refused ("CAST(NULL AS <type>) says which"), and a final walk over
+the IR refuses any NULL that reached the end untyped, so a path nobody
+remembered (a function argument, arithmetic) cannot pass `type: undefined`
+on. TRUE / FALSE are refused by name: HANA has BOOLEAN and SQLite has not.
+
+| working corpus | every column typed | lowered with guesses |
+| --- | ---: | ---: |
+| after 2a | 7 (2%) | 41 (11%) |
+| after (b): binder | 10 (3%) | 36 |
+| after (c): views refused | **10 (3%)** | **27 (7%)** |
+
+The second column shrinks because a guess became a named refusal, which is
+the direction it should move. What is left in it is the 14 bodies whose
+tables an export would bring, and the **wanted** list now prints them per
+package: `CMS_VDM 8/8` is one decision. The tables of HANA's own views are
+kept out of that list.
+
+Two things learned on the way, both about instruments. The "diamond" the
+include expansion seemed to produce -- 16 tables with a doubled field --
+was the expansion's own marker rows for two unresolved includes, both
+named `.INCLUDE`; DDIC does not activate a real duplicate, and the
+measurement was of the marker. And a false ambiguity: a table read bare in
+both branches of a UNION was "a source twice without an alias", because
+the set lived on the body rather than on the SELECT. Both found by the
+count moving the wrong way and reading one body.

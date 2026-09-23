@@ -167,9 +167,9 @@ export function toIr(tree, options = {}) {
     if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
     return undefined;
   };
-  /** table names used as qualifiers without an alias; a name used twice is ambiguous and stays so */
-  const implicitSources = new Set();
-  const ambiguousSources = new Set();
+  /** table names used as qualifiers without an alias, per SELECT; a name used twice in one FROM is ambiguous and stays so */
+  let implicitSources = new Set();
+  let ambiguousSources = new Set();
 
   const registerSource = (schema, sourceName) => {
     for (const [name, type] of Object.entries(schema ?? {})) {
@@ -693,7 +693,28 @@ export function toIr(tree, options = {}) {
       const table = String(temp.value).toUpperCase();
       return finish(scan(table), catalogue[table] ?? {});
     }
+    // a schema-qualified source: `sys.m_host_information`, `"PUBLIC"."TABLES"`
+    const ref = kid(node, "ColumnRef");
+    const parts = ref === undefined ? [] : kids(ref, "Name").map(nameOf);
+    if (parts.length >= 2) {
+      const schema = parts[0];
+      const table = parts[parts.length - 1];
+      // `sys.dummy` is DUMMY, the one-row source every dialect renders
+      if (schema === "SYS" && table === "DUMMY") return finish(scan("DUMMY"), {});
+      if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
+        // HANA's own views: not a dictionary table anywhere, not portable in
+        // principle, and refused by name so a catalogue miss on them does not
+        // read as a table an export could bring
+        throw new BindError(`${schema}.${table} is a HANA system view, not portable`, node);
+      }
+      throw new BindError(`a schema-qualified source ${schema}.${table} is not lowered: the catalogue knows tables by name only`, node);
+    }
     const table = nameOf(node);
+    if (table.startsWith("M_") && catalogue[table] === undefined) {
+      // an unqualified M_* the dictionary knows is an ordinary object (old
+      // matchcode views are named so); one it does not is HANA's monitoring
+      throw new BindError(`${table} is a HANA monitoring view (M_*), not portable`, node);
+    }
     return finish(scan(table), catalogue[table] ?? {}, table);
   }
 
@@ -795,15 +816,23 @@ export function toIr(tree, options = {}) {
     const outerColumns = columns;
     const outerAmbiguous = ambiguousColumns;
     const outerQualified = qualifiedColumns;
+    const outerImplicit = implicitSources;
+    const outerAmbiguousSources = ambiguousSources;
     columns = {};
     ambiguousColumns = new Set();
     qualifiedColumns = Object.create(outerQualified);
+    // the two SELECTs of a UNION may both read one table without an alias:
+    // ambiguity is a property of one FROM, not of the body
+    implicitSources = new Set();
+    ambiguousSources = new Set();
     try {
       return selectInScope(node);
     } finally {
       columns = outerColumns;
       ambiguousColumns = outerAmbiguous;
       qualifiedColumns = outerQualified;
+      implicitSources = outerImplicit;
+      ambiguousSources = outerAmbiguousSources;
     }
   }
 
@@ -1184,15 +1213,35 @@ export function toIr(tree, options = {}) {
         throw new BindError(`${node.node} is parsed but not lowered yet`, node);
     }
   }
-  if (returnedRel !== undefined) return {statements, rel: returnedRel};
+  // **No untyped NULL leaves the binder.** A CAST, a CASE branch and a
+  // comparison give a NULL literal its type; every other path -- a function
+  // argument, arithmetic, an IN list, a window argument -- would pass
+  // `type: undefined` on to whatever reads it next, and a default there is
+  // the quiet kind of wrong. Checked once, by construction, rather than at
+  // each site somebody remembers (foreman-dell, 2026-09-22).
+  const noUntyped = (out) => {
+    const walk = (node, where) => {
+      if (node === null || typeof node !== "object") return;
+      if (node.untyped === true) throw new BindError(`NULL ${where} has no type here: CAST(NULL AS <type>) says which`);
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "type") continue;
+        const place = node.node === "call" ? `in ${String(node.name ?? node.fn ?? "a call").toUpperCase()}` : where;
+        if (Array.isArray(value)) value.forEach((one) => walk(one, place));
+        else walk(value, place);
+      }
+    };
+    walk(out, "in an expression");
+    return out;
+  };
+  if (returnedRel !== undefined) return noUntyped({statements, rel: returnedRel});
   if (last === undefined && outParam !== undefined) {
     // the body answers through its OUT table parameter: the last thing
     // assigned to it is the plan, and there is no final select because the
     // procedure does not need one
     const assigned = bound.get(String(outParam.name).toUpperCase());
-    if (assigned !== undefined) return {statements, rel: assigned.rel};
+    if (assigned !== undefined) return noUntyped({statements, rel: assigned.rel});
   }
-  if (last === undefined && options.allowNoResult === true) return {statements};
+  if (last === undefined && options.allowNoResult === true) return noUntyped({statements});
   if (last === undefined) throw new BindError("a body has to end in a statement that produces rows", tree);
-  return {statements, rel: relation(last)};
+  return noUntyped({statements, rel: relation(last)});
 }
