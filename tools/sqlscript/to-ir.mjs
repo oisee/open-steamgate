@@ -408,6 +408,12 @@ export function toIr(tree, options = {}) {
         // expose the wrong AMDP boundary type even when the SQL itself ran.
         let resultType = T.str;
         if (["ROW_NUMBER", "RANK", "DENSE_RANK"].includes(fn)) resultType = T.int8;
+        // measured on A4H (docs/sqlscript-hana-observed.md): COUNT is wider
+        // than INTEGER (BIGINT), and MIN / MAX keep their argument's type --
+        // doubling 2147483647 overflows for MAX(int) and not for COUNT(*).
+        // SUM(int) overflowed too on HANA, where DuckDB widens: not typed yet.
+        if (fn === "COUNT") resultType = T.int8;
+        if (["MIN", "MAX"].includes(fn) && args.length === 1 && args[0].type !== undefined && !isUnresolved(args[0].type)) resultType = args[0].type;
         if (fn === "LOWER") {
           if (args.length !== 1 || !measuredTextType(args[0]?.type)) {
             throw new BindError("LOWER requires exactly one measured text argument", node);
@@ -1008,6 +1014,12 @@ export function toIr(tree, options = {}) {
   }
 
   function select(node) {
+    // `SELECT ... INTO v` fills scalars; it is a statement, and the procedural
+    // compiler takes the IntoClause off before binding what is left as a
+    // relation. One that reaches here stands where rows were expected.
+    if (kid(node, "IntoClause") !== undefined) {
+      throw new BindError("SELECT ... INTO fills scalars; it is a statement, not a relation", node);
+    }
     const outerColumns = columns;
     const outerAmbiguous = ambiguousColumns;
     const outerQualified = qualifiedColumns;
@@ -1097,6 +1109,14 @@ export function toIr(tree, options = {}) {
       const as = alias === undefined ? (expr.name ?? "V") : nameOf(alias);
       return {as, expr: projected(expr, as, item)};
     });
+    // two items under one name collapse into one key of the schema and of an
+    // answer's row: a column silently lost. Refused once, here, for every
+    // relation (foreman-dell's critic on #36)
+    const named = items.filter((one) => one.as !== "*").map((one) => one.as);
+    if (new Set(named).size !== named.length) {
+      const twice = named.find((one, i) => named.indexOf(one) !== i);
+      throw new BindError(`${named.length} items under ${new Set(named).size} distinct names (${twice} twice${twice === "V" ? ", an unnamed expression" : ""}); give each its own`, node);
+    }
     // **`SELECT *` is not a projection, it is the absence of one.**
     //
     // A `project` whose only item is a star was reaching the lowering as

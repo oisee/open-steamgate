@@ -252,6 +252,16 @@ export class Join extends Expression {
 }
 
 /** SELECT ... FROM ... [WHERE] [GROUP BY] [ORDER BY] */
+/** `INTO a, b [DEFAULT x, y]` -- a SELECT that fills scalars instead of
+ *  producing rows. Measured on A4H (docs/sqlscript-hana-observed.md): one
+ *  row assigns, none raises unless DEFAULT is given, two raise always. */
+export class IntoClause extends Expression {
+  getRunnable() {
+    return seq(str("INTO"), new Name(), star(seq(",", new Name())),
+      opt(seq(str("DEFAULT"), new Expr(), star(seq(",", new Expr())))));
+  }
+}
+
 export class Select extends Expression {
   getRunnable() {
     // **`altPrio`, not `opt`, for DISTINCT.** With `opt` the grammar admits
@@ -266,6 +276,7 @@ export class Select extends Expression {
     return seq(str("SELECT"), opt(seq(str("TOP"), new Expr())),
       altPrio(seq(str("DISTINCT"), new SelectItem(), star(seq(",", new SelectItem()))),
         seq(new SelectItem(), star(seq(",", new SelectItem())))),
+      opt(new IntoClause()),
       // `FROM a, b` is a cross join written with a comma, and the corpus uses
       // it for exactly that -- `FROM public.m_services s, public.m_volume_files v`
       // with the join written out in the WHERE
@@ -464,7 +475,11 @@ export class AbapType extends Expression {
  *  (docs/sqlscript-corpus.md, 0 of 405). */
 export class Body extends Expression {
   getRunnable() {
-    return altPrio(
+    // `alt`, not `altPrio`: the first reading matched a PREFIX ending in a
+    // bare `SELECT ...;` and committed, so a body with statements after one
+    // (a `SELECT ... INTO v;` followed by `rv = :v;`) could not be read at
+    // all. parse() still prefers the first reading that consumes the body.
+    return alt(
       seq(star(new Statement()), new SetOperation(), opt(";")),
       plus(new Statement()));
   }
