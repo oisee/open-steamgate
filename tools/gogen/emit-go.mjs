@@ -12,7 +12,9 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
 export const ident = (name) => {
-  const id = String(name).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
+  // from the _ of an attribute of the class's own
+  const id = String(name).toLowerCase().replace(/~/g, "__").replace(/[^a-z0-9_]/g, "_");
   return GO_RESERVED.has(id) || /^\d/.test(id) ? `${id}_` : id;
 };
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
@@ -164,6 +166,7 @@ export function emitGo(program, pkg = "main") {
   for (const [name, sigs] of program.interfaceMethods ?? []) {
     out.push(`type ${typeName(name)} interface {`);
     for (const m of sigs) if (definable(program, m)) out.push(`\t${signature({name}, m, true)}`);
+    out.push(...intfAccessors(program, name));
     out.push("}", "");
   }
   const compiled = new Set(classes.map((c) => c.name));
@@ -179,6 +182,7 @@ export function emitGo(program, pkg = "main") {
     for (const a of inst) out.push(`\t${ident(a.name)} ${goType(a.type)}`);
     out.push("}", "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
+    out.push(...attrAccessors(cls, inst));
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
       out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${a.value === undefined ? "" : ` = ${constLiteral(a)}`}`);
     }
@@ -313,12 +317,32 @@ function classInterface(program, cls) {
   const out = [`type I_${T} interface {`];
   if (cls.super && POLY.has(cls.super)) out.push(`\tI_${typeName(cls.super)}`);
   out.push(`\tAs_${T}() *${T}`);
+  // the accessors of the interfaces the class implements, so the reference converts to them
+  for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType(a.type)}`);
   for (const m of cls.signatures?.values() ?? []) {
     if (m.unsupported || m.static || m.private || m.name === "CONSTRUCTOR" || !definable(program, m)) continue;
     out.push(`\t${signature({name: cls.name}, m, true)}`);
   }
   out.push("}", "", `func (me *${T}) As_${T}() *${T} { return me }`, "");
   return out;
+}
+
+/*
+ * An interface's DATA through a reference to the interface: a Go interface
+ * has no fields, so it carries one accessor per attribute, a pointer to the
+ * object's own field, and every class that implements the interface gives
+ * it. A read is *p, a write *p = v; both reach the object.
+ */
+const accessorName = (attr) => `Ptr_${typeName(attr)}`;
+
+function intfAccessors(program, intf) {
+  return (program.interfaceAttrs?.get(intf) ?? []).filter((a) => !a.static && !a.unsupported && definable(program, {params: [{type: a.type}]}))
+    .map((a) => `\t${accessorName(a.name)}() *${goType(a.type)}`);
+}
+
+function attrAccessors(cls, inst) {
+  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &me.${ident(a.name)} }`);
+  return out.length ? [...out, ""] : [];
 }
 
 /** a signature whose every type is declared in this program */
@@ -444,7 +468,8 @@ function place(p, ctx) {
     case "const": return p.go;
     case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
-    case "refattr": return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
+    case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
+      return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
       const b = place(p.base, ctx);
       return `${b}[abap.Idx(len(${b}), ${expr(p.index, ctx)})]`;

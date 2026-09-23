@@ -1,0 +1,7 @@
+CLASS zcl_gogen_t_rf_obj DEFINITION PUBLIC CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES zif_gogen_t_rf.
+ENDCLASS.
+
+CLASS zcl_gogen_t_rf_obj IMPLEMENTATION.
+ENDCLASS.

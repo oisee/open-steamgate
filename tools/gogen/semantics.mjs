@@ -98,6 +98,24 @@ const EXPECT = {
   // a text with \r, U+2028 or U+2029 is NOT_COMPILED in both backends
   ZCL_GOGEN_T_STRCRLF: {Go: "ERROR NOT_COMPILED in FIND REGEX: ^ or $ in a text with a line end other than \\n is not measured: a$ at zcl_gogen_t_strcrlf.clas.abap:11",
     JS: "ERROR NOT_COMPILED in FIND REGEX: ^ or $ in a text with a line end other than \\n is not measured: a$"},
+  // DATA of an interface is one field of the object: written through an
+  // interface reference and read through the class reference and back,
+  // through a reference to an included interface (zif_ia2, measured with
+  // local interfaces in a test include), in the class as zif~attr and
+  // me->zif~attr, in a subclass too; READ-ONLY written inside the class
+  // through me and through a reference of the class's type, and in the
+  // subclass. The A4H probe also showed what does not activate, which the
+  // front end refuses rather than compiles: VALUE on an interface DATA (so
+  // init:0), a write to READ-ONLY through an interface reference (inside
+  // the class too) or from outside the class, and lo_i->zif_ia~attr on a
+  // reference to zif_ia itself
+  ZCL_GOGEN_T_IA: "init:0 o:7 i:8 bump:9,90,90,9 pair:3p inner:in,in,two alias:shared other:0, first:9,shared sub:42,1049,43,7 ro:2",
+  // a subclass implementing an interface (zif_iadb) that includes one its
+  // superclass already implements (zif_iadc, through zif_iada): A4H
+  // activates it and keeps one field, which set( ) of the superclass writes
+  // and every reference reads ($ZOSG_TMP_0121, 2026-09-23). Go gave the
+  // subclass a second field until then: get:0 ... get:7
+  ZCL_GOGEN_T_IADUP: "get:5 a:6 c:6 s:6 b:7 get:5",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
@@ -131,4 +149,33 @@ for (const line of goOut.trim().split("\n")) {
     console.log(`${ok ? "ok  " : "FAIL"} ${who} ${cls}: ${got}${ok ? "" : `\n     want: ${want}`}`);
   }
 }
+
+// What A4H does not activate and abaplint does not report, so the front end
+// refuses it (a statement stub): testdata-refused/ holds one statement per
+// refusal, each answered by its message at its line, and the neighbours that
+// must still compile (an attribute named VALUE, a read of a READ-ONLY
+// attribute); MV_X is READ-ONLY and shares its name with a component of a
+// structure declared before it, which is not an attribute and must not hide
+// the READ-ONLY. lo_i->zif~attr on a reference to zif itself is a
+// syntax error abaplint does report, so that object is left out whole.
+const REFUSED = {
+  12: "ZIF_GOGEN_T_RF~MV_V: VALUE on an interface DATA does not activate on A4H",
+  13: "ZIF_GOGEN_T_RF->MV_RO: a write to a READ-ONLY attribute through an interface reference (a syntax error on A4H)",
+  14: "ZCL_GOGEN_T_RF_OBJ->ZIF_GOGEN_T_RF~MV_RO: a write to a READ-ONLY attribute outside ZCL_GOGEN_T_RF_OBJ (a syntax error on A4H)",
+  15: "ZIF_GOGEN_T_RF->CO_K: a constant through an interface reference is not in the subset",
+  17: "ZIF_GOGEN_T_RF->MV_X: a write to a READ-ONLY attribute through an interface reference (a syntax error on A4H)",
+};
+const refused = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf", "zcl_gogen_t_rf_obj", "zcl_gogen_t_rf_own"], tolerant: true});
+const got = new Map(refused.partial.map((x) => [Number(/zcl_gogen_t_rf\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const [line, want] of Object.entries(REFUSED)) {
+  const ok = got.get(Number(line)) === want;
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused :${line}: ${got.get(Number(line)) ?? "(compiled)"}${ok ? "" : `\n     want: ${want}`}`);
+}
+for (const [line, msg] of got) {
+  if (REFUSED[line] === undefined) { bad += 1; console.log(`FAIL refused :${line}: must compile, got ${msg}`); }
+}
+const own = refused.broken.includes("zcl_gogen_t_rf_own");
+if (!own) bad += 1;
+console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);
 process.exit(bad ? 1 : 0);

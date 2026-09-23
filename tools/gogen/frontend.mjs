@@ -114,6 +114,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
       }
       // a CLASS-METHODS of an interface is the class's function, not a method of the reference
       program.interfaceMethods.set(name, sigs.filter((x) => !x.unsupported && !x.static));
+      interfaceAttributes(program, name);
     }
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
   }
@@ -426,6 +427,13 @@ function classIr(ctx0, obj) {
     addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => m.getName()}), "", m.isStatic());
   }
   const implemented = [...new Set(def.getImplementing().flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]))];
+  // an interface a superclass already implements (itself or through an
+  // included one) is a field of the superclass's part of the object: a
+  // second copy here would be a second field in Go, shadowing the embedded
+  // one, and the value would split in two
+  const inherited = new Set(ancestors(reg, className).flatMap((c) => (reg.getObject("CLAS", c)?.getDefinition()?.getImplementing() ?? [])
+    .flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))])));
+  attributes.push(...implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
   for (const intf of implemented.map((name) => ({name}))) {
     const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
@@ -1266,6 +1274,7 @@ function findAttribute(ctx, n) {
   const defs = findScope(ctx.spaghetti.getTop(), "class_definition");
   const id = impl?.getData().vars[n] ?? defs?.getData().vars[n];
   if (id === undefined) return undefined;
+  if (n.includes("~") && !(id instanceof abaplint.Types.ClassConstant) && !id.getMeta().includes("static")) return ownIntfAttribute(ctx, n);
   if (id instanceof abaplint.Types.ClassConstant || n.includes("~")) {
     const go = registerConst(ctx.program, n, id, ctx.className);
     if (go === undefined) throw new Unsupported(`constant ${n} is outside the subset`);
@@ -1304,7 +1313,7 @@ function lvalue(target, ctx) {
     if (isExpr(kids[i], Expressions.TableExpression)) {
       place = rowOf(place, kids[i], ctx);
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName)) {
-      place = refAttribute(place, kids[i + 1], ctx);
+      place = refAttribute(place, kids[i + 1], ctx, true);
       i += 1;
     } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
@@ -1318,7 +1327,9 @@ function lvalue(target, ctx) {
 }
 
 /** ref->attr: an instance attribute of the class a reference points to */
-function refAttribute(base, attrNode, ctx) {
+function refAttribute(base, attrNode, ctx, write = false) {
+  if (base.type.k === "ref" && base.type.intf && base.type.name !== "OBJECT") return intfRefAttribute(base, upper(attrNode.concatTokens()), ctx, write);
+  if (base.type.k === "ref" && !base.type.intf && attrNode.concatTokens().includes("~")) return classRefIntfAttribute(base, upper(attrNode.concatTokens()), ctx, write);
   if (base.type.k !== "ref" || base.type.intf) throw new Unsupported(`-> on a ${base.type.k === "ref" ? "interface reference" : base.type.k}`);
   const name = upper(attrNode.concatTokens());
   const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => ctx.reg.getObject("CLAS", c)?.getDefinition()?.getAttributes().getInstance()
@@ -1333,6 +1344,145 @@ function rowOf(place, te, ctx) {
   const inner = te.getChildren().filter((c) => !isTok(c));
   if (inner.length !== 1 || !isExpr(inner[0], Expressions.Source)) throw new Unsupported(`table expression with a key: ${te.concatTokens()}`);
   return {e: "row", base: place, index: convert(source(inner[0], ctx, I), I), type: place.type.row};
+}
+
+/* ------------------------------------------------------ interface attributes */
+
+/*
+ * DATA of an interface is a field of every object whose class implements
+ * the interface: INTF~ATTR in the class, ref->attr through a reference to
+ * the interface, ref->intf~attr through a class reference or through a
+ * reference to an interface that includes INTF. Measured on A4H
+ * (ZCL_GOGEN_T_IA, 2026-09-23): one field, written through either reference
+ * and read through the other; READ-ONLY is writable in the implementing
+ * class and its subclasses (through me and through a reference of the
+ * class's type), never through an interface reference, and not at all
+ * outside; VALUE on an interface DATA does not activate; lo_i->intf~attr
+ * naming the reference's own interface does not either. VALUE and the
+ * READ-ONLY writes are syntax errors abaplint does not report, so the front
+ * end refuses them; the last one abaplint does report, and the refusal here
+ * only matters to a tolerant survey. A subclass that implements an interface
+ * its superclass already implements (through an included one) shares the
+ * superclass's field (A4H, ZCL_GOGEN_T_IADUP). The refusals are checked by
+ * semantics.mjs against testdata-refused/.
+ */
+
+/** the DATA and CLASS-DATA of one interface (not of those it includes), cached */
+function ownInterfaceAttributes(program, intf) {
+  program.intfOwnAttrs ??= new Map();
+  if (program.intfOwnAttrs.has(intf)) return program.intfOwnAttrs.get(intf);
+  const obj = program.reg.getObject("INTF", intf);
+  const def = obj?.getDefinition();
+  const out = [];
+  program.intfOwnAttrs.set(intf, out);
+  if (!def) return out;
+  // READ-ONLY and VALUE are read off the statement: abaplint's attribute of
+  // an interface carries neither (its meta is empty). Only the statements
+  // that declare an attribute count: a DATA BEGIN OF block is its DataBegin,
+  // and the components inside it are not attributes
+  const stmts = new Map();
+  const walk = (node) => {
+    for (const c of node.getChildren()) {
+      if (isStmt(c, Statements.Data) || isStmt(c, Statements.DataBegin)) {
+        const n = c.findDirectExpression(Expressions.DefinitionName) ?? c.findFirstExpression(Expressions.DefinitionName);
+        if (n && !stmts.has(upper(n.concatTokens()))) stmts.set(upper(n.concatTokens()), c);
+      } else if (isStruct(c, Structures.Data)) {
+        const begin = c.findDirectStatement(Statements.DataBegin);
+        const n = begin?.findDirectExpression(Expressions.DefinitionName);
+        if (n && !stmts.has(upper(n.concatTokens()))) stmts.set(upper(n.concatTokens()), begin);
+      } else if (c instanceof Nodes.StructureNode) walk(c);
+    }
+  };
+  const top = obj.getMainABAPFile()?.getStructure();
+  if (top) walk(top);
+  const readOnly = (st) => {
+    const t = st?.getTokens().map((x) => upper(x.getStr())) ?? [];
+    return t.some((x, i) => x === "READ" && t[i + 1] === "-" && t[i + 2] === "ONLY");
+  };
+  for (const a of def.getAttributes().getInstance()) {
+    const name = `${intf}~${upper(a.getName())}`;
+    const st = stmts.get(upper(a.getName()));
+    const entry = {name, intf, readOnly: readOnly(st)};
+    if (st?.findFirstExpression(Expressions.Value)) entry.unsupported = `${name}: VALUE on an interface DATA does not activate on A4H`;
+    else {
+      try { entry.type = typeOf(a.getType(), name, program); } catch (e) { if (!(e instanceof Unsupported)) throw e; entry.unsupported = e.message; }
+    }
+    out.push(entry);
+  }
+  for (const a of def.getAttributes().getStatic()) {
+    const name = `${intf}~${upper(a.getName())}`;
+    out.push({name, intf, static: true, unsupported: `${name}: CLASS-DATA of an interface is not in the subset`});
+  }
+  return out;
+}
+
+/** the attributes of an interface and of every interface it includes */
+function interfaceAttributes(program, intf) {
+  program.interfaceAttrs ??= new Map();
+  if (!program.interfaceAttrs.has(intf)) {
+    program.interfaceAttrs.set(intf, [intf, ...componentInterfaces(program.reg, intf)].flatMap((i) => ownInterfaceAttributes(program, i)));
+  }
+  return program.interfaceAttrs.get(intf);
+}
+
+/** the fields a class gets for the interfaces it implements itself (a subclass inherits them) */
+function implementedAttributes(program, implemented) {
+  return implemented.flatMap((i) => ownInterfaceAttributes(program, i)).filter((a) => !a.static)
+    .map((a) => (a.unsupported ? {name: a.name, unsupported: a.unsupported} : {name: a.name, type: a.type, static: false, fromIntf: a.intf, readOnly: a.readOnly}));
+}
+
+/** INTF~ATTR inside a class that implements INTF (or inherits it) */
+function ownIntfAttribute(ctx, n) {
+  const intf = n.slice(0, n.lastIndexOf("~"));
+  const a = ownInterfaceAttributes(ctx.program, intf).find((x) => x.name === n);
+  if (a === undefined) throw new Unsupported(`${n}: not an attribute of ${intf} (an alias?)`);
+  if (a.unsupported) throw new Unsupported(a.unsupported);
+  return {e: "attr", name: n, type: a.type};
+}
+
+/** ref->attr and ref->comp~attr through a reference to an interface */
+function intfRefAttribute(base, name, ctx, write) {
+  const intf = base.type.name;
+  if (name.includes("~")) {
+    const pre = name.slice(0, name.lastIndexOf("~"));
+    // measured on A4H: lo_i->zif_i~a on a reference to zif_i is a syntax error
+    if (!componentInterfaces(ctx.reg, intf).includes(pre)) throw new Unsupported(`${intf}->${name}: ${pre} is not an interface ${intf} includes`);
+  }
+  const full = name.includes("~") ? name : `${intf}~${name}`;
+  const a = interfaceAttributes(ctx.program, intf).find((x) => x.name === full);
+  if (a === undefined) {
+    // a constant or a CLASS-DATA read through the reference is ABAP too, but
+    // not in the subset; say so rather than suspect an alias
+    const [pre, comp] = full.split("~");
+    const idef = ctx.reg.getObject("INTF", pre)?.getDefinition();
+    if (idef?.getAttributes().getConstants().some((x) => upper(x.getName()) === comp)) {
+      throw new Unsupported(`${intf}->${name}: a constant through an interface reference is not in the subset`);
+    }
+    if (idef?.getAttributes().getStatic().some((x) => upper(x.getName()) === comp)) {
+      throw new Unsupported(`${intf}->${name}: a static attribute through an interface reference is not in the subset`);
+    }
+    throw new Unsupported(`${intf}->${name}: not an attribute of the interface (an alias?)`);
+  }
+  if (a.unsupported) throw new Unsupported(a.unsupported);
+  if (write && a.readOnly) throw new Unsupported(`${intf}->${name}: a write to a READ-ONLY attribute through an interface reference (a syntax error on A4H)`);
+  return {e: "refattr", base, name: full, type: a.type};
+}
+
+/** ref->intf~attr through a reference to a class that implements intf */
+function classRefIntfAttribute(base, name, ctx, write) {
+  const pre = name.slice(0, name.lastIndexOf("~"));
+  // the topmost class that implements it: the field is its, and a subclass
+  // implementing the same interface again shares it
+  const owner = [base.type.name, ...ancestors(ctx.reg, base.type.name)].findLast((c) => (ctx.reg.getObject("CLAS", c)?.getDefinition()?.getImplementing() ?? [])
+    .some((i) => upper(i.name) === pre || componentInterfaces(ctx.reg, upper(i.name)).includes(pre)));
+  if (owner === undefined) throw new Unsupported(`${base.type.name}->${name}: the class does not implement ${pre}`);
+  if (!ctx.program.wanted.has(owner)) throw new Unsupported(`${base.type.name}->${name}: ${owner}, which implements ${pre}, is not compiled`);
+  const a = ownInterfaceAttributes(ctx.program, pre).find((x) => x.name === name);
+  if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an attribute of ${pre} (an alias?)`);
+  if (a.unsupported) throw new Unsupported(a.unsupported);
+  const inside = ctx.className === owner || ancestors(ctx.reg, ctx.className).includes(owner);
+  if (write && a.readOnly && !inside) throw new Unsupported(`${base.type.name}->${name}: a write to a READ-ONLY attribute outside ${owner} (a syntax error on A4H)`);
+  return {e: "refattr", base, name, type: a.type};
 }
 
 /* --------------------------------------------------------------- expressions */
@@ -2349,7 +2499,7 @@ function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {
     const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition();
-    if ((def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf)) return true;
+    if ((def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf || (REG && componentInterfaces(REG, upper(i.name)).includes(intf)))) return true;
   }
   return false;
 }
