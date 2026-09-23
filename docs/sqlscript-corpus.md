@@ -900,13 +900,24 @@ only, into the gitignored `.local/a4h-ddic`.
 | working, compiles as a procedure | 17 | **18** |
 | teaching, compiles as a procedure | 3 | 3 |
 
-The twelve bodies move on to where the next steps are:
+**Which change moved the body.** The one body that now compiles names a
+table function whose DDL source is called like its entity. It moved
+because its source was read from the sandbox, not because of the entity
+lookup. The five bodies the lookup reaches stop further on, at NUMC (3), a
+HANA system view and a RAW data element. The twelfth DDLS also needed `--`
+comments stripped: a source written on a system uses them, and its
+commented-out parameter list was read as a parameter. One quote-aware
+comment stripper now serves the entity lookup and the table-function
+reader (`tools/ddls-entity.mjs`).
+
+All twelve bodies now reach their signature and stop here:
 
 | now stops at | bodies |
 | --- | ---: |
 | a column typed INT2 (`xunumber`) | 4 |
 | NUMC in a RETURNS list | 3 |
 | INT8 in a RETURNS list | 1 |
+| a RAW data element in a RETURNS list | 1 |
 | a HANA system view | 1 |
 | a column the scope does not type | 1 |
 | compiles | 1 |

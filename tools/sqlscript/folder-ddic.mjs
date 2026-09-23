@@ -67,14 +67,33 @@ export class FolderDdic {
         const was = this.index.get(key);
         if (was !== undefined) this.overrides.push({key, was: was.folder, now: folder, ...(was.folder === folder ? {duplicate: true} : {})});
         this.index.set(key, {path, folder});
-        if (m[2].toUpperCase() === "DDLS") {
-          const entity = entityOf(readFileSync(path, "utf8"));
-          if (entity !== undefined && entity !== m[1].toUpperCase()) this.entities.set(`DDLS:${entity}`, {path, folder});
-        }
       }
     };
     walk(folder);
+    this.indexEntities();
     return this;
+  }
+
+  /**
+   * The DDLS entity index, rebuilt from the file index after every folder,
+   * so a later folder that shadows a file by name also replaces the entity
+   * that file defined. Two sources defining one entity is not valid on a
+   * system; neither is taken, and the pair is recorded like an override.
+   */
+  indexEntities() {
+    const seen = new Map();
+    for (const [key, entry] of [...this.index.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      if (!key.startsWith("DDLS:")) continue;
+      const entity = entityOf(readFileSync(entry.path, "utf8"));
+      if (entity === undefined || entity === key.slice(5)) continue;
+      (seen.get(entity) ?? seen.set(entity, []).get(entity)).push(entry);
+    }
+    this.entities = new Map();
+    this.ambiguousEntities = [];
+    for (const [entity, entries] of seen) {
+      if (entries.length === 1) this.entities.set(`DDLS:${entity}`, entries[0]);
+      else this.ambiguousEntities.push({entity, paths: entries.map((one) => one.path)});
+    }
   }
 
   /** by file name first; a DDLS also by the entity it defines */
@@ -123,7 +142,8 @@ export class FolderDdic {
     const duplicates = this.overrides.length - taken;
     return this.folders.map((folder) => `${folder}  (${this.hits.get(folder) ?? 0} resolved)`)
       .concat(taken === 0 ? [] : [`${taken} names taken over by a later folder`])
-      .concat(duplicates === 0 ? [] : [`${duplicates} names twice inside one folder (the later path won)`]);
+      .concat(duplicates === 0 ? [] : [`${duplicates} names twice inside one folder (the later path won)`])
+      .concat(this.ambiguousEntities.length === 0 ? [] : [`${this.ambiguousEntities.length} DDLS entities defined by two sources (neither taken)`]);
   }
 }
 

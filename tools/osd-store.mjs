@@ -444,13 +444,19 @@ export class ObjectStore {
   #ddlsEntities() {
     const entries = this.#entries();
     if (this.ddlsEntityIndex === undefined || this.ddlsEntityIndexOf !== entries) {
+      // as the folder dictionary does: two sources defining one entity are
+      // not valid on a system, so neither is taken
       const byEntity = new Map();
+      const twice = new Set();
       for (const entry of entries.values()) {
         if (entry.type !== "DDLS") continue;
         let entity;
         try { entity = entityOf(readFileSync(join(this.root, entry.file), "utf8")); } catch { entity = undefined; }
-        if (entity !== undefined && entity !== String(entry.name).toUpperCase() && !byEntity.has(entity)) byEntity.set(entity, entry);
+        if (entity === undefined || entity === String(entry.name).toUpperCase()) continue;
+        if (byEntity.has(entity)) twice.add(entity);
+        byEntity.set(entity, entry);
       }
+      for (const entity of twice) byEntity.delete(entity);
       this.ddlsEntityIndex = byEntity;
       this.ddlsEntityIndexOf = entries;
     }
