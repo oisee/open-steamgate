@@ -15,6 +15,7 @@ import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo, funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
+import {home} from "./home.mjs";
 import {copyFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 
@@ -146,7 +147,6 @@ function sceneMain(sc, recs) {
 package main
 
 import (
-import {home} from "./home.mjs";
 	"encoding/json"
 	"os"
 	"sort"
@@ -165,7 +165,7 @@ ${ctxs}
 	${sc.init ?? ""}
 	frames := make([]map[string]any, 0, len(ctxs))
 	for _, c := range ctxs {
-		f := obj.ZIF_O4D_EFFECT__RENDER_FRAME(s, c)
+		f := obj.ZIF_O4D_EFFECT__RENDER_FRAME(s, &c)
 		lines := []map[string]any{}
 		for _, l := range f.lines {
 			lines = append(lines, map[string]any{"x1": l.x1, "y1": l.y1, "x2": l.x2, "y2": l.y2, "c": l.color})
@@ -185,7 +185,7 @@ ${ctxs}
 	for i := 0; i < repeat; i++ {
 		t := time.Now()
 		for _, c := range ctxs {
-			obj.ZIF_O4D_EFFECT__RENDER_FRAME(s, c)
+			obj.ZIF_O4D_EFFECT__RENDER_FRAME(s, &c)
 		}
 		sweeps = append(sweeps, time.Since(t).Nanoseconds()/int64(len(ctxs)))
 	}

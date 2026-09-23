@@ -21,6 +21,7 @@ import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
+import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pack = `${home}/packs/o4d/upstream`;
@@ -133,7 +134,6 @@ function goMain() {
 package main
 
 import (
-import {home} from "./home.mjs";
 	"encoding/json"
 	"fmt"
 	"math"
