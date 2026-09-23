@@ -234,6 +234,22 @@ export function toIr(tree, options = {}) {
     if (children.length >= 2 && last?.node === "identifier") return nameOf(last);
     return undefined;
   };
+  /** the common table expressions in scope, by name */
+  let ctes = new Map();
+  /** Select nodes whose TOP the enclosing statement applies after its ORDER BY */
+  const deferredTop = new Set();
+  const directWord = (node, word) => (node.children ?? []).some((c) => c.node === "word" && String(c.value).toUpperCase() === word);
+  /** the TOP count of a Select, or undefined; refused unless it is an INTEGER literal or parameter */
+  const topOf = (sel) => {
+    const children = sel.children ?? [];
+    const at = children.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "TOP");
+    if (at < 0) return undefined;
+    const count = children[at + 1]?.node === "Expr" ? expression(children[at + 1]) : undefined;
+    if (count?.type?.abap !== "I" || !["lit", "param"].includes(count?.node)) {
+      throw new BindError("TOP requires a literal or scalar INTEGER count", sel);
+    }
+    return count;
+  };
   /** table names used as qualifiers without an alias, per SELECT; a name used twice in one FROM is ambiguous and stays so */
   let implicitSources = new Set();
   let ambiguousSources = new Set();
@@ -871,6 +887,11 @@ export function toIr(tree, options = {}) {
       throw new BindError(`a schema-qualified source ${schema}.${table} is not lowered: the catalogue knows tables by name only`, node);
     }
     const table = nameOf(node);
+    if (ctes.has(table)) {
+      // a common table expression of the enclosing WITH, by its name
+      const cte = ctes.get(table);
+      return finish(cte, schemaOf(cte, catalogue), table);
+    }
     if (table.startsWith("M_") && catalogue[table] === undefined) {
       // an unqualified M_* the dictionary knows is an ordinary object (old
       // matchcode views are named so); one it does not is HANA's monitoring
@@ -1207,6 +1228,14 @@ export function toIr(tree, options = {}) {
         return {col: e.name, desc: hasWord(k, "DESC")};
       }));
     }
+    // TOP is a word of the Select itself (direct child), and it applies after
+    // the ORDER BY: when the ORDER BY sits on the enclosing statement, the
+    // statement applies the TOP (topOf, relationBody) and the select skips it
+    const top = node.node === "Select" && !deferredTop.has(node) ? topOf(node) : undefined;
+    if (top !== undefined) {
+      if (directWord(node, "LIMIT")) throw new BindError("a select with both TOP and LIMIT has no single reading", node);
+      rel = limit(rel, top);
+    }
     if (hasWord(node, "LIMIT")) {
       const after = (node.children ?? []);
       const at = after.findIndex((c) => c.node === "word" && String(c.value).toUpperCase() === "LIMIT");
@@ -1232,7 +1261,37 @@ export function toIr(tree, options = {}) {
     if (node === undefined) {
       throw new BindError("a relation was expected here and the tree has none");
     }
+    // `WITH a AS (...), b AS (...)`: each definition is bound in order (a
+    // later one may read an earlier one) and inlined where its name stands,
+    // like a table variable -- a CTE is not a barrier either. The names are
+    // scoped to this statement: the map is restored when it is done.
+    const cteDefs = kids(node, "CteDef");
+    if (cteDefs.length > 0) {
+      const outerCtes = ctes;
+      ctes = new Map(outerCtes);
+      try {
+        for (const def of cteDefs) {
+          const cteName = nameOf(kid(def, "Name"));
+          if (ctes.has(cteName) && !outerCtes.has(cteName)) throw new BindError(`WITH names ${cteName.toLowerCase()} twice`, def);
+          ctes.set(cteName, relation(kid(def, "SetOperation")));
+        }
+        return relationBody(node);
+      } finally {
+        ctes = outerCtes;
+      }
+    }
+    return relationBody(node);
+  }
+
+  function relationBody(node) {
     const selects = kids(node, "Select");
+    // `SELECT TOP n ... ORDER BY ...` reads the ORDER BY onto the statement:
+    // sort first, then take n, as HANA does
+    const top = selects.length === 1 && kids(node, "OrderKey").length > 0 ? topOf(selects[0]) : undefined;
+    if (top !== undefined && directWord(node, "LIMIT")) {
+      throw new BindError("a select with both TOP and LIMIT has no single reading", node);
+    }
+    if (top !== undefined) deferredTop.add(selects[0]);
     const finishSet = (rel) => {
       const outerWords = new Set((node.children ?? []).filter((one) => one.node === "word")
         .map((one) => String(one.value).toUpperCase()));
@@ -1249,7 +1308,13 @@ export function toIr(tree, options = {}) {
     };
     // the trailing ORDER BY / LIMIT belong to the set operation, not to its
     // last branch, so they are applied here and over the whole thing
-    if (selects.length === 1) return finishSet(select(selects[0]));
+    if (selects.length === 1) {
+      const rel = finishSet(select(selects[0]));
+      return top === undefined ? rel : limit(rel, top);
+    }
+    if (selects.some((one) => topOf(one) !== undefined)) {
+      throw new BindError("TOP inside a branch of a set operation is not lowered", node);
+    }
     // **Which set operation it was is a word, and the word was never read.**
     //
     // `EXCEPT` and `INTERSECT` parse into the same node as `UNION` and were

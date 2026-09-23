@@ -72,6 +72,8 @@ export function irTypeFromAbap(type, resolve) {
   if (["T", "TIMS"].includes(text)) return T.char(6);
   const length = /^(?:C\s+LENGTH\s+|CHAR)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));
+  // the type pool ABAP's `abap_bool TYPE c LENGTH 1`: a CHAR 1, bound as CHAR is
+  if (text === "ABAP_BOOL") return T.char(1);
   const raw = /^X\s+LENGTH\s+(\d+)$/.exec(text)?.[1];
   if (raw !== undefined) return T.bytes(Number(raw));
   const packed = /^P(?:\s+LENGTH\s+(\d+))?(?:\s+DECIMALS\s+(\d+))?$/.exec(text);

@@ -86,6 +86,10 @@ export function scalarTypeOf(abapType, resolve = () => undefined) {
   if (["XSTRING"].includes(text)) return T.bytes();
   // bare C, N, X: ABAP's default length is 1
   if (text === "C" || text === "N") return T.char(1);
+  // a type of the type pool ABAP, which every program sees without naming it
+  // (https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/abenabap_boolean.htm):
+  // `abap_bool TYPE c LENGTH 1`; not a data element, so no dictionary holds it
+  if (text === "ABAP_BOOL") return T.char(1);
   if (text === "X") return T.bytes(1);
   const length = /^(?:C\s+LENGTH\s+|CHAR|N\s+LENGTH\s+|NUMC)(\d+)$/.exec(text)?.[1];
   if (length !== undefined) return T.char(Number(length));

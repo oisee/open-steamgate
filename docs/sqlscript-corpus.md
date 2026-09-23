@@ -840,3 +840,29 @@ Twelve bodies changed their parameter-type refusal: three now compile, the
 rest moved on -- to HANA's own views (refused by name), to columns no
 catalogue describes, to a STRING scalar in a DECLARE (host string scalars
 are the milestone that opens those), to an untyped CAST.
+
+### WITH, TOP n and the type pool ABAP: parses more, compiles the same
+
+*2026-09-23. The next grammar bucket, measured per body against the step
+before it.*
+
+`WITH name AS (...)` binds its common table expressions in order, each
+seeing the ones before it, scoped to the select that carries them; a name
+defined twice is refused. `SELECT TOP n` takes n rows after the
+statement's ORDER BY, which is where HANA applies it; the count must be an
+INTEGER literal or input, and TOP together with LIMIT, or TOP inside one
+branch of a set operation, is refused by name rather than given a reading.
+Both run as procedures on DuckDB and SQLite (`test/sqlscript-procedure-scope.mjs`).
+`abap_bool` is the type pool ABAP's `c LENGTH 1` and binds as a CHAR 1.
+
+Per body: 6 bodies newly parse, and **none** compiled -- three stop at an
+output whose table type is not resolved, two at a parameter type, one at a
+column no catalogue describes. `abap_bool` alone moved no body. Compiles
+stays at 17 working and 3 teaching.
+
+What that says about the next step: after the grammar, the largest single
+refusal is not a construct but the procedure's shape. 46 bodies
+(19 working, 27 teaching) stop at "exactly one OUT or RETURNING output";
+more than one output table is the next runtime milestone, ahead of more
+grammar. Parameter types (67) and unresolved output table types (23) are
+the dictionary's share.
