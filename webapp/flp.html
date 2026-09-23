@@ -161,6 +161,17 @@
                       }
                     },
                     {
+                      id: "sysinfo",
+                      tileType: "sap.ushell.ui.tile.StaticTile",
+                      properties: {
+                        title: "System information",
+                        subtitle: "who this system is, what runs it",
+                        info: "ZCL_OSD_SYSINFO",
+                        icon: "sap-icon://it-host",
+                        targetURL: "#SystemInfo-show"
+                      }
+                    },
+                    {
                       id: "se16",
                       tileType: "sap.ushell.ui.tile.StaticTile",
                       properties: {
@@ -349,6 +360,13 @@
           description: "the sap-lsd light-show, recorded as SAP GUI screens and replayed over a push channel",
           applicationType: "URL",
           url: "../sap/bc/lsd",
+          navigationMode: "embedded"
+        },
+        "SystemInfo-show": {
+          title: "System information",
+          description: "the system as sy shows it, and the environment that runs the ABAP",
+          applicationType: "URL",
+          url: "../sap/bc/osd/sysinfo/",
           navigationMode: "embedded"
         },
         "DataBrowser-show": {
