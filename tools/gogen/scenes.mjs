@@ -26,8 +26,15 @@ const recording = flag("recording", `/home/alice/dev/open-steamgate/.local/o4d-a
 const repeat = Number(flag("repeat", 20));
 
 // what each scene reads from its context, beyond t
+// The beat position is computed the way ZCL_O4D_APC_HANDLER=>CALC_BEAT_INFO
+// does, in the same double arithmetic: 152 bpm, a 16th is beat_sec / 4.
+const BEAT_SEC = 60 / 152;
+const pos16 = (gt) => Math.floor(gt / (BEAT_SEC / 4));
 const SCENES = {
   glitch: {cls: "ZCL_O4D_GLITCH", ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}}`},
+  // NEW #( ) in the handler: the constructor's defaults 640 x 400, scale 20
+  plasma: {cls: "ZCL_O4D_PLASMA", init: "obj.CONSTRUCTOR(s, 640, 400, 20)",
+    ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}, gt: ${r.gt}, gbi: ZIF_O4D_EFFECT__TY_BEAT_INFO{pos_16: ${pos16(r.gt)}}}`},
 };
 const sc = SCENES[scene];
 if (!sc) throw new Error(`no scene ${scene} (known: ${Object.keys(SCENES).join(", ")})`);
@@ -119,6 +126,7 @@ ${ctxs}
 	}
 	obj := &${sc.cls}{}
 	s := &abap.Session{}
+	${sc.init ?? ""}
 	frames := make([]map[string]any, 0, len(ctxs))
 	for _, c := range ctxs {
 		f := obj.ZIF_O4D_EFFECT__RENDER_FRAME(s, c)

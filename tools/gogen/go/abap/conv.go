@@ -245,3 +245,41 @@ func MinF(vs ...float64) float64 {
 func ToUpper(v string) string { return strings.ToUpper(v) }
 func ToLower(v string) string { return strings.ToLower(v) }
 func Strlen(v string) int32   { return int32(utf8.RuneCountInString(v)) }
+
+// FmtF formats an f the way a string template does, as measured on A4H
+// 2026-09-23: seventeen significant digits, always positional (1E20 is
+// 100000000000000000000, 1E-7 is 0.000000099999999999999995), trailing
+// zeros of the fraction dropped (1.5, 0.001, 2).
+func FmtF(v float64) string {
+	if v == 0 {
+		return "0"
+	}
+	e := strconv.FormatFloat(v, 'e', 16, 64) // [-]d.dddddddddddddddde±XX
+	neg := e[0] == '-'
+	if neg {
+		e = e[1:]
+	}
+	mant, exp, _ := strings.Cut(e, "e")
+	digits := strings.Replace(mant, ".", "", 1)
+	x, _ := strconv.Atoi(exp)
+	// the decimal point sits after digit number x+1
+	point := x + 1
+	var intPart, frac string
+	switch {
+	case point <= 0:
+		intPart, frac = "0", strings.Repeat("0", -point)+digits
+	case point >= len(digits):
+		intPart, frac = digits+strings.Repeat("0", point-len(digits)), ""
+	default:
+		intPart, frac = digits[:point], digits[point:]
+	}
+	frac = strings.TrimRight(frac, "0")
+	out := intPart
+	if frac != "" {
+		out += "." + frac
+	}
+	if neg {
+		out = "-" + out
+	}
+	return out
+}

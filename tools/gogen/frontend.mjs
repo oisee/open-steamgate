@@ -128,8 +128,10 @@ function classIr(ctx0, obj) {
 
   // attributes and constants live in the class implementation scope
   const implScope = findScope(spaghetti.getTop(), "class_implementation");
+  const defScope = findScope(spaghetti.getTop(), "class_definition");
   const attributes = [];
-  for (const [name, id] of Object.entries(implScope?.getData().vars ?? {})) {
+  const classVars = {...(defScope?.getData().vars ?? {}), ...(implScope?.getData().vars ?? {})};
+  for (const [name, id] of Object.entries(classVars)) {
     if (name === "ME" || name === "SUPER") continue;
     const meta = id.getMeta();
     if (id instanceof abaplint.Types.ClassConstant || (meta.includes("read_only") && meta.includes("static") && name.includes("~"))) {
@@ -375,8 +377,11 @@ function variable(name, ctx) {
 }
 
 function findAttribute(ctx, n) {
+  // instance and static attributes are declared in the class definition's
+  // scope, constants and interface constants show in the implementation's
   const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
-  const id = impl?.getData().vars[n];
+  const defs = findScope(ctx.spaghetti.getTop(), "class_definition");
+  const id = impl?.getData().vars[n] ?? defs?.getData().vars[n];
   if (id === undefined) return undefined;
   if (id instanceof abaplint.Types.ClassConstant || n.includes("~")) {
     const go = registerConst(ctx.program, n, id, ctx.className);
@@ -682,8 +687,8 @@ function template(n, ctx) {
     } else if (isExpr(c, Expressions.StringTemplateSource)) {
       if (c.findDirectExpression(Expressions.StringTemplateFormatting)) throw new Unsupported(`template formatting option: ${c.concatTokens()}`);
       const v = source(c.findDirectExpression(Expressions.Source), ctx);
-      if (v.type.k === "f") throw new Unsupported("f in a string template: the format is not measured yet");
-      if (!["i", "int8", "string", "c", "x"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
+      if (!["i", "int8", "f", "string", "c", "x"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
       parts.push({value: v});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);

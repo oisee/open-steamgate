@@ -246,6 +246,7 @@ function templatePart(v, ctx) {
   switch (v.type.k) {
     case "i": return `abap.FmtI(${x})`;
     case "int8": return `abap.FmtI8(${x})`;
+    case "f": return `abap.FmtF(${x})`;
     case "string": case "c": return x;
     case "x": return `abap.XToHex(${x})`;
     default: throw new Error(`template part ${v.type.k}`);

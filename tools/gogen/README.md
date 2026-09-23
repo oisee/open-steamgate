@@ -69,6 +69,29 @@ boxed arguments (fib, 95–105×). A table row is an object (35×). Arithmetic
 through the operator protocol costs 15–55×. Plasma is the smallest gap
 because `Math.sin` is the same cost in both.
 
+## Demo scenes against A4H
+
+`node tools/gogen/scenes.mjs <scene>` compiles one scene of ZO4D straight out
+of `packs/o4d/upstream` (the interface and the class, nothing rewritten),
+gives its `render_frame` the context of every frame of the A4H recording
+(`t`, `gt`, and `pos_16` computed like `ZCL_O4D_APC_HANDLER=>CALC_BEAT_INFO`),
+and compares lines, rects and texts number by number with the recording.
+
+| scene | frames equal to A4H, Go | frames equal to A4H, JS (npm 2.13.89) | Go a frame | JS a frame | JS / Go |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| glitch | 64 of 64 | spot-checked equal | 14 µs | 205 µs | ×14.5 |
+| plasma | **256 of 256** | 249 of 256 | 140 µs | 2527 µs | ×18 |
+
+The seven plasma frames the JS runtime gets wrong (10, 41, 161, 177, 192,
+208, 223) are exactly ANOMALY-2026-09-17-integer-division-not-rounded: a
+`/` inside an integer expression keeps its fraction there. The Go backend
+rounds it, because the IR computes the calculation type of the whole
+expression, target included, which is what A4H does.
+
+The f format of a string template was measured on A4H before it was
+written (fifteen values, `go/abap/fmtf_test.go`): seventeen significant
+digits, always positional, trailing zeros dropped.
+
 ## Semantics: what the two backends answer
 
 The `ABAP rule` column is the **documented** rule. Only the target-type row
