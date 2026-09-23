@@ -110,3 +110,51 @@ describe("an alias that shadows a source column", () => {
     expect(rel.input.rel).to.equal("project");
   });
 });
+
+describe("a table function called in FROM", () => {
+  const registry = {
+    "CL_X=>GET_ROWS": {name: "CL_X=>GET_ROWS", source: "class", parameters: [{name: "IV_A", kind: "scalar", abapType: "string"}, {name: "IV_N", kind: "scalar", abapType: "i"}], returns: {K: {abap: "C", len: 4}, V: {abap: "STRING"}}},
+    "CL_X=>CONVERT": {name: "CL_X=>CONVERT", source: "class", parameters: [{name: "IT_ROWS", kind: "table", abapType: "tt_rows", schema: {K: {abap: "C", len: 4}}}, {name: "IV_MODE", kind: "scalar", abapType: "i", optional: true}], returns: {K: {abap: "C", len: 4}}},
+  };
+  const sig = {parameters: [{name: "iv_a", direction: "IN", abapType: "string"}, {name: "it_guid", direction: "IN", abapType: "tt_g", kind: "table", schema: GUIDS}]};
+  const call = (body, options = {}) => toIr(parse(new Body(), lex(body)), {catalogue: {...CATALOGUE, IT_GUID: GUIDS}, signature: sig, relationSchemas: {IT_GUID: GUIDS}, tableFunctions: registry, strictColumns: true, ...options});
+
+  it("binds the callee's declared RETURNS as the source's schema and its arguments as typed values", () => {
+    const ir = call('lt = SELECT f.k, f.v FROM "CL_X=>GET_ROWS"(:iv_a, 1) AS f WHERE f.k = \'x\'; RETURN :lt;');
+    const hana = lower(ir.rel, "hana");
+    expect(hana.sql).to.match(/FROM \(SELECT \* FROM "CL_X=>GET_ROWS"\(\?, 1\)\) AS "F"/);
+    expect(hana.params.map((p) => p.name)).to.deep.equal(["IV_A", "p1"]);
+  });
+
+  it("keeps the callee's name as the source spells it", () => {
+    const ir = call('RETURN SELECT k FROM "cl_x=>get_rows"(:iv_a, 1);', {tableFunctions: {"CL_X=>GET_ROWS": registry["CL_X=>GET_ROWS"]}});
+    expect(lower(ir.rel, "hana").sql).to.contain('"cl_x=>get_rows"(');
+  });
+
+  it("is refused by name on a dialect that has no such object", () => {
+    const ir = call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(:iv_a, 1);');
+    expect(() => lower(ir.rel, "duckdb")).to.throw(/CL_X=>GET_ROWS is not compiled for duckdb/);
+    expect(() => lower(ir.rel, "sqlite")).to.throw(/not compiled for sqlite/);
+  });
+
+  it("refuses a callee the registry does not hold, an argument count that differs, and a system function", () => {
+    expect(() => call('RETURN SELECT k FROM "CL_Y=>NOBODY"(:iv_a);')).to.throw(BindError, /table function call CL_Y=>NOBODY is not in the registry/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>GET_ROWS"(:iv_a);')).to.throw(BindError, /takes 2 argument\(s\) \(iv_a, iv_n\) and is called with 1/);
+    expect(() => call("RETURN SELECT k FROM sys.series_generate_date('INTERVAL 1 DAY', :iv_a, :iv_a);")).to.throw(BindError, /SYS.SERIES_GENERATE_DATE is a HANA system function/);
+  });
+
+  it("lets a trailing OPTIONAL or DEFAULT argument be left out, and still refuses too few or too many", () => {
+    expect(call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid);').rel.input.args).to.have.length(1);
+    expect(call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid, 1);').rel.input.args).to.have.length(2);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"();')).to.throw(BindError, /takes 1 to 2 argument\(s\) \(it_rows, iv_mode\?\) and is called with 0/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid, 1, 2);')).to.throw(BindError, /is called with 3/);
+  });
+
+  it("binds a table argument to a table variable or an IN table parameter, and refuses anything else", () => {
+    const ir = call('RETURN SELECT k FROM "CL_X=>CONVERT"(:it_guid);');
+    expect(ir.rel.input.args[0]).to.include({kind: "relation", name: "IT_GUID"});
+    expect(() => lower(ir.rel, "hana")).to.throw(/table-valued argument to CL_X=>CONVERT is not lowered yet/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"(:nobody);')).to.throw(BindError, /unknown table variable :nobody passed to CL_X=>CONVERT/);
+    expect(() => call('RETURN SELECT k FROM "CL_X=>CONVERT"(1);')).to.throw(BindError, /argument it_rows of CL_X=>CONVERT is a table and must be a table variable/);
+  });
+});

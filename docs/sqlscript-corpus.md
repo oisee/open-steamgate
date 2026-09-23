@@ -619,3 +619,72 @@ measurement was of the marker. And a false ambiguity: a table read bare in
 both branches of a UNION was "a source twice without an alias", because
 the set lived on the body rather than on the SELECT. Both found by the
 count moving the wrong way and reading one body.
+
+### 2b: a table function called in FROM, bound against a registry: 10 → 14
+
+*2026-09-23, morning. The line that had topped the working list since the
+grammar learned the bracket: 23 bodies, "a table function call in FROM is
+parsed but not lowered yet".*
+
+Looking at the 23 before writing anything: 15 call one class's functions
+(`cl_islm_ml_engine_int_util=>convert_configuration` and two siblings),
+declared in the **class** -- `CLASS-METHODS … IMPORTING value(it_configuration)
+TYPE … RETURNING value(rt) TYPE …`, `METHOD … BY DATABASE FUNCTION` -- and
+called with the caller's own IN table as the argument; 1 calls a DDLS table
+function; 1 calls `sys.series_generate_date`. A registry built from DDLS
+alone would have moved 15 bodies from one refusal to another.
+
+So the registry has both sources (`tools/sqlscript/table-function-registry.mjs`):
+every `define table function` the dictionary holds, keyed by its name and
+by `implemented by method`; and every `BY DATABASE FUNCTION` method with a
+RETURNING table type, keyed `CLASS=>METHOD`, its RETURNING type read through
+the class's TYPES or the dictionary. On this export: **242 names**, 190 of
+them DDLS. The binder looks the callee up as the body spells it -- `"CL=>M"`
+and the DDLS entity are different objects on HANA, so nothing is normalised
+-- binds each argument against the declared parameter (a scalar as a typed
+value, a table only as a table variable or an IN table of this body), lets a
+trailing OPTIONAL or DEFAULT parameter be omitted as the corpus does, and
+refuses by name: a callee not in the registry, a count that does not fit,
+a table argument that is an expression, a system function (`SYS.*`). The
+result carries the callee's declared RETURNS as its schema.
+
+Lowering renders the call as the source spells it, **on HANA only** and
+only with scalar arguments; on DuckDB and SQLite it is "not compiled for
+<dialect>", and a table-valued argument is refused everywhere: on HANA it
+would have to be a table variable, which one statement does not have.
+
+Two things were under it. abaplint reads no class definition at all out of
+the ISLM classes (it stops on a multi-line `USING cl_a=>m1 cl_b=>m2.` list
+after `BY DATABASE FUNCTION`), so their methods had **no parameters**, and
+the body's own `:it_configuration` was an unknown variable. The extractor
+now reads the definitions as text when abaplint hands back none
+(`definitionsByText`), never wrong parameters, at worst none. And DEFAULT
+did not count as OPTIONAL: `iv_convertvalues TYPE i DEFAULT 0` is why every
+call of `convert_configuration` passes one argument.
+
+| working corpus | every column typed | lowered with guesses |
+| --- | ---: | ---: |
+| after (c) | 10 (3%) | 27 |
+| after 2b | **14 (4%)** | 32 |
+
+Of the 23 bodies, the call was the *first* refusal and rarely the only one:
+now that it binds, 8 stop at `CALL` (a procedure call statement), 7 at a
+bare `NULL AS x`, 2 at `:im_obj` whose data element is in no dictionary
+here, and exactly **one** at the table-valued argument itself. The
+histogram moved to the next honest line, which is what a slice is for.
+
+**The DuckDB route, measured by foreman-dell (DuckDB 1.5.5, `@duckdb/node-api`).**
+Scalar-input table functions: yes -- `CREATE MACRO f(p) AS TABLE SELECT …`,
+called as `FROM f(?)` with a bound parameter, inlined by the planner with
+the caller's filters pushed into the scan, nesting works, named and
+defaulted arguments work, cost against an inlined subquery 1.008×. A
+relation parameter: **no** -- `CREATE MACRO f(tbl) AS TABLE SELECT * FROM
+tbl` fails at CREATE, `f((SELECT …))` fails ("cannot contain subqueries");
+what works is `query_table(name)` over a table, a view or **the caller's
+CTE**, so an IN table has to be named first. A direct self-reference fails
+at CREATE, a two-macro cycle only at call ("max expression depth"), so the
+cycle guard is ours. Dependencies are not tracked (DROP MACRO succeeds
+under a user). An untyped macro parameter takes the type of whatever is
+bound; declare them typed. And DuckDB has no blank-padded CHAR: `'A  ' =
+'A'` is false, which settles the DuckDB column of the trailing-blank
+conformance case before the HXE column exists.

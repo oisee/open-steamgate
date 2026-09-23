@@ -121,6 +121,11 @@ export const ref = (handle) => ({rel: "ref", handle});
  * the right thing than the wrong one.
  */
 export const refTo = (handle, schema) => ({rel: "ref", handle, schema});
+/** a table function called in FROM: the callee as the source spells it, its
+ *  arguments (scalar expressions or relations), and the schema its
+ *  declaration promises -- carried, like a ref's, because nothing below it
+ *  can derive it */
+export const tableFunctionCall = (name, args, schema) => ({rel: "tfcall", name, args, schema});
 export const filter = (input, pred) => ({rel: "filter", input, pred});
 export const project = (input, items) => ({rel: "project", input, items});
 export const join = (left, right, on, kind = "inner") => ({rel: "join", left, right, on, kind});
@@ -252,6 +257,9 @@ export function schemaOf(rel, catalogue = {}) {
       // a materialised relation: its schema is the plan's that made it, and
       // the binder knows which that was - it must carry it on the node
       if (rel.schema === undefined) throw new Error("schemaOf: a ref must carry the schema of the relation it points at");
+      return {...rel.schema};
+    case "tfcall":
+      if (rel.schema === undefined) throw new Error(`schemaOf: the call of ${rel.name} must carry the schema its declaration promises`);
       return {...rel.schema};
     case "filter":
     case "order":

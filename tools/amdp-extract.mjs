@@ -153,6 +153,37 @@ export function withoutBangValue(source) {
   return out;
 }
 
+/** The method definitions of a class, read as text: `[CLASS-]METHODS name
+ *  IMPORTING value(p) TYPE t ... RETURNING value(r) TYPE t.` Used when
+ *  abaplint hands back no class definition at all. Comments are dropped
+ *  first, and only the four parameter sections are read; a declaration
+ *  this cannot read yields no parameters, never wrong ones. */
+export function definitionsByText(source) {
+  const text = source.split("\n").map((line) => line.replace(/^\*.*$/, "").replace(/"[^\n]*$/, "")).join("\n");
+  const out = new Map();
+  const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
+  for (const m of text.matchAll(/\b(?:CLASS-)?METHODS\s+([\w~]+)\b([\s\S]*?)\s*\.(?=\s)/gi)) {
+    const name = m[1].toUpperCase();
+    const rest = m[2];
+    if (/^\s*FOR\s+TABLE\s+FUNCTION/i.test(rest) || /^\s*(REDEFINITION|ABSTRACT|FINAL)?\s*$/i.test(rest)) continue;
+    const params = [];
+    let current;
+    const words = rest.replace(/\s+/g, " ").trim();
+    const sections = words.split(/\b(IMPORTING|EXPORTING|CHANGING|RETURNING|RAISING|EXCEPTIONS)\b/i);
+    for (let i = 1; i < sections.length; i += 2) {
+      current = direction[sections[i].toLowerCase()];
+      if (current === undefined) continue;
+      for (const p of sections[i + 1].matchAll(/(?:VALUE\s*\(\s*([\w\/]+)\s*\)|REFERENCE\s*\(\s*([\w\/]+)\s*\)|\b([\w\/]+))\s+TYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)((?:\s+(?:OPTIONAL|DEFAULT\s+\S+))*)/gi)) {
+        const pname = p[1] ?? p[2] ?? p[3];
+        if (/^(IMPORTING|EXPORTING|CHANGING|RETURNING|OPTIONAL|DEFAULT|TYPE)$/i.test(pname)) continue;
+        params.push({name: pname, direction: current, abapType: p[4].trim(), optional: /\b(OPTIONAL|DEFAULT)\b/i.test(p[5] ?? "")});
+      }
+    }
+    if (!out.has(name)) out.set(name, params);
+  }
+  return out;
+}
+
 export function extract(source, filename = "x.clas.abap", extraTypeSources = []) {
   const reg = new abaplint.Registry()
     .addFile(new abaplint.MemoryFile(filename, withoutBangValue(source))).parse();
@@ -169,7 +200,16 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   // exact rather than a guess.
   const defs = new Map();
   const direction = {importing: "IN", exporting: "OUT", changing: "INOUT", returning: "RETURNING"};
-  for (const m of obj.getClassDefinition?.()?.methods ?? []) {
+  const classDefinition = obj.getClassDefinition?.();
+  if (classDefinition === undefined) {
+    // abaplint could not read the class definition -- on a class off a
+    // system that is usually a statement inside a SQLScript body it takes
+    // for ABAP (the ISLM classes, 2026-09-23) -- and then every method had
+    // no parameters, so a body's own IN table looked like an unknown
+    // variable. The definition text is still there: read it as text.
+    for (const [name, params] of definitionsByText(source)) defs.set(name, params);
+  }
+  for (const m of classDefinition?.methods ?? []) {
     const params = [];
     const methodParameters = m.parameters ?? [];
     for (const [index, p] of methodParameters.entries()) {
@@ -190,8 +230,9 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
       const typeMatch = /\bTYPE\s+(?:REF\s+TO\s+)?([\w\/]+(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i.exec(declaration);
       const abapType = typeMatch?.[1] ?? "";
       const modifiers = typeMatch === null ? "" : declaration.slice(typeMatch.index + typeMatch[0].length);
+      // OPTIONAL and DEFAULT both make a parameter one a caller may omit
       params.push({name: p.name, direction: direction[p.direction] ?? "IN", abapType: abapType.trim(),
-        optional: /\bOPTIONAL\b/i.test(modifiers)});
+        optional: /\b(OPTIONAL|DEFAULT)\b/i.test(modifiers)});
     }
     defs.set(String(m.name).toUpperCase(), params);
   }

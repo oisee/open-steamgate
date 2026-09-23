@@ -22,7 +22,7 @@
 // understand must not come out as something close to the truth: the whole
 // point of the IR is that the lowering can trust the node names.
 
-import {T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
+import {tableFunctionCall, T, col, lit, param, sessionValue, bin, call, cast, not, like, inList, caseWhen,
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 import {isTableParameter, signatureScalars, isUnresolved} from "./scalar-types.mjs";
@@ -619,6 +619,63 @@ export function toIr(tree, options = {}) {
     return bin(ops[0], ...adopt(expression(sides[0]), expression(sides[1])), T.bool);
   }
 
+  /** `FROM "CL_X=>GET_ROWS"(:it_rows, 1)`: the callee is looked up in the
+   *  registry this run was given, its arguments bound against the declared
+   *  parameters, and its declared RETURNS is the schema. Nothing is guessed:
+   *  a callee not in the registry, an argument count that differs, or a
+   *  table argument that is not a table variable of this body is a refusal
+   *  by name. The name is kept as the source spells it, because on HANA
+   *  `"CL=>M"` and the DDLS entity are different objects. */
+  function tableFunction(call) {
+    const ref = kid(call, "ColumnRef");
+    const names = ref === undefined ? [] : kids(ref, "Name");
+    const parts = names.map(nameOf);
+    const spelled = names.map((one) => String(leaf(one)?.value ?? ""));
+    if (parts.length >= 2) {
+      const schema = parts[0];
+      if (schema === "SYS" || schema === "PUBLIC" || schema.startsWith("_SYS_")) {
+        throw new BindError(`${parts.join(".")} is a HANA system function, not portable`, call);
+      }
+      throw new BindError(`a schema-qualified table function call ${parts.join(".")} is not lowered: the registry knows callees by name only`, call);
+    }
+    const name = parts[0] ?? "";
+    const fn = (options.tableFunctions ?? {})[name];
+    if (fn === undefined) {
+      throw new BindError(`table function call ${name} is not in the registry of this run`, call);
+    }
+    const argNodes = kids(call, "Expr");
+    // a trailing OPTIONAL / DEFAULT parameter may be left out, as the corpus
+    // does (`convert_configuration(:it_configuration)`, iv_convertvalues
+    // DEFAULT 0); the callee's own default then applies on the engine
+    const required = fn.parameters.filter((p) => p.optional !== true).length;
+    if (argNodes.length < required || argNodes.length > fn.parameters.length) {
+      const spelled = fn.parameters.map((p) => p.name.toLowerCase() + (p.optional === true ? "?" : "")).join(", ");
+      throw new BindError(`table function ${name} takes ${required === fn.parameters.length ? required : `${required} to ${fn.parameters.length}`} argument(s) (${spelled}) and is called with ${argNodes.length}`, call);
+    }
+    const args = fn.parameters.slice(0, argNodes.length).map((p, i) => {
+      const argNode = argNodes[i];
+      if (p.kind === "table") {
+        // a table argument is a table variable of this body or one of its IN
+        // table parameters, and nothing else: an expression here is not a table
+        const host = terminalLeaves(argNode).find((l) => l.node === "host");
+        const only = terminalLeaves(argNode).length === 1;
+        if (host === undefined || !only) {
+          throw new BindError(`argument ${p.name.toLowerCase()} of ${name} is a table and must be a table variable`, argNode);
+        }
+        const varName = String(host.value).slice(1).toUpperCase();
+        const known = bound.get(varName);
+        if (known !== undefined) return {kind: "relation", name: varName, rel: known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue))};
+        if (tableParams.some((one) => String(one.name).toUpperCase() === varName)) return {kind: "relation", name: varName, rel: scan(varName)};
+        throw new BindError(`unknown table variable :${varName.toLowerCase()} passed to ${name}`, host);
+      }
+      let e = expression(argNode);
+      if (e.untyped === true) e = {...e, type: p.type, untyped: undefined};
+      return {kind: "scalar", name: p.name, expr: e};
+    });
+    const schema = fn.returns ?? {};
+    return [tableFunctionCall(spelled[0], args, schema), schema];
+  }
+
   function source(node) {
     if (node === undefined) throw new BindError("a FROM source was expected here and the tree has none");
     const sourceName = sourceAlias(node);
@@ -648,9 +705,7 @@ export function toIr(tree, options = {}) {
     // against the ones this stage mentions, which is what
     // `tools/sqlscript/grammar-cover.mjs` does now.
     const call = (node.children ?? []).find((c) => c.node === "TableFunctionCall");
-    if (call !== undefined) {
-      throw new BindError("a table function call in FROM is parsed but not lowered yet", call);
-    }
+    if (call !== undefined) return finish(...tableFunction(call));
     const host = (node.children ?? []).find((c) => c.node === "host");
     if (host !== undefined) {
       const name = String(host.value).slice(1).toUpperCase();

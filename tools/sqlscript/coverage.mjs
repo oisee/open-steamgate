@@ -25,6 +25,7 @@ import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
 import {parseTableFunction} from "./table-function-ddls.mjs";
 import {typedParameters} from "./signature-schemas.mjs";
 import {ddicCatalogue} from "../sqlscript-ddic-catalogue.mjs";
+import {registryFromDdls, registryFromClass} from "./table-function-registry.mjs";
 
 const TEACHING = /^(SABAPDEMOS|SABAP_DEMOS_|SABP_COMPILER|SABP_UNIT_DOUBLE_|SDDIC_ADT_TEST|SACMTST|S_ESH_TST_AUTOMATION|BW4_PREVIEW_TEST)/;
 
@@ -38,7 +39,7 @@ export function bodiesOf(source, filename) {
     const cls = extract(source, filename);
     const methods = cls?.methods ?? [];
     if (methods.length > 0) {
-      return methods.map((m) => ({body: m.body, signature: m, types: cls.types, language: (m.language || "SQLSCRIPT").toUpperCase()}));
+      return methods.map((m) => ({body: m.body, signature: m, types: cls.types, className: cls.className, language: (m.language || "SQLSCRIPT").toUpperCase()}));
     }
   } catch {
     // a class the extractor cannot read still has bodies worth counting
@@ -140,6 +141,24 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   // and include. A table that cannot be resolved is left out and named, so
   // the body's refusal stays "the catalogue does not describe X" and the
   // header says why.
+  // **The table functions a body may call**, from both places they are
+  // declared: every DDLS table function the dictionary holds, and every
+  // `BY DATABASE FUNCTION` method with a RETURNING table type in the
+  // classes read. Keyed as a body spells the callee (`CL=>M`, DDLS name).
+  const fromDdls = registryFromDdls(ddic, resolveType);
+  const tableFunctions = {...fromDdls.registry};
+  const registrySkipped = [...fromDdls.unreadable];
+  const byClass = new Map();
+  for (const one of [...corpora.teaching, ...corpora.working]) {
+    if (one.className === undefined) continue;
+    if (!byClass.has(one.className)) byClass.set(one.className, {types: one.types, methods: []});
+    byClass.get(one.className).methods.push(one.signature);
+  }
+  for (const [className, {types, methods}] of byClass) {
+    const got = registryFromClass(className, methods, {types, store: ddic, resolve: resolveType});
+    Object.assign(tableFunctions, got.registry);
+    registrySkipped.push(...got.skipped);
+  }
   const usingFailures = new Map();
   const parameterFailures = new Map();
   for (const one of [...corpora.teaching, ...corpora.working]) {
@@ -223,7 +242,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       // (foreman-dell). The headline is the portable one.
       let ir;
       try {
-        ir = toIr(tree, {catalogue, signature, resolveType, relationSchemas});
+        ir = toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions});
         lower(ir.rel, "duckdb");
         loweredCount += 1;
       } catch (error) {
@@ -240,7 +259,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         // and how many lower only because a column nobody described became
         // STRING: the same body bound with every column required to be typed
         try {
-          lower(toIr(tree, {catalogue, signature, resolveType, relationSchemas, strictColumns: true}).rel, "duckdb");
+          lower(toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions, strictColumns: true}).rel, "duckdb");
           loweredStrict += 1;
         } catch (error) {
           const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
@@ -283,6 +302,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   report.dictionary = ddic;
   report.bodies = corpora;
   report.catalogueFailures = {using: [...usingFailures.keys()], parameters: [...parameterFailures.keys()]};
+  report.registry = {size: Object.keys(tableFunctions).length, ddls: Object.values(fromDdls.registry).length, skipped: registrySkipped};
   report.scratch = scratch;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
   return report;
@@ -302,7 +322,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, scratch, catalogueFailures, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, scratch, catalogueFailures, registry, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");
@@ -313,6 +333,8 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
   console.log(`  ${exports.length} package exports  (${exports.reduce((n, f) => n + (dictionary.hits.get(f) ?? 0), 0)} resolved)`);
   console.log(`table-function signatures read off their DDLS: ${tableFunctions.read}` +
     (tableFunctions.missing.length === 0 ? "" : `; not usable: ${tableFunctions.missing.join(", ")}`));
+  console.log(`table functions a body may call: ${registry.size} names (${registry.ddls} DDLS entries, the rest AMDP functions of the classes read)` +
+    (registry.skipped.length === 0 ? "" : `; ${registry.skipped.length} not registered, e.g. ${registry.skipped.slice(0, 3).join("; ")}`));
   if (catalogueFailures.using.length > 0) console.log(`USING tables in the export refused whole (an include did not resolve): ${catalogueFailures.using.length}\n  ${catalogueFailures.using.slice(0, 8).join("\n  ")}`);
   if (catalogueFailures.parameters.length > 0) console.log(`table parameters not typed: ${catalogueFailures.parameters.length}\n  ${catalogueFailures.parameters.slice(0, 8).join("\n  ")}`);
   for (const [which, r] of Object.entries(corporaReport)) {
