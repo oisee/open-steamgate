@@ -161,7 +161,7 @@ tell a date from a timestamp — and the generated component came out
 over it: *the data type of the component FLIGHT_DATE … is not compatible*.
 
 SEGW says it in the tree instead. Three date properties in SAP's own sample
-projects (`EPM_DEVELOPER_SCENARIO`, `S_EPM_SADL_GW_DEV_SCEN_TX`) all carry:
+projects (`EPM-RFC-SAMPLE`, `EPM-SADL-TX-SAMPLE`) all carry:
 
 ```xml
 <EDM_CORE_TYPE>Edm.DateTime</EDM_CORE_TYPE>
@@ -191,8 +191,8 @@ class to **implement** the interface; the interface existing is not enough.
 This tree had that call for weeks with `npm test` green and abaplint silent
 (`ANOMALY-2026-09-19-interface-call-without-interfaces`).
 
-Where the `INTERFACES` line belongs is measured, not chosen. SAP's own
-`/IWBEP/CL_GWSAMPLE_BAS_DPC`, which has value helps, declares three:
+Where the `INTERFACES` line belongs is measured, not chosen. The DPC of
+[GWSAMPLE_BASIC](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html), which has value helps, declares three:
 
 ```abap
 interfaces /IWBEP/IF_SB_DPC_COMM_SERVICES .

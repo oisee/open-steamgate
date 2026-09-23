@@ -72,7 +72,7 @@ entities:
     # INTERFACES line in the generated _DPC when, and only when, the project
     # maps a search help, which is measured: 8 corpus DPCs declare
     # IF_SB_DPC_COMM_SERVICES and IF_SB_GEN_DPC_INJECTION and none declares
-    # this one; SAP's own /IWBEP/CL_GWSAMPLE_BAS_DPC, which has value helps,
+    # this one; the DPC of GWSAMPLE_BASIC (help.sap.com, docs/segw-mapping.md), which has value helps,
     # declares all three. So the fix is not a line in a class, it is the
     # data source the model was missing.
     operations:

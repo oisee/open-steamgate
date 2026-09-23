@@ -79,6 +79,7 @@ editor), not the Gateway.
   2026-09-12 by Alice; before that no SAP API was called at all.)
 - **Never commit captures** (`*.pcap`, `*.jsonl`) — they carry real logons,
   session GUIDs, credentials. Only protocol facts belong here.
+- **SAP-delivered objects (the AMDP corpus, the SEGW samples in `.local/corpus-sap`): no names in tracked files unless public SAP documentation or abapedia.org shows them -- then with the link.** Shapes, counts, field names and the interface names we implement (the contract) stay. Placeholders by role map to the real folders in the gitignored `.local/corpus-names.json`; the names are in the gitignored leak list. Open-source repos under `.local/corpus` are public under their own licence and may be named with their link.
 - **Public repo — no live identifiers.** No real hostnames, usernames, IPs,
   transport IDs, or customer namespaces in any tracked file. Operational scratch
   goes under `.local/` (gitignored).
@@ -91,10 +92,11 @@ editor), not the Gateway.
   The names live in `.local/corpus-names.json` (the teaching/working split
   the instruments read is there too) and in `.local/leak-identifiers.json`,
   so `npm run leak` catches their return. The private share and handovers
-  on it may name them. History already in `main` is not rewritten. Scope:
-  this rule is about the AMDP corpus; the SAP-delivered SEGW sample projects
-  under `.local/corpus-sap`, which docs name as oracles, predate it and are
-  not revisited by it -- whether they fall under it too is Alice's call.
+  on it may name them. History already in `main` is not rewritten. The same
+  rule covers the SAP-delivered SEGW samples under `.local/corpus-sap`
+  (Alice and foreman-dell, 2026-09-23), with the exception written in the
+  bullet above: a name public SAP documentation or abapedia.org shows may be
+  used, with the link.
 
 ## First move (Sprint 0)
 

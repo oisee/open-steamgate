@@ -109,7 +109,7 @@ describe("the SEGW file names a real system writes", () => {
 
 // A symbol with no pool entry is a silent empty label.
 //
-// Not hypothetical, and not ours: SAP's own `cl_uconhttp_mpc` calls
+// Not hypothetical, and not ours: the MPC of SAP's UCON-HTTP-SAMPLE-PROJECT calls
 // `set_label_from_text_element` 37 times and its export carries neither
 // <TPOOL> nor <TEXTPOOL> -- symbols 075, 076, 077 point at nothing. Nobody
 // complains: abapGit imports it, the class activates, $metadata is valid,

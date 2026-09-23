@@ -55,15 +55,15 @@ entities:
     operations: [C, R, U, D, Q] # the DPC methods SEGW writes; default all five
     operations:                 # ...or, per operation, SEGW's "Map to Data Source"
       query:
-        function: SEPM_GWS_PRODUCTS_GET      # an RFC/BOR module
-        group: SEPM_GATEWAY_SERVICES         # its function group (optional)
+        function: EPM-RFC-MODULE      # an RFC/BOR module
+        group: EPM-FG         # its function group (optional)
         destination: NONE                    # RFC destination (optional)
         log: ET_RETURN                       # the BAPIRET2 table (optional)
         ranges: {ProductId: IT_PRODUCT_ID_RANGE}   # $filter -> range table (HIGH/LOW/OPTION/SIGN)
         constants: {"IT_CONTROL\VALUE": "'X'"}     # parameter path -> literal
         out: {ProductId: "ET_LIST\PRODUCT_ID"}     # response side: property <- parameter path
       read:
-        function: SEPM_GWS_PRODUCT_GET_DETAIL
+        function: EPM-RFC-MODULE-2
         in: {ProductId: IV_PRODUCT_ID}             # request side: property -> parameter path
         out: {ProductId: "ES_PRODUCT\PRODUCT_ID"}
       # or a search help instead of a module:
@@ -125,7 +125,7 @@ tree row carries `COMPLEX_TYPE` and no Edm type, every flag cleared as
 SEGW writes it, and the `_MPC` declares the entity's structure component
 with the complex type's type (`ADDR type ADDRESS`) and defines the type in
 `DEFINE_COMPLEXTYPES`. A complex property cannot be a key. What segw-gen
-makes of it is what the S_ESH_SEARCH_ODATA sample project has.
+makes of it is what the search sample project has.
 
 ## Operations mapped to a module or a search help
 

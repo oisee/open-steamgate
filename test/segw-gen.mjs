@@ -53,8 +53,8 @@ describe("tools/segw-gen: IWPR -> _MPC/_DPC as SEGW writes them", () => {
 // Operations mapped to a data source: SEGW writes the RFC call or the
 // search-help call into the base class; the fixture maps TravelSet to two
 // function modules from test/fixtures/segw/zstg_rfc.fugr.xml and StatusVHSet
-// to a search help. The shape is the one of /IWBEP/EPM_DEV_SCENARIO_2 and
-// /IWBEP/GWSAMPLE_BASIC (docs/segw-mapping.md).
+// to a search help. The shape is the one of EPM-RFC-SAMPLE-2 and
+// /IWBEP/GWSAMPLE_BASIC (documented on help.sap.com, link in docs/segw-mapping.md).
 describe("tools/segw-gen: operations mapped to function modules and search helps", () => {
   const warnings = [];
   const {model, files} = generate(readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8"), {
