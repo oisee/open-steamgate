@@ -434,3 +434,32 @@ seam here holds fixed RAW as canonical upper-case hex text, so the portable
 bind is: the value as upper-case hex, padded with `00` on the right to the
 field's length, initial all zeros, a longer value or one that is not hex
 refused. String equality on that canonical form is byte equality.
+
+## What the kernel does with INT2 at an AMDP boundary (measured on A4H, 2026-09-23)
+
+Same method: a throwaway class with AMDP procedures and an ABAP Unit
+driver, in their own package, deleted afterwards.
+
+| case | what happens |
+| --- | --- |
+| an `int2` input of -32768, 32767, 0, 7 | seen exactly, not NULL |
+| `:iv + 1` with 32767 | 32768: the arithmetic is INTEGER's, no SMALLINT overflow |
+| `:iv + :iv` with 32767 | 65534, likewise |
+| an `int2` input with `DEFAULT 5`, omitted | 5 |
+| an INTEGER of 32767 or -32768 into an `int2` output component | kept |
+| an INTEGER of 32768, 40000, -40000 or 65536 into that component | `CX_AMDP_EXECUTION_FAILED` |
+| `:iv + :iv` with 20000, into that component | `CX_AMDP_EXECUTION_FAILED` |
+
+So INT2 is an INTEGER everywhere inside a body, and its range is checked
+where ABAP meets it. On the way out, the kernel **raises** for a value
+outside -32768..32767; it does not wrap and does not truncate. The
+portable runtime does the same: an INT2 column is checked on the rows it
+returns, and a scalar INT2 output on its value, with an error that names
+the exception HANA raises. An ABAP `int2` input cannot carry a value
+outside the range, so a JavaScript caller's value that does is refused at
+the bind. A nested CALL hands its relation on unevaluated, so an INT2
+output of a nested CALL is refused rather than passed on unchecked.
+
+A by-product: an AMDP method parameter declared `OPTIONAL` does not
+compile on A4H ("Use DEFAULT instead of OPTIONAL for the optional
+parameter"). Only `DEFAULT` makes an AMDP input optional.

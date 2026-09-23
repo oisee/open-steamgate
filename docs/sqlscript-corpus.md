@@ -924,3 +924,21 @@ All twelve bodies now reach their signature and stop here:
 
 INT2 blocks table parameters in 38 bodies across the corpus and now these
 4 as well. It is the next measurement on the sandbox.
+
+### INT2, measured: 18 → 21
+
+*2026-09-23. INT2 blocked a table parameter in 38 bodies and a RETURNS
+column in 4 more. It was measured on the sandbox first
+(`docs/sqlscript-hana-observed.md`); INT2 is now a measured datatype, an
+INTEGER in every expression, range-checked at the input bind and at the
+output boundary.*
+
+| | before | after |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 18 | **21** |
+| teaching, compiles as a procedure | 3 | 3 |
+
+Three bodies went from an INT2 field to compiling. The others moved on:
+four to a column the scope does not type, three to a table function the
+registry does not hold, one to another untyped column, one to a field
+still unresolved.

@@ -287,8 +287,11 @@ export function toIr(tree, options = {}) {
           // the result type of arithmetic is the wider of the two, and a
           // division is decimal because that is what HANA answers -- measured
           // (docs/sqlscript-hana-observed.md), not assumed from SQL folklore
+          // INT2 arithmetic is INTEGER's: 32767 + 32767 is 65534 on A4H, no
+          // SMALLINT overflow, so the INT2 range does not travel into a result
+          const widened = (t) => (t?.abap === "I" && t.bits !== undefined ? T.int : t);
           const type = op === "/" ? T.dec(15, 2)
-            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : left.type);
+            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
           left = bin(op, left, right, type);
         }
         return left;

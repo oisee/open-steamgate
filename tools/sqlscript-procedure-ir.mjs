@@ -68,6 +68,19 @@ function scalarForType(value, type, name) {
  *  not move into scalarForType, and that is the test to write with them.
  *  A value longer than the field is not one ABAP could have passed: refused,
  *  not cut. */
+// INT2 on A4H: -32768 .. 32767 in and out; outside it the kernel raises
+// CX_AMDP_EXECUTION_FAILED at the output boundary rather than wrapping, and
+// an ABAP int2 input can never be outside it, so a JavaScript caller's value
+// that is, is refused the same way
+const isInt2 = (type) => type?.abap === "I" && type.bits === 16;
+export class Int2OutOfRange extends Error {}
+function inInt2Range(value, where) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < -32768 || n > 32767) {
+    throw new Int2OutOfRange(`${where}: ${value} is outside INT2 (-32768..32767); HANA raises CX_AMDP_EXECUTION_FAILED here`);
+  }
+}
+
 function boundCharacter(value, type, name) {
   if (value == null) return null;
   if (typeof value !== "string") throw new UnsupportedSqlScript(`${name} is not a character value`);
@@ -395,7 +408,8 @@ export async function runProcedure(program, {
       throw new UnsupportedSqlScript(`portable scalar input ${name} has a malformed OPTIONAL flag`);
     }
     const typeKeys = parameter.type && typeof parameter.type === "object" ? Object.keys(parameter.type).sort() : [];
-    const exactScalar = typeKeys.length === 1 && typeKeys[0] === "abap" && ["I", "STRING"].includes(parameter.type.abap);
+    const exactScalar = (typeKeys.length === 1 && typeKeys[0] === "abap" && ["I", "STRING"].includes(parameter.type.abap))
+      || (typeKeys.join() === "abap,bits" && isInt2(parameter.type));
     const fixedChar = typeKeys.join() === "abap,len" && ["C", "X"].includes(parameter.type.abap)
       && Number.isInteger(parameter.type.len) && parameter.type.len > 0;
     if (!exactScalar && !fixedChar) {
@@ -417,6 +431,7 @@ export async function runProcedure(program, {
     if (parameter.kind !== undefined && !(parameter.type.abap === "C" && parameter.type.len === (parameter.kind === "DATS" ? 8 : 6))) {
       throw new UnsupportedSqlScript(`portable scalar input ${name} is a ${parameter.kind} but not C(${parameter.kind === "DATS" ? 8 : 6})`);
     }
+    if (isInt2(parameter.type)) inInt2Range(raw, `input ${name}`);
     const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
       : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
       : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);
@@ -540,6 +555,7 @@ export async function runProcedure(program, {
     if (scalar === undefined || !assignedScalars.has(program.output)) {
       throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
     }
+    if (isInt2(program.outputType) && scalar.value !== null) inInt2Range(scalar.value, `output ${program.output}`);
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
       trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
   }
@@ -569,6 +585,11 @@ export async function runProcedure(program, {
     if (expected.abap === "STRING" && ["C", "STRING"].includes(actual.abap)) {
       return {as: name, expr: source};
     }
+    // into an INT2 column: an INTEGER passes unchanged, and its range is
+    // checked on the rows below, where HANA raises rather than wraps
+    if (isInt2(expected) && actual.abap === "I") return {as: name, expr: source};
+    // and an INT2 value into an INTEGER column only widens
+    if (expected.abap === "I" && expected.bits === undefined && isInt2(actual)) return {as: name, expr: source};
     if (expected.abap === "I" && actual.abap === "INT8") {
       return {as: name, expr: cast(source, expected)};
     }
@@ -590,7 +611,14 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`output ${name} conversion from ${actual.abap} to ${expected.abap} is not measured`);
   });
   if (converted.some((item) => item.expr.node === "cast")) output = project(result, converted);
+  const int2Columns = Object.entries(program.outputSchema).filter(([, type]) => isInt2(type)).map(([column]) => column);
   if (deferRelation) {
+    // a nested CALL hands its relation to the caller unevaluated, so the
+    // range check at this boundary has no rows to look at; refused rather
+    // than letting an out-of-range value through where HANA raises
+    if (int2Columns.length > 0) {
+      throw new UnsupportedSqlScript(`output ${program.output} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
+    }
     return {relation: output, outputSchema: program.outputSchema,
       trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
         nestedCalls, databaseStatements: 0, boundParameters: 0}};
@@ -606,6 +634,11 @@ export async function runProcedure(program, {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }
   const answer = await client.native({...compiled, expect: "rows"});
+  for (const row of answer.rows) {
+    for (const column of int2Columns) {
+      if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${program.output}.${column}`);
+    }
+  }
   return {
     rows: answer.rows,
     columns: answer.columns,
