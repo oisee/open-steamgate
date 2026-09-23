@@ -1,3 +1,5 @@
+//go:build !libm
+
 package abap
 
 import (

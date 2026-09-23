@@ -50,7 +50,12 @@ writeFileSync(join(dir, "zz_main.go"), goMain());
 execFileSync("gofmt", ["-w", dir]);
 const bin = join(out, "demo");
 const t1 = performance.now();
-execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/demo"], {cwd: join(here, "go"), stdio: "inherit"});
+// sin and cos from glibc (cgo, tag libm): A4H computes them with the C
+// library, measured 2026-09-23 on the seed chains of constellation and
+// ignition, which fdlibm (V8, the pure-Go default) does not reproduce.
+// GOGEN_TAGS= (empty) builds the pure-Go variant.
+const tags = process.env.GOGEN_TAGS ?? "libm";
+execFileSync("go", ["build", "-trimpath", `-tags=${tags}`, "-ldflags=-s -w", "-o", bin, "./cmd/demo"], {cwd: join(here, "go"), stdio: "inherit", env: {...process.env, CGO_ENABLED: tags.includes("libm") ? "1" : "0"}});
 const tBuild = performance.now() - t1;
 // one process per recording, with a hard ceiling: a loop the compiler got
 // wrong grows a table without end, and on 2026-09-23 one such run took the
