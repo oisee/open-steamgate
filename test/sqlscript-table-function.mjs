@@ -121,6 +121,24 @@ describe("the folder dictionary hands a DDLS back by name", () => {
     expect(ddic.read("DDLS", "P_X_TF").source).to.equal(DDLS);
     expect(ddic.read("DDLS", "P_NOBODY")).to.equal(undefined);
   });
+
+  it("finds a DDLS by the entity it defines when that is not its file name, and the file name still wins", () => {
+    const other = mkdtempSync(join(tmpdir(), "osd-folder-entity-"));
+    try {
+      // the AMDP names the entity in FOR TABLE FUNCTION, never the DDL source
+      const source = "// define table function NOT_THIS\n@EndUserText.label: 'x'\ndefine table function P_Entity_Tf\nreturns { k : abap.char(4); }\nimplemented by method cl_x=>m;";
+      writeFileSync(join(other, "p_source_name.ddls.asddls"), source);
+      writeFileSync(join(other, "p_x_tf.ddls.asddls"), "define table function P_Something_Else returns { k : abap.char(4); } implemented by method cl_y=>m;");
+      const ddic = new FolderDdic([other]);
+      expect(ddic.read("DDLS", "P_ENTITY_TF").source).to.equal(source);
+      expect(ddic.find("DDLS", "p_entity_tf")).to.not.equal(undefined);
+      expect(ddic.read("DDLS", "P_SOURCE_NAME").source).to.equal(source);
+      expect(ddic.read("DDLS", "NOT_THIS")).to.equal(undefined);
+      expect(ddic.read("DDLS", "P_X_TF").source).to.contain("P_Something_Else");
+    } finally {
+      rmSync(other, {recursive: true, force: true});
+    }
+  });
 });
 
 describe("the registry of table functions a body may call", () => {

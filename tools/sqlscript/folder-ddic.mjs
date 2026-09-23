@@ -30,6 +30,10 @@ export const RELEASED_DDIC = (() => {
 export class FolderDdic {
   constructor(folders = []) {
     this.index = new Map();
+    /** a DDLS by the entity it defines, where that differs from its file name
+     *  (`cds_tf_x.ddls.asddls` defining `CdsFrwk_tf_x`): an AMDP names the
+     *  entity in FOR TABLE FUNCTION, never the DDL source */
+    this.entities = new Map();
     /** the folders given, in order; the later one wins a name they share */
     this.folders = [];
     /** every name a later folder took over from an earlier one: {key, was, now} */
@@ -61,10 +65,20 @@ export class FolderDdic {
         const was = this.index.get(key);
         if (was !== undefined) this.overrides.push({key, was: was.folder, now: folder, ...(was.folder === folder ? {duplicate: true} : {})});
         this.index.set(key, {path, folder});
+        if (m[2].toUpperCase() === "DDLS") {
+          const entity = entityOf(readFileSync(path, "utf8"));
+          if (entity !== undefined && entity !== m[1].toUpperCase()) this.entities.set(`DDLS:${entity}`, {path, folder});
+        }
       }
     };
     walk(folder);
     return this;
+  }
+
+  /** by file name first; a DDLS also by the entity it defines */
+  lookup(type, name) {
+    const key = `${String(type).toUpperCase()}:${String(name).toUpperCase()}`;
+    return this.index.get(key) ?? this.entities.get(key);
   }
 
   get size() {
@@ -73,7 +87,7 @@ export class FolderDdic {
 
   /** what `ddicCatalogue` asks before it resolves: is there an object of that type and name */
   find(type, name) {
-    const found = this.index.get(`${String(type).toUpperCase()}:${String(name).toUpperCase()}`);
+    const found = this.lookup(type, name);
     return found === undefined ? undefined : {name: String(name).toUpperCase(), path: found.path};
   }
 
@@ -85,7 +99,7 @@ export class FolderDdic {
 
   /** what `osd-type-graph.resolveType` asks of a store */
   read(type, name) {
-    const found = this.index.get(`${String(type).toUpperCase()}:${String(name).toUpperCase()}`);
+    const found = this.lookup(type, name);
     if (found === undefined) return undefined;
     return {source: readFileSync(found.path, "utf8")};
   }
@@ -109,6 +123,13 @@ export class FolderDdic {
       .concat(taken === 0 ? [] : [`${taken} names taken over by a later folder`])
       .concat(duplicates === 0 ? [] : [`${duplicates} names twice inside one folder (the later path won)`]);
   }
+}
+
+/** the name after `define [root] table function|view [entity]|... entity`, comments skipped */
+export function entityOf(source) {
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(?:\/\/|--).*$/gm, " ");
+  const m = /\bdefine\s+(?:root\s+)?(?:table\s+function|view\s+entity|view|abstract\s+entity|custom\s+entity|transient\s+view\s+entity)\s+([\w\/]+)/i.exec(text);
+  return m === null ? undefined : m[1].toUpperCase();
 }
 
 /** folders that are there, in the order given; a missing one is skipped rather than failing the run */
