@@ -11,6 +11,7 @@
     "test/amdp-oracle.mjs",
     "test/amdp-sandbox.mjs",
     "test/amdp.mjs",
+    "test/ir-writes.mjs",
     "test/ir-ranges.mjs",
     "test/amdp-pack.mjs",
     "test/analytics.mjs",

@@ -680,7 +680,46 @@ export function lower(rel, dialectName, options = {}) {
     }
   };
 
-  const sql = select(rel);
+  // writes (tools/ir-writes.mjs): the same expr() renders their values and
+  // conditions, so their placeholders and params come in text order
+  const writeStatement = (w) => {
+    const table = d.quote(w.table);
+    const cols = (list) => `(${list.map((c) => d.quote(c)).join(", ")})`;
+    const values = (rows) => rows.map((row) => `(${row.map(expr).join(", ")})`).join(", ");
+    // HANA takes one VALUES row; several go as a SELECT ... FROM DUMMY union
+    const hanaRows = (rows) => rows.map((row) => `SELECT ${row.map(expr).join(", ")} FROM DUMMY`).join(" UNION ALL ");
+    // a function, called where the WHERE stands in the text: rendering it
+    // earlier would push its params before the SET's (a bug caught by
+    // printing params next to the text, 2026-09-23)
+    const where = () => (w.pred === undefined ? "" : ` WHERE ${expr(w.pred)}`);
+    if (w.write === "insert") {
+      if (w.onDuplicate === "ignore" && dialectName === "hana") {
+        throw new Refused("INSERT that skips duplicate keys is not rendered for hana yet");
+      }
+      const ignore = w.onDuplicate === "ignore" ? " ON CONFLICT DO NOTHING" : "";
+      if (w.from !== undefined) return `INSERT INTO ${table} ${cols(w.columns)} ${select(w.from)}${ignore}`;
+      if (dialectName === "hana" && w.rows.length > 1) return `INSERT INTO ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
+      return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)}${ignore}`;
+    }
+    if (w.write === "update") {
+      const set = w.set.map((one) => `${d.quote(one.col)} = ${expr(one.expr)}`).join(", ");
+      return `UPDATE ${table} SET ${set}${where()}`;
+    }
+    if (w.write === "delete") return `DELETE FROM ${table}${where()}`;
+    if (w.write === "upsert") {
+      if (dialectName === "hana") {
+        return w.rows.length === 1
+          ? `UPSERT ${table} ${cols(w.columns)} VALUES ${values(w.rows)} WITH PRIMARY KEY`
+          : `UPSERT ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
+      }
+      const rest = w.columns.filter((c) => !w.key.includes(c));
+      const action = rest.length === 0 ? "DO NOTHING"
+        : `DO UPDATE SET ${rest.map((c) => `${d.quote(c)} = excluded.${d.quote(c)}`).join(", ")}`;
+      return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)} ON CONFLICT ${cols(w.key)} ${action}`;
+    }
+    throw new Refused(`no write ${JSON.stringify(w.write)}`);
+  };
+  const sql = rel.write !== undefined ? writeStatement(rel) : select(rel);
   return hostPreds.length === 0 ? {sql, params} : {sql, params, hostPreds};
 }
 

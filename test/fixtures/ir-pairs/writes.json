@@ -1,0 +1,1414 @@
+{
+  "note": "write statements lowered per dialect by tools/ir-writes-pairs.mjs; a port must give the same {sql, params} bytes. Table T (MANDT C3, ID I, TXT C10), key (MANDT, ID), seeded with SEED before each case.",
+  "seed": [
+    [
+      "001",
+      1,
+      "one"
+    ],
+    [
+      "001",
+      2,
+      "two"
+    ],
+    [
+      "002",
+      1,
+      "other"
+    ]
+  ],
+  "key": [
+    "MANDT",
+    "ID"
+  ],
+  "schema": {
+    "MANDT": {
+      "abap": "C",
+      "len": 3
+    },
+    "ID": {
+      "abap": "I"
+    },
+    "TXT": {
+      "abap": "C",
+      "len": 10
+    }
+  },
+  "pairs": [
+    {
+      "name": "INSERT one row, CHAR bound right-trimmed",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 3,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "three",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "error"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 3, $2::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "INSERT two rows",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 3,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "three",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 4,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "four",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "error"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?), (?, 4, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "four",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 3, ?), (?, 4, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "four",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 3, $2::varchar(10)), ($3::varchar(3), 4, $4::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "four",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT ?, 3, ? FROM DUMMY UNION ALL SELECT ?, 4, ? FROM DUMMY",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "three",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "four",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "INSERT a duplicate key: the engine raises",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "again",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "error"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 1, $2::varchar(10))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "INSERT skipping duplicate keys",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "again",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 5,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "five",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "onDuplicate": "ignore"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?), (?, 5, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "five",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?), (?, 5, ?) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "five",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 1, $2::varchar(10)), ($3::varchar(3), 5, $4::varchar(10)) ON CONFLICT DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "again",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "five",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "refused": "INSERT that skips duplicate keys is not rendered for hana yet"
+        }
+      }
+    },
+    {
+      "name": "INSERT FROM a select",
+      "statement": {
+        "write": "insert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "from": {
+          "rel": "project",
+          "input": {
+            "rel": "filter",
+            "input": {
+              "rel": "scan",
+              "table": "T"
+            },
+            "pred": {
+              "node": "bin",
+              "op": "=",
+              "left": {
+                "node": "col",
+                "name": "MANDT",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": "002",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "type": {
+                "abap": "BOOL"
+              }
+            }
+          },
+          "items": [
+            {
+              "as": "MANDT",
+              "expr": {
+                "node": "lit",
+                "value": "003",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              }
+            },
+            {
+              "as": "ID",
+              "expr": {
+                "node": "col",
+                "name": "ID",
+                "type": {
+                  "abap": "I"
+                }
+              }
+            },
+            {
+              "as": "TXT",
+              "expr": {
+                "node": "col",
+                "name": "TXT",
+                "type": {
+                  "abap": "C",
+                  "len": 10
+                }
+              }
+            }
+          ]
+        },
+        "onDuplicate": "error"
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT ? AS \"MANDT\", \"ID\" AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "003",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "002",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT ? AS \"MANDT\", \"ID\" AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "003",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "002",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT $1::varchar(3) AS \"MANDT\", \"ID\" AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" WHERE (\"MANDT\" = $2::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "003",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "002",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT ? AS \"MANDT\", \"ID\" AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "003",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "002",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "UPDATE one row by key",
+      "statement": {
+        "write": "update",
+        "table": "T",
+        "set": [
+          {
+            "col": "TXT",
+            "expr": {
+              "node": "lit",
+              "value": "uno",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          }
+        ],
+        "pred": {
+          "node": "bin",
+          "op": "AND",
+          "left": {
+            "node": "bin",
+            "op": "=",
+            "left": {
+              "node": "col",
+              "name": "MANDT",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            "right": {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          },
+          "right": {
+            "node": "bin",
+            "op": "=",
+            "left": {
+              "node": "col",
+              "name": "ID",
+              "type": {
+                "abap": "I"
+              }
+            },
+            "right": {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          },
+          "type": {
+            "abap": "BOOL"
+          }
+        }
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = $1::varchar(10) WHERE ((\"MANDT\" = $2::varchar(3)) AND (\"ID\" = 1))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "UPDATE every row of a client",
+      "statement": {
+        "write": "update",
+        "table": "T",
+        "set": [
+          {
+            "col": "TXT",
+            "expr": {
+              "node": "lit",
+              "value": "x",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          }
+        ],
+        "pred": {
+          "node": "bin",
+          "op": "=",
+          "left": {
+            "node": "col",
+            "name": "MANDT",
+            "type": {
+              "abap": "C",
+              "len": 3
+            }
+          },
+          "right": {
+            "node": "lit",
+            "value": "001",
+            "type": {
+              "abap": "C",
+              "len": 3
+            }
+          },
+          "type": {
+            "abap": "BOOL"
+          }
+        }
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "x",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "x",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = $1::varchar(10) WHERE (\"MANDT\" = $2::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "x",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "UPDATE \"T\" SET \"TXT\" = ? WHERE (\"MANDT\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "x",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "DELETE one row by key",
+      "statement": {
+        "write": "delete",
+        "table": "T",
+        "pred": {
+          "node": "bin",
+          "op": "AND",
+          "left": {
+            "node": "bin",
+            "op": "=",
+            "left": {
+              "node": "col",
+              "name": "MANDT",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            "right": {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          },
+          "right": {
+            "node": "bin",
+            "op": "=",
+            "left": {
+              "node": "col",
+              "name": "ID",
+              "type": {
+                "abap": "I"
+              }
+            },
+            "right": {
+              "node": "lit",
+              "value": 2,
+              "type": {
+                "abap": "I"
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          },
+          "type": {
+            "abap": "BOOL"
+          }
+        }
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "DELETE FROM \"T\" WHERE ((\"MANDT\" = ?) AND (\"ID\" = 2))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "DELETE FROM \"T\" WHERE ((\"MANDT\" = ?) AND (\"ID\" = 2))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "DELETE FROM \"T\" WHERE ((\"MANDT\" = $1::varchar(3)) AND (\"ID\" = 2))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "DELETE FROM \"T\" WHERE ((\"MANDT\" = ?) AND (\"ID\" = 2))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "MODIFY: one row updated, one inserted",
+      "statement": {
+        "write": "upsert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "uno",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 7,
+              "type": {
+                "abap": "I"
+              }
+            },
+            {
+              "node": "lit",
+              "value": "seven",
+              "type": {
+                "abap": "C",
+                "len": 10
+              }
+            }
+          ]
+        ],
+        "key": [
+          "MANDT",
+          "ID"
+        ]
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?), (?, 7, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "seven",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES (?, 1, ?), (?, 7, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "seven",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") VALUES ($1::varchar(3), 1, $2::varchar(10)), ($3::varchar(3), 7, $4::varchar(10)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "seven",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT ?, 1, ? FROM DUMMY UNION ALL SELECT ?, 7, ? FROM DUMMY",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "uno",
+              "type": "C(10)",
+              "isNull": false
+            },
+            {
+              "name": "p2",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p3",
+              "value": "seven",
+              "type": "C(10)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "MODIFY of key columns only",
+      "statement": {
+        "write": "upsert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID"
+        ],
+        "rows": [
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 1,
+              "type": {
+                "abap": "I"
+              }
+            }
+          ],
+          [
+            {
+              "node": "lit",
+              "value": "001",
+              "type": {
+                "abap": "C",
+                "len": 3
+              }
+            },
+            {
+              "node": "lit",
+              "value": 8,
+              "type": {
+                "abap": "I"
+              }
+            }
+          ]
+        ],
+        "key": [
+          "MANDT",
+          "ID"
+        ]
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES (?, 1), (?, 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES (?, 1), (?, 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\") VALUES ($1::varchar(3), 1), ($2::varchar(3), 8) ON CONFLICT (\"MANDT\", \"ID\") DO NOTHING",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\") SELECT ?, 1 FROM DUMMY UNION ALL SELECT ?, 8 FROM DUMMY",
+          "params": [
+            {
+              "name": "p0",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "001",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
