@@ -1598,6 +1598,139 @@
           ]
         }
       }
+    },
+    {
+      "name": "a lower-case SIGN is a dump",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "i",
+          "OPTION": "EQ",
+          "LOW": "A"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDump",
+        "abap": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+      }
+    },
+    {
+      "name": "a lower-case OPTION is a dump",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "eq",
+          "LOW": "A"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDump",
+        "abap": "SAPSQL_IN_ITAB_ILLEGAL_OPTION"
+      }
+    },
+    {
+      "name": "an initial row is a dump, not no restriction",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "",
+          "OPTION": "",
+          "LOW": ""
+        }
+      ],
+      "outcome": {
+        "error": "RangesDump",
+        "abap": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+      }
+    },
+    {
+      "name": "a value longer than the column raises",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "EQ",
+          "LOW": "ABCDEFGHIJK"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDataError",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "a CP pattern past twice the column raises",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "ABCDEFGHIJKLMNOPQRSTU*"
+        }
+      ],
+      "outcome": {
+        "error": "RangesDataError",
+        "abap": "CX_SY_DYNAMIC_OSQL_SEMANTICS"
+      }
+    },
+    {
+      "name": "a leading blank in CP is the special padding form",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": " *"
+        }
+      ],
+      "outcome": {
+        "error": "Refused",
+        "reason": "special padding form"
+      }
+    },
+    {
+      "name": "CP + alone is refused",
+      "column": "COL",
+      "type": {
+        "abap": "C",
+        "len": 10
+      },
+      "rows": [
+        {
+          "SIGN": "I",
+          "OPTION": "CP",
+          "LOW": "+"
+        }
+      ],
+      "outcome": {
+        "error": "Refused",
+        "reason": "plus alone"
+      }
     }
   ]
 }

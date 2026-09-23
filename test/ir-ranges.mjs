@@ -65,7 +65,7 @@ for (const {dialect, make} of ENGINES) describe(`ABAP ranges as IR, on ${dialect
   });
   after(async () => { await client.disconnect(); });
 
-  for (const one of CASES) {
+  for (const one of CASES.filter((c) => EXPECTED[c.name] !== undefined)) {
     it(`${one.name} selects what ABAP means`, async () => {
       const table = one.type.abap === "I" ? "N" : one.kind === "NUMC" ? "Z" : "T";
       const {rows} = await client.native({...lower(filter(scan(table), rangesPredicate("COL", one.type, one.rows, {kind: one.kind})), dialect), expect: "rows"});
@@ -80,7 +80,20 @@ describe("ABAP ranges as IR: the pairs, the marker, the refusals", () => {
   });
 
   it("every case has an expected selection, and the pairs are rendered by lower() itself", () => {
-    expect(Object.keys(EXPECTED).sort()).to.deep.equal(CASES.map((one) => one.name).sort());
+    const refusals = {
+      "a lower-case SIGN is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_SIGN"},
+      "a lower-case OPTION is a dump": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_OPTION"},
+      "an initial row is a dump, not no restriction": {error: "RangesDump", abap: "SAPSQL_IN_ITAB_ILLEGAL_SIGN"},
+      "a value longer than the column raises": {error: "RangesDataError", abap: "CX_SY_OPEN_SQL_DATA_ERROR"},
+      "a CP pattern past twice the column raises": {error: "RangesDataError", abap: "CX_SY_DYNAMIC_OSQL_SEMANTICS"},
+      "a leading blank in CP is the special padding form": {error: "Refused", reason: "special padding form"},
+      "CP + alone is refused": {error: "Refused", reason: "plus alone"},
+    };
+    expect([...Object.keys(EXPECTED), ...Object.keys(refusals)].sort()).to.deep.equal(CASES.map((one) => one.name).sort());
+    const file = JSON.parse(readFileSync(PAIRS_FILE, "utf8"));
+    for (const [name, code] of Object.entries(refusals)) {
+      expect(file.pairs.find((one) => one.name === name).outcome, name).to.deep.equal(code);
+    }
     const {sql, params} = lowerPredicate(rangesPredicate("COL", {abap: "C", len: 10}, [{SIGN: "I", OPTION: "EQ", LOW: "A"}]), "sqlite");
     expect(sql).to.equal('("COL" = ?)');
     expect(params.map((p) => p.value)).to.deep.equal(["A"]);

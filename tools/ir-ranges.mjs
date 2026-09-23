@@ -38,11 +38,26 @@
 import {T, lit, bin, not, like, col, filter, scan} from "./sqlscript-ir.mjs";
 import {lower} from "./sqlscript-lower.mjs";
 
-export class RangesError extends Error {}
-/** what A4H answers with an uncatchable dump (an invalid SIGN / OPTION, an initial row) */
-export class RangesDump extends RangesError {}
-/** what A4H raises as a catchable exception (a value too long for the column) */
-export class RangesDataError extends RangesError {}
+/** a range this module does not carry, refused by name; `reason` is a short stable code */
+export class RangesError extends Error {
+  constructor(message, reason = "refused") { super(message); this.reason = reason; }
+}
+/** what A4H answers with an uncatchable dump (an invalid SIGN / OPTION, an initial row); `abap` names it */
+export class RangesDump extends RangesError {
+  constructor(message, abap) { super(message, "dump"); this.abap = abap; }
+}
+/** what A4H raises as a catchable exception (a value too long for the column); `abap` names the class */
+export class RangesDataError extends RangesError {
+  constructor(message, abap) { super(message, "data error"); this.abap = abap; }
+}
+
+/** the outcome of a refused range as the pairs file carries it, for a port to check */
+export function errorCode(error) {
+  if (error instanceof RangesDump) return {error: "RangesDump", abap: error.abap};
+  if (error instanceof RangesDataError) return {error: "RangesDataError", abap: error.abap};
+  if (error instanceof RangesError) return {error: "Refused", reason: error.reason};
+  throw error;
+}
 
 const upper = (v) => String(v ?? "").toUpperCase();
 const TRUE = () => bin("=", lit(1, T.int), lit(1, T.int), T.bool);
@@ -64,7 +79,7 @@ function bound(value, type, kind) {
       text = text.padStart(type.len, "0");
     }
     if (Number.isInteger(type.len) && text.length > type.len) {
-      throw new RangesDataError(`range value ${JSON.stringify(value)} is longer than the column's ${type.len} characters: CX_SY_OPEN_SQL_DATA_ERROR on A4H`);
+      throw new RangesDataError(`range value ${JSON.stringify(value)} is longer than the column's ${type.len} characters: CX_SY_OPEN_SQL_DATA_ERROR on A4H`, "CX_SY_OPEN_SQL_DATA_ERROR");
     }
     return lit(text, type);
   }
@@ -105,7 +120,7 @@ export function likePattern(pattern) {
 function rowCondition(expr, type, kind, row) {
   const option = String(row.OPTION ?? "");
   if (!["EQ", "NE", "GT", "GE", "LT", "LE", "BT", "NB", "CP", "NP"].includes(option)) {
-    throw new RangesDump(`range OPTION ${JSON.stringify(row.OPTION ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H`);
+    throw new RangesDump(`range OPTION ${JSON.stringify(row.OPTION ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H`, "SAPSQL_IN_ITAB_ILLEGAL_OPTION");
   }
   const low = () => bound(row.LOW, type, kind);
   const high = () => bound(row.HIGH, type, kind);
@@ -123,7 +138,7 @@ function rowCondition(expr, type, kind, row) {
     // LOW at its declared width, then HIGH (measured on A4H)
     const source = type.abap === "C" && highText !== "" ? lowText.padEnd(type.len, " ") + highText : lowText;
     if (type.abap === "C" && source.replace(/ +$/, "").length > 2 * type.len) {
-      throw new RangesDataError(`CP pattern ${JSON.stringify(source.replace(/ +$/, ""))} is longer than twice the column's ${type.len}: CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H`);
+      throw new RangesDataError(`CP pattern ${JSON.stringify(source.replace(/ +$/, ""))} is longer than twice the column's ${type.len}: CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H`, "CX_SY_DYNAMIC_OSQL_SEMANTICS");
     }
     const items = cpItems(source);
     const wild = (one) => one.any === true || one.one === true;
@@ -132,13 +147,13 @@ function rowCondition(expr, type, kind, row) {
     const leadingBlank = items[0]?.lit === " ";
     const blankBeforeWild = items.some((one, i) => one.lit === " " && wild(items[i + 1] ?? {}));
     if (leadingBlank || blankBeforeWild) {
-      throw new RangesError(`${option} pattern ${JSON.stringify(source)} has blanks that meet the padding; A4H renders a special form for it that is not carried`);
+      throw new RangesError(`${option} pattern ${JSON.stringify(source)} has blanks that meet the padding; A4H renders a special form for it that is not carried`, "special padding form");
     }
     // `+` alone matched the initial CHAR on A4H while `++` did not, through
     // the same `col LIKE ?`: the difference is in the bound value, which the
     // plan cache does not keep. Refused rather than guessed
     if (items.length === 1 && items[0].one === true) {
-      throw new RangesError(`${option} pattern "+" matches the initial value on A4H in a way not reconstructed here`);
+      throw new RangesError(`${option} pattern "+" matches the initial value on A4H in a way not reconstructed here`, "plus alone");
     }
     const negated = option === "NP";
     if (items.length > 0 && items.every((one) => one.any === true)) return negated ? FALSE() : TRUE();
@@ -150,7 +165,7 @@ function rowCondition(expr, type, kind, row) {
     const {text, escape} = likePattern(items);
     return like(expr, lit(text, T.str), escape ? lit("#", T.str) : undefined, negated);
   }
-  throw new RangesDump(`range OPTION ${JSON.stringify(row.OPTION)} is not one ABAP knows`);
+  throw new RangesDump(`range OPTION ${JSON.stringify(row.OPTION)} is not one ABAP knows`, "SAPSQL_IN_ITAB_ILLEGAL_OPTION");
 }
 
 /**
@@ -167,7 +182,7 @@ export function rangesPredicate(column, type, rows, options = {}) {
   const sign = (s) => normal.filter((row) => row.SIGN === s);
   // exactly I or E: lower case or an initial row is a dump on A4H, not a no-op
   const unknown = normal.find((row) => !["I", "E"].includes(row.SIGN));
-  if (unknown !== undefined) throw new RangesDump(`range SIGN ${JSON.stringify(unknown.SIGN ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_SIGN, an uncatchable dump on A4H`);
+  if (unknown !== undefined) throw new RangesDump(`range SIGN ${JSON.stringify(unknown.SIGN ?? "")}: SAPSQL_IN_ITAB_ILLEGAL_SIGN, an uncatchable dump on A4H`, "SAPSQL_IN_ITAB_ILLEGAL_SIGN");
   const include = sign("I").map((row) => rowCondition(expr, type, options.kind, row));
   const exclude = sign("E").map((row) => rowCondition(expr, type, options.kind, row));
   const included = include.length === 0 ? undefined : or(include);

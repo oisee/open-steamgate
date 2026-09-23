@@ -9,7 +9,7 @@
 import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {rangesPredicate, lowerPredicate} from "./ir-ranges.mjs";
+import {rangesPredicate, lowerPredicate, errorCode} from "./ir-ranges.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const C10 = {abap: "C", len: 10};
@@ -45,14 +45,28 @@ export const CASES = [
   {name: "E NP", type: C10, rows: [r("E", "NP", "X*")]},
   {name: "I EQ, NUMC zero-padded", type: N4, kind: "NUMC", rows: [r("I", "EQ", "7")]},
   {name: "I BT, NUMC zero-padded to the column", type: N4, kind: "NUMC", rows: [r("I", "BT", "5", "10")]},
+  // the refusals, so a port checks them against this file too
+  {name: "a lower-case SIGN is a dump", type: C10, rows: [r("i", "EQ", "A")]},
+  {name: "a lower-case OPTION is a dump", type: C10, rows: [r("I", "eq", "A")]},
+  {name: "an initial row is a dump, not no restriction", type: C10, rows: [r("", "", "")]},
+  {name: "a value longer than the column raises", type: C10, rows: [r("I", "EQ", "ABCDEFGHIJK")]},
+  {name: "a CP pattern past twice the column raises", type: C10, rows: [r("I", "CP", "ABCDEFGHIJKLMNOPQRSTU*")]},
+  {name: "a leading blank in CP is the special padding form", type: C10, rows: [r("I", "CP", " *")]},
+  {name: "CP + alone is refused", type: C10, rows: [r("I", "CP", "+")]},
 ];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
+
+function outcome(one) {
+  let pred;
+  try { pred = rangesPredicate("COL", one.type, one.rows, {kind: one.kind}); }
+  catch (error) { return {outcome: errorCode(error)}; }
+  return {lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, lowerPredicate(pred, dialect)]))};
+}
 
 export function pairs() {
   return CASES.map((one) => ({
     name: one.name, column: "COL", type: one.type, ...(one.kind === undefined ? {} : {kind: one.kind}), rows: one.rows,
-    lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) =>
-      [dialect, lowerPredicate(rangesPredicate("COL", one.type, one.rows, {kind: one.kind}), dialect)])),
+    ...outcome(one),
   }));
 }
 
