@@ -847,8 +847,11 @@ are the milestone that opens those), to an untyped CAST.
 before it.*
 
 `WITH name AS (...)` binds its common table expressions in order, each
-seeing the ones before it, scoped to the select that carries them; a name
-defined twice is refused. `SELECT TOP n` takes n rows after the
+seeing the ones before it, scoped to the select that carries them, and
+shadowing a table of the same name as SQL does; a column list
+`x (a, b) AS (...)` renames the projected columns in order. A name defined
+twice, a column-count mismatch, a reference to a CTE defined later and
+`WITH RECURSIVE` are refused by name. `SELECT TOP n` takes n rows after the
 statement's ORDER BY, which is where HANA applies it; the count must be an
 INTEGER literal or input, and TOP together with LIMIT, or TOP inside one
 branch of a set operation, is refused by name rather than given a reading.
@@ -858,7 +861,8 @@ Both run as procedures on DuckDB and SQLite (`test/sqlscript-procedure-scope.mjs
 Per body: 6 bodies newly parse, and **none** compiled -- three stop at an
 output whose table type is not resolved, two at a parameter type, one at a
 column no catalogue describes. `abap_bool` alone moved no body. Compiles
-stays at 17 working and 3 teaching.
+stays at 17 working and 3 teaching. Parsed, for the whole branch against
+`main`: working 140 → 149, teaching 60 → 69.
 
 What that says about the next step: after the grammar, the largest single
 refusal is not a construct but the procedure's shape. 46 bodies

@@ -314,7 +314,8 @@ export class OrderKey extends Expression {
 /** `name AS ( SELECT ... )` -- one common table expression of a WITH */
 export class CteDef extends Expression {
   getRunnable() {
-    return seq(new Name(), str("AS"), "(", new SetOperation(), ")");
+    // the column list `x (a, b) AS (...)` renames the projected columns in order
+    return seq(new Name(), opt(seq("(", new Name(), star(seq(",", new Name())), ")")), str("AS"), "(", new SetOperation(), ")");
   }
 }
 
@@ -322,7 +323,7 @@ export class SetOperation extends Expression {
   getRunnable() {
     // `WITH a AS ( ... ), b AS ( ... ) SELECT ...` -- the names are in scope
     // for the statement that follows, and for the definitions after their own
-    return seq(opt(seq(str("WITH"), new CteDef(), star(seq(",", new CteDef())))), new Select(),
+    return seq(opt(seq(str("WITH"), opt(str("RECURSIVE")), new CteDef(), star(seq(",", new CteDef())))), new Select(),
       star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
       opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));

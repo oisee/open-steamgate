@@ -221,6 +221,26 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
        et_rows = select id, txt from a;`)).to.throw(/not present|unknown|not a table/i);
   });
 
+  it("WITH: a CTE shadows a table of the same name, a self-join on a CTE reads it twice, a column list renames", async () => {
+    const shadow = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with src as (select id, txt from src where id = 5) select id, txt from src;");
+    expect((await run(shadow)).rows.map((r) => r.ID)).to.deep.equal([5]);
+    const self = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      `et_rows = with s as (select id, txt from src where id < 10)
+        select a.id, b.txt from s a inner join s b on a.id = b.id order by id;`);
+    expect((await run(self)).rows.map((r) => [r.ID, r.TXT])).to.deep.equal([[1, "one"], [5, "five"]]);
+    const renamed = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = with s (id, txt) as (select txt, id from src) select txt as id, id as txt from s where txt > 1 order by txt;");
+    expect((await run(renamed)).rows.map((r) => r.ID)).to.deep.equal([5, 20]);
+  });
+
+  it("WITH: RECURSIVE, a column-count mismatch and a forward reference are refused by name", () => {
+    const refuse = (body, message) => expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows", body)).to.throw(message);
+    refuse("et_rows = with recursive a as (select id, txt from src) select id, txt from a;", /WITH RECURSIVE is not lowered/);
+    refuse("et_rows = with a (x) as (select id, txt from src) select id, txt from src;", /names 1 column\(s\) for a select of 2/);
+    refuse("et_rows = with a as (select id, txt from b), b as (select id, txt from src) select id, txt from a;", /CTE b used before it is defined/);
+  });
+
   it("TOP n takes n rows after the ORDER BY, as HANA does", async () => {
     const prog = program("EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select top 2 id, txt from src order by id desc;");
@@ -233,6 +253,8 @@ for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as proced
   it("TOP with LIMIT, TOP inside a UNION branch and a non-integer TOP are refused by name", () => {
     expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select top 2 id, txt from src order by id limit 1;")).to.throw(/both TOP and LIMIT/);
+    expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
+      "et_rows = select top 2 id, txt from src limit 1;")).to.throw(/both TOP and LIMIT/);
     expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
       "et_rows = select top 1 id, txt from src union all select id, txt from src;")).to.throw(/TOP inside a branch/);
     expect(() => program("EXPORTING VALUE(et_rows) TYPE tt_rows",
