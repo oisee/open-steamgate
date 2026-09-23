@@ -244,10 +244,9 @@ entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
   the entity set path needs `REF TO data`.
 - No database: every `SELECT` is a `NotCompiled` stub. The plan is the
   relational IR of portable AMDP as the one DB IR (docs/pamdp-ir-portability.md).
-- No `p`, `d`, `t`, `decfloat`; class-based exceptions only as far as the
-  runtime raises them (`TRY`/`CATCH`, `CATCH INTO` + `get_text( )`), no
-  `RAISE EXCEPTION` of own classes, no `CLEANUP`; dynamic calls only as
-  `CREATE OBJECT ... TYPE (name)` without arguments.
+- No `p`, `d`, `t`, `decfloat`; no `RAISE RESUMABLE`, no `RAISE EXCEPTION
+  ... MESSAGE`, no T100 or OTR texts in `get_text( )`; dynamic calls only
+  as `CREATE OBJECT ... TYPE (name)` without arguments.
 - Class statics are per process, so a host runs one step at a time (the
   stand serializes). Statics per session come before any parallelism.
 - The handler's `ON_MESSAGE` is still three host lines in the stands; the
@@ -257,6 +256,40 @@ entities), `RAISE EXCEPTION TYPE` (13), `CP`, `SPLIT` into several targets,
   `IMPORTING` by reference is a pointer in Go and the object in JS, a
   `VALUE( )` one is a copy (measured on A4H, pinned by `semantics.mjs`).
   Secondary keys, `SORTED` tables and `READ ... WITH KEY` are not there.
+
+## Class-based exceptions, 2026-09-23
+
+`RAISE EXCEPTION TYPE cls [EXPORTING ...]` and `RAISE EXCEPTION obj` of
+any class compiled in the program, `CATCH` by the class hierarchy,
+`CATCH ... INTO` with the object's attributes readable, `get_text( )`,
+`previous`, and `CLEANUP`. The object travels in the panic (Go:
+`*abap.Raised{Obj, Class}`, JS: `abap.Raised`) beside the runtime's own
+exceptions (`abap.ArithmeticError` / `abap.AbapError`), which are
+unchanged. A `CATCH` of runtime exceptions is still decided by the front
+end; one of raised objects walks a table of superclasses at run time
+(`abap.RegisterSupers`), since `RAISE EXCEPTION obj` only knows its class
+then, and an ancestor outside the program (cx_static_check in a test)
+still counts. `INTO` a variable of a `CATCH` that takes only raised objects
+receives the object itself; `INTO` one that also takes runtime exceptions
+(`CATCH cx_root INTO`) stays an exception value whose one method is
+`get_text( )`, the object's own when it was raised.
+
+Measured on A4H and pinned (ZCL_GOGEN_T_RAISE): hierarchy, first fitting
+`CATCH`, `CLEANUP` inner then outer then the handler, no `CLEANUP` for an
+exception raised inside a `CATCH` of the same `TRY`, a runtime exception
+passing a `CLEANUP`, `get_text( )` of a class without a text is `An
+exception was raised.` (open-abap's fallback, the same text, served by a
+host function; a T100 or OTR text dumps), `RAISE EXCEPTION obj` hands over
+the same object. Refused, as a system refuses: a `CATCH` after one of its
+superclass (does not activate on A4H; abaplint takes it, ANORMALIES
+catch-after-superclass). An initial reference raised aborts, and nothing
+catches it. Not measured: whether a system runs the `CLEANUP`s of an
+exception nobody catches before it dumps; here they run on the way to the
+dump (a dump ends the request either way).
+
+`GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/NoSuchSet` through the Go binary:
+`404 Not Found`, and the body byte for byte what OSG answers:
+`{"error":{"code":"STG/ENTITY_SET_NOT_FOUND","message":{"lang":"en","value":"Entity set NoSuchSet does not exist in ZSTG_DEMO_SRV"}}}`.
 
 ## Next, if this is pursued
 
