@@ -431,6 +431,7 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_hh      TYPE i.
     DATA lv_mm      TYPE i.
     DATA lv_ss      TYPE i.
+    DATA lv_ms      TYPE p LENGTH 16 DECIMALS 0.
 
     lv_days = iv_date - lv_epoch.
     IF iv_time IS NOT INITIAL.
@@ -439,7 +440,12 @@ CLASS zcl_stg_json IMPLEMENTATION.
       lv_ss = iv_time+4(2).
       lv_seconds = lv_hh * 3600 + lv_mm * 60 + lv_ss.
     ENDIF.
-    rv_ms = |{ ( lv_days * 86400 + lv_seconds ) * 1000 }|.
+* the milliseconds do not fit an i for any date after 1970-01-25: computed
+* as i (the type of its operands) the product overflows on a system, where
+* every Edm.DateTime would dump (A4H, 2026-09-23, ANORMALIES
+* epoch-ms-overflow); a p target makes p the calculation type
+    lv_ms = ( lv_days * 86400 + lv_seconds ) * 1000.
+    rv_ms = |{ lv_ms }|.
     CONDENSE rv_ms NO-GAPS.
   ENDMETHOD.
 
