@@ -172,3 +172,7 @@ type Exception struct {
 }
 
 func (e *Exception) Text() string { return e.Class + " in " + e.Op }
+
+// Ptr passes a value that is not a variable where a pointer is expected (a
+// composite IMPORTING by reference given an expression).
+func Ptr[T any](v T) *T { return &v }

@@ -42,6 +42,14 @@ const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "
 export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row))
   && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
   && (a.k !== "ref" || a.name === b.name);
+/*
+ * An IMPORTING table or structure passed by reference is the caller's own
+ * data: measured on A4H, it sees what a CHANGING of the same table did,
+ * APPEND included. VALUE( ) is a copy. So a composite IMPORTING by
+ * reference is a pointer in Go, and a VALUE( ) one is cloned at the call.
+ */
+export const composite = (t) => t?.k === "table" || t?.k === "struct";
+export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
 const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
 
@@ -210,7 +218,7 @@ function classIr(ctx0, obj) {
     try {
       const p = m.getParameters();
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
-      const param = (x, dir) => ({name: upper(x.getName()), dir, type: typeOf(x.getType(), where, program),
+      const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
         default: defaultOf(p, x), optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       signatures.set(name, {
@@ -723,7 +731,9 @@ function variable(name, ctx) {
   const n = upper(name);
   if (ctx.fieldSymbols?.has(n)) return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
   const p = ctx.sig.params.find((x) => x.name === n);
-  if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing"};
+  // ref: a pointer in Go; box: an EXPORTING / CHANGING box in JS (an
+  // IMPORTING table or structure is a pointer in Go and the object itself in JS)
+  if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing" || byRef(p), box: p.dir !== "importing"};
   if (ctx.sig.returning?.name === n) return {e: "var", name: n, type: ctx.sig.returning.type};
   if (ctx.locals.has(n)) return {e: "var", name: n, type: ctx.locals.get(n)};
   const attr = findAttribute(ctx, n);
@@ -1137,11 +1147,11 @@ function constructor(c, ctx, inferred) {
     const args = sig.map((p) => {
       const src = given.get(p.name);
       if (src === undefined) {
-        if (p.default !== undefined) return {dir: "importing", value: defaultValue(p, ctx)};
-        if (p.optional) return {dir: "importing", value: {e: "zero", type: p.type}};
+        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`NEW ${to.name}: ${p.name} not supplied`);
       }
-      return {dir: "importing", value: convert(source(src, ctx, p.type), p.type)};
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(src, ctx, p.type), p.type)};
     });
     return {e: "new", cls: to.name, args, type: to};
   }
@@ -1167,7 +1177,7 @@ function methodSignature(ctx, owner, name) {
     if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
-    const param = (x, dir) => ({name: upper(x.getName()), dir, type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
+    const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
       optional: optional.has(upper(x.getName()))});
     const ret = p.getReturning();
     sig = {name, static: m.isStatic?.() ?? false,
@@ -1190,7 +1200,7 @@ function constructorSignature(ctx, clsName) {
   const p = m.getParameters();
   if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
   const optional = new Set((p.getOptional?.() ?? []).map(upper));
-  return p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing",
+  return p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
     type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), optional: optional.has(upper(x.getName()))}));
 }
 
@@ -1402,11 +1412,11 @@ function call(chain, ctx, statement, hint) {
     if (p.dir === "importing") {
       const s = given.get(p.name);
       if (s === undefined) {
-        if (p.default !== undefined) return {dir: "importing", value: defaultValue(p, ctx)};
-        if (p.optional) return {dir: "importing", value: {e: "zero", type: p.type}};
+        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
       }
-      return {dir: "importing", value: convert(source(s, ctx, p.type), p.type)};
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};

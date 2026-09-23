@@ -23,7 +23,6 @@ import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const home = "/home/alice/dev/open-steamgate";
 const pack = `${home}/packs/o4d/upstream`;
 const libs = [`${home}/.local/lars/open-abap-core/src`, `${home}/.local/lars/open-abap-apc/src`];
 const wantedScenes = process.argv.slice(2).filter((a) => !a.startsWith("--"));
@@ -134,6 +133,7 @@ function goMain() {
 package main
 
 import (
+import {home} from "./home.mjs";
 	"encoding/json"
 	"fmt"
 	"math"
@@ -205,9 +205,9 @@ func frame(h *ZCL_O4D_APC_HANDLER, s *abap.Session, tick int32) string {
 	eff := h.mo_demo.GET_EFFECT_AT_BAR(s, ctx.gbi.bar)
 	var f ZIF_O4D_EFFECT__TY_FRAME
 	if eff != nil {
-		f = eff.ZIF_O4D_EFFECT__RENDER_FRAME(s, ctx)
+		f = eff.ZIF_O4D_EFFECT__RENDER_FRAME(s, &ctx)
 	}
-	return h.FRAME_TO_JSON(s, f, ctx, "")
+	return h.FRAME_TO_JSON(s, &f, &ctx, "")
 }
 `;
 }

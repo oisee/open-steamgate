@@ -13,9 +13,9 @@ import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
+import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const home = "/home/alice/dev/open-steamgate";
 const which = process.argv.slice(2).find((a) => /^[a-z]+$/.test(a)) ?? "speedrun";
 const story = `${home}/packs/zork/games/zork-mini-z3.w3mi.data.z3`;
 const script = readFileSync(`${home}/packs/zork/games/zork-mini-${which}-txt.w3mi.data.txt`, "utf8");

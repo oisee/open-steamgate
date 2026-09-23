@@ -5,9 +5,10 @@
 //   node tools/gogen/survey.mjs
 import {readFileSync, readdirSync} from "node:fs";
 import {compileProgram} from "./frontend.mjs";
+import {home} from "./home.mjs";
 
-const pack = "/home/alice/dev/open-steamgate/packs/o4d/upstream";
-const recordings = "/home/alice/dev/open-steamgate/.local";
+const pack = `${home}/packs/o4d/upstream`;
+const recordings = `${home}/.local`;
 const byName = new Map();
 for (const f of readdirSync(pack).filter((x) => x.endsWith(".clas.abap")).sort()) {
   const src = readFileSync(`${pack}/${f}`, "utf8");

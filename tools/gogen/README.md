@@ -134,15 +134,16 @@ the WSL machine with it).
 
 | | frames equal to A4H | scenes equal frame for frame |
 | --- | ---: | ---: |
-| Go (sin/cos from glibc, `-tags libm`) | 3392 of 3840 | 22 of 25 |
-| JS from the same IR (V8's sin/cos) | 3007 of 3840 | 18 of 25 |
+| Go with sin/cos from glibc (`demo.mjs --libm`) | 3840 of 3840 | 25 of 25 |
+| Go, pure (fdlibm port, the default) | 3422 of 3840 | 17 of 25 |
+| JS from the same IR (V8's sin/cos) | 3422 of 3840 | 17 of 25 |
 
-The three scenes left on Go (amiga_ball, amiga_ball_2, sierpinski, plus the
-sierpinski half of glitch) draw the same triangles in another order: `SORT
-... BY z` without `STABLE`, equal keys, and the kernel's order within a tie
-is not insertion order nor its reverse (`[3,2,1,0] [6,7,5,4] ...`). ABAP
-promises nothing there; `docs/frame-comparison.md` already puts the fix in
-the demo (a second key), not in a runtime.
+Pure Go and JS agree with each other everywhere; where they differ from
+A4H it is the last bit of `sin` (a known difference). The triangle order
+of amiga_ball, amiga_ball_2 and sierpinski used to differ as well: `SORT
+... BY z` without `STABLE` leaves equal keys in the kernel's order
+(`[3,2,1,0] [6,7,5,4] ...`). The demo now carries a second key
+(vivid-vibes#5, activated in `$ZO4D` and re-recorded on A4H).
 
 What it took, each measured before it was written:
 - attribute `VALUE`s set when the object is made (a `mv_scale` left at 0
@@ -193,23 +194,35 @@ without an overflow is a question for Lars, not a patch.
 
 ## What this does not show
 
-- The handler's `frame` command itself is not compiled: it parses its JSON
-  with FIND and offsets, so the harness does its three lines.
-- No database, no `p`, no exceptions beyond arithmetic and conversion, no
-  dynamic calls, no references to interfaces (the harness calls the class).
-  Those are the expensive parts of a real runtime port (`@abaplint/runtime`
-  is 11.2k lines of TS).
-- JS runs one thread here. The pool of backlog B.12 takes the JS side to
-  several processes, 474 -> 1646 frames/s on the demo. The Go numbers show
-  the same thing inside one process, with no socket pinned to a process.
-- Tables are Go slices: assigning one table to another would share it,
-  where ABAP copies. The front end refuses table assignment until
-  copy-on-write exists.
+- A request of OSG's own gateway. 190 of 963 methods of OSG's ABAP compile,
+  but no entry point has a stub-free call closure yet; that is the next
+  milestone (below), not a percentage.
+- No database: every `SELECT` is a `NotCompiled` stub. The plan is the
+  relational IR of portable AMDP as the one DB IR (docs/pamdp-ir-portability.md).
+- No `p`, `d`, `t`, `decfloat`; exceptions only as far as the runtime raises
+  them (`TRY`/`CATCH`, `CATCH INTO` + `get_text( )`), no `RAISE` of own
+  classes, no `CLEANUP`; no inheritance or `super`; no dynamic calls.
+- Class statics are per process, so a host runs one step at a time (the
+  stand serializes). Statics per session come before any parallelism.
+- The handler's `ON_MESSAGE` is three host lines (a `RETURN` inside its
+  `TRY` is refused); everything it calls is compiled.
+- Table values: an assignment, `APPEND`, `MODIFY`, `READ ... INTO`, `LOOP
+  ... INTO` clone a table or a structure holding one; a composite
+  `IMPORTING` by reference is a pointer in Go and the object in JS, a
+  `VALUE( )` one is a copy (measured on A4H, pinned by `semantics.mjs`).
+  Secondary keys, `SORTED` tables and `READ ... WITH KEY` are not there.
 
 ## Next, if this is pursued
 
-1. Done: the whole demo (above).
-2. Zork: one closed interpreter of 3k lines, strings, `xstring` and a deep
-   call graph, compared by transcript.
-3. Only then the IR inside the transpiler, gradually: an IR node may be an
-   opaque JS chunk, the Go backend refuses those.
+Ranked with codex gpt-6-sol, 2026-09-23:
+1. One request end to end: a Go HTTP handler calling the compiled
+   `ZCL_STG_DISPATCHER` for the service document of a registered service,
+   answering what OSG answers, with the call closure from that entry point
+   reported and the build failing on any reachable stub.
+2. The part of exceptions, interface dispatch and inheritance that request
+   needs, and no more.
+3. A step budget counted at loop back edges (a goroutine cannot be stopped
+   from outside; the OOM of 2026-09-23 is the reason).
+4. The DB layer through the shared relational IR and its conformance pairs.
+5. Statics per session, after deciding which statics are session state and
+   which are shared caches.

@@ -24,8 +24,8 @@ const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i < 0 ? d : args[i + 1]; };
 const scene = args.find((a) => !a.startsWith("--") && !args[args.indexOf(a) - 1]?.startsWith("--")) ?? "glitch";
 const upstream = flag("upstream", resolve(root, "..", "..", "..", "packs", "o4d", "upstream"));
-const pack = existsSync(upstream) ? upstream : resolve("/home/alice/dev/open-steamgate/packs/o4d/upstream");
-const recording = flag("recording", `/home/alice/dev/open-steamgate/.local/o4d-a4h-${scene}.jsonl`);
+const pack = existsSync(upstream) ? upstream : resolve(`${home}/packs/o4d/upstream`);
+const recording = flag("recording", `${home}/.local/o4d-a4h-${scene}.jsonl`);
 const repeat = Number(flag("repeat", 20));
 
 // what each scene reads from its context, beyond t
@@ -146,6 +146,7 @@ function sceneMain(sc, recs) {
 package main
 
 import (
+import {home} from "./home.mjs";
 	"encoding/json"
 	"os"
 	"sort"

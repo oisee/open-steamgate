@@ -92,7 +92,7 @@ const tab = (n) => "  ".repeat(n);
 
 function place(p, ctx) {
   switch (p.e) {
-    case "var": return p.ref ? `${ident(p.name)}.v` : ident(p.name);
+    case "var": return p.box ? `${ident(p.name)}.v` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
     case "static": {
       const [cls, attr] = p.go.split("__");
@@ -250,11 +250,16 @@ function stmt(st, ctx, d) {
   }
 }
 
+/** an IMPORTING VALUE( ) table or structure is the callee's own copy */
+function importingArg(a, ctx) {
+  return a.byValue && (a.type?.k === "table" || a.type?.k === "struct") ? moved(a.value, ctx) : expr(a.value, ctx);
+}
+
 /** a call statement: EXPORTING parameters go through boxes and come back after the call */
 function callStmt(e, ctx, t) {
   const boxes = [];
   const args = e.args.map((a, i) => {
-    if (a.dir === "importing") return expr(a.value, ctx);
+    if (a.dir === "importing") return importingArg(a, ctx);
     const b = `box${ctx.loop++}_${i}`;
     boxes.push({b, a});
     return b;
@@ -331,10 +336,24 @@ function expr(e, ctx) {
       if (e.base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${e.base.len}, ${off}, ${len})`;
       return `abap.SubS(${expr(e.x, ctx)}, ${off}, ${len})`;
     }
-    case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => expr(a.value, ctx))].join(", ")})`;
+    case "new": return `${typeName(e.cls)}.$new(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
     case "call": {
-      if (e.args.some((a) => a.dir !== "importing" && a.place)) throw new Error("EXPORTING in an expression call");
-      const args = e.args.map((a) => (a.dir === "importing" ? expr(a.value, ctx) : `{v: ${zero(a.type)}}`));
+      if (e.args.some((a) => a.dir !== "importing" && a.place)) {
+        // EXPORTING / CHANGING of a functional call: boxes, written back
+        // after the call, inside an arrow so the call stays an expression
+        const pre = [];
+        const post = [];
+        const args = e.args.map((a, i) => {
+          if (a.dir === "importing") return importingArg(a, ctx);
+          if (!a.place) return `{v: ${zero(a.type)}}`;
+          const b = `box${ctx.loop++}_${i}`;
+          pre.push(`const ${b} = {v: ${place(a.place, ctx)}};`);
+          post.push(`${place(a.place, ctx)} = ${b}.v;`);
+          return b;
+        });
+        return `(() => { ${pre.join(" ")} const r = ${callee(e, ctx)}(${["s", ...args].join(", ")}); ${post.join(" ")} return r; })()`;
+      }
+      const args = e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx) : `{v: ${zero(a.type)}}`));
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
     default: throw new Error(`no JS for expression ${e.e}`);

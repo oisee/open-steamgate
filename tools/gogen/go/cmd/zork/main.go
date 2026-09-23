@@ -30,7 +30,7 @@ func main() {
 		}
 		s := &abap.Session{}
 		t := time.Now()
-		sr := New_ZCL_ORK_00_SPEEDRUN(s, string(story), commands)
+		sr := New_ZCL_ORK_00_SPEEDRUN(s, string(story), &commands)
 		res := sr.RUN(s)
 		out["ms"] = float64(time.Since(t).Microseconds()) / 1000
 		out["result"] = map[string]any{"success": res.success, "commands_run": res.commands_run, "commands_total": res.commands_total,
