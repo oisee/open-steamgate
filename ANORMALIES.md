@@ -1276,3 +1276,19 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: **needs an issue** in `abaplint/abaplint` (a syntax check for OPTIONAL on an AMDP method's scalar parameter); not yet filed -- goes out through the critic gate.
 - Upstream version containing a fix: none yet (the workaround lives in our compiler; abaplint has no check to fix)
 - Regression-test location: `test/sqlscript-procedure-scope.mjs` ("OPTIONAL on a scalar is refused in the kernel's words …"), `test/sqlscript-procedure-source.mjs`, `test/amdp-cleanroom-corpus.mjs`
+
+### ANOMALY-2026-09-23-epoch-ms-overflow — `ZCL_STG_JSON=>EPOCH_MS` overflows `i` on a system, and the transpiler runtime lets it through
+
+- Status: `fixed in OSG` (EPOCH_MS computes in p); the transpiler runtime's missing range check is still open
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (npm) runtime; OSG's own `src/gateway/zcl_stg_json.clas.abap`
+- Affected ABAP statement, runtime API or adapter: an arithmetic expression of `i` operands embedded in a string template, `rv_ms = |{ ( lv_days * 86400 + lv_seconds ) * 1000 }|` in `EPOCH_MS`, which every `Edm.DateTime` of a JSON answer goes through
+- Minimal ABAP reproducer: `DATA li TYPE i VALUE 20713. DATA lv TYPE string. lv = |{ ( li * 86400 + 0 ) * 1000 }|.`
+- Exact command used to run it: A4H, a throwaway ABAP Unit probe in `$ZOSG_TMP_0160` (deleted after); here, `node tools/gogen/semantics.mjs` (ZCL_GOGEN_T_RQDATE, part `d`) and `node tools/gogen/gateway.mjs '/sap/opu/odata/sap/ZSTG_DEMO_SRV/BookingSet?$format=json'`
+- Expected SAP behaviour: measured on A4H: `CX_SY_ARITHMETIC_OVERFLOW`. The calculation type of the embedded expression is `i` (its operands' type; a template gives it no wider target), and 20713 * 86400 * 1000 is outside `i` for any date after 1970-01-25. The same probe measured that a `d` operand counts as `i` too: `( d / 7 ) * 7` into `i` rounds in between
+- Actual open-abap behaviour: OSG answers `BookingSet` with `"FlightDate":"\/Date(1789430400000)\/"`; the JS runtime computes the product without the `i` range check
+- Impact on open-steamgate: every entity with a date (`BookingSet`, `TravelSet('T0001')/to_Bookings`) answers here and would dump on a system; the Go backend of `tools/gogen` computes in `i` as A4H does and stops with the same exception
+- Smallest safe workaround: not a workaround but the fix: `EPOCH_MS` computes the milliseconds in `p LENGTH 16`. Measured on A4H with the fixed method ($ZOSG_TMP_0021, deleted): 2026-09-15 is 1789430400000 (the value OSG answered before, so no answer changes), 1969-12-31 23:59:59 is -1000, 9999-12-31 23:59:59 is 253402300799000
+- Upstream: the range check is the transpiler runtime's (**needs an issue** once reduced to the runtime alone); the `EPOCH_MS` fix is ours
+- Regression-test location: `tools/gogen/semantics.mjs` on branch spike/go-backend, ZCL_GOGEN_T_RQDATE (`dOVF`); the Go backend computes `i` as A4H does and stopped at this method
+- Upstream version containing a fix: none yet
