@@ -199,6 +199,11 @@ const EXPECT = {
   // a---X- c---X dX- e-- before (a structure field starts as ""), JS
   // aXXX-X cXXX- dX- e-- (a structure compared with a fresh one by ===)
   ZCL_GOGEN_T_RQINIT: "aXXXXX b-- cXXXX dXX eX- fX",
+  // x / xstring into a string or a c, and i into x(1), A4H 2026-09-23
+  // ($ZOSG_TMP_0022; the copy leaves out the probe's TRY around hex1( -1 ),
+  // which raised nothing there, and sets x'0A0B' as 2571 and x'DEADBEEF' as a
+  // constant: c -> x is not in the subset): the demo's outro stopped on INT_TO_HEX
+  ZCL_GOGEN_T_X2S: "a:AB b:00 c:2C d:FF e:[0A0B] f:[DEADBEEF] g:[] h:[0A0] i:FF",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

@@ -2793,6 +2793,9 @@ export function convert(expr, to) {
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
   if (to.k === "x" && from.k === "i") return ok("i2x");
+  // x / xstring into characters: the hex digits, upper case, zeros kept; a c
+  // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
+  if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
   if (to.k === "xstring" && from.k === "x") return {...expr, type: to};

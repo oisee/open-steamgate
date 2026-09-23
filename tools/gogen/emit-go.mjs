@@ -1073,7 +1073,7 @@ function conv(e, ctx) {
     case "c2s": return x;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2s": return `abap.IToString(${x})`;
-    case "x2s": return `abap.XToHex(${x})`;
+    case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
