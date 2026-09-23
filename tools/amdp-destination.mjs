@@ -553,14 +553,18 @@ export class AmdpDestination {
     const targets = Array.isArray(p.portable.outputs)
       ? p.portable.outputs.map((one) => ({name: one.name, value: answer.outputs?.[one.name]?.rows}))
       : [{name: p.portable.output, value: p.portable.outputType === undefined ? answer.rows : answer.value}];
+    // every target resolved before any is written: a missing one refuses
+    // the call with nothing half-written
+    const resolved = [];
     for (const {name: output, value} of targets) {
       const target = firstPresent(pick(signature.importing, output),
         pick(signature.changing, output), pick(signature.tables, output));
       if (target === undefined) {
         await refuse(`AMDP: portable ${p.class}=>${p.method} has no runtime target for ${output}`, p.module);
       }
-      fromJson(target, withAbapDates(value));
+      resolved.push({target, value});
     }
+    for (const {target, value} of resolved) fromJson(target, withAbapDates(value));
     if (this.trace) {
       console.log(`AMDP: portable ${p.class}=>${p.method} on DuckDB; ` +
         `${answer.trace?.databaseStatements ?? 0} database statement(s)`);

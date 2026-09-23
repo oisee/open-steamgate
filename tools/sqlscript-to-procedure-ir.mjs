@@ -623,18 +623,20 @@ export function compileProcedure(method, types, options = {}) {
       throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
     }
     // every OUT table must be assigned somewhere in the body, or HANA does not
-    // compile the procedure (measured on A4H, in its words)
-    if (Array.isArray(output.outputs)) {
+    // compile the procedure (measured on A4H, in its words) -- one OUT as much
+    // as several; a CALL whose output is the OUT assigns it
+    if (output.kind === "relation") {
       const assigned = new Set();
       const walk = (statements) => {
         for (const one of statements) {
           if (one.stmt === "assign-relation") assigned.add(one.name);
+          if (one.stmt === "call-procedure") assigned.add(one.output);
           if (one.stmt === "while") walk(one.body ?? []);
           if (one.stmt === "if") { for (const branch of one.branches ?? []) walk(branch.body ?? []); walk(one.otherwise ?? []); }
         }
       };
       walk(body);
-      const missing = output.outputs.find((one) => !assigned.has(one.name));
+      const missing = (output.outputs ?? [output]).find((one) => !assigned.has(one.name));
       if (missing !== undefined) throw new UnsupportedSqlScript(`some out table variable is not assigned: ${missing.name}`);
     }
     return procedure({parameters, relationParameters, body, output: output.name,

@@ -639,6 +639,31 @@ for (const {dialect, make} of ENGINES) describe(`several OUT tables as measured 
     expect(values(answer, "ET_B", "N").sort((a, b) => a - b)).to.deep.equal([10, 50]);
   });
 
+  it("a single OUT assigned nowhere is refused too, as HANA refuses it", () => {
+    expect(() => program("EXPORTING VALUE(et_a) TYPE tt_n", "DECLARE i INTEGER = 0; i = 1;"))
+      .to.throw(UnsupportedSqlScript, /some out table variable is not assigned: ET_A/);
+  });
+
+  it("an OUT assigned only in THEN, or only in a WHILE that never runs, compiles and is empty where not assigned", async () => {
+    const inThen = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et_a) TYPE tt_n",
+      "IF :iv = 1 THEN et_a = select id as n from src; END IF;");
+    expect((await run(inThen, {IV: 1})).rows).to.have.length(2);
+    expect((await run(inThen, {IV: 2})).rows).to.deep.equal([]);
+    const inLoop = program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_t) TYPE tt_t",
+      "et_t = select txt from src; WHILE 1 = 0 DO et_a = select id as n from src; END WHILE;");
+    const answer = await run(inLoop);
+    expect(answer.outputs.ET_A.rows).to.deep.equal([]);
+    expect(answer.outputs.ET_T.rows).to.have.length(2);
+  });
+
+  it("an unassigned OUT is answered without the database: no rows, its declared columns", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_t) TYPE tt_t",
+      "IF :iv = 1 THEN et_a = select id as n from src; ELSE et_t = select txt from src; END IF;");
+    const answer = await run(prog, {IV: 1});
+    expect(answer.outputs.ET_T).to.deep.include({rows: [], columns: [{name: "TXT"}]});
+    expect(answer.trace.databaseStatements).to.equal(1);
+  });
+
   it("refuses an OUT assigned nowhere, in HANA's words, and a scalar OUT beside table OUTs", () => {
     expect(() => program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_b) TYPE tt_n", "et_a = select id as n from src;"))
       .to.throw(UnsupportedSqlScript, /some out table variable is not assigned: ET_B/);

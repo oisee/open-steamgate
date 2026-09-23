@@ -636,8 +636,11 @@ export async function runProcedure(program, {
   // An OUT table the path taken did not assign is an empty table (measured
   // on A4H: the caller's rows are replaced by none); one assigned nowhere in
   // the body does not compile there, and the compiler refuses it the same way
-  const emptyOf = (schema) => project(filter(scan("DUMMY"), bin("=", lit(1, T.int), lit(0, T.int), T.bool)),
-    Object.entries(schema).map(([name, type]) => ({as: name, expr: lit(type.abap === "I" || type.abap === "INT8" || type.abap === "P" ? 0 : "", type)})));
+  // an unassigned OUT is answered without the database: no rows, the
+  // declared columns (a typed empty SELECT would render literals whose SQL
+  // type is not the declared one, and some types have no literal at all)
+  const emptyAnswer = (schema) => ({rows: [], columns: Object.keys(schema).map((name) => ({name})), outputSchema: schema,
+    trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps, nestedCalls, databaseStatements: 0, boundParameters: 0}});
   if (Array.isArray(program.outputs) && program.outputs.length > 1) {
     if (deferRelation) {
       throw new UnsupportedSqlScript(`a nested CALL of ${program.outputs.length} outputs is not carried; a CALL hands on one relation`);
@@ -646,7 +649,8 @@ export async function runProcedure(program, {
     let statements = 0;
     let bound = 0;
     for (const one of program.outputs) {
-      const answer = await finishOne(one.name, one.schema, relations.get(one.name) ?? emptyOf(one.schema));
+      const assignedRel = relations.get(one.name);
+      const answer = assignedRel === undefined ? emptyAnswer(one.schema) : await finishOne(one.name, one.schema, assignedRel);
       outputs[one.name] = {rows: answer.rows, columns: answer.columns, outputSchema: one.schema};
       statements += answer.trace.databaseStatements;
       bound += answer.trace.boundParameters;
@@ -654,7 +658,11 @@ export async function runProcedure(program, {
     return {outputs, trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
       databaseStatements: statements, boundParameters: bound}};
   }
-  return finishOne(program.output, program.outputSchema, relations.get(program.output) ?? emptyOf(program.outputSchema));
+  const single = relations.get(program.output);
+  if (single === undefined && deferRelation) {
+    throw new UnsupportedSqlScript(`output relation ${program.output} of a nested CALL was not assigned on the path taken`);
+  }
+  return single === undefined ? emptyAnswer(program.outputSchema) : finishOne(program.output, program.outputSchema, single);
 
   async function finishOne(outputName, outputSchema, result) {
   // A native AMDP procedure converts the final SELECT into the declared ABAP
