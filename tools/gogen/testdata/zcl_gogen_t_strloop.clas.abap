@@ -1,0 +1,13 @@
+CLASS zcl_gogen_t_strloop DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+
+CLASS zcl_gogen_t_strloop IMPLEMENTATION.
+  METHOD run.
+    DATA s TYPE string.
+    s = `a b`.
+    REPLACE ALL OCCURRENCES OF ' ' IN s WITH '_'.
+    rv = s.
+  ENDMETHOD.
+ENDCLASS.

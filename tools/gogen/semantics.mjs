@@ -41,6 +41,46 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // strings, measured on A4H 2026-09-23 (probe classes of the same code in
+  // $ZOSG_TMP_0130). SPLIT INTO fields: the last takes the rest, missing
+  // pieces clear, a c field cut is sy-subrc 4, an empty string clears all
+  ZCL_GOGEN_T_STRSPLIT: "more:a/b,c,d/0 fewer:a///0 trail:a/b//0 empty:a//b none://0 lead:/a resttrail:a/b,c, trunc:ab/d/4 trunc2:ab/cd/4 space:a//b str:[a]/[b]/[] self:p/q two:a/b",
+  // REPLACE: POSIX leftmost-longest, empty regex matches replaced, SECTION,
+  // $0 literal without REGEX, c pattern and WITH lose trailing blanks, a c
+  // target cut is sy-subrc 2. The pair: a JS RegExp is leftmost-first, so
+  // a|aX in aXbX takes a where A4H and Go take aX (longest:-bX); the JS
+  // backend refuses nothing here and is wrong there, as FindStmt already is
+  ZCL_GOGEN_T_STRREPL: {
+    Go: "first:aXYcabc/0 miss:aXYcabc/4 rxall:a--a--/0 rxempty:-a-b-c-/0 rxstar:-a--c- groups:baabbaab longest:-bX rxmiss:4 sect:abca-c/0 sectoff:abca-ca-c sectlen:a-cabc dollar:a$0c cwith:ab ctrail:[a X] cten:a -/0 ctrunc:aXYZ/2 icase:---",
+    JS: "first:aXYcabc/0 miss:aXYcabc/4 rxall:a--a--/0 rxempty:-a-b-c-/0 rxstar:-a--c- groups:baabbaab longest:-XbX rxmiss:4 sect:abca-c/0 sectoff:abca-ca-c sectlen:a-cabc dollar:a$0c cwith:ab ctrail:[a X] cten:a -/0 ctrunc:aXYZ/2 icase:---",
+  },
+  // repeat( ) replace( ): A4H's run, except its last line had sub = ' ',
+  // which is empty there and raised CX_SY_STRG_PAR_VAL (see STREDGE); the
+  // copy asks sub = 'b' with = '_ ' (A4H: a c WITH loses its blank too)
+  ZCL_GOGEN_T_STRFN: "rep:ababab/[]/[  ]/[] r1:a-cabc r0:a-ca-c r2:abca-cabc rm1:abcabca-c r5:abcabc rq:a''b'' rx:a--a-- rxe:-a-b-c- rxg:baba rc:[a _]",
+  // condense( ) shift_left( ) shift_right( ): del strips first, then runs of
+  // from become the first character of to
+  ZCL_GOGEN_T_STRCOND: "c:[a b] cd:[a-b-] cdel:[ a b ] cfrom:[a  b] cto:[ab] cc:[a b] cto2:[axb] cdel2:[x] sl:cde/[ab ]/x/bca sr:abc/[ ab]/x/cab slc:[ab]/[ab]//abc",
+  // MOVE-CORRESPONDING: by name, converted, the rest and sy-subrc untouched.
+  // A4H set sy-subrc = 7 before it and answered .../7; the subset refuses an
+  // assignment to sy-subrc, so the copy sets 4 with a FIND that fails
+  ZCL_GOGEN_T_STRMOVE: "[lon]/[42 ]/[AB]/keep/12/4",
+  // to_mixed( ), c targets of REPLACE (searched with their blanks), regex
+  // replacement text, ^ and $ per line, empty matches, SPLIT with c
+  // separators (their blanks count), and what raises. A4H caught cx_root
+  // and printed the class; the copy catches that class by name
+  ZCL_GOGEN_T_STREDGE: "n1 m:HelloWorld/_a_b_/AbCd/abCd/ab_cdEf/a12bC lc:helloWorld cblank:[xxb]/0 cfull:[xxxb]/0 crx:[a-]/0 cdel:[a]/0 crx2:[-]/0 cfield:[ab--------]/0"
+    + " n2 esc:$1[a]b amp:a..b find:0 repl:-a#-b dollar:a-#b- bb:- empty:[-]/0 firstempty:-abc/0 rxicase:a-a"
+    + " n4 csep:[]/[b] c2sep:[a]/[b]/[] csrc:[a]/[b]/[] ctab:2 etab:1 stab:2 cvar:[ab x cd]/[] splitempty:abc//0"
+    + " replfirstempty:-abc/0 repneg:CX_SY_STRG_PAR_VAL replfnempty:CX_SY_STRG_PAR_VAL"
+    + " shiftneg:CX_SY_RANGE_OUT_OF_BOUNDS shiftbig:CX_SY_RANGE_OUT_OF_BOUNDS r:CX_SY_RANGE_OUT_OF_BOUNDS src5:CX_SY_RANGE_OUT_OF_BOUNDS slc3:abc"
+    + " slc4:CX_SY_RANGE_OUT_OF_BOUNDS sectbig:CX_SY_RANGE_OUT_OF_BOUNDS sectok:a-c/0 sectlong:CX_SY_RANGE_OUT_OF_BOUNDS",
+  // REPLACE ALL OCCURRENCES OF an empty pattern (here ' ', a c blank, which
+  // is empty) raises CX_SY_REPLACE_INFINITE_LOOP on A4H, where CATCH cx_root
+  // takes it; open-abap-core has no such class, so no CATCH can name it here
+  // and the copy lets it go (ANORMALIES 2026-09-23-replace-infinite-loop)
+  ZCL_GOGEN_T_STRLOOP: {Go: "ERROR CX_SY_REPLACE_INFINITE_LOOP in REPLACE ALL OCCURRENCES OF '' at zcl_gogen_t_strloop.clas.abap:10",
+    JS: "ERROR CX_SY_REPLACE_INFINITE_LOOP in REPLACE ALL OCCURRENCES OF ''"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
