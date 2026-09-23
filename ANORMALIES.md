@@ -1208,3 +1208,27 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: **needs an issue** in abaplint (the check should skip the parameter validation when the type is dynamic)
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_INH (the A4H-only line `abl:` is left out of the local copy until abaplint accepts it)
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-string-statements — SPLIT, REPLACE and the string functions differ from A4H in eight places
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, open-abap-core as cloned under `.local/lars/`
+- Affected ABAP statement, runtime API or adapter: `SPLIT ... INTO f1 f2`, `REPLACE ... IN SECTION`, `REPLACE ... WITH` a regex replacement, `REPLACE` into a c field, `REPLACE ALL OCCURRENCES OF ''`, `repeat( )`, `replace( occ = )`, `shift_right( )`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_str{split,repl,fn,cond,loop}.clas.abap`, each a static `RUN` returning a string; the same code ran on A4H as ABAP Unit probes in `$ZOSG_TMP_0130` (deleted after)
+- Exact command used to run it: the testdata classes through `new Transpiler({unknownTypes: "runtimeError"}).runRaw(files)` and the generated `init.mjs`, `RUN` called per class (the harness of `tools/gogen/run.mjs`, without open-abap-core)
+- Expected SAP behaviour (A4H, 2026-09-23), against actual open-abap behaviour:
+  1. `SPLIT` into a c field too short for its piece cuts it and sets sy-subrc 4; open-abap cuts and sets 0 (`trunc:ab/d/4` against `trunc:ab/d/0`).
+  2. `REPLACE ... IN SECTION OFFSET o LENGTH l OF s` replaces only inside the section; open-abap ignores the section and replaces in the whole string (`sect:abca-c` against `sect:a-ca-c`).
+  3. In a regex replacement `$0` is the whole match; open-abap passes the text to JavaScript's `String.replace`, which has no `$0` (`groups:baabbaab` against `groups:ba$0ba$0`).
+  4. `REPLACE` into a c field whose result is longer than the field cuts it and sets sy-subrc 2 (a cut of trailing blanks only is 0); open-abap sets 0 (`ctrunc:aXYZ/2` against `aXYZ/0`).
+  5. `REPLACE ALL OCCURRENCES OF ''` (also `OF ' '`, a c blank being empty) raises `CX_SY_REPLACE_INFINITE_LOOP`, which `CATCH cx_root` takes; open-abap throws a plain JavaScript `Error("REPLACE, zero length input")`, and open-abap-core has no class `CX_SY_REPLACE_INFINITE_LOOP`, so abaplint refuses a `CATCH` that names it.
+  6. `repeat( val = ' ' occ = 3 )` is empty, because a c argument loses its trailing blanks; open-abap gives three blanks.
+  7. `replace( ... occ = 2 )` replaces the second occurrence and `occ = -1` the last; open-abap replaces nothing for either (`r2:abca-cabc rm1:abcabca-c` against `abcabcabc` twice).
+  8. `shift_right( )` is implemented; open-abap raises `Error("shift_right todo")`.
+  Not counted here: `a|aX` in `aXbX` takes `aX` on A4H (POSIX, leftmost-longest) and `a` in JavaScript's `RegExp` (leftmost-first). That is the regex engine, shared by the open-abap runtime and by gogen's JS backend, noted in `tools/gogen/semantics.mjs`, and not an open-abap anomaly.
+- Impact on open-steamgate: the SEGW generator and the gateway call `replace( ... occ = 0 )`, `repeat( )` and two-target `SPLIT` on string targets, where the two runtimes agree; nothing on the served path is known to hit the eight differences. The Go backend (`tools/gogen`) follows A4H in all eight; for item 5 its front end holds the superclass A4H gives the class (`CX_DYNAMIC_CHECK`), so `CATCH cx_dynamic_check` and `CATCH cx_root` take it there too (`ZCL_GOGEN_T_STRLOOP`).
+- Smallest safe workaround: none needed on the served path; do not rely on `IN SECTION`, `occ` other than 0 or 1, or `$0` in code that also runs on open-abap
+- Upstream issue: **needs an issue** in `abaplint/transpiler` (the runtime items) and one in `open-abap-core` (the missing class); not sent, the critic pass the upstream rule asks for comes first
+- Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE, _STRLINES)
+- Upstream version containing a fix: `unknown`

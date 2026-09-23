@@ -261,6 +261,13 @@ function stmt(st, ctx, d) {
         `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)});`];
+    case "split_into": return [`${t}{`, `${t}  const spl = abap.SplitInto(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length});`,
+      `${t}  s.sy.subrc = abap.SplitSubrc(spl, [${st.lens.join(", ")}]);`,
+      ...st.targets.map((x) => `${t}  ${place(x.target, ctx)} = ${expr(x.value, ctx)};`), `${t}}`];
+    case "replace": {
+      const p = place(st.target, ctx);
+      return [`${t}{ const r = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
+    }
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
@@ -279,10 +286,6 @@ function stmt(st, ctx, d) {
       if (!st.unique) return [`${t}${tb}.push(${moved(st.value, ctx)}); s.sy.subrc = 0;`];
       return [`${t}{`, `${t}  const ${v} = ${moved(st.value, ctx)};`,
         `${t}  if (${st.keys ? `${tb}.some((r) => ${st.keys.map((k) => `r.${ident(k)} === ${v}.${ident(k)}`).join(" && ")})` : `${tb}.includes(${v})`}) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
-    }
-    case "replace_all": {
-      const p = place(st.target, ctx);
-      return [`${t}{ const r = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
     }
     case "assert":
       return [`${t}if (!(${cond(st.cond, ctx)})) throw new abap.AbapError("ASSERTION_FAILED", ${JSON.stringify(st.text)});`];
@@ -384,6 +387,9 @@ function expr(e, ctx) {
     }
     case "const": return e.go;
     case "temp": return e.name;
+    case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
+    case "flag": return String(e.value);
+    case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
     case "sy": return `s.sy.${e.field.toLowerCase()}`;
     case "int": return String(e.value);
     case "float": return String(e.value);

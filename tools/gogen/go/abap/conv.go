@@ -382,15 +382,6 @@ func NotCompiled(method, reason string) ArithmeticError {
 	return ArithmeticError{"NOT_COMPILED", method + ": " + reason}
 }
 
-// ReplaceAll is REPLACE ALL OCCURRENCES OF in a string: sy-subrc 0 when
-// something was replaced, 4 when not.
-func ReplaceAll(v, of, with string) (string, int32) {
-	if of == "" || !strings.Contains(v, of) {
-		return v, 4
-	}
-	return strings.ReplaceAll(v, of, with), 0
-}
-
 // Contains is the unique-key check of a HASHED table keyed on the whole line.
 func Contains[T comparable](s []T, v T) bool {
 	for _, x := range s {
@@ -537,6 +528,10 @@ func Uccp(v string) int32 {
 func Split(v, sep string) []string {
 	if v == "" {
 		return []string{}
+	}
+	// an empty separator does not split (measured: abc is one row)
+	if sep == "" {
+		return []string{v}
 	}
 	parts := strings.Split(v, sep)
 	if strings.HasSuffix(v, sep) {
