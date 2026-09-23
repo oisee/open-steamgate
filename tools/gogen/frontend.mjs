@@ -1911,6 +1911,12 @@ function resolveStatic(owner, attr, ctx) {
     const a = findAttribute(ctx, attr);
     if (a) return a;
   }
+  // an alias of an interface for a constant of an interface it includes
+  // (IF_APC_WSP_EXTENSION=>CO_CONNECT_MODE_REJECT for
+  // IF_APC_WSP_EXTENSION_COMMON~CO_CONNECT_MODE_REJECT)
+  const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
+  const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
+  if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
   throw new Unsupported(`${owner}=>${attr}`);
 }
 
