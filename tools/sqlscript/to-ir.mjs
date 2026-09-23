@@ -585,7 +585,10 @@ export function toIr(tree, options = {}) {
     const words = (node.children ?? []);
     const name = String(words.find((c) => c.node === "identifier" || c.node === "quoted")?.value ?? "").toUpperCase();
     const sizes = words.filter((c) => c.node === "number").map((c) => Number(c.value));
-    if (/^(INT|INTEGER|BIGINT|SMALLINT|TINYINT)$/.test(name)) return T.int;
+    // SMALLINT and TINYINT carry a range the portable engines do not enforce
+    // on a CAST (DuckDB kept 40000); refused until measured, like INT1
+    if (/^(SMALLINT|TINYINT)$/.test(name)) throw new BindError(`the SQL type ${name} is not measured yet`, node);
+    if (/^(INT|INTEGER|BIGINT)$/.test(name)) return T.int;
     if (/^(N?VARCHAR|N?CHAR|ALPHANUM|SHORTTEXT)$/.test(name)) {
       if (sizes[0] === undefined) throw new BindError(`CAST to ${name} without a length`, node);
       return T.char(sizes[0]);

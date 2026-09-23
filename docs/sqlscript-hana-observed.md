@@ -463,3 +463,10 @@ output of a nested CALL is refused rather than passed on unchecked.
 A by-product: an AMDP method parameter declared `OPTIONAL` does not
 compile on A4H ("Use DEFAULT instead of OPTIONAL for the optional
 parameter"). Only `DEFAULT` makes an AMDP input optional.
+
+Refused by name until measured, around INT2: a CAST or DECLARE to
+SMALLINT or TINYINT; INT1 on every path (unsigned 0..255 in ABAP); a
+UNION of an INT2 and an INTEGER column (HANA unifies them; the IR does not
+yet); an INTEGER assigned to an INT2 scalar. An INT2 column of a table
+input is range-checked at the bind with one query; across a nested CALL,
+INT2 inputs and outputs are refused.

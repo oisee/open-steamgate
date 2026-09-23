@@ -63,10 +63,10 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     const source = readFileSync(new URL("../src/amdp/zcl_osd_amdp_demo.clas.abap", import.meta.url), "utf8");
     const extracted = extract(source, "zcl_osd_amdp_demo.clas.abap");
     const method = extracted.methods.find((one) => one.name.toUpperCase() === "SQUARES");
-    for (const declaration of ["SMALLINT", "NVARCHAR(1)", "DECIMAL(3,1)"]) {
+    for (const [declaration, message] of [["SMALLINT", /the SQL type SMALLINT is not measured yet/], ["TINYINT", /the SQL type TINYINT is not measured yet/],
+      ["NVARCHAR(1)", /DECLARE supports only INTEGER/], ["DECIMAL(3,1)", /DECLARE supports only INTEGER/]]) {
       const body = method.body.replace("DECLARE lv_i INTEGER", `DECLARE lv_i ${declaration}`);
-      expect(() => compileProcedure({...method, body}, extracted.types), declaration)
-        .to.throw(UnsupportedSqlScript, /DECLARE supports only INTEGER/);
+      expect(() => compileProcedure({...method, body}, extracted.types), declaration).to.throw(message);
     }
   });
 

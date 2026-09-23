@@ -426,6 +426,37 @@ for (const {dialect, make} of ENGINES) describe(`INT2 as measured on A4H, as pro
     }
   });
 
+  it("INT2 arithmetic is INTEGER's in the IR: a sum of INT2 inputs assigns to an INTEGER scalar and is not capped", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 RETURNING VALUE(rv) TYPE i", "rv = :iv + :iv;");
+    expect((await runProcedure(prog, {inputs: {IV: 32767}})).value).to.equal(65534);
+  });
+
+  it("an omitted INT2 DEFAULT takes its literal, and a DEFAULT outside the range is not a value it can hold", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE int2 DEFAULT 5 EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv as n from src;");
+    expect((await run(prog)).rows.map((r) => Number(r.N))).to.deep.equal([5]);
+    const wide = program("IMPORTING VALUE(iv) TYPE int2 DEFAULT 40000 EXPORTING VALUE(et) TYPE tt_small",
+      "et = select :iv as n from src;");
+    let caught;
+    try { await run(wide); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Int2OutOfRange);
+  });
+
+  it("INT1 is refused by name on every path until measured: a data element, a CDS built-in, a signature scalar", async () => {
+    const {scalarTypeOf, irTypeOfDdic} = await import("../tools/sqlscript/scalar-types.mjs");
+    expect(() => irTypeOfDdic({DATATYPE: "INT1", LENG: 3}, "ZDE_BYTE")).to.throw(/ZDE_BYTE: INT1 is not measured yet/);
+    expect(() => scalarTypeOf("abap.int1")).to.throw(/INT1 is not measured yet/);
+    expect(() => scalarTypeOf("zde_byte", () => ({DATATYPE: "INT1", LENG: 3, DECIMALS: 0}))).to.throw(/INT1 is not measured yet/);
+    expect(() => program("IMPORTING VALUE(iv) TYPE int1 EXPORTING VALUE(et) TYPE tt_small", "et = select 1 as n from src;")).to.throw();
+  });
+
+  it("a CAST to SMALLINT or TINYINT is refused until measured", () => {
+    for (const name of ["smallint", "tinyint"]) {
+      expect(() => program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(et) TYPE tt_small",
+        `et = select cast(:iv as ${name}) as n from src;`)).to.throw(new RegExp(`the SQL type ${name.toUpperCase()} is not measured yet`));
+    }
+  });
+
   it("an INT2 input outside the range is refused, as an ABAP int2 can never carry one", async () => {
     const prog = program("IMPORTING VALUE(iv) TYPE int2 EXPORTING VALUE(et) TYPE tt_wide",
       "et = select :iv as v from src;");

@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf, col, cast, project} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -462,6 +462,26 @@ export async function runProcedure(program, {
     if (JSON.stringify(actual) !== expectedShape) {
       throw new UnsupportedSqlScript(`relation input ${name} schema does not match its AMDP signature`);
     }
+    // INT2 columns of a table input: an ABAP caller cannot hand over a value
+    // outside -32768..32767, so one that does came from a JavaScript caller
+    // and is refused at the bind, as the scalar input is (foreman-dell)
+    const int2Inputs = Object.entries(parameter.schema).filter(([, type]) => isInt2(type)).map(([column]) => column);
+    if (int2Inputs.length > 0) {
+      if (closedRelationInputs || client?.native === undefined) {
+        throw new UnsupportedSqlScript(`relation input ${name} has INT2 columns (${int2Inputs.join(", ")}); their range check needs the database and is not carried across a CALL`);
+      }
+      const outside = int2Inputs.map((column) => bin("OR",
+        bin("<", col(column, T.int2), lit(-32768, T.int), T.bool),
+        bin(">", col(column, T.int2), lit(32767, T.int), T.bool), T.bool))
+        .reduce((a, b) => bin("OR", a, b, T.bool));
+      let probe;
+      try { probe = lower(limit(filter(value, outside), 1), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+      catch (error) { throw new UnsupportedSqlScript(`cannot check INT2 columns of relation input ${name}: ${error.message}`); }
+      const found = await client.native({...probe, expect: "rows"});
+      if (found.rows.length > 0) {
+        throw new Int2OutOfRange(`relation input ${name}: a row is outside INT2 (-32768..32767) in ${int2Inputs.join(", ")}; an ABAP int2 table cannot carry it`);
+      }
+    }
     relations.set(name, value);
   }
   let steps = 0;
@@ -555,7 +575,9 @@ export async function runProcedure(program, {
     if (scalar === undefined || !assignedScalars.has(program.output)) {
       throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
     }
-    if (isInt2(program.outputType) && scalar.value !== null) inInt2Range(scalar.value, `output ${program.output}`);
+    // no range check here: a scalar INT2 output can only be assigned an INT2
+    // value (an INTEGER into it is refused as not an identical measured type),
+    // so it is always in range; the INT2 scalar boundary itself is unmeasured
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
       trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
   }
