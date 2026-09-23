@@ -24,9 +24,30 @@ console.log(`front end: ${program.classes.length} classes, ${program.partial.len
 const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+// the database: the transpiler's CREATE TABLEs for this registry and the rows
+// test/seed.mjs gives the Node side, so both hosts start from the same data
+const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
+const setup = new DatabaseSetup(program.reg).run();
+process.env.OSD_ROOT ??= home;
+const {seedStatements} = await import(`${home}/test/seed.mjs`);
+const seed = seedStatements();
+// rows of a table this program has no definition for (a pack's) are left
+// out, and said so
+const created = new Set(setup.schemas.sqlite.map((x) => /^CREATE\s+(?:TABLE|VIEW)\s+['"]?([\w\/]+)/i.exec(x)?.[1]?.toLowerCase()).filter(Boolean));
+const inserts = [...setup.insert, ...(Array.isArray(seed) ? seed : [seed])].filter((x) => String(x).trim() !== "");
+const skipped = new Map();
+const kept = inserts.filter((x) => {
+  const t = /^INSERT\s+INTO\s+['"]?([\w\/]+)/i.exec(x)?.[1]?.toLowerCase();
+  if (t === undefined || created.has(t)) return true;
+  skipped.set(t, (skipped.get(t) ?? 0) + 1);
+  return false;
+});
+writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...setup.schemas.sqlite, ...kept]));
+console.log(`database: ${created.size} tables and views, ${kept.length} inserts${skipped.size ? `; left out, no table in this program: ${[...skipped].map(([t, n]) => `${t} (${n})`).join(", ")}` : ""}`);
 writeFileSync(join(dir, "main.go"), `package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -62,6 +83,9 @@ func abapStack(r any) string {
 	return strings.Join(out, " <- ")
 }
 
+//go:embed zz_db.json
+var dbScript []byte
+
 func main() {
 	s := &abap.Session{}
 	defer func() {
@@ -71,6 +95,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+	if err := abap.OpenDB(dbScript); err != nil {
+		fmt.Println("DATABASE", err)
+		os.Exit(1)
+	}
 	ZCL_STG_SEGW_REGISTRY_REGISTER(s)
 	// what the ICF handler does before dispatch: ~path without the query,
 	// the query as form fields, decoded; the host as the outside sees it
