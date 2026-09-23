@@ -71,4 +71,46 @@ ENDCLASS.\n`);
       rmSync(root, {recursive: true, force: true});
     }
   });
+
+  describe("the store's entity look-up stays a read, and follows writes", () => {
+    let root, store, ObjectStore;
+    const ddls = (entity) => `define table function ${entity} returns { k : abap.int4; } implemented by method cl_x=>m;\n`;
+    beforeEach(async () => {
+      ({ObjectStore} = await import("../tools/osd-store.mjs"));
+      root = mkdtempSync(join(tmpdir(), "osd-store-entity-"));
+      mkdirSync(join(root, "src"), {recursive: true});
+      writeFileSync(join(root, "src", "z_src.ddls.asddls"), ddls("Z_OLD"));
+      store = new ObjectStore({root, roots: [{path: "src", package: "$ENTITY", writable: true}], libs: []});
+    });
+    afterEach(async () => {
+      const {rmSync} = await import("node:fs");
+      rmSync(root, {recursive: true, force: true});
+    });
+
+    it("follows a rewrite of the source to its new entity", () => {
+      expect(store.read("DDLS", "Z_OLD").source).to.contain("Z_OLD");
+      store.write("DDLS", "Z_SRC", ddls("Z_NEW"));
+      expect(store.read("DDLS", "Z_NEW").source).to.contain("Z_NEW");
+      expect(() => store.read("DDLS", "Z_OLD")).to.throw(/does not exist/);
+    });
+
+    it("forgets the entity of a deleted source", () => {
+      expect(store.read("DDLS", "Z_OLD").source).to.contain("Z_OLD");
+      store.delete("DDLS", "Z_SRC");
+      expect(() => store.read("DDLS", "Z_OLD")).to.throw(/does not exist/);
+    });
+
+    it("never resolves a write target by entity: a write to the entity name is a new object", () => {
+      store.write("DDLS", "Z_OLD", ddls("Z_OTHER"));
+      expect(readFileSync(join(root, "src", "z_src.ddls.asddls"), "utf8")).to.contain("Z_OLD");
+      expect(store.read("DDLS", "Z_SRC").source).to.contain("Z_OLD");
+    });
+
+    it("takes neither of two sources defining one entity", () => {
+      writeFileSync(join(root, "src", "z_two.ddls.asddls"), ddls("Z_OLD"));
+      const fresh = new ObjectStore({root, roots: [{path: "src", package: "$ENTITY", writable: true}], libs: []});
+      expect(() => fresh.read("DDLS", "Z_OLD")).to.throw(/does not exist/);
+      expect(fresh.read("DDLS", "Z_TWO").source).to.contain("Z_OLD");
+    });
+  });
 });

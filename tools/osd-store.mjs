@@ -494,10 +494,6 @@ export class ObjectStore {
       const program = this.#entries().get(`PROG ${key}`);
       return program === undefined ? undefined : {...program, type: "INCL"};
     }
-    // a DDLS by the entity it defines, when that is not its object name
-    if (type === "DDLS") {
-      return this.#ddlsEntities().get(key);
-    }
     if (type === "STRU") {
       const table = this.#entries().get(`TABL ${key}`);
       if (table === undefined) {
@@ -540,7 +536,12 @@ export class ObjectStore {
   }
 
   read(type, name, include = "main") {
-    const entry = this.find(type, name);
+    // a DDLS may be read by the entity it defines, when that is not its
+    // object name (FOR TABLE FUNCTION names the entity). Only a read: a
+    // write or a delete resolves its target by object name, never by entity,
+    // or it would land in another object's file (foreman-dell, 2026-09-23)
+    const entry = this.find(type, name)
+      ?? (String(type).toUpperCase() === "DDLS" ? this.#ddlsEntities().get(String(name).toUpperCase()) : undefined);
     if (entry === undefined) {
       throw new NotFound(type, name);
     }
@@ -951,6 +952,7 @@ export class ObjectStore {
 
   // a write means the parse is stale, here and for anyone sharing this tree
   #forget() {
+    this.ddlsEntityIndex = undefined;
     this.parsed = undefined;
     PARSED.delete(this.root);
   }
