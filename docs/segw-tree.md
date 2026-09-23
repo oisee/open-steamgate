@@ -32,9 +32,9 @@ every `*.iwpr.xml` under the folders and records, per table,
 
 Sources: the 21 SEGW projects available locally (untracked, `.local/`): the
 eight public abapGit repositories of the closure corpus, the SAP sample
-projects exported from A4H (`/IWBEP/GWSAMPLE_BASIC`, `EPM_DEVELOPER_SCENARIO`,
-`MGW_ERROR_LOG`, `SADL_GW_DRAFT_ADMINISTRATION`, `S_EPM_CDS_EXP`,
-`S_EPM_SADL_GW_DEV_SCEN_TX`, `S_ESH_SEARCH_ODATA`, `UCONHTTP`) and one project
+projects exported from A4H ([`/IWBEP/GWSAMPLE_BASIC`](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html), `EPM-RFC-SAMPLE`,
+`ERROR-LOG-SAMPLE`, `DRAFT-ADMIN-SAMPLE`, `EPM-CDS-SAMPLE`,
+`EPM-SADL-TX-SAMPLE`, `SEARCH-ODATA-SAMPLE`, `UCON-HTTP-SAMPLE-PROJECT`) and one project
 from the Lars clones. 53 tables, `src/segw/segw-tables.json`.
 
 The two hand-written fixtures under `test/fixtures/segw/` and stg-compile's

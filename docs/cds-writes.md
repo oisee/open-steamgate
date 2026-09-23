@@ -47,7 +47,7 @@ keeps the not-implemented answer and names the reason, for example
   `creatable` / `updatable` / `deletable` from the same annotations, the key
   property is not updatable, and segw-gen writes the SADL definition with
   `maxEditMode="EX"` instead of `"RO"` when the tree marks the set writable.
-  The oracle for that rule is `S_EPM_CDS_EXP`: CDS data sources, its tree
+  The oracle for that rule is `EPM-CDS-SAMPLE`: CDS data sources, its tree
   marks `EmployeeSet` and `LeaveRequestSet` creatable, and its DPC writes
   `EX` for exactly those two; every read-only project in the corpus writes
   `RO`. The definition of the service is the contract the exposure follows,

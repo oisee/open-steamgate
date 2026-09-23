@@ -786,7 +786,7 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
         ls_sadl-sadl_type  = ls_set-sadl_type.
         ls_sadl-binding    = ls_set-sadl_binding.
 * maxEditMode follows what the tree says the set allows: EX where it is
-* creatable, updatable or deletable, RO otherwise (S_EPM_CDS_EXP writes EX
+* creatable, updatable or deletable, RO otherwise (EPM-CDS-SAMPLE writes EX
 * for its two writable sets, every read-only project in the corpus writes RO)
         IF ls_set-creatable = abap_true OR ls_set-updatable = abap_true OR ls_set-deletable = abap_true.
           ls_sadl-edit_mode = 'EX'.

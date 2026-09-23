@@ -278,7 +278,7 @@ Precondition: **Alice says go.** Nothing here runs unasked.
    (by hand, or through the vsp sibling). One request, `ZSTG_RAP`.
 3. **`system git_export` on `ZSTG_RAP`** → lands under `.local/corpus-sap/` as
    `ZSTG_RAP/` plus `ZSTG_RAP_<YYYYMMDD>_<HHMMSS>.zip`, matching the existing
-   exports (e.g. `.local/corpus-sap/S_EPM_GATEWAY_20260912_192941.zip`).
+   exports (e.g. `.local/corpus-sap/<EPM-FG-PACKAGE>_<timestamp>.zip`).
 4. **If `/DMO/` is installed, `system git_export` on `/DMO/FLIGHT`** (and
    `/DMO/FLIGHT_UNMANAGED`, `/DMO/FLIGHT_REUSE`, `/DMO/FLIGHT_LEGACY`) →
    `.local/corpus-sap/DMO_FLIGHT/`. SAP-authored 1909 BDEFs and behavior pools

@@ -620,7 +620,7 @@ the generator, the editor is the file.
    CDS and EPM objects joins DDIC; complex types over DDIC structures,
    `set_action_for`, complex return types, `set_semantic`, `set_as_etag`,
    the real nullable flag, decimal digits/scale, entity-set flags read the
-   way the tree means them. `/IWBEP/GWSAMPLE_BASIC` DPC now comes out
+   way the tree means them. [`/IWBEP/GWSAMPLE_BASIC`](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html) DPC now comes out
    line-identical; the RFC DPCs differ by release drift only (2012 key
    loops vs 2013 converted keys). Redefine and annotation-model projects
    are recognised and skipped. Corpus (third-party) still identical.
