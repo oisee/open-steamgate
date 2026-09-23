@@ -2056,7 +2056,14 @@ function sourceOperand(n, ctx, hint) {
     const int = n.findDirectExpression(Expressions.Integer);
     if (int !== undefined) {
       const value = Number(int.concatTokens());
-      if (!Number.isSafeInteger(value) || Math.abs(value) > 2147483647) throw new Unsupported(`integer literal ${value}`);
+      // a number literal past the range of i is a p literal in ABAP (31
+      // digits at most), held as its digits like every p value
+      if (Math.abs(value) > 2147483647) {
+        const digits = int.concatTokens().replace(/^\+/, "").replace(/^(-?)0+(?=\d)/, "$1");
+        if (!/^-?\d{1,31}$/.test(digits)) throw new Unsupported(`integer literal ${int.concatTokens()}`);
+        return {e: "str", value: digits, type: P31};
+      }
+      if (!Number.isSafeInteger(value)) throw new Unsupported(`integer literal ${value}`);
       return {e: "int", value, type: I};
     }
     const text = n.concatTokens();

@@ -23,5 +23,7 @@ CLASS zcl_gogen_t_packed IMPLEMENTATION.
     ENDTRY.
     lv_small = 999.
     rv = rv && | max:{ lv_small }|.
+    lv_neg = 20260912000000.
+    rv = rv && | lit:{ lv_neg }|.
   ENDMETHOD.
 ENDCLASS.

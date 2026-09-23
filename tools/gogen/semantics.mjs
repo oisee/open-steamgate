@@ -265,7 +265,7 @@ const EXPECT = {
   // ANORMALIES epoch-ms-overflow: the i operands do not overflow when the
   // target is p); a move that does not fit is a conversion overflow (ABAP
   // documentation)
-  ZCL_GOGEN_T_PACKED: "ms:1728003600000 neg:-16400 small:conv max:999",
+  ZCL_GOGEN_T_PACKED: "ms:1728003600000 neg:-16400 small:conv max:999 lit:20260912000000",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
