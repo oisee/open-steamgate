@@ -10,7 +10,7 @@
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
-import {ident, funcName, referencedClasses} from "./emit-go.mjs";
+import {ident, funcName, referencedClasses, hexBytes} from "./emit-go.mjs";
 
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
@@ -18,6 +18,7 @@ const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace
 function literal(c) {
   if (c.type.k === "i" || c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "int8") return `${BigInt(c.value)}n`;
+  if (c.type.k === "x" || c.type.k === "xstring") return JSON.stringify(String.fromCharCode(...hexBytes(c.value, c.type.len)));
   return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
 }
 

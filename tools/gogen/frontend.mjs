@@ -146,17 +146,31 @@ function typeOf(t, where, program) {
     const q = t.getQualifiedName();
     // a type declared in a class or a method has no owner in its name: two
     // classes may both have a ty_face, with other fields, so the class names it
-    const local = !q || !q.includes("=>");
+    // a DDIC structure (a TABL of the dictionary, e.g. IHTTPNVP) is global:
+    // one Go type for every class that uses it, or two classes cannot pass it
+    // a structure is the class's own only when the class declares a type of
+    // that name; a DDIC table or a type-pool type is global, one Go type
+    // for every class that uses it, or two classes cannot pass it
+    const local = !q || (!q.includes("=>") && (program.currentTypes?.has(upper(q)) ?? true));
     let go = q ? goName(q) : `S_${comps.map((c) => c.name).join("_").slice(0, 40).toUpperCase()}`;
     if (local && program.currentClass) go = `${program.currentClass}__${go}`;
     const shape = comps.map((c) => upper(c.name)).join(",");
     for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
       go = `${go.replace(/_V\d+$/, "")}_V${n}`;
     }
+    if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
     if (!program.structs.has(go)) {
       const st = {k: "struct", go, fields: [], shape};
       program.structs.set(go, st); // before the fields: a struct may nest itself through a table
-      st.fields = comps.map((c) => ({name: upper(c.name), type: typeOf(c.type, `${where}-${c.name}`, program)}));
+      try {
+        st.fields = comps.map((c) => ({name: upper(c.name), type: typeOf(c.type, `${where}-${c.name}`, program)}));
+      } catch (e) {
+        // a field outside the subset: the structure is not in the program,
+        // and every later use of it is refused with the same reason
+        program.structs.delete(go);
+        (program.badStructs ??= new Map()).set(go, e.message);
+        throw e;
+      }
     }
     return {k: "struct", go};
   }
@@ -184,6 +198,9 @@ function classIr(ctx0, obj) {
   const {reg, program} = ctx0;
   program.currentClass = goName(obj.getName());
   const file = obj.getMainABAPFile();
+  // the type names this class declares itself (class and method TYPES)
+  program.currentTypes = new Set([...file.getRaw().matchAll(/\bTYPES\s*:?\s*(?:BEGIN\s+OF\s+)?([\w\/]+)/gi)].map((m) => upper(m[1])));
+  for (const m of file.getRaw().matchAll(/,\s*(?:BEGIN\s+OF\s+)?([\w\/]+)\s+TYPE\b/gi)) program.currentTypes.add(upper(m[1]));
   const def = obj.getDefinition();
   const spaghetti = new abaplint.SyntaxLogic(reg, obj).run().spaghetti;
   const tree = new Rearranger().run("CLAS", file.getStructure());
@@ -290,7 +307,7 @@ function classIr(ctx0, obj) {
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
-        if (known.has(vname)) continue;
+        if (known.has(vname) || vname === "ME" || vname === "SUPER") continue;
         const t = typeOf(id.getType(), `${className}=>${name} ${vname}`, program);
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
@@ -393,6 +410,7 @@ function registerConst(program, name, id, className) {
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
   let value = id.getValue?.();
   if (typeof value !== "string" && typeof value !== "number") return undefined; // structured constants: not yet
+  if (!["i", "int8", "f", "c", "string", "x", "xstring"].includes(type.k)) return undefined;
   // a quote inside a literal is written twice: '#''"' is #'" (the Zork
   // alphabet shifted by one character after it until this was read right)
   value = String(value);
@@ -759,6 +777,7 @@ function variable(name, ctx) {
 }
 
 function findAttribute(ctx, n) {
+  if (n === "ME" || n === "SUPER") return undefined;
   // instance and static attributes are declared in the class definition's
   // scope, constants and interface constants show in the implementation's
   const impl = findScope(ctx.spaghetti.getTop(), "class_implementation");
@@ -784,6 +803,11 @@ function lvalue(target, ctx) {
   if (isExpr(first, Expressions.InlineData)) {
     place = variable(first.findFirstExpression(Expressions.TargetField).concatTokens(), ctx);
     i = 1;
+  } else if (upper(first.concatTokens()) === "ME" && isTok(kids[1], "->")) {
+    const a = findAttribute(ctx, upper(kids[2].concatTokens()));
+    if (a === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
+    place = a;
+    i = 3;
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
     i = 1;
@@ -1006,6 +1030,10 @@ function fieldChain(n, ctx) {
     const owner = upper(kids[0].concatTokens());
     const attr = upper(kids[2].concatTokens());
     place = resolveStatic(owner, attr, ctx);
+    i = 3;
+  } else if ((isTok(kids[0], "ME") || upper(kids[0].concatTokens()) === "ME") && isTok(kids[1], "->")) {
+    place = {e: "attr", name: upper(kids[2].concatTokens()), type: findAttribute(ctx, upper(kids[2].concatTokens()))?.type};
+    if (place.type === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
     i = 3;
   } else if (isExpr(kids[0], Expressions.SourceField) || isExpr(kids[0], Expressions.SourceFieldSymbol)) {
     place = variable(kids[0].concatTokens(), ctx);
@@ -1304,6 +1332,7 @@ const FUNCTIONS = {
 
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
+  if (/^super\s*->/i.test(chain.concatTokens())) throw new Unsupported(`SUPER-> call: inheritance is not compiled yet`);
   // x->get_text( ) of an exception caught INTO x
   if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     const v = kids[0].concatTokens();
@@ -1341,6 +1370,7 @@ function call(chain, ctx, statement, hint) {
   } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     receiver = isExpr(kids[0], Expressions.FieldChain) || isExpr(kids[0], Expressions.SourceField) ? fieldChain(kids[0], ctx) : null;
     if (receiver === null || receiver.type.k !== "ref") throw new Unsupported(`call through ${kids[0].concatTokens()}`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[2];
   } else {

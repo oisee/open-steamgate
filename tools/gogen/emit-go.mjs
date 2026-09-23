@@ -167,10 +167,20 @@ export function referencedClasses(program) {
   return seen;
 }
 
+/** the bytes of an x literal written as hex text, padded or cut to its length */
+export function hexBytes(text, len) {
+  const b = (String(text).match(/[0-9a-fA-F]{2}/g) ?? []).map((h) => parseInt(h, 16));
+  if (len === undefined) return b;
+  return b.length >= len ? b.slice(0, len) : [...b, ...new Array(len - b.length).fill(0)];
+}
+
 function constLiteral(c) {
-  if (c.type.k === "i" || c.type.k === "int8") return String(Number(c.value));
+  if (c.type.k === "i") return String(Number(c.value));
+  // int8: the digits as written, a JS number would round 9223372036854775807
+  if (c.type.k === "int8") return String(BigInt(String(c.value).trim()));
   if (c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
+  if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes(c.value, c.type.len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
   throw new Error(`constant of type ${c.type.k}`);
 }
 
@@ -184,14 +194,14 @@ function signature(cls, m, inInterface = false) {
 }
 
 function method(cls, m) {
-  const lines = [...(m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
+  const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (!m.static) lines.push("\t_ = me");
   for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} *${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
   lines.push("\treturn", "}");
-  if (m.pos) lines.push(RESET);
+  if (LINES && m.pos) lines.push(RESET);
   return lines;
 }
 
@@ -278,9 +288,11 @@ function withBuilders(body, ctx, t, emitLoop) {
  * (the RESET marker, replaced once the file is assembled).
  */
 const RESET = "\u0000reset-position";
+// GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
+const LINES = !process.env.GOGEN_NOLINE;
 function stmt(st, ctx, d) {
   const lines = stmtLines(st, ctx, d);
-  if (st.pos && lines.length > 0) lines[0] = lines[0].replace(/^(\t*)/, `$1/*line ${st.pos.file}:${st.pos.row}*/ `);
+  if (LINES && st.pos && lines.length > 0) lines[0] = lines[0].replace(/^(\t*)/, `$1/*line ${st.pos.file}:${st.pos.row}*/ `);
   return lines;
 }
 
@@ -586,7 +598,8 @@ function cond(c, ctx) {
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
-    case "initial": return `${expr(c.x, ctx)} == ${zero(c.x.type)}`;
+    // in parentheses: a composite literal right before the { of an if does not parse
+    case "initial": return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
