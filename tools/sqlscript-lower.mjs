@@ -44,7 +44,7 @@
 // approximating. Refusing is a feature: an engine that quietly returns a
 // different number is the failure this project has already paid for twice.
 
-const DIALECTS = {
+export const DIALECTS = {
   hana: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
     // HANA infers a bare `?` from its immediate context. In `? || ?` that

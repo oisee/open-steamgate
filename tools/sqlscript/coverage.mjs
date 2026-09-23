@@ -19,7 +19,9 @@ import {lex, LexError} from "./lexer.mjs";
 import {parse, ParseError} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
 import {toIr} from "./to-ir.mjs";
-import {lower} from "../sqlscript-lower.mjs";
+import {lower, DIALECTS} from "../sqlscript-lower.mjs";
+
+const DIALECT_NAMES = Object.keys(DIALECTS).sort();
 import * as extractor from "../amdp-extract.mjs";
 import {definitionsDisagree} from "../amdp-extract.mjs";
 import {FolderDdic, RELEASED_DDIC, existingFolders} from "./folder-ddic.mjs";
@@ -262,6 +264,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const wantedByPackage = new Map();
     let loweredByText = 0;
     let strictByText = 0;
+    const strictByDialect = Object.fromEntries(DIALECT_NAMES.map((one) => [one, 0]));
+    let strictEverywhere = 0;
     for (const {body, signature, catalogue, relationSchemas, absentUsings, pkg, signatureSource} of bodies) {
       let tokens = [];
       let tree;
@@ -298,9 +302,22 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
         // and how many lower only because a column nobody described became
         // STRING: the same body bound with every column required to be typed
         try {
-          lower(toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions, strictColumns: true}).rel, "duckdb");
+          const strictRel = toIr(tree, {catalogue, signature, resolveType, relationSchemas, tableFunctions, strictColumns: true}).rel;
+          lower(strictRel, "duckdb");
           loweredStrict += 1;
           if (signatureSource === "text") strictByText += 1;
+          // portable means one answer on every database we support, so the
+          // strict count is also taken per dialect and for all of them at once
+          let everywhere = true;
+          for (const dialect of DIALECT_NAMES) {
+            try {
+              lower(strictRel, dialect);
+              strictByDialect[dialect] += 1;
+            } catch {
+              everywhere = false;
+            }
+          }
+          if (everywhere) strictEverywhere += 1;
         } catch (error) {
           const why = String(error.message ?? error).replace(/: line.*/, "").slice(0, 60);
           strictOnly.set(why, (strictOnly.get(why) ?? 0) + 1);
@@ -331,6 +348,8 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
       loweredStrict,
       loweredByText,
       strictByText,
+      strictByDialect,
+      strictEverywhere,
       strictRefusals: [...strictOnly.entries()].sort((a, b) => b[1] - a[1]),
       wanted: [...wanted.entries()].sort((a, b) => b[1] - a[1]),
       wantsSeveral,
@@ -389,6 +408,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
     console.log(`  lowered  ${r.loweredStrict}  (${r.shareStrict}% -- on duckdb with every column typed: the only number worth quoting)`);
+    console.log(`           ${r.strictEverywhere} of them lower on every dialect (${DIALECT_NAMES.join(", ")}); per dialect: ${DIALECT_NAMES.map((one) => `${one} ${r.strictByDialect[one]}`).join(", ")}`);
     console.log(`           ${r.lowered} when a column nobody described may be STRING (${r.share}%), ${r.loweredHana} of those on hana`);
     if (r.strictByText > 0 || r.loweredByText > 0) console.log(`           of which on a signature read as text: ${r.strictByText} strict, ${r.loweredByText} lowered`);
     for (const [reason, count] of r.strictRefusals.slice(0, 6)) console.log(`  ${String(count).padStart(5)}  strict: ${reason}`);

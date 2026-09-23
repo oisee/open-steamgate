@@ -7,6 +7,7 @@
 // omitted by the caller was filled with the initial value.
 import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
+import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
@@ -28,11 +29,19 @@ const CATALOGUE = {SRC: {ID: {abap: "I"}, TXT: {abap: "C", len: 10}}};
 // a table input is a relation, never an array: the rows of SRC as the input
 const ROWS = scan("SRC");
 
-describe("slice (b) constructs, as procedures on DuckDB", function () {
+// Every portable dialect with an in-process client, not DuckDB alone: DuckDB
+// is the first engine we check, not the definition of "works" (Alice,
+// 2026-09-23). PostgreSQL joins where a server is configured.
+const ENGINES = [
+  {dialect: "duckdb", make: () => new DuckDBDatabaseClient({path: ":memory:"})},
+  {dialect: "sqlite", make: () => new FileSqliteClient({path: ":memory:"})},
+];
+
+for (const {dialect, make} of ENGINES) describe(`slice (b) constructs, as procedures on ${dialect}`, function () {
   this.timeout(30000);
   let client;
   beforeEach(async () => {
-    client = new DuckDBDatabaseClient({path: ":memory:"});
+    client = make();
     await client.connect();
     await client.native({sql: 'CREATE TABLE "SRC" ("ID" INTEGER, "TXT" VARCHAR)', expect: "none"});
     await client.native({sql: 'INSERT INTO "SRC" VALUES (1, \'one\'), (5, \'five\'), (20, \'twenty\')', expect: "none"});
@@ -43,7 +52,7 @@ describe("slice (b) constructs, as procedures on DuckDB", function () {
     const {methods, types} = extract(CLASS(signature, body), "cl_t.clas.abap");
     return compileProcedure(methods[0], types, {catalogue: CATALOGUE});
   };
-  const run = (prog, inputs = {}, relationInputs = {}) => runProcedure(prog, {client, dialect: "duckdb", inputs, relationInputs, inputCatalogue: CATALOGUE});
+  const run = (prog, inputs = {}, relationInputs = {}) => runProcedure(prog, {client, dialect, inputs, relationInputs, inputCatalogue: CATALOGUE});
 
   it("an omitted DEFAULT takes the literal, not the initial value: DEFAULT 10 answers the rows up to 10", async () => {
     const prog = program("IMPORTING VALUE(iv_limit) TYPE i DEFAULT 10 EXPORTING VALUE(et_rows) TYPE tt_rows",
