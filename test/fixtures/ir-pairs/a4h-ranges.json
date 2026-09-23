@@ -1,0 +1,2050 @@
+{
+ "source": "A4H (HANA), 2026-09-23, own throwaway table: MANDT, K CHAR8 key, N NUMC4, I INT4, C CHAR10; initial C stored as empty string",
+ "rows": [
+  {
+   "k": "K01",
+   "n": "0001",
+   "i": 1,
+   "c": "A"
+  },
+  {
+   "k": "K02",
+   "n": "0002",
+   "i": 2,
+   "c": "B"
+  },
+  {
+   "k": "K03",
+   "n": "0003",
+   "i": 3,
+   "c": "C"
+  },
+  {
+   "k": "K04",
+   "n": "0004",
+   "i": 4,
+   "c": "D"
+  },
+  {
+   "k": "K05",
+   "n": "0005",
+   "i": 5,
+   "c": "M"
+  },
+  {
+   "k": "K06",
+   "n": "0006",
+   "i": 6,
+   "c": "N"
+  },
+  {
+   "k": "K07",
+   "n": "0007",
+   "i": 7,
+   "c": "T"
+  },
+  {
+   "k": "K08",
+   "n": "0008",
+   "i": 8,
+   "c": "TA1*Z"
+  },
+  {
+   "k": "K09",
+   "n": "0009",
+   "i": 9,
+   "c": "T1*Z"
+  },
+  {
+   "k": "K10",
+   "n": "0010",
+   "i": 10,
+   "c": "TA1*"
+  },
+  {
+   "k": "K11",
+   "n": "0011",
+   "i": 11,
+   "c": "TA1XZ"
+  },
+  {
+   "k": "K12",
+   "n": "0012",
+   "i": 12,
+   "c": "TA1*ZZ"
+  },
+  {
+   "k": "K13",
+   "n": "0013",
+   "i": 13,
+   "c": "50%_off"
+  },
+  {
+   "k": "K14",
+   "n": "0014",
+   "i": 14,
+   "c": "50X_off"
+  },
+  {
+   "k": "K15",
+   "n": "0015",
+   "i": 15,
+   "c": "50%Xoff"
+  },
+  {
+   "k": "K16",
+   "n": "0016",
+   "i": 16,
+   "c": "50%_offer"
+  },
+  {
+   "k": "K17",
+   "n": "0017",
+   "i": -1,
+   "c": "A_1"
+  },
+  {
+   "k": "K18",
+   "n": "0018",
+   "i": 0,
+   "c": "A%1"
+  },
+  {
+   "k": "K19",
+   "n": "0019",
+   "i": 100,
+   "c": "A#1"
+  },
+  {
+   "k": "K20",
+   "n": "0020",
+   "i": -100,
+   "c": "A*1"
+  },
+  {
+   "k": "K21",
+   "n": "0021",
+   "i": 21,
+   "c": "A+1"
+  },
+  {
+   "k": "K22",
+   "n": "0022",
+   "i": 22,
+   "c": "AX1"
+  },
+  {
+   "k": "K23",
+   "n": "0023",
+   "i": 23,
+   "c": "a1"
+  },
+  {
+   "k": "K24",
+   "n": "0024",
+   "i": 24,
+   "c": "A1"
+  },
+  {
+   "k": "K25",
+   "n": "0025",
+   "i": 25,
+   "c": "X"
+  },
+  {
+   "k": "K26",
+   "n": "0026",
+   "i": 26,
+   "c": "XY"
+  },
+  {
+   "k": "K27",
+   "n": "0027",
+   "i": 27,
+   "c": "x1"
+  },
+  {
+   "k": "K28",
+   "n": "0028",
+   "i": 28,
+   "c": ""
+  },
+  {
+   "k": "K29",
+   "n": "0029",
+   "i": 29,
+   "c": "TX"
+  },
+  {
+   "k": "K30",
+   "n": "0000",
+   "i": 30,
+   "c": "A B"
+  },
+  {
+   "k": "K31",
+   "n": "0031",
+   "i": 31,
+   "c": "ABCDEFGHIJ"
+  }
+ ],
+ "cases": [
+  {
+   "name": "empty ranges: no restriction",
+   "column": "C",
+   "rows": [],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ, CHAR with trailing blanks",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "A    ",
+     "high": ""
+    }
+   ],
+   "lowLen": 45,
+   "matched": [
+    "K01"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ twice",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "B",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "E EQ only",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I BT and E EQ",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": "A",
+     "high": "M"
+    },
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "C",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K04",
+    "K05",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K24",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I NB",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NB",
+     "low": "B",
+     "high": "D"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I NE GT GE LT LE",
+   "column": "I",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NE",
+     "low": 1,
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "GT",
+     "low": 2,
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "GE",
+     "low": 3,
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "LT",
+     "low": 4,
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "LE",
+     "low": 5,
+     "high": ""
+    }
+   ],
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with * + and an escaped *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "T*1#*+",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K08",
+    "K09"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with a literal % and _",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "50%_off*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K13",
+    "K16"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with trailing blanks",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "T*   ",
+     "high": ""
+    }
+   ],
+   "lowLen": 45,
+   "matched": [
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K29"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "E NP",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "E",
+     "option": "NP",
+     "low": "X*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K25",
+    "K26"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I NE",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NE",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I GT",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "GT",
+     "low": "M",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K23",
+    "K25",
+    "K26",
+    "K27",
+    "K29"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I GE",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "GE",
+     "low": "M",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K23",
+    "K25",
+    "K26",
+    "K27",
+    "K29"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I LT",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "LT",
+     "low": "B",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K24",
+    "K28",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I LE",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "LE",
+     "low": "B",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K24",
+    "K28",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I LT '0' (initial sorts lowest)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "LT",
+     "low": "0",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I GE initial",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "GE",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I BT with LOW > HIGH",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": "M",
+     "high": "A"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP + E EQ",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A*",
+     "high": ""
+    },
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "A1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "E EQ twice (no I rows)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    },
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "B",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ value longer than the column",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "ABCDEFGHIJK",
+     "high": ""
+    }
+   ],
+   "lowLen": 45,
+   "error": "CX_SY_OPEN_SQL_DATA_ERROR"
+  },
+  {
+   "name": "I EQ value of exact column length (char45 range)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "ABCDEFGHIJ",
+     "high": ""
+    }
+   ],
+   "lowLen": 45,
+   "matched": [
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with * inside",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A*1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K24"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with + inside",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A+1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP #*",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A#*1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K20"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP #+",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A#+1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K21"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP ##",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A##1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K19"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP literal _",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A_1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K17"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP literal %",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A%1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K18"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP literal % then *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A%*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K18"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP without wildcard",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "T",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K07"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP trailing *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "T*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K29"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP leading *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "*A",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP case: lower pattern",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "a*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K23"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP case: upper pattern vs lower data",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A+",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K24"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP #A1 (# before an ordinary char)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "#A1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K24"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP #a1",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "#a1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K23"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP trailing lone #",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A#",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP embedded blank",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A +",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K30"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP + (single char)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "+",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K25",
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP ++",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "++",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K23",
+    "K24",
+    "K26",
+    "K27",
+    "K29"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP leading blank then *",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": " *",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP initial LOW",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP ' ' plus I CP '+ '",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": " ",
+     "high": ""
+    },
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "+ ",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K25",
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP 'TA1*+'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "TA1*+",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K08",
+    "K10",
+    "K11",
+    "K12"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I NP",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NP",
+     "low": "X*",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ with CP metachar (literal)",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "A*1",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K20"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ initial LOW",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ blank LOW",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": " ",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K28"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I NE initial LOW",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NE",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "E EQ initial LOW",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "E",
+     "option": "EQ",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "INT4 I BT",
+   "column": "I",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": -1,
+     "high": 5
+    }
+   ],
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K17",
+    "K18"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "INT4 I NB",
+   "column": "I",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NB",
+     "low": 1,
+     "high": 99
+    }
+   ],
+   "matched": [
+    "K17",
+    "K18",
+    "K19",
+    "K20"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "NUMC I BT via numc4 range",
+   "column": "N",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": "5",
+     "high": "10"
+    }
+   ],
+   "matched": [
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10"
+   ],
+   "subrc": 0,
+   "lowType": "numc4"
+  },
+  {
+   "name": "NUMC I BT via char4 range",
+   "column": "N",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": "5",
+     "high": "10"
+    }
+   ],
+   "matched": [
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10"
+   ],
+   "subrc": 0,
+   "lowType": "char4"
+  },
+  {
+   "name": "I BT with HIGH initial",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "BT",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I EQ with HIGH filled",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "A",
+     "high": "Z"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP with HIGH filled",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X*",
+     "high": "Z"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP 'X*' HIGH 'X*'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X*",
+     "high": "X*"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP 'X*' HIGH 'Y'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X*",
+     "high": "Y"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP 'XY' HIGH 'Z'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "XY",
+     "high": "Z"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP 'A*' HIGH '1'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "A*",
+     "high": "1"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I NP 'X*' HIGH 'Z'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "NP",
+     "low": "X*",
+     "high": "Z"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "K05",
+    "K06",
+    "K07",
+    "K08",
+    "K09",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20",
+    "K21",
+    "K22",
+    "K23",
+    "K24",
+    "K25",
+    "K26",
+    "K27",
+    "K28",
+    "K29",
+    "K30",
+    "K31"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP 'X' HIGH '*'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X",
+     "high": "*"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K25"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP 'T' HIGH '*'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "T",
+     "high": "*"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K07"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP 'X' HIGH '+'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X",
+     "high": "+"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "I CP 'X*' HIGH '*'",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X*",
+     "high": "*"
+    }
+   ],
+   "lowLen": 10,
+   "matched": [
+    "K25",
+    "K26"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP 'X' HIGH '*' in a char45 range",
+   "column": "C",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "X",
+     "high": "*"
+    }
+   ],
+   "lowLen": 45,
+   "error": "CX_SY_DYNAMIC_OSQL_SEMANTICS"
+  },
+  {
+   "name": "I EQ '7' in a RANGE OF numc4 (LOW becomes 0007)",
+   "column": "N",
+   "lowType": "numc4",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "7",
+     "high": ""
+    }
+   ],
+   "matched": [
+    "K07"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ '7' in a RANGE OF char4 on the NUMC4 column",
+   "column": "N",
+   "lowType": "char4",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "7",
+     "high": ""
+    }
+   ],
+   "matched": [
+    "K07"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I EQ '0007' in a RANGE OF char4 on the NUMC4 column",
+   "column": "N",
+   "lowType": "char4",
+   "rows": [
+    {
+     "sign": "I",
+     "option": "EQ",
+     "low": "0007",
+     "high": ""
+    }
+   ],
+   "matched": [
+    "K07"
+   ],
+   "subrc": 0
+  },
+  {
+   "name": "I CP pattern longer than the column (12 chars, char45 range)",
+   "column": "C",
+   "lowLen": 45,
+   "rows": [
+    {
+     "sign": "I",
+     "option": "CP",
+     "low": "ABCDEFGHIJK*",
+     "high": ""
+    }
+   ],
+   "matched": [],
+   "subrc": 4
+  },
+  {
+   "name": "SIGN lower case",
+   "column": "C",
+   "lowLen": 10,
+   "rows": [
+    {
+     "sign": "i",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "error": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+  },
+  {
+   "name": "OPTION lower case",
+   "column": "C",
+   "lowLen": 10,
+   "rows": [
+    {
+     "sign": "I",
+     "option": "eq",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "error": "SAPSQL_IN_ITAB_ILLEGAL_OPTION"
+  },
+  {
+   "name": "SIGN invalid",
+   "column": "C",
+   "lowLen": 10,
+   "rows": [
+    {
+     "sign": "X",
+     "option": "EQ",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "error": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+  },
+  {
+   "name": "OPTION invalid",
+   "column": "C",
+   "lowLen": 10,
+   "rows": [
+    {
+     "sign": "I",
+     "option": "ZZ",
+     "low": "A",
+     "high": ""
+    }
+   ],
+   "error": "SAPSQL_IN_ITAB_ILLEGAL_OPTION"
+  },
+  {
+   "name": "all-initial row",
+   "column": "C",
+   "lowLen": 10,
+   "rows": [
+    {
+     "sign": "",
+     "option": "",
+     "low": "",
+     "high": ""
+    }
+   ],
+   "error": "SAPSQL_IN_ITAB_ILLEGAL_SIGN"
+  }
+ ],
+ "note": "lowLen is the declared length of the range's LOW (char10 unless the case says char45); lowType where the range type differs from the column. Uncatchable dumps are SAPSQL_*, catchable exceptions CX_SY_*."
+}

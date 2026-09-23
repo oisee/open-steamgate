@@ -12,6 +12,7 @@
     "test/amdp-sandbox.mjs",
     "test/amdp.mjs",
     "test/ir-ranges.mjs",
+    "test/ir-ranges-a4h.mjs",
     "test/amdp-pack.mjs",
     "test/analytics.mjs",
     "test/taxi-import.mjs",
