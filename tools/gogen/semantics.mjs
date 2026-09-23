@@ -41,11 +41,27 @@ const EXPECT = {
   // end read as WHEN a alone until 2026-09-23 (the alternatives after the
   // first sit in Or nodes), and which a wrong OData type came out of
   ZCL_GOGEN_T_WHEN: "abc abc abc d -",
+  // class-based exceptions (A4H, the exception classes local to the probe,
+  // the same code otherwise): a CATCH by hierarchy with the attributes read
+  // INTO, the first CATCH that fits, CLEANUP inner then outer then the
+  // handler, no CLEANUP for one raised inside a CATCH of the same TRY,
+  // get_text( ) of a class without a text, RAISE EXCEPTION obj hands over
+  // the object itself (a handler's change stays in it), previous, cx_no_check
+  // through a method without RAISING, an INTO not taken stays initial,
+  // cx_root taking a raised object and a runtime one, a runtime exception
+  // passing a CLEANUP. Not in the local copy: RAISE EXCEPTION of an initial
+  // reference, which aborts on A4H ("Access using a 'ZERO' object reference
+  // is not possible", CATCH cx_root does not take it), and a CATCH after one
+  // of its superclass, which does not activate
+  ZCL_GOGEN_T_RAISE: "h:7 first:sub clean:i1-ci-co-h3 incatch:ch text:[An exception was raised.] same:18 prev:18 nocheck again:19 untaken:initial root:[An exception was raised.] root:zerodivide rt:ch",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]);
-const program = compileProgram({folders: [join(here, "testdata"), core], objects});
+// the roots of the exception classes, and get_text( )'s helper, compiled
+// out of open-abap-core as the gateway compiles them
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER"];
+const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));

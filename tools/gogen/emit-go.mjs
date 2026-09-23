@@ -212,14 +212,67 @@ export function emitGo(program, pkg = "main") {
       : `panic(abap.NotCompiled(${JSON.stringify(`${cls.name}=>CONSTRUCTOR`)}, "CREATE OBJECT by name of a class whose constructor has parameters"))`;
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
+  out.push(...exceptionSupers(program));
   out.push(...dispatcher(classes));
   out.push(...staticRegistry(program, classes));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.s === "native"))) out.push(...nativeRtti(program));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
   out.push(...cloneFuncs());
   out.push(...descFuncs());
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
   return out.join("\n") + "\n";
+}
+
+/**
+ * CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE, which open-abap writes as kernel
+ * code: an exception object that is no IF_T100_MESSAGE and has no text id
+ * has the fallback text (A4H gives the same for such a class, 2026-09-23);
+ * a T100 message or an OTR text id is not read here and dumps.
+ */
+function nativeMessageText(program) {
+  const head = `func Native_GET_TEXT_FOR_MESSAGE(s *abap.Session, text ${goType({k: "ref", name: "IF_MESSAGE", intf: true})}) string {`;
+  const root = CLASSES.get("CX_ROOT");
+  // IF_T100_MESSAGE has no methods, so every Go value fits its interface:
+  // the classes that implement it are told by name
+  const t100 = [...CLASSES.values()].filter((c) => [c, ...ancestorsOf(c)].some((x) => (x.interfaces ?? []).includes("IF_T100_MESSAGE"))).map((c) => c.name);
+  return [head, "\tif text == nil {", `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "an initial reference"))`, "\t}",
+    ...(t100.length ? [`\tswitch abap.ClassOf(text) {`, `\tcase ${t100.map((x) => JSON.stringify(x)).join(", ")}:`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "T100 message texts are not read in the Go host"))`, "\t}"] : []),
+    ...(root && POLY.has("CX_ROOT") && root.attributes.some((a) => a.name === "TEXTID" && !a.unsupported)
+      ? ["\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().textid != \"\" {", `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
+      : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
+    `\treturn "An exception was raised."`, "}", ""];
+}
+
+/*
+ * Class-based exceptions: a CATCH takes a runtime exception of a class it
+ * covers (decided by the front end) or a raised object whose class is one
+ * of the names or inherits from one (decided at run time, over the table of
+ * superclasses below). INTO receives the object itself, or, for a CATCH
+ * that also covers runtime exceptions, an exception value.
+ */
+function catchCond(c) {
+  const rt = c.covers.map((x) => `xE.Class == ${JSON.stringify(x)}`);
+  const own = c.own.map((x) => `abap.IsA(xRX.Class, ${JSON.stringify(x)})`);
+  const parts = [];
+  if (rt.length) parts.push(`(xOK && (${rt.join(" || ")}))`);
+  if (own.length) parts.push(`(xROK && (${own.join(" || ")}))`);
+  return parts.length ? parts.join(" || ") : "false";
+}
+
+function catchInto(c, t) {
+  if (!c.into) return [];
+  const v = ident(c.into);
+  if (c.intoKind === "ref") return [`${t}\t\t\t\t${v} = abap.Cast[${goType(c.intoType)}](xRX.Obj)`];
+  if (!c.own.length) return [`${t}\t\t\t\t${v} = &abap.Exception{Class: xE.Class, Op: xE.Op}`];
+  return [`${t}\t\t\t\tif xROK {`, `${t}\t\t\t\t\t${v} = &abap.Exception{Class: xRX.Class, Obj: xRX.Obj}`, `${t}\t\t\t\t} else {`,
+    `${t}\t\t\t\t\t${v} = &abap.Exception{Class: xE.Class, Op: xE.Op}`, `${t}\t\t\t\t}`];
+}
+
+function exceptionSupers(program) {
+  const m = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  if (m.length === 0) return [];
+  return ["func init() {", "\tabap.RegisterSupers(map[string]string{", ...m.map(([k, v]) => `\t\t${JSON.stringify(k)}: ${JSON.stringify(v)},`), "\t})", "}", ""];
 }
 
 /**
@@ -571,6 +624,8 @@ function stmtLines(st, ctx, d) {
       const m = ctx.method;
       return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
+    case "raise":
+      return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
     case "raise_classic":
       return [`${t}panic(abap.ClassicException{Name: ${JSON.stringify(st.name)}, Method: ${JSON.stringify(st.method)}})`];
     case "if": {
@@ -662,12 +717,14 @@ function stmtLines(st, ctx, d) {
       (ctx.tries ??= []).push(frame);
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
       frame.mode = "catch";
-      const cases = st.catches.map((c) => [`${t}\t\t\tcase ok && (${c.covers.length ? c.covers.map((x) => `e.Class == ${JSON.stringify(x)}`).join(" || ") : "false"}):`,
-        ...(c.into ? [`${t}\t\t\t\t${ident(c.into)} = &abap.Exception{Class: e.Class, Op: e.Op}`] : []),
+      const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
+        ...catchInto(c, t),
         ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
+      const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) {`, ...st.cleanup.flatMap((x) => stmt(x, ctx, d + 5)), `${t}\t\t\t\t}`] : [];
       ctx.tries.pop();
-      const out = [`${t}ctl${n} := func() (ctl int) {`, `${t}\tdefer func() {`, `${t}\t\tif r := recover(); r != nil {`, `${t}\t\t\te, ok := abap.AsError(r)`,
-        `${t}\t\t\t_ = e`, `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, `${t}\t\t\t\tabap.Repanic(r, debug.Stack())`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
+      const out = [`${t}ctl${n} := func() (ctl int) {`, `${t}\tdefer func() {`, `${t}\t\tif xR := recover(); xR != nil {`, `${t}\t\t\txE, xOK := abap.AsError(xR)`,
+        `${t}\t\t\txRX, xROK := abap.AsRaised(xR)`, `${t}\t\t\t_, _, _, _ = xE, xOK, xRX, xROK`,
+        `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, ...cleanup, `${t}\t\t\t\tabap.Repanic(xR, debug.Stack())`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
         ...body, `${t}\treturn 0`, `${t}}()`, `${t}_ = ctl${n}`];
       for (const code of [1, 2, 3]) if (frame.used.has(code)) out.push(`${t}if ctl${n} == ${code} {`, `${t}\t${leave(ctx, code)}`, `${t}}`);
       return out;
@@ -834,7 +891,7 @@ function expr(e, ctx) {
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
-    case "exc_text": return `${expr(e.x, ctx)}.Text()`;
+    case "exc_text": return `${expr(e.x, ctx)}.TextOf(s)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;

@@ -172,6 +172,7 @@ func abs64(v int64) int64 {
 type Exception struct {
 	Class string
 	Op    string
+	Obj   any // the object of a RAISE EXCEPTION, nil for the runtime's own
 }
 
 func (e *Exception) Text() string { return e.Class + " in " + e.Op }

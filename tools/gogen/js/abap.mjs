@@ -361,3 +361,33 @@ export function CA(a, b) { return b !== "" && [...a].some((c) => b.includes(c));
 
 export function notCompiled(why) { throw new AbapError("NOT_COMPILED", why); }
 export function Condense(s, noGaps) { return noGaps ? s.replaceAll(" ", "") : s.split(" ").filter((x) => x !== "").join(" "); }
+
+// RAISE EXCEPTION: the object and its class travel in a throw, beside the
+// runtime's own AbapError (see raise.go)
+export class Raised extends Error {
+  constructor(obj, cls) { super(`UNCAUGHT_EXCEPTION ${cls}`); this.obj = obj; this.cls = cls; }
+}
+const supers = new Map();
+export function registerSupers(m) { for (const [k, v] of Object.entries(m)) supers.set(k, v); }
+export function isA(cls, ancestor) {
+  for (let c = cls, n = 0; c && n < 40; c = supers.get(c), n += 1) if (c === ancestor) return true;
+  return false;
+}
+export function raise(obj, cls) {
+  if (obj === null || obj === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "RAISE EXCEPTION of an initial reference");
+  const c = cls || obj.constructor?.$abap;
+  if (!c) throw new AbapError("NOT_COMPILED", "RAISE EXCEPTION: the class of the object is not registered");
+  return new Raised(obj, c);
+}
+export function classBased(e) {
+  return e instanceof Raised || (e instanceof AbapError && e.cls.startsWith("CX_"));
+}
+// get_text( ) of a value a CATCH INTO received that also takes runtime
+// exceptions: a raised object's own get_text, else the class and the operation
+export function excText(s, x) {
+  if (x instanceof Raised) {
+    if (typeof x.obj.IF_MESSAGE__GET_TEXT !== "function") throw new AbapError("NOT_COMPILED", `${x.cls}=>GET_TEXT: get_text( ) of the class is not compiled`);
+    return x.obj.IF_MESSAGE__GET_TEXT(s);
+  }
+  return x.message;
+}
