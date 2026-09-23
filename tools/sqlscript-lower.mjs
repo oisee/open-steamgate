@@ -278,6 +278,7 @@ export function lower(rel, dialectName, options = {}) {
   const d = DIALECTS[dialectName];
   if (d === undefined) throw new Refused(`no dialect ${dialectName}`);
   const params = [];
+  const hostPreds = [];
   const refOf = options.relationRef ?? ((handle) => handle);
 
   const expr = (e) => {
@@ -302,6 +303,14 @@ export function lower(rel, dialectName, options = {}) {
       case "param":
         params.push({name: e.name, value: e.value, type: seamType(e.type), isNull: e.isNull});
         return d.placeholder(params.length, seamType(e.type));
+      case "hostPred": {
+        // a predicate the host supplies at run time (tools/ir-ranges.mjs):
+        // a marker, not a parameter, so the build-time text keeps its own
+        // placeholders in order and the host splices its own in
+        if (!/^[A-Za-z0-9_]+$/.test(String(e.id))) throw new Refused(`host predicate id ${JSON.stringify(e.id)} is not a plain name`);
+        hostPreds.push({id: e.id, column: e.column, columnType: e.columnType, ...(e.kind === undefined ? {} : {kind: e.kind}), after: params.length});
+        return `/*@range:${e.id}*/`;
+      }
       case "session":
         throw new Refused(`session value ${e.kind} ${e.name} was not captured by the procedure runtime`);
       case "bin": {
@@ -671,7 +680,8 @@ export function lower(rel, dialectName, options = {}) {
     }
   };
 
-  return {sql: select(rel), params};
+  const sql = select(rel);
+  return hostPreds.length === 0 ? {sql, params} : {sql, params, hostPreds};
 }
 
 /** how many statements this plan will cost - one, unless a barrier says otherwise */
