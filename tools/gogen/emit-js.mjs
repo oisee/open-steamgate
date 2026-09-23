@@ -26,7 +26,7 @@ function zero(t) {
   }
 }
 const composite = (t) => t.k === "struct" || t.k === "table";
-const isPlace = (e) => ["var", "attr", "static", "field", "fs", "row"].includes(e.e);
+const isPlace = (e) => ["var", "attr", "static", "field", "fs", "row", "refattr"].includes(e.e);
 
 let STRUCTS = new Map();
 
@@ -53,7 +53,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
       out.push(`  static ${ident(a.name)} = ${zero(a.type)};`);
     }
-    const cp = cls.constructor?.params ?? [];
+    const cp = cls.constructor?.params ?? cls.ctorParams ?? [];
     out.push(`  static NEW(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
       ...(cls.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
@@ -95,6 +95,7 @@ function place(p, ctx) {
     }
     case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
     case "fs": return ident(p.name);
+    case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
       const b = place(p.base, ctx);
       return `${b}[abap.Idx(${b}.length, ${expr(p.index, ctx)})]`;
@@ -195,6 +196,17 @@ function stmt(st, ctx, d) {
       const cmp = st.keys.map((k) => `if (x.${ident(k.name)} !== y.${ident(k.name)}) return (x.${ident(k.name)} < y.${ident(k.name)} ? -1 : 1) * ${k.desc ? -1 : 1};`);
       return [`${t}${tb}.sort((x, y) => { ${cmp.join(" ")} return 0; });`];
     }
+    case "insert_table": {
+      const tb = place(st.table, ctx);
+      const v = `ins${ctx.loop++}`;
+      if (!st.unique) return [`${t}${tb}.push(${moved(st.value, ctx)}); s.sy.subrc = 0;`];
+      return [`${t}{`, `${t}  const ${v} = ${moved(st.value, ctx)};`,
+        `${t}  if (${tb}.includes(${v})) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
+    }
+    case "replace_all": {
+      const p = place(st.target, ctx);
+      return [`${t}{ const r = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)}); ${p} = r[0]; s.sy.subrc = r[1]; }`];
+    }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
@@ -244,7 +256,10 @@ const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": return place(e, ctx);
+    case "zero": return zero(e.type);
+    case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
+    case "table_lit": return `[${e.rows.map((r) => moved(r, ctx)).join(", ")}]`;
     case "bool": return `(${cond(e.cond, ctx)} ? "X" : ${JSON.stringify(e.blank)})`;
     case "cond": {
       let out = e.else ? expr(e.else, ctx) : zero(e.type);

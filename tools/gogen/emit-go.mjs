@@ -50,7 +50,7 @@ export function emitGo(program, pkg = "main") {
   // interfaces used as reference types, and classes referred to but not compiled
   for (const [name, sigs] of program.interfaceMethods ?? []) {
     out.push(`type ${typeName(name)} interface {`);
-    for (const m of sigs) out.push(`\t${signature({name}, m, true)}`);
+    for (const m of sigs) if (definable(program, m)) out.push(`\t${signature({name}, m, true)}`);
     out.push("}", "");
   }
   const compiled = new Set(classes.map((c) => c.name));
@@ -66,11 +66,11 @@ export function emitGo(program, pkg = "main") {
     for (const m of cls.methods) out.push(...method(cls, m), "");
     // a method that did not compile still exists, and says why when called
     for (const m of cls.stubs ?? []) {
-      if (m.name === "CONSTRUCTOR") continue;
+      if (m.name === "CONSTRUCTOR" || !definable(program, m)) continue;
       out.push(`${signature(cls, m)} {`, `\tpanic(abap.NotCompiled(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.reason)}))`, "}", "");
     }
     // NEW: a new object, its constructor run with the arguments
-    const cp = cls.constructor?.params ?? [];
+    const cp = cls.constructor?.params ?? cls.ctorParams ?? [];
     out.push(`func New_${typeName(cls.name)}(${["s *abap.Session", ...cp.map((p) => `${ident(p.name)} ${goType(p.type)}`)].join(", ")}) *${typeName(cls.name)} {`,
       `\to := &${typeName(cls.name)}{}`,
       ...(cls.constructor ? [`\to.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")})`] : []),
@@ -79,6 +79,18 @@ export function emitGo(program, pkg = "main") {
   }
   out.push(...dispatcher(classes));
   return out.join("\n") + "\n";
+}
+
+/** a signature whose every type is declared in this program */
+export function definable(program, m) {
+  const ok = (t) => {
+    if (!t) return true;
+    if (t.k === "struct") return program.structs.has(t.go);
+    if (t.k === "table") return ok(t.row);
+    if (t.k === "ref") return t.intf ? program.interfaceMethods?.has(t.name) : true;
+    return true;
+  };
+  return m.params.every((p) => ok(p.type)) && ok(m.returning?.type);
 }
 
 export function referencedClasses(program) {
@@ -135,6 +147,7 @@ function place(p, ctx) {
     case "static": return p.go;
     case "field": return `${place(p.base, ctx)}.${ident(p.name)}`;
     case "fs": return `(*${ident(p.name)})`;
+    case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
       const b = place(p.base, ctx);
       return `${b}[abap.Idx(len(${b}), ${expr(p.index, ctx)})]`;
@@ -247,6 +260,17 @@ function stmt(st, ctx, d) {
       const cmp = st.keys.map((k) => `if x.${ident(k.name)} != y.${ident(k.name)} { return x.${ident(k.name)} ${k.desc ? ">" : "<"} y.${ident(k.name)} }`);
       return [`${t}sort.SliceStable(${tb}, func(a, b int) bool { x, y := ${tb}[a], ${tb}[b]; ${cmp.join("; ")}; return false })`];
     }
+    case "insert_table": {
+      const tb = place(st.table, ctx);
+      const v = `ins${ctx.loop++}`;
+      if (!st.unique) return [`${t}${tb} = append(${tb}, ${expr(st.value, ctx)})`, `${t}s.Sy.Subrc = 0`];
+      return [`${t}{`, `${t}\t${v} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tif !abap.Contains(${tb}, ${v}) {`, `${t}\t\t${tb} = append(${tb}, ${v})`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
+    }
+    case "replace_all": {
+      const p = place(st.target, ctx);
+      return [`${t}${p}, s.Sy.Subrc = abap.ReplaceAll(${p}, ${expr(st.of, ctx)}, ${expr(st.with, ctx)})`];
+    }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
@@ -275,7 +299,10 @@ const FN_F = {SIN: "math.Sin", COS: "math.Cos", TAN: "math.Tan", SQRT: "abap.Sqr
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": return place(e, ctx);
+    case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
+    case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
+    case "table_lit": return `${goType(e.type)}{${e.rows.map((r) => expr(r, ctx)).join(", ")}}`;
     case "bool": return `func() string { if ${cond(e.cond, ctx)} { return "X" }; return ${JSON.stringify(e.blank)} }()`;
     case "cond": {
       const parts = e.branches.map((b) => `if ${cond(b.cond, ctx)} { return ${expr(b.value, ctx)} }`);

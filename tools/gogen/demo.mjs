@@ -1,0 +1,213 @@
+// The whole ZO4D demo, compiled to Go and to JS from one IR, against the A4H
+// recordings: the handler, the demo director and every effect class of the
+// pack, nothing rewritten.
+//
+//   node tools/gogen/demo.mjs [scene ...]
+//
+// What runs is ABAP: ZCL_O4D_APC_HANDLER=>INIT_ALL_DEMOS and LOAD_DEMO set
+// the demo up, BUILD_RENDER_CTX makes the context of a tick (beat info,
+// scene switching, transitions), ZCL_O4D_DEMO=>GET_EFFECT_AT_BAR picks the
+// effect, the effect renders, FRAME_TO_JSON writes the frame. The harness
+// only does what the handler's 'frame' command does before those calls
+// (three lines, the time of a tick and mv_frame_num) -- that command parses
+// its JSON with FIND and offsets, which this compiler does not have yet --
+// and it starts a fresh handler per recording, as o4d-record opens a fresh
+// socket per scene. The frames the ABAP writes are compared with the
+// recording number by number.
+import {execFileSync} from "node:child_process";
+import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {dirname, join} from "node:path";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {compileProgram} from "./frontend.mjs";
+import {emitGo} from "./emit-go.mjs";
+import {emitJs} from "./emit-js.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const home = "/home/alice/dev/open-steamgate";
+const pack = `${home}/packs/o4d/upstream`;
+const libs = [`${home}/.local/lars/open-abap-core/src`, `${home}/.local/lars/open-abap-apc/src`];
+const wantedScenes = process.argv.slice(2);
+
+const recordings = readdirSync(`${home}/.local`).filter((f) => /^o4d-a4h-[a-z0-9_]+\.jsonl$/.test(f) && f !== "o4d-a4h.jsonl")
+  .map((f) => ({scene: f.replace(/^o4d-a4h-|\.jsonl$/g, ""), file: `${home}/.local/${f}`}))
+  .filter((r) => wantedScenes.length === 0 || wantedScenes.includes(r.scene)).sort((a, b) => a.scene.localeCompare(b.scene));
+
+/* ------------------------------------------------------------------ compile */
+const t0 = performance.now();
+const objects = ["zif_o4d_effect", ...new Set(readdirSync(pack).filter((f) => /^zcl_o4d_.*\.clas\.abap$/.test(f)).map((f) => f.split(".")[0]))];
+const program = compileProgram({folders: [pack, ...libs], objects});
+const tFront = performance.now() - t0;
+const out = join(here, ".out", "demo");
+rmSync(out, {recursive: true, force: true});
+mkdirSync(out, {recursive: true});
+const dir = join(here, "go", "cmd", "demo");
+mkdirSync(dir, {recursive: true});
+writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+
+// the ticks of each recording: frames are consecutive ticks from the first
+const spt = 60 / 152 / 1; // placeholder, the real value comes from the ABAP (get_sec_per_tick) at run time
+void spt;
+const runs = recordings.map((r) => ({scene: r.scene, frames: readFileSync(r.file, "utf8").trim().split("\n").map((l) => JSON.parse(l))}));
+writeFileSync(join(out, "runs.json"), JSON.stringify(runs.map((r) => ({scene: r.scene, gt: r.frames.map((f) => f.gt)}))));
+writeFileSync(join(dir, "zz_main.go"), goMain());
+execFileSync("gofmt", ["-w", dir]);
+const bin = join(out, "demo");
+const t1 = performance.now();
+execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/demo"], {cwd: join(here, "go"), stdio: "inherit"});
+const tBuild = performance.now() - t1;
+let goOut;
+try {
+  goOut = JSON.parse(execFileSync(bin, [join(out, "runs.json")], {maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"]}).toString());
+} catch (e) {
+  console.error(String(e.stderr).split("\n").slice(0, 12).join("\n"));
+  process.exit(1);
+}
+
+/* --------------------------------------------------------------------- JS */
+writeFileSync(join(out, "demo.mjs"), emitJs(program));
+copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+const m = await import(pathToFileURL(join(out, "demo.mjs")).href);
+const jsOut = runs.map((r) => {
+  try { return jsRun(r); } catch (e) { return {scene: r.scene, error: String(e.message ?? e).slice(0, 160)}; }
+});
+function jsRun(r) {
+  const s = {sy: {index: 0, tabix: 0, subrc: 0}};
+  const h = new m.ZCL_O4D_APC_HANDLER();
+  h.INIT_ALL_DEMOS(s);
+  h.LOAD_DEMO(s, "main");
+  const ticks = ticksOf(r.frames.map((f) => f.gt), h.mo_demo.GET_SEC_PER_TICK(s));
+  const frames = [];
+  const t = process.hrtime.bigint();
+  for (const tick of ticks) frames.push(frameJs(h, s, tick));
+  return {scene: r.scene, frames, ns: Number(process.hrtime.bigint() - t) / ticks.length};
+}
+
+/* ------------------------------------------------------------------ compare */
+const close = (a, b) => (typeof a === "number" && typeof b === "number"
+  ? a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b)) : a === b);
+function diff(a, b, path = "") {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return `${path}.length`;
+    for (let i = 0; i < a.length; i++) { const d = diff(a[i], b[i], `${path}.*`); if (d) return d; }
+    return null;
+  }
+  if (a && typeof a === "object") {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b ?? {})])) { const d = diff(a[k], b?.[k], `${path}.${k}`); if (d) return d; }
+    return null;
+  }
+  return close(a, b) ? null : path;
+}
+console.log(`\ndemo: ${program.classes.length} classes compiled, front end ${Math.round(tFront)} ms, go build ${Math.round(tBuild)} ms, binary ${(statSync(bin).size / 1e6).toFixed(1)} MB`);
+console.log(`${"scene".padEnd(18)}${"frames".padStart(7)}${"Go = A4H".padStart(10)}${"JS = A4H".padStart(10)}${"Go µs".padStart(9)}${"JS µs".padStart(9)}  first difference`);
+let totals = {n: 0, go: 0, js: 0};
+for (const [i, r] of runs.entries()) {
+  const g = goOut.runs[i];
+  const j = jsOut[i];
+  let gok = 0; let jok = 0; let first = g.error ? `go: ${g.error.slice(0, 110)}` : j.error ? `js: ${j.error.slice(0, 110)}` : "";
+  r.frames.forEach((want, k) => {
+    const dg = g.error ? "error" : diff(JSON.parse(g.frames[k]), want);
+    const dj = j.error ? "error" : diff(JSON.parse(j.frames[k]), want);
+    if (!dg) gok++; else first = first || `go f${k} ${dg}`;
+    if (!dj) jok++; else first = first || `js f${k} ${dj}`;
+  });
+  totals.n += r.frames.length; totals.go += gok; totals.js += jok;
+  console.log(`${r.scene.padEnd(18)}${String(r.frames.length).padStart(7)}${String(gok).padStart(10)}${String(jok).padStart(10)}${((g.ns ?? 0) / 1e3).toFixed(0).padStart(9)}${((j.ns ?? 0) / 1e3).toFixed(0).padStart(9)}  ${first}`);
+}
+console.log(`${"all".padEnd(18)}${String(totals.n).padStart(7)}${String(totals.go).padStart(10)}${String(totals.js).padStart(10)}`);
+
+function ticksOf(gts, secPerTick) {
+  const first = Math.round(gts[0] / secPerTick);
+  return gts.map((_, k) => first + k);
+}
+
+// the handler's 'frame' command, sub = 0, after it parsed the tick
+function frameJs(h, s, tick) {
+  const fpt = h.mo_demo.GET_FPT(s);
+  const gt = tick * h.mo_demo.GET_SEC_PER_TICK(s);
+  h.mv_frame_num = tick * fpt;
+  const ctx = h.BUILD_RENDER_CTX(s, gt);
+  const eff = h.mo_demo.GET_EFFECT_AT_BAR(s, ctx.gbi.bar);
+  const frame = eff ? eff.ZIF_O4D_EFFECT__RENDER_FRAME(s, ctx) : m.new_ZIF_O4D_EFFECT__TY_FRAME();
+  return h.FRAME_TO_JSON(s, frame, ctx, "");
+}
+
+function goMain() {
+  return `// Code generated by tools/gogen/demo.mjs. DO NOT EDIT.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"time"
+
+	"osg/gogen/abap"
+)
+
+type run struct {
+	Scene string    \`json:"scene"\`
+	Gt    []float64 \`json:"gt"\`
+}
+
+type result struct {
+	Scene  string   \`json:"scene"\`
+	Frames []string \`json:"frames"\`
+	Ns     float64  \`json:"ns"\`
+	Error  string   \`json:"error,omitempty"\`
+}
+
+func main() {
+	raw, _ := os.ReadFile(os.Args[1])
+	var runs []run
+	json.Unmarshal(raw, &runs)
+	out := []result{}
+	for _, r := range runs {
+		out = append(out, one(r))
+	}
+	json.NewEncoder(os.Stdout).Encode(map[string]any{"runs": out})
+}
+
+// one recording on a fresh handler; a method that did not compile raises,
+// and the scene is reported with the reason instead of stopping the rest
+func one(r run) (res result) {
+	res.Scene = r.Scene
+	defer func() {
+		if e := recover(); e != nil {
+			res.Error = fmt.Sprint(e)
+		}
+	}()
+	{
+		s := &abap.Session{}
+		h := &ZCL_O4D_APC_HANDLER{}
+		h.INIT_ALL_DEMOS(s)
+		h.LOAD_DEMO(s, "main")
+		spt := h.mo_demo.GET_SEC_PER_TICK(s)
+		first := int32(math.Round(r.Gt[0] / spt))
+		frames := []string{}
+		t := time.Now()
+		for k := range r.Gt {
+			frames = append(frames, frame(h, s, first+int32(k)))
+		}
+		res.Frames = frames
+		res.Ns = float64(time.Since(t).Nanoseconds()) / float64(len(r.Gt))
+	}
+	return res
+}
+
+// the handler's 'frame' command, sub = 0, after it parsed the tick
+func frame(h *ZCL_O4D_APC_HANDLER, s *abap.Session, tick int32) string {
+	fpt := h.mo_demo.GET_FPT(s)
+	gt := float64(tick) * h.mo_demo.GET_SEC_PER_TICK(s)
+	h.mv_frame_num = tick * fpt
+	ctx := h.BUILD_RENDER_CTX(s, gt)
+	eff := h.mo_demo.GET_EFFECT_AT_BAR(s, ctx.gbi.bar)
+	var f ZIF_O4D_EFFECT__TY_FRAME
+	if eff != nil {
+		f = eff.ZIF_O4D_EFFECT__RENDER_FRAME(s, ctx)
+	}
+	return h.FRAME_TO_JSON(s, f, ctx, "")
+}
+`;
+}

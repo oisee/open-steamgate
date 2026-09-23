@@ -206,3 +206,8 @@ export function FmtFDec(v, n) {
   const ip = s.slice(0, s.length - n).replace(/^0+/, "") || "0";
   return (neg ? "-" : "") + ip + (n > 0 ? `.${s.slice(s.length - n)}` : "");
 }
+
+export function ReplaceAll(v, of, wth) {
+  if (of === "" || !v.includes(of)) return [v, 4];
+  return [v.split(of).join(wth), 0];
+}

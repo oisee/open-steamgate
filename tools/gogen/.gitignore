@@ -2,3 +2,4 @@
 .out/
 go/cmd/bench/zz_generated.go
 go/cmd/scene/zz_*.go
+go/cmd/demo/zz_*.go
