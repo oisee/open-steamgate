@@ -473,3 +473,14 @@ the way: a CAST to BIGINT is typed as a plain INTEGER, which is narrower
 than BIGINT; it is a known gap, recorded here until it is measured. An INT2 column of a table
 input is range-checked at the bind with one query; across a nested CALL,
 INT2 inputs and outputs are refused.
+## OPTIONAL on an AMDP input (measured on A4H, 2026-09-23)
+
+| declaration | on A4H |
+| --- | --- |
+| a scalar input (`i`, `string`) with `OPTIONAL` | does not compile: `Use DEFAULT instead of OPTIONAL for the optional parameter "IV" of the AMDP method "M".` |
+| a table input with `OPTIONAL` | compiles |
+| that table input, omitted by the caller | the body sees an empty table (`COUNT(*)` is 0) |
+
+So an AMDP scalar is optional only through `DEFAULT`, and the portable
+compiler refuses a scalar `OPTIONAL` in the same words. A table
+`OPTIONAL` is refused by name until it is carried as an empty relation.

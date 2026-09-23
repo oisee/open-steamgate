@@ -105,7 +105,7 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     const optionalTable = {...method, parameters: method.parameters.map((one) =>
       one.name === "it" ? {...one, optional: true} : one)};
     expect(() => compileProcedure(optionalTable, types))
-      .to.throw(UnsupportedSqlScript, /OPTIONAL support is limited to ABAP INTEGER or STRING scalars/);
+      .to.throw(UnsupportedSqlScript, /OPTIONAL table input it: omitted it is an empty table \(measured on A4H\); not carried yet/);
   });
 
   it("captures a scalar INTEGER LIMIT and accepts only the neutral OFFSET 0", async () => {
@@ -140,17 +140,17 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
       .to.throw(UnsupportedSqlScript, /only the semantics-neutral literal OFFSET 0/);
   });
 
-  it("carries required and OPTIONAL ABAP STRING inputs as typed bound values", async () => {
+  it("carries required and DEFAULT ABAP STRING inputs as typed bound values", async () => {
     const types = new Map([
       ["TY_TEXT", {kind: "structure", components: [{name: "text", abapType: "c LENGTH 20"}]}],
       ["TT_TEXT", {kind: "table", of: "TY_TEXT"}],
     ]);
     const method = {body: "et = SELECT :iv_text AS text FROM DUMMY;", parameters: [
-      {name: "iv_text", direction: "IN", abapType: "string", optional: true},
+      {name: "iv_text", direction: "IN", abapType: "string", optional: true, default: "''"},
       {name: "et", direction: "OUT", abapType: "tt_text"},
     ]};
     const stringInput = compileProcedure(method, types);
-    expect(stringInput.parameters).to.deep.equal([{name: "IV_TEXT", type: T.str, optional: true}]);
+    expect(stringInput.parameters).to.deep.equal([{name: "IV_TEXT", type: T.str, optional: true, default: ""}]);
     const omitted = await runProcedure(stringInput, {client, dialect: "duckdb", inputCatalogue: {DUMMY: {}}});
     expect(omitted.rows).to.deep.equal([{TEXT: ""}]);
     const supplied = await runProcedure(stringInput, {client, dialect: "duckdb", inputs: {IV_TEXT: "portable"},
@@ -167,7 +167,7 @@ describe("the original SQUARES AMDP through the portable runtime", function () {
     expect(refusal.message).to.match(/IV_TEXT is not a SQLScript string/);
 
     const coercion = compileProcedure({body: "rv = :iv_text;", parameters: [
-      {name: "iv_text", direction: "IN", abapType: "string", optional: true},
+      {name: "iv_text", direction: "IN", abapType: "string", optional: true, default: "''"},
       {name: "rv", direction: "RETURNING", abapType: "i"},
     ]}, new Map());
     for (const inputs of [{}, {IV_TEXT: "7.0"}]) {

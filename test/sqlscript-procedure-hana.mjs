@@ -503,7 +503,7 @@ describe("STRING inputs: native SQLScript against portable bound values", functi
     ]);
     const method = {name: "string_input", language: "SQLSCRIPT", readOnly: true,
       body: "et = SELECT :iv_text AS text FROM DUMMY;", parameters: [
-        {name: "iv_text", direction: "IN", abapType: "string", optional: true},
+        {name: "iv_text", direction: "IN", abapType: "string", optional: true, default: "''"},
         {name: "et", direction: "OUT", abapType: "tt_text"},
       ]};
     const portable = compileProcedure(method, types);
@@ -644,7 +644,7 @@ describe("scalar functions: native SQLScript against portable host evaluation", 
         }
         if (item.method === "optional_value") {
           const omitted = await runProcedure(portable, {client, dialect: "hana"});
-          expect(omitted.value, "ABAP OPTIONAL integer omission supplies type-initial zero").to.equal(0);
+          expect(omitted.value, "an omitted DEFAULT 0 integer is zero").to.equal(0);
         }
       }
     } finally {

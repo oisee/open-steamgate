@@ -1246,3 +1246,32 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
 - Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-amdp-scalar-optional — our compiler and abaplint accept OPTIONAL on an AMDP scalar input, which the kernel refuses
+
+- Status: `fixed here` (our compiler); upstream open (abaplint)
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55; `tools/sqlscript-to-procedure-ir.mjs` before this entry
+- Affected ABAP statement, runtime API or adapter: `CLASS-METHODS m IMPORTING VALUE(iv) TYPE <scalar> OPTIONAL …` on an AMDP method (`BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT`)
+- Minimal ABAP reproducer:
+  ```abap
+  CLASS zcl_opt DEFINITION PUBLIC FINAL CREATE PUBLIC.
+    PUBLIC SECTION.
+      INTERFACES if_amdp_marker_hdb.
+      TYPES: BEGIN OF ty_seen, n TYPE i, END OF ty_seen,
+             tt_seen TYPE STANDARD TABLE OF ty_seen WITH EMPTY KEY.
+      CLASS-METHODS m IMPORTING VALUE(iv) TYPE i OPTIONAL EXPORTING VALUE(et) TYPE tt_seen.
+  ENDCLASS.
+  CLASS zcl_opt IMPLEMENTATION.
+    METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+      et = SELECT :iv AS n FROM dummy;
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+- Exact command used to run it: on A4H, saving the class through ADT; in abaplint, `new Registry(Config.getDefault(v757|v758|Cloud))`, `addFile`, `parse()`, `findIssues()`.
+- Expected SAP behaviour (measured on A4H, throwaway class, deleted): the class does not compile -- `Use DEFAULT instead of OPTIONAL for the optional parameter "IV" of the AMDP method "M".` -- for `i` and `string` alike. On a **table** input `OPTIONAL` compiles, and an omitted table arrives in the body as an empty table (`COUNT(*)` = 0; a passed two-row table counts 2). Every OPTIONAL in the A4H AMDP export is on a table input.
+- Actual open-abap behaviour: abaplint reports no issue under `v757`, `v758` or `Cloud`. Our compiler accepted the scalar OPTIONAL and bound an omitted input as ABAP's initial value -- a case the kernel never lets happen -- and a clean-room fixture of ours was written that way.
+- Impact on open-steamgate: none on the measured corpus (no scalar OPTIONAL there); a hand-written AMDP class would have run here and failed to activate on a system.
+- Smallest safe workaround: the compiler refuses a scalar OPTIONAL in the kernel's words and a table OPTIONAL by name ("omitted it is an empty table (measured on A4H); not carried yet"); the fixture and the tests that leaned on the omission use `DEFAULT` or pass the initial value.
+- Upstream issue: **needs an issue** in `abaplint/abaplint` (a syntax check for OPTIONAL on an AMDP method's scalar parameter); not yet filed -- goes out through the critic gate.
+- Regression-test location: `test/sqlscript-procedure-scope.mjs` ("OPTIONAL on a scalar is refused in the kernel's words …"), `test/sqlscript-procedure-source.mjs`, `test/amdp-cleanroom-corpus.mjs`
