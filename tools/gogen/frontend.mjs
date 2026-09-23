@@ -3296,6 +3296,7 @@ function defaultValue(p, ctx) {
   }
   if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
+  if (/^`.*`$/s.test(t)) return convert({e: "str", value: t.slice(1, -1).replace(/``/g, "`"), type: S}, p.type);
   if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
   if (/^abap_false$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
   // a constant: CLS=>C, or C of the class or interface the method is declared in
