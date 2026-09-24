@@ -149,8 +149,9 @@ async function executeScenario(compiled, spec, index) {
     return {
       label: spec.label ?? `scenario ${index + 1}`,
       status: "executed",
+      // a scalar OUT among several answers a value, a table rows
       rows: answer.outputs === undefined ? answer.rows
-        : Object.fromEntries(Object.entries(answer.outputs).map(([name, one]) => [name, one.rows])),
+        : Object.fromEntries(Object.entries(answer.outputs).map(([name, one]) => [name, one.rows ?? one.value])),
       columns: answer.outputs === undefined ? answer.columns?.map((one) => one.name)
         : Object.fromEntries(Object.entries(answer.outputs).map(([name, one]) => [name, one.columns?.map((c) => c.name)])),
       trace: answer.trace,

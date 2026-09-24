@@ -620,7 +620,8 @@ export async function runProcedure(program, {
       && ((program.relationParameters ?? []).length > 0 || containsRelationStatement(program.body ?? []))) {
     throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
   }
-  if (program.outputType === undefined && client?.supportsNative !== true) {
+  const scalarsOnly = Array.isArray(program.outputs) && program.outputs.length > 0 && program.outputs.every((one) => one.scalar !== undefined);
+  if (program.outputType === undefined && !scalarsOnly && client?.supportsNative !== true) {
     throw new UnsupportedSqlScript("the selected database has no native relational channel");
   }
   for (const [name, value] of Object.entries({maxSteps, maxPlanNodes, maxPlanDepth, maxParameters, maxCallDepth})) {

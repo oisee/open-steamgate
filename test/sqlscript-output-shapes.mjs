@@ -37,6 +37,25 @@ for (const [dialect, make] of ENGINES) {
       expect(await rows()).to.deep.equal(["2b", "3c"]);
     });
 
+    it("refuses a SELECT assigned to a scalar, as HANA does when it creates the procedure", () => {
+      // HXE 2.00.088: "scalar type is not allowed: EV_A" for an OUT and for a
+      // declared variable; it used to become a table variable here and the
+      // OUT answered its initial value
+      const compile = (body, parameters) => () => compileProcedure({name: "M", kind: "METHOD", parameters, body}, new Map(), {catalogue: CATALOGUE});
+      const outs = [{name: "ev_a", direction: "OUT", abapType: "i"}, {name: "ev_b", direction: "OUT", abapType: "i"}];
+      expect(compile("ev_a = SELECT COUNT(*) AS c FROM t; ev_b = 7;", outs)).to.throw(/scalar type is not allowed: EV_A/);
+      expect(compile("DECLARE n INTEGER; n = SELECT COUNT(*) AS c FROM t; ev_a = :n; ev_b = 1;", outs)).to.throw(/scalar type is not allowed: N/);
+    });
+
+    it("several OUT tables: outputs names them, and output and outputSchema are absent", () => {
+      const types = new Map([["TT", {kind: "table", of: "TY"}], ["TY", {kind: "structure", components: [{name: "id", abapType: "i"}]}]]);
+      const program = compileProcedure({name: "M", kind: "METHOD", parameters: [
+        {name: "et_a", direction: "OUT", abapType: "tt"}, {name: "et_b", direction: "OUT", abapType: "tt"}],
+      body: "et_a = SELECT id FROM t; et_b = SELECT id FROM t WHERE id > 1;"}, types, {catalogue: CATALOGUE});
+      expect(program.outputs.map((one) => one.name)).to.deep.equal(["ET_A", "ET_B"]);
+      expect([program.output, program.outputSchema]).to.deep.equal([undefined, undefined]);
+    });
+
     it("several scalar OUTs and no table: each as the body left it, an unassigned one initial", async () => {
       const program = compileProcedure({name: "M", kind: "METHOD", parameters: [
         {name: "iv_id", direction: "IN", abapType: "i"},

@@ -628,6 +628,12 @@ export function compileProcedure(method, types, options = {}) {
           continue;
         }
         const set = child(node, "SetOperation");
+        // a SELECT is a table: HANA refuses it into a scalar when the
+        // procedure is created, an OUT or a declared variable alike (HXE
+        // 2.00.088: "scalar type is not allowed"); SELECT ... INTO it is
+        if (set !== undefined && scalarTypes[name] !== undefined) {
+          throw new UnsupportedSqlScript(`scalar type is not allowed: ${name} (a SELECT assigned to a scalar; HANA takes SELECT ... INTO)`, node);
+        }
         if (set !== undefined) {
           // the output's declared schema types a bare NULL assigned to it
           const rel = bind(set, "relation", outputSchemaOf(name));
