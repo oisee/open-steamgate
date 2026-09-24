@@ -65,7 +65,7 @@ let STRUCTS = new Map();
  * written at the end of the module.
  */
 let DESCS = new Map();
-const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t:${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
+const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t${t.sorted ? "s" : t.hashed ? "h" : ""}:${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
 function desc(t) {
   switch (t.k) {
     case "i": return "abap.TI";
@@ -107,7 +107,8 @@ function descDecls() {
       again = true;
       const t = d.type;
       if (t.k === "table") {
-        decl.push(`const ${d.name} = {kind: "h", row: null, zero: () => []};`);
+        // a SORTED or HASHED table takes no generic APPEND (ultra/events, as go/abap AppendData)
+        decl.push(`const ${d.name} = {kind: "h", row: null, zero: () => []${t.sorted || t.hashed ? ", noAppend: true" : ""}};`);
         fill.push(`${d.name}.row = ${desc(t.row)};`);
       } else {
         const fs = STRUCTS.get(t.go)?.fields ?? [];
@@ -276,7 +277,11 @@ function method(cls, m) {
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
   const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
-  lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
+  // ultra/events: a field symbol of anything but a structure row or generic
+  // data would need a box for the place it points at; refused here honestly
+  const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data");
+  if (odd) lines.push(`    throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: field symbol ${odd.name} of a ${odd.type.k}: the JS emitter holds only rows of structures`)});`);
+  else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
   return lines;
@@ -765,6 +770,7 @@ function expr(e, ctx) {
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
     case "me": return "me";
+    case "type_kind": return `${expr(e.x, ctx)}.t.kind`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;
     case "ev_sender": return "EvSender";

@@ -95,7 +95,8 @@ function desc(t) {
     case "dref": return "abap.TRef";
     case "ref": case "exc": return "abap.TObj";
     case "struct": case "table": {
-      const key = goType(t);
+      // a SORTED or HASHED table has no Append (ultra/events): its own descriptor
+      const key = goType(t) + (t.sorted ? "|sorted" : t.hashed ? "|hashed" : "");
       if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
       return DESCS.get(key).name;
     }
@@ -116,7 +117,7 @@ function descFuncs() {
       out.push(`var ${d.name} = &abap.Type{}`);
       if (t.k === "table") {
         const g = goType(t);
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${t.hashed ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${zero(t.row)}); return &(*p.(*${g}))[len(*p.(*${g}))-1] }, Delete: func(p any, i int) { *p.(*${g}) = append((*p.(*${g}))[:i], (*p.(*${g}))[i+1:]...) }, `}${copyZero(t)}}`);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${t.hashed || t.sorted ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${zero(t.row)}); return &(*p.(*${g}))[len(*p.(*${g}))-1] }, Delete: func(p any, i int) { *p.(*${g}) = append((*p.(*${g}))[:i], (*p.(*${g}))[i+1:]...) }, `}${copyZero(t)}}`);
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
         // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
@@ -1280,6 +1281,7 @@ function expr(e, ctx) {
       return `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
     }
     case "nop_call": return "";
+    case "type_kind": return `string(${expr(e.x, ctx)}.T.Kind)`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;
     case "ev_sender": return `abap.SenderAs[${goType(e.type)}](EvSender)`;

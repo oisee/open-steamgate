@@ -882,7 +882,10 @@ function classIr(ctx0, obj) {
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
         if (vname.startsWith("<")) {
-          if (t.k !== "struct" && t.k !== "data") throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
+          // ultra/events: in Go a typed field symbol of any kind is a pointer to
+          // the row or field (a string table's line, a whole table); the JS
+          // emitter holds only rows of structures and refuses the method
+          if (!["struct", "data", "table", "string", "c", "i", "int8", "n", "d", "t", "x", "xstring", "p", "f"].includes(t.k)) throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
           ctx.fieldSymbols.set(vname, t);
         } else {
           ctx.locals.set(vname, t);
@@ -1258,6 +1261,7 @@ function structure(node, ctx) {
     }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
+    if (!lt) throw new Unsupported(`LOOP form: ${text}`);
     const fsNode = lt.findFirstExpression(Expressions.FSTarget) ?? lt.findFirstExpression(Expressions.TargetFieldSymbol);
     let into = null;
     let fs = null;
@@ -1266,6 +1270,8 @@ function structure(node, ctx) {
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
       fs = upper(nm);
     } else {
+      // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
+      if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
       into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
       if (!sameType(into.type, table.type.row)) throw new Unsupported(`LOOP ... INTO a ${into.type.k} over rows of ${table.type.row.k}`);
     }
@@ -1497,8 +1503,11 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
-      const fsName = upper(/<[\w]+>/.exec(text)?.[0] ?? "");
+      // the field symbol after ASSIGNING, not the first one in the text: READ
+      // TABLE <a>-t ASSIGNING <b> bound <a> (ultra/events, ZCL_GG_HTTP_HANDLER)
+      const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
+      if (ctx.fieldSymbols.get(fsName).k !== "data" && !sameType(ctx.fieldSymbols.get(fsName), table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
       return {s: "read_index", table, index, fs: fsName};
     }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
@@ -3850,6 +3859,14 @@ function call(chain, ctx, statement, hint) {
     const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
     if (arg("SEED") || !arg("MIN") || !arg("MAX") || ps.length !== 2) throw new Unsupported(`cl_abap_random_int form: ${chain.concatTokens()}`);
     return {e: "random", min: convert(source(arg("MIN"), ctx, I), I), max: convert(source(arg("MAX"), ctx, I), I), type: I};
+  }
+  // cl_abap_typedescr=>describe_by_data( x )->type_kind (ultra/events,
+  // ZCL_ABAPGIT_HTML~ADD): the type kind DESCRIBE FIELD x TYPE gives, which
+  // is what the descriptor's TYPE_KIND holds; no descriptor object is made
+  if (/^cl_abap_typedescr=>describe_by_data\(.*\)->type_kind$/i.test(chain.concatTokens())) {
+    const arg = chain.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+    if (!arg) throw new Unsupported(`describe_by_data form: ${chain.concatTokens()}`);
+    return {e: "type_kind", x: convert(source(arg, ctx), {k: "data"}), type: C(1)};
   }
   if (isExpr(kids[0], Expressions.NewObject)) {
     if (kids.length !== 1) throw new Unsupported(`a call on a new object: ${chain.concatTokens()}`);

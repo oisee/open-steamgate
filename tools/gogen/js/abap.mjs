@@ -674,6 +674,7 @@ export function DeleteIndex(d, i) {
 // APPEND v TO a generic standard table: a new initial row, v moved into it;
 // the new row's index (sy-tabix), as go/abap AppendData
 export function AppendData(t, v) {
+  if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
