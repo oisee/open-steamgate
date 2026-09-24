@@ -1307,3 +1307,17 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: the class is missing from open-abap-core -- **needs an issue** there (or a PR from the fork, per the branch-not-fork exception); not yet filed, goes out through the critic gate.
 - Upstream version containing a fix: none yet
 - Regression-test location: none yet
+
+### NOTE-2026-09-24-view-client-node-vs-go — a CDS SQL view carries MANDT, and only the Go backend filters by it
+
+- Status: `known`
+- Discovery date: `2026-09-24` (critic on #45)
+- Affected versions: `tools/cds2ddic.mjs` since #45
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM <cds sql view>` in the generated `zcl_stg_cds_*` sources, and every OData read over them
+- Expected SAP behaviour: a CDS SQL view over a client-dependent table has the client as its first key field, and Open SQL reads only the logon client's rows through it (implicit client handling); the CDS entity itself exposes no client.
+- Actual open-abap behaviour: the generated SQL view now carries MANDT (the CDS twin does not), but the transpiled Open SQL adds no client condition (no implicit MANDT, the known anomaly), so the Node runtime reads every client's rows through the view, while the Go backend filters by the column. The same request can answer different rows on the two when the data holds more than one client.
+- Impact on open-steamgate: none on the seed data, which holds one client; a capture seeded with a second client's rows would show them on Node.
+- Smallest safe workaround: seed one client per database; the fix is implicit client handling in the transpiled Open SQL.
+- Upstream issue: part of the implicit-MANDT anomaly; no separate issue.
+- Upstream version containing a fix: none yet
+- Regression-test location: `test/cds-client.mjs` (the column itself)

@@ -24,6 +24,7 @@
     "test/cds-check.mjs",
     "test/cds-projection.mjs",
     "test/cds-where.mjs",
+    "test/cds-client.mjs",
     "test/cds-write-chain.mjs",
     "test/conformance.mjs",
     "test/database-identity.mjs",
