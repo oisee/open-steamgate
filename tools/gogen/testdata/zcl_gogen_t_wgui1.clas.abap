@@ -2,7 +2,8 @@
 * line_exists( ), NS, reference comparison, SORTED tables with INSERT INTO
 * TABLE, APPEND ... ASSIGNING, CONCATENATE (fields and LINES OF), FIND ALL
 * OCCURRENCES ... MATCH COUNT (substring, REGEX, a CL_ABAP_REGEX object),
-* escape( ) for HTML attributes and a typed field symbol of a string.
+* escape( ) for HTML attributes. The field symbol of a string is in
+* ZCL_GOGEN_T_WGUI3, so that the JS emitter compiles this one.
 CLASS zcl_gogen_t_wgui1 DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_kv,
@@ -30,7 +31,6 @@ CLASS zcl_gogen_t_wgui1 IMPLEMENTATION.
     DATA lt_c3 TYPE ty_c3_tab.
     DATA lv_n TYPE i.
     DATA lo_re TYPE REF TO cl_abap_regex.
-    FIELD-SYMBOLS <lv_s> TYPE string.
     FIELD-SYMBOLS <ls_kv> TYPE ty_kv.
 
     APPEND 3 TO lt_i.
@@ -70,13 +70,8 @@ CLASS zcl_gogen_t_wgui1 IMPLEMENTATION.
     rv = |{ rv } rd:{ sy-subrc }/{ sy-tabix }|.
 
     CLEAR lt_str.
-    APPEND `p` TO lt_str.
-    APPEND `q` TO lt_str ASSIGNING <lv_s>.
-    rv = |{ rv } ap:{ sy-tabix }|.
-    <lv_s> = `r`.
-    LOOP AT lt_str ASSIGNING <lv_s>.
-      <lv_s> = <lv_s> && `!`.
-    ENDLOOP.
+    APPEND `p!` TO lt_str.
+    APPEND `r!` TO lt_str.
 
     CONCATENATE 'ab ' `cd ` 'e' INTO lv_str.
     rv = |{ rv } cc:[{ lv_str }]|.

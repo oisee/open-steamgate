@@ -3899,6 +3899,9 @@ function valueBody(body, to, ctx, text) {
       else if (inner.length === 1 && isExpr(inner[0], Expressions.Source)) rows.push(convert(source(inner[0], ctx, to.row), to.row));
       else throw new Unsupported(`VALUE table line ${line.concatTokens().slice(0, 30)}`);
     }
+    // ultra/events (fix round): VALUE for a SORTED table places the rows in
+    // key order and raises on a duplicate; the literal keeps source order
+    if (to.sorted && rows.length > 0) throw new Unsupported(`VALUE with rows for a SORTED table`);
     return {e: "table_lit", rows, type: to};
   }
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
@@ -4444,6 +4447,11 @@ export function convert(expr, to) {
   // are not measured
   if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
+  // ultra/events (fix round): a move INTO a SORTED table sorts the rows (and
+  // raises on a duplicate of a unique key), which no emitter does, so a
+  // table of another kind or key refuses here; out of a SORTED table into a
+  // STANDARD one the rows keep their order, which is what a slice does
+  if (to.k === "table" && from.k === "table" && to.sorted && !sameSort(from, to)) throw new Unsupported(`a move into a SORTED table from a table of another kind or key`);
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
   // two structures of one technical type (the same components in the same
   // order, each of the same type and length; names may differ): a move is
