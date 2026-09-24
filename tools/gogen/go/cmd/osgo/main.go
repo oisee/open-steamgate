@@ -25,6 +25,7 @@ import (
 	"html"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,20 +74,10 @@ func refusal(n icfRefused) http.HandlerFunc {
 	}
 }
 
-// statusServices read the five status tables (ZOSD_SVC ...), which the Node
-// hosts refresh before each such request (test/start.mjs withFreshStatus,
-// tools/osd-status.mjs: facts of the facade, not of the ABAP). OSGo has no
-// refresh yet, so they answer out of the seed, and say so in a header.
-var statusServices = []string{odataBase + "/ZOSD_STATUS_SRV", "/sap/bc/gui/sap/its/webgui"}
-
-const statusSnapshotHeader = "X-Osgo-Status-Snapshot"
-
-func seedSnapshot(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(statusSnapshotHeader, "seed; not refreshed (tools/osd-status.mjs is not in OSGo)")
-		h(w, r)
-	}
-}
+// the status service: its tables (ZOSD_SVC ...) are refreshed with this
+// process's own snapshot at start and before each request to it, as the Node
+// hosts do (test/start.mjs withFreshStatus); status.go (ultra/json)
+const statusODataPath = odataBase + "/ZOSD_STATUS_SRV"
 
 // odataBase is where test/start.mjs mounts the OData front.
 const odataBase = "/sap/opu/odata/sap"
@@ -301,6 +292,7 @@ func main() {
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	flag.Parse()
+	started := time.Now()
 	abap.HostFacts = append(abap.HostFacts, "host\tosgo: net/http in front of cl_express_icf_shim, one dialog step per request", buildFacts)
 
 	if *media == "" {
@@ -394,11 +386,6 @@ func main() {
 		if !svc.Active {
 			h = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) }
 		}
-		for _, st := range statusServices {
-			if strings.EqualFold(svc.Path, st) {
-				h = seedSnapshot(h)
-			}
-		}
 		routes = append(routes, route{svc.Path, false, h})
 	}
 	// the nodes left out, each at its own path: longer than its parent's, so
@@ -407,7 +394,8 @@ func main() {
 		routes = append(routes, route{n.Path, false, refusal(n)})
 	}
 	odata := icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)
-	routes = append(routes, route{statusServices[0], false, seedSnapshot(odata)})
+	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
+	routes = append(routes, route{statusODataPath, false, withFreshStatus(status, odata)})
 	routes = append(routes, route{odataBase + "/", false, odata})
 	// longest prefix first, so /sap/bc/a/b is not taken by /sap/bc/a
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
@@ -443,10 +431,20 @@ func main() {
 	for _, n := range notServed {
 		log.Printf("not served   %s: %s (answers 501)", n.Path, n.Why)
 	}
-	log.Printf("status       %s answer out of the seed, not refreshed (header %s)", strings.Join(statusServices, ", "), statusSnapshotHeader)
-	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
-	log.Fatal(server.ListenAndServe())
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
+	// the status tables have this process in them before anybody asks, with
+	// the listener already open (its state is read off /proc/net/tcp)
+	if rows, err := refreshStatus(status); err != nil {
+		log.Printf("status refresh: %v", err)
+	} else {
+		log.Printf("status       %d rows of this process in the status tables, refreshed before each %s request", rows, statusODataPath)
+	}
+	log.Fatal(server.Serve(ln))
 }
 
 func fileExists(p string) bool {

@@ -87,6 +87,16 @@ writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
 // the table registry as JSON, the column registry a dynamic WHERE parser reads
 writeFileSync(join(dir, "zz_tables.json"), JSON.stringify(columnRegistry(program), null, 1));
 const has = (fn) => go.includes(`\nfunc ${fn}(`);
+// the system status of the binary (ultra/json, status.mjs / go/cmd/osgo/status.go):
+// what it serves, and the generation it is
+{
+  const {statusFacts, statusGo} = await import("./status.mjs");
+  const generated = go + JSON.stringify(statements);
+  const facts = echo ? {services: [], packs: [], generation: `go:${(await import("node:crypto")).createHash("sha256").update(generated).digest("hex").slice(0, 16)}`}
+    : await statusFacts({program, services: services.filter((x) => x.active), webapps, generated});
+  writeFileSync(join(dir, "zz_status.go"), statusGo(facts, has("ZCL_OSD_STATUS_REFRESH")));
+  console.log(`status: ${facts.services.length} services and ${facts.packs.length} packs of this binary, generation ${facts.generation}`);
+}
 const boots = ["ZCL_STG_SEGW_REGISTRY_REGISTER", "ZCL_STG_SHLP_REGISTRY_REGISTER"].filter(has);
 writeFileSync(join(dir, "zz_boot.go"), `package main
 
