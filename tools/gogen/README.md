@@ -1165,4 +1165,15 @@ ANORMALIES entry: the implicit MANDT) and `adt-deferred` (the ADT facade,
 postponed). The headline is passed / (Node-passed - go-matches-system -
 adt-deferred), the raw ratio is printed beside it.
 
-WAVE1_RESULT
+Measured after the wave (osgo from this branch on parity-home 6327bab, 965
+classes, 33 methods not compiled; `--e2e`, Node reference reused):
+**95.1 %** -- 176 of 185 (297 Node-passed, less 13 go-matches-system and 99
+adt-deferred, of which 13 pass on OSGo anyway); raw 63.6 % (189/297). Before
+the wave, the same arithmetic: 165/199, 83 %. `--fast` (mocha only): 131/136,
+96.3 %. What is left: `CREATE DATA` of a type without a generated
+descriptor in ZCL_OSD_WEBGUI (2 mocha + 2 e2e), `ImportSet` being slow on
+OSGo (20-50 s a call against 1-5 s; one mocha timeout, the SEGW e2e spec
+at 90 s), `CL_ABAP_GZIP=>COMPRESS_BINARY` (@KERNEL, RepoSet), and the
+editor's parser colouring and compile check (2, Node host tools).
+Wall time with 4 jobs: full 6m45s (the Playwright job alone 6m45s), fast
+3m20s (segw-tree alone 3m17s), against ~40 min serial before.
