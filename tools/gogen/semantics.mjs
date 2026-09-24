@@ -35,6 +35,9 @@ const EXPECT = {
   // LOOP / DELETE itab WHERE a-b = v and c IS [NOT] INITIAL (a structure
   // component too)
   ZCL_GOGEN_T_LOOPW: "a:11;33; b:1;4; c:3; d:4; e:1;3; del:0/3/4/3",
+  // template WIDTH / ALIGN / PAD, PAD = '=' among them (the option parser
+  // cut a quoted '=' in two)
+  ZCL_GOGEN_T_TPLPAD: "zcl_x=====CP/zcl_x/ab.../000zcl_x/zcl_x==",
   ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H

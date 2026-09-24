@@ -3760,7 +3760,13 @@ function template(n, ctx) {
       const fmt = c.findDirectExpression(Expressions.StringTemplateFormatting);
       const opts = {};
       if (fmt) {
-        const words = fmt.concatTokens().split(/\s*=\s*|\s+/);
+        // KEY = value pairs; a quoted value may itself be '=' (PAD = '=',
+        // ultra/itab: zcl_stg_segw_gen's include name), which a split on
+        // "=" cut in two
+        const src = fmt.concatTokens();
+        const pairs = [...src.matchAll(/(\w+)\s*=\s*('(?:[^']|'')*'|[^\s']+)/g)];
+        if (pairs.map((m) => m[0]).join(" ").replace(/\s+/g, "") !== src.replace(/\s+/g, "")) throw new Unsupported(`template formatting ${src}`);
+        const words = pairs.flatMap((m) => [m[1], m[2]]);
         for (let i = 0; i < words.length; i += 2) {
           const k = upper(words[i]);
           const val = words[i + 1];
