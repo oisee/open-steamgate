@@ -299,7 +299,7 @@ DATA(lv_c) = lv_i * '2.5'.    " SAP: P(8,0) 8    open-abap: Float 7.5
 
 ### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
 
-- Status: `fixed upstream: abaplint/transpiler#1863, merged 2026-09-18, released in @abaplint/runtime 2.13.88`
+- Status: `fixed upstream: abaplint/transpiler#1863, merged 2026-09-18, released in @abaplint/runtime 2.13.88; this tree already has it`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`operators/mod.ts`)
 - Affected ABAP statement, runtime API or adapter: `a MOD b` where either operand is a float (or a packed number with decimals)
@@ -620,7 +620,7 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 
 ### ANOMALY-2026-09-14-arithmetic-typed-as-character — Arithmetic with a character literal is typed by the literal
 
-- Status: `fixed upstream: abaplint/abaplint#4293, merged 2026-09-14, first released in @abaplint/core 2.120.53`
+- Status: `fixed upstream: abaplint/abaplint#4293, merged 2026-09-14, first released in @abaplint/core 2.120.53; this tree already has it`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/core 2.120.50`
 - Affected ABAP statement, runtime API or adapter: the inferred type of `DATA(x) = <arithmetic expression>`
@@ -857,7 +857,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-13-default-ignore — `DEFAULT IGNORE` is parsed and not honoured, and the project cannot switch the rule off
 
-- Status: `fixed upstream: abaplint/abaplint#4291, merged 2026-09-14, first released in @abaplint/core 2.120.53`
+- Status: `fixed upstream: abaplint/abaplint#4291, merged 2026-09-14, first released in @abaplint/core 2.120.53; this tree already has it`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/core 2.120.5`, `@abaplint/transpiler-cli 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `METHODS m DEFAULT IGNORE` / `DEFAULT FAIL` in an interface
@@ -1048,7 +1048,7 @@ twice out loud before reading the code that answers it.
 - Actual open-abap behaviour: the body survives intact as the request's data (`get_cdata` returns it), so nothing is lost — it is simply not parsed into fields. The failure is therefore **silent and total** for a posting screen: no error, no empty-ness anywhere a caller can see, just every field reading as if nobody filled it in
 - Impact on open-steamgate: the editor screen (G.8) is the first page here that posts a form at all. The screens written before it did not meet this — SE16 navigates by GET, and the webgui posts through `sapevent`, which carries its payload in the URL. So the gap is one this tree could only find the day it wrote a text area
 - Smallest safe workaround: `src/webgui/zcl_osd_form.clas.abap` — the query-string fields as the shim gives them, plus the body parsed when the method is POST or PUT and the content type is `application/x-www-form-urlencoded`. (Found first on 2026-09-18 in the AMDP sandbox, whose `zcl_osd_amdp_sbx=>posted_body` parses the pairs by hand; a form sends a space as `+`, and `REPLACE ... WITH ' '` replaces it with nothing, since a text literal loses its trailing blanks -- it has to be written `` WITH ` ` ``.) It is **not** `cl_http_utility=>string_to_fields`, and the two differences are required by the encoding rather than chosen: `+` is a space (that method decodes with `decodeURIComponent`, which leaves `+` alone, so a source posted through a text area would come back with its indentation turned into plus signs), and the **name** is unescaped too
-- Upstream issue: none yet. The fix belongs in the shim, where the request is assembled, and it is small — parse the body into fields when the content type says it is a form. `docs/upstream.md` carries it; it goes out under the critic gate like the rest
+- Upstream issue: none yet; the repository is open-abap/express-icf-shim. The fix belongs in the shim, where the request is assembled, and it is small — parse the body into fields when the content type says it is a form. `docs/upstream.md` carries it; it goes out under the critic gate like the rest
 - Regression-test location: `test/unit/zcl_osd_form_test` — the decoding rules, and separately `the_gap_this_exists_for`, which asserts that `get_form_field` over a posted body answers **nothing**. That is the expiry: when the shim learns to parse a body, that test fails and says to delete the workaround rather than to adjust an expectation
 - Upstream version containing a fix: `unknown`
 
@@ -1420,6 +1420,6 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: into x LENGTH 4, `ABG10000`, `AB CD000`, `0a1B0000` and `AB    00` (the blanks of the c kept), none of them hex; into an xstring the same as A4H
 - Impact on open-steamgate: none seen; the zvdb DPC upper-cases and validates VectorHex before the move
 - Smallest safe workaround: the IR writes a RAW by the A4H rule (`tools/ir-writes.mjs` bindValue); the Go backend has it too (`go/abap/conv.go` CToX)
-- Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (an older issue of the same defect; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895)
+- Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (a related, older issue about conversion type c; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895)
 - Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
 - Upstream version containing a fix: none yet
