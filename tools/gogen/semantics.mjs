@@ -38,6 +38,9 @@ const EXPECT = {
   // template WIDTH / ALIGN / PAD, PAD = '=' among them (the option parser
   // cut a quoted '=' in two)
   ZCL_GOGEN_T_TPLPAD: "zcl_x=====CP/zcl_x/ab.../000zcl_x/zcl_x==",
+  // NS / CN (negated CS / CO); DELETE itab inside LOOP AT itab deletes the
+  // current row and the loop goes on with the next (two in a row here)
+  ZCL_GOGEN_T_NSCN: "01011-3-3 3:T1Berlin;T2Aarhus;T5Bergen;",
   ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H

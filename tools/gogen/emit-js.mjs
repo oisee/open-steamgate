@@ -489,6 +489,7 @@ function stmt(st, ctx, d) {
     }
     case "loop": {
       const n = ctx.loop++;
+      st.token.idxVar = `i${n}`; // ultra/itab: DELETE itab of the current row
       const tb = expr(st.table, ctx);
       const start = st.from ? `Math.max(${expr(st.from, ctx)} - 1, 0)` : "0";
       const limit = st.to ? ` && i${n} < ${expr(st.to, ctx)}` : "";
@@ -607,6 +608,12 @@ function stmt(st, ctx, d) {
       const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
         `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
+    }
+    // ultra/itab: DELETE itab inside LOOP AT itab, as emit-go
+    case "delete_current": {
+      const tb = place(st.table, ctx);
+      const i = st.token.idxVar;
+      return [`${t}${tb}.splice(${i}, 1); ${i}--; s.sy.subrc = 0;`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;

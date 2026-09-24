@@ -1252,7 +1252,13 @@ function structure(node, ctx) {
     // WHERE comp op value [AND ...]: a row that fails it is not a pass
     const cc = st.findDirectExpression(Expressions.ComponentCond);
     const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
-    return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
+    // ultra/itab: the loop is known to its body, for DELETE itab (the
+    // current row) inside it
+    // (a shared token object, not the loop itself, so the IR stays a tree)
+    const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, token: {}};
+    (ctx.loopStack ??= []).push(loop);
+    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
+    return loop;
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
@@ -1562,6 +1568,16 @@ function statement(node, ctx) {
     const cc = node.findDirectExpression(Expressions.ComponentCond);
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
+  // ultra/itab: DELETE itab, the short form inside LOOP AT itab: the
+  // current row goes and the loop goes on with the row after it (A4H
+  // ZCL_GOGEN_T_NSCN); only in the innermost loop, over that same table
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+[^\s.]+\s*\.?$/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const loop = ctx.loopStack?.[ctx.loopStack.length - 1];
+    const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
+    if (!loop || table.type.k !== "table" || !same(loop.table, table)) throw new Unsupported(`DELETE itab outside a LOOP over it: ${text}`);
+    return {s: "delete_current", table, token: loop.token};
   }
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
@@ -4327,12 +4343,14 @@ function compare(node, ctx) {
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const opText = upper(opNode.concatTokens());
   const op = OPS[opText] ?? opText;
-  if (op === "CO" || op === "CS") {
+  if (op === "CO" || op === "CS" || op === "CN" || op === "NS") {
     // measured on A4H: CO is true for an empty operand; CS ignores case and
     // an empty pattern is always found; trailing blanks count in a string,
-    // a c operand has none stored
-    const r = {c: op.toLowerCase(), l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
-    return not ? {c: "not", x: r} : r;
+    // a c operand has none stored. CN and NS are the negations of CO and CS
+    // (ultra/itab: NS in the demo DPC's search; A4H ZCL_GOGEN_T_NSCN)
+    const neg = op === "CN" || op === "NS";
+    const r = {c: op === "CO" || op === "CN" ? "co" : "cs", l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
+    return neg !== not ? {c: "not", x: r} : r;
   }
   if (["CP", "NP", "CA", "NA"].includes(op)) {
     // measured on A4H (2026-09-23): CP ignores case except after #, + is one

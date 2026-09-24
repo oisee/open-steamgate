@@ -856,6 +856,7 @@ function stmtLines(st, ctx, d) {
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
       const n = ctx.loop++;
+      st.token.idxVar = `i${n}`; // ultra/itab: DELETE itab of the current row
       const tb = expr(st.table, ctx);
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
@@ -1146,6 +1147,13 @@ ${t}	}`));
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
+    }
+    // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
+    // the loop index steps back, so the next pass reads the row after it
+    case "delete_current": {
+      const tb = place(st.table, ctx);
+      const i = st.token.idxVar;
+      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
