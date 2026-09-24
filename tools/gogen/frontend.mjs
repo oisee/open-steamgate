@@ -1180,6 +1180,13 @@ function registerConst(program, name, id, className) {
     return go;
   }
   if (typeof value !== "string" && typeof value !== "number") return undefined;
+  // an n constant whose VALUE is exactly its digits (ultra/demodata: A4H
+  // prints C_MIN of n 10 VALUE '9000000000' as 9000000000); any other n
+  // VALUE is not measured
+  if (type.k === "n" && new RegExp(`^[0-9]{${type.len}}$`).test(unquote(value))) {
+    program.consts.set(go, {go, type, value: unquote(value)});
+    return go;
+  }
   if (!SCALAR.includes(type.k)) return undefined;
   program.consts.set(go, {go, type, value: unquote(value)});
   return go;
@@ -3111,6 +3118,9 @@ function substring(base, off, len, node) {
   // a d or t is read as the c of its length (measured on A4H: t '123456'
   // gives 12 and 34 for (2) and +2(2) into i)
   if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(base.type.len)};
+  // an n the same way: its digits (A4H: n 10 '9000000123'+1(9) is 123 into
+  // an i and 000000123 into an n 9; ultra/demodata)
+  if (base.type.k === "n") base = {...base, type: C(base.type.len)};
   const k = base.type.k;
   if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${node.concatTokens()}`);
   const litLen = len?.e === "int" ? len.value : undefined;
@@ -3435,9 +3445,11 @@ function writeIrType(t, where) {
   // the build-time check of a write stands a STRING in for it (irCheck). A
   // RAWSTRING column is not written yet: not measured
   if (t.k === "x") return RIR.T.bytes(t.len ?? 1);
-  // ultra/events: a p column (ZOSD_TSES-CREATED) is not written yet because
-  // tools/ir-writes.mjs has no initial value for P ("a column of type P has
-  // no initial value here yet"); the fix belongs there, not here
+  // a DEC column: its digits and decimals, as sqlIrType counts them; bound
+  // as the decimal text of the work area's p (tools/ir-writes.mjs
+  // packedText, taken from main, where the P initial value was added;
+  // go/abap/dbwrite.go bindValue). ultra/demodata: ZOSD_TAXIFACT's FARE
+  if (t.k === "p") return RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0);
   throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
 }
 /** the type a write is checked with at build time: ir-writes.mjs binds no
@@ -3810,6 +3822,8 @@ function selectStatement(node, ctx, text) {
       if (f.type.k === "xstring" || (c.type.k === "x" && f.type.k === "x")) return {field: f.name, type: f.type};
       throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     }
+    // a NUMC column into an n field of its length: its digits (ultra/demodata)
+    if (c.type.k === "n" && f.type.k === "n" && c.type.len === f.type.len) return {field: f.name, type: f.type};
     if (!["c", "string", "i", "d", "t", "n"].includes(c.type.k) || !["c", "string", "i", "d", "t"].includes(f.type.k)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     return {field: f.name, type: f.type};
@@ -4109,7 +4123,9 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   // ZCL_GOGEN_T_RAWRD)
   const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring") || (c.type.k === "p" && f.type.k === "p")
     || (c.type.k === "x" && (f.type.k === "x" || f.type.k === "xstring"))
-    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
+    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"))
+    // a NUMC column into an n field of its length (ultra/demodata)
+    || (c.type.k === "n" && f.type.k === "n" && c.type.len === f.type.len);
   // INTO (a, b, ...) / INTO (@a, @DATA(b), ...): one target per column, by
   // position (ultra/zvdb, A4H ZCL_GOGEN_T_RAWSEL: a row missing leaves the
   // targets as they were, sy-subrc 4; @DATA( ) is typed as its column)
@@ -5112,6 +5128,20 @@ export function convert(expr, to) {
   // are the value (anything else, blanks, signs, other lengths, is a
   // conversion rule not measured here)
   if (to.k === "n" && expr.e === "chars" && to.len && new RegExp(`^[0-9]{${to.len}}$`).test(expr.value)) return {...expr, type: to};
+  // ultra/demodata, NUMC moves measured on A4H 2026-09-24 (ZCL_GOGEN_T_NUMC,
+  // $ZOSG_TMP_0462). An n holds its digits, zeros included:
+  // n -> string keeps them (0000000042), n -> c is a c move of them (into a
+  // c 8: 00000000), n -> i and f read them as a number
+  if (from.k === "n" && to.k === "string") return {...expr, type: to};
+  if (from.k === "n" && to.k === "c") return ok("s2c");
+  if (from.k === "n" && numeric(to)) return ok("c2n");
+  // i -> n: the sign dropped, the last digits kept, zeros in front (42 into
+  // n 10 is 0000000042, -5 into n 3 is 005, 123456 into n 3 is 456)
+  if (from.k === "i" && to.k === "n") return ok("i2n");
+  // c / string -> n: the digits only, right-aligned, the last ones kept
+  // (' 12' is 0000000012, 'a1b2 3' into n 3 is 123, '98765' into n 3 is
+  // 765, a blank c is 000)
+  if (charlike(from) && to.k === "n") return ok("s2n");
   // i -> string and x -> string are conversion rules not measured yet (the
   // sign of an i goes to the END there, unlike in a template): refused
   // until an A4H probe says what they give
@@ -5466,6 +5496,10 @@ function compareValues(op, l, r, ctx) {
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  // n with n of one length: their digits in order, which is their numeric
+  // order (A4H: 9000000017 > 9000000000, ZCL_GOGEN_T_NUMC); other lengths
+  // are not measured
+  if (l.type.k === "n" && r.type.k === "n" && l.type.len === r.type.len) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   // two object references, = and <>: the same object or not (ultra/json)
   if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);

@@ -408,6 +408,23 @@ func main() {
 		}()
 		abap.DialogStep(func() { boot(&abap.Session{}) })
 	}()
+	// the synthetic demo rows (ZCL_OSD_DEMO_DATA=>BOOT, as the Node hosts run
+	// it through tools/osd-demo-data.mjs): the same class and the same knob,
+	// OSD_DEMO_ROWS; one dialog step of its own, and a dump there is reported
+	// and the server starts without the rows
+	if hasDemoData {
+		func() {
+			started := time.Now()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("demo data: ZCL_OSD_DEMO_DATA=>BOOT failed, serving without it: %s  at %s", dumpText(r), strings.Join(abapStack(r), " <- "))
+				}
+			}()
+			var report string
+			abap.DialogStep(func() { report = demoData(&abap.Session{}, os.Getenv("OSD_DEMO_ROWS")) })
+			log.Printf("demo data: %s (%d ms)", report, time.Since(started).Milliseconds())
+		}()
+	}
 
 	webapp := filepath.Join(*root, "webapp")
 	type route struct {

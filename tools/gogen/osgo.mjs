@@ -117,6 +117,12 @@ const has = (fn) => go.includes(`\nfunc ${fn}(`);
   console.log(`status: ${facts.services.length} services and ${facts.packs.length} packs of this binary, generation ${facts.generation}`);
 }
 const boots = ["ZCL_STG_SEGW_REGISTRY_REGISTER", "ZCL_STG_SHLP_REGISTRY_REGISTER"].filter(has);
+// the synthetic demo rows: ZCL_OSD_DEMO_DATA=>BOOT with the knob the Node
+// hosts pass (tools/osd-demo-data.mjs, OSD_DEMO_ROWS); main.go runs it in a
+// dialog step of its own, after boot, and starts without them if it dumps
+const demoData = has("ZCL_OSD_DEMO_DATA_BOOT")
+  ? "const hasDemoData = true\n\nfunc demoData(s *abap.Session, config string) string { return ZCL_OSD_DEMO_DATA_BOOT(s, config) }"
+  : "// ZCL_OSD_DEMO_DATA is not in this program\nconst hasDemoData = false\n\nfunc demoData(s *abap.Session, config string) string { return \"\" }";
 // ZCL_APC_HOST as go/apc's Host, when this program compiled it (cmd/o4dserve's
 // adapter): the query of the upgrade request as the handler's form fields
 const apcAdapter = has("New_ZCL_APC_HOST") ? `
@@ -173,6 +179,8 @@ const osgRoot = ${JSON.stringify(home)}
 func boot(s *abap.Session) {
 ${boots.map((b) => `\t${b}(s)`).join("\n")}
 }
+
+${demoData}
 
 // the shim's REQ and RES are the exchange (go/abap/icf.go)
 func runShim(s *abap.Session, x *abap.ICFExchange, base string) {

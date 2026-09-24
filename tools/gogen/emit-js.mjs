@@ -1000,6 +1000,8 @@ function conv(e, ctx) {
     case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "i2s": return `abap.IToString(${x})`;
+    case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
+    case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;

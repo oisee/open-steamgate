@@ -91,6 +91,13 @@ func bindValue(v any, t *IRType, where string) *IR {
 		if s, ok := v.(string); ok {
 			return Lit(DBXString(s), t)
 		}
+	case "P":
+		// a p field holds its decimal text (packed.go); bound as that text,
+		// as ir-writes.mjs packedText binds it, and the DEC column's
+		// affinity makes it a number (ultra/demodata)
+		if s, ok := v.(string); ok {
+			return Lit(FmtP(s, t.Dec), t)
+		}
 	}
 	panic(NotCompiled(where, fmt.Sprintf("a %T for a column of type %s", v, t.seam())))
 }
