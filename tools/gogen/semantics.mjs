@@ -65,6 +65,21 @@ const EXPECT = {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
+  // CONCATENATE ... IN BYTE MODE into an xstring (A4H 2026-09-24, $ZOSG_TMP_0460;
+  // ultra/packs, the SMW0 loaders of Zork and ZO4D): an x keeps its trailing
+  // 00 bytes, an x never assigned is its length in 00, sy-subrc 0
+  ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
+  // cl_http_utility=>encode_x_base64: RFC 4648, padded (A4H 2026-09-24,
+  // $ZOSG_TMP_0460; the LSD channel). A host function of the Go runtime: the
+  // JS emitter refuses
+  // the initial value of an x/d/t/n/p that nobody assigned, wherever it
+  // lives: a structure component (nested too), a row APPENDed after CLEAR, a
+  // CLASS-DATA, an instance attribute, a local, a RETURNING never set, a
+  // component VALUE #( ) does not name (A4H 2026-09-24, $ZOSG_TMP_0461; the
+  // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
+  // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
+  ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
+  ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
   // (A4H 2026-09-23, $batch parts end their body this way)
@@ -537,7 +552,7 @@ const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".c
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX",
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];

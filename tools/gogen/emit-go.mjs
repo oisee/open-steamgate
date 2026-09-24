@@ -55,10 +55,22 @@ export function goType(t) {
 // a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
 const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
 
-// an x field is always its full length: initial is that many 00 bytes
+// an x field is always its full length: initial is that many 00 bytes.
+// A structure's initial value sets every component whose initial value is
+// not Go's zero value, recursively (ultra/packs fix round, critic finding 1:
+// an x/d/t/n/p component, a row built from one, a CLASS-DATA and an instance
+// attribute all started at "" in Go while JS and ABAP give the type's
+// initial value; ZCL_GOGEN_T_XINIT pins it)
 const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
-  : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
+  : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{${zeroFields(t).join(", ")}}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
     : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? JSON.stringify(pZero(t)) : t.k === "n" ? JSON.stringify("0".repeat(t.len)) : "nil");
+/** is this zero() text Go's own zero value for the type, so a declaration may leave it out */
+const isGoZero = (z) => z === "0" || z === `""` || z === "nil" || z === "abap.Data{}" || /^[A-Za-z0-9_.]+\{\}$/.test(z);
+/** the components of a structure whose initial value is not Go's zero value, as `name: value` */
+function zeroFields(t, skip = new Set()) {
+  return (STRUCTDEFS.get(t.go)?.fields ?? []).filter((f) => !skip.has(String(f.name).toUpperCase())).map((f) => [f, zero(f.type)])
+    .filter(([, z]) => !isGoZero(z)).map(([f, z]) => `${ident(f.name)}: ${z}`);
+}
 
 /*
  * ABAP tables are values: an assignment copies them, deep, with the tables
@@ -308,7 +320,9 @@ export function emitGo(program, pkg = "main") {
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
-      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${a.value === undefined ? "" : ` = ${constLiteral(a)}`}`);
+      // a CLASS-DATA without VALUE starts at its type's initial value (critic finding 1)
+      const init = a.value !== undefined ? constLiteral(a) : isGoZero(zero(a.type)) ? undefined : zero(a.type);
+      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${init === undefined ? "" : ` = ${init}`}`);
     }
     if (chainCctor(cls)) {
       const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
@@ -335,7 +349,9 @@ export function emitGo(program, pkg = "main") {
     // descriptors the way the kernel does, field by field)
     out.push(`func Alloc_${typeName(cls.name)}() *${typeName(cls.name)} {`,
       `\to := &${typeName(cls.name)}{}`,
-      ...chain.flatMap((c) => (c.attributes ?? []).filter((a) => !a.static && !a.unsupported && a.value !== undefined).map((a) => `\to.${ident(a.name)} = ${constLiteral(a)}`)),
+      // an instance attribute without VALUE starts at its type's initial value (critic finding 1)
+      ...chain.flatMap((c) => (c.attributes ?? []).filter((a) => !a.static && !a.unsupported && (a.value !== undefined || !isGoZero(zero(a.type))))
+        .map((a) => `\to.${ident(a.name)} = ${a.value !== undefined ? constLiteral(a) : zero(a.type)}`)),
       ...chain.filter((c) => POLY.has(c.name)).map((c) => `\to.self_${typeName(c.name)} = o`),
       "\treturn o", "}", "");
     out.push(`func New_${typeName(cls.name)}(${["s *abap.Session", ...cp.map((p) => `${ident(p.name)} ${byRef(p) ? "*" : ""}${goType(p.type)}`)].join(", ")}) *${typeName(cls.name)} {`,
@@ -768,7 +784,17 @@ function method(cls, m) {
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
-  for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
+  // a local whose initial value is not Go's zero value (an x of its length in
+  // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
+  // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
+  // assigned read as zero bytes long
+  for (const l of m.locals) {
+    const z = zero(l.type);
+    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${goType(l.type)}` : `\tvar ${ident(l.name)} ${goType(l.type)} = ${z}`, `\t_ = ${ident(l.name)}`);
+  }
+  // the RETURNING parameter starts at its initial value too (the JS emitter's
+  // let r = zero(t)); Go's named result starts at Go's zero value
+  if (m.returning && !isGoZero(zero(m.returning.type))) lines.push(`\t${ident(m.returning.name)} = ${zero(m.returning.type)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "" : "*"}${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
@@ -1343,6 +1369,10 @@ ${t}	}`));
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)})`];
     }
+    // CONCATENATE ... IN BYTE MODE into an xstring (ultra/packs): the bytes
+    // joined, the operands read before the target is written
+    case "concat_bytes":
+      return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}`, `${t}s.Sy.Subrc = 0`];
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -1588,8 +1618,11 @@ function expr(e, ctx) {
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
     case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
-    case "struct":
-      return `${e.type.go}{${e.fields.map((f) => `${ident(f.name)}: ${copied(expr(f.value, ctx), f.value.type, f.value)}`).join(", ")}}`;
+    case "struct": {
+      // VALUE #( ... ): a component it does not name is initial (critic finding 1)
+      const rest = zeroFields(e.type, new Set(e.fields.map((f) => String(f.name).toUpperCase())));
+      return `${e.type.go}{${[...e.fields.map((f) => `${ident(f.name)}: ${copied(expr(f.value, ctx), f.value.type, f.value)}`), ...rest].join(", ")}}`;
+    }
     case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;

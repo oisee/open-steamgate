@@ -21,9 +21,12 @@
 //   - one Session per socket (a stateful handler keeps its attributes);
 //   - every call into ABAP is one dialog step (Step), run one at a time in
 //     the process (abap.WorkProcess), inside abap.DialogStep, so a step that
-//     dumps rolls its database work back and the connection stays up, as a
-//     short dump in one APC step on a system ends that step and not the
-//     session;
+//     dumps rolls its database work back;
+//   - a dump in the constructor or ON_START is a 503 "<handler>: <dump>",
+//     a dump in ON_MESSAGE closes the socket 1011 "handler failed": what
+//     the Node host does (tools/osd-apc.mjs), chosen over keeping the
+//     socket up because then the page hears nothing and waits (ZO4D's
+//     outro did). What a system does has not been measured;
 //   - ON_ACCEPT and ON_START run before the upgrade is answered, and what
 //     ON_START sent is written after it. That is "open before drain"
 //     (CLAUDE.md): a message delivered before the page's socket is open is
@@ -32,16 +35,22 @@
 //     403 and never upgraded;
 //   - what a step sent is written in order after the step, outside the
 //     work process, so a slow client never holds the lock;
-//   - a text frame is ON_MESSAGE; a binary frame is refused (close 1003),
-//     since ZCL_APC_HOST takes text only; the end of the socket is ON_CLOSE
-//     with the peer's close code (1005 when it sent none, 1006 when the
-//     connection broke without a close frame or a write to it failed,
-//     RFC 6455 7.1.5).
+//   - a text frame is ON_MESSAGE; a binary frame is ignored and the socket
+//     stays up, as on the Node host (ZCL_APC_HOST takes text only);
+//   - a close frame from the peer is ON_CLOSE with "closed by the client"
+//     and 1000 whatever code it carried, as on the Node host; a connection
+//     that broke without one (or a write that failed) is ON_CLOSE with the
+//     error and 1006 (RFC 6455 7.1.5), where the Node host calls no
+//     ON_CLOSE. The close frame sent back is github.com/coder/websocket's
+//     echo of the peer's code, where Node answers 1000 "bye": the library
+//     answers a close frame itself, before ON_CLOSE runs.
 package apc
 
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -70,9 +79,12 @@ type Host interface {
 type Channel struct {
 	// Name is the application, for the log (zo4d_demo).
 	Name string
+	// Handler is the handler class, named in the 503 of a dump at start
+	// (Node: "<handler>: <why>").
+	Handler string
 	// New makes the connection's host: runs in a step of its own, after the
-	// handshake is checked and before the upgrade; a dump answers 500 and
-	// the socket is not opened.
+	// handshake is checked and before the upgrade; a dump answers 503 and
+	// the socket is not opened, nil (no host class) answers 500.
 	New func(s *abap.Session, r *http.Request) Host
 	// Step runs one dialog step; nil is abap.APCStep.
 	Step func(name string, work func()) error
@@ -82,6 +94,9 @@ type Channel struct {
 	// a request with an Origin header whose host is not the request's Host
 	// is refused 403. A request without Origin (not a browser) is let in.
 	OriginPatterns []string
+	// AnyOrigin lets every origin in, as the Node host does (it never looks
+	// at Origin); OriginPatterns is then not read.
+	AnyOrigin bool
 	// ReadLimit is the largest message read; 0 is 1 MB.
 	ReadLimit int64
 	// Logf logs; nil is log.Printf.
@@ -192,27 +207,44 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, why, status)
 		return
 	}
-	if !originAllowed(r, ch.OriginPatterns) {
+	if !ch.AnyOrigin && !originAllowed(r, ch.OriginPatterns) {
 		http.Error(w, "origin not allowed for this APC channel", http.StatusForbidden)
 		return
 	}
 	s := &abap.Session{}
 	var host Host
-	if err := ch.step("CONSTRUCTOR", "", func() { host = ch.New(s, r) }); err != nil || host == nil {
-		http.Error(w, "APC handler could not be created", http.StatusInternalServerError)
+	// a dump while the handler starts: 503 and why, in text (Node's answer)
+	unavailable := func(err error) {
+		why := err.Error()
+		var d *abap.ErrDump
+		if errors.As(err, &d) {
+			why = fmt.Sprint(d.Dump)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, "%s: %s", ch.Handler, why)
+	}
+	if err := ch.step("CONSTRUCTOR", "", func() { host = ch.New(s, r) }); err != nil {
+		unavailable(err)
+		return
+	}
+	if host == nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	var accepted bool
 	var out []string
 	if err := ch.step("ON_START", "", func() { accepted = host.Open(s); out = host.Drain(s) }); err != nil {
-		http.Error(w, "APC handler dumped in ON_START", http.StatusInternalServerError)
+		unavailable(err)
 		return
 	}
 	if !accepted {
-		http.Error(w, "APC connection rejected by the handler", http.StatusForbidden)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, "the handler refused the connection")
 		return
 	}
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: ch.OriginPatterns})
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: ch.OriginPatterns, InsecureSkipVerify: ch.AnyOrigin})
 	if err != nil {
 		// checked above, so this is the hijack failing: the handler was
 		// started for a socket that never opened, and it ends
@@ -245,27 +277,31 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var ce websocket.CloseError
 			if errors.As(err, &ce) {
-				reason, code = ce.Reason, int32(ce.Code)
-				if code == -1 {
-					code = 1005
-				}
+				// the Node host's ON_CLOSE for any close frame of the client
+				reason, code = "closed by the client", 1000
 			} else {
 				reason, code = err.Error(), 1006
 			}
 			break
 		}
 		if typ != websocket.MessageText {
-			c.Close(websocket.StatusUnsupportedData, "binary messages are not supported by this host")
-			reason, code = "binary message", int32(websocket.StatusUnsupportedData)
-			break
+			// ignored, as the Node host ignores an opcode it does not serve
+			continue
 		}
 		text := string(data)
 		out = nil
 		if ch.step("ON_MESSAGE", text, func() { host.Message(s, text); out = host.Drain(s) }) != nil {
-			// what a step that dumped had sent goes nowhere (not measured on
-			// a system): it is taken off the manager so that the next step
-			// does not send it as its own
-			ch.step("DRAIN", "", func() { host.Drain(s) })
+			// the Node host's queue: a callback that failed ends the socket
+			// 1011 "handler failed"; what the step had sent goes nowhere
+			if c.Close(websocket.StatusInternalError, "handler failed") == nil {
+				// the client answered the close frame: on Node that answer
+				// is read as the client's close
+				reason, code = "closed by the client", 1000
+			} else {
+				reason, code = "handler failed", 1006
+			}
+			ch.step("ON_CLOSE", "", func() { host.Close(s, reason, code) })
+			return
 		}
 		alive = write(out)
 	}
@@ -274,4 +310,127 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reason, code = "write failed", 1006
 	}
 	ch.step("ON_CLOSE", "", func() { host.Close(s, reason, code) })
+}
+
+// RequestPath is the path an upgrade is matched on, as the Node host takes
+// it (tools/osd-apc.mjs mountChannels): the request target as sent, before
+// "?", trailing slashes dropped, not percent-decoded, so /sap/bc/apc/sap/%7Aork
+// is not /sap/bc/apc/sap/zork on either host.
+func RequestPath(r *http.Request) string {
+	p := r.RequestURI
+	if p == "" {
+		p = r.URL.RequestURI()
+	}
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	return strings.TrimRight(p, "/")
+}
+
+// FormFields is the query of the upgrade as URLSearchParams reads it (the
+// WHATWG application/x-www-form-urlencoded parser the Node host uses), in
+// URL order: split on '&', empty pieces skipped, name and value at the
+// first '=', '+' is a space, a '%' not followed by two hex digits stays as
+// it is, and bytes that are not UTF-8 become U+FFFD. url.ParseQuery would
+// drop a pair with a bad escape or a ';'; URLSearchParams keeps it.
+func FormFields(rawQuery string) [][2]string {
+	var out [][2]string
+	for _, piece := range strings.Split(rawQuery, "&") {
+		if piece == "" {
+			continue
+		}
+		name, value, _ := strings.Cut(piece, "=")
+		out = append(out, [2]string{formDecode(name), formDecode(value)})
+	}
+	return out
+}
+
+func unhex(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
+}
+
+func formDecode(s string) string {
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '+' {
+			b = append(b, ' ')
+			continue
+		}
+		if c == '%' && i+2 <= len(s)-1 {
+			h, ok1 := unhex(s[i+1])
+			l, ok2 := unhex(s[i+2])
+			if ok1 && ok2 {
+				b = append(b, h<<4|l)
+				i += 2
+				continue
+			}
+		}
+		b = append(b, c)
+	}
+	return utf8Decode(b)
+}
+
+// utf8Decode is the WHATWG "UTF-8 decode without BOM": each maximal
+// subpart of an ill-formed sequence is one U+FFFD (strings.ToValidUTF8
+// would give one for a whole run of them).
+func utf8Decode(b []byte) string {
+	var sb strings.Builder
+	var cp rune
+	need, seen := 0, 0
+	lower, upper := byte(0x80), byte(0xBF)
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if need == 0 {
+			switch {
+			case c <= 0x7F:
+				sb.WriteByte(c)
+			case c >= 0xC2 && c <= 0xDF:
+				need, cp = 1, rune(c&0x1F)
+			case c >= 0xE0 && c <= 0xEF:
+				if c == 0xE0 {
+					lower = 0xA0
+				} else if c == 0xED {
+					upper = 0x9F
+				}
+				need, cp = 2, rune(c&0x0F)
+			case c >= 0xF0 && c <= 0xF4:
+				if c == 0xF0 {
+					lower = 0x90
+				} else if c == 0xF4 {
+					upper = 0x8F
+				}
+				need, cp = 3, rune(c&0x07)
+			default:
+				sb.WriteRune('�')
+			}
+			continue
+		}
+		if c < lower || c > upper {
+			need, seen, cp = 0, 0, 0
+			lower, upper = 0x80, 0xBF
+			sb.WriteRune('�')
+			i-- // the byte is read again as the start of a sequence
+			continue
+		}
+		lower, upper = 0x80, 0xBF
+		cp = cp<<6 | rune(c&0x3F)
+		seen++
+		if seen == need {
+			sb.WriteRune(cp)
+			need, seen, cp = 0, 0, 0
+		}
+	}
+	if need != 0 {
+		sb.WriteRune('�')
+	}
+	return sb.String()
 }

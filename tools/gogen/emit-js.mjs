@@ -450,6 +450,9 @@ function stmt(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
     }
+    // CONCATENATE ... IN BYTE MODE (ultra/packs; see emit-go.mjs)
+    case "concat_bytes":
+      return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")};`, `${t}s.sy.subrc = 0;`];
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps});`];

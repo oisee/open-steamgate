@@ -547,6 +547,67 @@ is the host's), and there is no Go Zork APC stand. The tiles do not read
 their media through Go today; once `SELECT ... WHERE` lands, `mediacheck`
 is to be rerun against the packs' loader methods themselves.
 
+## The packs on OSGo: Zork, Vivid Vibes, LSD, 2026-09-24
+
+The osgo build reads the layers the Node build reads (`osg-build.mjs`):
+`abap_transpile.json`'s `input_folder` with every pack's ABAP folders before
+`gen/` (`tools/osd-packs.mjs` `inputFoldersOf`), `test/` left out as
+before, the later folder winning an object two hold (`tools/osd-inputs.mjs`
+`layers`); a file a later layer hides is not loaded at all (`compileProgram`
+`skip`), which is how the transpiler is handed the winner only. With the
+packs fetched that is 945 classes; `ZCL_O4D_HTTP_HANDLER` of `packs/o4d/src`
+wins over the upstream copy, as on Node. The packs' rows come with
+`test/seed.mjs` and their W3MI objects with `collectMedia` over the layers
+(89 objects, 15.6 MB). Every `*.sapc.xml` whose handler is compiled is a
+push channel (`tools/osd-icf.mjs` `channels`): an upgrade request at its
+path goes to `go/apc` around the compiled `ZCL_APC_HOST` (the adapter is
+generated into `zz_boot.go`; the upgrade's query as form fields, in URL
+order), with the `X-OSD-Channel` receipt the Node host writes; a channel
+whose class is missing is a 501, an upgrade anywhere else a 404, and ICF
+requests and channel steps share `abap.WorkProcess`.
+
+What the packs needed of the compiler: `CONCATENATE ... IN BYTE MODE` into
+an xstring (the SMW0 loaders of Zork and ZO4D), `cl_http_utility=>
+encode_x_base64` as a host function (the LSD channel sends the show so),
+and an `x` that is never assigned starting at its length in 00 bytes
+(it was Go's empty string). The last one is wider than a local: in the
+review round the same held for a structure's `x`/`d`/`t`/`n`/`p`
+component, a row appended after `CLEAR`, `CLASS-DATA`, an instance
+attribute, a `RETURNING` never set and a component `VALUE #( )` leaves out,
+so `zero()` of a structure now sets those components and attributes and
+results start there too. All measured on A4H (`ZCL_GOGEN_T_BYTECAT`,
+`ZCL_GOGEN_T_B64`, `ZCL_GOGEN_T_XINIT`).
+
+Against OSG on Node (`STG_DB=sqlite node test/run.mjs`), in Chromium and on
+the sockets: the three pages are byte for byte equal; Zork boots from
+`ZORK-MINI.Z3` and ten commands give the same 22 lines, and typed into the
+page the same frames; LSD sends the same 225 332 bytes in the same base64
+chunks and plays (`Playing 0:05 / 3:28`); Vivid Vibes plays its first part
+with the 4.6 MB MP3 loaded (`readyState` 4, playing) and the images equal.
+Its frames differ from Node's where Node differs from A4H (the pulse,
+the mountains, the tesseract: ANORMALIES 2026-09-16/17) and in the digits of
+every `f` (ANOMALY-2026-09-24-float-template-digits); `node demo.mjs`
+still has Go equal to the A4H recordings. The second part ("outro") stops
+at `ZCL_O4D_GALLERY=>RENDER`, `APPEND LINES OF`, which the subset does not
+have yet.
+
+The socket's edges follow the Node host (`tools/osd-apc.mjs`), each chosen
+and measured against it in the review round (2026-09-24): a dump in the
+constructor or `ON_START` is a 503 `<handler>: <why>`; a dump in
+`ON_MESSAGE` closes the socket 1011 `handler failed` (before, Go kept it open
+and the outro's page waited on silence); a binary frame is ignored; any
+close frame of the client is `ON_CLOSE` with `closed by the client` / 1000;
+every origin is let in (`apc.Channel.AnyOrigin`; a same-origin rule would
+refuse every page behind a proxy that rewrites Host); the channel is matched
+on the path as sent (`apc.RequestPath`, not percent-decoded) and the query
+decoded as `URLSearchParams` decodes it (`apc.FormFields`). What still
+differs, on purpose or by the library: the close frame sent back to a client
+close is `github.com/coder/websocket`'s echo of the client's code (1005 when
+it sent none) where Node answers 1000 `bye`, since the library answers the
+close itself; Go calls `ON_CLOSE` (with 1006) when a connection breaks
+without a close frame, Node calls none; the `<why>` of a 503 is the Go
+dump's text. None of this was measured on a system.
+
 ## Next, if this is pursued
 
 Ranked with codex gpt-6-sol, 2026-09-23:

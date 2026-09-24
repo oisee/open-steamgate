@@ -35,17 +35,80 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"osg/gogen/abap"
+	"osg/gogen/apc"
 )
 
 //go:embed zz_db.json
 var dbScript []byte
 
-// one work process: class statics are per process (see the package comment)
-var workProcess sync.Mutex
+// one work process: class statics are per process (see the package comment).
+// It is abap.WorkProcess, the lock the APC channels' steps take as well
+// (go/abap/apc.go), so an ICF request and a push-channel message never run
+// ABAP at the same time (ultra/packs).
+var workProcess = &abap.WorkProcess
+
+// a push channel (*.sapc.xml) this program serves: its path and handler class
+type apcChannel struct {
+	Path    string
+	Name    string
+	Handler string
+}
+
+// isUpgrade: a WebSocket handshake asks for it in Upgrade (RFC 6455 4.2.1)
+func isUpgrade(r *http.Request) bool {
+	for _, v := range r.Header.Values("Upgrade") {
+		for _, t := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(t), "websocket") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// channelRoutes is tools/osd-apc.mjs mountChannels: an upgrade request goes
+// to the channel declared at its path (trailing slashes dropped, the path
+// compared as it was sent, not percent-decoded), a declared channel whose class this program lacks is
+// refused 501, and an upgrade to any other path is 404. A request that is not
+// an upgrade is not the channel's: it is routed as any other (on Node the
+// channel lives on the listener's upgrade event, and express answers the rest).
+func channelRoutes() func(w http.ResponseWriter, r *http.Request) bool {
+	byPath := map[string]http.Handler{}
+	for _, c := range apcChannels {
+		c := c
+		// AnyOrigin: the Node host never looks at Origin, and behind a proxy
+		// that rewrites Host a same-origin rule would refuse every page
+		// (ultra/packs review); Handler names the class in a start dump's 503
+		ch := &apc.Channel{Name: c.Name, Handler: c.Handler, AnyOrigin: true, New: func(s *abap.Session, r *http.Request) apc.Host { return newAPCHost(s, c.Handler, r) }}
+		byPath[c.Path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// the receipt the Node host writes into its 101 (tools/osd-apc.mjs)
+			w.Header().Set("X-OSD-Channel", c.Name)
+			ch.ServeHTTP(w, r)
+		})
+	}
+	for _, n := range apcLeftOut {
+		byPath[n.Path] = refusal(n)
+	}
+	if len(byPath) == 0 {
+		return func(http.ResponseWriter, *http.Request) bool { return false }
+	}
+	return func(w http.ResponseWriter, r *http.Request) bool {
+		if !isUpgrade(r) {
+			return false
+		}
+		// the raw request path, as the Node host's req.url (not decoded)
+		p := apc.RequestPath(r)
+		if h, ok := byPath[p]; ok {
+			h.ServeHTTP(w, r)
+		} else {
+			w.WriteHeader(404)
+		}
+		return true
+	}
+}
 
 type icfService struct {
 	Path    string `json:"path"`
@@ -414,7 +477,11 @@ func main() {
 	// longest prefix first, so /sap/bc/a/b is not taken by /sap/bc/a
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
+	upgrade := channelRoutes()
 	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if upgrade(w, r) {
+			return
+		}
 		p := r.URL.EscapedPath()
 		for _, rt := range routes {
 			switch {
@@ -444,6 +511,12 @@ func main() {
 	}
 	for _, n := range notServed {
 		log.Printf("not served   %s: %s (answers 501)", n.Path, n.Why)
+	}
+	for _, c := range apcChannels {
+		log.Printf("Push channel on ws://localhost:%d%s  (%s)", *port, c.Path, c.Handler)
+	}
+	for _, n := range apcLeftOut {
+		log.Printf("not served   %s: %s (an upgrade answers 501)", n.Path, n.Why)
 	}
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	ln, err := net.Listen("tcp", server.Addr)

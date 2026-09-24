@@ -1762,6 +1762,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: none needed; the Go backend sets 4 (`abap.ConcatFit`)
 - Upstream: **needs an issue** in abaplint/transpiler (runtime, CONCATENATE)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_WGUI1
+- See also: ANOMALY-2026-09-24-concatenate-subrc, the same runtime statement measured from the other side (no cut: A4H sets 0; `concatenate.js` never writes sy-subrc, so the 0 above is the value the statement before left)
 - Upstream version containing a fix: none yet
 
 ### ANOMALY-2026-09-24-sorted-read-miss-tabix — a key READ that misses on a SORTED table sets sy-tabix one row short in the transpiler runtime
@@ -1794,4 +1795,36 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: none needed; the Go backend refuses the call (and, for now, every move or VALUE that would fill a SORTED table from rows in another order)
 - Upstream: **needs an issue** in abaplint/abaplint (check_syntax, parameter type compatibility)
 - Regression-test location: `tools/gogen/semantics.mjs` REFUSED_SORT
+
+### ANOMALY-2026-09-24-concatenate-subrc — `CONCATENATE` leaves sy-subrc as it was in the transpiler runtime
+
+- Status: `open` (the Go backend of `tools/gogen` sets it; nothing depends on it in OSG yet)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate.js` never writes `sy-subrc`)
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE ... INTO t [IN BYTE MODE]`; in OSG the SMW0 loaders of the Zork and ZO4D packs (`zcl_ork_00_game_loader_smw0`, `zcl_ork_00_script_loader_smw0`, `zcl_o4d_image_handler`), which glue `WWWDATA_IMPORT`'s rows together this way
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_bytecat.clas.abap` (a `READ TABLE ... INDEX 1` on an empty table sets sy-subrc 4, then `CONCATENATE lv_xs lv_x INTO lv_xs IN BYTE MODE`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0460` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node; the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H `cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0` -- sy-subrc 0 after the statement (4 is only for a target of fixed length that cut the result); an `x` operand keeps its trailing 00 bytes in byte mode
+- Actual open-abap behaviour: `cat:FFAB00CD00/5/4 zeros:0000AB00CD00/6 empty:0/4` -- the bytes are right, sy-subrc is whatever the statement before left
+- Impact on open-steamgate: none seen; a program that checks sy-subrc after CONCATENATE into a fixed-length field reads the previous statement's code
+- Smallest safe workaround: none needed in OSG; the Go backend writes sy-subrc 0 (`concat_bytes` in `tools/gogen/emit-go.mjs` / `emit-js.mjs`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, `concatenate`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_BYTECAT
+- See also: ANOMALY-2026-09-24-concatenate-cut-subrc (a c target that cuts the result: 4 on A4H)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-float-template-digits — an `f` in a string template has sixteen fraction digits in the transpiler runtime, seventeen significant digits on a system
+
+- Status: `open` (the Go backend formats as A4H does; the Node host answers the other digits)
+- Discovery date: `2026-09-24` (as a difference between the hosts; the A4H format was measured 2026-09-23 for `tools/gogen`)
+- Affected versions: `@abaplint/runtime` 2.13.89 (`template_formatting.js`: a `Float` that is not whole is `raw.toFixed(16)`)
+- Affected ABAP statement, runtime API or adapter: `|{ f }|` without formatting options; in OSG every number of the ZO4D channel's JSON (`zcl_o4d_apc_handler`: `"fps":{ mo_demo->get_fps( ) }`, every frame's coordinates)
+- Minimal ABAP reproducer: `DATA f TYPE f. f = 152 * 16 / 60. rv = |{ f }|.`; the fifteen values of `tools/gogen/go/abap/fmtf_test.go`
+- Exact command used to run it: the ZO4D push channel on OSG (Node, `test/run.mjs`, main 42755c5) and on OSGo (branch ultra/packs) side by side, the same commands (`.local/ultra-packs-pw/wscmp.mjs`, `get_megademo` then frames); A4H: the 2026-09-23 measurement behind `FmtF` (README "The f format of a string template")
+- Expected SAP behaviour: seventeen significant digits, always positional, trailing zeros dropped: `40.533333333333331`, `0.39473684210526316`, `0.015625`
+- Actual open-abap behaviour: sixteen digits after the point whatever the magnitude, zeros kept: `40.5333333333333314`, `0.3947368421052632`, `0.0156250000000000`; a small number loses significant digits (`0.0246710526315789` for `0.024671052631578948`)
+- Impact on open-steamgate: the demo's JSON differs from A4H's in the last digits of most numbers; the page parses them back, so nothing on the screen changes. A value re-read with fewer significant digits is not the same double
+- Smallest safe workaround: none in OSG; compare frames numerically (`NUMERIC=1` in the comparison script)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, template formatting of `f`)
+- Regression-test location: `tools/gogen/go/abap/fmtf_test.go`
 - Upstream version containing a fix: none yet

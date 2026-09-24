@@ -7,7 +7,24 @@ import {home} from "./home.mjs";
 
 const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 
-export const layers = [`${home}/src`, `${home}/gen`];
+/*
+ * The layers in the order the Node build reads them (tools/osd-inputs.mjs):
+ * abap_transpile.json's input_folder with every pack's ABAP folders before
+ * gen/ (tools/osd-packs.mjs inputFoldersOf), the later folder winning an
+ * object both hold. test/ stays out, as it always has here: it holds test
+ * fixtures, not the system. A file an later layer hides is not loaded at all
+ * (`hidden`), the way osd-build.mjs hands the transpiler the winner only.
+ */
+const {inputFoldersOf} = await import(`${home}/tools/osd-packs.mjs`);
+const {layers: layersOf} = await import(`${home}/tools/osd-inputs.mjs`);
+const transpileConfig = JSON.parse(readFileSync(`${home}/abap_transpile.json`, "utf8"));
+const layerFolders = inputFoldersOf(home, transpileConfig).filter((f) => f !== "test");
+export const layers = layerFolders.map((f) => `${home}/${f}`);
+const resolved = layersOf(home, {...transpileConfig, input_folder: layerFolders});
+if (resolved.duplicates.length > 0) throw new Error(`the same object twice in one folder: ${JSON.stringify(resolved.duplicates)}`);
+/** the files of an object that a later layer holds too, absolute */
+export const hidden = new Set(resolved.hidden.map((f) => `${home}/${f}`));
+export const overridden = resolved.overridden;
 export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/scaffold", "open-abap-odata/src", "ajson/src/core"]
   .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
 
@@ -41,11 +58,11 @@ if (abapgit) libs.push(abapgit);
 
 /** every class and interface of the layers and libraries, compiled (a statement outside the subset is a stub) */
 export function compileOsg() {
-  const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
+  const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => !hidden.has(f) && /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
   const t0 = performance.now();
-  const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true});
+  const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true, skip: (path) => hidden.has(path)});
   const summary = `front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`;
-  return {program, summary};
+  return {program, summary: `${summary}\nlayers: ${layerFolders.join(", ")}${overridden.length ? `; overridden: ${overridden.map((o) => `${o.object} by ${o.winner}`).join(", ")}` : ""}`};
 }
 
 /**
