@@ -47,7 +47,14 @@ const tokenStr = (n) => n.getFirstToken().getStr();
 const upper = (s) => String(s).toUpperCase();
 const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
-export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row))
+// ultra/events: a SORTED table keeps its rows in key order, which only
+// INSERT INTO TABLE knows how to do; every other statement that would place
+// rows (APPEND, INSERT INDEX, MODIFY INDEX, SORT, SELECT / SPLIT INTO TABLE)
+// refuses one, and a move between a SORTED and another table is not the
+// same type (it would have to sort)
+const refuseSorted = (t, what) => { if (t?.type?.sorted) throw new Unsupported(`${what} a SORTED table`); };
+const sameSort = (a, b) => (a.sorted ?? null) === null ? (b.sorted ?? null) === null : (b.sorted !== undefined && a.sorted.join() === b.sorted.join() && a.unique === b.unique);
+export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a.row, b.row) && sameSort(a, b)))
   && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
   && (a.k !== "ref" || a.name === b.name)
   && (a.k !== "p" || (!!a.calc === !!b.calc && (a.calc || (a.len === b.len && a.dec === b.dec))));
@@ -640,6 +647,14 @@ function typeOf(t, where, program) {
       const key = (t.getOptions().primaryKey?.keyFields ?? []).map(upper);
       if (key.length === 0) throw new Unsupported(`${where}: HASHED table without a key`);
       return {k: "table", row, hashed: key};
+    }
+    // ultra/events: SORTED ... WITH UNIQUE / NON-UNIQUE KEY (ZCL_ABAPGIT_STRING_MAP):
+    // a slice in key order, see refuseSorted and insert_table
+    if (access === "SORTED") {
+      const o = t.getOptions();
+      const key = (o.primaryKey?.keyFields ?? []).map(upper);
+      if (key.length === 0) throw new Unsupported(`${where}: SORTED table without a key`);
+      return {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique};
     }
     throw new Unsupported(`${where}: ${access} tables`);
   }
@@ -1407,6 +1422,7 @@ function statement(node, ctx) {
       else if (isTok(kids[i], "TO")) to = convert(source(next, ctx, I), I);
     }
     const value = convert({e: "lrow", type: src.type.row}, table.type.row);
+    refuseSorted(table, "APPEND LINES OF into");
     return {s: "append_lines", table, src, from, to, value};
   }
   if (isStmt(node, Statements.Append)) {
@@ -1421,6 +1437,7 @@ function statement(node, ctx) {
     }
     if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    refuseSorted(table, "APPEND to");
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.ReadTable) && /\bWITH\s+(TABLE\s+)?KEY\b/i.test(text)) {
@@ -1542,6 +1559,7 @@ function statement(node, ctx) {
         keys.push({...key, desc});
       }
     }
+    refuseSorted(table, "SORT of");
     return {s: "sort", table, keys};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
@@ -1569,6 +1587,16 @@ function statement(node, ctx) {
     const keys = table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE") ? table.type.hashed : null;
     if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
     for (const k of keys ?? []) fieldOf(ctx, table.type.row, k, text);
+    // ultra/events: a SORTED table (UNIQUE key only; where a duplicate of a
+    // NON-UNIQUE key goes is not measured): the row goes before the first
+    // row with a greater key, not at all when one has the same key
+    if (table.type.sorted) {
+      if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
+      const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
+      const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
+      return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys};
+    }
     return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
@@ -1579,6 +1607,7 @@ function statement(node, ctx) {
     const srcs = node.findDirectExpressions(Expressions.Source).concat(node.findDirectExpressions(Expressions.SimpleSource4));
     const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? srcs[0];
     const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    refuseSorted(table, "INSERT ... INDEX into");
     return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
   }
   if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text);
@@ -1643,6 +1672,7 @@ function statement(node, ctx) {
     const idx = after("INDEX");
     const val = after("FROM");
     if (!idx || !val || node.findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
+    refuseSorted(table, "MODIFY ... INDEX of");
     return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.Split)) return splitStatement(node, ctx, text);
@@ -1771,6 +1801,7 @@ function splitStatement(node, ctx, text) {
   if (/\bINTO\s+TABLE\b/i.test(text)) {
     const table = lvalue(targets[0], ctx);
     if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
+    refuseSorted(table, "SPLIT INTO TABLE");
     return {s: "split", table, x, sep};
   }
   // INTO t1 t2 ...: measured, the last target takes the rest (a,b,c,d into
@@ -3012,6 +3043,7 @@ function selectStatement(node, ctx, text) {
   rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
+  refuseSorted(target, "SELECT INTO TABLE");
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
@@ -3116,6 +3148,7 @@ function dynamicSelect(sel, ctx, text) {
   let target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
   if (target.type.k === "table") target = convert(target, {k: "data", table: true});
   else if (target.type.k !== "data") throw new Unsupported(`dynamic SELECT INTO TABLE of a ${target.type.k}`);
+  refuseSorted(target, "SELECT INTO TABLE");
   return {s: "select_dyn", table, fields, where, groupBy, orderBy, primaryKey, corresponding, target, text: text.replace(/\s+/g, " ")};
 }
 
@@ -4034,6 +4067,14 @@ function defaultValue(p, ctx) {
   // a constant: CLS=>C, or C of the class or interface the method is declared in
   const named = /^([\w\/]+)=>(\w+)$/.exec(t) ?? (/^\w+$/.test(t) && p.defOwner ? [t, p.defOwner, t] : null);
   if (named) return convert(resolveStatic(upper(named[1]), upper(named[2]), ctx), p.type);
+  // a component of a structured constant: CLS=>C-COMP or C-COMP (ultra/events:
+  // zif_abapgit_html=>c_action_type-sapevent, the DEFAULT of ZIF_ABAPGIT_HTML~A)
+  const comp = /^([\w\/]+)=>(\w+)-(\w+)$/.exec(t) ?? (/^\w+-\w+$/.test(t) && p.defOwner ? [t, p.defOwner, ...t.split("-")] : null);
+  if (comp) {
+    const base = resolveStatic(upper(comp[1]), upper(comp[2]), ctx);
+    const f = fieldOf(ctx, base.type, comp[3], `DEFAULT ${t}`);
+    return convert({e: "field", base, name: f.name, type: f.type}, p.type);
+  }
   throw new Unsupported(`DEFAULT ${t}`);
 }
 

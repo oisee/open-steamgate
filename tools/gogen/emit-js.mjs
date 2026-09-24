@@ -572,6 +572,17 @@ function stmt(st, ctx, d) {
         `${t}  s.sy.tabix = ${tb}.length;`, `${t}}`);
       return out;
     }
+    // ultra/events: INSERT INTO TABLE of a SORTED table with a unique key (emit-go)
+    case "insert_sorted": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
+      const cmp = st.keys.map((k) => `if (${get(`r${n}`, k)} !== ${get(`v${n}`, k)}) return ${get(`r${n}`, k)} > ${get(`v${n}`, k)} ? 1 : -1;`).join(" ");
+      return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
+        `${t}  let pos${n} = ${tb}.length; s.sy.subrc = 0;`,
+        `${t}  for (let i = 0; i < ${tb}.length; i++) { const c = cmp${n}(${tb}[i]); if (c === 0) { s.sy.subrc = 4; break; } if (c > 0) { pos${n} = i; break; } }`,
+        `${t}  if (s.sy.subrc === 0) ${tb}.splice(pos${n}, 0, v${n});`, `${t}}`];
+    }
     case "insert_table": {
       const tb = place(st.table, ctx);
       const v = `ins${ctx.loop++}`;

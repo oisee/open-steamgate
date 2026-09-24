@@ -972,6 +972,18 @@ ${t}	}`));
         `${t}	s.Sy.Tabix = int32(len(${tb}))`, `${t}}`);
       return out;
     }
+    // ultra/events: INSERT INTO TABLE of a SORTED table with a unique key
+    case "insert_sorted": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
+      const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
+      return [`${t}{`, `${t}	v${n} := ${copied(expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
+        `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
+        `${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`,
+        `${t}		if c${n} > 0 {`, `${t}			pos${n} = i${n}`, `${t}			break`, `${t}		}`, `${t}	}`,
+        `${t}	if s.Sy.Subrc == 0 {`, `${t}		${tb} = append(${tb}, v${n})`, `${t}		copy(${tb}[pos${n}+1:], ${tb}[pos${n}:])`, `${t}		${tb}[pos${n}] = v${n}`, `${t}	}`, `${t}}`];
+    }
     case "insert_table": {
       const tb = place(st.table, ctx);
       const v = `ins${ctx.loop++}`;
