@@ -348,6 +348,16 @@ const EXPECT = {
   // x, p (\TYPE=%_T...), a structure's length. The JS emitter has no RTTI
   ZCL_GOGEN_T_RTTI: {Go: "c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\\TYPE=D/D//8 t:E/T/0/12/\\TYPE=T/T//6 f:E/F/0/8/\\TYPE=F/F//24 i:E/I/0/4/\\TYPE=I/I//11 i8:E/8/0/8/\\TYPE=INT8/INT8//20 p:E/P/2/8/17 b:E/C/0/2/\\TYPE-POOL=ABAP\\TYPE=ABAP_BOOL/ABAP_BOOL//1 s:E/g/0/8/\\TYPE=STRING/STRING//0 xs:E/y/0/8/\\TYPE=XSTRING/XSTRING//0 flat:S/u/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT/TY_FLAT/ deep:S/v/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_DEEP/TY_DEEP/ comps:S=E,XS=E,FL=S,TB=T, line:\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT tk:S uk: same",
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  // open-abap-core's /UI2/CL_JSON=>DESERIALIZE end to end (ultra/json): not
+  // an A4H value, a system has its own /UI2/CL_JSON. What the pieces give
+  // that were measured there (the parser's members through a non-unique
+  // sorted key come newest first, so an array fills its table in reverse;
+  // ZCL_GOGEN_T_SECKEY), where the Node host answers
+  // "osg/42/X//3:1X,2,3, bad:caught" (ANORMALIES secondary-key-duplicates).
+  // A missing member is cleared, an unknown one ignored. The JS emitter
+  // has neither JSON.parse nor RTTI as host functions
+  ZCL_GOGEN_T_JSONDES: {Go: "osg/42/X//3:3,2,1X, bad:caught",
+    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
   ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity
@@ -417,7 +427,9 @@ const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".c
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
 const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE",
-  "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR"];
+  "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
+  // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
+  "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
