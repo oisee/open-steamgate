@@ -80,6 +80,17 @@ func bindValue(v any, t *IRType, where string) *IR {
 		if s, ok := v.(string); ok {
 			return Lit(s, t)
 		}
+	// a RAW(n) column: the work area's x as n bytes of upper-case hex; a
+	// RAWSTRING: the xstring's hex (dbraw.go). ir-writes.mjs has no byte
+	// type in bindValue yet (ultra/zvdb report)
+	case "X":
+		if s, ok := v.(string); ok {
+			return Lit(DBXHex(s, t.Len), t)
+		}
+	case "XSTRING":
+		if s, ok := v.(string); ok {
+			return Lit(DBXString(s), t)
+		}
 	}
 	panic(NotCompiled(where, fmt.Sprintf("a %T for a column of type %s", v, t.seam())))
 }

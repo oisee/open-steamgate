@@ -981,10 +981,21 @@ function withBuilders(body, ctx, t, emitLoop, outside = []) {
  * line, not the generated one. Code that is not ABAP gets its own lines back
  * (the RESET marker, replaced once the file is assembled).
  */
+// a column as scanned, in the Go value of its kind (a RAW(n) column its n
+// bytes, go/abap dbraw.go), and moved into a field of type ft: a RAW column
+// into an x of another length cut or 00-padded (ultra/zvdb)
+function dbColumn(c, v, ft) {
+  const k = c.type.k;
+  const val = k === "i" ? `abap.DBI(${v})` : k === "string" ? `abap.DBStr(${v})` : k === "xstring" ? `abap.DBXStr(${v})`
+    : k === "x" ? `abap.DBX(${v}, ${c.type.len ?? 1})` : k === "p" ? dbP(v, ft) : `abap.DBChar(${v})`;
+  return k === "x" && ft?.k === "x" && (ft.len ?? 1) !== (c.type.len ?? 1) ? `abap.XFit(${val}, ${ft.len ?? 1})` : val;
+}
+
 // the arguments of a statement lowered at build time: the logon client, a
 // host value (a c right-trimmed, as the column binds it), a literal
 function sqlArgs(args, ctx) {
   return `[]any{${args.map((a) => (a.fit !== undefined ? `abap.DBCFit(${expr(a.host, ctx)}, ${a.fit})`
+    : a.xhex !== undefined ? `abap.DBXHex(${expr(a.host, ctx)}, ${a.xhex})` : a.xexact !== undefined ? `abap.DBXSHex(${expr(a.host, ctx)}, ${a.xexact})`
     : a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
 }
@@ -1406,7 +1417,7 @@ ${t}	}`));
       const rowGo = goType(st.target.type.row);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : st.cols[i].type.k === "p" ? dbP(`c${i}_${n}`, a.type) : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
       return [`${t}${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -1429,12 +1440,13 @@ ${t}	}`));
       // one row at most; only the fields the columns go to are written, and
       // nothing when there is no row
       const n = ctx.loop++;
-      const tgt = place(st.target, ctx);
+      // INTO (a, b, ...): each column into its own place (frontend intoWorkArea)
+      const tgt = st.target === null ? null : place(st.target, ctx);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       // a character field takes the column cut to its length
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : st.cols[i].type.k === "p" ? dbP(`c${i}_${n}`, a.type) : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
+        : `${a.place ? place(a.place, ctx) : a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(dbColumn(st.cols[i], `c${i}_${n}`, a.type), a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
@@ -1449,7 +1461,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const tgt = place(st.target, ctx);
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
-      const val = (i) => (st.cols[i].type.k === "i" ? `abap.DBI(q${n}.c${i})` : st.cols[i].type.k === "string" ? `abap.DBStr(q${n}.c${i})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(q${n}.c${i})` : st.cols[i].type.k === "p" ? dbP(`q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type) : `abap.DBChar(q${n}.c${i})`);
+      const val = (i) => dbColumn(st.cols[i], `q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type);
       const moves = st.assign.map((a, i) => (a === null ? null : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
       return [`${t}{`,
         `${t}\ttype selrow${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
@@ -1627,6 +1639,7 @@ function expr(e, ctx) {
     case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -1639,6 +1652,7 @@ function expr(e, ctx) {
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
     case "exc_text": return `${expr(e.x, ctx)}.TextOf(s)`;
+    case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.Class)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
@@ -1765,6 +1779,7 @@ function conv(e, ctx) {
     case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
+    case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;

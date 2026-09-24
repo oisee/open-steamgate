@@ -409,6 +409,13 @@ func BitX(op, a, b string) string {
 	return string(out)
 }
 
+// BitXS is BIT-XOR of two xstrings (A4H 2026-09-24, ZCL_GOGEN_T_XCONV): the
+// shorter padded with 00 on the right, the result as long as the longer.
+func BitXS(op, a, b string) string {
+	n := max(len(a), len(b))
+	return BitX(op, XFit(a, n), XFit(b, n))
+}
+
 // XToI reads an x or xstring as an i: the last four bytes, 00 on the left,
 // a signed int32 (A4H 2026-09-24, ZCL_GOGEN_T_XCMPN: FF 255, FFFFFFFF -1,
 // 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI); the shift
@@ -463,6 +470,24 @@ func SubX(v string, off, length int32) string {
 		rangeError()
 	}
 	return v[off : off+length]
+}
+
+// CToX is a character value moved into an x or an xstring (A4H 2026-09-24,
+// ZCL_GOGEN_T_XCONV; UPDATE SET raw = string the same, ZCL_GOGEN_T_RAWSTR):
+// the bytes of the longest prefix of upper-case hex digits -- a lower-case
+// letter, a blank or any other character ends it -- an odd count padded
+// with 0. `ab` is empty, `ABG1` is AB, `ABC` is ABC0, ` AB` is empty.
+func CToX(v string) string {
+	n := 0
+	for n < len(v) && (v[n] >= '0' && v[n] <= '9' || v[n] >= 'A' && v[n] <= 'F') {
+		n++
+	}
+	h := v[:n]
+	if n%2 == 1 {
+		h += "0"
+	}
+	b, _ := hex.DecodeString(h)
+	return string(b)
 }
 
 // XFit moves bytes into an x field of n bytes: cut, or padded right with 00.

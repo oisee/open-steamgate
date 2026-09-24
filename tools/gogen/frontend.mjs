@@ -2821,6 +2821,15 @@ function source(node, ctx, outer, hint = outer) {
   if (bits) {
     // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length, byte by byte
     const leaves = leafTypes(node, ctx);
+    // BIT-XOR of xstrings (ultra/zvdb, A4H 2026-09-24, ZCL_GOGEN_T_XCONV:
+    // 0F0F BIT-XOR FF00 is F00F; 0F0F BIT-XOR FF, either way round, is F00F:
+    // the shorter padded with 00 on the right, the result the longer). AND
+    // and OR of xstrings, and x mixed with xstring, were not measured
+    if (leaves.every((t) => t.k === "xstring")) {
+      const ops = node.getChildren().filter((c) => isExpr(c, Expressions.ArithOperator)).map((c) => upper(c.concatTokens()));
+      if (ops.every((o) => o === "BIT-XOR")) return arith(node, ctx, XS);
+      throw new Unsupported(`${ops.find((o) => o !== "BIT-XOR")} of xstrings: not measured: ${node.concatTokens()}`);
+    }
     if (!leaves.every((t) => t.k === "x" && t.len === leaves[0].len)) {
       throw new Unsupported(`bit operation on other than x fields of one length: ${node.concatTokens()}`);
     }
@@ -2968,7 +2977,7 @@ function arith(node, ctx, calc, hint) {
     const op = its[1].op;
     if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
     if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
-    if (BIT_OPS.has(op) !== (calc.k === "x")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
+    if (BIT_OPS.has(op) !== (calc.k === "x" || calc.k === "xstring")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
     expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
   } else if (its.length === 1) {
     // a lone constructor takes its # from where the value goes
@@ -3151,7 +3160,7 @@ function namedType(typeNode, ctx, inferred) {
     return inferred;
   }
   const t = upper(text);
-  const builtin = {I, F, STRING: S, INT8, D: C(8), T: C(6)}[t];
+  const builtin = {I, F, STRING: S, XSTRING: XS, INT8, D: C(8), T: C(6)}[t];
   if (builtin) return builtin;
   const local = ctx.scope.findType?.(t) ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
   if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
@@ -3176,6 +3185,32 @@ function constructor(c, ctx, inferred) {
   if (c.kw === "VALUE") {
     const to = namedType(c.typeNode, ctx, inferred);
     return valueBody(c.body, to, ctx, c.text);
+  }
+  // CORRESPONDING type( struct ) without BASE / MAPPING / EXCEPT (ultra/zvdb,
+  // A4H 2026-09-24, ZCL_GOGEN_T_XCONV): a new structure, initial but for the
+  // components the source has by name, each moved by the conversion rules
+  // (c 6 into string loses its trailing blanks, c 4 into c 2 is cut). The
+  // source is named once per component, so it must be a place that costs
+  // nothing to name (as MOVE-CORRESPONDING)
+  if (c.kw === "CORRESPONDING") {
+    const to = namedType(c.typeNode, ctx, inferred);
+    const kids = c.body?.getChildren() ?? [];
+    if (kids.length !== 1 || !isExpr(kids[0], Expressions.Source)) throw new Unsupported(`CORRESPONDING form: ${c.text}`);
+    const from = source(kids[0], ctx);
+    if (from.type.k !== "struct" || to.k !== "struct") throw new Unsupported(`CORRESPONDING from a ${from.type.k} to a ${to.k}`);
+    const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
+    if (!plain(from)) throw new Unsupported(`CORRESPONDING of something other than a variable or its component: ${c.text}`);
+    const src = structOf(ctx, from.type);
+    const dst = structOf(ctx, to);
+    if (!src || !dst) throw new Unsupported(`CORRESPONDING: a structure not in the program`);
+    const fields = [];
+    for (const f of dst.fields) {
+      const g = src.fields.find((x) => x.name === f.name);
+      if (!g) continue;
+      if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`CORRESPONDING with a deep component ${f.name}`);
+      fields.push({name: f.name, value: convert({e: "field", base: from, name: g.name, type: g.type}, f.type)});
+    }
+    return {e: "struct", fields, type: to};
   }
   if (c.kw === "COND") {
     const to = namedType(c.typeNode, ctx, inferred);
@@ -3367,8 +3402,10 @@ function dbTable(ctx, tableName, verb) {
 /** the IR type of a column in a predicate or a projection */
 // a DEC column: its digits (2n-1 for p LENGTH n) and decimals, as the IR
 // counts them (ANORMALIES NOTE packed-length-is-bytes)
+// a RAW(n) column is T.bytes(n), a RAWSTRING T.bytes() (ultra/zvdb)
 const sqlIrType = (t) => (t.k === "i" ? RIR.T.int : t.k === "int8" ? RIR.T.int8 : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date
-  : t.k === "p" ? RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0) : RIR.T.char(t.len ?? 1));
+  : t.k === "p" ? RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0) : t.k === "x" ? RIR.T.bytes(t.len ?? 1) : t.k === "xstring" ? RIR.T.bytes()
+    : RIR.T.char(t.len ?? 1));
 /** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
  * d, t or n is its characters, as the column stores them */
 function writeIrType(t, where) {
@@ -3378,11 +3415,23 @@ function writeIrType(t, where) {
   if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
   if (t.k === "d") return RIR.T.char(8);
   if (t.k === "t") return RIR.T.char(6);
+  // a RAW(n) column (ultra/zvdb, A4H ZCL_GOGEN_T_RAWRD / _RAWSEL): its n
+  // bytes, an x or xstring cut or padded with 00, bound by the Go runtime as
+  // the column holds them (go/abap dbraw.go DBXHex, bindValue).
+  // tools/ir-writes.mjs has no byte type in bindValue / initialValue yet, so
+  // the build-time check of a write stands a STRING in for it (irCheck). A
+  // RAWSTRING column is not written yet: not measured
+  if (t.k === "x") return RIR.T.bytes(t.len ?? 1);
   // ultra/events: a p column (ZOSD_TSES-CREATED) is not written yet because
   // tools/ir-writes.mjs has no initial value for P ("a column of type P has
   // no initial value here yet"); the fix belongs there, not here
   throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
 }
+/** the type a write is checked with at build time: ir-writes.mjs binds no
+ * bytes yet (bindValue, initialValue), and the shape it renders does not
+ * depend on the type, so a STRING stands in for a RAW column there. What
+ * runs is the Go runtime's bindValue with the real type (dbwrite.go) */
+const irCheck = (t) => (t.abap === "X" || t.abap === "XSTRING" ? RIR.T.str : t);
 const lowName = (n) => n.toLowerCase();
 const mandtPred = () => RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool);
 const andIr = (a, b) => (a === null ? b : b === null ? a : RIR.bin("AND", a, b, RIR.T.bool));
@@ -3397,6 +3446,16 @@ function sqlHost(src, trailing, ctx, text) {
     return source(simple, ctx);
   }
   if (!isExpr(simple, Expressions.SimpleSource3) || simple.getChildren().length !== 1) throw new Unsupported(`SQL value: ${text}`);
+  // sy-mandt (sy-subrc, ...) without @ in an old-style condition: the parser
+  // leaves the component as a sibling of `sy` (ultra/zvdb: DELETE FROM
+  // zvdb_100_vec WHERE mandt = sy-mandt ...); read as the same field of sy
+  if (sk.length === 3 && upper(simple.concatTokens()) === "SY" && !isVariableName("SY", ctx) && isTok(sk[1], "-") && isExpr(sk[2], Expressions.SQLFieldName)) {
+    const syText = `SY-${upper(sk[2].concatTokens())}`;
+    let v;
+    try { v = fieldChain({getChildren: () => [], concatTokens: () => syText}, ctx); } catch { v = undefined; }
+    if (v === undefined || v.e === undefined) throw new Unsupported(`SQL value: ${text}`);
+    return v;
+  }
   let v = sourceOperand(simple.getFirstChild(), ctx);
   for (let i = 1; i < sk.length; i += 2) {
     if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SQL value: ${text}`);
@@ -3409,7 +3468,8 @@ function sqlHost(src, trailing, ctx, text) {
 /** a value compared with or written into a column: a literal of the
  * column's own kind is an IR literal, anything else a host value converted
  * to the column's type and bound at run time */
-function sqlValue(v, ct, ir, acc) {
+function sqlValue(v, ct, ir, acc, set = false) {
+  if (ct.k === "x") return rawValue(v, ct, ir, acc, set);
   if (v.e === "chars" && ct.k === "c" && v.value.length <= (ct.len ?? 1)) return RIR.lit(v.value, ir);
   if (v.e === "int" && ct.k === "i") return RIR.lit(v.value, ir);
   // a character value that may not fit the column: convert( ) would cut it,
@@ -3426,6 +3486,30 @@ function sqlValue(v, ct, ir, acc) {
   const x = convert(v, ct);
   acc.hosts.push(x);
   return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
+}
+
+/**
+ * A value against a RAW(n) column (ultra/zvdb, A4H 2026-09-24,
+ * ZCL_GOGEN_T_RAWRD / _RAWSEL / _RAWSTR / _RAWDYN; go/abap dbraw.go). In a
+ * WHERE: an x of the same length compares as its bytes (another length does
+ * not activate), an xstring must hold exactly n bytes at run time
+ * (CX_SY_OPEN_SQL_DATA_ERROR), a literal is exactly 2n upper-case hex
+ * digits. In a SET: an x or xstring of any length cut or padded with 00, a
+ * character value by the move rule (CToX). Bound as the column holds it,
+ * upper-case hex of 2n digits.
+ */
+function rawValue(v, ct, ir, acc, set) {
+  const n = ct.len ?? 1;
+  const where = set ? "SET" : "WHERE";
+  if (v.e === "chars" || v.e === "str") {
+    if (v.e === "chars" && new RegExp(`^[0-9A-F]{${2 * n}}$`).test(v.value)) return RIR.lit(v.value, ir);
+    throw new Unsupported(`${where}: the literal '${v.value}' against a RAW(${n}) column is not ${2 * n} upper-case hex digits (not measured statically; CX_SY_OPEN_SQL_DATA_ERROR in a dynamic WHERE)`);
+  }
+  if (v.type.k === "x" && (set || (v.type.len ?? 1) === n)) { acc.hosts.push({xhex: n, v}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
+  if (v.type.k === "x") throw new Unsupported(`WHERE: an x of ${v.type.len ?? 1} bytes against a RAW(${n}) column (a syntax error on A4H: not compatible)`);
+  if (v.type.k === "xstring") { acc.hosts.push(set ? {xhex: n, v} : {xexact: n, v}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
+  if (set && charlike(v.type)) { acc.hosts.push({xhex: n, v: convert(v, ct)}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
+  throw new Unsupported(`${where}: a ${v.type.k} against a RAW(${n}) column is not measured`);
 }
 
 const SQL_OPS = {"=": "=", EQ: "=", "<>": "<>", NE: "<>", "<": "<", LT: "<", ">": ">", GT: ">", "<=": "<=", LE: "<=", ">=": ">=", GE: ">="};
@@ -3464,7 +3548,7 @@ function sqlCompare(p, ctx, tb, acc) {
   if (!op || !src || kids[1] !== op || kids[2] !== src) throw new Unsupported(`WHERE compare: ${text}`);
   const sqlOp = SQL_OPS[upper(op.concatTokens())];
   if (sqlOp === undefined) throw new Unsupported(`WHERE operator ${op.concatTokens()}`);
-  if (!["c", "string", "i", "n", "d", "t", "int8"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
+  if (!["c", "string", "i", "n", "d", "t", "int8", "x"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
   const v = sqlHost(src, kids.slice(3), ctx, text);
   return RIR.bin(sqlOp, RIR.col(lowName(col), sqlIrType(ct)), sqlValue(v, ct, sqlIrType(ct), acc), RIR.T.bool);
 }
@@ -3515,7 +3599,8 @@ function loweredArgs(lowered, acc) {
     const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
     if (m) {
       const h = acc.hosts[Number(m[1])];
-      return h.fit !== undefined ? {host: h.v, fit: h.fit} : {host: h};
+      return h.fit !== undefined ? {host: h.v, fit: h.fit} : h.xhex !== undefined ? {host: h.v, xhex: h.xhex}
+        : h.xexact !== undefined ? {host: h.v, xexact: h.xexact} : {host: h};
     }
     if (p.name === "SY-MANDT") return {mandt: true};
     return {value: p.value};
@@ -3647,6 +3732,7 @@ function selectLoop(node, ctx) {
   const tb = selectTable(sel, ctx, text);
   const cols = selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT loop");
+  if (target === null) throw new Unsupported(`SELECT loop INTO a list: not measured: ${text}`);
   const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
   const order = orderByOf(sel, tb);
@@ -3705,6 +3791,12 @@ function selectStatement(node, ctx, text) {
     // a DEC column into a p field, rounded to the field (abap.DBP)
     if ((c.type.k === "p") !== (f.type.k === "p")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     if (c.type.k === "p") return {field: f.name, type: f.type};
+    // a RAW(n) column into an x (cut or 00-padded) or an xstring (n bytes),
+    // a RAWSTRING into an xstring (ultra/zvdb, A4H ZCL_GOGEN_T_RAWRD)
+    if (c.type.k === "x" || c.type.k === "xstring" || f.type.k === "x" || f.type.k === "xstring") {
+      if (f.type.k === "xstring" || (c.type.k === "x" && f.type.k === "x")) return {field: f.name, type: f.type};
+      throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+    }
     if (!["c", "string", "i", "d", "t", "n"].includes(c.type.k) || !["c", "string", "i", "d", "t"].includes(f.type.k)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     return {field: f.name, type: f.type};
@@ -3913,7 +4005,7 @@ function updateSet(node, ctx, tb, text) {
     if (tb.client && col === "MANDT") throw new Unsupported(`UPDATE SET of the client column: ${text}`);
     const ct = tb.colType(col);
     const ir = writeIrType(ct, `UPDATE ${tb.name}-${col}`);
-    set.push({col, expr: sqlValue(sqlHost(src, fk.slice(3), ctx, k.concatTokens()), ct, ir, acc)});
+    set.push({col, expr: sqlValue(sqlHost(src, fk.slice(3), ctx, k.concatTokens()), ct, ir, acc, true)});
   }
   if (set.length === 0) throw new Unsupported(`UPDATE SET form: ${text}`);
   const pred = wherePred(node, ctx, tb, acc);
@@ -3966,9 +4058,9 @@ function writeRows(kind, node, ctx, tb, text, verb) {
     return {name: n, kind: ct.k, ir: writeIrType(ct, `${verb} ${tb.name}-${n}`), client: tb.client && n === "MANDT"};
   });
   if (tb.key.length === 0 || tb.key.some((k) => !tb.columns.has(k))) throw new Unsupported(`${verb} ${tb.name}: its primary key does not resolve`);
-  const schema = Object.fromEntries(cols.map((c) => [c.name, c.ir]));
+  const schema = Object.fromEntries(cols.map((c) => [c.name, irCheck(c.ir)]));
   const rows = WIR.bindRows(names, schema, [{}]);
-  const keyPred = cols.filter((c) => tb.key.includes(c.name)).map((c) => RIR.bin("=", RIR.col(c.name, c.ir), WIR.initialValue(c.ir), RIR.T.bool))
+  const keyPred = cols.filter((c) => tb.key.includes(c.name)).map((c) => RIR.bin("=", RIR.col(c.name, irCheck(c.ir)), WIR.initialValue(irCheck(c.ir)), RIR.T.bool))
     .reduce((a, b) => RIR.bin("AND", a, b, RIR.T.bool));
   const rest = cols.filter((c) => !tb.key.includes(c.name));
   const op = kind === "merge" ? "modify" : kind;
@@ -3979,7 +4071,7 @@ function writeRows(kind, node, ctx, tb, text, verb) {
   const onDuplicate = op !== "insert" ? undefined : accepting ? "ignore" : fromTable ? "raise" : "error";
   try {
     const stmt = op === "insert" ? WIR.insertRows(tb.name, names, rows, {onDuplicate})
-      : op === "update" ? WIR.update(tb.name, rest.map((c) => ({col: c.name, expr: WIR.initialValue(c.ir)})), keyPred)
+      : op === "update" ? WIR.update(tb.name, rest.map((c) => ({col: c.name, expr: WIR.initialValue(irCheck(c.ir))})), keyPred)
         : op === "delete" ? WIR.remove(tb.name, keyPred)
           : WIR.upsert(tb.name, names, rows, tb.key);
     lowerRelation(stmt, "sqlite");
@@ -3995,15 +4087,34 @@ function writeRows(kind, node, ctx, tb, text, verb) {
  * written (by name with CORRESPONDING, else by position).
  */
 function intoWorkArea(sel, ctx, text, cols, verb) {
-  const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
-  const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
-  if (!into || !tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`${verb} INTO form: ${text}`);
+  const into = sel.findDirectExpression(Expressions.SQLIntoStructure) ?? sel.findDirectExpression(Expressions.SQLIntoList);
+  const targets = into?.findDirectExpressions(Expressions.SQLTarget) ?? [];
+  const tnode = targets[0]?.findDirectExpression(Expressions.Target);
+  // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
+  // storage: it goes into an xstring field only; a RAW(n) column into an x
+  // (cut or 00-padded) or an xstring (its n bytes) (ultra/zvdb, A4H
+  // ZCL_GOGEN_T_RAWRD)
+  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring") || (c.type.k === "p" && f.type.k === "p")
+    || (c.type.k === "x" && (f.type.k === "x" || f.type.k === "xstring"))
+    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
+  // INTO (a, b, ...) / INTO (@a, @DATA(b), ...): one target per column, by
+  // position (ultra/zvdb, A4H ZCL_GOGEN_T_RAWSEL: a row missing leaves the
+  // targets as they were, sy-subrc 4; @DATA( ) is typed as its column)
+  if (into && targets.length > 1) {
+    if (/\bCORRESPONDING\b/i.test(into.concatTokens()) || targets.length !== cols.length) throw new Unsupported(`${verb} INTO list form: ${text}`);
+    const places = targets.map((t) => {
+      const tn = t.findDirectExpression(Expressions.Target);
+      if (!tn) throw new Unsupported(`${verb} INTO list form: ${text}`);
+      return lvalue(tn, ctx);
+    });
+    places.forEach((p, i) => {
+      if (!okCol(cols[i], p) || ["struct", "table"].includes(p.type.k)) throw new Unsupported(`SELECT: column ${cols[i].name} (${cols[i].type.k}) into a ${p.type.k}`);
+    });
+    return {assign: places.map((p) => ({place: p, type: p.type})), target: null};
+  }
+  if (!into || !tnode || targets.length !== 1) throw new Unsupported(`${verb} INTO form: ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   const target = lvalue(tnode, ctx);
-  // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
-  // storage: it goes into an xstring field only
-  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring") || (c.type.k === "p" && f.type.k === "p")
-    || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
   let assign;
   if (target.type.k === "struct") {
     const fields = ctx.program.structs.get(target.type.go)?.fields ?? [];
@@ -4597,6 +4708,14 @@ function call(chain, ctx, statement, hint) {
       return {e: "exc_text", x: {e: "var", name: upper(v), type: EXC}, type: S};
     }
   }
+  // cl_abap_classdescr=>get_class_name( x ) of an exception caught INTO x
+  // together with runtime exceptions: \CLASS=<its class>, what A4H answers
+  // for the runtime's own (ZCL_GOGEN_T_RAWRD: \CLASS=CX_SY_OPEN_SQL_DATA_ERROR)
+  // and for a raised object alike
+  if (/^cl_abap_(class|type)descr=>get_class_name\(\s*\w+\s*\)$/i.test(chain.concatTokens())) {
+    const v = /\(\s*(\w+)\s*\)$/.exec(chain.concatTokens())[1];
+    if (ctx.locals?.get(upper(v))?.k === "exc") return {e: "exc_class", x: {e: "var", name: upper(v), type: EXC}, type: S};
+  }
   // cl_abap_random_int=>create( [seed] min max )->get_next( ): a system seeds
   // an unseeded generator at random, so a number, not a sequence, is the
   // contract; a SEED makes the sequence the contract and is refused
@@ -5039,6 +5158,11 @@ export function convert(expr, to) {
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
   if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");
+  // characters into x / xstring (A4H 2026-09-24, ZCL_GOGEN_T_XCONV, and the
+  // same rule for UPDATE SET raw = string, ZCL_GOGEN_T_RAWSTR): the longest
+  // prefix of upper-case hex digits (a lower-case letter, a blank or a G ends
+  // it), an odd count padded with 0; into x LENGTH n then cut or 00-padded
+  if ((to.k === "x" || to.k === "xstring") && charlike(from)) return ok("c2x");
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
   if (to.k === "xstring" && from.k === "x") return {...expr, type: to};

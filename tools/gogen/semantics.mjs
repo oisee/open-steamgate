@@ -570,6 +570,27 @@ const EXPECT = {
   // over a table of strings with sep '&', none and ', ' (ultra/httpc; the
   // transpiler on Node answers the same)
   ZCL_GOGEN_T_SUBRCW: "subrc:7,0 empty:[] cat:[a&&b c][ab c][a, , b c]",
+  // RAW(n) columns (ultra/zvdb, A4H 2026-09-24, $ZOSG_TMP_0300, the same
+  // code but for the CATCH, see each class): read into xstring the n bytes
+  // (trailing 00 and an initial value too), into x cut or 00-padded; WHERE
+  // with an x of the same length or an xstring of exactly n bytes (else
+  // CX_SY_OPEN_SQL_DATA_ERROR), < and ORDER BY in byte order; SET with any
+  // x / xstring cut or padded, a string by the move rule; INTO (a, b) by
+  // position, a miss keeps the targets, @DATA( ) typed as the column; a
+  // literal is exactly 2n upper-case hex digits (dynamic WHERE: else
+  // CX_SY_OPEN_SQL_DATA_ERROR)
+  ZCL_GOGEN_T_RAWRD: {Go: "xs:A4=12000000;B4=12340000;C4=00000000;D4=FFFFFFFF;E4=00000012; x2:A=1200;120000000000;B=1234;123400000000;C=0000;000000000000;D=FFFF;FFFFFFFF0000;E=0000;000000120000; eqs5:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR  eq4:A eqs1:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR eqs4:A eq0:C eqe:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR lt4:CE gts1:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR nes1:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR ord:CEABD set1:1/4=12000000 sets1:4=12000000 set5:4=12000000",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_RAW: the JS backend has no database (the Go host has SQLite)"},
+  ZCL_GOGEN_T_RAWSEL: {Go: "old:0/BB/12340000 miss:4/BB/12340000 new:0/[A]/12000000 inl:0/12000000/[A]/12345678/[ABCD] nmiss:4/keep/12000000 imiss:4/00000000/[] us1:0/1=56000000 us5:0/1=56000000",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_RAW: the JS backend has no database (the Go host has SQLite)"},
+  ZCL_GOGEN_T_RAWSTR: {Go: "[12AB]0/1=12AB0000 [12ab]0/1=12000000 [1234567890AB]0/1=12345678 [XYZ]0/1=00000000 []0/1=00000000 [ABC]0/1=ABC00000 [12345678]0/1=12345678 ",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_RAW: the JS backend has no database (the Go host has SQLite)"},
+  ZCL_GOGEN_T_RAWDYN: {Go: "st4:A stlt:ABC [r = '12000000']:A [r = '12']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = '1200000000']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r < '12340000']:AC [r = 'abcdef01']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = 'ABCDEF01']:E [r = 'XYZ']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = '']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = '00000000']:C [r = 12]:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = ' 12000000']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR [r = '1200000 ']:\\CLASS=CX_SY_OPEN_SQL_DATA_ERROR",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_RAW: the JS backend has no database (the Go host has SQLite)"},
+  // string / c -> x and xstring: the longest prefix of upper-case hex digits,
+  // odd padded with 0; CORRESPONDING #( ) from initial by name; BIT-XOR of
+  // xstrings, the shorter padded with 00 (ultra/zvdb, A4H, same code)
+  ZCL_GOGEN_T_XCONV: "x4:AB000000;00000000;A0000000;AB000000;AB000000;12345678;00000000;00000000;ABC00000;00000000; xs:1=AB;0=;1=A0;1=AB;1=AB;5=1234567890;0=;0=;2=ABC0;1=00; c:AB000000/1=AB cor:[xy]2/[AB]/7/[];[xy]/[AB]/7/[];[xy]/[AB]/7/[] xor:2=F00F/2=F00F/2=F00F conv:ABCDEF/CD/205/2",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

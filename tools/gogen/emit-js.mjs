@@ -857,6 +857,7 @@ function expr(e, ctx) {
     case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "int8" ? `abap.NegI8(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -869,6 +870,7 @@ function expr(e, ctx) {
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
     case "exc_text": return `abap.excText(s, ${expr(e.x, ctx)})`;
+    case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.cls)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "xstrlen": return `${expr(e.x, ctx)}.length`;
@@ -999,6 +1001,7 @@ function conv(e, ctx) {
     case "x2i": return `abap.XToI(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
+    case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;

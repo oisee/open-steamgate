@@ -348,6 +348,18 @@ func valueFor(tok osqlToken, c *OsqlColumn) *IR {
 		// a decimal string, bound: never a float
 		return Lit(value, t)
 	}
+	// a RAW(n) column (ultra/zvdb, A4H ZCL_GOGEN_T_RAWDYN): a quoted literal
+	// of exactly 2n upper-case hex digits compares as those bytes; any other
+	// quoted literal or a number is CX_SY_OPEN_SQL_DATA_ERROR. A backquoted
+	// literal was not measured
+	if t.Abap == "X" && t.Len > 0 {
+		if tok.kind == "text" && rawHexLit(raw, t.Len) {
+			return Lit(raw, t)
+		}
+		if tok.kind == "text" || tok.kind == "number" {
+			panic(ArithmeticError{"CX_SY_OPEN_SQL_DATA_ERROR", fmt.Sprintf("%q is not a valid value for X(%d,0)", raw, t.Len)})
+		}
+	}
 	if tok.kind == "number" && t.Abap != "C" {
 		refuseWhere("number into char", "an unquoted number against the %s column %s is not measured", t.Abap, c.Name)
 	}
@@ -559,6 +571,11 @@ func (p *osqlParser) primary() *IR {
 	negated := p.word() == "NOT"
 	if negated {
 		p.take()
+	}
+	// a RAW column: the comparisons were measured (ZCL_GOGEN_T_RAWDYN), not
+	// BETWEEN or IN
+	if kw := p.word(); c.Type.Abap == "X" && (kw == "BETWEEN" || kw == "IN") {
+		refuseWhere("column type", "%s on the RAW column %s is not measured", kw, c.Name)
 	}
 	switch kw := p.word(); {
 	case kw == "BETWEEN":

@@ -210,6 +210,11 @@ export function FmtFDec(v, n) {
 }
 
 // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length
+// BitXS: BIT-XOR of two xstrings, the shorter padded with 00 (go/abap conv.go)
+export function BitXS(op, a, b) {
+  const n = Math.max(a.length, b.length);
+  return BitX(op, XFit(a, n), XFit(b, n));
+}
 export function BitX(op, a, b) {
   let out = "";
   for (let i = 0; i < a.length; i++) {
@@ -246,6 +251,15 @@ export function SubX(v, off, len) {
   return v.slice(off, off + len);
 }
 export const XFit = (v, n) => (v.length >= n ? v.slice(0, n) : v + "\u0000".repeat(n - v.length));
+// characters moved into x / xstring (go/abap conv.go CToX): the longest
+// prefix of upper-case hex digits, an odd count padded with 0, as bytes
+export const CToX = (v) => {
+  const m = /^[0-9A-F]*/.exec(v)[0];
+  const h = m.length % 2 === 1 ? m + "0" : m;
+  let out = "";
+  for (let i = 0; i < h.length; i += 2) out += String.fromCharCode(parseInt(h.slice(i, i + 2), 16));
+  return out;
+};
 export const Uccpi = (v) => String.fromCodePoint(v).replace(/ +$/, "");
 // find( val sub off ), as measured on A4H: offset or -1, empty sub raises
 export function Find(v, sub, off) {

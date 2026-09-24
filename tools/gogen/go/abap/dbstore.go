@@ -28,12 +28,14 @@ func prepareStore(d *sql.DB) error {
 		return err
 	}
 	var updates []string
+	existing := map[string]bool{}
 	for rows.Next() {
 		var name, text string
 		if err := rows.Scan(&name, &text); err != nil {
 			rows.Close()
 			return err
 		}
+		existing[strings.ToUpper(name)] = true
 		var set []string
 		for _, m := range charColumn.FindAllStringSubmatch(text, -1) {
 			set = append(set, fmt.Sprintf(`%s = rtrim(%s, ' ')`, quote(m[1]), quote(m[1])))
@@ -43,10 +45,40 @@ func prepareStore(d *sql.DB) error {
 		}
 	}
 	rows.Close()
+	updates = append(updates, rawUpdates(existing)...)
 	for _, u := range updates {
 		if _, err := d.Exec(u); err != nil {
 			return fmt.Errorf("%w: %s", err, u)
 		}
 	}
 	return nil
+}
+
+// rawUpdates: a RAW(n) column holds upper-case hex of exactly 2n digits
+// (dbraw.go: the length HANA keeps, measured). The seed writes abapGit's
+// hex unpadded, so the tables of the registry are brought to that form
+// once, at open; a NULL (a row inserted without the column) becomes the
+// initial value, n 00 bytes. Tables the registry does not know are left
+// as they are, and so are the registry's structures (no table in the store).
+func rawUpdates(existing map[string]bool) []string {
+	var out []string
+	for _, name := range TableNames() {
+		t, _ := TableByName(name)
+		if t == nil || t.View || !existing[strings.ToUpper(t.Name)] {
+			continue
+		}
+		var set, where []string
+		for _, c := range t.Columns {
+			if c.Kind != 'X' || c.Len <= 0 {
+				continue
+			}
+			q, zeros := quote(strings.ToLower(c.Name)), strings.Repeat("0", 2*c.Len)
+			set = append(set, fmt.Sprintf(`%s = upper(substr(coalesce(%s, '') || '%s', 1, %d))`, q, q, zeros, 2*c.Len))
+			where = append(where, fmt.Sprintf(`%s IS NULL OR length(%s) <> %d OR %s <> upper(%s)`, q, q, 2*c.Len, q, q))
+		}
+		if len(set) > 0 {
+			out = append(out, fmt.Sprintf(`UPDATE %s SET %s WHERE %s`, quote(strings.ToLower(t.Name)), strings.Join(set, ", "), strings.Join(where, " OR ")))
+		}
+	}
+	return out
 }
