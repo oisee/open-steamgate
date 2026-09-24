@@ -355,6 +355,10 @@ func hasPrefixFold(p, prefix string) bool {
 }
 
 func main() {
+	if jsMain != nil { // wasm.go: the service worker host (GOOS=js)
+		jsMain()
+		return
+	}
 	port := flag.Int("port", 3095, "port to listen on")
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
@@ -400,6 +404,46 @@ func main() {
 		log.Printf("database: %s (WAL)%s", *dbFile, map[bool]string{true: ", new: seeded", false: ", as it was"}[seeded])
 		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), file "+filepath.Base(*dbFile)+", WAL")
 	}
+	startABAP()
+
+	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
+	mux := buildMux(*root, status)
+
+	for _, svc := range icfServices {
+		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
+	}
+	for _, n := range notServed {
+		log.Printf("not served   %s: %s (answers 501)", n.Path, n.Why)
+	}
+	for _, c := range apcChannels {
+		log.Printf("Push channel on ws://localhost:%d%s  (%s)", *port, c.Path, c.Handler)
+	}
+	for _, n := range apcLeftOut {
+		log.Printf("not served   %s: %s (an upgrade answers 501)", n.Path, n.Why)
+	}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
+	// the status tables have this process in them before anybody asks, with
+	// the listener already open (its state is read off /proc/net/tcp)
+	if rows, err := refreshStatus(status); err != nil {
+		log.Printf("status refresh: %v", err)
+	} else {
+		log.Printf("status       %d rows of this process in the status tables, refreshed before each %s request", rows, statusODataPath)
+	}
+	log.Fatal(server.Serve(ln))
+}
+
+// jsMain is the host a GOOS=js build runs instead of the net/http server
+// (wasm.go); nil in every other build
+var jsMain func()
+
+// startABAP is what every host runs once its database is open: the boot
+// classes, then the synthetic demo rows, each a dialog step of its own
+func startABAP() {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -425,8 +469,14 @@ func main() {
 			log.Printf("demo data: %s (%d ms)", report, time.Since(started).Milliseconds())
 		}()
 	}
+}
 
-	webapp := filepath.Join(*root, "webapp")
+// buildMux is the port's routing: the launchpad's front door, the static
+// folders under root, the SICF nodes this program has (and a refusal at
+// each one left out), the OData front, the push channels, longest prefix
+// first. Shared by the net/http server and the service-worker host.
+func buildMux(root string, status statusHost) http.Handler {
+	webapp := filepath.Join(root, "webapp")
 	type route struct {
 		prefix string
 		exact  bool
@@ -466,7 +516,7 @@ func main() {
 		// a pack folder of the build's checkout is looked for under -root,
 		// so a copied tree (root/webapp, root/packs/<name>/webapp) serves it
 		if rel, err := filepath.Rel(osgRoot, dir); err == nil && !strings.HasPrefix(rel, "..") {
-			dir = filepath.Join(*root, rel)
+			dir = filepath.Join(root, rel)
 		}
 		routes = append(routes, route{p, false, serveStatic(p, dir, notFound)})
 	}
@@ -489,7 +539,6 @@ func main() {
 		routes = append(routes, route{n.Path, false, refusal(n)})
 	}
 	odata := icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)
-	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
 	routes = append(routes, route{statusODataPath, false, odata})
 	routes = append(routes, route{odataBase + "/", false, odata})
 	// every route under a path test/start.mjs refreshes the status tables
@@ -507,7 +556,7 @@ func main() {
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
 	upgrade := channelRoutes()
-	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if upgrade(w, r) {
 			return
 		}
@@ -534,33 +583,6 @@ func main() {
 		}
 		notFound(w, r)
 	})
-
-	for _, svc := range icfServices {
-		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
-	}
-	for _, n := range notServed {
-		log.Printf("not served   %s: %s (answers 501)", n.Path, n.Why)
-	}
-	for _, c := range apcChannels {
-		log.Printf("Push channel on ws://localhost:%d%s  (%s)", *port, c.Path, c.Handler)
-	}
-	for _, n := range apcLeftOut {
-		log.Printf("not served   %s: %s (an upgrade answers 501)", n.Path, n.Why)
-	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
-	ln, err := net.Listen("tcp", server.Addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
-	// the status tables have this process in them before anybody asks, with
-	// the listener already open (its state is read off /proc/net/tcp)
-	if rows, err := refreshStatus(status); err != nil {
-		log.Printf("status refresh: %v", err)
-	} else {
-		log.Printf("status       %d rows of this process in the status tables, refreshed before each %s request", rows, statusODataPath)
-	}
-	log.Fatal(server.Serve(ln))
 }
 
 func fileExists(p string) bool {
