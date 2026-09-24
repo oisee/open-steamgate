@@ -913,7 +913,7 @@ entities:
     keys: [Funcname, Parameter]
     properties:
       Funcname: {type: String(30), field: FUNCNAME}
-      Parameter: {type: String(30), field: PARAMETER}
+      Parameter: {type: String(30), field: PARAM_NAME}
       Kind: {type: String(1), field: KIND}
       Typ: {type: String(30), field: TYP}
       Optional: {type: String(1), field: OPTIONAL}

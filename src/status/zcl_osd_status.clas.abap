@@ -17,6 +17,9 @@ CLASS zcl_osd_status DEFINITION PUBLIC CREATE PUBLIC.
 *    "packs":[{"name":..,"order":..,"objects":..,"folders":..,
 *              "description":..}]}
 *
+* The JSON keys "handler" and "section" land in ZOSD_SVC-HANDLER_NAME and
+* ZOSD_DB-CATEGORY: a system reserves HANDLER and SECTION as field names.
+*
 * SNAPSHOT gives the same JSON back out of the tables, so the round trip is
 * testable without the facade.
 *
@@ -217,11 +220,11 @@ CLASS zcl_osd_status IMPLEMENTATION.
 
     LOOP AT ls_snap-services INTO ls_svc_in.
       CLEAR ls_svc.
-      ls_svc-path    = ls_svc_in-path.
-      ls_svc-kind    = ls_svc_in-kind.
-      ls_svc-handler = ls_svc_in-handler.
-      ls_svc-text    = ls_svc_in-text.
-      ls_svc-pack    = ls_svc_in-pack.
+      ls_svc-path         = ls_svc_in-path.
+      ls_svc-kind         = ls_svc_in-kind.
+      ls_svc-handler_name = ls_svc_in-handler.
+      ls_svc-text         = ls_svc_in-text.
+      ls_svc-pack         = ls_svc_in-pack.
       READ TABLE lt_svc WITH KEY path = ls_svc-path TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
         APPEND ls_svc TO lt_svc.
@@ -246,11 +249,11 @@ CLASS zcl_osd_status IMPLEMENTATION.
       CLEAR ls_db.
       lv_seq       = lv_seq + 1.
       ls_db-seq    = lv_seq.
-      ls_db-section = ls_db_in-section.
+      ls_db-category = ls_db_in-section.
       ls_db-name   = ls_db_in-name.
       ls_db-value  = ls_db_in-value.
       ls_db-note   = ls_db_in-note.
-      READ TABLE lt_db WITH KEY section = ls_db-section name = ls_db-name TRANSPORTING NO FIELDS.
+      READ TABLE lt_db WITH KEY category = ls_db-category name = ls_db-name TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
         APPEND ls_db TO lt_db.
       ENDIF.
@@ -345,7 +348,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
       CLEAR ls_svc_out.
       ls_svc_out-path    = ls_svc-path.
       ls_svc_out-kind    = ls_svc-kind.
-      ls_svc_out-handler = ls_svc-handler.
+      ls_svc_out-handler = ls_svc-handler_name.
       ls_svc_out-text    = ls_svc-text.
       ls_svc_out-pack    = ls_svc-pack.
       APPEND ls_svc_out TO ls_snap-services.
@@ -363,7 +366,7 @@ CLASS zcl_osd_status IMPLEMENTATION.
 
     SELECT * FROM zosd_db INTO ls_db ORDER BY seq.
       CLEAR ls_db_out.
-      ls_db_out-section = ls_db-section.
+      ls_db_out-section = ls_db-category.
       ls_db_out-name    = ls_db-name.
       ls_db_out-value   = ls_db-value.
       ls_db_out-note    = ls_db-note.

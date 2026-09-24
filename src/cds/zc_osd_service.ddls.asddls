@@ -6,13 +6,13 @@ define view ZC_OSD_SERVICE
   as select from zosd_svc
 {
       @EndUserText.label: 'Path'
-  key path    as Path,
+  key path         as Path,
       @EndUserText.label: 'Kind'
-      kind    as Kind,
+      kind         as Kind,
       @EndUserText.label: 'Handler'
-      handler as Handler,
+      handler_name as HandlerName,
       @EndUserText.label: 'Name'
-      text    as Text,
+      text         as Text,
       @EndUserText.label: 'Pack'
-      pack    as Pack
+      pack         as Pack
 }

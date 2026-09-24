@@ -36,7 +36,7 @@ test("one DuckDB-Wasm connection serves OData and Portable AMDP in Pages", async
       return {status: response.status, rows: (await response.json()).d.results};
     });
     expect(facts.status).toBe(200);
-    expect(facts.rows.find((row) => row.Section === "Database" && row.Name === "Engine")?.Value).toBe("duckdb");
+    expect(facts.rows.find((row) => row.Category === "Database" && row.Name === "Engine")?.Value).toBe("duckdb");
 
     await expect.poll(() => page.evaluate(() => {
       const element = document.querySelector("[id$='--engineSelect']");

@@ -7,7 +7,7 @@
     <DDLANGUAGE>E</DDLANGUAGE>
     <TABCLASS>TRANSP</TABCLASS>
     <CLIDEP>X</CLIDEP>
-    <DDTEXT>SEGW generator: function module parameters (the function library)</DDTEXT>
+    <DDTEXT>SEGW generator: function module parameters</DDTEXT>
     <MAINFLAG>X</MAINFLAG>
     <CONTFLAG>A</CONTFLAG>
     <EXCLASS>1</EXCLASS>
@@ -40,7 +40,7 @@
      <MASK>  CHAR</MASK>
     </DD03P>
     <DD03P>
-     <FIELDNAME>PARAMETER</FIELDNAME>
+     <FIELDNAME>PARAM_NAME</FIELDNAME>
      <KEYFLAG>X</KEYFLAG>
      <ADMINFIELD>0</ADMINFIELD>
      <INTTYPE>C</INTTYPE>

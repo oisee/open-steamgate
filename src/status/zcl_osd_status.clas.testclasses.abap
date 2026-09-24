@@ -110,7 +110,7 @@ CLASS ltcl_status IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_rows exp = 2 ).
     cl_abap_unit_assert=>assert_equals( act = count_rows( ) exp = 2 ).
     SELECT SINGLE * FROM zosd_db INTO ls_db.
-    cl_abap_unit_assert=>assert_equals( act = ls_db-section exp = 'Database' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_db-category exp = 'Database' ).
     cl_abap_unit_assert=>assert_equals( act = ls_db-name exp = 'Engine' ).
     cl_abap_unit_assert=>assert_equals( act = ls_db-value exp = 'duckdb' ).
     cl_abap_unit_assert=>assert_equals( act = ls_db-note exp = 'connected backend' ).

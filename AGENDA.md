@@ -7,7 +7,7 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
 > was decided and why.
 
-## ZOSD_TAXIFACT-ZONE is PICKUP_ZONE (2026-09-24)
+## Names a system reserves: ZONE, HANDLER, SECTION, PARAMETER (2026-09-24)
 
 Decided: the taxi fact table's field `ZONE`, a reserved word on a system
 (ANORMALIES zone-reserved-word), is `PICKUP_ZONE`. A4H refuses the CDS
@@ -23,17 +23,34 @@ running generation's views, which DuckDB would otherwise keep naming `zone`.
 The stamped backends (SQLite file, SQLite with `STG_DB_PATH`, PostgreSQL)
 already rebuild or set a file aside on any DDIC change and hold only seed rows.
 
+The other names of the tree in `TRESE` (A4H's list of reserved names, 453
+entries) that A4H refuses (measured the same day) are renamed the same way,
+by the same rule (fix/reserved-words; agreed with osg-i7): the table field
+gets a name that says what it holds, the CDS alias stays unless it is
+reserved itself, and a renamed alias takes the OData property with it.
+
+| table field | now | CDS element | now |
+| --- | --- | --- | --- |
+| `ZOSD_ICF_APC-HANDLER` | `CLASS_NAME` (SAPC's name) | `ZC_OSD_ICF_APC.Handler` | `ClassName` |
+| `ZOSD_ICF_ASIDE-HANDLER` | `ICF_HANDLER` | (no view) | |
+| `ZOSD_SVC-HANDLER` | `HANDLER_NAME` | `ZC_OSD_SERVICE.Handler` | `HandlerName` |
+| `ZOSD_DB-SECTION` | `CATEGORY` | `ZC_OSD_DATABASE.Section` | `Category` |
+| `ZSTG_FM_PARAM-PARAMETER` | `PARAM_NAME` | (table-mapped; OData stays `Parameter`) | |
+| `ICFHANDLER-ICFHANDLER` (SAP's) | unchanged | `ZC_OSD_ICF_HANDLER.Handler` | `IcfHandler` |
+
+The five tables and four views activate on A4H with these names
+(`$ZOSG_TMP_0040`, deleted). DuckDB files are migrated by the same list in
+`tools/osd-db-migrate.mjs`; the status snapshot JSON keeps `handler` and
+`section`. `test/reserved-words.mjs` fails when an own transparent table or
+a CDS element takes one of the refused names again. The structures with
+`COUNT`, `FILE`, `PACKAGE`, `ROWCOUNT` and `RULE` (ZOSD_TYPE_S,
+ZOSD_OBJECT_S, ZOSD_SQLTRACE_S, ZOSD_ISSUE_S) stay: a structure has no
+database table, and A4H's own structures carry all of those names.
+
 Open:
-- Other names of the tree are in `TRESE` (A4H's list of reserved names, 453
-  entries), scanned against every TABL and generated view field. Refused on
-  A4H when put in a table (measured the same day): `HANDLER` (ZOSD_ICF_APC,
-  ZOSD_ICF_ASIDE, ZOSD_SVC), `SECTION` (ZOSD_DB), `PARAMETER`
-  (ZSTG_FM_PARAM); as CDS elements `Handler` (ZC_OSD_ICF_APC, ZC_OSD_ICF_HANDLER,
-  ZC_OSD_SERVICE) and `Section` (ZC_OSD_DATABASE). `TEXT` and `LENGTH` are
-  listed and accepted. The structures with `COUNT`, `FILE`, `PACKAGE`,
-  `ROWCOUNT` and `RULE` (ZOSD_TYPE_S, ZOSD_OBJECT_S, ZOSD_SQLTRACE_S,
-  ZOSD_ISSUE_S) were not measured; a structure has no database table. Not
-  renamed yet.
+- `ZOSD_ICF_ORIGIN`'s description is 62 characters; ADT refuses more than
+  60 when it creates a table (`ZSTG_FM_PARAM`'s 66 was, and is 42 now). Not
+  measured through abapGit.
 
 ## Sources are files; tables hold only derived indices (2026-09-24)
 

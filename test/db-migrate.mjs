@@ -79,6 +79,38 @@ describe("DuckDB file migration (tools/osd-db-migrate.mjs)", function () {
     }
   });
 
+  it("names the HANDLER / SECTION / PARAMETER renames, reserved on a system as well", () => {
+    expect(COLUMN_RENAMES).to.deep.include.members([
+      {table: "zosd_icf_apc", from: "handler", to: "class_name"},
+      {table: "zosd_icf_aside", from: "handler", to: "icf_handler"},
+      {table: "zosd_svc", from: "handler", to: "handler_name"},
+      {table: "zosd_db", from: "section", to: "category"},
+      {table: "zstg_fm_param", from: "parameter", to: "param_name"},
+    ]);
+  });
+
+  it("renames a key column (ZOSD_DB-SECTION, ZSTG_FM_PARAM-PARAMETER) and keeps the rows", async () => {
+    const path = join(dir, "status.duckdb");
+    let db = await open(path);
+    await db.execute(`CREATE TABLE "zosd_db" ("section" VARCHAR(20), "name" VARCHAR(60), "value" VARCHAR(240),
+      "note" VARCHAR(240), "seq" INT, PRIMARY KEY("section","name"))`);
+    await db.execute(`CREATE TABLE "zstg_fm_param" ("mandt" VARCHAR(3), "funcname" VARCHAR(30), "parameter" VARCHAR(30),
+      "kind" VARCHAR(1), "typ" VARCHAR(30), "optional" VARCHAR(1), "remote" VARCHAR(1), "stg_seq" INT,
+      PRIMARY KEY("mandt","funcname","parameter"))`);
+    await db.execute("INSERT INTO zosd_db VALUES ('Database','Engine','duckdb','connected backend',1)");
+    await db.execute("INSERT INTO zstg_fm_param VALUES ('123','Z_MODULE','IV_ID','I','CHAR10','X','X',1)");
+    db.close();
+    db = await open(path);
+    try {
+      expect(await migrateDuckdbColumns(db)).to.deep.equal(["zosd_db.section -> category", "zstg_fm_param.parameter -> param_name"]);
+      expect(await db.query("SELECT category, name FROM zosd_db")).to.deep.equal([{category: "Database", name: "Engine"}]);
+      expect(await db.query("SELECT funcname, param_name FROM zstg_fm_param")).to.deep.equal([{funcname: "Z_MODULE", param_name: "IV_ID"}]);
+      expect(await migrateDuckdbColumns(db)).to.deep.equal([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("does nothing to a file made after the rename, or without the table", async () => {
     const db = await open(join(dir, "new.duckdb"));
     try {

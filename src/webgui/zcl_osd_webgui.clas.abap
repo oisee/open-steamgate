@@ -311,14 +311,14 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
           add( EXPORTING iv_parent = 'ODATA' iv_id = |ODATA-{ lv_name }| iv_kind = gc_kind-service
                          iv_text = COND string( WHEN ls_svc-text IS INITIAL THEN lv_name ELSE ls_svc-text )
                          iv_name = lv_name iv_url = lv_url
-                         iv_detail = CONV string( ls_svc-handler ) iv_badge = 'ODATA'
+                         iv_detail = CONV string( ls_svc-handler_name ) iv_badge = 'ODATA'
                CHANGING  ct_nodes = rt_nodes ).
         WHEN 'ICF'.
           lv_name = last_segment( CONV string( ls_svc-path ) ).
           add( EXPORTING iv_parent = 'ICF' iv_id = |ICF-{ lv_name }| iv_kind = gc_kind-service
                          iv_text = COND string( WHEN ls_svc-text IS INITIAL THEN lv_name ELSE ls_svc-text )
                          iv_name = lv_name iv_url = CONV string( ls_svc-path )
-                         iv_detail = CONV string( ls_svc-handler ) iv_badge = 'ICF'
+                         iv_detail = CONV string( ls_svc-handler_name ) iv_badge = 'ICF'
                CHANGING  ct_nodes = rt_nodes ).
         WHEN 'APC'.
 * a websocket has no page of its own; the node names the class that answers
@@ -326,15 +326,15 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
           add( EXPORTING iv_parent = 'APC' iv_id = |APC-{ lv_name }| iv_kind = gc_kind-service
                          iv_text = COND string( WHEN ls_svc-text IS INITIAL THEN lv_name ELSE ls_svc-text )
                          iv_name = lv_name
-                         iv_detail = CONV string( ls_svc-handler ) iv_badge = 'APC'
+                         iv_detail = CONV string( ls_svc-handler_name ) iv_badge = 'APC'
                CHANGING  ct_nodes = rt_nodes ).
         WHEN 'APP'.
-          lv_name = ls_svc-handler.
+          lv_name = ls_svc-handler_name.
           TRANSLATE lv_name TO UPPER CASE.
           add( EXPORTING iv_parent = 'APPS' iv_id = |APP-{ lv_name }| iv_kind = gc_kind-app
                          iv_text = COND string( WHEN ls_svc-text IS INITIAL THEN lv_name ELSE ls_svc-text )
                          iv_name = lv_name iv_url = CONV string( ls_svc-path )
-                         iv_detail = CONV string( ls_svc-handler ) iv_badge = 'APP'
+                         iv_detail = CONV string( ls_svc-handler_name ) iv_badge = 'APP'
                CHANGING  ct_nodes = rt_nodes ).
       ENDCASE.
     ENDSELECT.
