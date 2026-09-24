@@ -637,7 +637,7 @@ export function compileProcedure(method, types, options = {}) {
         const unsorted = order.ties === null || order.ties === undefined ? []
           : Object.keys(schema).filter((column) => !order.ties.has(upper(column)));
         if (unsorted.length > 0) {
-          const refusal = new UnsupportedSqlScript(`FOR over cursor ${cursorName}: its rows are sorted by ${[...order.ties].join(", ") || "nothing it reads"}, and rows equal in those come in any order, while the loop reads ${unsorted.join(", ")} too`, node);
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${cursorName}: its rows are sorted by ${[...order.ties].join(", ") || "nothing it reads"}, and rows equal in those come in any order, while its row carries ${unsorted.join(", ")} too (every column of the row counts as read)`, node);
           refusal.reason = "order";
           throw refusal;
         }
