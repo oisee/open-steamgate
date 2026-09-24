@@ -412,7 +412,7 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new If(), new While(), new Block(), new ProcedureCall(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new While(), new For(), new Block(), new ProcedureCall(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }
@@ -452,6 +452,19 @@ export class While extends Expression {
     // optional opening/closing tokens accepted both half-open spellings.
     return seq(str("WHILE"), new Condition(), str("DO"),
       star(new Statement()), str("END"), str("WHILE"), ";");
+  }
+}
+
+/** `FOR r AS c DO ... END FOR;` -- a loop over the rows of a declared
+ *  cursor (with its arguments, `FOR r AS c(:a, :b)`), `r.col` naming a
+ *  column of the current row inside. The first construct of the grammar
+ *  backlog the corpus oracle measured: 19 bodies that HANA accepts stopped
+ *  here. */
+export class For extends Expression {
+  getRunnable() {
+    return seq(str("FOR"), new Name(), str("AS"), new Name(),
+      opt(seq("(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")")),
+      str("DO"), star(new Statement()), str("END"), str("FOR"), ";");
   }
 }
 

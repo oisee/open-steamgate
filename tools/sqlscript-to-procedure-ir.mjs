@@ -11,9 +11,37 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
-  ifElse, callProcedure, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, forCursor, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
 
 const upper = (value) => String(value).toUpperCase();
+
+/**
+ * The order a relation's rows come in, as far as HANA shows it (observed on
+ * HXE and A4H, docs/sqlscript-hana-observed.md, "The order a cursor's rows
+ * come in"): `defined` by ORDER BY or by the caller's rows, `inherited`
+ * through a scan, filter or projection of a relation whose order is known,
+ * `unknown` after DISTINCT, a join, a union, grouping, or a database table
+ * read without ORDER BY. `orders` holds what each table variable was given.
+ */
+export function orderOf(rel, orders = new Map()) {
+  const unknown = (why) => ({kind: "unknown", why});
+  if (rel === undefined || rel === null) return unknown("no relation");
+  switch (rel.rel) {
+    case "order": return {kind: "defined", why: "ORDER BY"};
+    case "var": return orders.get(upper(rel.name)) ?? unknown(`:${String(rel.name).toLowerCase()} has no known order`);
+    case "filter": case "alias": {
+      const inner = orderOf(rel.input, orders);
+      return inner.kind === "unknown" ? inner : {kind: "inherited", why: inner.why};
+    }
+    case "project": {
+      if (rel.distinct) return unknown("DISTINCT");
+      const inner = orderOf(rel.input, orders);
+      return inner.kind === "unknown" ? inner : {kind: "inherited", why: inner.why};
+    }
+    case "scan": return upper(rel.table) === "DUMMY" ? {kind: "defined", why: "one row"} : unknown(`the table ${upper(rel.table)} read without ORDER BY`);
+    default: return unknown(rel.rel === "join" ? "a join" : rel.rel === "union" ? "a union" : rel.rel === "aggregate" ? "grouping" : rel.rel);
+  }
+}
 const children = (node, kind) => (node.children ?? []).filter((one) => one.node === kind);
 const child = (node, kind) => children(node, kind)[0];
 const leaf = (node) => {
@@ -33,6 +61,12 @@ const exactWrapped = (node, kind) => {
     current = semantic[0];
   }
   return current;
+};
+/** every node of a kind, anywhere under `node` */
+const findAll = (node, kind, found = []) => {
+  if (node?.node === kind) found.push(node);
+  for (const one of node?.children ?? []) findAll(one, kind, found);
+  return found;
 };
 const terminalLeaves = (node, found = []) => {
   if (node?.value !== undefined) found.push(node);
@@ -252,6 +286,7 @@ export function compileProcedure(method, types, options = {}) {
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
   const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
+  const parameterOrders = relationParameters.map((one) => [one.name, {kind: "defined", why: `the caller's rows of :${one.name.toLowerCase()}`}]);
   // a DEFAULT is carried as its literal, never as the initial value: an
   // omitted `DEFAULT 10` filled with 0 answers a different question
   const defaultOf = (one, type) => {
@@ -338,8 +373,19 @@ export function compileProcedure(method, types, options = {}) {
     restoreObject(relationSchemas, common("relations"));
     restoreObject(scalarTypes, common("scalars"));
   };
+  const rowVariables = {};
+  const cursors = new Map();
+  // the order each table variable's rows were given: a table parameter's
+  // rows come in the caller's order; an assignment's, in its relation's
+  const relationOrders = new Map(parameterOrders);
+  const noteOrder = (name, rel) => {
+    const now = orderOf(rel, relationOrders);
+    const before = relationOrders.get(upper(name));
+    // an assignment in one branch and another in the next: the worse wins
+    relationOrders.set(upper(name), before?.kind === "unknown" ? before : now);
+  };
   const bind = (node, fragment, targetSchema) => toIr(node, {
-    fragment, scalarTypes, relationSchemas, deferTableVariables: true, strictColumns: true,
+    fragment, scalarTypes, relationSchemas, rowVariables, deferTableVariables: true, strictColumns: true,
     signature: method, arrayValues, catalogue, ...(targetSchema === undefined ? {} : {targetSchema}),
   });
 
@@ -372,10 +418,19 @@ export function compileProcedure(method, types, options = {}) {
           }
           const occurrences = terminalLeaves(tree).filter((one) =>
             one.node === "identifier" && upper(one.value) === name).length;
+          const query = child(node, "SetOperation");
+          // a cursor a FOR loop reads is kept as the relation it selects; it
+          // is bound where the loop stands, with the variables as they are then
+          const usedByFor = findAll(tree, "For").some((loop) => nameOf(children(loop, "Name")[1]) === name);
+          if (usedByFor) {
+            if (query === undefined) throw new UnsupportedSqlScript("CURSOR declaration requires a query", node);
+            cursors.set(name, query);
+            cursorNames.add(name);
+            continue;
+          }
           if (occurrences !== 1) {
             throw new UnsupportedSqlScript("initial CURSOR support is limited to a declared but unused cursor", node);
           }
-          const query = child(node, "SetOperation");
           if (query === undefined) throw new UnsupportedSqlScript("CURSOR declaration requires a query", node);
           const selects = children(query, "Select");
           const select = selects.length === 1 ? selects[0] : undefined;
@@ -470,6 +525,7 @@ export function compileProcedure(method, types, options = {}) {
           ]));
           const rel = rows.length === 1 ? rows[0] : union(rows, true);
           relationSchemas[name] = {[names[0]]: T.int, [names[1]]: T.int};
+          noteOrder(name, rel);
           result.push(assignRelation(name, rel, node));
           continue;
         }
@@ -479,6 +535,7 @@ export function compileProcedure(method, types, options = {}) {
           const rel = bind(set, "relation", outputSchemaOf(name));
           try { relationSchemas[name] = schemaOf(rel, catalogue); }
           catch (error) { throw new UnsupportedSqlScript(`cannot prove schema assigned to ${name}: ${error.message}`, node); }
+          noteOrder(name, rel);
           result.push(assignRelation(name, rel, node));
         }
         else {
@@ -516,6 +573,28 @@ export function compileProcedure(method, types, options = {}) {
         }
         relationSchemas[calledOutput] = structuredClone(output.schema);
         result.push(callProcedure(procedureLeaves[0].value, input, calledOutput, node));
+      } else if (node.node === "For") {
+        const [rowName, cursorName] = children(node, "Name").map(nameOf);
+        const query = cursors.get(cursorName);
+        if (query === undefined) throw new UnsupportedSqlScript(`FOR over ${cursorName}, which is not a cursor declared here`, node);
+        if (children(node, "Expr").length > 0) throw new UnsupportedSqlScript("a cursor with arguments is not carried yet", node);
+        if (rowVariables[rowName] !== undefined) throw new UnsupportedSqlScript(`a FOR loop inside another over the same row name ${rowName}`, node);
+        const cursor = bind(query, "relation");
+        let schema;
+        try { schema = schemaOf(cursor, catalogue); }
+        catch (error) { throw new UnsupportedSqlScript(`cannot prove the schema of cursor ${cursorName}: ${error.message}`, node); }
+        const order = orderOf(cursor, relationOrders);
+        if (order.kind === "unknown") {
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${cursorName}: its rows come in no order HANA guarantees (${order.why})`, node);
+          refusal.reason = "order";
+          throw refusal;
+        }
+        rowVariables[rowName] = schema;
+        for (const [column, type] of Object.entries(schema)) scalarTypes[`${rowName}.${column}`] = type;
+        const body = compileStatements({children: children(node, "Statement")});
+        delete rowVariables[rowName];
+        for (const column of Object.keys(schema)) delete scalarTypes[`${rowName}.${column}`];
+        result.push(forCursor(rowName, cursorName, cursor, schema, body, order, node));
       } else if (node.node === "While") {
         result.push(whileLoop(condition(child(node, "Condition")), compileStatements(node), node));
       } else if (node.node === "Block") {
@@ -665,7 +744,14 @@ export function compileProcedure(method, types, options = {}) {
         || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
           containsRelationStatement(branch.body ?? []))
           || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
-    if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body))) {
+    // a scalar output over relations is carried when something reads them
+    // into scalars -- a FOR loop over a cursor, or SELECT ... INTO
+    const readsRelations = (statements) => statements.some((statement) =>
+      statement.stmt === "for-cursor" || statement.stmt === "select-into"
+        || (statement.stmt === "while" && readsRelations(statement.body ?? []))
+        || (statement.stmt === "if" && ((statement.branches ?? []).some((branch) => readsRelations(branch.body ?? []))
+          || readsRelations(statement.otherwise ?? []))));
+    if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body)) && !readsRelations(body)) {
       throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
     }
     // every OUT table must be assigned somewhere in the body, or HANA does not
