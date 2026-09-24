@@ -423,6 +423,9 @@ const EXPECT = {
   // ... WHERE read the variable as the body left it (the Go emitter's string
   // builders kept an appended string out of both until the loop ended)
   ZCL_GOGEN_T_WHILEAPP: "ababab xxx",
+  // not an A4H value: a generic table's rows keep their type (the Go
+  // emitter gave a c 3 table the descriptor of a string table: "g g")
+  ZCL_GOGEN_T_DESCKEY: "g C",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
