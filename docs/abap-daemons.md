@@ -361,8 +361,9 @@ loop and each hundredth firing: the first hundred had fired 91.5 ms after
 the loop ended, the last 105.7 ms after. That is not a timer firing early:
 each timer runs from its own `START_TIMER`, up to the length of the loop
 before its end, and the loop's length was not logged. So this batch shows
-capacity and throughput (1000 timers, all fired within 14.2 ms of each
-other), not lateness; the lateness is the table above. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
+capacity and throughput (1000 timers; every hundredth firing was logged,
+and firings 100 to 1000 fell within 14.2 ms; the first 99 were not timed
+individually), not lateness; the lateness is the table above. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
 ms, 1.4 ms after the callback returned.
 
 ### P8 and the AMC half of P6: blocked, and why
