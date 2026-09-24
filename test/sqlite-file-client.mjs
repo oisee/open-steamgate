@@ -176,3 +176,20 @@ describe("tools/sqlite-file-client: rows on disk while the process runs", functi
     await db.disconnect();
   });
 });
+
+describe("tools/sqlite-file-client: an INTEGER parameter binds as INTEGER", () => {
+  it("reads back as '1', not '1.0' (node:sqlite binds a JavaScript number as REAL)", async () => {
+    const {FileSqliteClient} = await import("../tools/sqlite-file-client.mjs");
+    const client = new FileSqliteClient({path: ":memory:"});
+    await client.connect();
+    try {
+      const {rows} = await client.native({sql: "SELECT CAST(? AS TEXT) AS T, typeof(?) AS Y, CAST(? AS TEXT) AS P",
+        params: [{name: "a", value: 1, type: "I"}, {name: "b", value: 7, type: "I"}, {name: "c", value: "1.50", type: "P(15,2)"}]});
+      expect(rows[0]).to.deep.include({T: "1", Y: "integer"});
+      // a packed value is not an integer type and keeps its decimals
+      expect(rows[0].P).to.equal("1.5");
+    } finally {
+      await client.disconnect();
+    }
+  });
+});

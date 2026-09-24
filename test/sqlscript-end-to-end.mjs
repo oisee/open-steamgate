@@ -287,9 +287,9 @@ describe("a concatenating aggregate, and the ordering that makes it a value", ()
 
   it("is spelt per engine and ordered identically on all three", () => {
     const body = "SELECT STRING_AGG(k, ',' ORDER BY k DESC) AS V FROM src;";
-    expect(compile(body, "hana", CAT).sql).to.contain('STRING_AGG("K", ? ORDER BY "K" DESC)');
-    expect(compile(body, "duckdb", CAT).sql).to.contain('string_agg("K", ? ORDER BY "K" DESC)');
-    expect(compile(body, "sqlite", CAT).sql).to.contain('group_concat("K", ? ORDER BY "K" DESC)');
+    expect(compile(body, "hana", CAT).sql).to.contain('STRING_AGG("K", ? ORDER BY "K" DESC NULLS LAST)');
+    expect(compile(body, "duckdb", CAT).sql).to.contain('string_agg("K", ? ORDER BY "K" DESC NULLS LAST)');
+    expect(compile(body, "sqlite", CAT).sql).to.contain('group_concat("K", ? ORDER BY "K" DESC NULLS LAST)');
   });
 
   it("answers the same string on both engines that ship", async () => {
@@ -319,7 +319,7 @@ describe("a window function, and the tie that is the only thing that could diffe
     const body = "SELECT ROW_NUMBER() OVER (PARTITION BY k ORDER BY n DESC) AS V FROM src;";
     const rendered = ["hana", "duckdb", "sqlite"].map((d) => compile(body, d, CAT).sql);
     expect(new Set(rendered).size, rendered.join("\n")).to.equal(1);
-    expect(rendered[0]).to.contain('ROW_NUMBER() OVER (PARTITION BY "K" ORDER BY "N" DESC)');
+    expect(rendered[0]).to.contain('ROW_NUMBER() OVER (PARTITION BY "K" ORDER BY "N" DESC NULLS LAST)');
   });
 
   it("answers the same numbers on both engines that ship", async () => {

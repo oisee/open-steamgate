@@ -277,6 +277,13 @@ const PORTABLE = new Set([
 
 export class Refused extends Error {}
 
+// HANA sorts NULL as the smallest value: first ascending, last descending
+// (measured on HXE 2.00.088, 2026-09-24: ORDER BY v gives N,1,2 and ORDER BY
+// v DESC gives 2,1,N). PostgreSQL and DuckDB put NULL last ascending by
+// default, so the placement is written out on every engine rather than
+// left to each one's default
+const orderKey = (d, k) => `${d.quote(k.col)} ${k.desc ? "DESC NULLS LAST" : "ASC NULLS FIRST"}`;
+
 export function lower(rel, dialectName, options = {}) {
   const d = DIALECTS[dialectName];
   if (d === undefined) throw new Refused(`no dialect ${dialectName}`);
@@ -465,7 +472,7 @@ export function lower(rel, dialectName, options = {}) {
           const parts = [];
           if (w.partitionBy.length > 0) parts.push(`PARTITION BY ${w.partitionBy.map(expr).join(", ")}`);
           if (w.orderBy.length > 0) {
-            parts.push(`ORDER BY ${w.orderBy.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`);
+            parts.push(`ORDER BY ${w.orderBy.map((k) => orderKey(d, k)).join(", ")}`);
           }
           return ` OVER (${parts.join(" ")})`;
         };
@@ -476,7 +483,7 @@ export function lower(rel, dialectName, options = {}) {
         if (PORTABLE.has(e.fn) || AGGREGATES.has(e.fn)) {
           const name = AGGREGATES.has(e.fn) ? d.aggName(e.fn) : e.fn;
           const ordering = (e.orderBy ?? []).length === 0 ? ""
-            : ` ORDER BY ${e.orderBy.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ")}`;
+            : ` ORDER BY ${e.orderBy.map((k) => orderKey(d, k)).join(", ")}`;
           return `${name}(${args.join(", ")}${ordering})${over(e.window)}`;
         }
         // **An unknown function is refused, not rendered.**
@@ -654,7 +661,7 @@ export function lower(rel, dialectName, options = {}) {
         // rest on row order surviving a projection, which no standard
         // promises and which is exactly the kind of assumption this file
         // exists to avoid.
-        const keys = r.keys.map((k) => `${d.quote(k.col)} ${k.desc ? "DESC" : "ASC"}`).join(", ");
+        const keys = r.keys.map((k) => orderKey(d, k)).join(", ");
         const inner = r.input;
         if (inner?.rel === "project") {
           // Reuse the projection's whole query block. Reconstructing its

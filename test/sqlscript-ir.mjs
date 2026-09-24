@@ -196,7 +196,7 @@ describe("SQLScript IR: the shapes the corpus actually contains", () => {
            bin("=", col("K", T.int, "L"), col("K", T.int, "R"), T.bool)),
       [{as: "LK", expr: col("K", T.int, "L")}]);
     const sql = sqlOf(limit(order(selected, [{col: "LK"}]), 2), "duckdb");
-    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K") ORDER BY "LK" ASC LIMIT 2');
+    expect(sql).to.equal('SELECT "L"."K" AS "LK" FROM (SELECT * FROM "A") AS "L" INNER JOIN (SELECT * FROM "B") AS "R" ON ("L"."K" = "R"."K") ORDER BY "LK" ASC NULLS FIRST LIMIT 2');
   });
 
   it("group by with an aggregate", () => {

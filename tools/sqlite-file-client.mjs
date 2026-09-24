@@ -14,7 +14,7 @@
 // and the browser; DuckDB stays where it is. Same eleven methods, so
 // nothing above the seam knows which of the three it is talking to.
 import {DatabaseSync} from "node:sqlite";
-import {bindValue} from "./abap-types.mjs";
+import {bindValue, abapTypeLetter} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
 import {existsSync, mkdirSync, renameSync, rmSync} from "node:fs";
 import {dirname} from "node:path";
@@ -299,7 +299,15 @@ export class FileSqliteClient {
       if (p.isNull === true) {
         return null;
       }
-      return bindValue(p);
+      const value = bindValue(p);
+      // node:sqlite binds every JavaScript number as REAL, so an INTEGER
+      // parameter read back as text was '1.0' where HANA (and sql.js, which
+      // binds an integral number as INTEGER) give '1' -- measured 2026-09-24.
+      // An integer type's integral value goes as a BigInt, which binds as INTEGER
+      if (typeof value === "number" && Number.isSafeInteger(value) && ["I", "B", "S"].includes(abapTypeLetter(p.type))) {
+        return BigInt(value);
+      }
+      return value;
     });
   }
 

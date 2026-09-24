@@ -710,3 +710,15 @@ relation whose order is defined, and *unknown* after DISTINCT, a join, a
 union, grouping, or a scan of a database table without ORDER BY. A FOR loop
 over a cursor of unknown order is refused ("order"), since its result can
 depend on an order no HANA promises.
+
+Two more, measured on HXE the same afternoon:
+
+- **Ties are not kept.** A table variable in a known order, a cursor
+  `ORDER BY g` over a key with ten values: within each group, about half
+  the rows came out of their original order, at 100 rows and at 100 000.
+  So ORDER BY defines an order only up to its keys; a loop that reads a
+  column the keys do not include is refused ("order").
+- **NULL is the smallest value.** `ORDER BY v` gives `NULL, 1, 2` and
+  `ORDER BY v DESC` gives `2, 1, NULL`. PostgreSQL and DuckDB put NULL last
+  ascending by default, so every ORDER BY the lowering writes now says
+  `ASC NULLS FIRST` / `DESC NULLS LAST`, on every engine.

@@ -26,19 +26,27 @@ const upper = (value) => String(value).toUpperCase();
 export function orderOf(rel, orders = new Map()) {
   const unknown = (why) => ({kind: "unknown", why});
   if (rel === undefined || rel === null) return unknown("no relation");
+  // `ties`: the output columns an ORDER BY sorted by. Rows equal in those
+  // come in any order (measured on HXE: within ties, about half the rows
+  // swapped at 100 and at 100 000 rows), so an order is only as good as the
+  // columns a reader sees being among them. null: no ties (one row, or the
+  // caller's rows, which have positions)
   switch (rel.rel) {
-    case "order": return {kind: "defined", why: "ORDER BY"};
+    case "order": return {kind: "defined", why: "ORDER BY", ties: new Set(rel.keys.map((k) => upper(k.col)))};
     case "var": return orders.get(upper(rel.name)) ?? unknown(`:${String(rel.name).toLowerCase()} has no known order`);
     case "filter": case "alias": {
       const inner = orderOf(rel.input, orders);
-      return inner.kind === "unknown" ? inner : {kind: "inherited", why: inner.why};
+      return inner.kind === "unknown" ? inner : {...inner, kind: "inherited"};
     }
     case "project": {
       if (rel.distinct) return unknown("DISTINCT");
       const inner = orderOf(rel.input, orders);
-      return inner.kind === "unknown" ? inner : {kind: "inherited", why: inner.why};
+      if (inner.kind === "unknown") return inner;
+      const ties = inner.ties === null || inner.ties === undefined ? null
+        : new Set(rel.items.filter((item) => item.expr?.node === "col" && inner.ties.has(upper(item.expr.name))).map((item) => upper(item.as)));
+      return {...inner, kind: "inherited", ties};
     }
-    case "scan": return upper(rel.table) === "DUMMY" ? {kind: "defined", why: "one row"} : unknown(`the table ${upper(rel.table)} read without ORDER BY`);
+    case "scan": return upper(rel.table) === "DUMMY" ? {kind: "defined", why: "one row", ties: null} : unknown(`the table ${upper(rel.table)} read without ORDER BY`);
     default: return unknown(rel.rel === "join" ? "a join" : rel.rel === "union" ? "a union" : rel.rel === "aggregate" ? "grouping" : rel.rel);
   }
 }
@@ -286,7 +294,7 @@ export function compileProcedure(method, types, options = {}) {
   const relationParameters = relationCandidates.map(({one, schema}) => ({name: upper(one.name), schema}));
   const relationNames = new Set(relationParameters.map((one) => one.name));
   const relationSchemas = Object.fromEntries(relationParameters.map((one) => [one.name, one.schema]));
-  const parameterOrders = relationParameters.map((one) => [one.name, {kind: "defined", why: `the caller's rows of :${one.name.toLowerCase()}`}]);
+  const parameterOrders = relationParameters.map((one) => [one.name, {kind: "defined", why: `the caller's rows of :${one.name.toLowerCase()}`, ties: null}]);
   // a DEFAULT is carried as its literal, never as the initial value: an
   // omitted `DEFAULT 10` filled with 0 answers a different question
   const defaultOf = (one, type) => {
@@ -586,6 +594,13 @@ export function compileProcedure(method, types, options = {}) {
         const order = orderOf(cursor, relationOrders);
         if (order.kind === "unknown") {
           const refusal = new UnsupportedSqlScript(`FOR over cursor ${cursorName}: its rows come in no order HANA guarantees (${order.why})`, node);
+          refusal.reason = "order";
+          throw refusal;
+        }
+        const unsorted = order.ties === null || order.ties === undefined ? []
+          : Object.keys(schema).filter((column) => !order.ties.has(upper(column)));
+        if (unsorted.length > 0) {
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${cursorName}: its rows are sorted by ${[...order.ties].join(", ") || "nothing it reads"}, and rows equal in those come in any order, while the loop reads ${unsorted.join(", ")} too`, node);
           refusal.reason = "order";
           throw refusal;
         }

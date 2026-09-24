@@ -33,6 +33,13 @@ describe("the order of a relation's rows, as the compiler classifies it", () => 
     expect(orderOf(it)).to.include({kind: "unknown"}); // a variable nobody gave an order
   });
 
+  it("refuses a FOR whose ORDER BY leaves ties among the columns it reads", () => {
+    let caught;
+    try { compile(LOOP("SELECT n, k FROM :lt", "lt = SELECT n, k FROM :it ORDER BY k;")); } catch (error) { caught = error; }
+    expect(caught).to.include({reason: "order"});
+    expect(caught.message).to.match(/sorted by K, and rows equal in those come in any order, while the loop reads N too/);
+  });
+
   it("refuses at compile time a FOR over DISTINCT, with the reason 'order'", () => {
     let caught;
     try { compile(LOOP("SELECT DISTINCT n FROM :it")); } catch (error) { caught = error; }
@@ -68,9 +75,16 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
     it("a filter keeps that order", async () => {
       expect((await run(LOOP("SELECT n FROM :it WHERE k > 10"))).value).to.equal("3,2,");
     });
-    it("ORDER BY in the table variable the cursor reads decides it", async () => {
-      expect((await run(LOOP("SELECT n, k FROM :lt", "lt = SELECT n, k FROM :it ORDER BY k DESC;"))).value).to.equal("3,2,1,");
-      expect((await run(LOOP("SELECT n, k FROM :lt", "lt = SELECT n, k FROM :it ORDER BY k;"))).value).to.equal("1,2,3,");
+    it("ORDER BY in the table variable the cursor reads decides it, when it sorts by every column the loop reads", async () => {
+      expect((await run(LOOP("SELECT n, k FROM :lt", "lt = SELECT n, k FROM :it ORDER BY k DESC, n;"))).value).to.equal("3,2,1,");
+      expect((await run(LOOP("SELECT n FROM :lt", "lt = SELECT n, k FROM :it ORDER BY n;"))).value).to.equal("1,2,3,");
+    });
+    it("ORDER BY puts NULL first ascending and last descending, as HANA does", async () => {
+      const withNull = union([...IT.inputs, project(scan("DUMMY"), [{as: "N", expr: lit(null, T.int)}, {as: "K", expr: lit(40, T.int)}])], true);
+      const loop = (dir) => `DECLARE v NVARCHAR(100) = ''; DECLARE CURSOR c FOR SELECT n FROM :lt;
+        lt = SELECT n FROM :it ORDER BY n ${dir}; FOR r AS c DO v = :v || IFNULL(TO_NVARCHAR(r.n), 'N') || ','; END FOR; ev = :v;`;
+      expect((await runProcedure(compile(loop("ASC")), {client, dialect, relationInputs: {IT: withNull}})).value).to.equal("N,1,2,3,");
+      expect((await runProcedure(compile(loop("DESC")), {client, dialect, relationInputs: {IT: withNull}})).value).to.equal("3,2,1,N,");
     });
     it("an empty cursor runs the body no time", async () => {
       expect((await run(LOOP("SELECT n FROM :it WHERE k > 100"))).value).to.equal("");
