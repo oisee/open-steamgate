@@ -1,6 +1,10 @@
 * Moves that fill a SORTED table (ultra/events fix round): a system sorts
 * the rows; the emitters would keep them in source order, so each is
-* refused. A4H: see the REFUSED_SORT comment in semantics.mjs.
+* refused. A4H 2026-09-24 ($ZOSG_TMP_0441), this class without its last
+* line: 'mv:ab vl:cd rk:dc empty:0 back:2' (sorted on the move, on VALUE,
+* re-sorted by the other key); the last line, a STANDARD table for an
+* IMPORTING parameter typed SORTED, does not activate ("LT_T is not
+* type-compatible with formal parameter IT"), abaplint lets it through.
 CLASS zcl_gogen_t_rf_sort DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_kv,

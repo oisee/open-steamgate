@@ -527,10 +527,10 @@ for (const [line, msg] of got) {
 // SORTED table into a STANDARD one compile. A4H: see the comment at the
 // top of testdata-refused/zcl_gogen_t_rf_sort.clas.abap
 const REFUSED_SORT = {
-  40: "a move into a SORTED table from a table of another kind or key",
-  42: "VALUE with rows for a SORTED table",
   44: "a move into a SORTED table from a table of another kind or key",
-  50: "a move into a SORTED table from a table of another kind or key",
+  46: "VALUE with rows for a SORTED table",
+  48: "a move into a SORTED table from a table of another kind or key",
+  54: "a move into a SORTED table from a table of another kind or key",
 };
 const rsort = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_sort"], tolerant: true});
 const rgot = new Map(rsort.partial.map((x) => [Number(/zcl_gogen_t_rf_sort\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
