@@ -133,6 +133,9 @@ CLASS zcl_stg_entry_provider IMPLEMENTATION.
   METHOD convert_value.
     DATA lv_kind TYPE c LENGTH 1.
     DATA lv_ms   TYPE string.
+* the milliseconds as a number: an arithmetic expression compared with a
+* string does not activate on a system (ANORMALIES arith-compared-with-string)
+    DATA lv_msp  TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_days TYPE i.
     DATA lv_secs TYPE i.
     DATA lv_date TYPE d VALUE '19700101'.
@@ -158,11 +161,12 @@ CLASS zcl_stg_entry_provider IMPLEMENTATION.
         FIND REGEX 'Date\((-?\d+)\)' IN iv_value SUBMATCHES lv_ms.
         IF sy-subrc = 0.
 * /Date(ms)/ -> days since 1970 + seconds
-          lv_days = lv_ms / 1000 / 86400.
-          IF lv_ms < 0 OR lv_days * 86400 * 1000 > lv_ms.
+          lv_msp = lv_ms.
+          lv_days = lv_msp / 1000 / 86400.
+          IF lv_msp < 0 OR lv_days * 86400 * 1000 > lv_msp.
             lv_days = lv_days - 1.
           ENDIF.
-          lv_secs = lv_ms / 1000 - lv_days * 86400.
+          lv_secs = lv_msp / 1000 - lv_days * 86400.
           lv_date = lv_date + lv_days.
           lv_hh = lv_secs DIV 3600.
           lv_rest = lv_secs MOD 3600.
