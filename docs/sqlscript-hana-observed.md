@@ -655,8 +655,10 @@ label do not parse here, so they are refused before any rule applies.
 ## The kernel's own wrapper around an AMDP body (read on A4H, 2026-09-24)
 
 Read off a generated procedure in the system's HANA catalog
-(`SYS.PROCEDURES.DEFINITION` of a documented SAP AMDP demo with a CHANGING
-table), not guessed:
+(`SYS.PROCEDURES.DEFINITION` of a documented SAP AMDP demo with a
+CHANGING table; which one is in the local notes), not guessed. This is the
+form of a procedure; the form the oracle writes for a function and a table
+function is ours and was not read off a system:
 
 - a CHANGING table parameter becomes two: `in "X__IN__"` and `out "X"`, and
   the procedure starts with `"X" = select * from :X__IN__;`;

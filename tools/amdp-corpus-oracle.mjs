@@ -21,11 +21,18 @@
 //              progress (a table not in the dictionary, a CDS view not
 //              reconstructed, a procedure not in the corpus)
 //   ddic-type  our DDIC -> HANA type mapping has no answer for a type
+//   ours-table a table we meant to reconstruct and could not create
 //   signature  HANA refused the procedure head we wrote, not the body
-//   shape      a column the body names is not in the table we reconstructed
-//   body       a syntax or semantic error inside the body: the only class
-//              that is a fact about the body itself
+//   shape      a column or type mismatch -- often the table or type we
+//              reconstructed, not the body
+//   hxe-refuses a syntax or semantic refusal inside the body. Every body of
+//              the corpus is active on the system it came from, so this is
+//              never a fact about the body alone: it is our stand, or a
+//              difference between this HANA and that one
 //   other      anything else, with the message
+//
+// The kernel's form of a procedure was read off A4H; the form of a function
+// and of a table function here is ours, not read off a system.
 import {mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
 import {measure} from "./sqlscript/coverage.mjs";
@@ -426,24 +433,29 @@ export function missingObject(message) {
 }
 
 /** a HANA refusal sorted into the class that says whose fault it is */
-export function classify(message) {
+export function classify(message, headLines = 0) {
   const text = String(message ?? "");
   if (missingObject(text) !== undefined) return "missing";
   // a HANA repository object (sap.hana.*) in a schema of its own: outside ABAP
   if (/invalid schema name/i.test(text)) return "missing";
-  if (/invalid column name|column .* not found/i.test(text)) return "shape";
-  if (/incorrect syntax near "AS"|parameter|invalid datatype|RETURNS/i.test(text) && /line [1-4] col/.test(text)) return "signature";
-  if (/sql syntax error|incorrect syntax|feature not supported|invalid (?:identifier|name|argument)|not allowed|wrong number|inconsistent datatype|type mismatch|scalar type|table variable|is not declared/i.test(text)) return "body";
+  if (/invalid column name|column .* not found|inconsistent datatype|type mismatch|scalar type/i.test(text)) return "shape";
+  const line = Number(/line (\d+) col/.exec(text)?.[1] ?? 0);
+  if (headLines > 0 && line > 0 && line <= headLines) return "signature";
+  if (/sql syntax error|incorrect syntax|feature not supported|invalid (?:identifier|name|argument)|not allowed|wrong number|table variable|is not declared/i.test(text)) return "hxe-refuses";
   return "other";
 }
 
-const withTimeout = (promise, ms, what) => Promise.race([promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after ${ms} ms: ${what}`)), ms))]);
+const withTimeout = (promise, ms, what) => {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms: ${what}`)), ms);
+  })]).finally(() => clearTimeout(timer));
+};
 
 /** our own verdict on a body: "OK" or the compiler's first refusal */
 function ours(body, r) {
   try {
-    compileProcedure({...body.signature, body: body.body}, body.types ?? new Map(),
+    compileProcedure({...body.signature, body: body.signature.body ?? body.body}, body.types ?? new Map(),
       {catalogue: body.catalogue, resolveType: r.dictionary.resolver(), store: r.dictionary});
     return "OK";
   } catch (error) {
@@ -459,11 +471,13 @@ function parseStop(body, why) {
   const rest = line.slice(Number(m[2]) - 1).trim();
   const words = rest.match(/^[:"]?[A-Za-z_][\w$#\/]*"?|^\S/g) ?? [];
   const next = rest.slice((words[0] ?? "").length).trim().match(/^[A-Za-z_][\w]*|^\S/)?.[0] ?? "";
-  const shape = (w) => (/^[A-Za-z_]/.test(w) && !/^(SELECT|FROM|WHERE|FOR|IN|DO|END|IF|THEN|ELSE|CALL|DECLARE|BEGIN|UNION|ALL|AS|ON|JOIN|INTO|WITH|CASE|WHEN|AND|OR|NOT|ORDER|GROUP|BY|TOP|LIMIT|RETURN|EXEC|EXECUTE|SIGNAL|RESIGNAL|CURSOR|OPEN|FETCH|CLOSE|WHILE|LOOP|BREAK|CONTINUE|ARRAY|TABLE|MAP_MERGE|APPLY_FILTER|CE_\w+|UNNEST|SEQUENTIAL|PARALLEL|EXECUTION|DISTINCT|OVER|PARTITION|INSERT|UPDATE|DELETE|UPSERT|MERGE|TRUNCATE|TOP|LATERAL|CROSS|OUTER|LEFT|RIGHT|INNER|FULL|USING|IS|NULL|BETWEEN|LIKE|EXISTS|ANY|SOME|HAVING|FILTER|WINDOW|RECORD_COUNT|ROWS|RANGE)$/i.test(w) ? "<name>" : upper(w));
+  const shape = (w) => (w.startsWith(":") ? ":<var>" : w.startsWith('"') ? "<name>" : /^[A-Za-z_]/.test(w) && !/^(SELECT|FROM|WHERE|FOR|IN|DO|END|IF|THEN|ELSE|CALL|DECLARE|BEGIN|UNION|ALL|AS|ON|JOIN|INTO|WITH|CASE|WHEN|AND|OR|NOT|ORDER|GROUP|BY|TOP|LIMIT|RETURN|EXEC|EXECUTE|SIGNAL|RESIGNAL|CURSOR|OPEN|FETCH|CLOSE|WHILE|LOOP|BREAK|CONTINUE|ARRAY|TABLE|MAP_MERGE|APPLY_FILTER|CE_\w+|UNNEST|SEQUENTIAL|PARALLEL|EXECUTION|DISTINCT|OVER|PARTITION|INSERT|UPDATE|DELETE|UPSERT|MERGE|TRUNCATE|TOP|LATERAL|CROSS|OUTER|LEFT|RIGHT|INNER|FULL|USING|IS|NULL|BETWEEN|LIKE|EXISTS|ANY|SOME|HAVING|FILTER|WINDOW|RECORD_COUNT|ROWS|RANGE)$/i.test(w) ? "<name>" : upper(w));
   return `${shape(words[0] ?? "")} ${shape(next)}`.trim();
 }
 
-export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000, out, scratch = "/tmp/sqlscript-coverage", catalog, extraDdic}) {
+export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000, out, scratch, catalog, extraDdic}) {
+  // the corpus's sources are unzipped under .local, not a world-readable /tmp
+  scratch ??= join(out, "scratch");
   if (catalog !== undefined && existsSync(catalog)) CATALOG = readCatalog(readFileSync(catalog, "utf8"));
   if (extraDdic !== undefined && existsSync(extraDdic)) EXTRA = readExtraDdic(readFileSync(extraDdic, "utf8"));
   const r = measure(exportDir, scratch, {ddic});
@@ -477,6 +491,8 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   const exec = (sql) => withTimeout(new Promise((resolve, reject) =>
     client.exec(sql, (e, rows) => (e ? reject(e) : resolve(rows)))), timeoutMs, sql.slice(0, 60));
   const version = (await exec("SELECT VERSION FROM M_DATABASE"))[0]?.VERSION;
+  const theirs = upper(process.env.HXE_SCHEMA ?? process.env.HANA_SCHEMA ?? "");
+  if (theirs === SCHEMA) throw new Error(`HXE_SCHEMA / HANA_SCHEMA is ${SCHEMA}, the schema this tool drops: refused`);
   await exec(`DROP SCHEMA ${quote(SCHEMA)} CASCADE`).catch(() => undefined);
   await exec(`CREATE SCHEMA ${quote(SCHEMA)}`);
   await exec(`SET SCHEMA ${quote(SCHEMA)}`);
@@ -517,6 +533,11 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
         result.set(body.key, {status: "refused", class: "ddic-type", message: error.message});
         continue;
       }
+      // two bodies of one routine name: the second would DROP the first
+      if (created.some((key) => key.split("#")[0] === body.routine)) {
+        result.set(body.key, {status: "refused", class: "other", message: "a second body of a routine already created"});
+        continue;
+      }
       // a missing table is made and the same body tried again, up to a bound
       let outcome;
       for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -529,10 +550,15 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
           const message = String(error.message ?? error);
           const missing = missingObject(message);
           if (missing?.kind === "table" && !tables.has(upper(missing.name)) && await ensureTable(missing.name)) continue;
-          outcome = {status: "refused", class: classify(message), message, missing};
+          // a table we could not make is our failure, not the corpus's
+          const made = missing?.kind === "table" ? tables.get(upper(missing.name)) : undefined;
+          const klass = made?.startsWith("ddic-type") ? "ddic-type" : made?.startsWith("create failed") ? "ours-table"
+            : classify(message, statement.slice(0, statement.indexOf("\nBEGIN\n") + 1).split("\n").length + 1);
+          outcome = {status: "refused", class: klass, message, missing};
           break;
         }
       }
+      outcome ??= {status: "refused", class: "other", message: "the bound of 40 tables made for one body was reached"};
       if (outcome.status === "created") {
         created.push(body.key);
         result.set(body.key, outcome);
