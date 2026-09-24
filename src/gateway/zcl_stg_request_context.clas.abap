@@ -191,6 +191,8 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     DATA lv_field    TYPE string.
     DATA lv_group    TYPE string.
     DATA lv_clause   TYPE string.
+    DATA lv_include  TYPE string.
+    DATA lv_exclude  TYPE string.
 
     LOOP AT mt_filter INTO ls_filter.
       READ TABLE ms_set-properties INTO ls_property WITH KEY name = ls_filter-property.
@@ -199,18 +201,35 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
       ELSE.
         lv_field = to_upper( ls_filter-property ).
       ENDIF.
-      CLEAR lv_group.
+* a select-options table means (any I line) AND NOT (any E line): the I
+* lines OR-ed and put in parentheses, the E lines AND-ed after them. Chained
+* as `a OR b AND NOT ( c )` the kernel reads `a OR ( b AND NOT c )`, AND
+* binding tighter than OR (measured on A4H, docs/osql-where.md)
+      CLEAR: lv_group, lv_include, lv_exclude.
       LOOP AT ls_filter-select_options INTO ls_option.
         lv_clause = where_for_option( iv_field  = lv_field
                                       is_option = ls_option ).
-        IF lv_group IS INITIAL.
-          lv_group = lv_clause.
-        ELSEIF ls_option-sign = 'E'.
-          lv_group = |{ lv_group } AND { lv_clause }|.
+        IF ls_option-sign = 'E'.
+          IF lv_exclude IS INITIAL.
+            lv_exclude = lv_clause.
+          ELSE.
+            lv_exclude = |{ lv_exclude } AND { lv_clause }|.
+          ENDIF.
         ELSE.
-          lv_group = |{ lv_group } OR { lv_clause }|.
+          IF lv_include IS INITIAL.
+            lv_include = lv_clause.
+          ELSE.
+            lv_include = |{ lv_include } OR { lv_clause }|.
+          ENDIF.
         ENDIF.
       ENDLOOP.
+      IF lv_include IS NOT INITIAL AND lv_exclude IS NOT INITIAL.
+        lv_group = |( { lv_include } ) AND { lv_exclude }|.
+      ELSEIF lv_include IS NOT INITIAL.
+        lv_group = lv_include.
+      ELSE.
+        lv_group = lv_exclude.
+      ENDIF.
       IF lv_group IS INITIAL.
         CONTINUE.
       ENDIF.
