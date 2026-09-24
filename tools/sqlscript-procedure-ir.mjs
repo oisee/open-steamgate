@@ -38,6 +38,9 @@ export const whileLoop = (condition, body, source) =>
  *  schema, and the order its rows are known to come in (orderOf) */
 export const forCursor = (row, cursorName, cursor, schema, body, order, source) =>
   ({stmt: "for-cursor", row, cursorName, cursor, schema, body, order, source});
+/** `FOR i IN [REVERSE] from .. to DO body END FOR` over a declared integer */
+export const forRange = (variable, from, to, reverse, body, source) =>
+  ({stmt: "for-range", variable, from, to, reverse, body, source});
 export const ifElse = (branches, otherwise = [], source) =>
   ({stmt: "if", branches, otherwise, source});
 // `SELECT ... INTO a, b [DEFAULT x, y]`: the relation, the scalars it
@@ -814,6 +817,29 @@ export async function runProcedure(program, {
           throw new UnsupportedSqlScript("non-deterministic relational execution is outside the P1a subset", statement);
         }
         relations.set(statement.name, value);
+      } else if (statement.stmt === "for-range") {
+        // measured on HXE: the bounds are evaluated once, inclusive; from >
+        // to runs no time; REVERSE counts down; the counter is the loop's
+        // own -- an assignment to the variable inside lasts to the end of
+        // that turn -- and the variable keeps the last value it was given
+        const from = await evaluate(statement.from, "FOR bound");
+        const to = await evaluate(statement.to, "FOR bound");
+        if (from === null || to === null) {
+          throw new UnsupportedSqlScript(`FOR ${statement.variable}: a NULL bound is not measured (a NULL literal does not compile on HANA)`, statement);
+        }
+        const current = scalars.get(statement.variable);
+        const turns = [];
+        for (let c = Number(from); c <= Number(to); c += 1) {
+          turns.push(c);
+          if (turns.length > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, statement);
+        }
+        if (statement.reverse) turns.reverse();
+        for (const c of turns) {
+          step(statement);
+          scalars.set(statement.variable, {type: current.type, value: intoVariable(c, undefined, current.type, statement.variable)});
+          assignedScalars.add(statement.variable);
+          await execute(statement.body);
+        }
       } else if (statement.stmt === "for-cursor") {
         if (client?.native === undefined) {
           throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: its rows come from the database, and this run has none`, statement);

@@ -221,7 +221,9 @@ export function lex(source, options = {}) {
       while (j < source.length && isDigit(source[j])) {
         j += 1;
       }
-      if (source[j] === ".") {
+      // `1..:n` is a range, not the number `1.`: a dot followed by a dot
+      // stays out of the number
+      if (source[j] === "." && source[j + 1] !== ".") {
         j += 1;
         while (j < source.length && isDigit(source[j])) {
           j += 1;

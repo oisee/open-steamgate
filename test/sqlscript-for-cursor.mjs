@@ -188,3 +188,30 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
     });
   });
 }
+
+// FOR i IN [REVERSE] a .. b, as measured on HXE (docs/sqlscript-hana-observed.md,
+// "A numeric FOR loop"): every case here is the value HANA returned
+describe("FOR over a range of integers, as HANA Express ran it", () => {
+  const SIG1 = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
+  const run = async (loop) => (await runProcedure(compileProcedure({...SIG1,
+    body: `DECLARE v NVARCHAR(200) = ''; DECLARE n INTEGER = 0; DECLARE i INTEGER = 0; ${loop} ev = :v;`}, new Map(), {}), {})).value;
+  for (const [name, loop, hana] of [
+    ["inclusive", "FOR i IN 1 .. 3 DO v = :v || i || ','; END FOR;", "1,2,3,"],
+    ["from above to: no turn", "FOR i IN 3 .. 1 DO v = :v || i || ','; END FOR;", ""],
+    ["REVERSE counts down", "FOR i IN REVERSE 1 .. 3 DO v = :v || i || ','; END FOR;", "3,2,1,"],
+    ["the bounds are read once", "n = 3; FOR i IN 1 .. :n DO n = 1; v = :v || i || ','; END FOR;", "1,2,3,"],
+    ["1..:n without blanks", "n = 2; FOR i IN 1..:n DO v = :v || i || ','; END FOR;", "1,2,"],
+    ["the counter is the loop's own", "FOR i IN 1 .. 3 DO i = 5; v = :v || i || ','; END FOR;", "5,5,5,"],
+    ["the variable keeps the last value", "FOR i IN 1 .. 2 DO v = :v || i; END FOR; v = :v || '|' || :i;", "12|2"],
+    ["bounds are expressions", "n = 2; FOR i IN :n - 1 .. :n * 2 DO v = :v || i || ','; END FOR;", "1,2,3,4,"],
+    ["no turn leaves the variable as it was", "i = 7; FOR i IN 3 .. 1 DO v = :v || i; END FOR; v = :v || '|' || :i;", "|7"],
+    ["after REVERSE, the last value visited", "FOR i IN REVERSE 1 .. 3 DO v = :v || i; END FOR; v = :v || '|' || :i;", "321|1"],
+  ]) it(`${name}: ${JSON.stringify(hana)}`, async () => expect(await run(loop)).to.equal(hana));
+
+  it("refuses what HANA refuses: an undeclared variable, a non-integer bound", () => {
+    const compile1 = (body) => compileProcedure({...SIG1, body}, new Map(), {});
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; FOR i IN 1 .. 3 DO v = :v || i; END FOR; ev = :v;")).to.throw(/i is not declared|I is not declared/);
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2.7 DO v = :v || i; END FOR; ev = :v;")).to.throw(/not an integer/);
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE s NVARCHAR(3); FOR s IN 1 .. 2 DO v = :v; END FOR; ev = :v;")).to.throw(/not INTEGER or BIGINT/);
+  });
+});

@@ -462,9 +462,18 @@ export class While extends Expression {
  *  here. */
 export class For extends Expression {
   getRunnable() {
-    return seq(str("FOR"), new Name(), str("AS"), new Name(),
-      opt(seq("(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")")),
+    return seq(str("FOR"), new Name(),
+      altPrio(
+        seq(str("AS"), new Name(), opt(seq("(", opt(seq(new Expr(), star(seq(",", new Expr())))), ")"))),
+        new ForRange()),
       str("DO"), star(new Statement()), str("END"), str("FOR"), ";");
+  }
+}
+
+/** `IN [REVERSE] a .. b` of a numeric FOR loop (5 bodies of the backlog) */
+export class ForRange extends Expression {
+  getRunnable() {
+    return seq(str("IN"), opt(str("REVERSE")), new Expr(), ".", ".", new Expr());
   }
 }
 

@@ -722,3 +722,24 @@ Two more, measured on HXE the same afternoon:
   `ORDER BY v DESC` gives `2, 1, NULL`. PostgreSQL and DuckDB put NULL last
   ascending by default, so every ORDER BY the lowering writes now says
   `ASC NULLS FIRST` / `DESC NULLS LAST`, on every engine.
+
+## A numeric FOR loop (measured on HXE 2.00.088, 2026-09-24)
+
+`FOR i IN [REVERSE] a .. b DO ... END FOR`, each case a procedure created and
+called on HANA Express:
+
+| body | HANA |
+| --- | --- |
+| `FOR i IN 1 .. 3` | 1, 2, 3 -- inclusive |
+| `FOR i IN 3 .. 1` | no turn |
+| `FOR i IN REVERSE 1 .. 3` | 3, 2, 1 |
+| `n = 3; FOR i IN 1 .. :n DO n = 1; ...` | 1, 2, 3 -- the bounds are read once |
+| `FOR i IN 1..:n` (no blanks) | accepted |
+| `FOR i IN 1 .. 3 DO i = 5; ...` | 5, 5, 5 -- three turns: the counter is the loop's own |
+| after `FOR i IN 1 .. 2` | `:i` is 2 -- the declared variable keeps the last value |
+| `i = 7; FOR i IN 3 .. 1 ...` | `:i` is still 7 |
+| after `FOR i IN REVERSE 1 .. 3` | `:i` is 1 |
+| a loop variable not declared before | does not compile: `identifier must be declared` |
+| `FOR i IN 1 .. 2.7`, `FOR i IN 1 .. NULL` | does not compile: a non-integer bound |
+| a BIGINT loop variable over 2147483646 .. 2147483647 | accepted |
+| `v = :v \|\| i` -- the variable without its colon | accepted in a scalar statement |
