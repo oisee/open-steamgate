@@ -2,11 +2,38 @@
 // OSGo, the same test files, each suite file on a fresh server of each kind.
 //
 //   node tools/gogen/parity.mjs [--root <checkout>] [--osgo <binary>] [--media <dir>]
-//        [--port 4610] [--out <dir>] [--suites a,b] [--only node|osgo] [--reuse-node]
-//        [--timeout 30000] [--no-count] [--e2e] [--report-only]
+//        [--port 4720] [--jobs N] [--out <dir>] [--node-ref <file>]
+//        [--suites a,b] [--changed] [--only node|osgo]
+//        [--reuse-node | --fresh-node] [--timeout 30000] [--no-count]
+//        [--e2e] [--fast] [--report-only]
 //
 // --report-only reads the last run's results (<out>/node-reference.json and
 // <out>/osgo-results.json) and only classifies and writes the summary again.
+//
+// Fast mode (the loop inside a wave; the full run with --e2e stays for the
+// end of one):
+//   --fast        mocha suites only (no Playwright), the Node reference reused,
+//                 suites in parallel. A few minutes.
+//   --jobs N      suites run N at a time (default: cores / 2), each on a port
+//                 of its own (--port + 1 + slot) with a server of its own and
+//                 so a database of its own (osgo and Node are both in memory).
+//                 A suite's Node and OSGo runs never overlap: one suite is one
+//                 job, and a suite that writes into the checkout (the editor's
+//                 "Save to gen/") does so from one server at a time. The probe
+//                 stays per test: each mocha is a process of its own and
+//                 notes only the requests to its own STG_PORT.
+//   --suites a,b  only these suite files (test/ and .mjs may be left out).
+//   --changed     only the suites that OSGo did not pass in full last time
+//                 (<out>/osgo-results.json); the others keep that result.
+//                 Cheap and blind: a rebuild can break a suite that passed.
+//
+// The Node reference (--node-ref, default <out>/node-reference.json) is
+// reused by default when its sidecar <ref>.meta.json names the same checkout
+// commit (and the same diff of tracked files) and it holds every suite asked
+// for; a reference of the same commit that lacks some suites gets just those
+// run and added. Anything else is stale and is run again, and the harness
+// says which and why. --reuse-node takes it whatever it says (a warning),
+// --fresh-node never takes it.
 //
 // How a suite reaches its server: 16 files of test/suites.json call
 // startServer() from test/start.mjs, which builds an express host in the
@@ -21,16 +48,20 @@
 // Score = tests passing on OSGo / tests passing on Node, over the tests that
 // passed on Node and sent at least one request there. Every other suite of
 // test/suites.json is in-process (it imports output/ or a tool directly) and
-// is counted, not run (mocha --dry-run), as "not applicable".
+// is counted, not run (mocha --dry-run), as "not applicable"; the count is
+// kept in the reference's meta and reused with it.
 //
 // --e2e adds the Playwright specs of test/e2e (the browser against the
 // server, SAPUI5 from SAP's CDN): one server per backend for the whole run,
 // as playwright.config.mjs has it, and the specs' results joined the same
-// way. Every spec is HTTP-level by construction.
+// way. Every spec is HTTP-level by construction. It runs beside the mocha
+// suites, in one job slot of its own.
 //
 // Writes <out>/parity.json and <out>/parity.md (default .local/parity/).
 import {spawn, spawnSync} from "node:child_process";
+import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream} from "node:fs";
+import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {home} from "./home.mjs";
 
@@ -41,13 +72,28 @@ const arg = (name, dflt) => {
 };
 const flag = (name) => process.argv.includes(`--${name}`);
 
+const T0 = Date.now();
+const phases = [];
+let phaseStart = Date.now();
+const phase = (name) => {
+  const now = Date.now();
+  phases.push({name, ms: now - phaseStart});
+  console.log(`[phase] ${name}: ${((now - phaseStart) / 1000).toFixed(1)} s`);
+  phaseStart = now;
+};
+
+const fast = flag("fast");
 const root = resolve(arg("root", home));
 const osgoBin = resolve(arg("osgo", join(here, ".out", "osgo")));
 const media = arg("media", join(dirname(osgoBin), "media"));
-const basePort = Number(arg("port", 4610));
+const basePort = Number(arg("port", 4720));
+const jobs = Math.max(1, Number(arg("jobs", Math.max(1, Math.floor(availableParallelism() / 2)))));
 const out = resolve(arg("out", join(home, ".local", "parity")));
+const nodeRefPath = resolve(arg("node-ref", join(out, "node-reference.json")));
+const nodeMetaPath = nodeRefPath.replace(/\.json$/, "") + ".meta.json";
 const only = arg("only");
 const testTimeout = Number(arg("timeout", 30000));
+const e2e = flag("e2e") && !fast;
 const mocha = join(root, "node_modules", "mocha", "bin", "mocha.js");
 mkdirSync(join(out, "runs"), {recursive: true});
 
@@ -57,10 +103,13 @@ const isHttp = (f) => {
   const text = readFileSync(join(root, f), "utf8");
   return /^import \{startServer\} from "\.\/start\.mjs";/m.test(text) && /startServer\(/.test(text);
 };
-const httpSuites = arg("suites") ? arg("suites").split(",") : listed.filter(isHttp);
-const naSuites = listed.filter((f) => !httpSuites.includes(f));
+const allHttp = listed.filter(isHttp);
+const norm = (s) => (s.startsWith("test/") ? s : `test/${s}`).replace(/(\.mjs)?$/, ".mjs");
+let httpSuites = arg("suites") ? arg("suites").split(",").filter(Boolean).map(norm) : [...allHttp];
+const naSuites = listed.filter((f) => !allHttp.includes(f));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const readJson = (f) => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return undefined; } };
 
 async function waitUp(port, child, ms) {
   const until = Date.now() + ms;
@@ -69,11 +118,12 @@ async function waitUp(port, child, ms) {
     try {
       await fetch(`http://127.0.0.1:${port}/`, {redirect: "manual", signal: AbortSignal.timeout(2000)});
       return true;
-    } catch { await sleep(300); }
+    } catch { await sleep(100); }
   }
   return false;
 }
 
+// servers are stopped by their own pid, never by port or by name
 function stop(child) {
   return new Promise((done) => {
     if (child.exitCode !== null || child.signalCode !== null) return done();
@@ -82,6 +132,8 @@ function stop(child) {
     try { process.kill(child.pid, "SIGTERM"); } catch { done(); }
   });
 }
+const live = new Set();
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { for (const c of live) { try { process.kill(c.pid, "SIGKILL"); } catch {} } process.exit(130); });
 
 function startBackend(kind, port, log) {
   const stream = createWriteStream(log);
@@ -94,20 +146,34 @@ function startBackend(kind, port, log) {
     : spawn(osgoBin, ["-port", String(port), "-addr", "127.0.0.1", "-root", root, ...(existsSync(media) ? ["-media", media] : [])], {cwd: dirname(osgoBin), env, stdio: ["ignore", "pipe", "pipe"]});
   child.stdout.pipe(stream);
   child.stderr.pipe(stream);
+  live.add(child);
+  child.once("exit", () => live.delete(child));
   return child;
 }
 
-function runMocha(files, port, recordFile, reportFile, extra = []) {
+// a child process, awaited without blocking the other jobs
+function run(cmd, args, opts, ms) {
+  return new Promise((done) => {
+    const child = spawn(cmd, args, {...opts, stdio: ["ignore", "pipe", "pipe"]});
+    live.add(child);
+    let stderr = "";
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", (d) => { stderr = (stderr + d).slice(-6000); });
+    const t = setTimeout(() => { try { process.kill(child.pid, "SIGKILL"); } catch {} }, ms);
+    child.once("exit", (status, signal) => { clearTimeout(t); live.delete(child); done({status, signal, stderr}); });
+  });
+}
+
+async function runMocha(files, port, recordFile, reportFile, extra = []) {
   const env = {...process.env, STG_PORT: String(port), PARITY_OUT: recordFile, STG_TLS: "0"};
   delete env.STG_SERVE;
-  const r = spawnSync(process.execPath, [
+  const r = await run(process.execPath, [
     "--import", join(here, "parity", "register.mjs"), mocha,
     "--require", join(here, "parity", "root-hooks.mjs"),
     "--timeout", String(testTimeout), "--reporter", "json", "--reporter-option", `output=${reportFile}`,
     ...extra, ...files,
-  ], {cwd: root, env, encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 64 << 20});
-  const read = (f) => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return undefined; } };
-  return {status: r.status, signal: r.signal, stderr: String(r.stderr ?? "").slice(-3000), records: read(recordFile) ?? [], report: read(reportFile)};
+  ], {cwd: root, env}, 20 * 60_000);
+  return {status: r.status, signal: r.signal, stderr: String(r.stderr ?? "").slice(-3000), records: readJson(recordFile) ?? [], report: readJson(reportFile)};
 }
 
 const slug = (f) => f.replace(/^test\//, "").replace(/\.mjs$/, "");
@@ -122,43 +188,116 @@ async function runSuite(kind, file, port) {
     await stop(child);
     return {file, kind, up: false, boot, records: [], hookFailures: [], serverDied: true, log: tail(`${base}.server.log`)};
   }
-  const m = runMocha([file], port, `${base}.records.json`, `${base}.mocha.json`);
+  const t1 = Date.now();
+  const m = await runMocha([file], port, `${base}.records.json`, `${base}.mocha.json`);
+  const wall = Date.now() - t1;
   const died = child.exitCode !== null || child.signalCode !== null;
   await stop(child);
   // failures that are not a test: a hook ("before all" ...), which leaves the tests under it unrun
   const hookFailures = (m.report?.failures ?? []).filter((f) => /"(before|after) (all|each)" hook/.test(f.title))
     .map((f) => ({title: f.fullTitle, message: String(f.err?.message ?? "").slice(0, 600)}));
   const ran = (m.report?.tests ?? []).length;
-  console.log(`  ${kind.padEnd(4)} ${file.padEnd(28)} boot ${String(boot).padStart(6)} ms  ${m.records.filter((r) => r.state === "passed").length}/${m.records.length} passed${hookFailures.length ? `, ${hookFailures.length} hook failure(s)` : ""}${died ? ", SERVER DIED" : ""}${m.report ? "" : ` (no report: exit ${m.status} ${m.signal ?? ""})`}`);
-  return {file, kind, up: true, boot, ran, records: m.records, hookFailures, serverDied: died, mochaExit: m.status, mochaStderr: m.report ? undefined : m.stderr, log: died ? tail(`${base}.server.log`) : undefined};
+  console.log(`  ${kind.padEnd(4)} ${file.padEnd(28)} :${port} boot ${String(boot).padStart(6)} ms  run ${(wall / 1000).toFixed(1).padStart(6)} s  ${m.records.filter((r) => r.state === "passed").length}/${m.records.length} passed${hookFailures.length ? `, ${hookFailures.length} hook failure(s)` : ""}${died ? ", SERVER DIED" : ""}${m.report ? "" : ` (no report: exit ${m.status} ${m.signal ?? ""})`}`);
+  return {file, kind, up: true, boot, wall, ran, records: m.records, hookFailures, serverDied: died, mochaExit: m.status, mochaStderr: m.report ? undefined : m.stderr, log: died ? tail(`${base}.server.log`) : undefined};
 }
 
 function tail(f) {
   try { return readFileSync(f, "utf8").split("\n").slice(-15).join("\n"); } catch { return ""; }
 }
 
-// ---- run -----------------------------------------------------------------
+// N at a time, each job holding one port slot for its whole length
+async function pool(items, n, work) {
+  const free = Array.from({length: n}, (_, i) => i);
+  const waiting = [];
+  const take = () => free.length ? Promise.resolve(free.shift()) : new Promise((r) => waiting.push(r));
+  const give = (s) => { const w = waiting.shift(); if (w) w(s); else free.push(s); };
+  await Promise.all(items.map(async (item) => {
+    const slot = await take();
+    try { await work(item, basePort + 1 + slot); } finally { give(slot); }
+  }));
+}
+
+// ---- the Node reference: reused or stale ---------------------------------
+function checkoutId() {
+  const git = (...a) => spawnSync("git", ["-C", root, ...a], {encoding: "utf8"}).stdout?.trim() ?? "";
+  const diff = git("diff", "HEAD");
+  return {commit: git("rev-parse", "HEAD"), diff: diff ? createHash("sha1").update(diff).digest("hex").slice(0, 12) : ""};
+}
+const checkout = checkoutId();
 const results = {node: {}, osgo: {}};
-const cachePath = join(out, "node-reference.json");
 const osgoPath = join(out, "osgo-results.json");
 const reportOnly = flag("report-only");
+let nodeMeta;
+let nodeRan = false;
 if (reportOnly) {
-  results.node = JSON.parse(readFileSync(cachePath, "utf8"));
+  results.node = JSON.parse(readFileSync(nodeRefPath, "utf8"));
   results.osgo = JSON.parse(readFileSync(osgoPath, "utf8"));
-  for (const f of Object.keys(results.osgo)) if (!httpSuites.includes(f)) httpSuites.push(f);
-}
-if (flag("reuse-node") && existsSync(cachePath)) {
-  results.node = JSON.parse(readFileSync(cachePath, "utf8"));
-  console.log(`node reference: reused ${cachePath}`);
+  httpSuites = Object.keys(results.osgo);
+  nodeMeta = readJson(nodeMetaPath);
+} else if (only !== "osgo") {
+  const ref = readJson(nodeRefPath);
+  const meta = readJson(nodeMetaPath);
+  const wanted = [...httpSuites, ...(e2e ? ["test/e2e"] : [])];
+  let why;
+  if (flag("fresh-node")) why = "--fresh-node";
+  else if (!ref) why = `none at ${nodeRefPath}`;
+  else if (!meta) why = `no ${nodeMetaPath}: which checkout it was measured on is unknown`;
+  else if (meta.commit !== checkout.commit) why = `measured on ${meta.commit.slice(0, 7)}, the checkout is ${checkout.commit.slice(0, 7)}`;
+  else if (meta.diff !== checkout.diff) why = `measured on ${meta.commit.slice(0, 7)} with tracked changes ${meta.diff || "none"}, now ${checkout.diff || "none"}`;
+  if (why && flag("reuse-node") && ref) {
+    console.log(`node reference: STALE (${why}), reused anyway (--reuse-node): ${nodeRefPath}`);
+    why = undefined;
+  }
+  if (why) {
+    console.log(`node reference: STALE (${why}); all ${wanted.length} suites run on Node again`);
+    nodeMeta = {commit: checkout.commit, diff: checkout.diff};
+  } else {
+    results.node = ref;
+    nodeMeta = meta ?? {commit: checkout.commit, diff: checkout.diff};
+    const missing = wanted.filter((f) => ref[f] === undefined);
+    console.log(`node reference: reused ${nodeRefPath} (${meta?.commit?.slice(0, 7) ?? "?"}, ${Object.keys(ref).length} suites, measured ${meta?.when ?? "?"})` +
+      (missing.length ? `; not in it, run now: ${missing.join(", ")}` : ""));
+  }
 }
 if (!reportOnly && !existsSync(osgoBin) && only !== "node") {
   console.error(`no osgo binary at ${osgoBin} (node tools/gogen/osgo.mjs builds it)`);
   process.exit(2);
 }
-console.log(`parity: ${httpSuites.length} HTTP suites, checkout ${root}, osgo ${osgoBin}`);
-for (const file of reportOnly ? [] : httpSuites) {
-  if (only !== "osgo" && results.node[file] === undefined) results.node[file] = await runSuite("node", file, basePort + 1);
-  if (only !== "node") results.osgo[file] = await runSuite("osgo", file, basePort + 2);
+
+// --changed: the suites OSGo did not pass in full last time, the rest kept
+let keptSuites;
+if (flag("changed") && !reportOnly) {
+  const prev = readJson(osgoPath) ?? {};
+  const whole = (f) => {
+    const g = prev[f];
+    const n = results.node[f];
+    if (!g || !g.up || g.serverDied || g.hookFailures?.length) return false;
+    const ok = new Set(g.records.filter((r) => r.state === "passed").map((r) => r.title));
+    return (n?.records ?? []).filter((r) => r.state === "passed").every((r) => ok.has(r.title));
+  };
+  const kept = httpSuites.filter(whole);
+  for (const f of kept) results.osgo[f] = prev[f];
+  httpSuites = httpSuites.filter((f) => !kept.includes(f));
+  console.log(`--changed: ${httpSuites.length} suite(s) to run, ${kept.length} kept from ${osgoPath} (passed in full last time): ${kept.map(slug).join(", ") || "none"}`);
+  httpSuites.push(...kept);
+  keptSuites = new Set(kept);
+}
+phase("setup");
+
+console.log(`parity: ${httpSuites.length} HTTP suites${e2e ? " + e2e" : ""}, ${jobs} job(s) on ports ${basePort + 1}..${basePort + jobs}, checkout ${root} (${checkout.commit.slice(0, 7)}${checkout.diff ? ` +${checkout.diff}` : ""}), osgo ${osgoBin}`);
+if (!reportOnly) {
+  const todo = httpSuites.filter((f) => !keptSuites?.has(f));
+  const work = [...todo.map((file) => ({file})), ...(e2e ? [{e2e: true}] : [])];
+  // e2e first: it is the longest job, it should not start last
+  work.sort((a, b) => (b.e2e ? 1 : 0) - (a.e2e ? 1 : 0));
+  await pool(work, jobs, async (w, port) => {
+    const file = w.e2e ? "test/e2e" : w.file;
+    const runOne = w.e2e ? (kind) => runE2e(kind, port) : (kind) => runSuite(kind, file, port);
+    if (only !== "osgo" && results.node[file] === undefined) { results.node[file] = await runOne("node"); nodeRan = true; }
+    if (only !== "node") results.osgo[file] = await runOne("osgo");
+  });
+  if (e2e) httpSuites.push("test/e2e");
+  phase(`suites (${work.length} job(s), ${jobs} at a time${nodeRan ? ", Node included" : ", Node reused"})`);
 }
 
 // the Playwright specs, one server per backend for the whole run
@@ -173,12 +312,11 @@ async function runE2e(kind, port) {
   const child = startBackend(kind, port, `${base}.server.log`);
   const up = await waitUp(port, child, kind === "node" ? 240_000 : 120_000);
   const records = [];
+  const t1 = Date.now();
   if (up) {
     const env = {...process.env, STG_PORT: String(port)};
-    spawnSync(process.execPath, [join(root, "node_modules", "@playwright", "test", "cli.js"), "test", "--config", config],
-      {cwd: root, env, encoding: "utf8", timeout: 40 * 60_000, maxBuffer: 64 << 20});
-    let report;
-    try { report = JSON.parse(readFileSync(`${base}.playwright.json`, "utf8")); } catch {}
+    await run(process.execPath, [join(root, "node_modules", "@playwright", "test", "cli.js"), "test", "--config", config], {cwd: root, env}, 40 * 60_000);
+    const report = readJson(`${base}.playwright.json`);
     const walk = (suite, path) => {
       for (const spec of suite.specs ?? []) {
         for (const t of spec.tests ?? []) {
@@ -195,28 +333,33 @@ async function runE2e(kind, port) {
     };
     for (const s of report?.suites ?? []) walk(s, []);
   }
+  const wall = Date.now() - t1;
   const died = child.exitCode !== null || child.signalCode !== null;
   await stop(child);
-  console.log(`  ${kind.padEnd(4)} test/e2e (playwright)         ${records.filter((r) => r.state === "passed").length}/${records.length} passed${died ? ", SERVER DIED" : ""}`);
-  return {file: "test/e2e", kind, up, boot: 0, records, hookFailures: [], serverDied: died, log: died ? tail(`${base}.server.log`) : undefined};
+  console.log(`  ${kind.padEnd(4)} test/e2e (playwright)         :${port} run ${(wall / 1000).toFixed(1).padStart(6)} s  ${records.filter((r) => r.state === "passed").length}/${records.length} passed${died ? ", SERVER DIED" : ""}`);
+  return {file: "test/e2e", kind, up, boot: 0, wall, records, hookFailures: [], serverDied: died, log: died ? tail(`${base}.server.log`) : undefined};
 }
-if (flag("e2e") && !reportOnly) {
-  httpSuites.push("test/e2e");
-  if (only !== "osgo" && results.node["test/e2e"] === undefined) results.node["test/e2e"] = await runE2e("node", basePort + 1);
-  if (only !== "node") results.osgo["test/e2e"] = await runE2e("osgo", basePort + 2);
-}
-if (!reportOnly && only !== "osgo") writeFileSync(cachePath, JSON.stringify(results.node));
-if (!reportOnly && only !== "node") writeFileSync(osgoPath, JSON.stringify(results.osgo));
 
-// the in-process suites, counted
+// the in-process suites, counted (kept with the Node reference: they depend on the checkout only)
 let naCount;
 if (reportOnly && existsSync(join(out, "runs", "na.mocha.json"))) {
   const r = JSON.parse(readFileSync(join(out, "runs", "na.mocha.json"), "utf8"));
   naCount = {suites: naSuites.length, tests: r.stats?.tests, counted: true};
+} else if (nodeMeta?.naCount && nodeMeta.commit === checkout.commit && nodeMeta.naCount.suites === naSuites.length) {
+  naCount = nodeMeta.naCount;
 } else if (!flag("no-count")) {
-  const m = runMocha(naSuites, basePort + 3, join(out, "runs", "na.records.json"), join(out, "runs", "na.mocha.json"), ["--dry-run"]);
+  const m = await runMocha(naSuites, basePort, join(out, "runs", "na.records.json"), join(out, "runs", "na.mocha.json"), ["--dry-run"]);
   naCount = {suites: naSuites.length, tests: m.report?.stats?.tests ?? (m.report?.tests ?? []).length, counted: m.report !== undefined};
+  if (nodeMeta && naCount.counted) { nodeMeta.naCount = naCount; nodeRan = true; }
+  phase("in-process suites counted (--dry-run)");
 }
+
+if (!reportOnly && only !== "osgo" && nodeRan) {
+  writeFileSync(nodeRefPath, JSON.stringify(results.node));
+  writeFileSync(nodeMetaPath, JSON.stringify({...nodeMeta, commit: checkout.commit, diff: checkout.diff, root, when: new Date().toISOString(), suites: Object.keys(results.node)}, null, 1));
+  console.log(`node reference: written ${nodeRefPath} (${Object.keys(results.node).length} suites)`);
+}
+if (!reportOnly && only !== "node") writeFileSync(osgoPath, JSON.stringify(Object.fromEntries(httpSuites.filter((f) => results.osgo[f]).map((f) => [f, results.osgo[f]]))));
 
 // ---- compare ---------------------------------------------------------------
 const tests = [];
@@ -434,7 +577,13 @@ ranked.forEach((g, i) => {
   }
 }
 if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
+phase("compare and report");
+summary.phases = phases;
+summary.wallMs = Date.now() - T0;
+writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
+md.push("## Wall time", "", "| phase | s |", "|---|---:|", ...phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`), `| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
 console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
 console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
+console.log(`wall ${(summary.wallMs / 1000).toFixed(1)} s: ${phases.map((p) => `${p.name} ${(p.ms / 1000).toFixed(1)} s`).join("; ")}`);
 console.log(`-> ${join(out, "parity.md")}`);
