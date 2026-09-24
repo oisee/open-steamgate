@@ -90,7 +90,7 @@ export function workProcess() {
 // RFC or HTTP call with no timeout. It is not cut off -- a system would dump
 // it, and a dump here is a rollback of work that may yet finish -- but it is
 // said, with how many wait behind it.
-const SLOW_MS = Number(globalThis.process?.env?.OSD_STEP_WARN_MS ?? 30000);
+const SLOW_MS = Number(globalThis.process?.env?.OSD_STEP_WARN_MS) > 0 ? Number(globalThis.process.env.OSD_STEP_WARN_MS) : 30000;
 let warned;
 setInterval?.(() => {
   if (holder !== undefined && holder !== warned && Date.now() - since > SLOW_MS) {
@@ -103,8 +103,10 @@ setInterval?.(() => {
  *  connection that is not a step of its own (the data preview's SQL door) */
 export async function exclusive(work, what) {
   installWait();
-  // a step inside a step would wait for itself; said, not hung
-  if (steps !== undefined && steps.getStore() !== undefined) {
+  // a step inside a step would wait for itself; said, not hung. A timer the
+  // step left behind carries its context past its end, and is no nesting
+  const outer = steps?.getStore();
+  if (outer !== undefined && outer.done !== true) {
     throw new Error(`a nested dialog step${what === undefined ? "" : ` (${what})`}: the step that would run it holds the work process`);
   }
   const token = {what};
@@ -112,6 +114,7 @@ export async function exclusive(work, what) {
   try {
     return steps === undefined ? await work() : await steps.run(token, work);
   } finally {
+    token.done = true;
     release();
   }
 }
@@ -184,6 +187,8 @@ function installWait() {
           release();
           released = true;
         }
+        // polled while rolled out, without the work process: a system asks
+        // it after the roll-in; here it reads only this step's own memory
         await new Promise((r) => setTimeout(r, Math.min(500, remaining)));
       }
     } finally {

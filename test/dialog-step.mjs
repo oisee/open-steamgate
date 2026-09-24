@@ -147,6 +147,15 @@ describe("a dialog step has the work process to itself", function () {
     expect(read).to.match(/a nested dialog step \(a read\)/);
   });
 
+  it("a timer a step left behind is not a step inside it", async () => {
+    let later;
+    await dialogStep(async () => {
+      later = new Promise((resolve) => setTimeout(() => resolve(dialogStep(async () => { await insert(5); })), 5));
+    });
+    await later;
+    expect(await ids()).to.deep.equal([5]);
+  });
+
   it("a read of the shared connection waits for the step in progress", async () => {
     let started;
     const inStep = new Promise((resolve) => { started = resolve; });

@@ -268,16 +268,24 @@ process.on("message", (message) => {
   let leaving;
   const leave = () => (leaving ??= (async () => {
     const db = connection();
+    let committed = false;
     try {
       await Promise.race([
         exclusive(async () => {
           await db.commit?.();
+          committed = true;
           if (typeof db.export !== "function") {
             await db.disconnect?.();
           }
         }, "leaving for a recycle"),
         new Promise((resolve) => setTimeout(resolve, grace).unref()),
       ]);
+      // the grace won: the step still holding the work process is rolled
+      // back here, because the exit hook of a client that persists by
+      // exporting (sql.js, tools/osd-persist.mjs) commits what is open
+      // before it exports -- "leaving without committing" would otherwise
+      // hold only for DuckDB and the file clients
+      if (committed === false) await db.rollback?.();
     } catch {
       // leaving anyway; the supervisor has a new runtime answering
     }
