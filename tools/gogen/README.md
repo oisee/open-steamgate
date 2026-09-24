@@ -428,7 +428,9 @@ used. `ZOSD_STATUS_SRV` and the webgui read the five status tables, which
 the Node hosts refresh before each such request (`withFreshStatus`). OSGo
 does the same with a snapshot of its own process (`go/cmd/osgo/status.go`,
 the build-time half from `status.mjs` into `zz_status.go`), at start and
-before each `ZOSD_STATUS_SRV` request, through the compiled
+before each request under the paths `test/start.mjs` refreshes for
+(`ZOSD_STATUS_SRV` and the webgui, read out of that file by `status.mjs`
+into `statusFreshPrefixes`), through the compiled
 `ZCL_OSD_STATUS=>REFRESH` and open-abap-core's `/UI2/CL_JSON=>DESERIALIZE`
 (ultra/json, below). Every row is a fact of the process or of the build:
 host kind `abap-go`, its pid, port, sockets and RSS, the program's own
@@ -437,7 +439,13 @@ Node build, so "in step" says no), the OData services and SICF nodes it
 serves, the apps under `-root`, the pack pages it serves, SQLite and the
 platform. Left out, not invented: the RFC and DIAG port rows (Node's JS
 protocol listeners), push channels, and the services and packs OSGo does
-not serve.
+not serve. A POST to `/sap/bc/osd/status/` above 128 KB, raw or inflated,
+answers 413 on OSGo (Node takes 16 MB): the Go runtime scans a sorted
+secondary key rather than indexing it, so the parse grows with the square
+of the members (1000 services 0.4 s, 3000 3.1 s, 6000 14 s under the one
+work process lock). An index kept up to date by the writes is the real fix;
+an order remembered and checked against the rows before each use was tried
+and was slower, since the check is itself a pass over the table.
 
 ### JSON into ABAP: `/UI2/CL_JSON=>DESERIALIZE` (ultra/json)
 
