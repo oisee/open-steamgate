@@ -285,7 +285,9 @@ export function emitGo(program, pkg = "main") {
     if (chainCctor(cls)) {
       const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
       out.push(`var cctor_${typeName(cls.name)} bool`, "", `func Ensure_${typeName(cls.name)}(s *abap.Session) {`, `\tif cctor_${typeName(cls.name)} {`, "\t\treturn", "\t}",
-        `\tcctor_${typeName(cls.name)} = true`, ...(sup ? [sup] : []), ...(ownCctor(cls) ? [`\t${funcName(cls.name, "CLASS_CONSTRUCTOR")}(s)`] : []), "}", "");
+        // ultra/events (fix round): an exception out of it is a runtime
+        // error (abap.CctorGuard, A4H ZCL_GOGEN_T_CCBOOM2)
+        `\tcctor_${typeName(cls.name)} = true`, `\tdefer abap.CctorGuard(${JSON.stringify(cls.name)}, &cctor_${typeName(cls.name)})`, ...(sup ? [sup] : []), ...(ownCctor(cls) ? [`\t${funcName(cls.name, "CLASS_CONSTRUCTOR")}(s)`] : []), "}", "");
     }
     for (const m of cls.methods) out.push(...method(cls, m), "");
     // a method that did not compile still exists, and says why when called

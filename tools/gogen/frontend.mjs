@@ -2716,6 +2716,10 @@ function resolveStatic(owner, attr, ctx) {
   const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
   const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
   if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
+  // ultra/events: a static attribute of ANOTHER class is refused here. On a
+  // system reading one is a use of that class and runs its class
+  // constructor first; whoever adds that read must also emit the class's
+  // Ensure_<class> (emit-go) / $ensure (emit-js) before it
   throw new Unsupported(`${owner}=>${attr}`);
 }
 

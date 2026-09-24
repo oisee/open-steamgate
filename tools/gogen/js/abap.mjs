@@ -1284,3 +1284,11 @@ export function TimeStamp(dec) {
   const ts = d.toISOString().slice(0, 19).replace(/[-:T]/g, "");
   return dec === 7 ? `${ts}.${String(d.getUTCMilliseconds()).padStart(3, "0")}0000` : ts;
 }
+
+// ultra/events (fix round): an exception out of a class constructor is a
+// runtime error no CATCH takes (A4H ZCL_GOGEN_T_CCBOOM2); see CctorGuard in
+// raise.go. Anything that is not class-based goes on as it is
+export function cctorDump(cls, e) {
+  if (!classBased(e)) return e;
+  return new AbapError("RUNTIME_ERROR", `${cls}=>CLASS_CONSTRUCTOR: ${e.message}`);
+}

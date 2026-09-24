@@ -201,8 +201,12 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     // ultra/events: CLASS_CONSTRUCTOR at the first use, as emit-go (chainCctor)
     if (chainCctor(cls)) {
       out.push(`  static $ensure(s) {`, `    if (Object.prototype.hasOwnProperty.call(${typeName(cls.name)}, "$cc")) return;`, `    ${typeName(cls.name)}.$cc = true;`);
-      if (cls.super && byName.get(cls.super) && chainCctor(byName.get(cls.super))) out.push(`    ${typeName(cls.super)}.$ensure(s);`);
-      if (ownCctor(cls)) out.push(`    ${typeName(cls.name)}.CLASS_CONSTRUCTOR(s);`);
+      // ultra/events (fix round): an exception out of it is a runtime error
+      // and the next use runs it again (abap.CctorGuard in emit-go)
+      out.push("    try {");
+      if (cls.super && byName.get(cls.super) && chainCctor(byName.get(cls.super))) out.push(`      ${typeName(cls.super)}.$ensure(s);`);
+      if (ownCctor(cls)) out.push(`      ${typeName(cls.name)}.CLASS_CONSTRUCTOR(s);`);
+      out.push(`    } catch (e) { delete ${typeName(cls.name)}.$cc; throw abap.cctorDump(${JSON.stringify(cls.name)}, e); }`);
       out.push("  }");
     }
     out.push(`  static $abap = ${JSON.stringify(cls.name)};`);

@@ -435,6 +435,11 @@ const EXPECT = {
   // once (A4H 2026-09-24, $ZOSG_TMP_0440; the transpiler runs them all when
   // the program loads, ANOMALY-2026-09-14-class-constructor-eager)
   ZCL_GOGEN_T_CCTOR: "a cc3 t3 t3 b cc1 cc2 t1 c ",
+  // an exception out of a class constructor: a runtime abortion on A4H
+  // (2026-09-24, $ZOSG_TMP_0441, fix round: "Division by 0", none of the
+  // CATCHes, CX_SY_ZERODIVIDE, CX_SY_NO_HANDLER, CX_ROOT, took it)
+  ZCL_GOGEN_T_CCBOOM2: {Go: "ERROR RUNTIME_ERROR in ZCL_GOGEN_T_CCBOOM=>CLASS_CONSTRUCTOR: CX_SY_ZERODIVIDE in / at zcl_gogen_t_ccboom.clas.abap:15",
+    JS: "ERROR RUNTIME_ERROR in ZCL_GOGEN_T_CCBOOM=>CLASS_CONSTRUCTOR: CX_SY_ZERODIVIDE in /"},
   // substring_before / _after: the first occurrence, empty when none (A4H
   // 2026-09-24, $ZOSG_TMP_0440, ultra/events)
   ZCL_GOGEN_T_WGUI2: "b:[a][][][k] a:[b=c][][x][][c]",

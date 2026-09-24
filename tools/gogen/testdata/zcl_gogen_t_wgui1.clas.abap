@@ -1,6 +1,6 @@
 * What the WEBGUI's sapevent path needs besides events (ultra/events):
 * line_exists( ), NS, reference comparison, SORTED tables with INSERT INTO
-* TABLE, APPEND ... ASSIGNING, CONCATENATE (fields and LINES OF), FIND ALL
+* TABLE, CONCATENATE (fields and LINES OF), FIND ALL
 * OCCURRENCES ... MATCH COUNT (substring, REGEX, a CL_ABAP_REGEX object),
 * escape( ) for HTML attributes. The field symbol of a string is in
 * ZCL_GOGEN_T_WGUI3, so that the JS emitter compiles this one.
