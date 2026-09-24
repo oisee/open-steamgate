@@ -31,6 +31,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
+	"compress/zlib"
+	"io"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -449,6 +453,57 @@ func withFreshStatus(h statusHost, next http.HandlerFunc) http.HandlerFunc {
 		if _, err := refreshStatus(h); err != nil {
 			log.Printf("status refresh: %v", err)
 		}
+		next(w, r)
+	}
+}
+
+// statusPostPath is the SICF node ZCL_OSD_STATUS_HTTP answers; a POST to it
+// is a snapshot for REFRESH.
+const statusPostPath = "/sap/bc/osd/status"
+
+// statusBodyLimit bounds what a POST to statusPostPath may carry, decoded
+// (ultra/json fix round, critic finding 4). /UI2/CL_JSON reads its node
+// table through sorted secondary keys, which the Go runtime scans instead
+// of indexing (seckey.go KeyRead, KeyOrder), so the parse grows with the
+// square of the members: 1000 services took 0.4 s, 3000 3.1 s and 6000
+// 14 s, all under the one work process lock. This process's own snapshot
+// is about 11 KB and Node's the same; 128 KB is some 1500 services, under
+// a second. Node takes express.raw's 16 MB here: the difference is only in
+// which bodies answer 413, and is OSGo's alone.
+const statusBodyLimit = 128 << 10
+
+// limitStatusBody answers 413, as the body parser does past its limit, for
+// a body to statusPostPath above statusBodyLimit, raw or inflated; anything
+// else goes on with the body as it came.
+func limitStatusBody(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Body == nil || r.Body == http.NoBody {
+			next(w, r)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(r.Body, statusBodyLimit+1))
+		if err != nil {
+			http.Error(w, "request aborted", 400)
+			return
+		}
+		if len(raw) > statusBodyLimit {
+			http.Error(w, "request entity too large", 413)
+			return
+		}
+		var z io.Reader
+		switch strings.ToLower(r.Header.Get("Content-Encoding")) {
+		case "gzip":
+			z, _ = gzip.NewReader(bytes.NewReader(raw))
+		case "deflate":
+			z, _ = zlib.NewReader(bytes.NewReader(raw))
+		}
+		if z != nil {
+			if n, _ := io.Copy(io.Discard, io.LimitReader(z, statusBodyLimit+1)); n > statusBodyLimit {
+				http.Error(w, "request entity too large", 413)
+				return
+			}
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
 		next(w, r)
 	}
 }

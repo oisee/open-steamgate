@@ -358,6 +358,9 @@ const EXPECT = {
   // x, p (\TYPE=%_T...), a structure's length. The JS emitter has no RTTI
   ZCL_GOGEN_T_RTTI: {Go: "c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\\TYPE=D/D//8 t:E/T/0/12/\\TYPE=T/T//6 f:E/F/0/8/\\TYPE=F/F//24 i:E/I/0/4/\\TYPE=I/I//11 i8:E/8/0/8/\\TYPE=INT8/INT8//20 p:E/P/2/8/17 b:E/C/0/2/\\TYPE-POOL=ABAP\\TYPE=ABAP_BOOL/ABAP_BOOL//1 s:E/g/0/8/\\TYPE=STRING/STRING//0 xs:E/y/0/8/\\TYPE=XSTRING/XSTRING//0 flat:S/u/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT/TY_FLAT/ deep:S/v/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_DEEP/TY_DEEP/ comps:S=E,XS=E,FL=S,TB=T, line:\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT tk:S uk: same",
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  // a dictionary-typed c: its output length is its domain's, not carried
+  // by the Go host, so describe_by_data refuses (ultra/json fix round)
+  ZCL_GOGEN_T_RTTIDDIC: {Go: "ERROR NOT_COMPILED in CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA: the output length of SDOK_CLASS, a dictionary type of kind C, is its domain's and not carried at cl_abap_typedescr.clas.abap:304", JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // open-abap-core's /UI2/CL_JSON=>DESERIALIZE end to end (ultra/json): not
   // an A4H value, a system has its own /UI2/CL_JSON. What the pieces give
   // that were measured there (the parser's members through a non-unique

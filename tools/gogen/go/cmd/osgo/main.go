@@ -386,6 +386,9 @@ func main() {
 		if !svc.Active {
 			h = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) }
 		}
+		if strings.EqualFold(strings.TrimSuffix(svc.Path, "/"), statusPostPath) {
+			h = limitStatusBody(h) // status.go statusBodyLimit (ultra/json fix round)
+		}
 		routes = append(routes, route{svc.Path, false, h})
 	}
 	// the nodes left out, each at its own path: longer than its parent's, so
