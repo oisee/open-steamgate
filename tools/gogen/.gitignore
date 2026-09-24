@@ -18,3 +18,4 @@ go/storecmp
 go/zork
 go/gateway
 go/httpc
+go/scenewasm

@@ -99,6 +99,92 @@ So most of the gap is the model, not the language: the same IR in JS is
 adds 1.2-4 times on top, most on calls (fib), and every core of the
 machine on one session's work.
 
+## Go in the browser (wasm), measured, 2026-09-24
+
+`node tools/gogen/wasm.mjs [plasma glitch] [--frames 1024] [--warmup 256]`
+builds one scene three ways and runs each in headless Chromium 151
+(Playwright), one after the other, each in a fresh context: the scene through
+gogen to Go, `GOOS=js GOARCH=wasm` (`cmd/scenewasm`, a `syscall/js` entry
+exporting `goScene.renderFrame(t, gt, pos16)` and `goScene.checksum()`); the
+same IR as JS (emit-js + `js/abap.mjs`); and the transpiler's JS with
+`@abaplint/runtime`, which runs in a page as it is. The page
+(`wasm-page.mjs`) feeds all three the contexts of the A4H recording, computed
+once in the page, times every frame alone with `performance.now()` (the page
+is cross-origin isolated, so the clock is 5 µs, not 100 µs), and reduces each
+frame to one FNV-1a checksum over the fields `scenes.mjs` compares with A4H:
+Go computes it in Go, the JS runtimes in JS.
+
+| scene | runtime | median ms/frame | p90 | fps (1/median) | startup ms (load + 1st frame) | frame checksums equal |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| plasma | Go → wasm | 0.59 | 0.87 | 1695 | 198 (191 + 7) | 256 of 256 |
+| plasma | JS from the IR | 0.25 | 0.37 | 4082 | 13 (6 + 7) | 256 of 256 |
+| plasma | transpiler JS | 2.62 | 3.33 | 382 | 55 (33 + 21) | 249 of 256 |
+| glitch | Go → wasm | 0.045 | 0.10 | 22 000 | 155 (151 + 4) | 64 of 64 |
+| glitch | JS from the IR | 0.015 | 0.03 | 67 000 | 10 (9 + 1) | 64 of 64 |
+| glitch | transpiler JS | 0.18 | 0.30 | 5 600 | 35 (30 + 5) | 64 of 64 |
+
+1024 frames timed after 256 of warm-up, the recording's frames in a cycle;
+the machine was shared (load 6-8 on 8 cores), and two more runs put plasma
+Go→wasm at 0.73 and 1.01 ms and the rest within ±40 %, the order never
+changing. Glitch is close to the clock's 5 µs grain. The seven plasma frames
+the transpiler gets different are the seven of
+ANOMALY-2026-09-17-integer-division-not-rounded (10, 41, 161, 177, 192,
+208, 223); Go→wasm and the IR's JS agree on every frame, and both equal A4H
+by `scenes.mjs`. Natively the same Go takes 155 µs (plasma) and 17 µs
+(glitch).
+
+So in a browser **the IR's JS is the fast one**: 2-3× Go→wasm, 10× the
+transpiler. Go's wasm port is single-threaded, has no goroutine parallelism
+to offer here, and allocates through its own GC in linear memory; a plasma
+frame builds 4000 `rgb(...)` strings. Go→wasm is still 4-5× the transpiler.
+
+Size (bytes; gzip -9, brotli q11; the JS bundled by Bun, whitespace and
+syntax minified, names kept since the runtime looks classes up by name):
+
+| file | raw | gzip | brotli |
+| --- | ---: | ---: | ---: |
+| plasma, Go wasm | 5 357 362 | 1 529 553 | 1 143 885 |
+| plasma, Go wasm, `-ldflags="-s -w"` | 5 255 931 | 1 502 020 | 1 127 916 |
+| glitch, Go wasm, `-s -w` | 5 193 461 | 1 482 476 | 1 113 013 |
+| `wasm_exec.js` (Go's loader) | 16 992 | 4 348 | 3 752 |
+| plasma, JS from the IR | 10 229 | 3 275 | 2 964 |
+| plasma, transpiler JS + runtime | 523 110 | 81 679 | 68 396 |
+| (a `syscall/js` hello with `math.Sin`, `-s -w`) | 1 926 655 | 575 112 | 443 561 |
+
+`-s -w` saves 2 % (wasm has no DWARF worth the name to strip). The Go
+runtime is a 1.9 MB floor; the other 3.3 MB is `go/abap` itself, which
+imports `net/http`, `crypto/tls`, `database/sql`, `regexp` and
+`encoding/json` for the kernel around the scene, and the linker keeps what
+an interface or `reflect` can reach. A scene alone does not need them; a
+host does. Startup follows size: 150-260 ms to compile and instantiate
+5 MB, against 6-12 ms to parse the IR's 10 KB. `go build` for js/wasm:
+8 s cold, 0.4 s warm. TinyGo is not installed here and was not tried.
+
+**The database split.** `go/abap` compiles for `js/wasm` and `wasip1/wasm`
+because the one non-portable call, the driver, sits behind build tags:
+`db_sqlite.go` (`//go:build !wasm`) opens `modernc.org/sqlite`, whose
+`modernc.org/libc` has no wasm files; `db_wasm.go` (`//go:build wasm`) has
+`openSQL` answer "no database in this build (wasm)", so `OpenDB` and
+`OpenDBFile` return that error and a statement then fails with the
+existing "the host did not open a database". Everything above `openSQL` is
+`database/sql` and does not know which driver it got: a driver that calls
+sql.js through `syscall/js` (the database the browser preview already uses),
+registered in `db_wasm.go`, is the whole seam. It is not written. The native
+build is unchanged.
+
+What a whole OSGo in the browser would still need: that sql.js driver
+(`database/sql/driver` over `syscall/js`, synchronous, since sql.js is);
+the host's `net/http` server replaced by a service-worker `fetch` handler
+calling the ICF dispatcher (the preview's shape, `web/preview-backend.mjs`),
+and APC over a `MessageChannel` instead of a WebSocket; the object store,
+media (`WWWDATA_IMPORT`) and the file-backed parts read through a host hook
+instead of `os` (as `abap.W3MI_LOADER` does for the JS preview); the
+`CL_HTTP_CLIENT` path over `fetch`; and, for size, the kernel split so that
+a page that only draws does not link `crypto/tls`. Measured here, it would
+arrive at 5 MB before the first application class and run slower than the
+IR's JS in the same page, so for the browser the IR emitted as JS is the
+better target and Go the one for a server.
+
 ## Demo scenes against A4H
 
 `node tools/gogen/scenes.mjs <scene>` compiles one scene of ZO4D straight out
