@@ -548,6 +548,23 @@ still has Go equal to the A4H recordings. The second part ("outro") stops
 at `ZCL_O4D_GALLERY=>RENDER`, `APPEND LINES OF`, which the subset does not
 have yet.
 
+The socket's edges follow the Node host (`tools/osd-apc.mjs`), each chosen
+and measured against it in the review round (2026-09-24): a dump in the
+constructor or `ON_START` is a 503 `<handler>: <why>`; a dump in
+`ON_MESSAGE` closes the socket 1011 `handler failed` (before, Go kept it open
+and the outro's page waited on silence); a binary frame is ignored; any
+close frame of the client is `ON_CLOSE` with `closed by the client` / 1000;
+every origin is let in (`apc.Channel.AnyOrigin`; a same-origin rule would
+refuse every page behind a proxy that rewrites Host); the channel is matched
+on the path as sent (`apc.RequestPath`, not percent-decoded) and the query
+decoded as `URLSearchParams` decodes it (`apc.FormFields`). What still
+differs, on purpose or by the library: the close frame sent back to a client
+close is `github.com/coder/websocket`'s echo of the client's code (1005 when
+it sent none) where Node answers 1000 `bye`, since the library answers the
+close itself; Go calls `ON_CLOSE` (with 1006) when a connection breaks
+without a close frame, Node calls none; the `<why>` of a 503 is the Go
+dump's text. None of this was measured on a system.
+
 ## Next, if this is pursued
 
 Ranked with codex gpt-6-sol, 2026-09-23:
