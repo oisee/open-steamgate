@@ -1976,6 +1976,95 @@
           ]
         }
       }
+    },
+    {
+      "name": "UPSERT ... SELECT: the keys the query brings updated, the others inserted",
+      "statement": {
+        "write": "upsert",
+        "table": "T",
+        "columns": [
+          "MANDT",
+          "ID",
+          "TXT"
+        ],
+        "from": {
+          "rel": "project",
+          "input": {
+            "rel": "scan",
+            "table": "T"
+          },
+          "items": [
+            {
+              "as": "MANDT",
+              "expr": {
+                "node": "col",
+                "name": "MANDT",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              }
+            },
+            {
+              "as": "ID",
+              "expr": {
+                "node": "bin",
+                "op": "+",
+                "left": {
+                  "node": "col",
+                  "name": "ID",
+                  "type": {
+                    "abap": "I"
+                  }
+                },
+                "right": {
+                  "node": "lit",
+                  "value": 1,
+                  "type": {
+                    "abap": "I"
+                  }
+                },
+                "type": {
+                  "abap": "I"
+                }
+              }
+            },
+            {
+              "as": "TXT",
+              "expr": {
+                "node": "col",
+                "name": "TXT",
+                "type": {
+                  "abap": "C",
+                  "len": 10
+                }
+              }
+            }
+          ]
+        },
+        "key": [
+          "MANDT",
+          "ID"
+        ]
+      },
+      "lowered": {
+        "sqlite": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT * FROM (SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\") WHERE true ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": []
+        },
+        "postgres": {
+          "sql": "INSERT INTO \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\" ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"TXT\" = excluded.\"TXT\"",
+          "params": []
+        },
+        "hana": {
+          "sql": "UPSERT \"T\" (\"MANDT\", \"ID\", \"TXT\") SELECT \"MANDT\" AS \"MANDT\", (\"ID\" + 1) AS \"ID\", \"TXT\" AS \"TXT\" FROM \"T\"",
+          "params": []
+        }
+      }
     }
   ],
   "packed": {

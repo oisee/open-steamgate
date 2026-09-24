@@ -748,6 +748,16 @@ export function lower(rel, dialectName, options = {}) {
       return `UPDATE ${target} SET ${set}${where()}`;
     }
     if (w.write === "delete") return `DELETE FROM ${target}${where()}`;
+    if (w.write === "upsert" && w.from !== undefined) {
+      if (dialectName === "hana") return `UPSERT ${table} ${cols(w.columns)} ${select(w.from)}`;
+      const rest = w.columns.filter((c) => !w.key.includes(c));
+      const action = rest.length === 0 ? "DO NOTHING"
+        : `DO UPDATE SET ${rest.map((c) => `${d.quote(c)} = excluded.${d.quote(c)}`).join(", ")}`;
+      // SQLite reads `... FROM t ON CONFLICT` as a join constraint: the
+      // select goes into a derived table with a WHERE of its own first
+      const from = dialectName === "sqlite" ? `SELECT * FROM (${select(w.from)}) WHERE true` : select(w.from);
+      return `INSERT INTO ${table} ${cols(w.columns)} ${from} ON CONFLICT ${cols(w.key)} ${action}`;
+    }
     if (w.write === "upsert") {
       if (dialectName === "hana") {
         return w.rows.length === 1

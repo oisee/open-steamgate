@@ -29,7 +29,7 @@ import {extract, parameterType} from "./amdp-extract.mjs";
 import {contentFoldersOf} from "./osd-packs.mjs";
 import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
 import {ObjectStore} from "./osd-store.mjs";
-import {ddicCatalogue} from "./sqlscript-ddic-catalogue.mjs";
+import {ddicCatalogue, ddicKeys} from "./sqlscript-ddic-catalogue.mjs";
 import {parseTableFunction} from "./sqlscript/table-function-ddls.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 
@@ -216,7 +216,7 @@ export function generate(folders, out = DEFAULT_OUT, options = {}) {
           const found = resolveType(store, name);
           return found.KIND === "DTEL" && found.DATATYPE !== "" ? found : undefined;
         };
-        portable = compileProcedure(method, parsed.types, {catalogue: ddicCatalogue(store, m.usings), store, resolveType: resolveElement});
+        portable = compileProcedure(method, parsed.types, {catalogue: ddicCatalogue(store, m.usings), keys: ddicKeys(store, m.usings), store, resolveType: resolveElement});
       } catch (error) {
         portableRefusal = {
           code: error?.code ?? "UNSUPPORTED_SQLSCRIPT",

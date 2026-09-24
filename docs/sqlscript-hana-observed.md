@@ -855,5 +855,8 @@ ends. Which plans: every one that reads the database at all -- a view or a
 table function reads the table under it, and which tables a view reads is
 not known here. The snapshot is a table of the columns' types filled by
 INSERT ... SELECT (SQLite keeps CHAR's RTRIM comparison), made inside the
-LUW. UPSERT, `::ROWCOUNT`, `INSERT INTO :lt` and MERGE are not carried yet:
-UPSERT needs the table's key, which the catalogue does not hold.
+LUW. UPSERT is carried in the two forms the corpus uses and HANA was
+measured in -- VALUES WITH PRIMARY KEY and SELECT, both by the table's
+primary key, which `ddicKeys` reads beside the catalogue; VALUES alone and
+VALUES WHERE are refused by name. `::ROWCOUNT`, `INSERT INTO :lt` and MERGE
+are not carried yet.

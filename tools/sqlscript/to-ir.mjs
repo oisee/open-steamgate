@@ -26,7 +26,7 @@ import {tableFunctionCall, T, col, lit, param, sessionValue, bin, call, cast, no
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 import {isTableParameter, signatureScalars, isUnresolved} from "./scalar-types.mjs";
-import {insertRows, insertFrom, update, remove, bindValue as bindWriteValue} from "../ir-writes.mjs";
+import {insertRows, insertFrom, update, remove, upsert, upsertFrom, bindValue as bindWriteValue} from "../ir-writes.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -1516,6 +1516,43 @@ export function toIr(tree, options = {}) {
       });
       const cond = kid(node, "Condition");
       return update(target.table, set, cond === undefined ? undefined : condition(cond), target.alias);
+    }
+    if (node.node === "Upsert") {
+      const ref = kid(node, "ColumnRef");
+      const parts = kids(ref, "Name").map(nameOf);
+      if (parts.length !== 1) throw new BindError(`UPSERT ${parts.join(".")}: the catalogue knows tables by name only`, ref);
+      const table = parts[0];
+      const schema = catalogue[table];
+      if (schema === undefined) throw new BindError(`${table} is not a table this method may write: it is not in the USING list`, node);
+      const key = (options.keys ?? {})[table];
+      if (key === undefined || key.length === 0) {
+        throw new BindError(`UPSERT ${table}: the table's primary key is not known here, and UPSERT goes by it`, node);
+      }
+      const named = kids(node, "Name").map(nameOf);
+      const columns = named.length > 0 ? named : Object.keys(schema);
+      for (const c of columns) if (schema[c] === undefined) throw new BindError(`${c} is not a column of ${table}`, node);
+      const query = kid(node, "SetOperation");
+      if (query !== undefined) {
+        const rel = relation(query);
+        const width = Object.keys(schemaOf(rel, catalogue)).length;
+        if (width !== columns.length) throw new BindError(`UPSERT ${table}: the query has ${width} columns, the upsert names ${columns.length}`, node);
+        return upsertFrom(table, columns, rel, key);
+      }
+      // measured on HXE: VALUES WITH PRIMARY KEY updates by the key; VALUES
+      // alone on a keyed table raised "unique constraint violated"; VALUES
+      // WHERE updates what the WHERE finds, and what it does when it finds
+      // nothing is not measured
+      if (!hasWord(node, "PRIMARY")) {
+        throw new BindError(`UPSERT ${table} VALUES without WITH PRIMARY KEY is not carried (HANA raised "unique constraint violated" on a keyed table; the WHERE form is not measured)`, node);
+      }
+      const values = kids(node, "Expr").map(expression);
+      if (values.length !== columns.length) throw new BindError(`UPSERT ${table}: ${values.length} values for ${columns.length} columns`, node);
+      const row = values.map((value, i) => {
+        const type = schema[columns[i]];
+        if (type?.abap === "P" && value.node === "lit" && typeof value.value === "number") return bindWriteValue(value.value, type);
+        return giveType(value, type);
+      });
+      return upsert(table, columns, [row], key);
     }
     if (node.node === "Insert") {
       if ((node.children ?? []).some((c) => c.node === "host")) {

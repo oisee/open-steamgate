@@ -33,6 +33,7 @@ const AFTER = {
   "INSERT FROM a select, skipping duplicate keys": [...BASE, S("001", 3, "two"), S("002", 2, "other")],
   "MODIFY with a key twice: the last row wins": [...without(BASE, S("001", 1, "one")), S("001", 1, "b")],
   "MODIFY with a field left out writes its initial value": [...BASE, S("001", 8, "")],
+  "UPSERT ... SELECT: the keys the query brings updated, the others inserted": [S("001", 1, "one"), S("001", 2, "one"), S("001", 3, "two"), S("002", 1, "other"), S("002", 2, "other")],
 };
 
 for (const {dialect, make} of ENGINES) describe(`writes as IR, on ${dialect}`, function () {

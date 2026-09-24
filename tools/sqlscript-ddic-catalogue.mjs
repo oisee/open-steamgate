@@ -43,3 +43,18 @@ export function ddicCatalogue(store, names = store.list("TABL").map((one) => one
   }
   return catalogue;
 }
+
+/** The primary key of each table, in field order -- what UPSERT goes by.
+ *  Kept beside the catalogue rather than in it: the binder reads a table's
+ *  entry as its columns, and a key is not one. */
+export function ddicKeys(store, names = store.list("TABL").map((one) => one.name)) {
+  const keys = {};
+  for (const name of [...new Set(names.map((one) => String(one).toUpperCase()))].sort()) {
+    if (store.find("TABL", name) === undefined) continue;
+    const resolved = resolveType(store, name);
+    if (resolved.KIND !== "STRUCTURE") continue;
+    const key = resolved.FIELDS.filter((field) => field.KEY === true).map((field) => field.NAME);
+    if (key.length > 0) keys[name] = key;
+  }
+  return keys;
+}

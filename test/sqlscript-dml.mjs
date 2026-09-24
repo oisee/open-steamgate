@@ -151,3 +151,31 @@ describe("the #63 critic's round", () => {
     expect(() => compileC("lt = SELECT 5 AS k, 'e' AS v FROM dummy; INSERT INTO t SELECT k, v FROM :lt; rv = 'x';")).not.to.throw();
   });
 });
+
+describe("UPSERT by the primary key, as HANA Express ran it", () => {
+  const KEYS = {T: ["K"]};
+  const compileU = (body) => compileProcedure({...SIG, body: "DECLARE n INTEGER; DECLARE s NVARCHAR(200); " + body},
+    new Map(), {catalogue: {T: TABLE}, keys: KEYS});
+  for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: ":memory:"})], ["sqlite", () => new FileSqliteClient({path: ":memory:"})]]) {
+    for (const [name, body, hana] of [
+      ["VALUES WITH PRIMARY KEY updates a key and inserts a new one", "UPSERT t VALUES (1, 'u') WITH PRIMARY KEY; UPSERT t VALUES (5, 'e') WITH PRIMARY KEY; " + agg, "1u,2b,5e"],
+      ["SELECT updates the keys it brings and inserts the others", "lt = SELECT 2 AS k, 'y' AS v FROM dummy UNION ALL SELECT 7 AS k, 'g' AS v FROM dummy; UPSERT t SELECT * FROM :lt; " + agg, "1a,2y,7g"],
+    ]) {
+      it(`on ${dialect}: ${name}: ${JSON.stringify(hana)}`, async () => {
+        const client = make();
+        await client.connect();
+        try {
+          await client.native({sql: 'CREATE TABLE "T" ("K" INTEGER PRIMARY KEY, "V" VARCHAR(10))', expect: "none"});
+          await client.native({sql: "INSERT INTO \"T\" VALUES (1, 'a')", expect: "none"});
+          await client.native({sql: "INSERT INTO \"T\" VALUES (2, 'b')", expect: "none"});
+          expect((await runProcedure(compileU(body), {client, dialect, inputCatalogue: {T: TABLE}})).value).to.equal(hana);
+        } finally { await client.disconnect(); }
+      });
+    }
+  }
+  it("refuses UPSERT without a known key, and VALUES without WITH PRIMARY KEY", () => {
+    expect(() => compile("UPSERT t SELECT k, v FROM t; rv = 'x';")).to.throw(/primary key is not known/);
+    expect(() => compileU("UPSERT t VALUES (1, 'x'); rv = 'x';")).to.throw(/without WITH PRIMARY KEY is not carried/);
+    expect(() => compileU("UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2; rv = 'x';")).to.throw(/without WITH PRIMARY KEY is not carried/);
+  });
+});
