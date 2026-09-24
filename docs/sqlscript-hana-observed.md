@@ -662,8 +662,13 @@ table), not guessed:
   the procedure starts with `"X" = select * from :X__IN__;`;
 - the method's body sits in a `begin ... end;` block of its own inside the
   procedure;
-- a table named in USING is read through a generated client view
-  (`...=>TABLE#covw`): the kernel handles the client, the body does not;
+- a table named in USING is read through a generated view
+  (`...=>TABLE#covw`), and that view is a plain projection of the table's
+  columns (`select "MANDT", "CARRID", ... from "SCARR"`, read off
+  `SYS.VIEWS`): it fixes the column list, and it does **not** restrict the
+  client. An AMDP has no implicit client handling -- the body joins or
+  filters on MANDT itself, as the demo does (`s.mandt = c.mandt`) -- so a
+  portable run that scans the table itself reads the same rows;
 - parameter types are generated table types (`...=>P00000#ttyp`);
 - `$ABAP.type( x )` in a body is replaced by x's HANA type, and a full-line
   ABAP comment (`*` in column one) is removed, before HANA sees it.
