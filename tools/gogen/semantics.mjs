@@ -4,7 +4,7 @@
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
-import {copyFileSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
+import {copyFileSync, cpSync, mkdirSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -432,6 +432,14 @@ const EXPECT = {
   // any parameter is passed; sy-dbsys the database client's name, sy-saprl
   // the transpiler runtime's constant (ultra/gaps, the AMDP sandbox page)
   ZCL_GOGEN_T_AMDPDEST: "illegal_func out:[] db:[sqlite] rel:[OPEN]",
+  // CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE' over a copy of
+  // testdata-store/tree (go/abap/store.go). Not an A4H value: the Node
+  // host's destination answers LIST, READ and WRITE the same over the same
+  // fixture (tools/gogen/storecmp.mjs --root, every call of this class
+  // among its calls); CHECK, ACTIVATE and TOKENS are the Go host's own
+  // honest refusal, an error and an issue that stands
+  ZCL_GOGEN_T_STORE: {Go: "LIST n5 a CLAS:CL_ST_LIB:$LIB:lib/src/cl_st_lib.clas.abap::active CLAS:ZCL_ST_A:$STG:src/zcl_st_a.clas.abap:X:active CLAS:ZCL_ST_GEN:$STG_GEN:gen/zcl_st_gen.clas.abap::active INTF:ZIF_ST_B:$STG_SUB:src/sub/zif_st_b.intf.abap:X:active PROG:ZST_PROG:$STG:src/zst_prog.prog.abap:X:active #CLAS=3 #INTF=1 #PROG=1 t0;list n3 a CLAS:CL_ST_LIB:$LIB:lib/src/cl_st_lib.clas.abap::active CLAS:ZCL_ST_A:$STG:src/zcl_st_a.clas.abap:X:active CLAS:ZCL_ST_GEN:$STG_GEN:gen/zcl_st_gen.clas.abap::active #CLAS=3 #INTF=1 #PROG=1 t0;READ src[118] src/zcl_st_a.clas.abap $STG active wX n0 a CLAS:ZCL_ST_A:$STG:src/zcl_st_a.clas.abap:X:active t0;READ src[28] src/zcl_st_a.clas.locals_imp.abap $STG active wX n0 a CLAS:ZCL_ST_A:$STG:src/zcl_st_a.clas.locals_imp.abap:X:active t0;READ src/zcl_st_a.clas.abap $STG active wX n0 a CLAS:ZCL_ST_A:$STG:src/zcl_st_a.clas.abap:X:active t0;READ err[CLAS ZCL_ST_SKIP does not exist] n0 a t0;WRITE src/zst_prog.prog.abap $STG inactive wX n0 a t0;READ src[27] src/zst_prog.prog.abap $STG inactive wX n0 a PROG:ZST_PROG:$STG:src/zst_prog.prog.abap:X:inactive t0;WRITE err[CLAS CL_ST_LIB comes from a library and cannot be changed here] n0 a t0;WRITE err[CLAS ZCL_ST_GEN comes from a library and cannot be changed here] n0 a t0;WRITE src/osd/zst_new.prog.abap $STG_OSD inactive wX n0 a t0;CHECK err[check needs the compiler (abaplint over the whole system), and this binary carries none: nothing was checked. Check on the Node host, or build the binary again from this tree] n1 a !PROG:ZST_PROG:0:no_compiler t0;ACTIVATE err[activation needs a new generation (rebuild): this binary is a built generation and carries no abaplint and no transpiler, so PROG ZST_PROG stays as it is in src/zst_prog.prog.abap and is active once the binary is built again from this tree] n1 a !PROG:ZST_PROG:0:rebuild t0;TOKENS err[tokens need the parser (abaplint), and this binary carries none] n0 a t0;NOPE err[unknown store command NOPE] n0 a t0;",
+    JS: "ERROR NOT_COMPILED in CALL FUNCTION 'ZOSD_STORE': the JS emitter has no host function modules"},
   // MODIFY itab FROM wa INDEX n = MODIFY itab INDEX n FROM wa (A4H
   // 2026-09-24, $ZOSG_TMP_0195): sy-subrc 0 / 4, sy-tabix untouched (both
   // emitters set it to n before)
@@ -573,7 +581,15 @@ writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
 // a layout change there breaks both, loudly (the import fails)
 const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(new DatabaseSetup(program.reg).run().schemas.sqlite));
-writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t_ "embed"\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n//go:embed zz_db.json\nvar dbScript []byte\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n\tif err := abap.OpenDB(dbScript); err != nil {\n\t\tpanic(err)\n\t}\n\tif err := abap.SetMediaDir(${JSON.stringify(join(here, "testdata", "media"))}); err != nil {\n\t\tpanic(err)\n\t}\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tvar out string\n\t\tabap.DialogStep(func() { out = ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}) })\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", out)\n\t}()`).join("\n")}\n}\n`);
+// DESTINATION 'STORE' (ZCL_GOGEN_T_STORE): the object store over a copy of
+// testdata-store/tree, fresh each run, since a WRITE lands in it; the
+// build's facts about it come from the Node store, as osgo.mjs takes them
+const storeTree = join(out, "store-tree");
+rmSync(storeTree, {recursive: true, force: true});
+cpSync(join(here, "testdata-store", "tree"), storeTree, {recursive: true});
+const {storeConfig} = await import("./store.mjs");
+const storeFacts = JSON.stringify(await storeConfig(storeTree, {storeModule: `${home}/tools/osd-store.mjs`}));
+writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t_ "embed"\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n//go:embed zz_db.json\nvar dbScript []byte\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n\tif err := abap.OpenDB(dbScript); err != nil {\n\t\tpanic(err)\n\t}\n\tif err := abap.SetMediaDir(${JSON.stringify(join(here, "testdata", "media"))}); err != nil {\n\t\tpanic(err)\n\t}\n\tif err := abap.SetStore(${JSON.stringify(storeTree)}, []byte(${JSON.stringify(storeFacts)}), ""); err != nil {\n\t\tpanic(err)\n\t}\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tvar out string\n\t\tabap.DialogStep(func() { out = ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}) })\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", out)\n\t}()`).join("\n")}\n}\n`);
 execFileSync("gofmt", ["-w", dir]);
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go")}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));

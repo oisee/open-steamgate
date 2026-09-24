@@ -1,7 +1,10 @@
 // The Go host's DESTINATION 'STORE' against the Node host's, answer by
 // answer, over the same files (go/abap/store.go, tools/osd-store-destination.mjs).
 //
-//   node tools/gogen/storecmp.mjs [--root <tree>]
+//   node tools/gogen/storecmp.mjs [--root <tree>] [--tools <checkout>]
+//
+// --tools names the checkout whose Node store answers (default: the tree
+// itself), for a tree that is only files, like testdata-store/tree.
 //
 // Reads are compared on the tree as it is. Writes are compared on two
 // scratch copies of it (src/ copied, everything else linked), one per host,
@@ -18,11 +21,12 @@ import {storeConfig} from "./store.mjs";
 const here = import.meta.dirname;
 const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
 const root = resolve(arg("--root") ?? home);
+const tools = resolve(arg("--tools") ?? root);
 const out = join(here, ".out", "storecmp");
 mkdirSync(out, {recursive: true});
 
-const {StoreDestination} = await import(`${root}/tools/osd-store-destination.mjs`);
-const {ObjectStore} = await import(`${root}/tools/osd-store.mjs`);
+const {StoreDestination} = await import(`${tools}/tools/osd-store-destination.mjs`);
+const {ObjectStore} = await import(`${tools}/tools/osd-store.mjs`);
 
 // a signature as the transpiled runtime hands one over: typed boxes the
 // destination sets, tables it clears and appends to
@@ -103,11 +107,17 @@ const reads = [
   {IV_COMMAND: "BOGUS"},
   {IV_COMMAND: "CHECK", IV_TYPE: "CLAS", IV_NAME: "ZCL_NO_SUCH_CLASS"},
   {IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: "ZCL_NO_SUCH_CLASS"},
+  // the calls of testdata/zcl_gogen_t_store over testdata-store/tree
+  {IV_COMMAND: "list", IV_FILTER: "st_", IV_TYPE: "clas"},
+  {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "zcl_st_a"},
+  {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCL_ST_A", IV_INCLUDE: "implementations"},
+  {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCL_ST_A", IV_INCLUDE: "testclasses"},
+  {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCL_ST_SKIP"},
   // every object of the tree, read whole
   ...all.map((o) => ({IV_COMMAND: "READ", IV_TYPE: o.type, IV_NAME: o.name})),
 ];
 const nodeDest = new StoreDestination({store: () => new ObjectStore({root})});
-const config = await storeConfig(root);
+const config = await storeConfig(root, {storeModule: `${tools}/tools/osd-store.mjs`});
 const goReads = goCalls(root, config, reads);
 let same = 0;
 for (let i = 0; i < reads.length; i += 1) {
@@ -145,6 +155,12 @@ const writes = [
   {IV_COMMAND: "LIST", IV_FILTER: "ZOSD_STORECMP"},
   {IV_COMMAND: "READ", IV_TYPE: "PROG", IV_NAME: "ZOSD_STORECMP_NEW"},
   {IV_COMMAND: "WRITE", IV_TYPE: "PROG", IV_NAME: "../../ZOSD_ESCAPE", IV_SOURCE: "REPORT x.\n"},
+  {IV_COMMAND: "WRITE", IV_TYPE: "PROG", IV_NAME: "ZST_PROG", IV_SOURCE: "* changed\r\nREPORT zst_prog.\n"},
+  {IV_COMMAND: "READ", IV_TYPE: "PROG", IV_NAME: "ZST_PROG"},
+  {IV_COMMAND: "WRITE", IV_TYPE: "CLAS", IV_NAME: "CL_ST_LIB", IV_SOURCE: "x"},
+  {IV_COMMAND: "WRITE", IV_TYPE: "CLAS", IV_NAME: "ZCL_ST_GEN", IV_SOURCE: "x"},
+  {IV_COMMAND: "WRITE", IV_TYPE: "PROG", IV_NAME: "ZST_NEW", IV_SOURCE: "REPORT zst_new."},
+  {IV_COMMAND: "NOPE"},
   {IV_COMMAND: "CHECK", IV_TYPE: "CLAS", IV_NAME: "ZCL_OSD_EDIT", IV_SOURCE: "CLASS x."},
   {IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: "ZCL_OSD_EDIT"},
 ];
@@ -158,7 +174,9 @@ for (const call of writes) {
   nodeWrites.push(await nodeCall(nodeWriter, call));
 }
 const goWrites = goCalls(goTree, config, writes);
-const touched = new Set(["src/webgui/zcl_osd_edit.clas.abap", "src/webgui/zcl_osd_edit.clas.testclasses.abap", "src/osd/zosd_storecmp_new.prog.abap"]);
+// the files the writes wrote, as the Node store named them
+const touched = new Set(nodeWrites.filter((a, i) => a !== undefined && writes[i].IV_COMMAND === "WRITE" && a.scalars.EV_ERROR === "")
+  .map((a) => a.scalars.EV_FILE));
 let wsame = 0;
 for (let i = 0; i < writes.length; i += 1) {
   if (nodeWrites[i] === undefined) {
