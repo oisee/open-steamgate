@@ -214,7 +214,24 @@ ABAP Unit test starts daemons, sends to them and polls a log table
 `WAIT UP TO '0.2' SECONDS` and a bound. Times are `GET TIME STAMP FIELD`
 differences, in milliseconds. Every object and every daemon was removed
 afterwards; the runtime table of running daemons counted zero at the end.
-Probe sources and raw logs stay under `.local/daemon-probes/`. Where this
+
+To reproduce: package `$ZOSG_TMP_0060`; tables `ZOSD_T_DLOG` (the log) and
+`ZOSD_T_DDAT` (P7's data); the daemon `ZCL_OSD_T_DMN`, which runs a
+command named in the PCP field `cmd` of each message; the timer handler
+`ZCL_OSD_T_TICK`; the driver `ZCL_OSD_T_DDRV` with one test include per
+batch; `ZCL_OSD_T_OTHER` (a second program, for P6) and the report
+`ZOSD_T_DSUB` (the target of P7's `SUBMIT`). The sources are tracked in
+[`docs/probes/abap-daemons/`](probes/abap-daemons/) (outside the transpile
+and lint inputs); the raw logs stay under `.local/daemon-probes/`. P7's
+"invisible to another session" is the driver's own `SELECT SINGLE` on
+`ZOSD_T_DDAT` over the default connection, run while the daemon was still
+busy in the callback that had inserted the row and again after it
+returned; the driver's `WAIT UP TO` ends its own LUW between reads, so it
+reads committed rows only. P10's re-activation was an ADT save and
+activation of `ZCL_OSD_T_DMN` with the constant `co_version` changed from
+`V1` to `V2`, made between two ABAP Unit runs while the daemon was idle
+with a 45 s timer pending; the first run started it, the second only
+watched. Where this
 section and the text above disagree, this section is the measurement and
 the text above is marked.*
 
@@ -224,9 +241,9 @@ the text above is marked.*
 | --- | --- | --- | --- |
 | P0 | signatures | read, see "P0" below. Three guesses in section 1 were wrong: the base class has **no** default callbacks, `IF_ABAP_DAEMON_HANDLE` has **only** `SEND`, and `START_TIMER` returns nothing and takes no context | the API table is corrected; the stop button calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP` |
 | P1 | `ON_MESSAGE` serialised? | yes. 20 × 200 ms messages: entries and exits strictly 1..20, never interleaved, 1 ms between an exit and the next entry, 4029.7 ms for all 20 (4031.7 ms in a second run). `SEND` through a held handle returns in 0.15 to 0.24 ms, before the callback runs | **confirms** the per-instance mailbox (one queue, one at a time, FIFO) and an asynchronous `SEND` |
-| P2 | timers | late by 0.3 to 1.7 ms, never early (table below). 0 and negative accepted and fire at once, 1000 timers in one daemon all fire, a timer due during a callback runs after it | a `setTimeout` posted into the mailbox is faithful; no rounding, no floor to emulate; **one timer per handler object** |
+| P2 | timers | late by 0.3 to 1.7 ms, never early in about 20 arms per interval, one daemon, one run (table below). 0 and negative accepted and fire at once, 1000 timers in one daemon all fire, a timer due during a callback runs after it | a `setTimeout` posted into the mailbox is faithful; no rounding, no floor to emulate; **one timer per handler object** |
 | P3 | a dump in `ON_MESSAGE` | the session ends; about 30 to 100 ms later **`ON_ERROR`** runs in a **new** session (statics and attributes initial), `i_code = 103` (runtime error), `i_reason` the runtime error's short text. **No** `ON_RESTART`, **no** `ON_BEFORE_RESTART_BY_SYSTEM`. The instance ID survives. The message that dumped is **not** redelivered; the ones queued behind it are delivered, in order | the first callback after a dump is `ON_ERROR`, not `ON_RESTART`; the failed message is **dropped** (at most once); timers are gone |
-| P4 | restart limits | **none found**: 42 dumps in two instances (12 at 5 s intervals, 30 back to back) and the daemon was still listed and still served the next message. Recovery takes ~34 ms after an isolated dump and **~1.04 s** when the previous recovery was less than about a second ago. A dump in `ON_START` or in `ON_TIMEOUT` gives one `ON_ERROR` and nothing else: nothing re-runs `ON_START`, so the timer is not re-armed and there is no dump loop | no FAILED state from a restart count; a back-off of about a second between recoveries instead |
+| P4 | restart limits | **none within 42 dumps**: in two instances (12 at 5 s intervals, 30 back to back) and the daemon was still listed and still served the next message. Recovery took 31 to 36 ms for dumps 5 s apart and **about 1.04 s** each for dumps back to back (P3: 30 to 100 ms); what triggers the slower regime is inferred, not measured. A dump in `ON_START` or in `ON_TIMEOUT` gives one `ON_ERROR` and nothing else: nothing re-runs `ON_START`, so the timer is not re-armed and there is no dump loop | no FAILED state from a restart count; a back-off parameter with the two measured regimes as defaults |
 | P5 | one instance per name? | **many.** `START` twice with the same class and name makes two instances with two IDs; `GET_DAEMON_INFO` lists both under the same name. `ON_ACCEPT` returning `reject` makes `START` return `e_setup_mode = 2`, an initial instance ID and **no exception**; no `ON_START` follows | the registry is keyed by instance ID; a name is a label |
 | P6 | users, clients, programs | the daemon runs as the user and in the client that called `START` (`sy-uname`, `sy-mandt` in every callback). **`GET_DAEMON_INFO` and `ATTACH` are restricted to the program that called `START`**: from another class of the same user and client, `GET_DAEMON_INFO` returns 0 rows and `ATTACH`/`SEND` raises "No access right for program <program>." Even the daemon's own class sees 0 rows. Cross-client and cross-user: **blocked** (one logon) | the registry records the creator program, and the client manager checks the caller's program |
 | P7 | the LUW of a callback | **each callback is a dialog step**: an insert without `COMMIT WORK` is invisible to another session while the callback runs and visible once it returns; a dump rolls it back. `COMMIT WORK` and `ROLLBACK WORK` inside a callback are allowed and take effect at once. **`WAIT UP TO` and `SUBMIT` are illegal**: runtime error `DAEMON_ILLEGAL_STATEMENT` ("Illegal statement in ABAP daemon session in program ..."), then `ON_ERROR`, and the insert before the `WAIT` is rolled back. `CALL FUNCTION ... STARTING NEW TASK` is allowed (sy-subrc 0) | **confirms** the step-per-callback rule; **overturns** "`WAIT` releases the lock" as a daemon concern: a daemon step never waits, and `WAIT` is a dump there |
@@ -339,8 +356,13 @@ is already active." and the first timer stands (it fired at 300.976 ms of
 active." (sic); on an armed one it succeeds and the timer never fires. A
 handler object nobody else references still fires (the timer keeps it).
 1000 handler objects armed at 100 ms from one callback: all accepted, all
-1000 fired between 91.5 and 105.7 ms after the arming loop ended, in one
-batch. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
+1000 fired, in one batch. The only timestamps are the end of the arming
+loop and each hundredth firing: the first hundred had fired 91.5 ms after
+the loop ended, the last 105.7 ms after. That is not a timer firing early:
+each timer runs from its own `START_TIMER`, up to the length of the loop
+before its end, and the loop's length was not logged. So this batch shows
+capacity and throughput (1000 timers, all fired within 14.2 ms of each
+other), not lateness; the lateness is the table above. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
 ms, 1.4 ms after the callback returned.
 
 ### P8 and the AMC half of P6: blocked, and why
@@ -377,11 +399,16 @@ reason: the probes ran under one logon.
    Timers do not survive; a daemon that wants its timer back re-arms it in
    `ON_ERROR`, which the ticker demo must do (its `ON_START` / `ON_RESTART`
    alone would leave it silent after a `boom`).
-3. **No restart limit and no FAILED state from counting** (P4). Replace
+3. **No FAILED state from counting** (P4: none within 42 dumps). Replace
    "the same number of restarts in the same window as a system, then the
-   row is FAILED" by a back-off: an `ON_ERROR` recovery waits about a
-   second when the previous one was less than a second ago. A daemon that
-   dumps on every message then costs one step per second, not a loop.
+   row is FAILED" by a back-off **parameter**. What was measured is two
+   regimes: dumps 5 s apart recovered in 31 to 36 ms (P3: 30 to 100 ms),
+   dumps back to back in about 1.04 s each. The rule behind them (for
+   example "wait a second when the previous recovery was less than a second
+   ago") is inferred, not measured, so the two regimes are the defaults and
+   the rule is configurable. A ceiling on restarts is configurable too and
+   off by default, which is what the system showed. A daemon that dumps on
+   every message then costs about one step per second, not a loop.
 4. **The generation swap uses `ON_BEFORE_RESTART_BY_SYSTEM( i_code = 202 )`
    in the old generation and `ON_RESTART` in the new** (P10), with the same
    instance ID. That settles the "which callback" question of section 4,
@@ -398,13 +425,26 @@ reason: the probes ran under one logon.
    too. The ack design loses the `WAIT` commit point inside daemon steps;
    `COMMIT WORK` stays a mid-step commit point (allowed, effective at once).
    The lock release on `WAIT` in `tools/osd-dialog-step.mjs` is still
-   needed, for requests and APC steps.
+   needed, for requests and APC steps. A `COMMIT WORK` in the middle of a
+   daemon step is safe under the shared lock: the lock is held by this
+   step, so no request or other step has work on the connection, and the
+   commit covers only the daemon's own.
+   `CALL FUNCTION ... STARTING NEW TASK` is allowed on a system. Locally it
+   would run inside the step that holds the lock, and after #75 a nested
+   step is refused by name, so it is either a planned divergence (run the
+   task after the step, or refuse it with a recorded error) or future
+   work; not decided here. `WAIT FOR ASYNCHRONOUS TASKS` is probably
+   illegal in a daemon like `WAIT UP TO`, but it was not measured.
 6. **The registry is keyed by instance ID and records the creator program**
    (P5, P6). Names repeat. `GET_DAEMON_INFO` and `ATTACH` answer only the
    program that called `START`, which needs the caller's program in the
-   runtime (on a system the manager asks the kernel for the calling
-   program; the transpiled runtime has no such call yet, so this is new
-   work in step 5, or an ANORMALIES entry if it is skipped). `GET_DAEMON_INFO` carries no state
+   runtime. On a system the manager asks the kernel for the calling
+   program, and "program" means the main program, for a class its class
+   pool (`<CLASS>====...CP`), not the class name; a method of another class
+   is another program. The transpiled runtime has no such call yet: until
+   step 5 builds one, the local client manager allows every caller, and
+   that is recorded in `ANORMALIES.md`
+   (`ANOMALY-2026-09-24-daemon-creator-program`). `GET_DAEMON_INFO` carries no state
    and no restart count: those columns of `ZOSD_DAEMON` are ours, for the
    status list, and not part of the API.
 7. **`STOP` is the last entry of the mailbox, not a cut** (P11). Messages
@@ -416,9 +456,15 @@ reason: the probes ran under one logon.
    manager keys by handler object; a second `START_TIMER` on the same object
    raises. Zero and negative timeouts are legal. The Node `setTimeout`
    design stands, with the lateness measured here as the tolerance for demo
-   test 2 (a few milliseconds, never early).
+   test 2 (a few milliseconds; never early in the samples taken).
 9. **`IF_ABAP_DAEMON_HANDLE` has no `STOP`** (P0): the status list's stop
-   button calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP`.
+   button calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP`. **Unmeasured, and the
+   first next probe:** `STOP` from a program other than the one that called
+   `START`. P6 measured `GET_DAEMON_INFO` and `ATTACH`/`SEND` from another
+   program (refused), not `STOP`. The status list's stop button lives in a
+   different program from any application's `START`, so on a system it may
+   well get "No access right" too, which would make a generic stop button a
+   local-only feature.
 10. **PCP on the wire uses LF, not CRLF** (captured in P1): `SERIALIZE` of a
     message with fields `cmd`, `a`, `b` = `x:y` and the text
     `hello<LF>world` gave exactly
@@ -463,7 +509,8 @@ name. **Still open** — everything AMC (P8), cross-client and cross-user
    |   daemon host (ABAP)  one object per running instance, in    |
    |                       the work process itself (no thread of  |
    |                       its own); every callback a dialog step |
-   |                       in the one step queue, released on WAIT|
+   |                       in the one step queue; it never waits  |
+   |                       (WAIT UP TO is a dump there, P7)       |
    |   class-data guard    a daemon step that reads or writes     |
    |                       class data is a recorded runtime error |
    |   timers              per instance, owned by the generation  |
@@ -485,8 +532,9 @@ strategy, which does not exist yet (see below).
 Every callback is **one dialog step**, and it takes **the same lock every
 other step takes**: on Node the step queue of osg-i7's PR in
 `tools/osd-dialog-step.mjs`, on Go `abap.WorkProcess`. There is no lock of
-the daemon's own. The queue is released for the length of a `WAIT` and taken
-again after it. Inside the lock, `dialogStep` / `DialogStep` commits on
+the daemon's own. For requests and APC steps the queue is released for the
+length of a `WAIT` and taken again after it; a daemon step never waits,
+because `WAIT UP TO` in a daemon is a `DAEMON_ILLEGAL_STATEMENT` dump (P7). Inside the lock, `dialogStep` / `DialogStep` commits on
 return and rolls back on a dump, **which P7 confirmed** on a system.
 The rule lives in the module every host already imports (CLAUDE.md, "A
 rule written once ... does not survive the second caller"), so the daemon
@@ -833,10 +881,12 @@ is not a demo. Decision D5.
 ~~Restart after a failure follows P3/P4: the same number of restarts in the
 same window as a system, then the row is FAILED and the daemon stays down
 until someone starts it.~~ **Overturned by P4:** a system showed no restart
-limit (42 dumps, the daemon still served the next message), only a pause of
-about a second between recoveries that follow each other. The host does the
-same: `ON_ERROR` on a fresh object, a back-off of about a second, no FAILED
-state from counting.
+limit within 42 dumps (the daemon still served the next message), and
+recoveries that followed each other took about a second each. The host
+calls `ON_ERROR` on a fresh object after a back-off parameter whose
+defaults are the two measured regimes (change 3 under "Measured on A4H");
+a restart ceiling is configurable and off by default, and there is no
+FAILED state from counting.
 
 ### Observability
 
@@ -897,7 +947,7 @@ cost here (the APC host, the RFC channel, the pool).
 
 | step | what | days |
 | --- | --- | --- |
-| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 blocked**) | 1.5 |
+| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 blocked; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |

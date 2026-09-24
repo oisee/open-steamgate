@@ -29,6 +29,54 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
+
+- Status: `open` (by design; decision D4 in `docs/abap-daemons.md`)
+- Discovery date: `2026-09-24`
+- Affected versions: none yet; the daemon host is not built (`docs/abap-daemons.md`, step 5)
+- Affected ABAP statement, runtime API or adapter: static attributes read or written from a daemon callback (`CL_ABAP_DAEMON_EXT_BASE` subclasses)
+- Minimal ABAP reproducer: `docs/probes/abap-daemons/zcl_osd_t_ddrv.batch_a.testclasses.abap`, method `p01_serial` (the P9 part); the daemon sets `gv_static` in `ON_START`, the driver reads and sets its own copy, the daemon logs its value
+- Exact command used to run it: the ABAP Unit driver `ZCL_OSD_T_DDRV` (sources in `docs/probes/abap-daemons/`), run on A4H 2026-09-24 in `$ZOSG_TMP_0060`, all objects deleted afterwards
+- Expected SAP behaviour: the starting session reads the static the daemon set as initial, and the daemon keeps its own value after the starting session changed the static (probe P9). A daemon runs in an ABAP session of its own.
+- Actual open-abap behaviour: (planned) the daemon runs in the host process and on its thread (model (b) of D4), where class data is shared with every request of the process; a daemon step that reads or writes class data outside the runtime's own classes is a recorded runtime error instead
+- Impact on open-steamgate: a daemon that keeps state in class data works on a system and dumps here; that is the intended rule against state that outlives a call
+- Smallest safe workaround: keep daemon state in instance attributes or in a table
+- Upstream issue: none; this is our design, not a transpiler defect
+- Regression-test location: none yet (step 5 of `docs/abap-daemons.md`)
+- Upstream version containing a fix: `not applicable`
+
+### ANOMALY-2026-09-24-daemon-creator-program -- a system restricts GET_DAEMON_INFO and ATTACH to the program that called START; the local runtime will not check it at first
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: none yet; the client manager is not built (`docs/abap-daemons.md`, step 5)
+- Affected ABAP statement, runtime API or adapter: `CL_ABAP_DAEMON_CLIENT_MANAGER=>GET_DAEMON_INFO`, `=>ATTACH` (and probably `=>STOP`, unmeasured)
+- Minimal ABAP reproducer: `docs/probes/abap-daemons/zcl_osd_t_other.clas.abap` called from `zcl_osd_t_ddrv.batch_d1.testclasses.abap`
+- Exact command used to run it: the ABAP Unit driver `ZCL_OSD_T_DDRV` (sources in `docs/probes/abap-daemons/`), run on A4H 2026-09-24 in `$ZOSG_TMP_0060`, all objects deleted afterwards
+- Expected SAP behaviour: from a program other than the one that called `START` (for a class, its class pool, not the class name), `GET_DAEMON_INFO` returns 0 rows and `ATTACH` + `SEND` raises `CX_ABAP_DAEMON_ERROR` "No access right for program <program>." (probe P6). Inside the daemon itself `GET_DAEMON_INFO` also returns 0 rows. `STOP` from another program was not measured.
+- Actual open-abap behaviour: (planned) the transpiled runtime has no way to ask for the calling program, so the local client manager allows every caller until step 5 builds one
+- Impact on open-steamgate: code that works here may be refused on a system, notably a generic stop button in the status list
+- Smallest safe workaround: call `START`, `ATTACH` and `STOP` of a daemon from one class
+- Upstream issue: none yet; a caller-program query belongs to the runtime and would be proposed with the daemon host
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-24-daemon-lazy-restart -- after a re-activation a system restarts a daemon at its next event; we restart it at the generation swap
+
+- Status: `open` (by design; option A of D2 in `docs/abap-daemons.md`)
+- Discovery date: `2026-09-24`
+- Affected versions: none yet; the swap phase is not built (`docs/abap-daemons.md`, step 6)
+- Affected ABAP statement, runtime API or adapter: `ON_BEFORE_RESTART_BY_SYSTEM` / `ON_RESTART` after a changed daemon class is activated
+- Minimal ABAP reproducer: `docs/probes/abap-daemons/zcl_osd_t_ddrv.batch_d1.testclasses.abap`, then the daemon class activated with `co_version = 'V2'`, then `batch_d2`
+- Exact command used to run it: the ABAP Unit driver `ZCL_OSD_T_DDRV` (sources in `docs/probes/abap-daemons/`), run on A4H 2026-09-24 in `$ZOSG_TMP_0060`, all objects deleted afterwards
+- Expected SAP behaviour: nothing happens while the daemon is idle; at its next event (a timer, a message, a stop) `ON_BEFORE_RESTART_BY_SYSTEM( i_code = 202 )` runs in the old load and `ON_RESTART` in the new one, same instance ID (probe P10). A daemon that never gets another event keeps the old load.
+- Actual open-abap behaviour: (planned) the old generation's daemons are restarted when the generation is swapped, with the same two callbacks in the same order
+- Impact on open-steamgate: the callbacks a daemon sees are the same; only their moment differs, and an idle daemon restarts here and not on a system
+- Smallest safe workaround: none needed
+- Upstream issue: none; this is our design
+- Regression-test location: none yet (`test/daemon.mjs`, demo test 4, planned)
+- Upstream version containing a fix: `not applicable`
+
 ### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE (or HANDLER, SECTION, PARAMETER) activates here and not on a system
 
 - Status: `workaround` (ZONE: the table field is renamed in #67, the CDS element in #69, and ZC_OSD_TAXICUBE activates on A4H; HANDLER, SECTION, PARAMETER: the fields and the elements are renamed in fix/reserved-words, and every table and view they were in activates on A4H)

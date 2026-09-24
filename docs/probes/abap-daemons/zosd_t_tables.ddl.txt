@@ -1,0 +1,27 @@
+@EndUserText.label : 'OSD daemon probe log'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zosd_t_dlog {
+  key mandt  : mandt not null;
+  key logid  : sysuuid_x16 not null;
+  probe      : abap.char(10);
+  ts         : timestampl;
+  cb         : abap.char(30);
+  inst       : abap.char(255);
+  uname      : syuname;
+  clnt       : symandt;
+  txt        : abap.char(255);
+}
+
+@EndUserText.label : 'OSD daemon probe data'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zosd_t_ddat {
+  key mandt  : mandt not null;
+  key k      : abap.char(30) not null;
+  v          : abap.char(30);
+}
