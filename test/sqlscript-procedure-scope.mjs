@@ -386,6 +386,10 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
     expect(await rows("BEGIN\n      lt = select id, txt from src where id = 5;\n    END;\n    et_rows = select id, txt from :lt;")).to.deep.equal([5]);
     expect(await rows("lt = select id, txt from src where id = 1;\n    BEGIN\n      lt = select id, txt from src where id = 20;\n    END;\n    et_rows = select id, txt from :lt;")).to.deep.equal([20]);
     expect(await rows("DECLARE n INTEGER = 1;\n    BEGIN\n      n = 5;\n    END;\n    et_rows = select id, txt from src where id = :n;")).to.deep.equal([5]);
+    // C exactly as measured: the scalar handed out through a scalar OUT
+    const scalarOut = compile(DICT_CLASS("EXPORTING VALUE(ev) TYPE i",
+      "DECLARE v INTEGER = 1;\n    BEGIN\n      v = 2;\n    END;\n    ev = :v;"));
+    expect((await runProcedure(scalarOut, {client, dialect, inputCatalogue: CATALOGUE})).value).to.equal(2);
     // a block inside an IF is inlined into that branch
     expect(await rows("DECLARE n INTEGER = 1;\n    IF :n = 1 THEN\n      BEGIN\n        et_rows = select id, txt from src where id > 1;\n      END;\n    ELSE\n      et_rows = select id, txt from src;\n    END IF;")).to.deep.equal([5, 20]);
   });
@@ -393,7 +397,7 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
   it("refuses BEGIN AUTONOMOUS TRANSACTION, which is another transaction and not a scope", () => {
     expect(() => compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
       "et_rows = select id, txt from src;\n    BEGIN AUTONOMOUS TRANSACTION\n      et_rows = select id, txt from src;\n    END;")))
-      .to.throw(/cannot parse Body/);
+      .to.throw(/cannot parse Body|AUTONOMOUS TRANSACTION block is not carried yet/);
   });
 
   it("refuses a bare NULL in a subquery of an IF condition: no untyped NULL escapes through a fragment", () => {

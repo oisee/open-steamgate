@@ -649,5 +649,5 @@ from the procedure:
 So a nested block that declares nothing is the same as its statements
 written in place, which is how the portable compiler carries it. One that
 declares (a scope of its own, shadowing, an EXIT HANDLER) was not
-measured and is refused; `BEGIN AUTONOMOUS TRANSACTION` is another
-transaction and does not parse here.
+measured and is refused; `BEGIN AUTONOMOUS TRANSACTION`, a handler and a
+label do not parse here, so they are refused before any rule applies.

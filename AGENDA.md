@@ -17,6 +17,14 @@ text, CASE, functions -- and each function leaves it only with an
 engine = A4H pair in the IR pairs files. Open: LENGTH / SUBSTR / UPPER /
 LOWER / TRIM measured and moved to the host.
 
+Open, found by the critic on #51 (2026-09-24), both older than it: the
+compiler accepts a DECLARE after a statement (`BEGIN ... END; DECLARE n
+...`) and an assignment to a scalar IN parameter (`iv = 3`), which HANA's
+grammar should refuse -- one A4H probe, then a refusal; and an IF with one
+branch that assigns a table variable read after END IF is refused with
+"column ID is not present in the typed query scope" where the reason is
+"lt is not assigned on every path".
+
 ## SAP Easy Access, and the GUI substitutes wired in, 2026-09-18
 
 The system has an entry screen. `/sap/bc/gui/sap/its/webgui/` — the path the

@@ -530,8 +530,9 @@ export function compileProcedure(method, types, options = {}) {
         if (mode.length !== 0 && JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"])) {
           throw new UnsupportedSqlScript(`a nested BEGIN ${mode.join(" ")} block is not carried yet`, node);
         }
-        if (statements.some((one) => (one.children ?? []).some((part) => part.node === "Declare"
-          || (part.node === "word" && upper(part.value) === "DECLARE")))) {
+        // every DECLARE the grammar reads (a scalar, a table, a cursor)
+        // arrives as a Declare node; a handler or a label does not parse
+        if (statements.some((one) => (one.children ?? []).some((part) => part.node === "Declare"))) {
           throw new UnsupportedSqlScript("a nested block with its own DECLARE opens a scope, which is not carried yet", node);
         }
         result.push(...compileStatements({children: statements}));
@@ -647,7 +648,8 @@ export function compileProcedure(method, types, options = {}) {
   try {
     // A body wrapped whole in `BEGIN ... END` (plain, or SEQUENTIAL
     // EXECUTION) is the procedure's own scope, as table functions write it:
-    // its statements are the body. A nested block keeps the narrow rule.
+    // its statements are the body. A nested block is inlined by the rule in
+    // compileStatements (measured on A4H: it shares the procedure's variables).
     const topStatements = (tree.children ?? []).filter((one) => one.node === "Statement");
     const onlyNode = topStatements.length === 1 ? (topStatements[0].children ?? []).find((one) => one.node !== "word") : undefined;
     const wrapperMode = onlyNode?.node === "Block"
