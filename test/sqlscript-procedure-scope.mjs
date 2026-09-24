@@ -377,6 +377,25 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
       .to.throw(UnsupportedSqlScript, /nested BEGIN PARALLEL EXECUTION block is not carried yet/);
   });
 
+  it("a nested block shares the procedure's variables, as measured on A4H", async () => {
+    // A4H, 2026-09-24: a table variable first assigned inside the block is
+    // visible after END with its value; one assigned before is overwritten
+    // inside; a declared scalar assigned inside keeps the new value
+    const rows = async (body) => (await runProcedure(compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows", body)),
+      {client, dialect, inputCatalogue: CATALOGUE})).rows.map((r) => r.ID).sort((a, b) => a - b);
+    expect(await rows("BEGIN\n      lt = select id, txt from src where id = 5;\n    END;\n    et_rows = select id, txt from :lt;")).to.deep.equal([5]);
+    expect(await rows("lt = select id, txt from src where id = 1;\n    BEGIN\n      lt = select id, txt from src where id = 20;\n    END;\n    et_rows = select id, txt from :lt;")).to.deep.equal([20]);
+    expect(await rows("DECLARE n INTEGER = 1;\n    BEGIN\n      n = 5;\n    END;\n    et_rows = select id, txt from src where id = :n;")).to.deep.equal([5]);
+    // a block inside an IF is inlined into that branch
+    expect(await rows("DECLARE n INTEGER = 1;\n    IF :n = 1 THEN\n      BEGIN\n        et_rows = select id, txt from src where id > 1;\n      END;\n    ELSE\n      et_rows = select id, txt from src;\n    END IF;")).to.deep.equal([5, 20]);
+  });
+
+  it("refuses BEGIN AUTONOMOUS TRANSACTION, which is another transaction and not a scope", () => {
+    expect(() => compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
+      "et_rows = select id, txt from src;\n    BEGIN AUTONOMOUS TRANSACTION\n      et_rows = select id, txt from src;\n    END;")))
+      .to.throw(/cannot parse Body/);
+  });
+
   it("refuses a bare NULL in a subquery of an IF condition: no untyped NULL escapes through a fragment", () => {
     expect(() => compile(DICT_CLASS("IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(et_rows) TYPE zt_rows",
       "IF :iv_n IN (select null as y from dummy) THEN\n      et_rows = select id, txt from src;\n    ELSE\n      et_rows = select id, txt from src where id = 1;\n    END IF;")))
