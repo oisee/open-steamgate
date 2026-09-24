@@ -6,6 +6,7 @@ CLASS zcl_osd_t_dmn DEFINITION
 
   PUBLIC SECTION.
     INTERFACES if_abap_timer_handler.
+    INTERFACES if_amc_message_receiver_pcp.
 
     CONSTANTS co_version TYPE string VALUE 'V1'.
     CLASS-DATA gv_static TYPE string.
@@ -37,6 +38,12 @@ CLASS zcl_osd_t_dmn DEFINITION
     DATA mv_idx TYPE i.
     DATA mv_attr TYPE string.
     DATA mt_keep TYPE STANDARD TABLE OF REF TO object WITH EMPTY KEY.
+    TYPES: BEGIN OF ty_amc, tag TYPE string, count TYPE i, last TYPE i, gaps TYPE i, END OF ty_amc.
+    DATA mt_amc TYPE STANDARD TABLE OF ty_amc WITH EMPTY KEY.
+    DATA mv_last_tag TYPE string.
+    DATA mv_switches TYPE i.
+    DATA mt_consumers TYPE STANDARD TABLE OF REF TO if_amc_message_consumer WITH EMPTY KEY.
+    METHODS amc_send IMPORTING iv_ch TYPE string iv_tag TYPE string iv_n TYPE i RAISING cx_static_check.
     METHODS init IMPORTING io_ctx TYPE REF TO if_abap_daemon_context.
     METHODS busy IMPORTING iv_ms TYPE i.
     METHODS arm_next.
@@ -250,6 +257,55 @@ CLASS zcl_osd_t_dmn IMPLEMENTATION.
       CATCH cx_static_check INTO DATA(lx_w).
         log( iv_probe = mv_probe iv_cb = 'CAUGHT_ON_MESSAGE' iv_inst = mv_inst iv_txt = lx_w->get_text( ) ).
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD if_amc_message_receiver_pcp~receive.
+    DATA lv_seq TYPE i.
+    DATA lv_total TYPE i.
+    DATA lv_gap TYPE abap_bool.
+    TRY.
+        DATA(lv_tag) = i_message->get_field( 'tag' ).
+        lv_seq = i_message->get_field( 'seq' ).
+        lv_total = i_message->get_field( 'total' ).
+        DATA(lv_ch) = i_message->get_field( 'ch' ).
+      CATCH cx_root INTO DATA(lx).
+        log( iv_probe = mv_probe iv_cb = 'AMC_RX_ERR' iv_txt = lx->get_text( ) ).
+        RETURN.
+    ENDTRY.
+    READ TABLE mt_amc ASSIGNING FIELD-SYMBOL(<ls>) WITH KEY tag = lv_tag.
+    IF sy-subrc <> 0.
+      APPEND VALUE #( tag = lv_tag ) TO mt_amc ASSIGNING <ls>.
+    ENDIF.
+    <ls>-count = <ls>-count + 1.
+    IF lv_seq <> <ls>-last + 1.
+      <ls>-gaps = <ls>-gaps + 1.
+      lv_gap = abap_true.
+    ENDIF.
+    <ls>-last = lv_seq.
+    IF mv_last_tag IS NOT INITIAL AND mv_last_tag <> lv_tag.
+      mv_switches = mv_switches + 1.
+    ENDIF.
+    mv_last_tag = lv_tag.
+    IF lv_seq = 1 OR lv_seq = lv_total OR lv_gap = abap_true.
+      log( iv_probe = mv_probe
+           iv_cb = COND #( WHEN lv_seq = lv_total THEN 'AMC_RX_END' WHEN lv_gap = abap_true THEN 'AMC_RX_GAP' ELSE 'AMC_RX_FIRST' )
+           iv_inst = lv_tag
+           iv_txt = |ch={ lv_ch } tag={ lv_tag } seq={ lv_seq }/{ lv_total } count={ <ls>-count } gaps={ <ls>-gaps } switches={ mv_switches } | &&
+                    |same_client={ xsdbool( i_context->get_producer_client( ) = sy-mandt ) } same_user={ xsdbool( i_context->get_producer_username( ) = sy-uname ) }| ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD amc_send.
+    DATA lo_p TYPE REF TO if_amc_message_producer_pcp.
+    lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'ZOSD_T_AMC' i_channel_id = CONV #( iv_ch ) ).
+    DO iv_n TIMES.
+      DATA(lo_m) = cl_ac_message_type_pcp=>create( ).
+      lo_m->set_field( i_name = 'tag' i_value = iv_tag ).
+      lo_m->set_field( i_name = 'seq' i_value = |{ sy-index }| ).
+      lo_m->set_field( i_name = 'total' i_value = |{ iv_n }| ).
+      lo_m->set_field( i_name = 'ch' i_value = iv_ch ).
+      lo_p->send( lo_m ).
+    ENDDO.
   ENDMETHOD.
 
   METHOD do_message.
@@ -487,6 +543,56 @@ CLASS zcl_osd_t_dmn IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_ser WITH '<CRLF>'.
         REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_ser WITH '<LF>'.
         log( iv_probe = mv_probe iv_cb = 'PCP_IN' iv_txt = lv_ser ).
+
+      WHEN 'amcsub'.
+        DATA(lv_ch) = i_message->get_field( 'ch' ).
+        TRY.
+            DATA(lo_c) = cl_amc_channel_manager=>create_message_consumer( i_application_id = 'ZOSD_T_AMC' i_channel_id = CONV #( lv_ch ) ).
+            lo_c->start_message_delivery( me ).
+            APPEND lo_c TO mt_consumers.
+            log( iv_probe = mv_probe iv_cb = 'AMC_SUBSCRIBED' iv_txt = lv_ch ).
+          CATCH cx_amc_error INTO DATA(lxa).
+            log( iv_probe = mv_probe iv_cb = 'AMC_SUB_ERR' iv_txt = |{ lv_ch }: { lxa->get_text( ) }| ).
+        ENDTRY.
+
+      WHEN 'amcsend'.
+        TRY.
+            log( iv_probe = mv_probe iv_cb = 'AMC_TX_START' iv_txt = |tag={ i_message->get_field( 'tag' ) } n={ lv_n }| ).
+            amc_send( iv_ch = i_message->get_field( 'ch' ) iv_tag = i_message->get_field( 'tag' ) iv_n = CONV i( lv_n ) ).
+            log( iv_probe = mv_probe iv_cb = 'AMC_TX_END' iv_txt = |tag={ i_message->get_field( 'tag' ) } n={ lv_n }| ).
+            lv_ms = lv_msf.
+            IF lv_ms > 0.
+              busy( lv_ms ).
+              log( iv_probe = mv_probe iv_cb = 'AMC_TX_STEP_END' iv_txt = |tag={ i_message->get_field( 'tag' ) }| ).
+            ENDIF.
+          CATCH cx_amc_error INTO DATA(lxs).
+            log( iv_probe = mv_probe iv_cb = 'AMC_TX_ERR' iv_txt = lxs->get_text( ) ).
+        ENDTRY.
+
+      WHEN 'amcsendrb' OR 'amcsendboom'.
+        TRY.
+            amc_send( iv_ch = i_message->get_field( 'ch' ) iv_tag = i_message->get_field( 'tag' ) iv_n = 1 ).
+            log( iv_probe = mv_probe iv_cb = 'AMC_TX_END' iv_txt = |tag={ i_message->get_field( 'tag' ) } then={ lv_cmd }| ).
+          CATCH cx_amc_error INTO DATA(lxr).
+            log( iv_probe = mv_probe iv_cb = 'AMC_TX_ERR' iv_txt = lxr->get_text( ) ).
+        ENDTRY.
+        lv_ms = lv_msf.
+        busy( lv_ms ).
+        IF lv_cmd = 'amcsendrb'.
+          ROLLBACK WORK.
+          log( iv_probe = mv_probe iv_cb = 'AMC_TX_ROLLED_BACK' iv_txt = |tag={ i_message->get_field( 'tag' ) }| ).
+        ELSE.
+          log( iv_probe = mv_probe iv_cb = 'AMC_TX_BOOM' iv_txt = |tag={ i_message->get_field( 'tag' ) }| ).
+          boom( ).
+        ENDIF.
+
+      WHEN 'amcstats'.
+        LOOP AT mt_amc INTO DATA(ls_amc).
+          log( iv_probe = mv_probe iv_cb = 'AMC_STATS' iv_inst = ls_amc-tag iv_txt = |tag={ ls_amc-tag } count={ ls_amc-count } last={ ls_amc-last } gaps={ ls_amc-gaps } switches={ mv_switches }| ).
+        ENDLOOP.
+        IF mt_amc IS INITIAL.
+          log( iv_probe = mv_probe iv_cb = 'AMC_STATS' iv_txt = 'none' ).
+        ENDIF.
 
       WHEN OTHERS.
         log( iv_probe = mv_probe iv_cb = 'UNKNOWN' iv_txt = lv_cmd ).

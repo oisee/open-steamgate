@@ -247,7 +247,7 @@ the text above is marked.*
 | P5 | one instance per name? | **many.** `START` twice with the same class and name makes two instances with two IDs; `GET_DAEMON_INFO` lists both under the same name. `ON_ACCEPT` returning `reject` makes `START` return `e_setup_mode = 2`, an initial instance ID and **no exception**; no `ON_START` follows | the registry is keyed by instance ID; a name is a label |
 | P6 | users, clients, programs | the daemon runs as the user and in the client that called `START` (`sy-uname`, `sy-mandt` in every callback). **`GET_DAEMON_INFO` and `ATTACH` are restricted to the program that called `START`**: from another class of the same user and client, `GET_DAEMON_INFO` returns 0 rows and `ATTACH`/`SEND` raises "No access right for program <program>." Even the daemon's own class sees 0 rows. Cross-client and cross-user: **blocked** (one logon) | the registry records the creator program, and the client manager checks the caller's program |
 | P7 | the LUW of a callback | **each callback is a dialog step**: an insert without `COMMIT WORK` is invisible to another session while the callback runs and visible once it returns; a dump rolls it back. `COMMIT WORK` and `ROLLBACK WORK` inside a callback are allowed and take effect at once. **`WAIT UP TO` and `SUBMIT` are illegal**: runtime error `DAEMON_ILLEGAL_STATEMENT` ("Illegal statement in ABAP daemon session in program ..."), then `ON_ERROR`, and the insert before the `WAIT` is rolled back. `CALL FUNCTION ... STARTING NEW TASK` is allowed (sy-subrc 0) | **confirms** the step-per-callback rule; **overturns** "`WAIT` releases the lock" as a daemon concern: a daemon step never waits, and `WAIT` is a dump there |
-| P8 | AMC ordering and LUW | **mostly blocked**, see below. Measured: `co_comm_type_synchronous` is refused by `CREATE_MESSAGE_PRODUCER` ("Communication type 1 is not supported."); authorisation is checked at `SEND` and at `START_MESSAGE_DELIVERY`, not when the producer or consumer object is created | synchronous is not a mode to build; the program check belongs at send/subscribe time |
+| P8 | AMC ordering and LUW | **delivery is at `SEND`**, not at `COMMIT WORK`: a message reached a subscribed daemon 0.5 to 0.6 ms after `SEND` while the sending session was still busy 1.5 s before its commit, and a message sent before `ROLLBACK WORK` was delivered and not recalled. The same for a daemon as producer: delivered 1 to 2 ms after `SEND`, 1.5 s before its callback returned, and neither a `ROLLBACK WORK` nor a dump later in the same callback recalled it. One producer, 1000 messages: in order, no gap. Two producers (a session and a daemon, 500 each) on one channel: each stream in order and gap-free, the two interleaved message by message (868 switches). `i_suppress_echo = abap_true` keeps a session's own message from its own receiver; `abap_false` delivers it. Scopes user and system deliver to the same user and client. `co_comm_type_synchronous` is refused ("Communication type 1 is not supported."); authorisation is checked at `SEND` and at `START_MESSAGE_DELIVERY`. Cross-client, cross-user and the APC binding: **not measured**. Details in "P8: AMC" below | **decides** section 3's open AMC paragraph and section 4 step 6: a publication leaves at `SEND`, outside the LUW, once per `SEND` and never retracted; order per producer, none across producers |
 | P9 | the daemon's statics | its own. The starting session reads the static attribute the daemon set as initial; the daemon keeps its value after the starting session changed its own copy | **confirms** the divergence D4 records |
 | P10 | re-activation while running | nothing happens while the daemon is idle. At its **next event**, `ON_BEFORE_RESTART_BY_SYSTEM` runs in the **old** load (`i_code = 202`, `program_version_changed`; statics still set, instance attributes initial), then `ON_RESTART` in the **new** load in a new session (same instance ID, statics and attributes initial), about 5 ms later. No dump, no `ON_ERROR`. A timer armed before the activation fired on time (45 001 ms) in the old session before the restart; a `STOP` that was the next event was delivered to the new instance after `ON_RESTART` | **confirms** option A of D2 and names its callbacks: `ON_BEFORE_RESTART_BY_SYSTEM(202)` in the old generation, `ON_RESTART` in the new. The system restarts lazily, we eagerly; the sequence a daemon sees is the same |
 | P11 | stop | `STOP` returns in 0.36 to 1.7 ms (once 4.3 ms) and is **queued behind everything already sent, including messages sent after `STOP` returned**: five queued messages and two sent after `STOP` all ran, then `ON_STOP` with the stop's PCP message (1.5 s later). A `STOP` without a parameter still passes a bound, empty message. After `ON_STOP`: `SEND` on an old handle raises `CX_ABAP_DAEMON_ERROR` "Consumer is not available (for AMC application ID ABAP_DAEMONS, Channel ID /command ...)", `ATTACH` and a second `STOP` raise "The ABAP Daemon instance is not available (...)", a malformed ID "Invalid input parameter.". `GET_DAEMON_INFO` still lists the instance until `ON_STOP` has run | `STOP` is a message in the same mailbox, drained first; a send after `ON_STOP` raises (demo test 6 stands) |
@@ -366,23 +366,53 @@ and firings 100 to 1000 fell within 14.2 ms; the first 99 were not timed
 individually), not lateness; the lateness is the table above. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
 ms, 1.4 ms after the callback returned.
 
-### P8 and the AMC half of P6: blocked, and why
+### P8: AMC
 
-An AMC channel needs an AMC application (object type `SAMC`). The ADT
-client used for the probes cannot create one ("unsupported object type:
-SAMC"). The standard applications that exist (`ABAP_DAEMONS`, a daemon
-test application) authorise named SAP programs only, and the probe program
-was refused at `SEND` and at `START_MESSAGE_DELIVERY` with "No
-authorization for program <program> to access to ABAP Messaging Channel
-with application ID ... and Channel ...". Adding the probe to their
-authorised programs would change an SAP object, which the probe rules
-forbid. So these stay **unmeasured**: message order for one and for two
-producers, delivery at `SEND` or at `COMMIT WORK`, delivery of a message
-sent in a rolled-back LUW, `i_suppress_echo`, the APC binding, and
-cross-client delivery for each scope value. The AMC paragraph of section 3
-("not decided until P8") therefore still holds. The route to measure them
-is an abapGit import of a `*.samc.xml` into a throwaway package, which
-needs Alice's go, or a channel created by hand in transaction SAMC.
+*Run on 2026-09-24 on the same ABAP 7.5x system, in a second throwaway
+package, after the P0 to P11 batch. The ADT client cannot create an AMC
+application, so the application was created the way a deploy would create
+it: abapGit's own object handler for `SAMC` (`ZCL_ABAPGIT_OBJECT_SAMC`,
+`ZIF_ABAPGIT_OBJECT~DESERIALIZE`) called from an ABAP Unit test with the
+prepared [`zosd_t_amc.samc.xml`](probes/abap-daemons/zosd_t_amc.samc.xml)
+(installer `ZCL_OSD_T_SAMC`). It returned "exists, active" at once, with
+nothing to activate afterwards. The application `ZOSD_T_AMC` has three PCP
+channels, `/pc` (scope client), `/pu` (user) and `/ps` (system), each
+authorised for send and receive to the class pools of the daemon and of
+the driver. A local test class of the driver sends and receives as the
+driver's class pool (`ZCL_OSD_T_DDRV====...CP`); nothing else had to be
+authorised. The receiver is the daemon `ZCL_OSD_T_DMN`, which now also
+implements `IF_AMC_MESSAGE_RECEIVER_PCP` and subscribes when told to
+(`amcsub`); it counts per producer tag, checks the sequence field, and
+logs the first message, the last and any gap. The driver ran two batches:
+[`batch_p8a`](probes/abap-daemons/zcl_osd_t_ddrv.batch_p8a.testclasses.abap)
+(order, two producers, scopes; 1.3 s) and
+[`batch_p8b`](probes/abap-daemons/zcl_osd_t_ddrv.batch_p8b.testclasses.abap)
+(the LUW, echo, a daemon as producer; 7.5 s; on the system the include still
+held batch A's method, no longer marked `FOR TESTING`). Times are log-row
+timestamp differences. Afterwards the handler's `DELETE` removed the
+application; it leaves the object directory entry behind, which abapGit's
+`ZIF_ABAPGIT_TADIR~DELETE_SINGLE` removed
+([`install`](probes/abap-daemons/zcl_osd_t_samc.install.testclasses.abap),
+[`remove`](probes/abap-daemons/zcl_osd_t_samc.remove.testclasses.abap)).
+Four daemons were started and stopped; the runtime table of running
+daemons counted zero at the end.*
+
+| question | observed |
+| --- | --- |
+| delivery at `SEND` or at `COMMIT WORK` | **at `SEND`.** The session sent one message and then busy-waited 1.5 s without a commit: the daemon had received it 0.6 ms after `SEND` returned, and the driver's own read before its commit already saw the receipt. In the 1000-message run the first message arrived 8 ms into a send loop that took 210 ms, about 200 ms before the sender's `COMMIT WORK` |
+| a message sent in a LUW that is rolled back | **delivered.** Received 0.5 ms after `SEND`; the `ROLLBACK WORK` 500 ms later recalled nothing |
+| a daemon as producer | **at `SEND`, not at the end of its step.** A daemon's `SEND` inside `ON_MESSAGE` reached the other daemon 2.0 ms later, 1.5 s before the sending callback returned. A daemon that sent and then ran `ROLLBACK WORK` (message delivered 1.1 ms after `SEND`, rollback 0.5 s later) and one that sent and then dumped (delivered 1.1 ms after `SEND`, `ON_ERROR` code 103 0.5 s later) both published: the rollback and the dump retract nothing |
+| order, one producer | 1000 messages in one loop: all 1000 received, sequence 1..1000 with no gap and no duplicate. `SEND` of 1000 PCP messages (each built fresh) took 210 ms, 0.21 ms per message; the receiving daemon had processed all 1000 about 280 ms after the first `SEND`, 66 ms after the sender's commit |
+| order, two producers | a daemon sent 500 (tag B, 175 ms for its loop) while the session sent 500 (tag C) on the same channel: both streams complete, each in its own order with no gap, and the receiver switched between them 868 times in 1000 messages. Order holds per producer; across producers there is none, not even in blocks |
+| `i_suppress_echo` | the session subscribed to `/pc` itself. With `abap_false` it received its own message (`WAIT FOR MESSAGING CHANNELS` returned with `sy-subrc = 0`); with `abap_true` it did not (`sy-subrc = 8` after the 2 s limit), while the daemon subscribed to the same channel received both |
+| where a session's receiver runs | in `WAIT FOR MESSAGING CHANNELS`, and also during a plain `WAIT UP TO` of a polling loop: the test session, still subscribed, had its receiver called for the daemons' later messages while it sat in the `WAIT UP TO '0.2' SECONDS` of its poll |
+| scope | `/pu` (user) and `/ps` (system) delivered to the same user in the same client; `/pc` (client) likewise, and every receiver saw `GET_PRODUCER_CLIENT` and `GET_PRODUCER_USERNAME` equal to its own. What each scope does **across** clients and users: not measured (one logon) |
+| latency | session to daemon 0.5 to 0.6 ms; daemon to daemon 1.1 to 2.0 ms; session to itself about 1 ms |
+
+Not measured: the APC binding (`BIND_AMC_MESSAGE_CONSUMER` delivering to a
+socket), cross-client and cross-user delivery per scope, and whether
+`WAIT FOR MESSAGING CHANNELS` is legal in a daemon (P7 makes it likely it is
+not). The raw log is under `.local/daemon-probes/amc/`.
 
 The cross-client and cross-user half of P6 is blocked for a simpler
 reason: the probes ran under one logon.
@@ -474,6 +504,19 @@ reason: the probes ran under one logon.
     set, a colon inside a value escaped as `\:`, an empty line, the body.
     The received copy has a `pcp-channel` field as its second line. This is
     the byte string step 2 tests against.
+11. **An AMC publication leaves at `SEND`** (P8). It is not part of the LUW:
+    the host hands each message to the broker when `SEND` returns, and a
+    later `ROLLBACK WORK`, a dump or a killed step does not retract it. This
+    settles the open AMC paragraph of section 3 and step 6 of section 4.
+    Order is per producer only; the broker must keep each producer's
+    messages in `SEND` order and may interleave producers freely, so a test
+    may assert per-producer order and must not assert a global one.
+    `i_suppress_echo` is a per-producer flag that skips the sending
+    session's own consumers. A session's receiver is called in
+    `WAIT FOR MESSAGING CHANNELS` and also during `WAIT UP TO`, so
+    `KERNEL_PUSH_CHANNELS=>wait` delivers in both. The object type `SAMC` is
+    deployable through abapGit's handler as it stands, which is the path the
+    demo's `ZOSD_TICKER` takes to a system.
 
 Recommendations of the note, as measured: **confirmed** — per-instance
 serialisation and FIFO (P1), asynchronous `SEND` (P1), a callback is a
@@ -485,8 +528,10 @@ table as the registry (the system keeps one, D9). **Overturned** — empty
 default callbacks, `STOP` on the handle, a timer ID and a timer context,
 restart count in `GET_DAEMON_INFO`, a restart limit with a FAILED state,
 `ON_RESTART` after a dump, `WAIT` inside a daemon step, one instance per
-name. **Still open** — everything AMC (P8), cross-client and cross-user
-(P6), the shutdown callbacks (P12, reading only).
+name. **Decided by P8** (the note had left it open): AMC delivery at `SEND`,
+outside the LUW; per-producer order. **Still open** — the APC binding and
+cross-client and cross-user delivery (P8), cross-client and cross-user
+daemons (P6), the shutdown callbacks (P12, reading only).
 
 ---
 
@@ -596,17 +641,16 @@ its mechanism is the first thing step 5 has to demonstrate.
   has (`process.send`, the same channel as `say` and `ready`), and the
   supervisor appends it to the instance's mailbox and forwards it to child
   B. With one child the round trip is the same and only shorter.
-- **AMC.** When a publication leaves is **not decided until P8** (**still open: P8
-  was blocked, see "Measured on A4H"**). A system
-  may send at `SEND`, independently of `COMMIT WORK`, in which case a
-  rolled-back step has still published; or it may hold messages until the
-  commit. The host supports both shapes (hand each message to the
-  supervisor at `SEND`, or drain them after the step and drop them on a
-  rollback) and picks the one P8 measures; no default is written before
-  that. Either way a publication is posted to the supervisor and fanned
-  out in publish order to every
-  subscriber: a bound APC socket in any child, or an ABAP session waiting in
-  `WAIT FOR MESSAGING CHANNELS`. The socket side needs `serveChannel` to
+- **AMC.** A publication leaves at `SEND` (**P8 measured**: delivered
+  0.5 to 2 ms after `SEND`, before the sender's commit, and not retracted by
+  `ROLLBACK WORK`, by a dump or by the end of the step). So the host hands
+  each message to the supervisor when `SEND` returns and keeps no per-step
+  buffer; the rejected alternative, draining after the step and dropping
+  on a rollback, would differ from a system. A publication is posted to
+  the supervisor and fanned out in each producer's publish order (producers
+  interleave, P8) to every subscriber: a bound APC socket in any child, or
+  an ABAP session waiting in `WAIT FOR MESSAGING CHANNELS` or in
+  `WAIT UP TO` (P8 saw a receiver called in both). The socket side needs `serveChannel` to
   accept frames that did not come from `on_message`; the waiting side needs
   `KERNEL_PUSH_CHANNELS=>wait` to see a delivered message instead of only
   polling a condition (it can keep polling at 100 ms in a first version).
@@ -808,7 +852,7 @@ Under option A, precisely:
      `COMMIT WORK`: write in steps that are each consistent on their own,
      or record progress and check it in `ON_RESTART`.
    - **At least once for effects outside the database**: an AMC message
-     published at `SEND` (if P8 says a system does that), outbound HTTP, a
+     published at `SEND` (which P8 confirmed a system does), outbound HTTP, a
      live RFC call, anything the step did before a kill that the rollback
      cannot undo.
    - The assumption it rests on: message IDs are assigned by the
@@ -827,9 +871,13 @@ Under option A, precisely:
    well-written daemon does on a system anyway, because a restart after an
    error loses them there too (**confirmed by P3/P4**).
 6. **AMC publications** already handed to the broker are delivered; the
-   broker is in the stable layer. Whether a step that was killed or rolled
-   back had already published depends on P8 (at `SEND`, or at commit); no
-   default is set before it.
+   broker is in the stable layer. A step that was killed or rolled back has
+   still published everything it sent before that point, because a message
+   leaves at `SEND` (**P8**: a daemon's message sent before a `ROLLBACK
+   WORK` and one sent before a dump were both delivered), which is what a
+   dump leaves behind on a system too. The message that step was processing
+   is not run again (point 2), so what it published is not repeated either:
+   subscribers see the part of the step before the kill and nothing after.
 7. **APC sockets bound to an AMC channel** live in a work process and die
    with it, as every APC socket does on a recycle today (`#stopChild`). The
    page reconnects and binds again. This is not new and not made worse; the
@@ -948,7 +996,7 @@ cost here (the APC host, the RFC channel, the pool).
 
 | step | what | days |
 | --- | --- | --- |
-| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 blocked; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
+| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 the same day through an abapGit-created `SAMC`; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
@@ -992,5 +1040,5 @@ deployed to a system is decided by the deploy manifest, not by the name.
 | D5 | Restart daemons after a process or system restart | yes for a process restart (same path as the swap); after a whole-system restart, mirror P12, with a switch to restart anyway for local use |
 | D6 | Where the ABAP lives | proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core. Nothing of this goes to the upstream repositories: they receive only fixes for differences from A4H, and ADF, AMC and the timer manager are new work |
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
-| D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time. **Run 2026-09-24; P8 and the cross-client half of P6 blocked** |
+| D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time. **Run 2026-09-24; P8 run the same day after Alice allowed the abapGit route for the `SAMC`; the cross-client half of P6 and of P8 blocked (one logon)** |
 | D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too (**P0: in a runtime table of its own**); the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
