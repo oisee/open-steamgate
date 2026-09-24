@@ -1257,7 +1257,12 @@ function structure(node, ctx) {
     // (a shared token object, not the loop itself, so the IR stays a tree)
     const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, token: {}};
     (ctx.loopStack ??= []).push(loop);
-    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
+    // critic fix: inside the body the loop's field symbol is freshly
+    // assigned on every pass until a DELETE of the current row makes it
+    // stale (fsCheck below)
+    const fresh = fs ? {name: fs, stale: false} : null;
+    if (fresh) (ctx.fsFresh ??= []).push(fresh);
+    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); if (fresh) ctx.fsFresh.pop(); }
     return loop;
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
@@ -1577,6 +1582,17 @@ function statement(node, ctx) {
     const loop = ctx.loopStack?.[ctx.loopStack.length - 1];
     const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
     if (!loop || table.type.k !== "table" || !same(loop.table, table)) throw new Unsupported(`DELETE itab outside a LOOP over it: ${text}`);
+    // critic fix: LOOP ... TO n with a deletion was not measured (the TO
+    // bound would stay absolute while the index steps back)
+    if (loop.to !== null) throw new Unsupported(`DELETE itab inside LOOP ... TO: not measured: ${text}`);
+    // critic fix: what <fs> of LOOP ... ASSIGNING <fs> is after its row went
+    // was not measured (Go would see the next row, JS the deleted one), so
+    // any later use of it in the method is refused (fsCheck)
+    if (loop.fs) {
+      const fresh = ctx.fsFresh?.findLast((f) => f.name === loop.fs);
+      if (fresh) fresh.stale = true;
+      (ctx.fsGone ??= new Set()).add(loop.fs);
+    }
     return {s: "delete_current", table, token: loop.token};
   }
   if (isStmt(node, Statements.DeleteInternal)) {
@@ -1950,11 +1966,25 @@ function initialValue(node, ctx) {
  * pointers in Go), an attribute of the instance, a static attribute or a
  * constant. The IR says which; the backend spells it.
  */
+/**
+ * ultra/itab (critic fix): a field symbol whose row a DELETE itab (the
+ * current row) removed is not used again, since what it then points to was
+ * not measured. Textual order over-approximates control flow on purpose:
+ * inside a later LOOP ... ASSIGNING of the same name it is fresh again, and
+ * everywhere else after the DELETE (the rest of that body, after the loop)
+ * it is refused.
+ */
+function fsCheck(n, ctx) {
+  if (!ctx.fsGone?.has(n)) return;
+  const fresh = ctx.fsFresh?.findLast((f) => f.name === n);
+  if (!fresh || fresh.stale) throw new Unsupported(`${n} used after DELETE of its row inside the LOOP: not measured`);
+}
+
 function variable(name, ctx) {
   const n = upper(name);
   // me as a value: the object itself (in Go its most-derived self)
   if (n === "ME") return {e: "me", type: {k: "ref", name: ctx.className}};
-  if (ctx.fieldSymbols?.has(n)) return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
+  if (ctx.fieldSymbols?.has(n)) { fsCheck(n, ctx); return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)}; }
   const p = ctx.sig.params.find((x) => x.name === n);
   // ref: a pointer in Go; box: an EXPORTING / CHANGING box in JS (an
   // IMPORTING table or structure is a pointer in Go and the object itself in JS)
@@ -3035,7 +3065,7 @@ function groupedColumns(sel, tb, text) {
     const name = as ? upper(as.concatTokens()) : null;
     if (/\bDISTINCT\b/i.test(agg.concatTokens())) throw new Unsupported(`aggregate ${agg.concatTokens()}`);
     if (fn === "COUNT" && /^COUNT\s*\(\s*\*\s*\)$/i.test(agg.concatTokens())) {
-      cols.push({name: name ?? "COUNT_STAR", type: I, agg: {star: true}});
+      cols.push({name: name ?? "COUNT_STAR", type: I, agg: {star: true}, named: !!name});
       continue;
     }
     const n = agg.findFirstExpression(Expressions.SQLFieldName);
@@ -3044,7 +3074,7 @@ function groupedColumns(sel, tb, text) {
     const ct = tb.colType(col);
     if (fn === "SUM" && ct.k !== "i") throw new Unsupported(`SUM of a ${ct.k} column: not measured`);
     if (fn !== "SUM" && !["c", "i", "n", "d", "t", "string"].includes(ct.k)) throw new Unsupported(`${fn} of a ${ct.k} column`);
-    cols.push({name: name ?? `${fn}_${col}`, type: ct, agg: {fn, col}});
+    cols.push({name: name ?? `${fn}_${col}`, type: ct, agg: {fn, col}, named: !!name});
   }
   if (cols.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
   if (new Set(cols.map((c) => c.name)).size !== cols.length) throw new Unsupported(`SELECT: two results of one name: ${text}`);
@@ -3142,6 +3172,11 @@ function selectStatement(node, ctx, text) {
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
   if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
+  // ultra/itab (critic fix): an aggregate without AS has no name of its
+  // own (COUNT_STAR / MAX_ID are ours), so INTO CORRESPONDING FIELDS would
+  // drop it silently; what ABAP does there is not measured. By position it
+  // was measured (ZCL_GOGEN_T_GRPBY) and stays.
+  if (corresponding && cols.some((c) => c.agg && !c.named)) throw new Unsupported(`SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: ${text}`);
   const target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
   if (target.type.k !== "table") throw new Unsupported(`SELECT INTO TABLE of a ${target.type.k}`);
   const elementary = target.type.row.k !== "struct";
@@ -4321,6 +4356,7 @@ function compare(node, ctx) {
   if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {
     const nm = /<[\w]+>/.exec(text)?.[0];
     if (!nm || !ctx.fieldSymbols.has(nm)) throw new Unsupported(`IS ASSIGNED: ${text}`);
+    fsCheck(nm, ctx);
     const r = {c: "assigned", fs: {e: "fs", name: nm, type: ctx.fieldSymbols.get(nm)}};
     return /\bIS\s+NOT\s+ASSIGNED\b/.test(text) !== not ? {c: "not", x: r} : r;
   }

@@ -11,8 +11,11 @@ package abap
 // (cl_abap_typedescr=>typekind_*: I 8 F P C g N ...), charTarget says the
 // typed target is c or string, target is a generic target (P nil for none),
 // leaves the generic operands. 'I', '8', 'P' or 'F'; 0 for a combination the
-// static rule refuses (a character target of an integer result, an operand
-// of another kind), which the caller raises as NOT_COMPILED.
+// static rule refuses (an operand of another kind), which the caller raises
+// as NOT_COMPILED. A c or string target of an integer result (all operands
+// i / int8) is refused as well: by the static rule a character target makes
+// the calculation type p, but that was not measured on A4H, so it stays a
+// deliberate refusal until it is.
 func CalcKind(static string, charTarget bool, target Data, leaves ...Data) byte {
 	ks := []byte(static)
 	for _, d := range leaves {
@@ -47,9 +50,9 @@ func CalcKind(static string, charTarget bool, target Data, leaves ...Data) byte 
 		switch k {
 		case 'I', '8', 'F', 'P', 'C', 'g', 'N':
 		default:
-			if !has("F") {
-				return 0
-			}
+			// refused with or without an f operand, so the refusal is
+			// uniform (critic fix; DataF would refuse it later anyway)
+			return 0
 		}
 	}
 	switch {

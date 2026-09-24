@@ -1188,7 +1188,10 @@ export function CalcKind(statics, charTarget, target, leaves) {
     else return "";
   }
   const has = (set) => ks.some((k) => set.includes(k));
-  if (!has("F") && ks.some((k) => !"I8FPCgN".includes(k))) return "";
+  // a kind outside I 8 F P C g N is refused with or without an f operand,
+  // so the refusal is uniform (critic fix); a character target of an
+  // integer result is refused below until measured
+  if (ks.some((k) => !"I8FPCgN".includes(k))) return "";
   if (has("F")) return "F";
   if (has("PCgN")) return "P";
   if (charTarget) return "";

@@ -41,6 +41,10 @@ const EXPECT = {
   // NS / CN (negated CS / CO); DELETE itab inside LOOP AT itab deletes the
   // current row and the loop goes on with the next (two in a row here)
   ZCL_GOGEN_T_NSCN: "01011-3-3 3:T1Berlin;T2Aarhus;T5Bergen;",
+  // ultra/itab critic fixes: honest refusals of what A4H was not asked
+  ZCL_GOGEN_T_DELFS: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELFS=>STALE (zcl_gogen_t_delfs.clas.abap:42): <L> used after DELETE of its row inside the LOOP: not measured at zcl_gogen_t_delfs.clas.abap:42", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELFS=>STALE (zcl_gogen_t_delfs.clas.abap:42): <L> used after DELETE of its row inside the LOOP: not measured"},
+  ZCL_GOGEN_T_DELTO: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELTO=>RUN (zcl_gogen_t_delto.clas.abap:15): DELETE itab inside LOOP ... TO: not measured: DELETE lt. at zcl_gogen_t_delto.clas.abap:15", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELTO=>RUN (zcl_gogen_t_delto.clas.abap:15): DELETE itab inside LOOP ... TO: not measured: DELETE lt."},
+  ZCL_GOGEN_T_GRPCOR: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_GRPCOR=>RUN (zcl_gogen_t_grpcor.clas.abap:13): SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: SELECT val MAX( id ) FROM zgogen_t_dbw INTO CORRESPONDING FIELDS OF TABLE lt GROUP BY val. at zcl_gogen_t_grpcor.clas.abap:13", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_GRPCOR=>RUN (zcl_gogen_t_grpcor.clas.abap:13): SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: SELECT val MAX( id ) FROM zgogen_t_dbw INTO CORRESPONDING FIELDS OF TABLE lt GROUP BY val."},
   ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H
