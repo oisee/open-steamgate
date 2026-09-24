@@ -4116,7 +4116,7 @@
         }
       },
       {
-        "name": "INSERT a lower-case text: the prefix ends at once",
+        "name": "INSERT a lower-case text: the prefix ends at once (measured: 12ab gives 12000000, ANOMALY-2026-09-24-raw-columns)",
         "statement": {
           "write": "insert",
           "table": "R",

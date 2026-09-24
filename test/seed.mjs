@@ -51,6 +51,7 @@ function quote(value, pad, isDate = false, hex = 0) {
     return String(value);
   }
   let s = String(value ?? "");
+  // cut past 2n on purpose: a system holds n bytes and cuts a longer value
   if (hex > 0) s = s.toUpperCase().slice(0, hex).padEnd(hex, "0");
   if (isDate) {
     // ISO in the file, internal in the database; anything else is left as it

@@ -145,7 +145,7 @@ const R_AFTER = {
   "INSERT a short RAW: padded with 00": ["1|0000000A", "3|12000000"],
   "INSERT a long RAW: cut to 4 bytes": ["1|0000000A", "4|12345678"],
   "INSERT a text by the c -> x rule: the hex prefix, an odd count padded": ["1|0000000A", "5|ABC00000"],
-  "INSERT a lower-case text: the prefix ends at once": ["1|0000000A", "7|12000000"],
+  "INSERT a lower-case text: the prefix ends at once (measured: 12ab gives 12000000, ANOMALY-2026-09-24-raw-columns)": ["1|0000000A", "7|12000000"],
   "INSERT a text past F: no prefix, 4 zero bytes": ["1|0000000A", "8|00000000"],
   "INSERT an empty text: 4 zero bytes": ["1|0000000A", "9|00000000"],
   "MODIFY with the RAW left out writes 4 zero bytes": ["1|0000000A", "6|00000000"],
