@@ -510,6 +510,41 @@ func CS(a, b string) bool { return b == "" || strings.Contains(strings.ToUpper(a
 
 // IToString is the move of an i into a string, measured on A4H: the digits
 // and then the place of the sign, 42 is "42 " and -5 is "5-".
+// nFit is k places of digits: right-aligned, zeros in front, the last k
+// kept
+func nFit(d string, k int) string {
+	if len(d) > k {
+		return d[len(d)-k:]
+	}
+	return strings.Repeat("0", k-len(d)) + d
+}
+
+// IToN is an i moved into n LENGTH k: the sign dropped, the last k digits
+// kept (A4H 2026-09-24, ZCL_GOGEN_T_NUMC: 42 -> 0000000042, -5 -> 005,
+// 123456 -> 456 in n 3)
+func IToN(v int32, k int) string { return nFit(strconv.FormatInt(AbsI64(int64(v)), 10), k) }
+
+// CToN is a c or string moved into n LENGTH k: its digits only, right-
+// aligned, the last k kept (A4H: ' 12' -> 0000000012, 'a1b2 3' -> 123 and
+// '98765' -> 765 in n 3, a blank c -> 000)
+func CToN(s string, k int) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return nFit(b.String(), k)
+}
+
+// AbsI64 is |v| for an int64 that is not the minimum
+func AbsI64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func IToString(v int32) string {
 	if v < 0 {
 		return strconv.FormatInt(-int64(v), 10) + "-"

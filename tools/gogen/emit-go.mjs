@@ -989,7 +989,7 @@ function sqlArgs(args, ctx) {
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
 }
 
-const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}}`;
+const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`;
 
 // the ranges of a statement: where lower() put each marker, and the rows of
 // the ranges table as the Go values of their fields
@@ -1748,6 +1748,8 @@ function conv(e, ctx) {
     case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2s": return `abap.IToString(${x})`;
+    case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
+    case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     // packed numbers, go/abap packed.go

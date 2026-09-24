@@ -570,6 +570,11 @@ const EXPECT = {
   // over a table of strings with sep '&', none and ', ' (ultra/httpc; the
   // transpiler on Node answers the same)
   ZCL_GOGEN_T_SUBRCW: "subrc:7,0 empty:[] cat:[a&&b c][ab c][a, , b c]",
+  // ultra/demodata, A4H 2026-09-24 ($ZOSG_TMP_0462, ZCL_GOGEN_T_NUMC):
+  // NUMC moves -- i -> n drops the sign and keeps the last digits, c -> n
+  // keeps the digits only, n -> string keeps the zeros, n -> c 8 is its
+  // first eight, n by offset, in CONCATENATE, a template and a constant
+  ZCL_GOGEN_T_NUMC: "i:0000000042,005,456,00 c:9000000001,0000000012,123,765,000 ni:42  ns:[0000000042] nc:[00000000] off:123 ,000000123 cat:20250107,9000000017 tpl:000000017 const:9000000000 gt",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

@@ -260,6 +260,12 @@ export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
 // i into a string, as A4H moves it: 42 is "42 ", -5 is "5-"
 export const IToString = (v) => (v < 0 ? `${-v}-` : `${v} `);
+// NUMC moves, as go/abap/conv.go IToN / CToN (A4H, ZCL_GOGEN_T_NUMC): the
+// digits right-aligned in k places, zeros in front, the last k kept; an i
+// loses its sign, a c its other characters
+const nFit = (digits, k) => (digits.length > k ? digits.slice(digits.length - k) : "0".repeat(k - digits.length) + digits);
+export const IToN = (v, k) => nFit(String(Math.abs(v)), k);
+export const CToN = (s, k) => nFit(String(s).replace(/[^0-9]/g, ""), k);
 // code point of a character; the blank c, stored empty, is 32
 export const Uccp = (v) => (v.length === 0 ? 32 : v.codePointAt(0));
 // SPLIT ... INTO TABLE as A4H does it
