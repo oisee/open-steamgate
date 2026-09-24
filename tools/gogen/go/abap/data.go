@@ -30,6 +30,8 @@ type Type struct {
 	// Append adds an initial row to a standard table and returns it; nil
 	// for a hashed table, whose rows only a keyed INSERT may add
 	Append func(p any) any
+	// Delete removes row i (from 0) of a standard table; nil for a hashed one
+	Delete func(p any, i int)
 }
 
 type Comp struct {
@@ -111,6 +113,20 @@ func Lines(d Data) int {
 		panic(NotCompiled("lines( )", "of a generic value that is not a table"))
 	}
 	return d.T.Lines(d.P)
+}
+
+// DeleteIndex is DELETE <generic table> INDEX i: false (sy-subrc 4) when
+// there is no row i, as for a typed table.
+func DeleteIndex(d Data, i int32) bool {
+	n := Lines(d)
+	if d.T.Delete == nil {
+		panic(NotCompiled("DELETE ... INDEX", "of a generic table that is not a standard table"))
+	}
+	if i < 1 || int(i) > n {
+		return false
+	}
+	d.T.Delete(d.P, int(i-1))
+	return true
 }
 
 // Row is row i (from 0) of a generic table, bound to the row itself.

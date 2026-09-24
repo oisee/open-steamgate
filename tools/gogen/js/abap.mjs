@@ -662,6 +662,14 @@ export function Lines(d) {
   return d.get().length;
 }
 
+// DELETE <generic table> INDEX i: false (sy-subrc 4) without a row i
+export function DeleteIndex(d, i) {
+  const n = Lines(d);
+  if (i < 1 || i > n) return false;
+  d.get().splice(i - 1, 1);
+  return true;
+}
+
 // row i (from 0) of a generic table, bound to the row itself
 export function Row(d, i) {
   const a = d.get();

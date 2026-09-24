@@ -379,6 +379,14 @@ function stmt(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = abap.cell(${zero(st.type)}, ${desc(st.type)});`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = ${expr(st.x, ctx)}.t.kind;`];
+    // DELETE / READ TABLE ... INDEX on a generic table (ultra/sadl, the SADL DPC's paging)
+    case "delete_index_data":
+      return [`${t}s.sy.subrc = abap.DeleteIndex(${expr(st.table, ctx)}, ${expr(st.index, ctx)}) ? 0 : 4;`];
+    case "read_index_data": {
+      const n = `idx${ctx.loop++}`;
+      return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)}, tb${n} = ${expr(st.table, ctx)};`,
+        `${t}  if (${n} >= 1 && ${n} <= abap.Lines(tb${n})) { ${ident(st.fs)} = abap.Row(tb${n}, ${n} - 1); s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
+    }
     case "loop_data": {
       const n = ctx.loop++;
       return [`${t}{`, `${t}  const tab${n} = ${expr(st.table, ctx)};`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,

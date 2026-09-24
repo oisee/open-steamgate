@@ -1281,6 +1281,12 @@ function statement(node, ctx) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
     const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    // a generic table (ultra/sadl): READ TABLE <t> INDEX n ASSIGNING <generic> only
+    if (table.type.k === "data" && table.type.table) {
+      const fsName = upper(/ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1] ?? "");
+      if (!fsName || ctx.fieldSymbols.get(fsName)?.k !== "data") throw new Unsupported(`READ TABLE form over a generic table: ${text}`);
+      return {s: "read_index_data", table, index: convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I), fs: fsName};
+    }
     if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
@@ -1316,6 +1322,8 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // a generic table (ultra/sadl): the same rule through its descriptor
+    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
     return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};

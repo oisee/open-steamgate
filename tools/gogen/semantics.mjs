@@ -271,6 +271,10 @@ const EXPECT = {
   // table>: a new initial value each time, a reference kept apart from the
   // next CREATE (A4H 2026-09-24, $ZOSG_TMP_0041, the same code)
   ZCL_GOGEN_T_CRDATA: "t000:0 tt:1 fresh:0 kept:1 n0:0 n1:42 n2:0",
+  // DELETE / READ TABLE ... INDEX on a generic STANDARD TABLE (A4H
+  // 2026-09-24, $ZOSG_TMP_0041, the same code): as for a typed table, and a
+  // move into the generic table copies (orig keeps its four rows)
+  ZCL_GOGEN_T_GENIDX: "d1:0/3 d9:4/3 r2:0/2/3 r7:4 kept:30 2 30 orig:4",
   ZCL_GOGEN_T_X2S: "a:AB b:00 c:2C d:FF e:[0A0B] f:[DEADBEEF] g:[] h:[0A0] i:FF",
   // SMW0 through the host: WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING, A4H
   // 2026-09-23 ($ZOSG_TMP_0230) answered this string over an object of its
