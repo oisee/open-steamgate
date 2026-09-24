@@ -982,3 +982,49 @@ compares a `BIT-AND` result, `ZCL_ABAPGIT_ZLIB=>DECOMPRESS` and
 ... IN BYTE MODE`, `ZCL_ABAPGIT_HASH=>SHA1` needs i -> c and string ->
 xstring moves. None of these is small, so the chain stops there. The OSG
 build went from 1200 to 1184 statement stubs.
+
+## RAW columns and the zvdb workbench (ultra/zvdb, 2026-09-24)
+
+The zvdb pack (`ZVDB_100_SRV`, `/app/zvdb/`) keeps 8-1536-bit vectors in
+`ZVDB_100_VEC-QBITS RAW(192)` and ranks them in ABAP (`ZCL_VDB_100_ANYDB`:
+`BIT-XOR` of xstrings and a popcount). What it needed, each measured on A4H
+first (`$ZOSG_TMP_0300`, probes pinned in `semantics.mjs`):
+
+- **A RAW(n) column is n bytes.** Written as `x'12000000'` into a RAW(4) it
+  reads back into an xstring as four bytes, an initial one as four 00 bytes.
+  The store holds upper-case hex of 2n digits, in the transpiler's own
+  `NCHAR(2n)` column so the seed loads unchanged; `prepareStore` pads a
+  seeded value to 2n digits at open (the TABU rows of zvdb carry 192 digits
+  for 192 bytes). Read into `x LENGTH m`: cut or 00-padded
+  (`go/abap/dbraw.go`).
+- **WHERE**: an x of the same length (another length does not activate), an
+  xstring of exactly n bytes (another, empty too, is
+  CX_SY_OPEN_SQL_DATA_ERROR), a literal of exactly 2n upper-case hex digits
+  (in `WHERE (cond)` anything else is CX_SY_OPEN_SQL_DATA_ERROR); `=`, `<`
+  and `ORDER BY` in byte order, which is the order of the hex text. IN and
+  BETWEEN on RAW are refused (not measured).
+- **SET / INSERT / UPDATE / MODIFY**: any x or xstring cut or 00-padded to n
+  bytes, a string by the c -> x move rule. `tools/ir-writes.mjs` binds no
+  bytes yet, so the build-time check of a write stands a STRING in for the
+  column (`irCheck`); the Go runtime binds the real type (`dbwrite.go`).
+- c / string -> x and xstring: the longest prefix of upper-case hex digits,
+  an odd count padded with 0 (`CToX`); `SELECT SINGLE ... INTO (a, b)` and
+  `(@DATA(a), @DATA(b))` by position, a miss keeps the targets;
+  `CORRESPONDING #( s )`; `BIT-XOR` of xstrings, the shorter padded with
+  00; a superclass's constant named through a subclass (the SEGW DPCs'
+  `/IWBEP/CX_MGW_NOT_IMPL_EXC=>METHOD_NOT_IMPLEMENTED`, which is why an
+  unimplemented DPC method now answers 501 as on Node, not 500).
+
+Against OSG on Node (`test/run.mjs`, main 42755c5), request by request with
+the port normalised: the service document, `$metadata`, `$count`, both
+buckets with `$filter Bucket`, `$orderby Id`, `$top 2500` (1.2 and 1.3 MB),
+`substringof` on Payload, `$skip`, `search=`, a single vector and a missing
+one, the ANYDB search on both buckets, its three error answers, and 23 steps
+of create / update / delete with their error cases: byte for byte the same.
+The AMDP engine is CX_SY_DYN_CALL_ILLEGAL_FUNC on both (no SQLScript
+database), in a different error body. In Chromium the workbench lists 2002
+texts, and a search for the first gives the same 20 rows on both hosts.
+Stubs in the zvdb classes: 30 before, 2 after (COMMIT_WORK's generic
+`iv_rfc_dest` comparison and LOG_MESSAGE's `MESSAGE ... INTO`, SEGW
+boilerplate that only RFC-mapped operations call; zvdb has none); OSG as a
+whole 1184 -> 1025.
