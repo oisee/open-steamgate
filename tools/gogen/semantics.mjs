@@ -337,6 +337,12 @@ const EXPECT = {
   // of a typed reference a new empty table; a variable may be called value;
   // two references are equal when they point at one object
   ZCL_GOGEN_T_JSONGEN: "ins:0/1/2 new:0 value:3 lt:2 row2:7/x cd:0 ins:0/2/1 new:0 after:1 eq ne",
+  // LOOP ... USING KEY over zcl_x=>gt with APPEND ... TO gt in the body
+  // (ultra/json fix round): A4H visits the appended row (app:1/1,3/2,2/3,
+  // lines:3, see the class); the key order taken once would not, so both
+  // backends refuse the loop
+  ZCL_GOGEN_T_SECKEYQ: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SECKEYQ=>RUN (zcl_gogen_t_seckeyq.clas.abap:29): LOOP ... USING KEY whose body changes the table: APPEND ls2 TO gt. at zcl_gogen_t_seckeyq.clas.abap:29",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SECKEYQ=>RUN (zcl_gogen_t_seckeyq.clas.abap:29): LOOP ... USING KEY whose body changes the table: APPEND ls2 TO gt."},
   // LOOP AT ref->* ASSIGNING <typed>: A4H the same day; the JS emitter binds
   // no typed field symbol over generic rows (as ASSIGN ref->* TO <typed>)
   ZCL_GOGEN_T_DREFLOOP: {Go: "1:1/a,2:2/b,10,20,",

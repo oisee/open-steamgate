@@ -1285,15 +1285,26 @@ function structure(node, ctx) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
       if (/\b(FROM|TO)\b/i.test(text)) throw new Unsupported(`LOOP ... USING KEY with FROM / TO: ${text}`);
       // the order is taken once, before the first pass: a body that could
-      // change the table (a call, or a statement naming it) is refused
-      const name = upper(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+      // change the table (a call, or a statement naming it) is refused.
+      // Names are compared without their qualifier (ultra/json fix round,
+      // critic finding 1): LOOP AT zcl_x=>gt with APPEND ... TO gt in the
+      // body, or me->mt against mt, is the same table. A4H 2026-09-24
+      // ($ZOSG_TMP_0421) visits a row appended during the loop, where the
+      // key order taken once would not: refused, not silently wrong.
+      // Over-refusal (lo->mt of another instance) is accepted.
+      const bare = (t) => upper(t).replace(/\s+/g, "").replace(/\[.*$/, "").replace(/^.*(=>|->)/, "");
+      const name = bare(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+      const esc = name.replace(/[^\w]/g, "\\$&");
+      const hit = (t) => { const b = bare(t); return b === name || name.startsWith(`${b}-`) || b.startsWith(`${name}-`); };
       for (const s of node.findAllStatementNodes()) {
         if (s === st) continue;
         const stext = upper(s.concatTokens());
         if (s.findFirstExpression(Expressions.MethodCallChain) || s.findFirstExpression(Expressions.MethodCall) || isStmt(s, Statements.Call)) {
           throw new Unsupported(`LOOP ... USING KEY whose body calls a method: ${s.concatTokens()}`);
         }
-        if (/^(APPEND|INSERT|DELETE|MODIFY|SORT|CLEAR|REFRESH|FREE)\b/.test(stext) && new RegExp(`(^|[^\\w>-])${name.replace(/[^\w]/g, "\\$&")}([^\\w-]|$)`).test(stext)) {
+        const modifies = /^(APPEND|INSERT|DELETE|MODIFY|SORT|CLEAR|REFRESH|FREE)\b/.test(stext);
+        if ((modifies && new RegExp(`(^|[^\\w-]|->|=>)${esc}([^\\w-]|$)`).test(stext))
+            || s.findAllExpressions(Expressions.Target).some((t) => hit(t.concatTokens()))) {
           throw new Unsupported(`LOOP ... USING KEY whose body changes the table: ${s.concatTokens()}`);
         }
       }
