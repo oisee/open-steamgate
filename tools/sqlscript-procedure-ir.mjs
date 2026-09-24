@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, refTo, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
 export {childBodies};
@@ -35,6 +35,8 @@ export const assignScalar = (name, expr, source) =>
   ({stmt: "assign-scalar", name: upper(name), expr, source});
 export const assignRelation = (name, rel, source) =>
   ({stmt: "assign-relation", name: upper(name), rel, source});
+/** a write to a database table: a tools/ir-writes.mjs node */
+export const writeTable = (write, source) => ({stmt: "write", write, source});
 export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
 /** `FOR row AS cursor DO body END FOR`: the cursor's relation, its row
@@ -536,6 +538,28 @@ export async function runProcedure(program, {
   let dbParams = 0;
   // what each FOR loop relied on for its order, for the trace
   const orderTrace = [];
+  // table variables materialised before a write to the table they read;
+  // dropped when the call ends, however it ends
+  const snapshots = [];
+  const readsTable = (node, table) => {
+    if (node === null || typeof node !== "object") return false;
+    if (node.rel === "scan" && upper(node.table) === table) return true;
+    return Object.values(node).some((value) => (Array.isArray(value) ? value.some((one) => readsTable(one, table)) : readsTable(value, table)));
+  };
+  const snapshot = async (name, rel) => {
+    let compiled;
+    try { compiled = lower(rel, dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+    catch (error) {
+      if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+      throw error;
+    }
+    const schema = schemaOf(rel, inputCatalogue);
+    const handle = await client.defineRelation({name: `snap_${name}`, sql: compiled.sql, params: compiled.params,
+      materialise: "a table variable read before a write to its table"});
+    snapshots.push(handle);
+    dbStatements += 1;
+    return refTo(handle, schema);
+  };
   const ask = (compiled) => {
     dbStatements += 1;
     dbParams += compiled.params.length;
@@ -821,6 +845,36 @@ export async function runProcedure(program, {
           throw new UnsupportedSqlScript("non-deterministic relational execution is outside the P1a subset", statement);
         }
         relations.set(statement.name, value);
+      } else if (statement.stmt === "write") {
+        if (client?.native === undefined || typeof client.defineRelation !== "function") {
+          throw new UnsupportedSqlScript("a write to a table needs the database, and this run has none", statement);
+        }
+        if (deferRelation) throw new UnsupportedSqlScript("a write inside a nested CALL is not carried yet", statement);
+        const table = upper(statement.write.table);
+        // A table variable read before the write keeps the rows it read
+        // (measured on HXE: `lt = SELECT FROM t; DELETE FROM t;` and :lt
+        // still has them). This executor keeps a variable as a plan, so a
+        // plan that reads the table is materialised before the write runs.
+        for (const [name, rel] of [...relations]) {
+          if (readsTable(rel, table)) relations.set(name, await snapshot(name, rel));
+        }
+        const frozenRel = (rel) => freezeRelation(rel, relations, scalars, session);
+        const frozen = (expr) => freezeExpr(expr, scalars, frozenRel, session);
+        const w = {...statement.write};
+        if (w.from !== undefined) w.from = frozenRel(w.from);
+        if (w.pred !== undefined) w.pred = frozen(w.pred);
+        if (w.set !== undefined) w.set = w.set.map((one) => ({...one, expr: frozen(one.expr)}));
+        if (w.rows !== undefined) w.rows = w.rows.map((row) => row.map(frozen));
+        let compiled;
+        try { compiled = lower(w, dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+        catch (error) {
+          if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+          throw error;
+        }
+        step(statement);
+        dbStatements += 1;
+        dbParams += compiled.params.length;
+        await client.native({...compiled, expect: "none"});
       } else if (statement.stmt === "for-range") {
         // measured on HXE: the bounds are evaluated once, inclusive; from >
         // to runs no time; REVERSE counts down; the counter is the loop's
@@ -952,6 +1006,7 @@ export async function runProcedure(program, {
       }
     }
   };
+  try {
   await execute(program.body);
   if (program.outputType !== undefined) {
     const scalar = scalars.get(program.output);
@@ -1007,7 +1062,10 @@ export async function runProcedure(program, {
   if (single === undefined && deferRelation) {
     throw new UnsupportedSqlScript(`output relation ${program.output} of a nested CALL was not assigned on the path taken`);
   }
-  return single === undefined ? emptyAnswer(program.outputSchema) : finishOne(program.output, program.outputSchema, single);
+  return single === undefined ? emptyAnswer(program.outputSchema) : await finishOne(program.output, program.outputSchema, single);
+  } finally {
+    for (const handle of snapshots) await client.dropRelation(handle);
+  }
 
   async function finishOne(outputName, outputSchema, result) {
   // A native AMDP procedure converts the final SELECT into the declared ABAP

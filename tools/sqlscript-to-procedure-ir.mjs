@@ -11,7 +11,7 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
-  ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable, writeTable} from "./sqlscript-procedure-ir.mjs";
 import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
 
 const upper = (value) => String(value).toUpperCase();
@@ -470,7 +470,8 @@ export function compileProcedure(method, types, options = {}) {
   };
   const compileStatements = (container, allowArrayDeclarations = false, returnAllowed = false) => {
     const result = [];
-    const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation"]);
+    const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation",
+      "Delete", "Update", "Insert"]);
     for (const wrapper of container.children ?? []) {
       const node = wrapper.node === "Statement"
         ? (wrapper.children ?? []).find((one) => one.node !== "word")
@@ -579,6 +580,13 @@ export function compileProcedure(method, types, options = {}) {
         const initialNode = child(node, "Expr");
         result.push(declareScalar(name, type,
           initialNode === undefined ? undefined : bind(initialNode, "expression"), node));
+      } else if (["Delete", "Update", "Insert"].includes(node.node)) {
+        // a write to a database table: the method must not be READ-ONLY (HANA
+        // creates such a procedure READS SQL DATA, which cannot modify)
+        if (method?.readOnly === true) {
+          throw new UnsupportedSqlScript(`${node.node.toUpperCase()} in a READ-ONLY method, which HANA refuses`, node);
+        }
+        result.push(writeTable(bind(node, "write"), node));
       } else if (node.node === "Assignment") {
         const name = nameOf(child(node, "Name"));
         assertAssignable(name, node, "to assign");

@@ -26,6 +26,7 @@ import {tableFunctionCall, T, col, lit, param, sessionValue, bin, call, cast, no
   subquery, scan, alias, refTo, filter, project, join, union, except, order, limit, aggregate,
   varRef, schemaOf} from "../sqlscript-ir.mjs";
 import {isTableParameter, signatureScalars, isUnresolved} from "./scalar-types.mjs";
+import {insertRows, insertFrom, update, remove, bindValue as bindWriteValue} from "../ir-writes.mjs";
 
 /** Functions that compute over a group. A window function with an `OVER`
  *  clause is **not** one of these even when it is spelt the same -- it
@@ -1450,6 +1451,78 @@ export function toIr(tree, options = {}) {
   // NULL nothing typed is refused here exactly as at the end of a body
   if (options.fragment === "relation") return noUntyped({rel: typeNullsFrom(relation(tree), options.targetSchema)}).rel;
   if (options.fragment === "type") return typeFromName(tree);
+  if (options.fragment === "write") return noUntyped({write: write(tree)}).write;
+
+  /** DELETE, UPDATE, INSERT on a database table, as a tools/ir-writes.mjs node */
+  function write(node) {
+    const targetOf = (rel) => {
+      const aliasName = rel.rel === "alias" ? rel.name : undefined;
+      const base = rel.rel === "alias" ? rel.input : rel;
+      if (base?.rel !== "scan" || String(base.table).toUpperCase() === "DUMMY") {
+        throw new BindError("a write goes to a database table, not to a table variable, a query or a function", node);
+      }
+      if (catalogue[String(base.table).toUpperCase()] === undefined) {
+        throw new BindError(`${base.table} is not a table this method may write: it is not in the USING list`, node);
+      }
+      return {table: String(base.table).toUpperCase(), alias: aliasName};
+    };
+    const columnOf = (ref, schema, target) => {
+      const parts = kids(ref, "Name").map(nameOf);
+      const name = parts[parts.length - 1];
+      if (parts.length > 2 || (parts.length === 2 && ![target.table, target.alias].includes(parts[0]))) {
+        throw new BindError(`SET ${parts.join(".")}: a column of the table written`, ref);
+      }
+      if (schema[name] === undefined) throw new BindError(`${name} is not a column of ${target.table}`, ref);
+      return name;
+    };
+    if (node.node === "Delete") {
+      const target = targetOf(source(kid(node, "Source")));
+      const cond = kid(node, "Condition");
+      return remove(target.table, cond === undefined ? undefined : condition(cond), target.alias);
+    }
+    if (node.node === "Update") {
+      const target = targetOf(source(kid(node, "Source")));
+      const schema = catalogue[target.table];
+      const set = kids(node, "SetItem").map((item) => {
+        const name = columnOf(kid(item, "ColumnRef"), schema, target);
+        return {col: name, expr: giveType(expression(kid(item, "Expr")), schema[name])};
+      });
+      const cond = kid(node, "Condition");
+      return update(target.table, set, cond === undefined ? undefined : condition(cond), target.alias);
+    }
+    if (node.node === "Insert") {
+      if ((node.children ?? []).some((c) => c.node === "host")) {
+        throw new BindError("INSERT INTO a table variable is not carried yet", node);
+      }
+      const ref = kid(node, "ColumnRef");
+      const parts = kids(ref, "Name").map(nameOf);
+      if (parts.length !== 1) throw new BindError(`INSERT INTO ${parts.join(".")}: the catalogue knows tables by name only`, ref);
+      const table = parts[0];
+      const schema = catalogue[table];
+      if (schema === undefined) throw new BindError(`${table} is not a table this method may write: it is not in the USING list`, node);
+      const named = kids(node, "Name").map(nameOf);
+      const columns = named.length > 0 ? named : Object.keys(schema);
+      for (const c of columns) if (schema[c] === undefined) throw new BindError(`${c} is not a column of ${table}`, node);
+      const query = kid(node, "SetOperation");
+      if (query !== undefined) {
+        const rel = relation(query);
+        const width = Object.keys(schemaOf(rel, catalogue)).length;
+        if (width !== columns.length) throw new BindError(`INSERT INTO ${table}: the query has ${width} columns, the insert names ${columns.length}`, node);
+        return insertFrom(table, columns, rel);
+      }
+      const values = kids(node, "Expr").map(expression);
+      if (values.length !== columns.length) throw new BindError(`INSERT INTO ${table}: ${values.length} values for ${columns.length} columns`, node);
+      // a number literal written to a packed column goes as the decimal
+      // string of the column's type, as every packed value is bound
+      const row = values.map((value, i) => {
+        const type = schema[columns[i]];
+        if (type?.abap === "P" && value.node === "lit" && typeof value.value === "number") return bindWriteValue(value.value, type);
+        return giveType(value, type);
+      });
+      return insertRows(table, columns, [row]);
+    }
+    throw new BindError(`${node.node} is not a write`, node);
+  }
 
   // The body, statement by statement and **in order**, because an assignment
   // binds a name the statements after it may use. The grammar wraps each one

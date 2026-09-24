@@ -810,3 +810,29 @@ HANA keeps 1.555's three decimals in `0 - x`, and SQLite's rounding to the
 declared scale cuts it to 1.55 (DuckDB widens the type and keeps the value).
 The leading minus takes its operand's type and is right; the binary rule is
 an older defect, left for its own change with its own measurements.
+
+## Writes: DELETE, UPDATE, INSERT, UPSERT (measured on HXE 2.00.088, 2026-09-24)
+
+A table T (K INTEGER PRIMARY KEY, V NVARCHAR(10)) holding (1, a), (2, b):
+
+| body | HANA |
+| --- | --- |
+| `lt = SELECT k, v FROM t; DELETE FROM t;` then `COUNT(*)` of `:lt` | 2 -- a table variable keeps the rows it read |
+| `lt = SELECT ... WHERE k = 1; UPDATE t SET v = 'z' WHERE k = 1;` then `MAX(v)` of `:lt` | a -- the old value |
+| `INSERT INTO t VALUES (3, 'c');` then `COUNT(*)` of `t` | 3 |
+| `UPDATE t SET v = 'q';` | every row |
+| `DELETE FROM t AS a WHERE EXISTS (SELECT ... FROM :lt AS b WHERE a.k = b.k)` | the alias is the target's |
+| `INSERT INTO t VALUES (1, 'dup')` | `unique constraint violated` |
+| `UPSERT t VALUES (1, 'u') WITH PRIMARY KEY` | updates 1; a new key inserts |
+| `UPSERT t VALUES (1, 'x')` -- no WITH PRIMARY KEY, no WHERE | `unique constraint violated` |
+| `UPSERT t SELECT ...` | by the primary key: updates the keys there, inserts the others |
+| `UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2` | updates the rows the WHERE finds |
+| `UPSERT n VALUES ...` twice, N without a key | one row -- the second updated it |
+| `DELETE FROM t WHERE k > 1;` then `::ROWCOUNT` | 1 |
+
+The first two rows are the rule the portable runtime has to keep on purpose:
+it holds a table variable as a plan and runs the plan late, so a plan that
+reads the table written is materialised before the write
+(`tools/sqlscript-procedure-ir.mjs`, `snapshot`) and dropped when the call
+ends. UPSERT, `::ROWCOUNT`, `INSERT INTO :lt` and MERGE are not carried yet:
+UPSERT needs the table's key, which the catalogue does not hold.

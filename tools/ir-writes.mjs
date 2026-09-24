@@ -199,14 +199,17 @@ export const insertFrom = (table, columns, rel, {onDuplicate = "error"} = {}) =>
   if (rel?.rel === "project") checkWritten((rel.items ?? []).map((item) => item.expr));
   return {write: "insert", table: upper(table), columns: names(columns), from: rel, onDuplicate};
 };
-/** UPDATE dbtab SET ... WHERE ...; `pred` undefined updates every row */
-export const update = (table, set, pred) => {
+/** UPDATE dbtab [AS alias] SET ... WHERE ...; `pred` undefined updates every
+ *  row. The alias is the name a correlated subquery in the condition uses. */
+export const update = (table, set, pred, alias) => {
   if (set.length === 0) throw new WriteError("an UPDATE that sets nothing");
   checkWritten(set.map((one) => one.expr));
-  return {write: "update", table: upper(table), set: set.map((one) => ({col: upper(one.col), expr: one.expr})), ...(pred === undefined ? {} : {pred})};
+  return {write: "update", table: upper(table), ...(alias === undefined ? {} : {alias: upper(alias)}),
+    set: set.map((one) => ({col: upper(one.col), expr: one.expr})), ...(pred === undefined ? {} : {pred})};
 };
-/** DELETE FROM dbtab WHERE ...; `pred` undefined deletes every row */
-export const remove = (table, pred) => ({write: "delete", table: upper(table), ...(pred === undefined ? {} : {pred})});
+/** DELETE FROM dbtab [AS alias] WHERE ...; `pred` undefined deletes every row */
+export const remove = (table, pred, alias) => ({write: "delete", table: upper(table),
+  ...(alias === undefined ? {} : {alias: upper(alias)}), ...(pred === undefined ? {} : {pred})});
 /** MODIFY dbtab FROM wa / FROM TABLE itab: insert, or update the row of the same key */
 export const upsert = (table, columns, rows, key) => {
   const cols = names(columns);

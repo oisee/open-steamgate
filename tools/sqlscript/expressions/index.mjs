@@ -416,8 +416,40 @@ export class Return extends Expression {
 /** one thing a body may contain */
 export class Statement extends Expression {
   getRunnable() {
-    return altPrio(new Declare(), new Return(), new If(), new While(), new For(), new Block(), new ProcedureCall(), new Assignment(),
+    return altPrio(new Declare(), new Return(), new If(), new While(), new For(), new Block(), new ProcedureCall(),
+      new Delete(), new Update(), new Insert(), new Assignment(),
       seq(new SetOperation(), ";"));
+  }
+}
+
+/** `DELETE FROM t [[AS] a] [WHERE cond];` -- a write to a database table */
+export class Delete extends Expression {
+  getRunnable() {
+    return seq(str("DELETE"), str("FROM"), new Source(), opt(seq(str("WHERE"), new Condition())), ";");
+  }
+}
+
+/** `UPDATE t [[AS] a] SET c = e, ... [WHERE cond];` */
+export class Update extends Expression {
+  getRunnable() {
+    return seq(str("UPDATE"), new Source(), str("SET"), new SetItem(), star(seq(",", new SetItem())),
+      opt(seq(str("WHERE"), new Condition())), ";");
+  }
+}
+
+export class SetItem extends Expression {
+  getRunnable() {
+    return seq(new ColumnRef(), "=", new Expr());
+  }
+}
+
+/** `INSERT INTO t [(c, ...)] VALUES (e, ...);` and `INSERT INTO t [(c, ...)] SELECT ...;`
+ *  The target is a name, not a Source: `t (k, v)` would read as a call. */
+export class Insert extends Expression {
+  getRunnable() {
+    return seq(str("INSERT"), str("INTO"), altPrio(tok(TokenKind.host), new ColumnRef()),
+      opt(seq("(", new Name(), star(seq(",", new Name())), ")")),
+      altPrio(seq(str("VALUES"), "(", new Expr(), star(seq(",", new Expr())), ")"), new SetOperation()), ";");
   }
 }
 
