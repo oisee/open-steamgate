@@ -651,3 +651,35 @@ written in place, which is how the portable compiler carries it. One that
 declares (a scope of its own, shadowing, an EXIT HANDLER) was not
 measured and is refused; `BEGIN AUTONOMOUS TRANSACTION`, a handler and a
 label do not parse here, so they are refused before any rule applies.
+
+## The kernel's own wrapper around an AMDP body (read on A4H, 2026-09-24)
+
+Read off a generated procedure in the system's HANA catalog
+(`SYS.PROCEDURES.DEFINITION` of a documented SAP AMDP demo with a
+CHANGING table; which one is in the local notes), not guessed. This is the
+form of a procedure; the form the oracle writes for a function and a table
+function is ours and was not read off a system:
+
+- a CHANGING table parameter becomes two: `in "X__IN__"` and `out "X"`, and
+  the procedure starts with `"X" = select * from :X__IN__;`;
+- the method's body sits in a `begin ... end;` block of its own inside the
+  procedure;
+- a table named in USING is read through a generated view
+  (`...=>TABLE#covw`), and that view is a plain projection of the table's
+  columns (`select "MANDT", "CARRID", ... from "SCARR"`, read off
+  `SYS.VIEWS`): it fixes the column list, and it does **not** restrict the
+  client. An AMDP has no implicit client handling -- the body joins or
+  filters on MANDT itself, as the demo does (`s.mandt = c.mandt`) -- so a
+  portable run that scans the table itself reads the same rows;
+- parameter types are generated table types (`...=>P00000#ttyp`);
+- `$ABAP.type( x )` in a body is replaced by x's HANA type, and a full-line
+  ABAP comment (`*` in column one) is removed, before HANA sees it.
+
+`tools/amdp-corpus-oracle.mjs` creates every corpus body on the local HANA
+Express in that form (one schema, dropped and recreated per run), with an
+empty table of the system's shape for each table it reads, and sorts every
+refusal into whose fault it is. First full run: HANA accepts 204 of the 364
+working bodies; every body the portable compiler accepts, HANA accepts too;
+84 that HANA accepts stop in our parser, which is the grammar backlog, by
+construct. The report and the shapes read off the system stay under
+`.local/amdp-oracle/`.
