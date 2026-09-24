@@ -12,6 +12,7 @@ import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
   ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
+import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 
@@ -423,6 +424,18 @@ export function compileProcedure(method, types, options = {}) {
   const rowVariables = {};
   const cursors = new Map();
   const openCursors = new Set();
+  // a table variable assigned inside a loop -- WHILE or a numeric FOR -- has,
+  // on the next turn, whatever order the last turn gave it, or the one
+  // before the loop: unknown throughout, rather than a first turn's order
+  // claimed for all (the numeric FOR was missed: the #56 critic)
+  const assignedInLoop = (node) => {
+    for (const assignment of findAll(node, "Assignment")) {
+      const assigned = nameOf(child(assignment, "Name"));
+      if (relationOrders.has(assigned) || relationSchemas[assigned] !== undefined) {
+        relationOrders.set(assigned, {kind: "unknown", why: `:${assigned.toLowerCase()} is assigned inside a loop`});
+      }
+    }
+  };
   // the variables of the numeric FOR loops being compiled: one inside
   // another over the same variable is not measured, and is refused
   const openRanges = new Set();
@@ -637,6 +650,7 @@ export function compileProcedure(method, types, options = {}) {
         };
         const reverse = (range.children ?? []).some((one) => one.node === "word" && upper(one.value) === "REVERSE");
         if (openRanges.has(name)) throw new UnsupportedSqlScript(`a FOR over ${name} inside a FOR over ${name} is not measured`, node);
+        assignedInLoop(node);
         const from = bound(fromNode);
         const to = bound(toNode);
         openRanges.add(name);
@@ -669,6 +683,9 @@ export function compileProcedure(method, types, options = {}) {
           refusal.reason = "order";
           throw refusal;
         }
+        // a table assigned inside the loop is unknown to every cursor inside
+        // it, as in a WHILE (the #59 critic: only WHILE and a numeric FOR did)
+        assignedInLoop(node);
         rowVariables[rowName] = schema;
         for (const [column, type] of Object.entries(schema)) scalarTypes[`${rowName}.${column}`] = type;
         openCursors.add(cursorName);
@@ -685,20 +702,14 @@ export function compileProcedure(method, types, options = {}) {
           for (const v of Object.values(r)) (Array.isArray(v) ? v : [v]).forEach(collectVars);
         };
         collectVars(cursor);
+        // an assignment or a CALL's output, in any block of the body
         const assigns = (statements) => statements.some((one) => (one.stmt === "assign-relation" && readByCursor.has(upper(one.name)))
-          || assigns(one.body ?? []) || (one.branches ?? []).some((b) => assigns(b.body ?? [])) || assigns(one.otherwise ?? []));
+          || (one.stmt === "call-procedure" && readByCursor.has(upper(one.output)))
+          || childBodies(one).some(assigns));
         if (assigns(body)) throw new UnsupportedSqlScript(`FOR over cursor ${cursorName}: a table it reads is assigned inside the loop`, node);
         result.push(forCursor(rowName, cursorName, cursor, schema, body, order, node));
       } else if (node.node === "While") {
-        // a table variable assigned inside the loop has, on the next turn,
-        // whatever order the last turn gave it -- or the one before the loop:
-        // unknown throughout, rather than a first turn's order claimed for all
-        for (const assignment of findAll(node, "Assignment")) {
-          const assigned = nameOf(child(assignment, "Name"));
-          if (relationOrders.has(assigned) || relationSchemas[assigned] !== undefined) {
-            relationOrders.set(assigned, {kind: "unknown", why: `:${assigned.toLowerCase()} is assigned inside a loop`});
-          }
-        }
+        assignedInLoop(node);
         result.push(whileLoop(condition(child(node, "Condition")), compileStatements(node), node));
       } else if (node.node === "Block") {
         const mode = (node.children ?? []).filter((one) => one.node === "word")
@@ -840,20 +851,6 @@ export function compileProcedure(method, types, options = {}) {
     const outer = wrapperMode !== undefined && (wrapperMode.length === 0 || JSON.stringify(wrapperMode) === JSON.stringify(["SEQUENTIAL", "EXECUTION"]))
       ? {children: children(onlyNode, "Statement")} : tree;
     const body = compileStatements(outer, true, true);
-    const containsRelationStatement = (statements) => statements.some((statement) =>
-      statement.stmt === "assign-relation"
-        || statement.stmt === "call-procedure"
-        || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
-        || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
-          containsRelationStatement(branch.body ?? []))
-          || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
-    // a scalar output over relations is carried when something reads them
-    // into scalars -- a FOR loop over a cursor, or SELECT ... INTO
-    const readsRelations = (statements) => statements.some((statement) =>
-      statement.stmt === "for-cursor" || statement.stmt === "select-into"
-        || (statement.stmt === "while" && readsRelations(statement.body ?? []))
-        || (statement.stmt === "if" && ((statement.branches ?? []).some((branch) => readsRelations(branch.body ?? []))
-          || readsRelations(statement.otherwise ?? []))));
     if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body)) && !readsRelations(body)) {
       throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
     }
@@ -866,8 +863,7 @@ export function compileProcedure(method, types, options = {}) {
         for (const one of statements) {
           if (one.stmt === "assign-relation") assigned.add(one.name);
           if (one.stmt === "call-procedure") assigned.add(one.output);
-          if (one.stmt === "while") walk(one.body ?? []);
-          if (one.stmt === "if") { for (const branch of one.branches ?? []) walk(branch.body ?? []); walk(one.otherwise ?? []); }
+          childBodies(one).forEach(walk);
         }
       };
       walk(body);

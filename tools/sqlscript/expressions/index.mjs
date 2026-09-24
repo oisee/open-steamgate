@@ -473,7 +473,11 @@ export class For extends Expression {
 /** `IN [REVERSE] a .. b` of a numeric FOR loop (5 bodies of the backlog) */
 export class ForRange extends Expression {
   getRunnable() {
-    return seq(str("IN"), opt(str("REVERSE")), new Expr(), ".", ".", new Expr());
+    // REVERSE is tried as the keyword first: `REVERSE (1) .. 3` would
+    // otherwise read as a call of a function named REVERSE (HANA runs it
+    // as the keyword: 3, 2, 1 -- measured on HXE)
+    return altPrio(seq(str("IN"), str("REVERSE"), new Expr(), ".", ".", new Expr()),
+      seq(str("IN"), new Expr(), ".", ".", new Expr()));
   }
 }
 

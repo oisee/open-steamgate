@@ -753,6 +753,18 @@ called on HANA Express:
 | `FOR i IN 1 .. 2.7`, `FOR i IN 1 .. NULL` | does not compile: a non-integer bound |
 | a BIGINT loop variable over 2147483646 .. 2147483647 | accepted |
 | `v = :v \|\| i` -- the variable without its colon | accepted in a scalar statement |
+| `IF i > 1 THEN ...`, `WHILE i < 3 DO i = i + 1; ...` -- without the colon | accepted, the variable read |
+| `FOR i IN 1 .. 3 DO v = :v \|\| i; i = 5; END FOR` | 1, 2, 3 -- the next turn's value is the counter's, not `i + 1` |
+| `FOR i IN REVERSE 3 .. 1` | no turn |
+| after `FOR i IN 1 .. 3 DO i = 5; END FOR` | `:i` is 5 -- the last value given, by the body |
+| `FOR i IN 1 .. :nn`, `FOR i IN :nn .. 3`, `FOR i IN REVERSE 1 .. :nn`, `nn` NULL | no turn, no error; `:i` as it was |
+| `FOR i IN REVERSE (1) .. 3` | 3, 2, 1 -- REVERSE is the keyword before a parenthesis too |
+| an INTEGER variable, a BIGINT bound | accepted |
+| an INTEGER variable over `2147483646 .. 2147483648` | `numeric overflow` |
+| a BIGINT variable over `9007199254740991 .. 9007199254740993` | three turns |
+| `FOR i IN -2 .. 0` | -2, -1, 0 |
+
+(the second block of rows measured 2026-09-24 for the #56 critic's follow-up)
 
 What the portable runtime does beyond the table, none of it measured on
 HANA (the #56 critic):
@@ -761,7 +773,16 @@ HANA (the #56 critic):
   right after a dot never starts a number, so `.3` does not swallow the
   upper bound;
 - a BIGINT bound past 2^53 is refused, not counted: a JavaScript number
-  stops changing at `c + 1` there;
+  stops changing at `c + 1` there (HANA counts it, above);
+- an INTEGER variable past 2^31 is refused at the turn that overflows,
+  after the turns before it ran -- HANA raises `numeric overflow`, and when
+  it raises was not measured;
+- a leading minus (`-2 .. 0`, and `i = -2` anywhere) does not parse yet --
+  a gap of the expression grammar, not of the loop; `(0 - 2) .. 0` does;
+- a range with more turns than what is left of the step budget is refused
+  before its first turn, the turns counted by arithmetic;
+- a table assigned inside any loop -- WHILE, a numeric FOR, a FOR over a
+  cursor -- has no order a cursor inside the loop can rely on;
 - a FOR inside a FOR over the same variable is refused;
 - `BREAK` and `CONTINUE` are not carried (the body does not parse);
 - each turn costs a step, as a WHILE's does, and the body's statements cost

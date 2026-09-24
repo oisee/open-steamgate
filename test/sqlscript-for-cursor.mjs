@@ -195,7 +195,7 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
 describe("FOR over a range of integers, as HANA Express ran it", () => {
   const SIG1 = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
   const run = async (loop) => (await runProcedure(compileProcedure({...SIG1,
-    body: `DECLARE v NVARCHAR(200) = ''; DECLARE n INTEGER = 0; DECLARE i INTEGER = 0; ${loop} ev = :v;`}, new Map(), {}), {})).value;
+    body: `DECLARE v NVARCHAR(200) = ''; DECLARE n INTEGER = 0; DECLARE i INTEGER = 0; DECLARE nn INTEGER; DECLARE b BIGINT = 0; ${loop} ev = :v;`}, new Map(), {}), {})).value;
   for (const [name, loop, hana] of [
     ["inclusive", "FOR i IN 1 .. 3 DO v = :v || i || ','; END FOR;", "1,2,3,"],
     ["from above to: no turn", "FOR i IN 3 .. 1 DO v = :v || i || ','; END FOR;", ""],
@@ -207,6 +207,14 @@ describe("FOR over a range of integers, as HANA Express ran it", () => {
     ["bounds are expressions", "n = 2; FOR i IN :n - 1 .. :n * 2 DO v = :v || i || ','; END FOR;", "1,2,3,4,"],
     ["no turn leaves the variable as it was", "i = 7; FOR i IN 3 .. 1 DO v = :v || i; END FOR; v = :v || '|' || :i;", "|7"],
     ["after REVERSE, the last value visited", "FOR i IN REVERSE 1 .. 3 DO v = :v || i; END FOR; v = :v || '|' || :i;", "321|1"],
+    // measured on HXE for the #56 critic's follow-up
+    ["the counter is the loop's own, written after it is read", "FOR i IN 1 .. 3 DO v = :v || i || ','; i = 5; END FOR;", "1,2,3,"],
+    ["REVERSE from above to: no turn", "FOR i IN REVERSE 3 .. 1 DO v = :v || i; END FOR; v = :v || '|';", "|"],
+    ["the variable keeps what the body gave it", "FOR i IN 1 .. 3 DO i = 5; END FOR; v = :v || :i;", "5"],
+    ["a NULL bound: no turn, the variable as it was", "i = 7; FOR i IN 1 .. :nn DO v = :v || i; END FOR; v = :v || '|' || :i;", "|7"],
+    ["an INTEGER variable over BIGINT bounds", "b = 2; FOR i IN 1 .. :b DO v = :v || i; END FOR;", "12"],
+    ["a bare scalar in IF", "i = 2; IF i > 1 THEN v = 'yes'; ELSE v = 'no'; END IF;", "yes"],
+    ["a bare scalar in WHILE", "WHILE i < 3 DO i = i + 1; v = :v || i; END WHILE;", "123"],
   ]) it(`${name}: ${JSON.stringify(hana)}`, async () => expect(await run(loop)).to.equal(hana));
 
   it("refuses what HANA refuses: an undeclared variable, a non-integer bound", () => {
@@ -225,6 +233,33 @@ describe("FOR over a range of integers, as HANA Express ran it", () => {
     expect(lex("x = .5").filter((t) => t.kind !== "eof").map((t) => t.value)).to.deep.equal(["x", "=", ".5"]);
   });
 
+  it("refuses a range past the step budget before the first turn, and at once", async () => {
+    const started = Date.now();
+    let caught;
+    try { await run("FOR i IN 1 .. 1000000000 DO v = :v || 'x'; END FOR;"); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/step limit/);
+    expect(Date.now() - started).to.be.below(1000);
+  });
+
+  it("sees a numeric FOR where every other block is seen: an OUT assigned in it, a cursor read in it, a table assigned in it", async () => {
+    const types = new Map([["TT", {kind: "table", of: "TY"}],
+      ["TY", {kind: "structure", components: [{name: "n", abapType: "i"}, {name: "k", abapType: "i"}]}]]);
+    const tableOut = {name: "M", kind: "METHOD", parameters: [{name: "it", direction: "IN", abapType: "tt"}, {name: "et", direction: "OUT", abapType: "tt"}]};
+    // an OUT table assigned only inside the loop is assigned (a WHILE's was)
+    expect(() => compileProcedure({...tableOut, body: "DECLARE i INTEGER = 0; FOR i IN 1 .. 1 DO et = SELECT n, k FROM :it; END FOR;"}, types, {})).not.to.throw();
+    // a cursor read inside the loop reads relations into a scalar OUT
+    expect(() => compileProcedure({...SIG, body: `DECLARE v NVARCHAR(100) = ''; DECLARE i INTEGER = 0; DECLARE CURSOR c FOR SELECT n FROM :it;
+      FOR i IN 1 .. 1 DO FOR r AS c DO v = :v || r.n; END FOR; END FOR; ev = :v;`}, TYPES, {})).not.to.throw();
+    // a table assigned inside the loop has no order a cursor can rely on, as in a WHILE
+    let caught;
+    try {
+      compileProcedure({...SIG, body: `DECLARE v NVARCHAR(100) = ''; DECLARE i INTEGER = 0; DECLARE CURSOR c FOR SELECT n FROM :lt; lt = SELECT n FROM :it;
+        FOR i IN 1 .. 2 DO FOR r AS c DO v = :v || r.n; END FOR; lt = SELECT DISTINCT n FROM :it; END FOR; ev = :v;`}, TYPES, {});
+    } catch (error) { caught = error; }
+    expect(caught).to.include({reason: "order"});
+    expect(caught.message).to.match(/:lt is assigned inside a loop/);
+  });
+
   it("refuses what it does not count exactly or was not measured: a BIGINT bound past 2^53, a FOR inside a FOR over the same variable", async () => {
     const SIGB = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
     let caught;
@@ -234,5 +269,89 @@ describe("FOR over a range of integers, as HANA Express ran it", () => {
     expect(caught?.message).to.match(/past 2\^53/);
     expect(() => compileProcedure({...SIGB, body: "DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2 DO FOR i IN 1 .. 2 DO v = :v || i; END FOR; END FOR; ev = :v;"}, new Map(), {}))
       .to.throw(/a FOR over I inside a FOR over I is not measured/);
+  });
+});
+
+describe("childBodies: the blocks every walker descends into", () => {
+  it("a WHILE's, a numeric FOR's and a cursor FOR's body, an IF's branches and ELSE", async () => {
+    const {childBodies} = await import("../tools/sqlscript-blocks.mjs");
+    const a = [{stmt: "a"}], b = [{stmt: "b"}], c = [{stmt: "c"}];
+    expect(childBodies({stmt: "while", body: a})).to.deep.equal([a]);
+    expect(childBodies({stmt: "for-range", body: a})).to.deep.equal([a]);
+    expect(childBodies({stmt: "for-cursor", body: a})).to.deep.equal([a]);
+    expect(childBodies({stmt: "if", branches: [{body: a}, {body: b}], otherwise: c})).to.deep.equal([a, b, c]);
+    expect(childBodies({stmt: "assign-scalar"})).to.deep.equal([]);
+  });
+});
+
+describe("the #59 critic's round: every loop alike, and what HANA measured", () => {
+  const SIG1 = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
+  const run = async (loop, options = {}) => (await runProcedure(compileProcedure({...SIG1,
+    body: `DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; DECLARE n INTEGER = 0; DECLARE nn INTEGER; DECLARE b BIGINT = 0; ${loop} ev = :v;`}, new Map(), {}), options)).value;
+
+  it("measured on HXE: a NULL lower bound, and REVERSE with a NULL bound, run no turn", async () => {
+    expect(await run("i = 7; FOR i IN :nn .. 3 DO v = :v || i; END FOR; v = :v || '|' || :i;")).to.equal("|7");
+    expect(await run("i = 7; FOR i IN REVERSE 1 .. :nn DO v = :v || i; END FOR; v = :v || '|' || :i;")).to.equal("|7");
+  });
+
+  it("measured on HXE: REVERSE is the keyword before a parenthesis, `REVERSE (1) .. 3` is 3, 2, 1", async () => {
+    expect(await run("FOR i IN REVERSE (1) .. 3 DO v = :v || i; END FOR;")).to.equal("321");
+    expect(await run("n = 1; FOR i IN REVERSE (:n + 0) .. 3 DO v = :v || i; END FOR;")).to.equal("321");
+    expect(await run("FOR i IN (1) .. 3 DO v = :v || i; END FOR;")).to.equal("123");
+  });
+
+  it("differs from HANA where it says so: an INTEGER past 2^31 refused, no leading minus yet", async () => {
+    let caught;
+    try { await run("b = 2147483648; FOR i IN 2147483646 .. :b DO v = :v || 'x'; END FOR;"); } catch (error) { caught = error; }
+    expect(caught, "HANA raises numeric overflow; this refuses").to.be.an("error");
+    // HANA reads `-2 .. 0` as -2, -1, 0; this grammar has no leading minus yet
+    // -- when it has, this fails and the doc's line is to be revisited
+    expect(() => compileProcedure({...SIG1, body: "DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN -2 .. 0 DO v = :v || i; END FOR; ev = :v;"}, new Map(), {})).to.throw();
+    expect(await run("FOR i IN (0 - 2) .. 0 DO v = :v || i || ','; END FOR;")).to.equal("-2,-1,0,");
+  });
+
+  it("refuses a range that does not fit what is left of the step budget, before its first turn", async () => {
+    let caught;
+    try { await run("FOR i IN 1 .. 3 DO v = :v || 'x'; END FOR; FOR i IN 1 .. 8 DO v = :v || 'y'; END FOR;", {maxSteps: 16}); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/step limit/);
+  });
+
+  it("a table assigned inside a cursor FOR is unknown to a cursor inside it, and a CALL output counts as an assignment", () => {
+    let caught;
+    try {
+      compileProcedure({...SIG, body: `DECLARE v NVARCHAR(100) = ''; DECLARE CURSOR c FOR SELECT n, k FROM :it ORDER BY n, k; DECLARE CURSOR d FOR SELECT n FROM :lt; lt = SELECT n FROM :it;
+        FOR r AS c DO FOR s AS d DO v = :v || s.n; END FOR; lt = SELECT DISTINCT n FROM :it; END FOR; ev = :v;`}, TYPES, {});
+    } catch (error) { caught = error; }
+    expect(caught).to.include({reason: "order"});
+    expect(caught.message).to.match(/:lt is assigned inside a loop/);
+  });
+
+  it("a CALL writing the table a cursor reads, inside its loop, is refused as an assignment is", () => {
+    const tableOut = {name: "M", kind: "METHOD", parameters: [{name: "it", direction: "IN", abapType: "tt"}, {name: "et", direction: "OUT", abapType: "tt"}]};
+    expect(() => compileProcedure({...tableOut, body: `DECLARE CURSOR c FOR SELECT n, k FROM :et ORDER BY n, k; et = SELECT n, k FROM :it;
+      FOR r AS c DO CALL "P"(:it, et); END FOR;`}, TYPES, {})).to.throw(/a table it reads is assigned inside the loop/);
+  });
+
+  it("a scalar function whose only relational statement sits in a loop, with nothing reading it into a scalar, is refused -- by the compiler and by the runtime", async () => {
+    expect(() => compileProcedure({...SIG1, body: "DECLARE i INTEGER = 0; DECLARE v NVARCHAR(10) = ''; FOR i IN 1 .. 1 DO lt = SELECT 1 AS x FROM DUMMY; END FOR; ev = :v;"}, new Map(), {}))
+      .to.throw(/scalar-only portable functions cannot contain relational/);
+    const {procedure: proc, forRange: range, assignRelation: assign, declareScalar: declare} = await import("../tools/sqlscript-procedure-ir.mjs");
+    const program = proc({output: "RV", outputType: T.int, body: [
+      declare("I", T.int, lit(0, T.int)),
+      range("I", lit(1, T.int), lit(1, T.int), false, [assign("LT", project(scan("DUMMY"), [{as: "X", expr: lit(1, T.int)}]))]),
+    ]});
+    let caught;
+    try { await runProcedure(program, {}); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/scalar-only portable functions cannot contain relational/);
+  });
+
+  it("the destination finds a CALL inside a numeric FOR and inside a cursor FOR, to deploy it", async () => {
+    const {nestedProcedures} = await import("../tools/amdp-destination.mjs");
+    const call = (p) => ({stmt: "call-procedure", procedure: p, output: "X"});
+    const found = nestedProcedures({body: [
+      {stmt: "for-range", body: [call("A=>IN_RANGE")]},
+      {stmt: "for-cursor", body: [call("B=>IN_CURSOR")]},
+    ]});
+    expect([...found].sort()).to.deep.equal(["A=>IN_RANGE", "B=>IN_CURSOR"]);
   });
 });
