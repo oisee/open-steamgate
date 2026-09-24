@@ -163,6 +163,18 @@ CLASS zcl_osd_git DEFINITION PUBLIC CREATE PUBLIC.
       RAISING
         zcx_abapgit_exception .
 
+    " SEND and RECEIVE with their classic exceptions: an unreachable remote or
+    " an error status is an exception with the reason, not a runtime error
+    CLASS-METHODS exchange
+      IMPORTING
+        !ii_client     TYPE REF TO if_http_client
+        !iv_url        TYPE string
+        !iv_expect     TYPE string OPTIONAL
+      RETURNING
+        VALUE(rv_data) TYPE xstring
+      RAISING
+        zcx_abapgit_exception .
+
     CLASS-METHODS walk
       IMPORTING
         !iv_tree        TYPE string
@@ -513,15 +525,9 @@ CLASS zcl_osd_git IMPLEMENTATION.
         value = iv_accept ).
     ENDIF.
 
-    li_client->send( ).
-    li_client->receive( ).
-
-    IF li_client->response->get_header_field( '~status_code' ) CP '4*'
-        OR li_client->response->get_header_field( '~status_code' ) CP '5*'.
-      zcx_abapgit_exception=>raise( |{ iv_url } answered { li_client->response->get_header_field( '~status_code' ) }| ).
-    ENDIF.
-
-    rv_data = li_client->response->get_data( ).
+    rv_data = exchange( ii_client = li_client
+                        iv_url    = iv_url
+                        iv_expect = iv_accept ).
 
   ENDMETHOD.
 
@@ -540,10 +546,64 @@ CLASS zcl_osd_git IMPLEMENTATION.
     li_client->request->set_content_type( iv_type ).
     li_client->request->set_cdata( iv_body ).
 
-    li_client->send( ).
-    li_client->receive( ).
+    rv_data = exchange( ii_client = li_client
+                        iv_url    = iv_url ).
 
-    rv_data = li_client->response->get_data( ).
+  ENDMETHOD.
+
+
+  METHOD exchange.
+
+    DATA lv_message  TYPE string.
+    DATA lv_code     TYPE i.
+    DATA lv_location TYPE string.
+    DATA lv_type     TYPE string.
+
+    ii_client->send(
+      EXCEPTIONS
+        http_communication_failure = 1
+        http_invalid_state         = 2
+        http_processing_failed     = 3
+        http_invalid_timeout       = 4
+        OTHERS                     = 5 ).
+    IF sy-subrc = 0.
+      ii_client->receive(
+        EXCEPTIONS
+          http_communication_failure = 1
+          http_invalid_state         = 2
+          http_processing_failed     = 3
+          OTHERS                     = 4 ).
+    ENDIF.
+    IF sy-subrc <> 0.
+      ii_client->get_last_error( IMPORTING message = lv_message ).
+      ii_client->close( ).
+      zcx_abapgit_exception=>raise( |{ iv_url } could not be reached: { lv_message }| ).
+    ENDIF.
+
+    " get_status rather than the ~status_code field, which the local runtime
+    " does not fill (ANOMALY-2026-09-24-httpc-status-code-field)
+    " anything but a 2xx is refused: a redirect has no refs in it either, and
+    " its empty body would read as a repository with no branches
+    ii_client->response->get_status( IMPORTING code = lv_code ).
+    IF lv_code < 200 OR lv_code >= 300.
+      lv_location = ii_client->response->get_header_field( 'location' ).
+      ii_client->close( ).
+      IF lv_location IS INITIAL.
+        zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_code }| ).
+      ELSE.
+        zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_code }, to { lv_location }| ).
+      ENDIF.
+    ENDIF.
+
+    " a server that is not a smart git server answers 200 with something else
+    lv_type = ii_client->response->get_content_type( ).
+    IF iv_expect IS NOT INITIAL AND lv_type NP |{ iv_expect }*|.
+      ii_client->close( ).
+      zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_type }, not { iv_expect }| ).
+    ENDIF.
+
+    rv_data = ii_client->response->get_data( ).
+    ii_client->close( ).
 
   ENDMETHOD.
 

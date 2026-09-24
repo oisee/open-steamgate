@@ -106,6 +106,16 @@ describe("tools/osd-git: a clone, with no git binary in the path", function () {
         ]));
         return;
       }
+      if (request.url.startsWith("/moved/")) {
+        response.writeHead(301, {location: request.url.replace(/^\/moved\//, "/repo/")});
+        response.end();
+        return;
+      }
+      if (request.url.startsWith("/page/")) {
+        response.writeHead(200, {"content-type": "text/html"});
+        response.end("<html>sign in</html>");
+        return;
+      }
       if (request.url === "/repo/git-upload-pack") {
         const chunks = [];
         request.on("data", (chunk) => chunks.push(chunk));
@@ -167,6 +177,45 @@ describe("tools/osd-git: a clone, with no git binary in the path", function () {
     // does that so a caller has something to print
     expect(failed.code).to.equal("GIT_FAILED");
     expect(failed.message).to.contain("refs/heads/nope");
+  });
+
+  it("a remote that answers 404 is refused with its status, not read as refs", async () => {
+    // the status comes from get_status: the ~status_code field the class
+    // read before is empty on this runtime (ANOMALY-2026-09-24-httpc-status-code-field),
+    // so an error answer went on to be parsed as an advertisement
+    let failed;
+    try {
+      await new Git().refs(url.replace(/\/repo$/, "/norepo"));
+    } catch (error) {
+      failed = error;
+    }
+    expect(failed, "a 404 has to be an error").to.not.equal(undefined);
+    expect(failed.code).to.equal("GIT_FAILED");
+    expect(failed.message).to.contain("answered 404");
+  });
+
+  it("a remote that redirects is refused with the status and where it points, not read as refs", async () => {
+    let failed;
+    try {
+      await new Git().refs(url.replace(/\/repo$/, "/moved"));
+    } catch (error) {
+      failed = error;
+    }
+    expect(failed, "a 301 has to be an error").to.not.equal(undefined);
+    expect(failed.code).to.equal("GIT_FAILED");
+    expect(failed.message).to.contain("answered 301");
+    expect(failed.message).to.contain("/repo/info/refs");
+  });
+
+  it("a 200 that is not an advertisement is refused by its content type", async () => {
+    let failed;
+    try {
+      await new Git().refs(url.replace(/\/repo$/, "/page"));
+    } catch (error) {
+      failed = error;
+    }
+    expect(failed, "an HTML page has to be an error").to.not.equal(undefined);
+    expect(failed.message).to.contain("text/html");
   });
 
   it("inflate is the platform's, and says how much of the input it ate", async () => {

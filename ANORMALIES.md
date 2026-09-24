@@ -166,6 +166,100 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Regression-test location: upstream, `test/statements/delete_internal.ts` (six cases from the tables above), `test/database.ts` ("FOR ALL ENTRIES, duplicates removed comparing all fields, not the key"), `packages/transpiler/test/single_statements.ts` (`COMPARING ALL FIELDS` emits `allFields: true`); here `src/demo_data/zcl_osd_demo_taxi.clas.testclasses.abap` (`grain_and_marks`) uses the portable form, and no test pins the anomaly
 - Upstream version containing a fix: `unknown` (merged, not yet released)
 
+### ANOMALY-2026-09-24-httpc-body-latin1 -- open-abap-core's `CL_HTTP_CLIENT` sends the request body one byte per UTF-16 code unit; a system sends UTF-8, whatever charset the request names
+
+- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host of tools/gogen does what Node does, on purpose: Node is its oracle)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (still in 3f22182) (`src/http/cl_http_client.clas.abap`, `IF_HTTP_CLIENT~SEND`: `req.write(requestBody, "binary")` of `get_cdata( )`, `content-length` from `lv_body.get().length`)
+- Affected ABAP statement, runtime API or adapter: `IF_HTTP_CLIENT~SEND` with a body set by `request->set_cdata( )`; `request->get_cdata( )` after `request->set_data( )`
+- Minimal ABAP reproducer: `docs/probes/httpc/zcl_osd_t_httpc_body.testclasses.abap`, `zcl_osd_t_httpc_body2.testclasses.abap`, `zcl_osd_t_httpc_cs.testclasses.abap` (over `zcl_osd_t_httpc.clas.abap` and `z_osd_t_httpc_sleep.func.abap`); on Node, case `post-nonlatin` of `tools/gogen/httpc.mjs` (spike/go-backend)
+- Exact command used to run it: the probe classes as ABAP Unit on an ABAP 7.5x system; every request went to the system's own ICM on localhost, logged on with an assertion ticket. The text is `a`, e-acute, euro sign, `z`. Two receivers: `/sap/bc/abap/demo_post?input=X` (SAP's demo handler, answers the body's `&`-parts, but its `unescape_url` turns every non-ASCII character into `#`, so it only counts characters) and `/sap/bc/soap/rfc` calling a probe RFC module that answers the text the SOAP runtime decoded, as UTF-8 (`EV_HEX`). The SOAP receiver decodes UTF-8 whatever the header's charset says (calibrated by posting known UTF-8 bytes with `set_data` under `charset=iso-8859-1`: it answered the text unchanged)
+- Expected SAP behaviour, as measured: `set_cdata` puts UTF-8 into the entity and that is what goes out. `request->get_data( )` is `61C3A9E282AC7A` right after `set_cdata` and again after `SEND`, under `text/plain; charset=utf-8`, `text/plain`, no content type at all, `text/plain; charset=iso-8859-1` set before `set_cdata` and set after it, `text/plain;charset=ISO-8859-1`, `charset=windows-1252`, `charset=utf-16`, and the header set through `set_header_field( 'content-type' )` or `( 'Content-Type' )`. Through SOAP the four cases posted that way (charset utf-8, iso-8859-1 set before and after `set_cdata`, none) each arrived as the same four characters (`EV_HEX` = base64 `YcOp4oKseg==` = `61C3A9E282AC7A`) and the envelope parsed whole; windows-1252, utf-16 and the `set_header_field` spellings were seen as `get_data` bytes only. An emoji is `F09F9880` (`61F09F98807A`) and reaches demo_post as two characters, one surrogate pair. So the charset parameter of the request does **not** change the bytes on this system; the entry's first version ("in the entity's code page, UTF-8 by default") was half right. `set_data( '61E97A' )` (not UTF-8): `get_data` keeps the three bytes, nothing raises, and the receiver decoding UTF-8 got an empty body (the bytes on the wire were not captured). `request->get_cdata( )` after `set_data` decodes UTF-8 (`41C3A9` gives `Aé`) and gives an **empty string** for bytes that are not UTF-8 (`61E97A`, under no charset, utf-8 and iso-8859-1 alike), not an exception. `Content-Length` of the wire was not seen directly (no raw echo was available); the SOAP envelope arriving whole is consistent with a byte count
+- Actual open-abap behaviour: the euro sign goes out as the single byte `AC` (each UTF-16 code unit written as its low byte), `content-length` counts UTF-16 code units, so a non-Latin-1 body is both corrupted and cut short; a body `set_data` filled with bytes that are not UTF-8 raises `CX_SY_CONVERSION_CODEPAGE` in `get_cdata` before anything is sent
+- Impact on open-steamgate: any request body outside Latin-1 is corrupted on the wire; ZCL_OSD_GIT's upload-pack request is ASCII and is not affected
+- Smallest safe workaround: none in OSG (a caller can `set_data( cl_abap_codepage=>convert_to( text ) )` itself, which is what a system does anyway)
+- Upstream: [open-abap/open-abap-core#1268](https://github.com/open-abap/open-abap-core/pull/1268) (branch `httpc-body-utf8`), opened 2026-09-25, not merged: send the bytes of `request->get_data( )`, which are UTF-8 for a `set_cdata` body, with `content-length` from their length; `get_cdata` of bytes that are not UTF-8 answers empty
+- Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend (Node and Go compared, not against a system); the system side is the probe sources above
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-failure-dumps -- a failed `CL_HTTP_CLIENT` request is an uncatchable error on Node; a system returns from SEND and fails RECEIVE with a classic exception
+
+- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host dumps where Node does)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (still in 3f22182) (`IF_HTTP_CLIENT~SEND`: the promise rejects out of a `WRITE '@KERNEL'` line; `SEND` and `RECEIVE` end in `sy-subrc = 0. " workaround for classic exceptions`; `GET_LAST_ERROR` answers the status code and `'todo_open_abap'`)
+- Affected ABAP statement, runtime API or adapter: `client->send( EXCEPTIONS http_communication_failure = 1 http_invalid_state = 2 http_processing_failed = 3 ... )`, `client->receive( EXCEPTIONS ... )`, `client->get_last_error( )`
+- Minimal ABAP reproducer: `docs/probes/httpc/zcl_osd_t_httpc_misc.testclasses.abap`, methods `f1`-`f7`; on Node, cases `refused`, `tls-to-plain`, `bad-scheme`, `header-newline` of `tools/gogen/httpc.mjs` (spike/go-backend)
+- Exact command used to run it: the probe class as ABAP Unit on an ABAP 7.5x system, each call inside `TRY ... CATCH cx_root` as well as with `EXCEPTIONS`
+- Expected SAP behaviour, as measured: no class-based exception in any case (the `CATCH cx_root` never fired) and no dump. A connection failure is **not** reported by `SEND`, which returns sy-subrc 0; it is `RECEIVE` that ends with `http_communication_failure` (sy-subrc 1, message 00 001 carrying the text), and the response then holds a status and an HTML error page that the ICM made up as the client:
+
+| Case | SEND | RECEIVE | `get_last_error` code / message | `get_status` |
+| --- | ---: | ---: | --- | --- |
+| connection refused (`http://localhost:1/x`) | 0 | 1 | 411 / `Direct connect to localhost:1 failed: NIECONN_REFUSED(-10)` | 404 `Connection Refused` |
+| `https://` to a plain HTTP port | 0 | 1 | 407 / `SSL handshake with localhost:<port> failed: SSSLRC_NO_SSL_RESPONSE (-75)` + the SSL library's explanation | 500 `Native SSL Error` |
+| method `GE T` | 0 | 1 | 405 / `Error in HTTP Request: Invalid request line (9); request line: GE T /sap/bc/abap/demo_post HTTP/1.0` | 400 `Bad Request` |
+| header value with a newline | 1 (message SHTTP 864) | 2 (SHTTP 862) | after SEND 46 / `46 -Fehlercode beim Senden der Daten.` (the kernel's text, German on that system); after RECEIVE 1001 / `Invalid http state.` | 46, then 1001, empty reason |
+| `RECEIVE` without `SEND` | -- | 2 (SHTTP 862) | 1001 / `Invalid http state.` | -- |
+| `ftp://` URL | `create_by_url` sy-subrc 1 (`argument_not_found`), no client | | | |
+| header name with a space | 0 | 0 | sent as is, the server answered 200 | 200 |
+
+- Actual open-abap behaviour: a JavaScript error no `CATCH` takes (a dump) for the refused, TLS, scheme and header-newline cases; the classic exceptions are never raised and sy-subrc is 0 whenever the call returns; `get_last_error` has no message
+- Impact on open-steamgate: ZCL_OSD_GIT (and any client) cannot report an unreachable remote; the dialog step dumps; our own calls had no `EXCEPTIONS` either, so ZCL_OSD_GIT dumped on a system too and needed `EXCEPTIONS http_communication_failure = 1 ...` on its SEND/RECEIVE whatever upstream does. It has them now (`ZCL_OSD_GIT=>EXCHANGE`, PR #84): on a system an unreachable remote is a `zcx_abapgit_exception` with `get_last_error`'s text; here it still dumps until the upstream fix
+- Smallest safe workaround: `EXCEPTIONS` on every SEND and RECEIVE of our own ABAP (ZCL_OSD_GIT has them); it is right on a system and changes nothing here until the upstream fix
+- Upstream: [open-abap/open-abap-core#1271](https://github.com/open-abap/open-abap-core/pull/1271) (branch `httpc-communication-failure`), opened 2026-09-25, not merged: catch the request's error in `SEND`, keep it, and let `RECEIVE` set sy-subrc 1 with the message in `get_last_error`; the response status the ICM invents (404/500/400) is secondary. Classic exceptions from a method in the transpiler are the underlying gap the source comment names
+- Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-timeout-ignored -- `SEND`'s `TIMEOUT` is ignored by open-abap-core's `CL_HTTP_CLIENT`; a system ends RECEIVE after that many seconds
+
+- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host ignores it as well)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (still in 3f22182) (`IF_HTTP_CLIENT~SEND` never reads `timeout`; no timeout is set on the Node request or its agent)
+- Affected ABAP statement, runtime API or adapter: `client->send( timeout = n )`
+- Minimal ABAP reproducer: `docs/probes/httpc/zcl_osd_t_httpc_time.testclasses.abap`, methods `t0`-`t5`
+- Exact command used to run it: the probe class as ABAP Unit on an ABAP 7.5x system against the system's own `/sap/bc/soap/rfc` calling a probe RFC module that waits a given number of seconds (at most 10); elapsed time from `GET TIME STAMP` around `SEND` + `RECEIVE`
+- Expected SAP behaviour, as measured: `if_http_client=>co_timeout_default` is 0 and `co_timeout_infinite` is -1. `send( timeout = 2 )` against a 6-second answer: `SEND` sy-subrc 0, `RECEIVE` sy-subrc 1 (`http_communication_failure`, message 00 001) after 2054 ms, `get_last_error` 402 / `Connection to partner timed out after 2s.`, `get_status` 500 `Internal Server Error` with an ICM error page. `timeout = 10` against 3 s: answered in 3014 ms; `timeout = 0` (default) against 3 s: 3013 ms; `timeout = -1` against 2 s: 2014 ms. `timeout = -5`: `SEND` sy-subrc 4 (`http_invalid_timeout`, message SHTTP 865), nothing sent; the following `RECEIVE` sy-subrc 1 (SHTTP 864), `get_last_error` 17 / `Internal error. Handle for this http session was not found or is NULL.` The default timeout's own length (a profile value) was not measured
+- Actual open-abap behaviour: the request waits as long as the socket stays open, whatever `timeout` says; an invalid value is not refused
+- Impact on open-steamgate: a remote that hangs hangs the dialog step
+- Smallest safe workaround: none in OSG
+- Upstream: [open-abap/open-abap-core#1272](https://github.com/open-abap/open-abap-core/issues/1272), filed 2026-09-25 (the fix follows #1271): a positive `timeout` as a socket timeout on the request, surfacing at `RECEIVE` as `http_communication_failure` (together with the failure entry above); a value below -1 is `http_invalid_timeout` from `SEND`
+- Regression-test location: none here (no timing test); the system side is the probe source above
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-status-code-field -- the response of open-abap-core's `CL_HTTP_CLIENT` has no `~status_code` header field; a system's has it and five more pseudo fields
+
+- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host does the same)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (still in 3f22182) (`IF_HTTP_CLIENT~SEND` sets `mv_status` and the header fields Node returns; no pseudo field)
+- Affected ABAP statement, runtime API or adapter: `client->response->get_header_field( '~status_code' )`, `~status_reason`, `~server_protocol`, `get_header_fields( )`; `get_status( )` itself answers on both
+- Minimal ABAP reproducer: `docs/probes/httpc/zcl_osd_t_httpc_misc.testclasses.abap`, methods `s1`-`s4` (every probe call prints `get_status( )`, the three fields and the names of all `~` fields); on Node, case `status-500` of `tools/gogen/httpc.mjs` (spike/go-backend)
+- Exact command used to run it: the probe classes as ABAP Unit on an ABAP 7.5x system
+- Expected SAP behaviour, as measured: after a `RECEIVE` that got an answer, `get_header_fields( )` lists `~response_line`, `~server_protocol`, `~status_code`, `~status_reason`, `~remote_addr`, `~uri_scheme_expanded` (after the timeout only the first four), and `~status_code` / `~status_reason` agree with `get_status( )` in every case seen: 200 `OK`, 401 `Unauthorized`, 403 `Forbidden`, 404 `Not found`, 500 `Soap document processing failed`, and the ICM's own 404 `Connection Refused`, 500 `Native SSL Error`, 400 `Bad Request`, 500 `Internal Server Error` of the failure entries. `~server_protocol` was `HTTP/1.0` against this system's own ICM. When `SEND` itself failed (a header with a newline), the three fields are empty and `get_status( )` answers the last error code (46, then 1001) with an empty reason
+- Actual open-abap behaviour: `~status_code`, `~status_reason` and `~server_protocol` are empty and `get_header_fields( )` has no `~` field; `get_status( )` gives the code and an empty reason
+- Impact on open-steamgate: ZCL_OSD_GIT's 4xx/5xx check read `~status_code` and never fired, on Node or on OSGo, so an error answer was parsed as refs
+- Smallest safe workaround: read `get_status( )` instead, in the ABAP that is ours: ZCL_OSD_GIT does since PR #84 and refuses anything but a 2xx (a 3xx with its `Location`), and an advertisement that is not `application/x-git-upload-pack-advertisement` (`test/osd-git.mjs`: a 404, a 301 and an HTML page, each red before)
+- Upstream: [open-abap/open-abap-core#1269](https://github.com/open-abap/open-abap-core/pull/1269) (branch `httpc-status-fields`), opened 2026-09-25, not merged: set `~status_code`, `~status_reason` (Node's `statusMessage`) and `~server_protocol` on the response, and `get_status`'s reason
+- Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-post-url-query -- open-abap-core moves the query of a POST's URL into the body even when the program set a body; a system does that only for a POST without one
+
+- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24**; narrowed: the case `tools/gogen/httpc.mjs` records (`query-post`, a POST with no body) does on a system what it does here, except the content type (the Go host does the same as Node)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (still in 3f22182) (`CREATE_BY_URL` splits the query off into form fields with `cl_http_utility=>set_query`; `SEND` writes the form fields of a POST into the body with `set_cdata`, whether or not a body was set, and sets no content type for them)
+- Affected ABAP statement, runtime API or adapter: `cl_http_client=>create_by_url( 'http://h/p?a=1' )` followed by `request->set_method( 'POST' )`, a body or none, and `send( )`
+- Minimal ABAP reproducer: `docs/probes/httpc/zcl_osd_t_httpc_misc.testclasses.abap`, methods `q1`-`q4`, and `zcl_osd_t_httpc_time.testclasses.abap`, method `q5`; on Node, case `query-post` of `tools/gogen/httpc.mjs` (spike/go-backend)
+- Exact command used to run it: the probe classes as ABAP Unit on an ABAP 7.5x system against SAP's demo handler `/sap/bc/abap/demo_post`, which answers the request's `~QUERY_STRING` (without `input=X`) or the `&`-parts of its body (with `input=X`)
+- Expected SAP behaviour, as measured: `create_by_url` keeps only the path in `~request_uri` and leaves `~query_string` empty, as open-abap-core does; the query waits as form fields. At `SEND`:
+  - GET: the fields go onto the request line (`~QUERY_STRING` at the server `k=v&z=1`, order kept)
+  - POST with a body set by `set_cdata` (`BODY`, `b=1`): the fields go onto the request line (`k=v&z=1`) and the body is sent unchanged
+  - POST with no body: the fields become the body (`input=X&k=v` at the server), the request line has no query (`~QUERY_STRING` empty), and the request's `content-type` field reads `application/x-www-form-urlencoded` after `SEND` (while `request->get_data( )` stays empty)
+- Actual open-abap behaviour: a POST always gets the fields as its body, replacing a body set before (`set_cdata`), with no query on the request line and no `content-type`
+- Impact on open-steamgate: none found (git's smart HTTP puts `?service=` on GETs only)
+- Smallest safe workaround: none in OSG
+- Upstream: [open-abap/open-abap-core#1270](https://github.com/open-abap/open-abap-core/pull/1270) (branch `httpc-post-query`), opened 2026-09-25, not merged, narrow: when a POST has a body, put the fields on the URL as for GET; when it has none, keep writing them into the body and add `content-type: application/x-www-form-urlencoded` unless one is set. PUT and other methods were not measured
+- Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe sources above
+- Upstream version containing a fix: none yet
+
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 The same defect as ANOMALY-2026-09-19-posted-form-has-no-fields, found a day
