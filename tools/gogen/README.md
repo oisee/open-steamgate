@@ -702,3 +702,21 @@ E-first), the flight cube with and without `$select` aggregation, SE16 90
 of 106 pages. Every other difference is named in ANORMALIES
 (ANOMALY-2026-09-24-dynamic-where-pasted: a CHAR literal cut, `1 = 1`,
 the order of a read without ORDER BY, client 001) or is another subset gap.
+
+## Class events and the WEBGUI's sapevent (ultra/events, 2026-09-24)
+
+`EVENTS` / `CLASS-EVENTS`, `SET HANDLER` (instance and static handlers, FOR
+obj / FOR ALL INSTANCES, ACTIVATION) and `RAISE EVENT ... EXPORTING` with the
+implicit SENDER, in both emitters, as A4H answered them
+(`go/abap/events.go` has the rules; ZCL_GOGEN_T_EVENTS / _EVENTS2 pin
+them). A sender carries its own registrations (`abap.Events`, embedded once
+per class chain), so a registration FOR an object lives exactly as long as
+the sender, as on a system. Class constructors now run at the first use of
+their class (ZCL_GOGEN_T_CCTOR); before, none ran.
+
+`/sap/bc/gui/sap/its/webgui/sapevent/` (ZCL_OSD_SAPEVENT: abapGit's HTML
+viewer inside open-abap-gui's `cl_gui_html_viewer`, a click coming back as
+two RAISE EVENTs) answers byte for byte as on Node, the page and the clicks
+(`.local/ultra-wip/events/pw/clicks.mjs` in Playwright). A transaction of
+the Easy Access menu (ZOSD_NOTE) still stops where its session row is
+written: `tools/ir-writes.mjs` has no initial value for a P column.
