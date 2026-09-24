@@ -17,7 +17,13 @@
 * C_SYNTHETIC_MIN); a row below it -- the bundled sample, a real import by
 * tools/import-nyc-taxi.mjs, which numbers from 0001000001 -- is never
 * read into the comparison, changed or deleted. When real rows already
-* number at least the size asked for, nothing synthetic is added.
+* number at least the size asked for, the synthetic ones are removed and
+* none are added, so the cube does not count a month twice.
+*
+* Client: the SELECTs and the DELETE name no MANDT, as on a system, where
+* the logon client is implicit. The transpiler has no implicit client
+* (ANORMALIES and CLAUDE.md, "no implicit MANDT"), so there they see the
+* rows of every client; the rows written carry sy-mandt.
 *
 * Later tables go the same way: tools/gen-data.mjs's synthetic flight
 * facts (ZSTG_FLIGHTFACT, STG_DATA_SCALE) become a ZCL_OSD_DEMO_FLIGHT
@@ -78,6 +84,7 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     DATA lv_have TYPE i.
     DATA lv_n_new TYPE i.
     DATA lv_n_old TYPE i.
+    FIELD-SYMBOLS <ls_new> TYPE zcl_osd_demo_taxi=>ty_fact.
     lv_rows = iv_rows.
     IF lv_rows < 0.
       lv_rows = 0.
@@ -86,11 +93,19 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     ENDIF.
     SELECT COUNT(*) FROM zosd_taxifact INTO lv_real WHERE fact_id < zcl_osd_demo_taxi=>c_synthetic_min.
     IF lv_rows > 0 AND lv_real >= lv_rows.
-      rv_report = |taxi: { lv_real } real rows, at least the { lv_rows } asked for; no synthetic rows added|.
+      " real rows are enough: synthetic ones beside them would be counted
+      " twice by the cube, so any left from an earlier start go
+      DELETE FROM zosd_taxifact WHERE fact_id >= zcl_osd_demo_taxi=>c_synthetic_min.
+      lv_n_old = sy-dbcnt.
+      rv_report = |taxi: { lv_real } real rows, at least the { lv_rows } asked for; | &&
+        |no synthetic rows, { lv_n_old } removed|.
       RETURN.
     ENDIF.
     lt_new = zcl_osd_demo_taxi=>generate( iv_rows = lv_rows
                                          iv_seed = iv_seed ).
+    LOOP AT lt_new ASSIGNING <ls_new>.
+      <ls_new>-mandt = sy-mandt.
+    ENDLOOP.
     SELECT * FROM zosd_taxifact INTO TABLE lt_old WHERE fact_id >= zcl_osd_demo_taxi=>c_synthetic_min ORDER BY fact_id.
     lv_want = zcl_osd_demo_taxi=>checksum( lt_new ).
     lv_have = zcl_osd_demo_taxi=>checksum( lt_old ).
@@ -105,6 +120,9 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
       INSERT zosd_taxifact FROM TABLE lt_new.
     ENDIF.
     rv_report = |taxi: { lv_n_new } synthetic rows of seed { iv_seed } written (checksum { lv_want }), { lv_n_old } replaced|.
+    IF lv_n_new < lv_rows.
+      rv_report = rv_report && |; only { lv_n_new } of the { lv_rows } asked for fit the month's cells|.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

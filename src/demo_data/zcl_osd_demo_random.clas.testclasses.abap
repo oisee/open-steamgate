@@ -4,6 +4,7 @@ CLASS ltcl_random DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINA
   PRIVATE SECTION.
     METHODS park_miller FOR TESTING RAISING cx_static_check.
     METHODS same_seed_same_draws FOR TESTING RAISING cx_static_check.
+    METHODS empty_ranges FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 
@@ -42,6 +43,19 @@ CLASS ltcl_random IMPLEMENTATION.
       cl_abap_unit_assert=>assert_equals( act = lv_b exp = lv_a ).
       cl_abap_unit_assert=>assert_true( boolc( lv_a >= 0 AND lv_a < 1000 ) ).
     ENDDO.
+  ENDMETHOD.
+
+  METHOD empty_ranges.
+    DATA lo_a TYPE REF TO zcl_osd_demo_random.
+    DATA lt_none TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lv_k TYPE i.
+    CREATE OBJECT lo_a EXPORTING iv_seed = 0.
+    lv_k = lo_a->draw( 0 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_k exp = 0 ).
+    lv_k = lo_a->draw( -3 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_k exp = 0 ).
+    lv_k = lo_a->pick( lt_none ).
+    cl_abap_unit_assert=>assert_equals( act = lv_k exp = 0 ).
   ENDMETHOD.
 
 ENDCLASS.

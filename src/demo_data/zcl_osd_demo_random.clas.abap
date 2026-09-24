@@ -46,7 +46,8 @@ CLASS zcl_osd_demo_random DEFINITION PUBLIC FINAL CREATE PUBLIC.
         VALUE(rt_pick) TYPE ty_ints.
 
     " the state from a seed: 1 <= x <= m - 1, then three steps so that near
-    " seeds part ways
+    " seeds part ways. A negative seed s counts as -1 - s and the result
+    " modulo m - 1, so 0, -1 and 2147483646 are one seed; any i is valid
     METHODS constructor
       IMPORTING
         iv_seed TYPE i.
@@ -150,12 +151,21 @@ CLASS zcl_osd_demo_random IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD draw.
+    " no range, no draw: 0, and the state stays where it is
+    IF iv_n <= 0.
+      rv_k = 0.
+      RETURN.
+    ENDIF.
     rv_k = next( ) MOD iv_n.
   ENDMETHOD.
 
   METHOD pick.
     DATA lv_n TYPE i.
     lv_n = lines( it_pick ).
+    IF lv_n = 0.
+      rv_index = 0.
+      RETURN.
+    ENDIF.
     lv_n = draw( lv_n ) + 1.
     READ TABLE it_pick INTO rv_index INDEX lv_n.
   ENDMETHOD.

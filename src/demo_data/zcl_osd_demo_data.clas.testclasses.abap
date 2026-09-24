@@ -67,6 +67,17 @@ CLASS ltcl_demo_data IMPLEMENTATION.
     lv_report = zcl_osd_demo_data=>ensure_taxi( iv_rows = 1 ).
     cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*real rows*' ).
     cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 0 ).
+* an import after a start: synthetic rows of the last start beside real
+* rows that are enough now; the real rows alone remain
+    DELETE FROM zosd_taxifact WHERE fact_id = '8999999999'.
+    lv_before = real_rows( ).
+    zcl_osd_demo_data=>ensure_taxi( iv_rows = 50 iv_seed = 6 ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 50 ).
+    INSERT zosd_taxifact FROM ls_fact.
+    lv_report = zcl_osd_demo_data=>ensure_taxi( iv_rows = lv_before + 1 ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*50 removed*' ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = real_rows( ) exp = lv_before + 1 ).
     DELETE FROM zosd_taxifact WHERE fact_id = '8999999999'.
   ENDMETHOD.
 

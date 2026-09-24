@@ -29,7 +29,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
-### ANOMALY-2026-09-24-zone-reserved-word — A table field named ZONE activates here and not on a system
+### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE activates here and not on a system
 
 - Status: `workaround` (the table field is renamed in #67, the CDS element here; with both, ZC_OSD_TAXICUBE activates on A4H)
 - Discovery date: `2026-09-24`
@@ -45,7 +45,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/db-migrate.mjs` (the migration), `test/taxi-import.mjs` (an import into an old-shaped file); nothing checks names against the reserved list yet
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-09-24-delete-adjacent-default-key — DELETE ADJACENT DUPLICATES compares every component of a DEFAULT KEY table
+### ANOMALY-2026-09-24-delete-adjacent-default-key -- DELETE ADJACENT DUPLICATES compares every component of a DEFAULT KEY table
 
 - Status: `open`
 - Discovery date: `2026-09-24`

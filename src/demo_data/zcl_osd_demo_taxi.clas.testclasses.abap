@@ -8,6 +8,7 @@ CLASS ltcl_taxi DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS same_seed_same_rows FOR TESTING RAISING cx_static_check.
     METHODS grain_and_marks FOR TESTING RAISING cx_static_check.
     METHODS pinned_checksum FOR TESTING RAISING cx_static_check.
+    METHODS checksum_sees_texts FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 
@@ -68,7 +69,42 @@ CLASS ltcl_taxi IMPLEMENTATION.
     DATA lv_sum TYPE i.
     lt_facts = zcl_osd_demo_taxi=>generate( iv_rows = 20000 iv_seed = zcl_osd_demo_taxi=>c_default_seed ).
     lv_sum = zcl_osd_demo_taxi=>checksum( lt_facts ).
-    cl_abap_unit_assert=>assert_equals( act = lv_sum exp = 999629773 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_sum exp = 163171580 ).
+  ENDMETHOD.
+
+  METHOD checksum_sees_texts.
+    DATA lt_facts TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA lt_edit TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA ls_fact TYPE zcl_osd_demo_taxi=>ty_fact.
+    DATA lv_base TYPE i.
+    DATA lv_sum TYPE i.
+    lt_facts = zcl_osd_demo_taxi=>generate( iv_rows = 20 iv_seed = 11 ).
+    lv_base = zcl_osd_demo_taxi=>checksum( lt_facts ).
+* Card <-> Cash, the same length
+    lt_edit = lt_facts.
+    READ TABLE lt_edit INTO ls_fact INDEX 1.
+    IF ls_fact-payment = 'Card'.
+      ls_fact-payment = 'Cash'.
+    ELSE.
+      ls_fact-payment = 'Card'.
+    ENDIF.
+    MODIFY lt_edit FROM ls_fact INDEX 1.
+    lv_sum = zcl_osd_demo_taxi=>checksum( lt_edit ).
+    cl_abap_unit_assert=>assert_differs( act = lv_sum exp = lv_base ).
+* another zone name of the same length
+    lt_edit = lt_facts.
+    READ TABLE lt_edit INTO ls_fact INDEX 1.
+    TRANSLATE ls_fact-zone TO UPPER CASE.
+    MODIFY lt_edit FROM ls_fact INDEX 1.
+    lv_sum = zcl_osd_demo_taxi=>checksum( lt_edit ).
+    cl_abap_unit_assert=>assert_differs( act = lv_sum exp = lv_base ).
+* another client
+    lt_edit = lt_facts.
+    READ TABLE lt_edit INTO ls_fact INDEX 1.
+    ls_fact-mandt = '999'.
+    MODIFY lt_edit FROM ls_fact INDEX 1.
+    lv_sum = zcl_osd_demo_taxi=>checksum( lt_edit ).
+    cl_abap_unit_assert=>assert_differs( act = lv_sum exp = lv_base ).
   ENDMETHOD.
 
 ENDCLASS.

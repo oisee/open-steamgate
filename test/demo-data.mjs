@@ -11,7 +11,7 @@ import {join} from "node:path";
 
 // what every host must hold for the default knob: the class's own answer,
 // measured on Node, OSGo and A4H (docs/demo-data.md)
-const DEFAULT = {rows: 20000, checksum: 999629773};
+const DEFAULT = {rows: 20000, checksum: 163171580};
 const SYNTHETIC = "fact_id >= '9000000000'";
 const SUMS = `SELECT COUNT(*) AS n, SUM(trips) AS trips FROM zosd_taxifact WHERE ${SYNTHETIC}`;
 

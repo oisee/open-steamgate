@@ -39,24 +39,42 @@ written into `web/generated/seed.mjs`.
 
 ## What is synthetic
 
-Synthetic rows are `FACT_ID` 9000000001 and up (`ZCL_OSD_DEMO_TAXI=>
-C_SYNTHETIC_MIN`). `tools/import-nyc-taxi.mjs` numbers real facts from
-0001000001, and the four bundled sample rows also sit in that range. A real
-import would need 8.99 billion groups to reach the synthetic range.
-`ENSURE_TAXI` never reads, changes or deletes a row below the range. When
-real rows already number at least the size asked for (an imported month),
-it adds nothing. The import itself replaces the client's rows, synthetic ones
-included, and the next start then finds the real month and leaves it alone.
+Synthetic rows are `FACT_ID` 9000000001 and up. The bound
+`ZCL_OSD_DEMO_TAXI=>C_SYNTHETIC_MIN` is 9000000000, which is never generated
+itself, and `>=` it is the synthetic range. `tools/import-nyc-taxi.mjs`
+numbers real facts from 0001000001, and the four bundled sample rows also
+sit in that range. A real import would need 8.99 billion groups to reach the
+synthetic range. `ENSURE_TAXI` never changes or deletes a row below the
+range. When real rows already number at least the size asked for (an
+imported month), it adds none and removes any synthetic rows left from an
+earlier start, so the cube never counts a month twice.
+
+No `MANDT` is named in the SELECTs or the DELETE, as on a system, where the
+logon client is implicit. The transpiler has no implicit client (CLAUDE.md,
+"no implicit MANDT"), so on Node they see every client's rows. The rows
+written carry `sy-mandt`.
 
 In the cube: `$filter=FACTID ge '9000000000'` is the synthetic part and
 `FACTID lt '9000000000'` the rest.
 
 ## Idempotent
 
-`ENSURE_TAXI` makes the rows it wants, then compares them with the synthetic
-rows present by number and by `CHECKSUM`. It writes only when they differ.
-The same size and seed give the same table, and a second start writes
-nothing. Another size or seed replaces the synthetic rows.
+`ENSURE_TAXI` makes the rows it wants, puts the logon client in them, then
+compares them with the synthetic rows present by number and by `CHECKSUM`.
+It writes only when they differ. The same size and seed give the same table,
+and a second start writes nothing. Another size or seed replaces the
+synthetic rows. Should a month ever run out of cells (not below
+`C_MAX_ROWS`), the report says how many rows fit.
+
+`CHECKSUM` folds every column of a row: the key, the client, day, hour,
+trips, cents of fare and tip, hundredths of a mile, the zone as its
+LocationID (0 for a text not in the lookup) and the payment as its number
+(0 for any other text). So Card to Cash, or one zone name for another of the
+same length, is a change, and no character codes are needed, which would
+differ between hosts. `GENERATE` leaves the client empty, so its checksum is
+the same on every system (163171580 for the default size and seed). The
+checksum in `ENSURE_TAXI`'s report includes the logon client, and on Node,
+client 123, it is 2056928574.
 
 ## Deterministic, the same on every runtime
 
@@ -88,7 +106,7 @@ followed by `DESCRIBE( first = 5 )`:
 9000000003 20250101 0 Manhattan/Upper West Side South/Card 8 83.76 14.23 12.24;
 9000000004 20250101 0 Manhattan/Chinatown/Card 1 12.12 2.90 1.76;
 9000000005 20250101 0 Manhattan/Central Park/Card 2 16.02 2.88 2.38;
-rows 20000 trips 78715 fare 1264137.29 tip 178368.34 distance 215645.95 checksum 999629773
+rows 20000 trips 78715 fare 1264137.29 tip 178368.34 distance 215645.95 checksum 163171580
 ```
 
 This result was identical, byte for byte, on four runtimes:
@@ -98,7 +116,7 @@ This result was identical, byte for byte, on four runtimes:
 - Node: the transpiler;
 - OSGo: gogen's Go emitter and its JS emitter (`tools/gogen/semantics.mjs`,
   `ZCL_GOGEN_T_DEMODATA`);
-- the browser preview: sql.js in Chromium, the same checksum in its log.
+- the browser preview: sql.js in Chromium, the same report (client 123) in its log.
 
 The ABAP Unit test `ZCL_OSD_DEMO_TAXI` / `pinned_checksum` passes on A4H and
 on Node. The cube's 555 groups by borough, payment and hour are equal on Node
