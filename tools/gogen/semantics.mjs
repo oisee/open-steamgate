@@ -591,6 +591,9 @@ const EXPECT = {
   // odd padded with 0; CORRESPONDING #( ) from initial by name; BIT-XOR of
   // xstrings, the shorter padded with 00 (ultra/zvdb, A4H, same code)
   ZCL_GOGEN_T_XCONV: "x4:AB000000;00000000;A0000000;AB000000;AB000000;12345678;00000000;00000000;ABC00000;00000000; xs:1=AB;0=;1=A0;1=AB;1=AB;5=1234567890;0=;0=;2=ABC0;1=00; c:AB000000/1=AB cor:[xy]2/[AB]/7/[];[xy]/[AB]/7/[];[xy]/[AB]/7/[] xor:2=F00F/2=F00F/2=F00F conv:ABCDEF/CD/205/2",
+  // a superclass's constant named through the subclass (ultra/zvdb, A4H
+  // 2026-09-24, $ZOSG_TMP_0300, the same code)
+  ZCL_GOGEN_T_INHCONST: "SUP/ZMSG/042/SUP",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

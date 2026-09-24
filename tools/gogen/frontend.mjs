@@ -3133,6 +3133,19 @@ function resolveStatic(owner, attr, ctx) {
     if (go === undefined) throw new Unsupported(`constant ${owner}=>${attr} is outside the subset`);
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
+  // a constant a superclass declares, named through the subclass
+  // (/IWBEP/CX_MGW_NOT_IMPL_EXC=>METHOD_NOT_IMPLEMENTED, declared by
+  // /IWBEP/CX_MGW_TECH_EXCEPTION): the same constant; a constant is fixed
+  // at compile time, so no class constructor runs for it (ultra/zvdb)
+  if (clas !== undefined && intf === undefined) {
+    for (const anc of ancestors(ctx.reg, owner)) {
+      const ac = clasDef(ctx.reg, anc)?.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
+      if (ac === undefined) continue;
+      const go = registerConst(ctx.program, `${anc}~${attr}`, ac, anc);
+      if (go === undefined) throw new Unsupported(`constant ${anc}=>${attr} is outside the subset`);
+      return {e: "const", go, type: ctx.program.consts.get(go).type};
+    }
+  }
   if (owner === ctx.className) {
     const a = findAttribute(ctx, attr);
     if (a) return a;
