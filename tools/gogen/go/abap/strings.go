@@ -433,3 +433,69 @@ func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
 	}
 	return b.String()
 }
+
+// ConcatFit puts the result of CONCATENATE into its target (ultra/events,
+// A4H ZCL_GOGEN_T_WGUI1): a string takes it whole (sy-subrc 0), a c of n
+// characters takes the first n and sy-subrc is 4 when something was cut;
+// n < 0 is a string. A c is held without trailing blanks.
+func ConcatFit(v string, n int) (string, int32) {
+	if n < 0 {
+		return v, 0
+	}
+	r := []rune(v)
+	var rc int32
+	if len(r) > n {
+		r, rc = r[:n], 4
+	}
+	return strings.TrimRight(string(r), " "), rc
+}
+
+// FindAllCount is FIND ALL OCCURRENCES OF [REGEX] p IN s MATCH COUNT: the
+// matches, not overlapping, left to right (the order REPLACE ALL takes
+// them). An empty pattern or an empty match is not measured and refused.
+func FindAllCount(s, p string, regex, icase bool) int32 {
+	if p == "" {
+		panic(NotCompiled("FIND ALL OCCURRENCES", "an empty pattern is not measured"))
+	}
+	var ms [][]int
+	if regex {
+		ms = rxAll(s, p, icase, false)
+	} else {
+		ms = plainAll(s, p, icase, false)
+	}
+	for _, m := range ms {
+		if m[1] == m[0] {
+			panic(NotCompiled("FIND ALL OCCURRENCES", "a regex that matches the empty string is not measured"))
+		}
+	}
+	return int32(len(ms))
+}
+
+// EscapeHTMLAttr is escape( val = v format = cl_abap_format=>e_html_attr )
+// (A4H ZCL_GOGEN_T_WGUI1): & < > " ' as entities, nothing else.
+func EscapeHTMLAttr(v string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;").Replace(v)
+}
+
+// SubstringBefore / SubstringAfter are substring_before / _after( val sub )
+// (ultra/events, A4H ZCL_GOGEN_T_WGUI2): around the first occurrence of sub,
+// empty when there is none; an empty sub is not measured and refused.
+func SubstringBefore(v, sub string) string {
+	if sub == "" {
+		panic(NotCompiled("substring_before( )", "an empty sub is not measured"))
+	}
+	if i := strings.Index(v, sub); i >= 0 {
+		return v[:i]
+	}
+	return ""
+}
+
+func SubstringAfter(v, sub string) string {
+	if sub == "" {
+		panic(NotCompiled("substring_after( )", "an empty sub is not measured"))
+	}
+	if i := strings.Index(v, sub); i >= 0 {
+		return v[i+len(sub):]
+	}
+	return ""
+}

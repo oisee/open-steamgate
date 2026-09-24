@@ -674,6 +674,7 @@ export function DeleteIndex(d, i) {
 // APPEND v TO a generic standard table: a new initial row, v moved into it;
 // the new row's index (sy-tabix), as go/abap AppendData
 export function AppendData(t, v) {
+  if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
@@ -1177,6 +1178,64 @@ export function uniqueKeyCheck(tb, dup, key) {
   if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key}: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not`);
 }
 
+// ---------------------------------------------------------------- class events
+// ultra/events: SET HANDLER / RAISE EVENT, line for line go/abap/events.go
+// (the rules measured on A4H are written there). A sender keeps its
+// registrations in a property of its own, $ev, so they live as long as it.
+function handlerTableSet(t, obj, method, filter, fn, on) {
+  let free = -1;
+  for (let i = 0; i < t.length; i += 1) {
+    const e = t[i];
+    if (e === null) { if (free < 0) free = i; continue; }
+    if (e.obj === obj && e.method === method) {
+      if (!on) { e.dead = true; t[i] = null; }
+      return;
+    }
+  }
+  if (!on) return;
+  const e = {obj, method, filter, fn, dead: false};
+  if (free >= 0) t[free] = e; else t.push(e);
+}
+const allHandlers = new Map();
+const staticHandlers = new Map();
+export function activation(v) {
+  if (v === "X") return true;
+  if (v === "" || v === " ") return false;
+  throw new AbapError("NOT_COMPILED", "SET HANDLER: ACTIVATION with a value that is neither 'X' nor blank is not measured");
+}
+export function setHandler(s, event, forObj, all, isStatic, obj, method, filter, fn, on) {
+  let m;
+  if (isStatic || all) {
+    m = isStatic ? staticHandlers : allHandlers;
+  } else {
+    if (forObj === null || forObj === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "SET HANDLER ... FOR an initial reference");
+    if (!Object.prototype.hasOwnProperty.call(forObj, "$ev")) Object.defineProperty(forObj, "$ev", {value: new Map(), enumerable: false});
+    m = forObj.$ev;
+  }
+  if (!m.has(event)) m.set(event, []);
+  handlerTableSet(m.get(event), obj, method, filter, fn, on);
+}
+// the handler object of SET HANDLER h->m: an initial one is a runtime abortion
+export function boundHandler(o) {
+  if (o === null || o === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "SET HANDLER with an initial handler reference");
+  return o;
+}
+export function raiseEvent(s, event, sender, isStatic, args) {
+  const lists = [];
+  if (isStatic) lists.push([...(staticHandlers.get(event) ?? [])]);
+  else {
+    if (sender?.$ev) lists.push([...(sender.$ev.get(event) ?? [])]);
+    lists.push([...(allHandlers.get(event) ?? [])]);
+  }
+  for (const l of lists) {
+    for (const e of l) {
+      if (e === null || e.dead) continue;
+      if (e.filter && !e.filter(sender)) continue;
+      e.fn(s, sender, args());
+    }
+  }
+}
+
 // int8 (ultra/itab): BigInt values, overflow checked as go/abap conv.go
 const MAX8 = 9223372036854775807n;
 const MIN8 = -9223372036854775808n;
@@ -1266,4 +1325,65 @@ export function DataF(d) {
     case "C": case "g": case "N": return ParseF(v);
     default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an f`);
   }
+}
+
+// ultra/events: CONCATENATE into its target, FIND ALL ... MATCH COUNT,
+// escape( ) for an HTML attribute: go/abap strings.go
+export function ConcatFit(v, n) {
+  if (n < 0) return [v, 0];
+  const r = [...v];
+  const rc = r.length > n ? 4 : 0;
+  return [r.slice(0, n).join("").replace(/ +$/, ""), rc];
+}
+export function FindAllCount(s, p, regex, icase) {
+  if (p === "") throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: an empty pattern is not measured");
+  const ms = regex ? rxAll(s, p, icase, false) : plainAll(s, p, icase, false);
+  if (ms.some((m) => m[0] === "")) throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: a regex that matches the empty string is not measured");
+  return ms.length;
+}
+export const EscapeHTMLAttr = (v) => v.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+
+// ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <fs>, and
+// describe_by_data( )->length: go/abap data.go
+export function AppendInitialData(t) {
+  if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND INITIAL LINE: to a generic table that is not a standard table");
+  const n = Lines(t);
+  const rt = t.t.row;
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  t.get().push(zero);
+  return [Row(t, n), n + 1];
+}
+export function DescrLength(d) {
+  if (d === null) throw new AbapError("NOT_COMPILED", "describe_by_data( )->length: of an unassigned field symbol");
+  switch (d.t.kind) {
+    case "C": case "N": return 2 * d.t.len;
+    case "X": return d.t.len;
+    case "I": return 4;
+  }
+  throw new AbapError("NOT_COMPILED", `describe_by_data( )->length: of type kind ${d.t.kind}`);
+}
+// substring_before / _after( val sub ): go/abap strings.go
+export function SubstringBefore(v, sub) {
+  if (sub === "") throw new AbapError("NOT_COMPILED", "substring_before( ): an empty sub is not measured");
+  const i = v.indexOf(sub);
+  return i >= 0 ? v.slice(0, i) : "";
+}
+export function SubstringAfter(v, sub) {
+  if (sub === "") throw new AbapError("NOT_COMPILED", "substring_after( ): an empty sub is not measured");
+  const i = v.indexOf(sub);
+  return i >= 0 ? v.slice(i + sub.length) : "";
+}
+// GET TIME STAMP FIELD (ultra/events): go/abap sysinfo.go TimeStamp
+export function TimeStamp(dec) {
+  const d = new Date();
+  const ts = d.toISOString().slice(0, 19).replace(/[-:T]/g, "");
+  return dec === 7 ? `${ts}.${String(d.getUTCMilliseconds()).padStart(3, "0")}0000` : ts;
+}
+
+// ultra/events (fix round): an exception out of a class constructor is a
+// runtime error no CATCH takes (A4H ZCL_GOGEN_T_CCBOOM2); see CctorGuard in
+// raise.go. Anything that is not class-based goes on as it is
+export function cctorDump(cls, e) {
+  if (!classBased(e)) return e;
+  return new AbapError("RUNTIME_ERROR", `${cls}=>CLASS_CONSTRUCTOR: ${e.message}`);
 }

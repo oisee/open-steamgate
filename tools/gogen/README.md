@@ -745,3 +745,45 @@ E-first), the flight cube with and without `$select` aggregation, SE16 90
 of 106 pages. Every other difference is named in ANORMALIES
 (ANOMALY-2026-09-24-dynamic-where-pasted: a CHAR literal cut, `1 = 1`,
 the order of a read without ORDER BY, client 001) or is another subset gap.
+
+## Class events and the WEBGUI's sapevent (ultra/events, 2026-09-24)
+
+`EVENTS` / `CLASS-EVENTS`, `SET HANDLER` (instance and static handlers, FOR
+obj / FOR ALL INSTANCES, ACTIVATION) and `RAISE EVENT ... EXPORTING` with the
+implicit SENDER, in both emitters, as A4H answered them
+(`go/abap/events.go` has the rules; ZCL_GOGEN_T_EVENTS / _EVENTS2 pin
+them). A sender carries its own registrations (`abap.Events`, embedded once
+per class chain), so a registration FOR an object lives exactly as long as
+the sender, as on a system. Class constructors now run at the first use of
+their class (ZCL_GOGEN_T_CCTOR); before, none ran.
+
+`/sap/bc/gui/sap/its/webgui/sapevent/` (ZCL_OSD_SAPEVENT: abapGit's HTML
+viewer inside open-abap-gui's `cl_gui_html_viewer`, a click coming back as
+two RAISE EVENTs) answers byte for byte as on Node, the page and the clicks
+(`.local/ultra-wip/events/pw/clicks.mjs` in Playwright). A transaction of
+the Easy Access menu (ZOSD_NOTE) still stops where its session row is
+written: `tools/ir-writes.mjs` has no initial value for a P column.
+
+Fix round, same day (all measured on A4H in `$ZOSG_TMP_0441`):
+
+- A SORTED table is filled only by `INSERT ... INTO TABLE` (row by row, the
+  unique rule) and `APPEND` of an equal-kind table. A move from a table of
+  another kind or key, a VALUE with rows and a STANDARD actual for a SORTED
+  IMPORTING parameter are refused (testdata-refused/zcl_gogen_t_rf_sort, the
+  last one does not even activate on a system).
+- `READ TABLE ... WITH [TABLE] KEY` on a SORTED table answers a miss as a
+  system does: 4 and the row it would go before, or 8 and lines + 1; only
+  components outside the key is a linear search (ZCL_GOGEN_T_SORTRD). A miss
+  that names a key part and a component outside it had no rule and is
+  refused (ZCL_GOGEN_T_SORTRD2).
+- A handler FOR EVENT e OF a subclass, FOR ALL INSTANCES, gets senders of
+  that subclass only (ZCL_GOGEN_T_EVENTS3).
+- An exception out of a class constructor is a runtime error no CATCH takes
+  (ZCL_GOGEN_T_CCBOOM2), as on a system.
+- WGUI1 is compiled by the JS emitter too; its string field symbols moved to
+  WGUI3, which JS refuses.
+- Host functions copied from open-abap-core rather than measured:
+  `CL_ABAP_TSTMP=>SUBTRACT` (whole seconds, an int; a TIMESTAMPL argument
+  with a fraction is refused) and `CL_ABAP_RANDOM=>CREATE( )->INT( )`
+  (unseeded only; a seed is refused, since a seeded generator's sequence is
+  the system's and not reproducible here).

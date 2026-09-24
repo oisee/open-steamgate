@@ -47,7 +47,14 @@ const tokenStr = (n) => n.getFirstToken().getStr();
 const upper = (s) => String(s).toUpperCase();
 const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 
-export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row))
+// ultra/events: a SORTED table keeps its rows in key order, which only
+// INSERT INTO TABLE knows how to do; every other statement that would place
+// rows (APPEND, INSERT INDEX, MODIFY INDEX, SORT, SELECT / SPLIT INTO TABLE)
+// refuses one, and a move between a SORTED and another table is not the
+// same type (it would have to sort)
+const refuseSorted = (t, what) => { if (t?.type?.sorted) throw new Unsupported(`${what} a SORTED table`); };
+const sameSort = (a, b) => (a.sorted ?? null) === null ? (b.sorted ?? null) === null : (b.sorted !== undefined && a.sorted.join() === b.sorted.join() && a.unique === b.unique);
+export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a.row, b.row) && sameSort(a, b)))
   && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
   && (a.k !== "ref" || a.name === b.name)
   && (a.k !== "p" || (!!a.calc === !!b.calc && (a.calc || (a.len === b.len && a.dec === b.dec))));
@@ -101,7 +108,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
-    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
+    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};
@@ -430,8 +437,17 @@ export function readClass(folder) {
   return compileProgram({folders: [folder], objects}).classes;
 }
 
+// ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
+const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
+  // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
+  // the seconds from TSTMP2 to TSTMP1, their fractions cut off, as
+  // open-abap-core's kernel lines compute them (its RETURNING is an i; a
+  // system's is a p with decimals); a random integer 0 .. 2^31-2 as
+  // open-abap-core's INT (a seed given to CREATE is ignored there too)
+  ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
+  ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
   // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
@@ -450,6 +466,12 @@ const NATIVE = new Map([
   // what the host is: runtime, platform, memory, one "name<TAB>value" line
   // each (go/abap/sysinfo.go; on Node the class's own @KERNEL lines)
   ["ZCL_OSD_SYSINFO=>ENVIRONMENT", {fn: "abap.SysInfoEnv", args: []}],
+  // ultra/events: abapGit's UTF-8 decoding, which its local class LCL_IN does
+  // through a codepage class found by name at run time (the class
+  // constructor of ZCL_ABAPGIT_GUI_EVENT needs it): the first IV_LENGTH bytes
+  // (all when not positive) read as UTF-8; bytes that are not UTF-8 would be
+  // a ZCX_ABAPGIT_EXCEPTION there, which the host does not make, so it dumps
+  ["ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8", {fn: "abap.XStringToStringUTF8", args: ["IV_DATA:xstring", "IV_LENGTH:i"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
 ]);
@@ -628,6 +650,10 @@ function typeOf(t, where, program) {
   if (t instanceof BasicTypes.GenericObjectReferenceType) return {k: "ref", name: "OBJECT", intf: true};
   // d and t: their characters, initial all zeros
   if (t instanceof BasicTypes.DateType) return {k: "d", len: 8};
+  // ultra/events: a generic TYPE p takes the caller's decimals, which a typed
+  // signature cannot say; only the host functions listed in P_GENERIC take
+  // one, as p(16,7), which holds a TIMESTAMP and a TIMESTAMPL exactly
+  if (t instanceof BasicTypes.PGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "p", len: 16, dec: 7};
   // p: declared, initial, copied and compared with initial only, as its
   // decimal text; any arithmetic or conversion is refused until packed
   // numbers are measured on A4H
@@ -651,6 +677,9 @@ function typeOf(t, where, program) {
   // operation of a c ignores anyway (a structure passed as clike is refused
   // at the call, where the conversion to string fails)
   if (t instanceof BasicTypes.CSequenceType || t instanceof BasicTypes.CLikeType) return S;
+  // ultra/events: xsequence takes an x or an xstring: carried as an xstring,
+  // as csequence is carried as a string (ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8)
+  if (t instanceof BasicTypes.XSequenceType) return XS;
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
@@ -673,6 +702,14 @@ function typeOf(t, where, program) {
       const key = (t.getOptions().primaryKey?.keyFields ?? []).map(upper);
       if (key.length === 0) throw new Unsupported(`${where}: HASHED table without a key`);
       return {k: "table", row, hashed: key};
+    }
+    // ultra/events: SORTED ... WITH UNIQUE / NON-UNIQUE KEY (ZCL_ABAPGIT_STRING_MAP):
+    // a slice in key order, see refuseSorted and insert_table
+    if (access === "SORTED") {
+      const o = t.getOptions();
+      const key = (o.primaryKey?.keyFields ?? []).map(upper);
+      if (key.length === 0) throw new Unsupported(`${where}: SORTED table without a key`);
+      return {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique};
     }
     throw new Unsupported(`${where}: ${access} tables`);
   }
@@ -864,6 +901,16 @@ function classIr(ctx0, obj) {
     interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
   cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
   cls.signatures = signatures;
+  // an object of this class can raise instance events (its own, a
+  // superclass's, an interface's): the backends give it its registrations
+  // (ultra/events, go/abap/events.go)
+  cls.instanceEvents = [className, ...ancestors(reg, className)].some((c) => {
+    const d = reg.getObject("CLAS", c)?.getDefinition();
+    if (!d) return false;
+    if (d.getEvents().some((e) => !e.isStatic())) return true;
+    return d.getImplementing().some((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]
+      .some((n) => reg.getObject("INTF", n)?.getDefinition()?.getEvents?.().some((e) => !e.isStatic())));
+  });
   const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   // a local class's methods are the ones of its own CLASS ... IMPLEMENTATION
   const methodNodes = obj.local === undefined ? tree.findAllStructures(Structures.Method)
@@ -911,7 +958,10 @@ function classIr(ctx0, obj) {
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
         if (vname.startsWith("<")) {
-          if (t.k !== "struct" && t.k !== "data") throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
+          // ultra/events: in Go a typed field symbol of any kind is a pointer to
+          // the row or field (a string table's line, a whole table); the JS
+          // emitter holds only rows of structures and refuses the method
+          if (!["struct", "data", "table", "string", "c", "i", "int8", "n", "d", "t", "x", "xstring", "p", "f"].includes(t.k)) throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
           ctx.fieldSymbols.set(vname, t);
         } else {
           ctx.locals.set(vname, t);
@@ -1317,7 +1367,8 @@ function structure(node, ctx) {
     }
     if (table.type.k === "data") {
       // LOOP AT <generic table> ASSIGNING <generic>: row by row, bound
-      const nm = /ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1];
+      // (an inline FIELD-SYMBOL( ) too: CL_GUI_HTML_VIEWER=>LOAD_DATA, ultra/events)
+      const nm = /ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1];
       const fsType = nm ? ctx.fieldSymbols.get(upper(nm)) : undefined;
       if (!nm || !["data", "struct"].includes(fsType?.k) || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       // a typed field symbol (ultra/json): each row must be a value of that
@@ -1326,6 +1377,7 @@ function structure(node, ctx) {
     }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
+    if (!lt) throw new Unsupported(`LOOP form: ${text}`);
     const fsNode = lt.findFirstExpression(Expressions.FSTarget) ?? lt.findFirstExpression(Expressions.TargetFieldSymbol);
     let into = null;
     let fs = null;
@@ -1334,6 +1386,8 @@ function structure(node, ctx) {
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
       fs = upper(nm);
     } else {
+      // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
+      if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
       into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
       if (!sameType(into.type, table.type.row)) throw new Unsupported(`LOOP ... INTO a ${into.type.k} over rows of ${table.type.row.k}`);
     }
@@ -1575,7 +1629,72 @@ function statement(node, ctx) {
       else if (isTok(kids[i], "TO")) to = convert(source(next, ctx, I), I);
     }
     const value = convert({e: "lrow", type: src.type.row}, table.type.row);
+    refuseSorted(table, "APPEND LINES OF into");
     return {s: "append_lines", table, src, from, to, value};
+  }
+  // ultra/events: APPEND wa TO itab ASSIGNING <fs> (A4H ZCL_GOGEN_T_WGUI1: the
+  // field symbol points at the new row, sy-tabix is its index). In Go the
+  // field symbol is a pointer into the slice, which a later APPEND that
+  // grows the slice leaves behind: fine for the use right after the APPEND
+  if (isStmt(node, Statements.Append) && /\bASSIGNING\b/i.test(text) && !/\b(LINES OF|INITIAL LINE|REFERENCE|SORTED BY)\b/i.test(text)) {
+    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsType = ctx.fieldSymbols.get(fsName);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
+    refuseSorted(table, "APPEND to");
+    if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
+    const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
+  }
+  // ultra/events: CONCATENATE (A4H ZCL_GOGEN_T_WGUI1): a c operand without
+  // its trailing blanks unless RESPECTING BLANKS, a string as it is, the
+  // separator with its blanks; into a c the result is cut (sy-subrc 4),
+  // else sy-subrc 0; LINES OF an empty table clears the target
+  if (isStmt(node, Statements.Concatenate)) {
+    if (/\bIN\s+BYTE\s+MODE\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
+    const kids = node.getChildren();
+    const respecting = /\bRESPECTING\s+BLANKS\b/i.test(text);
+    const lines = /^CONCATENATE\s+LINES\s+OF\b/i.test(text);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
+    const piece = (x) => {
+      if (x.type.k === "c") return respecting ? {e: "padc", x, n: x.type.len, type: S} : convert(x, S);
+      if (["string", "n", "d", "t"].includes(x.type.k)) return convert(x, S);
+      throw new Unsupported(`CONCATENATE of a ${x.type.k}`);
+    };
+    let sep = null;
+    const parts = [];
+    let table = null;
+    for (let i = 0; i < kids.length; i += 1) {
+      if (isTok(kids[i], "BY") && isTok(kids[i - 1], "SEPARATED")) {
+        const x = source(kids[i + 1], ctx);
+        sep = x.type.k === "c" ? {e: "padc", x, n: x.type.len, type: S} : piece(x);
+        i += 1;
+        continue;
+      }
+      if (isTok(kids[i], "INTO")) { i += 1; continue; }
+      if (isExpr(kids[i], Expressions.SimpleSource3) || isExpr(kids[i], Expressions.Source)) {
+        if (lines) table = source(kids[i], ctx);
+        else parts.push(piece(source(kids[i], ctx)));
+      }
+    }
+    if (lines) {
+      if (table?.type.k !== "table") throw new Unsupported(`CONCATENATE LINES OF a ${table?.type.k}`);
+      return {s: "concat", target, sep, table, row: piece({e: "temp", name: "ConcatRow", type: table.type.row})};
+    }
+    return {s: "concat", target, sep, parts};
+  }
+  // ultra/events: APPEND INITIAL LINE TO itab ASSIGNING <fs> (ZCL_ABAPGIT_CONVERT=>
+  // STRING_TO_TAB, over a generic STANDARD TABLE): a new initial row, <fs>
+  // on it, sy-tabix its index
+  if (isStmt(node, Statements.Append) && /^APPEND\s+INITIAL\s+LINE\s+TO\s+\S+\s+ASSIGNING\s+<[\w]+>\s*\.?$/i.test(text)) {
+    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsType = ctx.fieldSymbols.get(fsName);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
+    if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
+    refuseSorted(table, "APPEND to");
+    return {s: "append", table, value: {e: "zero", type: table.type.row}, fs: fsName};
   }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
@@ -1589,6 +1708,7 @@ function statement(node, ctx) {
     }
     if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    refuseSorted(table, "APPEND to");
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.ReadTable) && /\bWITH\s+(TABLE\s+)?KEY\b/i.test(text)) {
@@ -1647,7 +1767,29 @@ function statement(node, ctx) {
       const values = key.comps.map((c) => keys.find((x) => x.name === c.name).value);
       return {s: "read_seckey", table, key, values, into, fs};
     }
-    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed};
+    // ultra/events (fix round): a SORTED table is searched by its key (A4H
+    // 2026-09-24, ZCL_GOGEN_T_SORTRD). The key components given from the
+    // left of the table key (the whole key or a leading part of it) find the
+    // first row whose key part is not less: a hit is the first row of that
+    // range matching every component; a miss is sy-subrc 4 and sy-tabix that
+    // row, or 8 and lines + 1 past the end. Without the first key
+    // component the search is linear and a miss is 4 / 0. A leading part
+    // with components outside the key besides gave misses no rule covers
+    // (4/3, 8/5 and 4/-1 on A4H), so such a miss is NOT_COMPILED at run time.
+    let sorted = null;
+    if (table.type.sorted) {
+      const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
+      const prefix = [];
+      for (const k of table.type.sorted) {
+        const hit = line ? keys.find((x) => x.line) : keys.find((x) => !x.line && x.name === fieldOf(ctx, table.type.row, k, text).name);
+        if (!hit) break;
+        const kt = line ? table.type.row : fieldOf(ctx, table.type.row, k, text).type;
+        if (!["c", "string", "n", "d", "t", "i", "int8"].includes(kt.k)) throw new Unsupported(`READ TABLE of a SORTED table keyed on a ${kt.k}`);
+        prefix.push(keys.indexOf(hit));
+      }
+      sorted = {prefix, extra: keys.length > prefix.length};
+    }
+    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed, sorted};
   }
   if (isStmt(node, Statements.ReadTable)) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
@@ -1663,8 +1805,11 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
-      const fsName = upper(/<[\w]+>/.exec(text)?.[0] ?? "");
+      // the field symbol after ASSIGNING, not the first one in the text: READ
+      // TABLE <a>-t ASSIGNING <b> bound <a> (ultra/events, ZCL_GG_HTTP_HANDLER)
+      const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
+      if (ctx.fieldSymbols.get(fsName).k !== "data" && !sameType(ctx.fieldSymbols.get(fsName), table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
       return {s: "read_index", table, index, fs: fsName};
     }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
@@ -1726,6 +1871,7 @@ function statement(node, ctx) {
       }
     }
     keyGuard(table.type, "SORT");
+    refuseSorted(table, "SORT of");
     return {s: "sort", table, keys};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
@@ -1781,6 +1927,16 @@ function statement(node, ctx) {
     if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
     for (const k of keys ?? []) fieldOf(ctx, table.type.row, k, text);
     uniqueGuard(table.type, "INSERT INTO TABLE");
+    // ultra/events: a SORTED table (UNIQUE key only; where a duplicate of a
+    // NON-UNIQUE key goes is not measured): the row goes before the first
+    // row with a greater key, not at all when one has the same key
+    if (table.type.sorted) {
+      if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
+      const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
+      const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
+      return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys};
+    }
     return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
@@ -1793,6 +1949,7 @@ function statement(node, ctx) {
     const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
     keyGuard(table.type, "INSERT ... INDEX");
     uniqueGuard(table.type, "INSERT ... INDEX");
+    refuseSorted(table, "INSERT ... INDEX into");
     return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
   }
   if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text);
@@ -1803,6 +1960,17 @@ function statement(node, ctx) {
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
+  // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
+  // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
+  if (isStmt(node, Statements.GetTime)) {
+    if (!/^GET\s+TIME\s+STAMP\s+FIELD\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`GET TIME form: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${target.type.len},${target.type.dec ?? 0})`);
+    return {s: "get_timestamp", target, dec: target.type.dec ?? 0};
+  }
+  // class events (ultra/events): SET HANDLER and RAISE EVENT, see setHandler
+  if (isStmt(node, Statements.SetHandler)) return setHandler(node, ctx, text);
+  if (isStmt(node, Statements.RaiseEvent)) return raiseEvent(node, ctx, text);
   // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
   if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
@@ -1832,7 +2000,7 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {
-    const chain = node.findDirectExpression(Expressions.MethodCallChain);
+    const chain = node.findDirectExpression(Expressions.MethodCallChain) ?? callMethodChain(node);
     if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
     return {s: "call", call: call(chain, ctx, true)};
   }
@@ -1854,6 +2022,7 @@ function statement(node, ctx) {
     const idx = after("INDEX");
     const val = after("FROM");
     if (!idx || !val || node.findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
+    refuseSorted(table, "MODIFY ... INDEX of");
     return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.Split)) return splitStatement(node, ctx, text);
@@ -1871,6 +2040,26 @@ function statement(node, ctx) {
     // SECTION stays refused: what ^ and $ see there is not measured.
     const kids = node.getChildren();
     const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
+    // ultra/events: FIND ALL OCCURRENCES OF [REGEX] p IN s [IGNORING CASE]
+    // MATCH COUNT n and nothing else (A4H ZCL_GOGEN_T_WGUI1): matches do not
+    // overlap, n is 0 and sy-subrc 4 when there is none; REGEX may be a
+    // CL_ABAP_REGEX object (open-abap-core's: its PATTERN and MV_IGNORE_CASE)
+    const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
+    if (/^FIND ALL OCCURRENCES OF IN (IGNORING CASE )?MATCH COUNT$/.test(tw) && node.findDirectExpressions(Expressions.Source).length === 2) {
+      const [pat, subj] = node.findDirectExpressions(Expressions.Source);
+      const regex = !!node.findDirectExpression(Expressions.FindType);
+      let pattern = source(pat, ctx);
+      let icase = {e: "flag", value: /\bIGNORING\s+CASE\b/i.test(text), type: {k: "bool"}};
+      if (regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
+        const base = pattern;
+        pattern = {e: "refattr", base, name: "PATTERN", type: S};
+        icase = {e: "refattr", base, name: "MV_IGNORE_CASE", type: C(1)};
+      } else if (!charlike(pattern.type)) throw new Unsupported(`FIND ALL OCCURRENCES OF a ${pattern.type.k}`);
+      else pattern = convert(pattern, S);
+      const count = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
+      return {s: "find_all", regex, pattern, icase, subject: convert(source(subj, ctx), S), count};
+    }
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
@@ -1982,6 +2171,7 @@ function splitStatement(node, ctx, text) {
   if (/\bINTO\s+TABLE\b/i.test(text)) {
     const table = lvalue(targets[0], ctx);
     if (table.type.k !== "table" || table.type.row.k !== "string") throw new Unsupported("SPLIT into a table not of strings");
+    refuseSorted(table, "SPLIT INTO TABLE");
     return {s: "split", table, x, sep};
   }
   // INTO t1 t2 ...: measured, the last target takes the rest (a,b,c,d into
@@ -2070,6 +2260,8 @@ function moveCorresponding(node, ctx, text) {
 const STRING_FNS = {
   REPEAT: ["VAL", "OCC"], REPLACE: ["VAL", "SUB", "REGEX", "WITH", "OCC"], CONDENSE: ["VAL", "DEL", "FROM", "TO"],
   SHIFT_LEFT: ["VAL", "PLACES", "CIRCULAR", "SUB"], SHIFT_RIGHT: ["VAL", "PLACES", "CIRCULAR", "SUB"], TO_MIXED: ["VAL", "SEP", "CASE", "MIN"],
+  // ultra/events: substring_before / _after( val sub ), abapGit's parse_fields
+  SUBSTRING_BEFORE: ["VAL", "SUB"], SUBSTRING_AFTER: ["VAL", "SUB"],
 };
 function stringFn(name, direct, named, ctx, text) {
   const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
@@ -2084,6 +2276,12 @@ function stringFn(name, direct, named, ctx, text) {
   };
   const int = (k) => convert(source(given.get(k), ctx, I), I);
   const val = chars("VAL");
+  // the text before / after the first occurrence of sub, empty when there is
+  // none (A4H ZCL_GOGEN_T_WGUI2)
+  if (name === "SUBSTRING_BEFORE" || name === "SUBSTRING_AFTER") {
+    if (!given.has("SUB")) throw new Unsupported(`${name.toLowerCase()}( ) without sub: ${text}`);
+    return {e: "str_fn", fn: name === "SUBSTRING_BEFORE" ? "SubstringBefore" : "SubstringAfter", args: [val, chars("SUB")], type: S};
+  }
   if (name === "REPEAT") {
     if (!given.has("OCC")) throw new Unsupported(`repeat( ) without occ: ${text}`);
     return {e: "str_fn", fn: "Repeat", args: [val, int("OCC")], type: S};
@@ -2126,6 +2324,11 @@ function initialValue(node, ctx) {
   else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
   else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
   if (type.k === "struct" || type.k === "table") throw new Unsupported(`VALUE for a ${type.k}`);
+  // ultra/events: VALUE 'C2A0' of an x or xstring is its bytes, as a class
+  // constant's is (ZCL_ABAPGIT_GUI_EVENT's class constructor); only hex digits
+  if ((type.k === "xstring" || type.k === "x") && v.e === "chars" && /^([0-9A-F]{2})*$/i.test(v.value)) {
+    return {s: "assign", target: {e: "var", name, type}, value: {e: "xbytes", value: v.value, type}};
+  }
   return {s: "assign", target: {e: "var", name, type}, value: convert(v, type)};
 }
 
@@ -2431,6 +2634,11 @@ function items(node) {
       if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
       out.push({group: kids[i + 1]});
       i += 2;
+    } else if (isExpr(k, Expressions.MethodCallChain) && isExpr(kids[i + 1], Expressions.Arrow) && isExpr(kids[i + 2], Expressions.AttributeChain)) {
+      // ultra/events: m( )->attr, an attribute of what the call returns (only
+      // describe_by_data( )->type_kind / ->length are compiled: descrAttr)
+      out.push({descr: {call: k, attr: kids[i + 2]}});
+      i += 2;
     } else if (isExpr(k, Expressions.MethodCallChain) && isTok(kids[i + 1], "-") && isExpr(kids[i + 2], Expressions.ComponentChain)) {
       // m( )-comp: a component of what the call returns
       out.push({node: k, comps: kids[i + 2]});
@@ -2455,6 +2663,7 @@ function leafTypes(node, ctx) {
     for (const it of items(n)) {
       if (it.ctor) out.push(constructor(it.ctor, ctx).type);
       else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
+      else if (it.descr) out.push(descrAttr(it.descr.call, it.descr.attr, ctx).type);
       else if (it.group) walk(it.group);
       else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
       else if (it.node && it.comps) out.push(componentsOf(sourceOperand(it.node, ctx), it.comps, ctx).type);
@@ -2478,7 +2687,27 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * calculation type of all its leaves plus `outer` (the target, or the other
  * side of a comparison), as ABAP computes it.
  */
+/*
+ * cl_abap_typedescr=>describe_by_data( x )->type_kind / ->length (ultra/events:
+ * ZCL_ABAPGIT_HTML~ADD, ZCL_ABAPGIT_CONVERT=>STRING_TO_TAB): the type kind
+ * DESCRIBE FIELD x TYPE gives, the length in bytes (two per character of a
+ * c); no descriptor object is made. Any other attribute of a call's result
+ * is refused.
+ */
+function descrAttr(call, attr, ctx) {
+  const a = upper(attr.concatTokens());
+  if (!/^cl_abap_typedescr=>describe_by_data\($/i.test(call.concatTokens().replace(/\(.*$/s, "(")) || !["TYPE_KIND", "LENGTH"].includes(a)) {
+    throw new Unsupported(`an attribute of a call's result: ${call.concatTokens()}->${attr.concatTokens()}`);
+  }
+  const arg = call.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+  if (!arg) throw new Unsupported(`describe_by_data form: ${call.concatTokens()}`);
+  const x = convert(source(arg, ctx), {k: "data"});
+  return a === "LENGTH" ? {e: "type_length", x, type: I} : {e: "type_kind", x, type: C(1)};
+}
+
 function source(node, ctx, outer, hint = outer) {
+  const sk = node?.getChildren?.() ?? [];
+  if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)) return descrAttr(sk[0], sk[2], ctx);
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
   const bits = hasBitOp(node);
   if (bits) {
@@ -2617,6 +2846,7 @@ function arith(node, ctx, calc, hint) {
       const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
       return t === undefined ? v : convert(v, t);
     }
+    if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
     let v = sourceOperand(item.node, ctx, item.hint);
@@ -2796,6 +3026,10 @@ function resolveStatic(owner, attr, ctx) {
   const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
   const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
   if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
+  // ultra/events: a static attribute of ANOTHER class is refused here. On a
+  // system reading one is a use of that class and runs its class
+  // constructor first; whoever adds that read must also emit the class's
+  // Ensure_<class> (emit-go) / $ensure (emit-js) before it
   throw new Unsupported(`${owner}=>${attr}`);
 }
 
@@ -3036,6 +3270,9 @@ function writeIrType(t, where) {
   if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
   if (t.k === "d") return RIR.T.char(8);
   if (t.k === "t") return RIR.T.char(6);
+  // ultra/events: a p column (ZOSD_TSES-CREATED) is not written yet because
+  // tools/ir-writes.mjs has no initial value for P ("a column of type P has
+  // no initial value here yet"); the fix belongs there, not here
   throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
 }
 const lowName = (n) => n.toLowerCase();
@@ -3381,6 +3618,7 @@ function selectStatement(node, ctx, text) {
   }
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
+  refuseSorted(target, "SELECT INTO TABLE");
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
@@ -3485,6 +3723,7 @@ function dynamicSelect(sel, ctx, text) {
   let target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
   if (target.type.k === "table") target = convert(target, {k: "data", table: true});
   else if (target.type.k !== "data") throw new Unsupported(`dynamic SELECT INTO TABLE of a ${target.type.k}`);
+  refuseSorted(target, "SELECT INTO TABLE");
   return {s: "select_dyn", table, fields, where, groupBy, orderBy, primaryKey, corresponding, target, text: text.replace(/\s+/g, " ")};
 }
 
@@ -3904,6 +4143,151 @@ function raiseException(node, ctx, text) {
   return {s: "raise", value, cls: null};
 }
 
+/*
+ * Class events (ultra/events). EVENTS / CLASS-EVENTS of a class or an
+ * interface, SET HANDLER and RAISE EVENT, measured on A4H
+ * (ZCL_GOGEN_T_EVENTS / _EVENTS2, $ZOSG_TMP_0440; go/abap/events.go has the
+ * rules). An event is known by where it is declared, "DECL~EVENT", so a
+ * handler FOR EVENT e OF a subclass and a RAISE EVENT in a subclass meet
+ * the declaring class's event. program.events collects the events used,
+ * for the backends' parameter types.
+ */
+function eventInfo(ctx, owner, evName) {
+  let decl = null;
+  let def = null;
+  let name = upper(evName);
+  if (name.includes("~")) {
+    const [intf, ev] = name.split("~");
+    const idef = ctx.reg.getObject("INTF", intf)?.getDefinition();
+    const found = idef?.getEvents?.().find((e) => upper(e.getName()) === ev);
+    if (found) { decl = intf; def = found; name = ev; }
+  } else if (ctx.reg.getObject("INTF", owner)) {
+    const found = ctx.reg.getObject("INTF", owner).getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+    if (found) { decl = owner; def = found; }
+  } else {
+    for (const c of [owner, ...ancestors(ctx.reg, owner)]) {
+      const found = ctx.reg.getObject("CLAS", c)?.getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+      if (found) { decl = c; def = found; break; }
+    }
+  }
+  if (!def) throw new Unsupported(`event ${evName} of ${owner} is not in the program`);
+  const key = `${decl}~${name}`;
+  if (ctx.program.events.has(key)) return ctx.program.events.get(key);
+  // DEFAULT of an event parameter is not read off the definition (abaplint
+  // keeps no default for it): an event that has one is refused
+  const obj = ctx.reg.getObject("INTF", decl) ?? ctx.reg.getObject("CLAS", decl);
+  for (const f of obj.getABAPFiles()) {
+    for (const st of f.getStatements()) {
+      if (!(st.get() instanceof Statements.Events)) continue;
+      if (upper(st.findDirectExpression(Expressions.EventName)?.concatTokens() ?? "") !== name) continue;
+      if (/\bDEFAULT\b/i.test(st.concatTokens())) throw new Unsupported(`event ${key}: a parameter with DEFAULT`);
+    }
+  }
+  const params = def.getParameters().map((p) => ({name: upper(p.getName()), type: typeOf(p.getType(), `event ${key}`, ctx.program)}));
+  const info = {key, decl, name, static: def.isStatic(), params};
+  ctx.program.events.set(key, info);
+  return info;
+}
+
+/*
+ * SET HANDLER h1 h2 ... [FOR obj | FOR ALL INSTANCES] [ACTIVATION act].
+ * Each handler becomes the call the dispatch makes: its receiver the
+ * handler object as it was when SET HANDLER ran (ev_handler), its IMPORTING
+ * parameters the event's (ev_arg) and SENDER (ev_sender). A handler on me
+ * (bare name or me->m) is called as a call on me.
+ */
+function setHandler(node, ctx, text) {
+  const forAll = /\bFOR\s+ALL\s+INSTANCES\b/i.test(text);
+  const kids = node.getChildren();
+  const forAt = kids.findIndex((k) => isTok(k, "FOR"));
+  const actAt = kids.findIndex((k) => isTok(k, "ACTIVATION"));
+  const forObj = forAt >= 0 && !forAll ? source(kids[forAt + 1], ctx) : null;
+  if (forObj && forObj.type.k !== "ref") throw new Unsupported(`SET HANDLER ... FOR a ${forObj.type.k}`);
+  const activation = actAt >= 0 ? convert(source(kids[actAt + 1], ctx), C(1)) : null;
+  const handlers = [];
+  for (const ms of node.findDirectExpressions(Expressions.MethodSource)) {
+    const mk = ms.getChildren();
+    if (ms.findDirectExpression(Expressions.Dynamic)) throw new Unsupported(`SET HANDLER with a dynamic method: ${text}`);
+    let obj = null;
+    let owner;
+    let mname;
+    let staticRef = false;
+    if (mk.length === 1) {
+      owner = ctx.className;
+      mname = upper(mk[0].concatTokens());
+    } else if (mk.length === 3 && isTok(mk[1], "=>")) {
+      owner = upper(mk[0].concatTokens());
+      mname = upper(mk[2].concatTokens());
+      staticRef = true;
+    } else if (mk.length === 3 && isTok(mk[1], "->") && upper(mk[0].concatTokens()) === "ME") {
+      owner = ctx.className;
+      mname = upper(mk[2].concatTokens());
+    } else if (mk.length === 3 && isTok(mk[1], "->")) {
+      obj = fieldChain(mk[0], ctx);
+      if (obj.type.k !== "ref" || obj.type.intf) throw new Unsupported(`SET HANDLER through ${mk[0].concatTokens()}: not a class reference`);
+      owner = obj.type.name;
+      mname = upper(mk[2].concatTokens());
+    } else {
+      throw new Unsupported(`SET HANDLER handler ${ms.concatTokens()}`);
+    }
+    if (mname.includes("~")) throw new Unsupported(`SET HANDLER of an interface method: ${ms.concatTokens()}`);
+    const at = declaringClass(ctx.reg, owner, mname, "method");
+    if (!at) throw new Unsupported(`SET HANDLER: ${owner} has no method ${mname}`);
+    if (!ctx.program.wanted.has(at)) throw new Unsupported(`SET HANDLER: ${at} is not compiled in this program`);
+    const mdef = declaredMethod(ctx.reg, at, mname);
+    if (!mdef?.isEventHandler?.()) throw new Unsupported(`SET HANDLER: ${at}=>${mname} is not an event handler`);
+    const ev = eventInfo(ctx, upper(mdef.getEventClass()), mdef.getEventName());
+    const sig = methodSignature(ctx, at, mname);
+    if (sig.unsupported) throw new Unsupported(`SET HANDLER: ${at}=>${mname} was skipped: ${sig.unsupported}`);
+    if (sig.static && obj) throw new Unsupported(`SET HANDLER of a static method through a reference: ${ms.concatTokens()}`);
+    if (!sig.static && (staticRef || ctx.sig.static) && !obj) throw new Unsupported(`SET HANDLER of an instance method without an object: ${ms.concatTokens()}`);
+    if (ev.static && (forObj || forAll)) throw new Unsupported(`SET HANDLER ... FOR of a static event: ${text}`);
+    if (!ev.static && !forObj && !forAll) throw new Unsupported(`SET HANDLER of an instance event without FOR: ${text}`);
+    const byName = new Map(ev.params.map((p) => [p.name, p]));
+    const args = sig.params.map((p) => {
+      if (p.dir !== "importing") throw new Unsupported(`handler ${at}=>${mname}: ${p.dir} parameter ${p.name}`);
+      if (p.name === "SENDER") {
+        if (ev.static) throw new Unsupported(`handler ${at}=>${mname}: SENDER of a static event`);
+        return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "ev_sender", type: p.type}};
+      }
+      const ep = byName.get(p.name);
+      if (!ep) throw new Unsupported(`handler ${at}=>${mname}: ${p.name} is no parameter of ${ev.key}`);
+      if (!sameType(ep.type, p.type)) throw new Unsupported(`handler ${at}=>${mname}: ${p.name} typed unlike the event`);
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "ev_arg", name: p.name, type: p.type}};
+    });
+    const call = {e: "call", method: mname, static: sig.static, owner: sig.static ? at : null,
+      receiver: obj ? {e: "ev_handler", type: obj.type} : null, sup: null, args, type: {k: "void"}, exceptions: null, receiving: null, callee: mname};
+    // FOR EVENT e OF a subclass of the declaring class: FOR ALL INSTANCES
+    // only takes senders of that class
+    const of = upper(mdef.getEventClass());
+    let filter = null;
+    if (forAll && of !== ev.decl && !ctx.reg.getObject("INTF", of)) {
+      if (!ctx.program.wanted.has(of)) throw new Unsupported(`SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
+      filter = of;
+    }
+    handlers.push({call, obj, me: !obj && !sig.static, key: sig.static ? `${at}=>${mname}` : mname, event: ev.key, filter});
+  }
+  return {s: "set_handler", handlers, forObj, all: forAll, static: handlers.length > 0 && ctx.program.events.get(handlers[0].event).static, activation};
+}
+
+/*
+ * RAISE EVENT e [EXPORTING p = v ...]: the sender is me (none for a static
+ * event); every parameter's actual is evaluated anew for each handler, as
+ * A4H does (val: in ZCL_GOGEN_T_EVENTS).
+ */
+function raiseEvent(node, ctx, text) {
+  const ev = eventInfo(ctx, ctx.className, node.findDirectExpression(Expressions.EventName).concatTokens());
+  if (!ev.static && ctx.sig.static) throw new Unsupported(`RAISE EVENT of an instance event in a static method: ${text}`);
+  const given = new Map();
+  for (const p of node.findDirectExpression(Expressions.ParameterListS)?.findDirectExpressions(Expressions.ParameterS) ?? []) {
+    given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+  }
+  for (const n of given.keys()) if (!ev.params.some((p) => p.name === n)) throw new Unsupported(`RAISE EVENT ${ev.key}: no parameter ${n}`);
+  const args = ev.params.map((p) => ({name: p.name, type: p.type,
+    value: given.has(p.name) ? convert(source(given.get(p.name), ctx, p.type), p.type) : {e: "zero", type: p.type}}));
+  return {s: "raise_event", event: ev.key, static: ev.static, sender: ev.static ? null : {e: "me", type: {k: "ref", name: ctx.className}}, args};
+}
+
 /**
  * The superclass of every compiled exception class (and of its ancestors,
  * compiled or not), for a CATCH to walk at run time: the object raised is
@@ -3957,6 +4341,9 @@ function valueBody(body, to, ctx, text) {
       else if (inner.length === 1 && isExpr(inner[0], Expressions.Source)) rows.push(convert(source(inner[0], ctx, to.row), to.row));
       else throw new Unsupported(`VALUE table line ${line.concatTokens().slice(0, 30)}`);
     }
+    // ultra/events (fix round): VALUE for a SORTED table places the rows in
+    // key order and raises on a duplicate; the literal keeps source order
+    if (to.sorted && rows.length > 0) throw new Unsupported(`VALUE with rows for a SORTED table`);
     return {e: "table_lit", rows, type: to};
   }
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
@@ -4061,6 +4448,37 @@ const FUNCTIONS = {
   NMAX: "max", NMIN: "max",
 };
 
+/*
+ * ultra/events: the old CALL METHOD m / obj->m / cls=>m [EXPORTING ...]
+ * [IMPORTING ...] [CHANGING ...] [RECEIVING ...] [EXCEPTIONS ...] (ZCL_OSD_NOTE
+ * calls the HTML viewer so) as the method call chain the functional form
+ * parses into, so call() reads it the same way; undefined for any other shape
+ */
+function callMethodChain(node) {
+  const ms = node.findDirectExpression(Expressions.MethodSource);
+  const body = node.findDirectExpression(Expressions.MethodCallBody);
+  if (!ms || ms.findDirectExpression(Expressions.Dynamic)) return undefined;
+  const mk = ms.getChildren();
+  const nameFrom = mk.length === 1 ? mk[0] : mk.length === 3 && isExpr(mk[2], Expressions.AttributeName) ? mk[2] : null;
+  if (!nameFrom || (mk.length === 1 && !isExpr(mk[0], Expressions.SourceField))) return undefined;
+  const tokens = (n) => (n instanceof Nodes.TokenNode ? [n] : n.getChildren().flatMap(tokens));
+  const name = new Nodes.ExpressionNode(new Expressions.MethodName());
+  name.setChildren(tokens(nameFrom));
+  const kids = [name];
+  if (body) {
+    const mp = body.findDirectExpression(Expressions.MethodParameters);
+    if (!mp || body.getChildren().length !== 1) return undefined;
+    const param = new Nodes.ExpressionNode(new Expressions.MethodCallParam());
+    param.setChildren([mp]);
+    kids.push(param);
+  }
+  const mc = new Nodes.ExpressionNode(new Expressions.MethodCall());
+  mc.setChildren(kids);
+  const chain = new Nodes.ExpressionNode(new Expressions.MethodCallChain());
+  chain.setChildren(mk.length === 1 ? [mc] : [mk[0], mk[1], mc]);
+  return chain;
+}
+
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
   // x->get_text( ) of an exception caught INTO x
@@ -4130,6 +4548,10 @@ function call(chain, ctx, statement, hint) {
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);
   const full = param?.findDirectExpression(Expressions.MethodParameters);
+  // ultra/events (fix round): CL_ABAP_RANDOM->INT is a host function that
+  // ignores a seed (as open-abap-core's @KERNEL line does), so a seeded
+  // generator, whose sequence would be the contract, is refused
+  if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
   if (receiver === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
@@ -4137,6 +4559,16 @@ function call(chain, ctx, statement, hint) {
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
     if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
     return {e: "lines", table: t, type: I};
+  }
+  // ultra/events: escape( val = v format = cl_abap_format=>e_html_attr ) (A4H
+  // ZCL_GOGEN_T_WGUI1: & < > " ' become entities, nothing else changes)
+  if (receiver === null && owner === null && name === "ESCAPE" && !ctx.signatures.has(name)) {
+    const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
+    const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    if (ps.length !== 2 || !arg("VAL") || !/^cl_abap_format=>e_html_attr$/i.test(arg("FORMAT")?.concatTokens() ?? "")) throw new Unsupported(`escape( ) form: ${chain.concatTokens()}`);
+    const v = source(arg("VAL"), ctx);
+    if (!charlike(v.type)) throw new Unsupported(`escape( ) of a ${v.type.k}`);
+    return {e: "str_fn", fn: "EscapeHTMLAttr", args: [convert(v, S)], type: S};
   }
   if (receiver === null && owner === null && STRING_FNS[name] && !ctx.signatures.has(name)) return stringFn(name, direct, named, ctx, chain.concatTokens());
   if (receiver === null && owner === null && ["TO_LOWER", "TO_UPPER"].includes(name) && !ctx.signatures.has(name)) {
@@ -4277,6 +4709,10 @@ function call(chain, ctx, statement, hint) {
     if (p.type.k === "data" && !p.byValue && t.type.k !== "data" && t.type.k !== "dref" && (!p.type.table || t.type.k === "table")) {
       return {dir: p.dir, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
     }
+    // ultra/events: a generic TYPE c parameter (C(262143) here) takes the
+    // caller's c of any length: the callee writes the caller's field, which
+    // keeps its own length (the value is fitted to it after the call)
+    if (statement && p.type.k === "c" && p.type.len === 262143 && t.type.k === "c" && p.dir !== "importing") return {dir: p.dir, place: t, type: p.type, fitc: t.type.len};
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, place: t, type: p.type};
   });
@@ -4307,6 +4743,14 @@ function defaultValue(p, ctx) {
   // a constant: CLS=>C, or C of the class or interface the method is declared in
   const named = /^([\w\/]+)=>(\w+)$/.exec(t) ?? (/^\w+$/.test(t) && p.defOwner ? [t, p.defOwner, t] : null);
   if (named) return convert(resolveStatic(upper(named[1]), upper(named[2]), ctx), p.type);
+  // a component of a structured constant: CLS=>C-COMP or C-COMP (ultra/events:
+  // zif_abapgit_html=>c_action_type-sapevent, the DEFAULT of ZIF_ABAPGIT_HTML~A)
+  const comp = /^([\w\/]+)=>(\w+)-(\w+)$/.exec(t) ?? (/^\w+-\w+$/.test(t) && p.defOwner ? [t, p.defOwner, ...t.split("-")] : null);
+  if (comp) {
+    const base = resolveStatic(upper(comp[1]), upper(comp[2]), ctx);
+    const f = fieldOf(ctx, base.type, comp[3], `DEFAULT ${t}`);
+    return convert({e: "field", base, name: f.name, type: f.type}, p.type);
+  }
   throw new Unsupported(`DEFAULT ${t}`);
 }
 
@@ -4467,6 +4911,11 @@ export function convert(expr, to) {
   // are not measured
   if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
+  // ultra/events (fix round): a move INTO a SORTED table sorts the rows (and
+  // raises on a duplicate of a unique key), which no emitter does, so a
+  // table of another kind or key refuses here; out of a SORTED table into a
+  // STANDARD one the rows keep their order, which is what a slice does
+  if (to.k === "table" && from.k === "table" && to.sorted && !sameSort(from, to)) throw new Unsupported(`a move into a SORTED table from a table of another kind or key`);
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
   // two structures of one technical type (the same components in the same
   // order, each of the same type and length; names may differ): a move is
@@ -4487,6 +4936,14 @@ export function convert(expr, to) {
     if (to.intf && (to.name === "OBJECT" || implementsIntf(expr, from.name, to.name))) return {e: "upcast", x: expr, type: to};
     if (!to.intf && !from.intf && REG && ancestors(REG, from.name).includes(to.name)) return {e: "upcast", x: expr, type: to};
     throw new Unsupported(`reference ${from.name} -> ${to.name}`);
+  }
+  // ultra/events: a standard table into a standard table of another row
+  // type, row by row as a move converts the row (RAISE EVENT of abapGit's
+  // viewer: POSTDATA of c 1024 lines into c 256 lines, QUERY_TABLE of one
+  // flat structure into another)
+  if (from.k === "table" && to.k === "table" && !from.sorted && !to.sorted && !from.hashed && !to.hashed) {
+    const row = convert({e: "temp", name: "ConvRow", type: from.row}, to.row);
+    return {e: "conv", kind: "table_rows", from, to, x: expr, row, type: to};
   }
   throw new Unsupported(`conversion ${from.k} -> ${to.k}`);
 }
@@ -4578,6 +5035,14 @@ function compare(node, ctx) {
     const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+INITIAL\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
+  // line_exists( itab[ c = v ... ] ) (ultra/events, CL_GUI_CONTAINER=>ADD_CHILD
+  // and CL_GUI_HTML_VIEWER=>DISPATCH_SAPEVENT): whether READ TABLE ... WITH
+  // KEY with the same components would find a row, without sy-subrc
+  const pf = node.findDirectExpression(Expressions.MethodCallChain);
+  if (pf && sources.length === 0 && /^LINE_EXISTS$/i.test(pf.findDirectExpression(Expressions.MethodCall)?.findDirectExpression(Expressions.MethodName)?.concatTokens() ?? "")) {
+    const r = lineExists(pf, ctx);
+    return not ? {c: "not", x: r} : r;
+  }
   const opNode = node.findDirectExpression(Expressions.CompareOperator);
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const opText = upper(opNode.concatTokens());
@@ -4636,6 +5101,37 @@ function compare(node, ctx) {
     r = compareValues(op, source(sources[0], ctx), source(sources[1], ctx), ctx);
   }
   return not ? {c: "not", x: r} : r;
+}
+
+/** line_exists( itab[ c1 = v1 c2 = v2 ... ] ) and itab[ table_line = v ]: the
+ * keys as READ TABLE ... WITH KEY builds them (each value converted to the
+ * component's type) */
+function lineExists(chain, ctx) {
+  const src = chain.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+  const fc = src?.findDirectExpression(Expressions.FieldChain);
+  const fk = fc?.getChildren() ?? [];
+  const te = fk.at(-1);
+  if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
+  const head = {getChildren: () => fk.slice(0, -1), concatTokens: () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""),
+    findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k.findFirstExpression?.(t))).find(Boolean), get: () => fc.get()};
+  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(head, ctx);
+  if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
+  const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
+  const keys = [];
+  for (let i = 0; i < inner.length; i += 3) {
+    const comp = inner[i];
+    if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
+      throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+    }
+    const cname = upper(comp.concatTokens());
+    if (cname === "TABLE_LINE") keys.push({line: true, value: convert(source(inner[i + 2], ctx, table.type.row), table.type.row)});
+    else {
+      const f = fieldOf(ctx, table.type.row, cname, te.concatTokens());
+      keys.push({name: f.name, value: convert(source(inner[i + 2], ctx, f.type), f.type)});
+    }
+  }
+  if (keys.length === 0) throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+  return {c: "line_exists", table, keys};
 }
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */

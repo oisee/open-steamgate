@@ -2,6 +2,7 @@ package abap
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"runtime"
 	"strings"
@@ -47,3 +48,40 @@ func SysInfoEnv(s *Session) string {
 	lines = append(lines, HostFacts...)
 	return strings.Join(lines, "\n")
 }
+
+// TimeStamp is GET TIME STAMP FIELD (ultra/events): now in UTC as a
+// TIMESTAMP (dec 0, YYYYMMDDhhmmss) or a TIMESTAMPL (dec 7, a fraction of
+// seven digits), in the decimal text a p value is held as.
+func TimeStamp(dec int) string {
+	now := time.Now().UTC()
+	ts := now.Format("20060102150405")
+	if dec == 7 {
+		return ts + "." + fmt.Sprintf("%07d", now.Nanosecond()/100)
+	}
+	return ts
+}
+
+// TstmpSubtract is CL_ABAP_TSTMP=>SUBTRACT as open-abap-core computes it:
+// the seconds from t2 to t1. That copies open-abap-core, it is not measured
+// on a system, whose result is a p with seven decimals: so a value with a
+// fraction (a TIMESTAMPL), where the two would differ, is refused rather
+// than cut, as is a value that is not a valid time stamp.
+func TstmpSubtract(s *Session, t1, t2 string) int32 {
+	parse := func(v string) time.Time {
+		if i := strings.IndexByte(v, '.'); i >= 0 {
+			if strings.Trim(v[i+1:], "0") != "" {
+				panic(NotCompiled("CL_ABAP_TSTMP=>SUBTRACT", "a time stamp with a fraction (TIMESTAMPL): "+v))
+			}
+			v = v[:i]
+		}
+		t, err := time.Parse("20060102150405", fmt.Sprintf("%014s", v))
+		if err != nil {
+			panic(NotCompiled("CL_ABAP_TSTMP=>SUBTRACT", "a value that is not a time stamp: "+v))
+		}
+		return t
+	}
+	return int32(parse(t1).Sub(parse(t2)) / time.Second)
+}
+
+// RandomInt31 is CL_ABAP_RANDOM->INT as open-abap-core has it: 0 .. 2^31-2.
+func RandomInt31(s *Session) int32 { return int32(rand.Int64N(2147483647)) }

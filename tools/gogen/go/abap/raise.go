@@ -1,7 +1,9 @@
 package abap
 
 import (
+	"fmt"
 	"reflect"
+	"runtime/debug"
 	"sync"
 )
 
@@ -119,4 +121,40 @@ func (s *Session) Handled(r any) bool {
 		}
 	}
 	return false
+}
+
+// CctorDump is an exception that left a class constructor: A4H ends the
+// program with a runtime error there, whatever CATCH the user of the class
+// has (ZCL_GOGEN_T_CCBOOM2, 2026-09-24: a CX_SY_ZERODIVIDE in the class
+// constructor was a runtime abortion, not CX_SY_NO_HANDLER, and no CATCH
+// took it). It is not class-based, so no CATCH and no CLEANUP sees it.
+type CctorDump struct {
+	Class string
+	Cause any
+}
+
+func (e CctorDump) Error() string {
+	return "RUNTIME_ERROR in " + e.Class + "=>CLASS_CONSTRUCTOR: " + fmt.Sprint(e.Cause)
+}
+
+// CctorGuard is deferred by Ensure_<class> (ultra/events fix round): a panic
+// out of the class constructor clears the class's flag, so the next use
+// runs it again as the next internal session would on a system (osgo keeps
+// class data for the process), and a class-based exception becomes a
+// CctorDump; anything else (NOT_COMPILED, a dump already) goes on as it is.
+func CctorGuard(class string, done *bool) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	*done = false
+	if ClassBased(r) {
+		cause := r
+		if w, ok := r.(*Rethrown); ok {
+			cause = w.V
+			panic(&Rethrown{V: CctorDump{Class: class, Cause: cause}, Stack: w.Stack})
+		}
+		Repanic(CctorDump{Class: class, Cause: cause}, debug.Stack())
+	}
+	panic(r)
 }

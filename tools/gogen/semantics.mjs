@@ -470,6 +470,65 @@ const EXPECT = {
   // emitter has no registry and refuses
   ZCL_GOGEN_T_CRDYN: {Go: "a:0/h b:u/0[] c:2 lower:ok unknown:err kept:0",
     JS: "ERROR NOT_COMPILED in CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)"},
+  // class events (A4H 2026-09-24, $ZOSG_TMP_0440, ultra/events; the rules
+  // in go/abap/events.go): handlers in registration order, per sender a
+  // table with holes (a new one takes the lowest free place), a duplicate
+  // is one, FOR the sender before FOR ALL INSTANCES, a dispatch calls what
+  // was active at its start and still is, the actual read anew per handler
+  // (val), an exception out of a handler ends the dispatch, static events
+  // and handlers, an interface's event through an interface reference
+  ZCL_GOGEN_T_EVENTS: "none:[] order:a.p(2,s)b.q(2)c.p(2,s) other:[] twice:a.p(4,s) off:b.p(5,s) again:a.p(6,s)b.p(6,s) var:a.p(7,s) kill:a.kill kill2:a.kill add:a.add add2:a.addc.p(11,s) boom:a.boom.caught val:a.m(5,105)b.m(105,205) all:a.q(13)c.p(13,x)b.p(14,y)a.q(14)c.p(14,y) both:b.p(15,y)c.p(15,y)a.q(15)c.p(15,y) offone:b.p(16,y)a.q(16)c.p(16,y) offall:b.p(18,y) stat:static(19,s) sev:a.s(20)b.s(20) sev2:b.s(21) intf:a.i(hi,s)",
+  ZCL_GOGEN_T_EVENTS2: "revive:a.revive allfirst:b.p(2,s)c.p(2,s) nest:a.n1(a.n2()b.p(2,s))b.p(1,s) self:a.self3b.p(3,s)b.p(4,s) rev:c.p(5,s)a.p(5,s)b.q(5)b.p(5,s) back:a.p(6,s)b.p(6,s)c.p(6,s) holes:b.q(7)b.p(7,s)a.q(7) holes2:b.q(8)b.p(8,s)a.q(8)",
+  // the WEBGUI's sapevent path (A4H 2026-09-24, $ZOSG_TMP_0440, ultra/events):
+  // line_exists( ), NS / CN, reference comparison (two objects of a class
+  // without fields are two), a SORTED unique table (INSERT INTO TABLE leaves
+  // sy-tabix alone, rows in binary key order, a duplicate is sy-subrc 4),
+  // CONCATENATE (c operands lose trailing blanks, the
+  // separator keeps them, a c target is cut with sy-subrc 4, LINES OF an
+  // empty table clears), FIND ALL ... MATCH COUNT (0 and sy-subrc 4 when
+  // none; a CL_ABAP_REGEX object), escape( ) e_html_attr. APPEND ...
+  // ASSIGNING with a field symbol of a string is in WGUI3 (fix round,
+  // re-measured on A4H 2026-09-24, $ZOSG_TMP_0441), so the JS emitter
+  // compiles WGUI1 and must give the same string
+  ZCL_GOGEN_T_WGUI1: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
+  // the JS emitter holds no field symbol of a string and refuses the method
+  ZCL_GOGEN_T_WGUI3: {Go: "ap:2 fs:[p!/r!]",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI3=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  // READ TABLE WITH [TABLE] KEY on a SORTED table (A4H 2026-09-24,
+  // $ZOSG_TMP_0441, fix round): a search by the key's leading components,
+  // a miss is 4 and the row the key would go before, or 8 and lines + 1;
+  // without the first key component linear, a miss 4/0; the work area is
+  // left alone on a miss
+  ZCL_GOGEN_T_SORTRD: "hit:0/3/3 mid:4/3/c first:4/1 past:8/5 tk:4/3,8/5 fs:4/4 nf:8/5 nonkey:0/4,4/0 kv:0/3 lead:0/1/1,0/3/3,4/2,8/5,4/1 second:0/3,4/0 tk2:4/4 line:4/2/f,0/2/q,8/3",
+  // a miss with a key part and a component outside the key: A4H gave 4/3,
+  // 8/5 and 4/-1 (k = m v = 9, k = x v = 9, a = 2 v = 9), no rule; refused
+  // at the miss, the hit before it still answers
+  ZCL_GOGEN_T_SORTRD2: {Go: "ERROR NOT_COMPILED in READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured at zcl_gogen_t_sortrd2.clas.abap:28",
+    JS: "ERROR NOT_COMPILED in READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured"},
+  // a handler FOR EVENT e OF a subclass, FOR ALL INSTANCES: senders of the
+  // subclass only, whatever the static type of the reference raising it
+  // (A4H 2026-09-24, $ZOSG_TMP_0441, fix round)
+  ZCL_GOGEN_T_EVENTS3: "all:b(base)s(sub)b(sub)s(sub2)b(sub2) one:s(sub2)",
+  // a class constructor runs at the first use of its class: a static method
+  // call, a CREATE OBJECT of it or of a subclass (the superclass's first),
+  // once (A4H 2026-09-24, $ZOSG_TMP_0440; the transpiler runs them all when
+  // the program loads, ANOMALY-2026-09-14-class-constructor-eager)
+  ZCL_GOGEN_T_CCTOR: "a cc3 t3 t3 b cc1 cc2 t1 c ",
+  // an exception out of a class constructor: a runtime abortion on A4H
+  // (2026-09-24, $ZOSG_TMP_0441, fix round: "Division by 0", none of the
+  // CATCHes, CX_SY_ZERODIVIDE, CX_SY_NO_HANDLER, CX_ROOT, took it)
+  ZCL_GOGEN_T_CCBOOM2: {Go: "ERROR RUNTIME_ERROR in ZCL_GOGEN_T_CCBOOM=>CLASS_CONSTRUCTOR: CX_SY_ZERODIVIDE in / at zcl_gogen_t_ccboom.clas.abap:15",
+    JS: "ERROR RUNTIME_ERROR in ZCL_GOGEN_T_CCBOOM=>CLASS_CONSTRUCTOR: CX_SY_ZERODIVIDE in /"},
+  // substring_before / _after: the first occurrence, empty when none (A4H
+  // 2026-09-24, $ZOSG_TMP_0440, ultra/events)
+  ZCL_GOGEN_T_WGUI2: "b:[a][][][k] a:[b=c][][x][][c]",
+  // not an A4H value: the language rule that a WHILE condition and a LOOP
+  // ... WHERE read the variable as the body left it (the Go emitter's string
+  // builders kept an appended string out of both until the loop ended)
+  ZCL_GOGEN_T_WHILEAPP: "ababab xxx",
+  // not an A4H value: a generic table's rows keep their type (the Go
+  // emitter gave a c 3 table the descriptor of a string table: "g g")
+  ZCL_GOGEN_T_DESCKEY: "g C",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
@@ -478,7 +537,7 @@ const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".c
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE",
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
@@ -543,6 +602,25 @@ for (const [line, want] of Object.entries(REFUSED)) {
 }
 for (const [line, msg] of got) {
   if (REFUSED[line] === undefined) { bad += 1; console.log(`FAIL refused :${line}: must compile, got ${msg}`); }
+}
+// ultra/events (fix round): what fills a SORTED table other than INSERT
+// INTO TABLE is refused, each at its line: a move from a STANDARD table, a
+// VALUE with rows, a move between SORTED tables of other keys, a STANDARD
+// actual for a SORTED IMPORTING parameter. VALUE #( ) and a move out of a
+// SORTED table into a STANDARD one compile. A4H: see the comment at the
+// top of testdata-refused/zcl_gogen_t_rf_sort.clas.abap
+const REFUSED_SORT = {
+  44: "a move into a SORTED table from a table of another kind or key",
+  46: "VALUE with rows for a SORTED table",
+  48: "a move into a SORTED table from a table of another kind or key",
+  54: "a move into a SORTED table from a table of another kind or key",
+};
+const rsort = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_sort"], tolerant: true});
+const rgot = new Map(rsort.partial.map((x) => [Number(/zcl_gogen_t_rf_sort\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const line of new Set([...Object.keys(REFUSED_SORT).map(Number), ...rgot.keys()])) {
+  const ok = rgot.get(line) === REFUSED_SORT[line];
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused sort :${line}: ${rgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${REFUSED_SORT[line] ?? "(compiled)"}`}`);
 }
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;

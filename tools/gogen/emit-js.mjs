@@ -65,7 +65,7 @@ let STRUCTS = new Map();
  * written at the end of the module.
  */
 let DESCS = new Map();
-const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t:${t.hashed ? "h:" : ""}${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
+const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t${t.sorted ? "s" : t.hashed ? "h" : ""}:${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
 function desc(t) {
   switch (t.k) {
     case "i": return "abap.TI";
@@ -107,7 +107,8 @@ function descDecls() {
       again = true;
       const t = d.type;
       if (t.k === "table") {
-        decl.push(`const ${d.name} = {kind: "h", row: null, ${t.hashed ? "hashed: true, " : ""}zero: () => []};`);
+        // a SORTED or HASHED table takes no generic APPEND (ultra/events, as go/abap AppendData)
+        decl.push(`const ${d.name} = {kind: "h", row: null, ${t.hashed ? "hashed: true, " : ""}zero: () => []${t.sorted || t.hashed ? ", noAppend: true" : ""}};`);
         fill.push(`${d.name}.row = ${desc(t.row)};`);
       } else {
         const fs = STRUCTS.get(t.go)?.fields ?? [];
@@ -170,6 +171,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
   // a superclass is declared before its subclasses
   const byName = new Map(program.classes.map((c) => [c.name, c]));
+  BYNAME = byName;
   const ordered = [];
   const placed = new Set();
   const put = (c) => { if (placed.has(c.name)) return; placed.add(c.name); if (c.super && byName.has(c.super)) put(byName.get(c.super)); ordered.push(c); };
@@ -196,8 +198,19 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     const ctorAt = chain.find((c) => c.constructor || c.ctorParams);
     const cp = ctorAt ? (ctorAt.constructor?.params ?? ctorAt.ctorParams ?? []) : [];
     out.push(`  static $is = new Set(${JSON.stringify(isOf(cls))});`);
+    // ultra/events: CLASS_CONSTRUCTOR at the first use, as emit-go (chainCctor)
+    if (chainCctor(cls)) {
+      out.push(`  static $ensure(s) {`, `    if (Object.prototype.hasOwnProperty.call(${typeName(cls.name)}, "$cc")) return;`, `    ${typeName(cls.name)}.$cc = true;`);
+      // ultra/events (fix round): an exception out of it is a runtime error
+      // and the next use runs it again (abap.CctorGuard in emit-go)
+      out.push("    try {");
+      if (cls.super && byName.get(cls.super) && chainCctor(byName.get(cls.super))) out.push(`      ${typeName(cls.super)}.$ensure(s);`);
+      if (ownCctor(cls)) out.push(`      ${typeName(cls.name)}.CLASS_CONSTRUCTOR(s);`);
+      out.push(`    } catch (e) { delete ${typeName(cls.name)}.$cc; throw abap.cctorDump(${JSON.stringify(cls.name)}, e); }`);
+      out.push("  }");
+    }
     out.push(`  static $abap = ${JSON.stringify(cls.name)};`);
-    out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
+    out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, ...(chainCctor(cls) ? [`    ${typeName(cls.name)}.$ensure(s);`] : []), `    const o = new ${typeName(cls.name)}();`,
       ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
     for (const m of all) out.push(...method(cls, m));
@@ -266,17 +279,31 @@ function catchIntoJs(c, t) {
   return `${t}    ${ident(c.into)} = ${c.intoKind === "ref" ? "xE.obj" : "xE"};\n`;
 }
 
+// ultra/events: see chainCctor in emit-go.mjs
+const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
+  && (cls.methods.some((m) => m.name === "CLASS_CONSTRUCTOR") || (cls.stubs ?? []).some((m) => m.name === "CLASS_CONSTRUCTOR"));
+let BYNAME = new Map();
+function chainCctor(cls) {
+  for (let c = cls; c; c = c.super ? BYNAME.get(c.super) : null) if (ownCctor(c)) return true;
+  return false;
+}
+
 function method(cls, m) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
+  if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`    ${typeName(cls.name)}.$ensure(s);`);
   if (!m.static) lines.push("    const me = this;");
   const ret = m.returning ? ident(m.returning.name) : null;
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
   const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
-  lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
+  // ultra/events: a field symbol of anything but a structure row or generic
+  // data would need a box for the place it points at; refused here honestly
+  const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data");
+  if (odd) lines.push(`    throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: field symbol ${odd.name} of a ${odd.type.k}: the JS emitter holds only rows of structures`)});`);
+  else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
   return lines;
@@ -374,9 +401,20 @@ function stmt(st, ctx, d) {
         const n = ctx.loop++;
         return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`,
           ...unique.map((k) => `${t}  abap.uniqueKeyCheck(${tb}, (r) => ${k.comps.map((c) => `r.${ident(c)} === v${n}.${ident(c)}`).join(" && ")}, ${JSON.stringify(k.name)});`),
-          `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}s.sy.tabix = ${tb}.length;`];
+          `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${tb}[${tb}.length - 1];`] : [])];
       }
-      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`];
+      // ultra/events: APPEND ... ASSIGNING <fs> (a row of a structure only: see method)
+      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${tb}[${tb}.length - 1];`] : [])];
+    }
+    // ultra/events: CONCATENATE, FIND ALL ... MATCH COUNT (emit-go)
+    case "concat": {
+      const sep = st.sep ? expr(st.sep, ctx) : `""`;
+      const joined = st.table ? `${expr(st.table, ctx)}.map((ConcatRow) => ${expr(st.row, ctx)}).join(${sep})` : `[${st.parts.map((x) => expr(x, ctx)).join(", ")}].join(${sep})`;
+      return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${st.target.type.k === "c" ? st.target.type.len : -1}); ${place(st.target, ctx)} = v; s.sy.subrc = rc; }`];
+    }
+    case "find_all": {
+      const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} === "X")`;
+      return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase}); s.sy.subrc = ${place(st.count, ctx)} > 0 ? 0 : 4;`];
     }
     case "read_index": {
       const n = `idx${ctx.loop++}`;
@@ -400,9 +438,11 @@ function stmt(st, ctx, d) {
       if (st.call.e === "nop_call") return [];
       const c = st.call;
       const plain = c.receiving ? [`${t}${place(c.receiving, ctx)} = ${expr(c, ctx)};`] : callStmt(c, ctx, t);
-      if (!c.exceptions) return plain;
+      // ultra/events: a c field passed to a generic TYPE c keeps its length (emit-go)
+      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc});`);
+      if (!c.exceptions) return [...plain, ...fits];
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
-        `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
+        `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`, ...fits];
     }
     case "move_corr_data":
       return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)});`];
@@ -426,6 +466,9 @@ function stmt(st, ctx, d) {
     case "unassign":
       return [`${t}${ident(st.fs.name)} = null;`];
     // a move into generic data writes into the slot it is bound to
+    // ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <generic> (emit-go)
+    case "append_initial_data":
+      return [`${t}{ const [r, i] = abap.AppendInitialData(${expr(st.table, ctx)}); ${ident(st.fs)} = r; s.sy.tabix = i; }`];
     case "append_data":
       return [`${t}s.sy.tabix = abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)});`];
     // ultra/json: as emit-go (js/abap.mjs InsertData, NewLine)
@@ -574,6 +617,26 @@ function stmt(st, ctx, d) {
     case "raise_runtime": return [`${t}throw new abap.AbapError(${JSON.stringify(st.cls)}, ${JSON.stringify(st.op)});`];
     case "call_fm": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`CALL FUNCTION '${st.name}': the JS emitter has no host function modules`)});`];
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
+    // ultra/events: SET HANDLER and RAISE EVENT, as emit-go (js/abap.mjs
+    // setHandler / raiseEvent follow go/abap/events.go)
+    case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec});`];
+    case "set_handler": {
+      const lines = [`${t}{`, `${t}  const EvFor = ${st.forObj ? expr(st.forObj, ctx) : "null"};`,
+        `${t}  const EvOn = ${st.activation ? `abap.activation(${expr(st.activation, ctx)})` : "true"};`];
+      for (const h of st.handlers) {
+        const filter = h.filter ? `(o) => !!o?.constructor?.$is?.has(${JSON.stringify(h.filter)})` : "null";
+        const obj = h.obj ? "EvH" : h.me ? "me" : "null";
+        lines.push(`${t}  {`);
+        if (h.obj) lines.push(`${t}    const EvH = abap.boundHandler(${expr(h.obj, ctx)});`);
+        lines.push(`${t}    abap.setHandler(s, ${JSON.stringify(h.event)}, EvFor, ${st.all}, ${st.static}, ${obj}, ${JSON.stringify(h.key)}, ${filter}, (s, EvSender, EvA) => { ${expr(h.call, ctx)}; }, EvOn);`, `${t}  }`);
+      }
+      lines.push(`${t}}`);
+      return lines;
+    }
+    case "raise_event": {
+      const fields = st.args.map((a) => `${ident(a.name)}: ${moved(a.value, ctx)}`).join(", ");
+      return [`${t}abap.raiseEvent(s, ${JSON.stringify(st.event)}, ${st.sender ? expr(st.sender, ctx) : "null"}, ${st.static}, () => ({${fields}}));`];
+    }
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
       const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
@@ -616,6 +679,17 @@ function stmt(st, ctx, d) {
         `${t}  s.sy.tabix = ${tb}.length;`, `${t}}`);
       return out;
     }
+    // ultra/events: INSERT INTO TABLE of a SORTED table with a unique key (emit-go)
+    case "insert_sorted": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
+      const cmp = st.keys.map((k) => `if (${get(`r${n}`, k)} !== ${get(`v${n}`, k)}) return ${get(`r${n}`, k)} > ${get(`v${n}`, k)} ? 1 : -1;`).join(" ");
+      return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
+        `${t}  let pos${n} = ${tb}.length; s.sy.subrc = 0;`,
+        `${t}  for (let i = 0; i < ${tb}.length; i++) { const c = cmp${n}(${tb}[i]); if (c === 0) { s.sy.subrc = 4; break; } if (c > 0) { pos${n} = i; break; } }`,
+        `${t}  if (s.sy.subrc === 0) ${tb}.splice(pos${n}, 0, v${n});`, `${t}}`];
+    }
     case "insert_table": {
       const tb = place(st.table, ctx);
       const v = `ins${ctx.loop++}`;
@@ -633,6 +707,25 @@ function stmt(st, ctx, d) {
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
       const bind = st.fs ? `${ident(st.fs)} = r${n};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(r${n})` : `r${n}`};` : "";
+      // ultra/events (fix round): a SORTED table, as emit-go
+      if (st.sorted) {
+        const kv = (j) => `k${n}_${j}`;
+        const get = (k) => (k.line ? `r${n}` : `r${n}.${ident(k.name)}`);
+        const all = st.keys.map((k, j) => `${get(k)} === ${kv(j)}`).join(" && ");
+        const decl = st.keys.map((k, j) => `${t}  const ${kv(j)} = ${expr(k.value, ctx)};`);
+        const found = `{ ${bind} s.sy.subrc = 0; s.sy.tabix = i${n} + 1; hit${n} = true; break; }`;
+        if (st.sorted.prefix.length === 0) {
+          return [`${t}{`, ...decl, `${t}  let hit${n} = false;`, `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`,
+            `${t}    if (${all}) ${found}`, `${t}  }`, `${t}  if (!hit${n}) { s.sy.subrc = 4; s.sy.tabix = 0; }`, `${t}}`];
+        }
+        const cmp = st.sorted.prefix.map((j) => `if (${get(st.keys[j])} !== ${kv(j)}) return ${get(st.keys[j])} > ${kv(j)} ? 1 : -1;`).join(" ");
+        return [`${t}{`, ...decl, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`, `${t}  let pos${n} = -1, hit${n} = false;`,
+          `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`, `${t}    const c${n} = cmp${n}(r${n});`,
+          `${t}    if (c${n} < 0) continue;`, `${t}    if (pos${n} < 0) pos${n} = i${n};`, `${t}    if (c${n} > 0) break;`, `${t}    if (${all}) ${found}`, `${t}  }`,
+          `${t}  if (!hit${n}) {`,
+          ...(st.sorted.extra ? [`${t}    throw new abap.AbapError("NOT_COMPILED", "READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured");`] : []),
+          `${t}    s.sy.subrc = 4;`, `${t}    if (pos${n} < 0) { pos${n} = ${tb}.length; s.sy.subrc = 8; }`, `${t}    s.sy.tabix = pos${n} + 1;`, `${t}  }`, `${t}}`];
+      }
       return [`${t}{`, `${t}  s.sy.subrc = 4;`, `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`,
         `${t}    if (${cond}) { ${bind} s.sy.subrc = 0; s.sy.tabix = ${st.hashed ? "0" : `i${n} + 1`}; break; }`, `${t}  }`, `${t}}`];
     }
@@ -805,6 +898,13 @@ function expr(e, ctx) {
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
     case "me": return "me";
+    case "xbytes": return literal({type: e.type, value: e.value});
+    case "type_length": return `abap.DescrLength(${expr(e.x, ctx)})`;
+    case "type_kind": return `${expr(e.x, ctx)}.t.kind`;
+    // ultra/events: inside a handler's registration (set_handler)
+    case "ev_arg": return `EvA.${ident(e.name)}`;
+    case "ev_sender": return "EvSender";
+    case "ev_handler": return "EvH";
     case "upcast": return expr(e.x, ctx);
     case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
     // a typed slot seen as generic data: a binding to it; a value that is no
@@ -875,6 +975,7 @@ function conv(e, ctx) {
       if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
+    case "table_rows": return `${x}.map((ConvRow) => ${expr(e.row, ctx)})`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
@@ -934,7 +1035,15 @@ function cond(c, ctx) {
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
-    case "refeq": return `(${expr(c.l, ctx)} ${c.op === "=" ? "===" : "!=="} ${expr(c.r, ctx)})`;
+    // ultra/events: line_exists( ) (frontend lineExists)
+    case "line_exists": {
+      const n = ctx.loop++;
+      const keys = c.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
+      return `${expr(c.table, ctx)}.some((r${n}) => ${keys})`;
+    }
+    // two object references (ultra/json refeq; ultra/events: undefined and
+    // null are both the initial reference)
+    case "refeq": return `((${expr(c.l, ctx)} ?? null) ${c.op === "=" ? "===" : "!=="} (${expr(c.r, ctx)} ?? null))`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;
