@@ -31,13 +31,14 @@ open question in "What next" below.
 
 Merged into `main`, portable pipeline:
 
-- #55–#59: packed bind strings, ordering pairs, numeric FOR, host
-  relations, `sqlscript-blocks`.
-- #61–#64: DECLARE DEFAULT and CONSTANT, a leading minus, DML with its LUW,
-  UPSERT.
+- #55: packed columns bound as strings. #56 and #59: numeric FOR. #57:
+  host relations.
+- #62: DECLARE DEFAULT and CONSTANT, and a leading minus. #63: DML with its
+  LUW. #64: UPSERT.
 - #66: RAW columns.
 - #68: decimal arithmetic typed as HANA types it.
-- #70: the `library-absent` oracle class.
+- Oracle and stand: #58 (HXE refuses 28 → 0), #61 (the types a signature
+  names), #70 (the `library-absent` class).
 - #72: table functions called in FROM, run as nested calls on every engine.
 - Host and runtime: #75, one dialog step at a time (a FIFO work-process
   lock; APC events are steps too; WAIT gives the lock up).
@@ -66,12 +67,13 @@ The measurements behind each rule are in `docs/sqlscript-hana-observed.md`
 
   ```
   HXE_HOST=127.0.0.1 HXE_PORT=39017 HXE_PASSWORD="$(cat .local/hxe-password)" \
-    OSD_HANA_LIVE=1 node tools/amdp-corpus-oracle.mjs --out <dir>
+    node tools/amdp-corpus-oracle.mjs --out <dir>
   ```
 
   It takes about 20 minutes. The report (`<dir>/report.json`) names corpus
-  objects, so it stays under `.local/` or a scratch folder, never in a
-  tracked file. The HXE catalogue it uses is `.local/amdp-oracle/a4h-catalog.txt`.
+  objects, so `<dir>` is under `.local/` (the default is
+  `.local/amdp-oracle/`), never a tracked path. The HXE catalogue it uses is
+  `.local/amdp-oracle/a4h-catalog.txt`.
 - **The corpus** (`.local/a4h-export`, `.local/a4h-ddic`) is SAP's code:
   local only. Names from it never go into tracked files (CLAUDE.md, "The SAP
   corpus stays local"). `npm run leak` catches their return.
