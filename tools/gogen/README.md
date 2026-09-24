@@ -1071,3 +1071,38 @@ Merged with ultra/zvdb, `dbwrite.go` binds both a RAW(n) and a DEC column;
 `ZCL_GOGEN_T_RAWDEC` writes a row with one of each by INSERT and MODIFY
 FROM TABLE and reads it back (Go only, not an A4H value: each rule is pinned
 on its own above).
+
+## Parity with OSG on Node: OSG's own suites against OSGo (ultra/parity, 2026-09-24)
+
+`tools/gogen/parity.mjs` runs the HTTP-level suites of `test/suites.json`
+against OSG on Node and against the osgo binary, the same test files, a fresh
+server per suite file and backend. Those suites call `startServer()` from
+`test/start.mjs` in their own process and then fetch `localhost:STG_PORT`; a
+module hook (`parity/hooks.mjs`) turns `test/start.mjs` into a stub, so the
+fetches reach the server the harness started instead. A probe
+(`parity/register.mjs`) notes each test's requests (status, and the body of
+an error), and a test that sent none is in-process and not compared.
+`--e2e` adds the Playwright specs, one server per backend for the whole run.
+
+    # a frozen checkout: a detached worktree of main, transpiled, packs fetched
+    OSG_HOME=<checkout> flock <shared lock> node tools/gogen/osgo.mjs   # heavy
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --e2e --out .local/parity/final
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --report-only --out .local/parity/final
+
+Measured on main 6327bab, osgo from this branch (953 classes, 31 methods
+not compiled): **55.6 %** -- 165 of the 297 HTTP-level tests that pass on
+Node pass on OSGo (57.9 % without the 12 known divergences). 14 mocha suites
++ the Playwright specs; 130 suites (1905 tests) are in-process and not
+applicable, plus 32 in-process tests inside the HTTP suites and
+`zosd-test.mjs`, whose `before` needs the in-process database.
+
+| group | tests |
+|---|---:|
+| the ADT façade (`/sap/bc/adt`, `/osd/not-served`): a JS module of the Node host, not ABAP, absent from OSGo | 86 |
+| `escape( format = cl_abap_format=>e_json_string )` in `/UI2/CL_JSON=>SERIALIZE_INT` (RFC channel, transactions, e2e) | 18 |
+| known: implicit MANDT, T0009 of client 001 is filtered by OSGo and served by Node | 12 |
+| `ZCL_STG_SEGW_IMPORT=>IMPORT`: comparison of string with data (+ RepoSet and a timeout after it) | 7 |
+| `GET_EXPANDED_ENTITYSET`: `SELECT * FROM zstg_demo_bk INTO` form | 2 |
+| `DESCRIBE_BY_DATA`: output length of a DDIC type of kind C | 2 |
+| the editor's parser colouring and compile check (Node host tools) | 2 |
+| move of kind g into generic data of kind D; `ZCL_STG_SEGW_FUGR=>SIGNATURE` comparison; `CALL FUNCTION` without a host implementation | 1 each |
