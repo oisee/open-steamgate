@@ -1431,6 +1431,58 @@ function statement(node, ctx) {
     refuseSorted(table, "APPEND LINES OF into");
     return {s: "append_lines", table, src, from, to, value};
   }
+  // ultra/events: APPEND wa TO itab ASSIGNING <fs> (A4H ZCL_GOGEN_T_WGUI1: the
+  // field symbol points at the new row, sy-tabix is its index). In Go the
+  // field symbol is a pointer into the slice, which a later APPEND that
+  // grows the slice leaves behind: fine for the use right after the APPEND
+  if (isStmt(node, Statements.Append) && /\bASSIGNING\b/i.test(text) && !/\b(LINES OF|INITIAL LINE|REFERENCE|SORTED BY)\b/i.test(text)) {
+    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsType = ctx.fieldSymbols.get(fsName);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
+    refuseSorted(table, "APPEND to");
+    if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
+    const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
+  }
+  // ultra/events: CONCATENATE (A4H ZCL_GOGEN_T_WGUI1): a c operand without
+  // its trailing blanks unless RESPECTING BLANKS, a string as it is, the
+  // separator with its blanks; into a c the result is cut (sy-subrc 4),
+  // else sy-subrc 0; LINES OF an empty table clears the target
+  if (isStmt(node, Statements.Concatenate)) {
+    if (/\bIN\s+BYTE\s+MODE\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
+    const kids = node.getChildren();
+    const respecting = /\bRESPECTING\s+BLANKS\b/i.test(text);
+    const lines = /^CONCATENATE\s+LINES\s+OF\b/i.test(text);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
+    const piece = (x) => {
+      if (x.type.k === "c") return respecting ? {e: "padc", x, n: x.type.len, type: S} : convert(x, S);
+      if (["string", "n", "d", "t"].includes(x.type.k)) return convert(x, S);
+      throw new Unsupported(`CONCATENATE of a ${x.type.k}`);
+    };
+    let sep = null;
+    const parts = [];
+    let table = null;
+    for (let i = 0; i < kids.length; i += 1) {
+      if (isTok(kids[i], "BY") && isTok(kids[i - 1], "SEPARATED")) {
+        const x = source(kids[i + 1], ctx);
+        sep = x.type.k === "c" ? {e: "padc", x, n: x.type.len, type: S} : piece(x);
+        i += 1;
+        continue;
+      }
+      if (isTok(kids[i], "INTO")) { i += 1; continue; }
+      if (isExpr(kids[i], Expressions.SimpleSource3) || isExpr(kids[i], Expressions.Source)) {
+        if (lines) table = source(kids[i], ctx);
+        else parts.push(piece(source(kids[i], ctx)));
+      }
+    }
+    if (lines) {
+      if (table?.type.k !== "table") throw new Unsupported(`CONCATENATE LINES OF a ${table?.type.k}`);
+      return {s: "concat", target, sep, table, row: piece({e: "temp", name: "ConcatRow", type: table.type.row})};
+    }
+    return {s: "concat", target, sep, parts};
+  }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -1699,6 +1751,26 @@ function statement(node, ctx) {
     // SECTION stays refused: what ^ and $ see there is not measured.
     const kids = node.getChildren();
     const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
+    // ultra/events: FIND ALL OCCURRENCES OF [REGEX] p IN s [IGNORING CASE]
+    // MATCH COUNT n and nothing else (A4H ZCL_GOGEN_T_WGUI1): matches do not
+    // overlap, n is 0 and sy-subrc 4 when there is none; REGEX may be a
+    // CL_ABAP_REGEX object (open-abap-core's: its PATTERN and MV_IGNORE_CASE)
+    const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
+    if (/^FIND ALL OCCURRENCES OF IN (IGNORING CASE )?MATCH COUNT$/.test(tw) && node.findDirectExpressions(Expressions.Source).length === 2) {
+      const [pat, subj] = node.findDirectExpressions(Expressions.Source);
+      const regex = !!node.findDirectExpression(Expressions.FindType);
+      let pattern = source(pat, ctx);
+      let icase = {e: "flag", value: /\bIGNORING\s+CASE\b/i.test(text), type: {k: "bool"}};
+      if (regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
+        const base = pattern;
+        pattern = {e: "refattr", base, name: "PATTERN", type: S};
+        icase = {e: "refattr", base, name: "MV_IGNORE_CASE", type: C(1)};
+      } else if (!charlike(pattern.type)) throw new Unsupported(`FIND ALL OCCURRENCES OF a ${pattern.type.k}`);
+      else pattern = convert(pattern, S);
+      const count = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
+      return {s: "find_all", regex, pattern, icase, subject: convert(source(subj, ctx), S), count};
+    }
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
@@ -2294,6 +2366,16 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * side of a comparison), as ABAP computes it.
  */
 function source(node, ctx, outer, hint = outer) {
+  // cl_abap_typedescr=>describe_by_data( x )->type_kind (ultra/events,
+  // ZCL_ABAPGIT_HTML~ADD): the type kind DESCRIBE FIELD x TYPE gives, which is
+  // what the descriptor's TYPE_KIND holds; no descriptor object is made
+  const sk = node?.getChildren?.() ?? [];
+  if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)
+    && /^cl_abap_typedescr=>describe_by_data\($/i.test(sk[0].concatTokens().replace(/\(.*$/s, "(")) && upper(sk[2].concatTokens()) === "TYPE_KIND") {
+    const arg = sk[0].findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+    if (!arg) throw new Unsupported(`describe_by_data form: ${node.concatTokens()}`);
+    return {e: "type_kind", x: convert(source(arg, ctx), {k: "data"}), type: C(1)};
+  }
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
   const bits = hasBitOp(node);
   if (bits) {
@@ -3860,14 +3942,6 @@ function call(chain, ctx, statement, hint) {
     if (arg("SEED") || !arg("MIN") || !arg("MAX") || ps.length !== 2) throw new Unsupported(`cl_abap_random_int form: ${chain.concatTokens()}`);
     return {e: "random", min: convert(source(arg("MIN"), ctx, I), I), max: convert(source(arg("MAX"), ctx, I), I), type: I};
   }
-  // cl_abap_typedescr=>describe_by_data( x )->type_kind (ultra/events,
-  // ZCL_ABAPGIT_HTML~ADD): the type kind DESCRIBE FIELD x TYPE gives, which
-  // is what the descriptor's TYPE_KIND holds; no descriptor object is made
-  if (/^cl_abap_typedescr=>describe_by_data\(.*\)->type_kind$/i.test(chain.concatTokens())) {
-    const arg = chain.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
-    if (!arg) throw new Unsupported(`describe_by_data form: ${chain.concatTokens()}`);
-    return {e: "type_kind", x: convert(source(arg, ctx), {k: "data"}), type: C(1)};
-  }
   if (isExpr(kids[0], Expressions.NewObject)) {
     if (kids.length !== 1) throw new Unsupported(`a call on a new object: ${chain.concatTokens()}`);
     const nk = kids[0].getChildren();
@@ -3924,6 +3998,16 @@ function call(chain, ctx, statement, hint) {
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
     if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
     return {e: "lines", table: t, type: I};
+  }
+  // ultra/events: escape( val = v format = cl_abap_format=>e_html_attr ) (A4H
+  // ZCL_GOGEN_T_WGUI1: & < > " ' become entities, nothing else changes)
+  if (receiver === null && owner === null && name === "ESCAPE" && !ctx.signatures.has(name)) {
+    const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
+    const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    if (ps.length !== 2 || !arg("VAL") || !/^cl_abap_format=>e_html_attr$/i.test(arg("FORMAT")?.concatTokens() ?? "")) throw new Unsupported(`escape( ) form: ${chain.concatTokens()}`);
+    const v = source(arg("VAL"), ctx);
+    if (!charlike(v.type)) throw new Unsupported(`escape( ) of a ${v.type.k}`);
+    return {e: "str_fn", fn: "EscapeHTMLAttr", args: [convert(v, S)], type: S};
   }
   if (receiver === null && owner === null && STRING_FNS[name] && !ctx.signatures.has(name)) return stringFn(name, direct, named, ctx, chain.concatTokens());
   if (receiver === null && owner === null && ["TO_LOWER", "TO_UPPER"].includes(name) && !ctx.signatures.has(name)) {

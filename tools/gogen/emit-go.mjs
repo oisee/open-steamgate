@@ -252,6 +252,10 @@ export function emitGo(program, pkg = "main") {
     // subclasses get it through the embedding
     if (cls.instanceEvents && !(cls.super && CLASSES.get(cls.super)?.instanceEvents)) out.push("\tabap.Events");
     for (const a of inst) out.push(`\t${ident(a.name)} ${goType(a.type)}`);
+    // ultra/events: an object of a class without fields would be zero-sized,
+    // and Go may give two of them one address: ref <> ref and the handler
+    // registry need each object to be itself
+    if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
@@ -737,7 +741,25 @@ function stmtLines(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
       const tb = place(st.table, ctx);
-      return [`${t}${tb} = append(${tb}, ${copied(expr(st.value, ctx), st.value.type, st.value)})`, `${t}s.Sy.Tabix = int32(len(${tb}))`];
+      return [`${t}${tb} = append(${tb}, ${copied(expr(st.value, ctx), st.value.type, st.value)})`, `${t}s.Sy.Tabix = int32(len(${tb}))`,
+        // ultra/events: APPEND ... ASSIGNING <fs>
+        ...(st.fs ? [`${t}${ident(st.fs)} = &${tb}[len(${tb})-1]`] : [])];
+    }
+    // ultra/events: CONCATENATE [LINES OF] ... INTO t [SEPARATED BY s]
+    case "concat": {
+      const n = ctx.loop++;
+      const sep = st.sep ? expr(st.sep, ctx) : `""`;
+      const joined = st.table
+        ? `func() string { var b []string; for _, ConcatRow := range ${expr(st.table, ctx)} { b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, ${sep}) }()`
+        : `strings.Join([]string{${st.parts.map((x) => expr(x, ctx)).join(", ")}}, ${sep})`;
+      return [`${t}{`, `${t}	v${n}, rc${n} := abap.ConcatFit(${joined}, ${st.target.type.k === "c" ? st.target.type.len : -1})`,
+        `${t}	${place(st.target, ctx)} = v${n}`, `${t}	s.Sy.Subrc = rc${n}`, `${t}}`];
+    }
+    // ultra/events: FIND ALL OCCURRENCES ... MATCH COUNT n
+    case "find_all": {
+      const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} == "X")`;
+      return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase})`,
+        `${t}s.Sy.Subrc = 4`, `${t}if ${place(st.count, ctx)} > 0 {`, `${t}	s.Sy.Subrc = 0`, `${t}}`];
     }
     case "read_index": {
       const n = `idx${ctx.loop++}`;

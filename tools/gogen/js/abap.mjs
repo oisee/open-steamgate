@@ -1231,3 +1231,19 @@ export function F2I8(f) {
   if (Number.isNaN(r) || r >= 9.223372036854775807e18 || r < -9.223372036854775808e18) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "f->int8");
   return BigInt(r);
 }
+
+// ultra/events: CONCATENATE into its target, FIND ALL ... MATCH COUNT,
+// escape( ) for an HTML attribute: go/abap strings.go
+export function ConcatFit(v, n) {
+  if (n < 0) return [v, 0];
+  const r = [...v];
+  const rc = r.length > n ? 4 : 0;
+  return [r.slice(0, n).join("").replace(/ +$/, ""), rc];
+}
+export function FindAllCount(s, p, regex, icase) {
+  if (p === "") throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: an empty pattern is not measured");
+  const ms = regex ? rxAll(s, p, icase, false) : plainAll(s, p, icase, false);
+  if (ms.some((m) => m[0] === "")) throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: a regex that matches the empty string is not measured");
+  return ms.length;
+}
+export const EscapeHTMLAttr = (v) => v.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);

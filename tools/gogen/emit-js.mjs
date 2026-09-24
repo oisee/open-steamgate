@@ -326,7 +326,18 @@ function stmt(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
-      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`];
+      // ultra/events: APPEND ... ASSIGNING <fs> (a row of a structure only: see method)
+      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${tb}[${tb}.length - 1];`] : [])];
+    }
+    // ultra/events: CONCATENATE, FIND ALL ... MATCH COUNT (emit-go)
+    case "concat": {
+      const sep = st.sep ? expr(st.sep, ctx) : `""`;
+      const joined = st.table ? `${expr(st.table, ctx)}.map((ConcatRow) => ${expr(st.row, ctx)}).join(${sep})` : `[${st.parts.map((x) => expr(x, ctx)).join(", ")}].join(${sep})`;
+      return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${st.target.type.k === "c" ? st.target.type.len : -1}); ${place(st.target, ctx)} = v; s.sy.subrc = rc; }`];
+    }
+    case "find_all": {
+      const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} === "X")`;
+      return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase}); s.sy.subrc = ${place(st.count, ctx)} > 0 ? 0 : 4;`];
     }
     case "read_index": {
       const n = `idx${ctx.loop++}`;

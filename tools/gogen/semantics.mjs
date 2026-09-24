@@ -400,6 +400,17 @@ const EXPECT = {
   // and handlers, an interface's event through an interface reference
   ZCL_GOGEN_T_EVENTS: "none:[] order:a.p(2,s)b.q(2)c.p(2,s) other:[] twice:a.p(4,s) off:b.p(5,s) again:a.p(6,s)b.p(6,s) var:a.p(7,s) kill:a.kill kill2:a.kill add:a.add add2:a.addc.p(11,s) boom:a.boom.caught val:a.m(5,105)b.m(105,205) all:a.q(13)c.p(13,x)b.p(14,y)a.q(14)c.p(14,y) both:b.p(15,y)c.p(15,y)a.q(15)c.p(15,y) offone:b.p(16,y)a.q(16)c.p(16,y) offall:b.p(18,y) stat:static(19,s) sev:a.s(20)b.s(20) sev2:b.s(21) intf:a.i(hi,s)",
   ZCL_GOGEN_T_EVENTS2: "revive:a.revive allfirst:b.p(2,s)c.p(2,s) nest:a.n1(a.n2()b.p(2,s))b.p(1,s) self:a.self3b.p(3,s)b.p(4,s) rev:c.p(5,s)a.p(5,s)b.q(5)b.p(5,s) back:a.p(6,s)b.p(6,s)c.p(6,s) holes:b.q(7)b.p(7,s)a.q(7) holes2:b.q(8)b.p(8,s)a.q(8)",
+  // the WEBGUI's sapevent path (A4H 2026-09-24, $ZOSG_TMP_0440, ultra/events):
+  // line_exists( ), NS / CN, reference comparison (two objects of a class
+  // without fields are two), a SORTED unique table (INSERT INTO TABLE leaves
+  // sy-tabix alone, rows in binary key order, a duplicate is sy-subrc 4),
+  // APPEND ... ASSIGNING, CONCATENATE (c operands lose trailing blanks, the
+  // separator keeps them, a c target is cut with sy-subrc 4, LINES OF an
+  // empty table clears), FIND ALL ... MATCH COUNT (0 and sy-subrc 4 when
+  // none; a CL_ABAP_REGEX object), escape( ) e_html_attr. The JS emitter
+  // holds no field symbol of a string and refuses the method
+  ZCL_GOGEN_T_WGUI1: {Go: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 ap:2 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI1=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
@@ -407,7 +418,7 @@ const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE"];
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
