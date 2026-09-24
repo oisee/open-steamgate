@@ -21,6 +21,9 @@ CLASS ltcl_demo_data IMPLEMENTATION.
 
   METHOD teardown.
     zcl_osd_demo_data=>ensure_taxi( iv_rows = 0 ).
+* the real row real_rows_untouched inserts, also when an assertion stopped
+* that test before its own DELETE
+    DELETE FROM zosd_taxifact WHERE fact_id = '8999999999'.
   ENDMETHOD.
 
   METHOD real_rows.
