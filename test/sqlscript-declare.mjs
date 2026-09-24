@@ -3,6 +3,7 @@
 // docs/sqlscript-hana-observed.md).
 import {expect} from "chai";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
+import {decimalResult} from "../tools/sqlscript/to-ir.mjs";
 import {runProcedure, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
@@ -83,13 +84,20 @@ describe("decimal arithmetic keeps HANA's scale, as HXE answered it", () => {
     ["a - b", "-0.695"], ["0 - a", "-1.555"], ["a + b", "3.805"], ["a * b", "3.49875"],
     ["b - i", "-4.75"], ["a + i", "8.555"], ["a * i", "10.885"], ["1.5 + a", "3.055"],
     ["a + 1.2345", "2.7895"], ["i - 0.5", "6.5"], ["b * b", "5.0625"],
+    ["a * a", "2.418025"], ["ABS(a) + b", "3.805"],
+    // HXE prints 0.000 and 3.850; here the number is compared, because a
+    // DECIMAL's trailing zeros do not survive TO_NVARCHAR on SQLite or
+    // DuckDB (docs/sqlscript-hana-observed.md, "Decimal arithmetic")
+    ["0 * a", "0.000", "number"], ["ROUND(a, 1) + b", "3.850", "number"],
   ];
+  // SQLite is the engine the type decides for (it rounds to the declared
+  // scale); DuckDB widens by itself and is here as a regression guard only
   const ENGINES = [
     ["sqlite", () => new FileSqliteClient({path: ":memory:"})],
     ["duckdb", () => new DuckDBDatabaseClient()],
   ];
   for (const [dialect, make] of ENGINES) {
-    for (const [expression, expected] of CASES) {
+    for (const [expression, expected, compare] of CASES) {
       it(`${expression} is ${expected} on ${dialect}`, async () => {
         const client = make();
         await client.connect();
@@ -97,11 +105,38 @@ describe("decimal arithmetic keeps HANA's scale, as HXE answered it", () => {
           await client.native({sql: 'CREATE TABLE "S" ("A" DECIMAL(10,3), "B" DECIMAL(15,2), "I" INTEGER)', expect: "none"});
           await client.native({sql: 'INSERT INTO "S" VALUES (1.555, 2.25, 7)', expect: "none"});
           const program = compileProcedure({...SIG, body: `DECLARE s NVARCHAR(40) = ''; SELECT TO_NVARCHAR(${expression}) AS y INTO s FROM s; ev = :s;`}, new Map(), {catalogue: CAT});
-          expect((await runProcedure(program, {client, dialect})).value).to.equal(expected);
+          const value = (await runProcedure(program, {client, dialect})).value;
+          if (compare === "number") expect(Number(value)).to.equal(Number(expected));
+          else expect(value).to.equal(expected);
         } finally { await client.disconnect(); }
       });
     }
   }
+  it("types every measured row as HXE's SYS.TABLE_COLUMNS did", () => {
+    const P = (len, dec) => ({node: "col", type: {abap: "P", len, dec}});
+    const [A, B, C, H] = [P(10, 3), P(15, 2), P(31, 14), P(5, 0)];
+    const I = {node: "col", type: {abap: "I"}};
+    const G = {node: "col", type: {abap: "INT8"}};
+    const S16 = {node: "col", type: {abap: "I", bits: 16}};
+    const n = (value) => ({node: "lit", value, type: {abap: "I"}});
+    const d = (len, dec) => ({node: "lit", value: 0, type: {abap: "P", len, dec}});
+    const rows = [
+      ["-", A, B, 17, 3], ["+", A, B, 17, 3], ["-", n(0), A, 11, 3], ["-", B, I, 16, 2], ["+", A, I, 14, 3],
+      ["+", G, A, 23, 3], ["+", H, A, 11, 3], ["+", C, A, 32, 14], ["+", d(2, 1), A, 11, 3], ["+", A, d(5, 4), 12, 4],
+      ["-", I, d(1, 1), 12, 1], ["*", A, B, 25, 5], ["*", A, I, 20, 3], ["*", B, B, 30, 4], ["*", A, A, 20, 6],
+      ["+", S16, A, 11, 3], ["*", n(0), A, 11, 3],
+    ];
+    for (const [op, left, right, len, dec] of rows) {
+      expect(decimalResult(op, left, right), `${op} ${JSON.stringify(left.type)} ${JSON.stringify(right.type)}`).to.deep.equal({abap: "P", len, dec});
+    }
+    // past 38: floating on HANA, refused here (both measured)
+    expect(() => decimalResult("*", C, B)).to.throw(/past 38 digits/);
+    expect(() => decimalResult("+", P(38, 2), B)).to.throw(/past 38 digits/);
+    expect(() => decimalResult("*", {node: "bin", type: {abap: "P", len: 25, dec: 5}}, B)).to.throw(/past 38 digits/);
+  });
+  it("refuses an operand it has no measured type for, rather than P(15,2)", () => {
+    expect(() => decimalResult("+", {node: "call", type: {abap: "STRING"}}, {node: "col", type: {abap: "P", len: 15, dec: 2}})).to.throw(/type STRING in decimal arithmetic is not measured/);
+  });
   it("refuses a product past 38 digits, which HANA answers as a floating DECIMAL", () => {
     const catalogue = {S: {C: {abap: "P", len: 31, dec: 14}, B: {abap: "P", len: 15, dec: 2}}};
     expect(() => compileProcedure({...SIG, body: "DECLARE s NVARCHAR(40) = ''; SELECT TO_NVARCHAR(c * b) AS y INTO s FROM s; ev = :s;"}, new Map(), {catalogue})).to.throw(/past 38 digits/);

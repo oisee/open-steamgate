@@ -88,8 +88,8 @@ function writtenDecimal(text) {
 
 /** an operand as HANA's DECIMAL(p, s) for arithmetic: a packed value as it
  *  is, an integer column as its type's digits (INTEGER 10, BIGINT 19,
- *  SMALLINT 5, TINYINT 3), an integer literal as its own digits (0 - x keeps
- *  x's precision + 1, measured) */
+ *  SMALLINT 5, TINYINT 3 -- SMALLINT + DECIMAL(10,3) is (11,3), measured), an
+ *  integer literal as its own digits (0 - x keeps x's precision + 1) */
 function decimalShape(e) {
   const t = e?.type;
   if (t?.abap === "P" && Number.isInteger(t.len) && Number.isInteger(t.dec)) return {p: t.len, s: t.dec};
@@ -102,19 +102,23 @@ function decimalShape(e) {
 /** the DECIMAL HANA answers for + - * with a packed operand, measured on
  *  HXE 2.00.088 (docs/sqlscript-hana-observed.md, "Decimal arithmetic"):
  *  + and - keep the larger scale and one more integer digit than the wider
- *  side; * adds precisions and scales. Past 38 digits a product is HANA's
- *  floating DECIMAL, which has no fixed scale to carry */
-function decimalResult(op, left, right, node) {
+ *  side; * adds precisions and scales. Past 38 digits a sum or a product is
+ *  HANA's floating DECIMAL (measured for both: DECIMAL(38,2) + DECIMAL(15,2)
+ *  and (A * B) * B), which has no fixed scale to carry. An operand of any
+ *  other type -- a DOUBLE, whose sum with a DECIMAL is a DOUBLE, or a value
+ *  the IR types only as a STRING -- is not typed here and is refused */
+export function decimalResult(op, left, right, node) {
   const a = decimalShape(left);
   const b = decimalShape(right);
-  if (a === undefined || b === undefined) return T.dec(15, 2);
-  if (op === "*") {
-    if (a.p + b.p > 38) throw new BindError(`a product of DECIMAL(${a.p},${a.s}) and DECIMAL(${b.p},${b.s}) is past 38 digits: HANA answers a floating DECIMAL there`, node);
-    return T.dec(a.p + b.p, a.s + b.s);
+  if (a === undefined || b === undefined) {
+    const other = a === undefined ? left : right;
+    throw new BindError(`an operand of type ${other?.type?.abap ?? "unknown"} in decimal arithmetic is not measured`, node);
   }
-  const s = Math.max(a.s, b.s);
-  const p = Math.max(a.p - a.s, b.p - b.s) + 1 + s;
-  if (p > 38) throw new BindError(`a sum of DECIMAL(${a.p},${a.s}) and DECIMAL(${b.p},${b.s}) is past 38 digits`, node);
+  const [p, s] = op === "*" ? [a.p + b.p, a.s + b.s]
+    : [Math.max(a.p - a.s, b.p - b.s) + 1 + Math.max(a.s, b.s), Math.max(a.s, b.s)];
+  if (p > 38) {
+    throw new BindError(`DECIMAL(${a.p},${a.s}) ${op} DECIMAL(${b.p},${b.s}) is past 38 digits: HANA answers a floating DECIMAL there`, node);
+  }
   return T.dec(p, s);
 }
 
@@ -483,6 +487,10 @@ export function toIr(tree, options = {}) {
         // LENGTH of a text is an INTEGER (A4H: LENGTH('x  ') is 3)
         if (fn === "LENGTH" && args.length === 1 && ["C", "STRING"].includes(args[0].type?.abap)) resultType = T.int;
         if (["MIN", "MAX"].includes(fn) && args.length === 1 && args[0].type !== undefined && !isUnresolved(args[0].type)) resultType = args[0].type;
+        // measured on HXE 2.00.088: ROUND(x, n) and ABS(x) of a DECIMAL keep
+        // its precision and scale (ROUND(A, 1) + B over (10,3), (15,2) is
+        // (17,3) = 3.850), so decimal arithmetic can go on over them
+        if (["ROUND", "ABS"].includes(fn) && args[0]?.type?.abap === "P" && over === undefined) resultType = args[0].type;
         if (fn === "LOWER") {
           if (args.length !== 1 || !measuredTextType(args[0]?.type)) {
             throw new BindError("LOWER requires exactly one measured text argument", node);

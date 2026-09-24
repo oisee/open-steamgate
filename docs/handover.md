@@ -132,11 +132,9 @@ working tree; `-s read-only` is worth passing, because the default is
 
 ### Needs a machine that has something
 
-4. **`dec_mult`** — decimal multiplication against the HANA oracle. HANA's
-   result scale for `*` is s1 + s2, which decides whether the SQLite rounding
-   (`DIALECTS.sqlite.decArith`, `+` and `-` only today) may be extended to it.
-   The case is in the list with no answer and the table reports it as NOT
-   measured, which is the honest state and is visible.
+4. ~~**`dec_mult`**~~ — answered 2026-09-24 on HXE (2.8900, scale s1 + s2);
+   the SQLite rounding now covers `*` (`docs/sqlscript-hana-observed.md`,
+   "Decimal arithmetic").
 5. **The SQLScript corpus** lives on the i7 (`.local/a4h-export`), so
    `tools/sqlscript/run-corpus.mjs` cannot run on the other machine. 78 of
    364 bodies reach an engine.

@@ -3178,7 +3178,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "UPDATE \"P\" SET \"AMOUNT\" = (\"AMOUNT\" * CAST(? AS NUMERIC)) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = ROUND((\"AMOUNT\" * CAST(? AS NUMERIC)), 2) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
             "params": [
               {
                 "name": "p0",
@@ -3473,7 +3473,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 7, (CAST(? AS NUMERIC) * 2), CAST(? AS NUMERIC))",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 7, ROUND((CAST(? AS NUMERIC) * 2), 2), CAST(? AS NUMERIC))",
             "params": [
               {
                 "name": "p0",
