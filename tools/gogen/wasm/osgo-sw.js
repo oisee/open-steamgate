@@ -29,7 +29,14 @@ self.fs = (() => {
     if (!res.ok) throw error("ENOENT");
     return new Uint8Array(await res.arrayBuffer());
   };
+  // every other call Go's syscall makes: a missing method would be a panic
+  // in Go (js.Value.Call of undefined), an errno is an error it handles
+  const refuse = (code) => (...args) => args[args.length - 1](error(code));
+  const refused = Object.fromEntries(["readdir", "readlink"].map((n) => [n, refuse("ENOENT")])
+    .concat(["mkdir", "unlink", "rmdir", "chmod", "fchmod", "chown", "fchown", "lchown", "utimes", "rename",
+      "truncate", "ftruncate", "link", "symlink", "fsync"].map((n) => [n, refuse("EROFS")])));
   return {
+    ...refused,
     constants: {O_WRONLY: -1, O_RDWR: -1, O_CREAT: -1, O_TRUNC: -1, O_APPEND: -1, O_EXCL: -1, O_DIRECTORY: -1},
     writeSync(fd, buf) {
       line += decoder.decode(buf);
