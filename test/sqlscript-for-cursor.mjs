@@ -300,13 +300,12 @@ describe("the #59 critic's round: every loop alike, and what HANA measured", () 
     expect(await run("FOR i IN (1) .. 3 DO v = :v || i; END FOR;")).to.equal("123");
   });
 
-  it("differs from HANA where it says so: an INTEGER past 2^31 refused, no leading minus yet", async () => {
+  it("differs from HANA where it says so: an INTEGER past 2^31 refused; a leading minus reads as HANA reads it", async () => {
     let caught;
     try { await run("b = 2147483648; FOR i IN 2147483646 .. :b DO v = :v || 'x'; END FOR;"); } catch (error) { caught = error; }
     expect(caught, "HANA raises numeric overflow; this refuses").to.be.an("error");
-    // HANA reads `-2 .. 0` as -2, -1, 0; this grammar has no leading minus yet
-    // -- when it has, this fails and the doc's line is to be revisited
-    expect(() => compileProcedure({...SIG1, body: "DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN -2 .. 0 DO v = :v || i; END FOR; ev = :v;"}, new Map(), {})).to.throw();
+    // measured on HXE: `-2 .. 0` is -2, -1, 0
+    expect(await run("FOR i IN -2 .. 0 DO v = :v || i || ','; END FOR;")).to.equal("-2,-1,0,");
     expect(await run("FOR i IN (0 - 2) .. 0 DO v = :v || i || ','; END FOR;")).to.equal("-2,-1,0,");
   });
 
