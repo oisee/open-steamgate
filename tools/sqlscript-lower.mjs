@@ -374,9 +374,10 @@ export function lower(rel, dialectName, options = {}) {
         // have answered. For multiplication the result scale is s1 + s2:
         // 0.15 * 0.15 is 0.0225 on HANA, and rounding that to the declared 2
         // would answer 0.02 -- a rewrite that fixes one row by breaking a
-        // case nobody had measured. There is no oracle row for it, so it is
-        // left alone and `dec_mult` is in the case list to be asked the next
-        // time a machine with HANA is in reach.
+        // case nobody had measured. The IR now types a product s1 + s2 as HANA
+        // does (docs/sqlscript-hana-observed.md, "Decimal arithmetic"), so
+        // rounding it would be harmless, but SQLite's product of the two REALs
+        // already answers those rows and nothing asks for it.
         if (d.decArith !== undefined && e.type?.abap === "P" && e.type.dec !== undefined
             && (e.op === "+" || e.op === "-")) {
           return d.decArith(rendered, Number(e.type.dec));

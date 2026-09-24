@@ -72,9 +72,50 @@ const nameOf = (node) => String(leaf(node)?.value ?? "").toUpperCase();
 /** a literal's ABAP type, from what it is written as */
 function literalType(token) {
   if (token.node === "number") {
-    return String(token.value).includes(".") ? T.dec(15, 2) : T.int;
+    return String(token.value).includes(".") ? writtenDecimal(String(token.value)) : T.int;
   }
   return T.char(String(token.value).length);
+}
+
+/** a decimal literal is the DECIMAL it is written as: 1.5 is (2,1), 0.5 is
+ *  (1,1), 1.2345 is (5,4) -- read off HANA's arithmetic on HXE 2.00.088
+ *  (docs/sqlscript-hana-observed.md, "Decimal arithmetic") */
+function writtenDecimal(text) {
+  const [whole, fraction = ""] = text.replace(/^[-+]/, "").split(".");
+  const digits = whole.replace(/^0+/, "").length + fraction.length;
+  return T.dec(Math.max(digits, 1), fraction.length);
+}
+
+/** an operand as HANA's DECIMAL(p, s) for arithmetic: a packed value as it
+ *  is, an integer column as its type's digits (INTEGER 10, BIGINT 19,
+ *  SMALLINT 5, TINYINT 3), an integer literal as its own digits (0 - x keeps
+ *  x's precision + 1, measured) */
+function decimalShape(e) {
+  const t = e?.type;
+  if (t?.abap === "P" && Number.isInteger(t.len) && Number.isInteger(t.dec)) return {p: t.len, s: t.dec};
+  if (e?.node === "lit" && typeof e.value === "number" && Number.isInteger(e.value)) return {p: Math.max(String(Math.abs(e.value)).length, 1), s: 0};
+  if (t?.abap === "INT8") return {p: 19, s: 0};
+  if (t?.abap === "I") return {p: t.bits === 16 ? 5 : t.bits === 8 ? 3 : 10, s: 0};
+  return undefined;
+}
+
+/** the DECIMAL HANA answers for + - * with a packed operand, measured on
+ *  HXE 2.00.088 (docs/sqlscript-hana-observed.md, "Decimal arithmetic"):
+ *  + and - keep the larger scale and one more integer digit than the wider
+ *  side; * adds precisions and scales. Past 38 digits a product is HANA's
+ *  floating DECIMAL, which has no fixed scale to carry */
+function decimalResult(op, left, right, node) {
+  const a = decimalShape(left);
+  const b = decimalShape(right);
+  if (a === undefined || b === undefined) return T.dec(15, 2);
+  if (op === "*") {
+    if (a.p + b.p > 38) throw new BindError(`a product of DECIMAL(${a.p},${a.s}) and DECIMAL(${b.p},${b.s}) is past 38 digits: HANA answers a floating DECIMAL there`, node);
+    return T.dec(a.p + b.p, a.s + b.s);
+  }
+  const s = Math.max(a.s, b.s);
+  const p = Math.max(a.p - a.s, b.p - b.s) + 1 + s;
+  if (p > 38) throw new BindError(`a sum of DECIMAL(${a.p},${a.s}) and DECIMAL(${b.p},${b.s}) is past 38 digits`, node);
+  return T.dec(p, s);
 }
 
 const measuredTextType = (type) => {
@@ -305,7 +346,7 @@ export function toIr(tree, options = {}) {
             return a.variable === true || b.variable === true ? {...joined, variable: true} : joined;
           };
           const type = op === "||" ? concatenated() : op === "/" ? T.dec(15, 2)
-            : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
+            : (left.type?.abap === "P" || right.type?.abap === "P" ? decimalResult(op, left, right, parts[i]) : widened(left.type));
           left = bin(op, left, right, type);
         }
         return left;

@@ -73,3 +73,37 @@ describe("the #62 critic's round: every writer of a CONSTANT, and the minus's ty
     } finally { await client.disconnect(); }
   });
 });
+
+// HANA's result types for + - * over DECIMAL, read off HXE 2.00.088 with a
+// CREATE TABLE AS SELECT of each expression (docs/sqlscript-hana-observed.md,
+// "Decimal arithmetic"); the values are what HXE answered for the same row
+describe("decimal arithmetic keeps HANA's scale, as HXE answered it", () => {
+  const CAT = {S: {A: {abap: "P", len: 10, dec: 3}, B: {abap: "P", len: 15, dec: 2}, I: {abap: "I"}}};
+  const CASES = [
+    ["a - b", "-0.695"], ["0 - a", "-1.555"], ["a + b", "3.805"], ["a * b", "3.49875"],
+    ["b - i", "-4.75"], ["a + i", "8.555"], ["a * i", "10.885"], ["1.5 + a", "3.055"],
+    ["a + 1.2345", "2.7895"], ["i - 0.5", "6.5"], ["b * b", "5.0625"],
+  ];
+  const ENGINES = [
+    ["sqlite", () => new FileSqliteClient({path: ":memory:"})],
+    ["duckdb", () => new DuckDBDatabaseClient()],
+  ];
+  for (const [dialect, make] of ENGINES) {
+    for (const [expression, expected] of CASES) {
+      it(`${expression} is ${expected} on ${dialect}`, async () => {
+        const client = make();
+        await client.connect();
+        try {
+          await client.native({sql: 'CREATE TABLE "S" ("A" DECIMAL(10,3), "B" DECIMAL(15,2), "I" INTEGER)', expect: "none"});
+          await client.native({sql: 'INSERT INTO "S" VALUES (1.555, 2.25, 7)', expect: "none"});
+          const program = compileProcedure({...SIG, body: `DECLARE s NVARCHAR(40) = ''; SELECT TO_NVARCHAR(${expression}) AS y INTO s FROM s; ev = :s;`}, new Map(), {catalogue: CAT});
+          expect((await runProcedure(program, {client, dialect})).value).to.equal(expected);
+        } finally { await client.disconnect(); }
+      });
+    }
+  }
+  it("refuses a product past 38 digits, which HANA answers as a floating DECIMAL", () => {
+    const catalogue = {S: {C: {abap: "P", len: 31, dec: 14}, B: {abap: "P", len: 15, dec: 2}}};
+    expect(() => compileProcedure({...SIG, body: "DECLARE s NVARCHAR(40) = ''; SELECT TO_NVARCHAR(c * b) AS y INTO s FROM s; ev = :s;"}, new Map(), {catalogue})).to.throw(/past 38 digits/);
+  });
+});

@@ -804,12 +804,50 @@ HANA (the #56 critic):
 | `-:s`, s = '5' | -5 -- the text converted; the portable compiler refuses a minus before a text |
 | `-x`, `0 - x`, x DECIMAL(10,3) = 1.555 | -1.555, -1.555 -- the scale is kept |
 
-The last row says the binary rule of `tools/sqlscript/to-ir.mjs` -- any
-arithmetic with a packed operand is P(15,2) -- is wrong for a scale above 2:
-HANA keeps 1.555's three decimals in `0 - x`, and SQLite's rounding to the
-declared scale cuts it to 1.55 (DuckDB widens the type and keeps the value).
-The leading minus takes its operand's type and is right; the binary rule is
-an older defect, left for its own change with its own measurements.
+The last row said the old binary rule of `tools/sqlscript/to-ir.mjs` --
+any arithmetic with a packed operand is P(15,2) -- was wrong for a scale
+above 2: HANA keeps 1.555's three decimals in `0 - x`, and SQLite's
+rounding to the declared scale cut it to 1.55 (DuckDB widens the type and
+kept the value). It is replaced by the rule measured below.
+
+## Decimal arithmetic (measured on HXE 2.00.088, 2026-09-24)
+
+Each expression was the column of a `CREATE COLUMN TABLE r AS (SELECT ...)`
+over one row A DECIMAL(10,3) = 1.555, B DECIMAL(15,2) = 2.25, C
+DECIMAL(31,14), I INTEGER = 7, G BIGINT = 9, H DECIMAL(5,0) = 3, and the
+type is what `SYS.TABLE_COLUMNS` says of that column.
+
+| expression | HANA's type | value |
+| --- | --- | --- |
+| `A - B`, `A + B` | DECIMAL(17,3) | -0.695, 3.805 |
+| `0 - A` | DECIMAL(11,3) | -1.555 |
+| `B - I` | DECIMAL(16,2) | -4.75 |
+| `A + I` | DECIMAL(14,3) | 8.555 |
+| `G + A` | DECIMAL(23,3) | 10.555 |
+| `H + A` | DECIMAL(11,3) | 4.555 |
+| `C + A` | DECIMAL(32,14) | 2.55500000000001 |
+| `1.5 + A` | DECIMAL(11,3) | 3.055 |
+| `A + 1.2345` | DECIMAL(12,4) | 2.7895 |
+| `I - 0.5` | DECIMAL(12,1) | 6.5 |
+| `A * B` | DECIMAL(25,5) | 3.49875 |
+| `A * I` | DECIMAL(20,3) | 10.885 |
+| `B * B` | DECIMAL(30,4) | 5.0625 |
+| `C * B` | DECIMAL(34) floating, no scale | 2.2500000000000225e+0 |
+| `A / B` | DECIMAL(28,19) | 0.6911111111111111111 |
+| `A / I` | DECIMAL(21,14) | 0.22214285714285 |
+| `I / I` | DECIMAL(16,6) | 1.000000 |
+
+So `+` and `-` keep the larger scale and one more integer digit than the
+wider side, `max(p1 - s1, p2 - s2) + 1 + max(s1, s2)`; `*` adds precisions
+and scales, and past 38 digits the product is HANA's floating DECIMAL. An
+operand that is not packed counts as its digits: INTEGER 10, BIGINT 19, an
+integer literal its own (`0` is one digit, which is why `0 - A` is 11 and
+not 14), a decimal literal as written (1.5 is (2,1), 1.2345 is (5,4)). The
+portable compiler types `+ - *` that way (`decimalResult` in
+`tools/sqlscript/to-ir.mjs`, tests in `test/sqlscript-declare.mjs`) and
+refuses a product or sum past 38 digits. **Division is not this rule** --
+the three rows give scales 19, 14 and 6 -- and keeps the old P(15,2) until
+it has measurements enough to derive its own.
 
 ## Writes: DELETE, UPDATE, INSERT, UPSERT (measured on HXE 2.00.088, 2026-09-24)
 
