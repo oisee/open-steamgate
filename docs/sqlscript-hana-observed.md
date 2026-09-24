@@ -683,3 +683,30 @@ working bodies; every body the portable compiler accepts, HANA accepts too;
 84 that HANA accepts stop in our parser, which is the grammar backlog, by
 construct. The report and the shapes read off the system stay under
 `.local/amdp-oracle/`.
+
+## The order a cursor's rows come in (observed, 2026-09-24)
+
+Observed, not a documented guarantee: HANA promises no order without
+ORDER BY. A cursor over a table variable whose rows were put in a known,
+shuffled order (a permutation key), counted as inversions of that order
+over the loop, on HANA Express 2.00.088 and on A4H's HANA (a throwaway AMDP
+class, deleted; the table variable was the method's IN table, as in the
+corpus):
+
+| cursor `SELECT ... FROM :lt` | HXE 3 / 1000 / 100 000 rows | A4H 3 / 1000 / 100 000 rows |
+| --- | --- | --- |
+| as it is | 0 / 0 / 0 | 0 / 0 / 0 |
+| `WHERE` (a filter) | 0 / 0 / 0 | 0 / 0 / 0 |
+| a projection (`n * 2 AS m`) | 0 / 0 / 0 | -- |
+| `DISTINCT` | 0 / **7** / **12 799** | 0 / 0 / 0 |
+| a join with a small table | 0 / **7** / **791** | 0 / 0 / 0 |
+
+So a scan, a filter and a projection kept the table variable's order on
+both, at every size; DISTINCT and a join kept it on one HANA and lost it on
+the other, and at three rows every form looked ordered. The portable runtime
+therefore carries order as a property of a relation: *defined* (ORDER BY, or
+rows put in an order), *inherited* through a scan, filter or projection of a
+relation whose order is defined, and *unknown* after DISTINCT, a join, a
+union, grouping, or a scan of a database table without ORDER BY. A FOR loop
+over a cursor of unknown order is refused ("order"), since its result can
+depend on an order no HANA promises.
