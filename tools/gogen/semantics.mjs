@@ -120,6 +120,20 @@ const EXPECT = {
   // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
   // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
   ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0081, ABAP Unit probe of this
+  // class): CREATE DATA LIKE LINE OF a generic table of elementary rows is
+  // a new initial value of the row type (d 00000000, n zeros, i 0), which
+  // is written and inserted (/UI2/CL_JSON into a table of strings, ZOSD_NOTE)
+  ZCL_GOGEN_T_CRELEM: "s:g[][ab]1 s2:g[][cd]2 i:I[0 ][42 ]1 c:C[][abc]1 d:D[00000000][20250107]1 t:T[000000][123456]1 n:N[0000][0012]1",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0080, ABAP Unit probe of this
+  // class): cl_abap_gzip=>compress_binary then decompress_binary gives the
+  // input back, GZIP_OUT_LEN is xstrlen( gzip_out ), an empty input too,
+  // 1000 repetitive bytes compress below 100; zlib's raw stream of 11223344
+  // and one with a sync marker before an empty final block (Go's) both
+  // inflate. The compressed bytes are not pinned: A4H writes zlib's
+  // (130A312A63646160F8FF1F00 for 1254327601040000FFFF), Go its own
+  ZCL_GOGEN_T_GZIP: {Go: "rt:11/8 e:11/0 big:11/1000 small:1 z:11223344/4 s:11223344/4",
+    JS: "ERROR NOT_COMPILED in abap.DeflateRaw: a host function of the Go runtime"},
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
@@ -667,7 +681,9 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
-  "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
+  "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
+  // raw DEFLATE (parity-wave2, ZCL_GOGEN_T_GZIP)
+  "CL_ABAP_GZIP"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

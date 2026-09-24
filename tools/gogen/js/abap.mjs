@@ -699,7 +699,7 @@ export function AppendData(t, v) {
   if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
   MoveData(Row(t, n), v);
   return n + 1;
@@ -719,7 +719,7 @@ export function NewLine(t) {
   if (t === null) throw notAssigned("CREATE DATA LIKE LINE OF");
   if (t.t.kind !== "h") notCompiled("CREATE DATA LIKE LINE OF: a generic value that is not a table");
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   return cell(zero, rt);
 }
 
@@ -1391,7 +1391,7 @@ export function AppendInitialData(t) {
   if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND INITIAL LINE: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
   return [Row(t, n), n + 1];
 }

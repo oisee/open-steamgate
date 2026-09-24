@@ -615,6 +615,12 @@ const NATIVE = new Map([
   // answer to accept-encoding: gzip is inflated with zlib.gunzipSync, a
   // string as base64 is Buffer.from(string) (UTF-8) as base64 (authenticate)
   ["CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", {fn: "abap.GunzipWithHeader", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring"]}],
+  // parity-wave2: raw DEFLATE both ways (zlib.deflateRawSync /
+  // inflateRawSync on Node, go/abap/gzip.go): cl_abap_zip's ADD and GET,
+  // the SEGW RepoSet zip. Go's encoder is not zlib's, so the compressed
+  // bytes differ; the stream inflates to the same input on both
+  ["CL_ABAP_GZIP=>COMPRESS_BINARY", {fn: "abap.DeflateRaw", args: ["RAW_IN:xstring", "&GZIP_OUT:xstring", "&GZIP_OUT_LEN:i"]}],
+  ["CL_ABAP_GZIP=>DECOMPRESS_BINARY", {fn: "abap.InflateRaw", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring", "&RAW_OUT_LEN:i"]}],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~ENCODE_BASE64", {fn: "abap.EncodeBase64", args: ["UNENCODED:string"]}],
 ]);
 

@@ -150,10 +150,54 @@ func (t *Table) Column(name string) (*Column, bool) {
 // NewData is a new initial value of a type with a generated descriptor:
 // the generic row factory (CREATE DATA through a descriptor).
 func NewData(t *Type) Data {
+	if t != nil && t.New == nil {
+		if p := newElementary(t); p != nil {
+			return Data{P: p, T: t}
+		}
+	}
 	if t == nil || t.New == nil {
 		panic(NotCompiled("CREATE DATA", "a type without a generated descriptor"))
 	}
 	return Data{P: t.New(), T: t}
+}
+
+// newElementary is a new initial value of a built-in elementary descriptor
+// (parity-wave2: CREATE DATA LIKE LINE OF a generic table of strings, in
+// /UI2/CL_JSON=>_DESERIALIZE): the Go value each kind is carried as, at the
+// type's initial value, as emit-go's zero( ) writes it. nil for a kind
+// with no such value here (an object reference).
+func newElementary(t *Type) any {
+	switch t.Kind {
+	case 'I':
+		return new(int32)
+	case '8':
+		return new(int64)
+	case 'F':
+		return new(float64)
+	case 'g', 'y', 'C':
+		return new(string)
+	case 'X':
+		v := strings.Repeat("\x00", t.Len)
+		return &v
+	case 'D':
+		v := "00000000"
+		return &v
+	case 'T':
+		v := "000000"
+		return &v
+	case 'N':
+		v := strings.Repeat("0", t.Len)
+		return &v
+	case 'P':
+		v := "0"
+		if dec := t.Len % 100; dec > 0 {
+			v = "0." + strings.Repeat("0", dec)
+		}
+		return &v
+	case 'l':
+		return new(Data)
+	}
+	return nil
 }
 
 func (t *Table) typeOf(table bool) *Type {
