@@ -48,25 +48,48 @@ export function initialValue(type) {
  * holds, so a value it could not hold is refused rather than rounded: more
  * decimals than the type has (unless the extra ones are zeros), or more
  * digits than its length -- rounding on the way in is ABAP's assignment, not
- * the write's, and was not measured here. A JavaScript number is read by its
- * shortest text, so a caller with more than 15 digits passes a string.
+ * the write's, and was not measured here.
+ *
+ * The text grammar is abapNumber's (tools/ir-osql-where.mjs): blanks around
+ * it are skipped (spaces only -- a tab is not a blank), a sign may lead or
+ * trail ('5-' is -5, as ABAP writes it), digits on both sides of a point.
+ * The one difference is on purpose: abapNumber converts a WHERE literal and
+ * rounds half away from zero, as A4H does; a work area already holds its
+ * value, so here extra decimals are refused, never rounded.
+ *
+ * A JavaScript number is read by its shortest text and is refused past
+ * 2^53, where that text is no longer the number the caller meant: a caller
+ * with more digits passes a string. The type is checked as DDIC has it:
+ * `len` 1..31 digits (31 when absent), `dec` 0..14 and not above `len`.
  */
-function packedText(value, type, what) {
-  const dec = Number.isInteger(type.dec) ? type.dec : 0;
-  const text = typeof value === "number" ? (Number.isFinite(value) ? String(value) : "") : String(value).trim();
-  const m = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
-  if (m === null) throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
+export function packedText(value, type, what = "value") {
+  const len = type?.len === undefined ? 31 : type.len;
+  const dec = type?.dec === undefined ? 0 : type.dec;
+  if (!Number.isInteger(len) || len < 1 || len > 31) throw new WriteError(`a packed type of length ${JSON.stringify(type?.len)}: DDIC allows 1 to 31 digits`);
+  if (!Number.isInteger(dec) || dec < 0 || dec > 14 || dec > len) throw new WriteError(`a packed type with ${JSON.stringify(type?.dec)} decimals: DDIC allows 0 to 14, and not more than its ${len} digits`);
+  let text;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
+    if (Math.abs(value) > Number.MAX_SAFE_INTEGER) throw new WriteError(`${what} ${value} is past 2^53 as a JavaScript number: pass it as a decimal string`);
+    text = String(value);
+  } else if (typeof value === "string" || typeof value === "bigint") {
+    text = String(value).replace(/^ +| +$/g, "");
+  } else {
+    throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
+  }
+  const m = /^([+-]?)(\d+)(?:\.(\d+))?([+-]?)$/.exec(text);
+  if (m === null || (m[1] !== "" && m[4] !== "")) throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
   const fraction = m[3] ?? "";
   if (fraction.length > dec && /[1-9]/.test(fraction.slice(dec))) {
     throw new WriteError(`${what} ${JSON.stringify(value)} has more than the column's ${dec} decimals`);
   }
   const whole = m[2].replace(/^0+(?=\d)/, "");
   const digits = fraction.padEnd(dec, "0").slice(0, dec);
-  if (Number.isInteger(type.len) && (whole === "0" ? 0 : whole.length) + dec > type.len) {
-    throw new WriteError(`${what} ${JSON.stringify(value)} does not fit the column's ${type.len} digits`);
+  if ((whole === "0" ? 0 : whole.length) + dec > len) {
+    throw new WriteError(`${what} ${JSON.stringify(value)} does not fit the column's ${len} digits`);
   }
   const zero = /^0*$/.test(whole + digits);
-  return `${m[1] === "-" && !zero ? "-" : ""}${whole}${dec > 0 ? `.${digits}` : ""}`;
+  return `${(m[1] || m[4]) === "-" && !zero ? "-" : ""}${whole}${dec > 0 ? `.${digits}` : ""}`;
 }
 
 /**
@@ -102,6 +125,24 @@ export function bindRows(columns, schema, rows) {
   }));
 }
 
+/**
+ * A packed literal a statement writes must be the decimal string of its
+ * type, whoever built it: a lit(1.5, P) made by hand, not through
+ * bindValue, would reach the client as a JavaScript number and bind as a
+ * double. Checked where values are written (rows, SET), not in conditions.
+ */
+function checkWritten(node) {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) { node.forEach(checkWritten); return; }
+  if (node.node === "lit" && node.type?.abap === "P") {
+    if (typeof node.value !== "string" || packedText(node.value, node.type) !== node.value) {
+      throw new WriteError(`a packed literal ${JSON.stringify(node.value)} is not the decimal string of P(${node.type.len ?? 31},${node.type.dec ?? 0}): bind it with bindValue`);
+    }
+    return;
+  }
+  for (const value of Object.values(node)) checkWritten(value);
+}
+
 const DUPLICATES = ["error", "raise", "ignore"];
 const checkDuplicates = (onDuplicate) => {
   if (!DUPLICATES.includes(onDuplicate)) throw new WriteError(`onDuplicate ${JSON.stringify(onDuplicate)} is error, raise or ignore`);
@@ -112,6 +153,7 @@ export const insertRows = (table, columns, rows, {onDuplicate = "error"} = {}) =
   checkDuplicates(onDuplicate);
   if (rows.length === 0) throw new WriteError("an INSERT with no rows");
   if (rows.some((row) => row.length !== columns.length)) throw new WriteError("a row does not have one value per column");
+  checkWritten(rows);
   return {write: "insert", table: upper(table), columns: names(columns), rows, onDuplicate,
     ...(onDuplicate === "raise" ? {expected: rows.length} : {})};
 };
@@ -123,6 +165,7 @@ export const insertFrom = (table, columns, rel, {onDuplicate = "error"} = {}) =>
 /** UPDATE dbtab SET ... WHERE ...; `pred` undefined updates every row */
 export const update = (table, set, pred) => {
   if (set.length === 0) throw new WriteError("an UPDATE that sets nothing");
+  checkWritten(set.map((one) => one.expr));
   return {write: "update", table: upper(table), set: set.map((one) => ({col: upper(one.col), expr: one.expr})), ...(pred === undefined ? {} : {pred})};
 };
 /** DELETE FROM dbtab WHERE ...; `pred` undefined deletes every row */
@@ -135,6 +178,7 @@ export const upsert = (table, columns, rows, key) => {
   if (keys.some((k) => !cols.includes(k))) throw new WriteError("a MODIFY's key columns must be among its columns");
   if (rows.length === 0) throw new WriteError("a MODIFY with no rows");
   if (rows.some((row) => row.length !== cols.length)) throw new WriteError("a row does not have one value per column");
+  checkWritten(rows);
   // ABAP writes row by row and the last row of a key wins; one statement
   // would differ per engine (SQLite keeps the last, DuckDB the first,
   // PostgreSQL refuses), so the earlier rows of a key are dropped here

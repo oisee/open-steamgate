@@ -60,6 +60,21 @@ export const P_CASES = [
   {name: "UPDATE a packed amount by key", stmt: () => update("P", [{col: "AMOUNT", expr: bindValue("99.99", P_SCHEMA.AMOUNT)}], bin("AND", peq("MANDT", "001"), peq("ID", 1), T.bool))},
   {name: "MODIFY a TIMESTAMP on an existing row", stmt: () => upsert("P", P_COLS, prow({mandt: "001", id: 2, amount: "0.5", ts: "20261231235959"}), ["MANDT", "ID"])},
 ];
+// a wide packed column, P 31,14: past a double's 15 digits, so a value that
+// reaches the engine as a JavaScript number arrives rounded. Exact on the
+// engines with a decimal type; SQLite has none (NUMERIC affinity, a REAL).
+export const W_SCHEMA = {MANDT: {abap: "C", len: 3}, ID: {abap: "I"}, BIG: {abap: "P", len: 31, dec: 14}};
+const W_COLS = ["MANDT", "ID", "BIG"];
+const wrow = (...list) => bindRows(W_COLS, W_SCHEMA, list);
+export const W_SEED = [["001", 1, "0.00000000000001"]];
+export const W_EXACT = ["duckdb", "postgres", "hana"];
+export const W_CASES = [
+  {name: "INSERT a P 31,14 value with all 31 digits", stmt: () => insertRows("W", W_COLS,
+    wrow({mandt: "001", id: 2, big: "12345678901234567.12345678901234"}))},
+  {name: "UPDATE a P 31,14 value to its negative extreme", stmt: () => update("W",
+    [{col: "BIG", expr: bindValue("-99999999999999999.99999999999999", W_SCHEMA.BIG)}],
+    bin("AND", bin("=", col("MANDT", W_SCHEMA.MANDT), lit("001", W_SCHEMA.MANDT), T.bool), bin("=", col("ID", W_SCHEMA.ID), lit(1, W_SCHEMA.ID), T.bool), T.bool))},
+];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
 function rendered(stmt, dialect) {
@@ -85,6 +100,13 @@ export function packedPairs() {
   });
 }
 
+export function widePairs() {
+  return W_CASES.map((one) => {
+    const stmt = one.stmt();
+    return {name: one.name, statement: stmt, lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, rendered(stmt, dialect)]))};
+  });
+}
+
 export const render = () => JSON.stringify({
   note: "write statements lowered per dialect by tools/ir-writes-pairs.mjs; a port must give the same {sql, params} bytes. Table T (MANDT C3, ID I, TXT C10), key (MANDT, ID), seeded with SEED before each case.",
   seed: SEED, key: KEY, schema: SCHEMA,
@@ -92,6 +114,10 @@ export const render = () => JSON.stringify({
   packed: {
     note: "Table P (MANDT C3, ID I, AMOUNT P 15,2, TS P 15,0 -- a TIMESTAMP), key (MANDT, ID), seeded with seed before each case. A packed value is a decimal string with exactly the type's decimals; more non-zero decimals than the type, or more digits than its length, is refused (an ABAP work area cannot hold it), not rounded.",
     seed: P_SEED, schema: P_SCHEMA, pairs: packedPairs(),
+  },
+  wide: {
+    note: "Table W (MANDT C3, ID I, BIG P 31,14), key (MANDT, ID), seeded with seed before each case. Every packed parameter binds as its decimal string, never as a JavaScript number: 31 digits do not survive a double. The engines in exact read BIG back digit for digit; SQLite has no decimal type and keeps a REAL.",
+    seed: W_SEED, schema: W_SCHEMA, exact: W_EXACT, pairs: widePairs(),
   },
 }, undefined, 2) + "\n";
 
@@ -104,6 +130,6 @@ if (runsAs("ir-writes-pairs.mjs")) {
   } else {
     mkdirSync(dirname(PAIRS_FILE), {recursive: true});
     writeFileSync(PAIRS_FILE, text);
-    console.log(`wrote ${PAIRS_FILE}: ${CASES.length} cases x ${DIALECT_ORDER.length} dialects`);
+    console.log(`wrote ${PAIRS_FILE}: ${CASES.length + P_CASES.length + W_CASES.length} cases x ${DIALECT_ORDER.length} dialects`);
   }
 }

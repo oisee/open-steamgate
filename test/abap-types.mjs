@@ -28,11 +28,17 @@ describe("an ABAP type code that is a word is not read as a letter", () => {
   });
 
   it("and the letters still mean what they meant", () => {
-    for (const code of ["I", "B", "S", "P(15,2)", "F"]) {
-      expect(isNumericType(code), code).to.equal(true);
-      expect(bindValue({type: code, value: "7"}), code).to.equal(7);
-    }
+    for (const code of ["I", "B", "S", "P(15,2)", "F"]) expect(isNumericType(code), code).to.equal(true);
+    for (const code of ["I", "B", "S", "F"]) expect(bindValue({type: code, value: "7"}), code).to.equal(7);
+    expect(bindValue({type: "P(15,2)", value: 7}), "a packed number stays a number").to.equal(7);
     for (const code of ["C(10)", "N(4)", "D", "T"]) expect(isNumericType(code), code).to.equal(false);
+  });
+
+  it("a packed value given as its decimal string binds as that string, every digit of it", () => {
+    // Number() would give 12345678901234568 for the first: a double's 15 digits
+    expect(bindValue({type: "P(31,14)", value: "12345678901234567.12345678901234"})).to.equal("12345678901234567.12345678901234");
+    expect(bindValue({type: "P(15,2)", value: "7.00"})).to.equal("7.00");
+    expect(bindValue({type: "P(15,2)", value: "7.00", isNull: true})).to.equal(null);
   });
 
   it("X and XSTRING bind as bytes when the client asks for it", () => {

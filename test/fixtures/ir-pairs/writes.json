@@ -2888,5 +2888,289 @@
         }
       }
     ]
+  },
+  "wide": {
+    "note": "Table W (MANDT C3, ID I, BIG P 31,14), key (MANDT, ID), seeded with seed before each case. Every packed parameter binds as its decimal string, never as a JavaScript number: 31 digits do not survive a double. The engines in exact read BIG back digit for digit; SQLite has no decimal type and keeps a REAL.",
+    "seed": [
+      [
+        "001",
+        1,
+        "0.00000000000001"
+      ]
+    ],
+    "schema": {
+      "MANDT": {
+        "abap": "C",
+        "len": 3
+      },
+      "ID": {
+        "abap": "I"
+      },
+      "BIG": {
+        "abap": "P",
+        "len": 31,
+        "dec": 14
+      }
+    },
+    "exact": [
+      "duckdb",
+      "postgres",
+      "hana"
+    ],
+    "pairs": [
+      {
+        "name": "INSERT a P 31,14 value with all 31 digits",
+        "statement": {
+          "write": "insert",
+          "table": "W",
+          "columns": [
+            "MANDT",
+            "ID",
+            "BIG"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 2,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "12345678901234567.12345678901234",
+                "type": {
+                  "abap": "P",
+                  "len": 31,
+                  "dec": 14
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678901234567.12345678901234",
+                "type": "P(31,14)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678901234567.12345678901234",
+                "type": "P(31,14)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES ($1::varchar(3), 2, $2::numeric(31,14))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678901234567.12345678901234",
+                "type": "P(31,14)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, CAST(? AS DECIMAL(31,14)))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678901234567.12345678901234",
+                "type": "P(31,14)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "UPDATE a P 31,14 value to its negative extreme",
+        "statement": {
+          "write": "update",
+          "table": "W",
+          "set": [
+            {
+              "col": "BIG",
+              "expr": {
+                "node": "lit",
+                "value": "-99999999999999999.99999999999999",
+                "type": {
+                  "abap": "P",
+                  "len": 31,
+                  "dec": 14
+                }
+              }
+            }
+          ],
+          "pred": {
+            "node": "bin",
+            "op": "AND",
+            "left": {
+              "node": "bin",
+              "op": "=",
+              "left": {
+                "node": "col",
+                "name": "MANDT",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "type": {
+                "abap": "BOOL"
+              }
+            },
+            "right": {
+              "node": "bin",
+              "op": "=",
+              "left": {
+                "node": "col",
+                "name": "ID",
+                "type": {
+                  "abap": "I"
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": 1,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              "type": {
+                "abap": "BOOL"
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          }
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "UPDATE \"W\" SET \"BIG\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "-99999999999999999.99999999999999",
+                "type": "P(31,14)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "UPDATE \"W\" SET \"BIG\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "-99999999999999999.99999999999999",
+                "type": "P(31,14)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "UPDATE \"W\" SET \"BIG\" = $1::numeric(31,14) WHERE ((\"MANDT\" = $2::varchar(3)) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "-99999999999999999.99999999999999",
+                "type": "P(31,14)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "UPDATE \"W\" SET \"BIG\" = CAST(? AS DECIMAL(31,14)) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "-99999999999999999.99999999999999",
+                "type": "P(31,14)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      }
+    ]
   }
 }
