@@ -1292,25 +1292,43 @@ Wall time with 4 jobs: full 6m45s (the Playwright job alone 6m45s), fast
 
 ## The IR as JSON
 
-`tools/gogen/ir-json.mjs` writes the program `compileProgram` builds as JSON documents, so another process can read it back: the Go side, or a later build that does not parse the ABAP again. `node tools/gogen/ir-json-check.mjs [--out <dir>]` checks the round trip on the whole OSGo program.
+`tools/gogen/ir-json.mjs` writes the program `compileProgram` builds as JSON documents, so another process can read it back: the Go side, or a build that does not parse the ABAP again. `node tools/gogen/ir-json-check.mjs [--out <dir>]` checks the round trip on the whole OSGo program.
 
 **Documents.**
-- One shared document `{"ir": "gogen", "version": 1, "order": [...], "program": {...}}`: structures, constants, interfaces, RTTI, tables and the rest of the program.
-- One document per class or function group, `{"ir": "gogen", "version": 1, "object": "ZCL_X", "class": {...}}`. This is the unit an incremental build can keep by the hash of its source.
+- One shared document, `{"ir": "gogen", "version": 1, "source": "…", "order": [...], "program": {...}}`.
+- One document per class or function group, `{"ir": "gogen", "version": 1, "source": "…", "object": "ZCL_X", "class": {...}}`.
+- `source` is a hash of `frontend.mjs`, the two emitters and this file. A reader refuses a document written by other sources, since a change to the front end changes the IR without changing `version`.
+- Compact JSON; keys stay in the order they were built.
 
 **Tags.**
 - `Map` → `{"$map": [[k, v], ...]}` and `Set` → `{"$set": [...]}`, both in insertion order.
 - `BigInt` → `{"$bigint": "…"}`.
-- A node reached more than once in one document is written once as `{"$id": n, ...}` (or `{"$id": n, "$array": [...]}` for an array), and every later reach becomes `{"$ref": n}`.
+- A node reached more than once in one document is written once, as `{"$id": n, ...}` (or `{"$id": n, "$array": [...]}` for an array, or with `$map`/`$set`), and every later reach becomes `{"$ref": n}`. The decoder registers a node before it reads the node's contents, so a `$ref` inside a node finds it.
 
-The IR is a graph, not a tree. A DELETE inside a LOOP holds the loop's own node, and the emitters write the loop's index name into it and read it back through that reference. A copy reads `undefined`, and the first version of this file did exactly that. Plain objects keep their keys in insertion order. Nothing is sorted, because the emitters iterate in that order.
+The IR is a graph, not a tree. A DELETE inside a LOOP holds the loop's own node, and the emitters read the loop's index through that reference. Nodes shared between documents, such as the type constants, are copied into each document, which is harmless because nothing writes into them. Nothing is sorted, because the emitters iterate in insertion order.
 
-**What does not travel.** `reg`, the abaplint registry, and `functionModules`, front-end state holding abaplint groups and scopes. The emitters read neither: a function group's compiled form is its class. Anything else that is not plain data is refused with its path, which is how the `FunctionGroup` in `functionModules` was found. `osgDatabase` still needs `reg` for the transpiler's `DatabaseSetup`, so the CREATE TABLEs have to travel beside the IR if the Go side is to build without Node.
+**Refused.** Anything that is not plain data is refused with its path; that is how the `FunctionGroup` in `functionModules` was found. So are:
+- an array with a hole;
+- `-0`;
+- a key starting with `$`;
+- two classes with one name.
 
-**Measured 2026-09-24 on the OSGo program** (951 objects):
-- front end 57 s;
-- documents 83 MB, written in 1.3 s, read in 1.4 s;
+**Left out.**
+- `reg`, the abaplint registry;
+- `functionModules`: abaplint groups and scopes, which no emitter reads;
+- the compiler's scratch position, `currentClass`, `currentOwner` and `currentTypes`;
+- `idxVar`, which each emitter writes into the IR while it emits, with its own numbers. Because it is left out, writing the documents after an emit gives the same text; the check asserts this.
+
+`osgDatabase` still needs `reg` for the transpiler's `DatabaseSetup`, so the CREATE TABLEs have to travel beside the IR if the Go side is to build without Node.
+
+**Not yet a cache unit.** A class document is the unit a cache would keep, but it is not enough by itself:
+- A class contributes to the shared document (structures, constants, signatures, events, interface methods and attributes, RTTI, tables).
+- Its IR depends on its callees' signatures, on interfaces and on the DDIC.
+
+A cache needs, per class, what it contributed and what it read, keyed by the hash of that closure. `fromDocuments` takes the whole set; it refuses a class named in `order` whose document is missing.
+
+**Measured 2026-09-24 on the OSGo program** (951 objects, after 58ef230):
+- front end 8.2–8.4 s;
+- documents 35.2 MB, written in 1.2 s, read in 1.3 s;
 - Go (12.0 MB) and JS (7.3 MB) emitted from the JSON are byte-identical to the originals;
-- two runs in two processes give the same document hash.
-
-A second compile in the same process does not: the front end keeps counters across compiles (the FOR ALL ENTRIES row number `n` of a `fae_row`).
+- the document hash is the same in two processes.

@@ -27,17 +27,24 @@ const back = fromDocuments({program: JSON.parse(texts.program), objects: texts.o
 const t3 = performance.now();
 
 const goA = emitGo(program);
+// the emitters write scratch into the IR while they emit; the documents
+// leave it out, so writing them after an emit gives the same text
+const afterEmit = toDocuments(program);
+const stable = text(afterEmit.program) === texts.program && afterEmit.objects.every((d, i) => text(d) === texts.objects[i]);
 const goB = emitGo(back);
 const jsA = emitJs(program);
 const jsB = emitJs(back);
-const hash = createHash("sha256").update(texts.program).update(texts.objects.join("")).digest("hex").slice(0, 16);
+// a hash per document (what a cache would key on), and one over the list of them
+const digest = (t) => createHash("sha256").update(t).digest("hex").slice(0, 16);
+const perDocument = [digest(texts.program), ...texts.objects.map(digest)];
+const hash = digest(perDocument.join("\n"));
 
 const bytes = texts.program.length + texts.objects.reduce((n, t) => n + t.length, 0);
 console.log(`front end ${Math.round(t1 - t0)} ms; ${docs.objects.length} objects; to JSON ${Math.round(t2 - t1)} ms, ${(bytes / 1e6).toFixed(1)} MB; back ${Math.round(t3 - t2)} ms`);
-console.log(`Go from JSON ${goA === goB ? "identical" : "DIFFERS"} (${goA.length} bytes); JS from JSON ${jsA === jsB ? "identical" : "DIFFERS"} (${jsA.length} bytes); documents ${hash}`);
+console.log(`Go from JSON ${goA === goB ? "identical" : "DIFFERS"} (${goA.length} bytes); JS from JSON ${jsA === jsB ? "identical" : "DIFFERS"} (${jsA.length} bytes); documents after an emit ${stable ? "unchanged" : "CHANGED"}; documents ${hash}`);
 if (out !== undefined) {
   mkdirSync(join(out, "objects"), {recursive: true});
   writeFileSync(join(out, "program.json"), texts.program);
   docs.objects.forEach((d, i) => writeFileSync(join(out, "objects", `${d.object.replace(/[^A-Za-z0-9_]/g, "_").toLowerCase()}.json`), texts.objects[i]));
 }
-if (goA !== goB || jsA !== jsB) process.exit(1);
+if (goA !== goB || jsA !== jsB || !stable) process.exit(1);
