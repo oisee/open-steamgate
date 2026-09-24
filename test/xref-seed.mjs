@@ -1,6 +1,9 @@
 import {expect} from "chai";
 import {execFileSync, fork, spawn} from "node:child_process";
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import initSqlJs from "sql.js";
 import {TABLES, WIDTHS, applyRows, cacheKey, insertStatements, overlong, rows} from "../tools/osd-xref-seed.mjs";
 
@@ -96,7 +99,67 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
     expect(applied.CROSS).to.equal(1);
     expect(applied.refused.map((o) => `${o.table}.${o.column}`)).to.deep.equal(["CROSS.NAME"]);
     expect(count(await db.select({select: `SELECT COUNT(*) FROM "cross"`}))).to.equal(1);
+
+    // and inside somebody's LUW it refuses rather than commit their work
+    // with its own: every client's beginTransaction() is a no-op then
+    let refused;
+    await applyRows({...db, inTransaction: true}, rows).catch((e) => {
+      refused = e.message;
+    });
+    expect(refused).to.contain("outside an LUW");
+    await applyRows({...db, pool: {}, client: {}}, rows).catch((e) => {
+      refused = `pg: ${e.message}`;
+    });
+    expect(refused).to.equal("pg: the cross-reference is seeded outside an LUW, and this connection has one open");
   });
+
+  it("the key moves when the derivation does: tools/osd-xref.mjs and what it imports", async () => {
+    // over a copy of tools/, so the test edits nothing anybody else reads
+    const copy = mkdtempSync(join(tmpdir(), "osd-xref-key-"));
+    try {
+      for (const f of readdirSync("tools").filter((n) => n.endsWith(".mjs"))) cpSync(join("tools", f), join(copy, f));
+      const root = process.cwd();
+      const same = await cacheKey(root, {tools: `${copy}/`});
+      expect(same, "the copy is the same derivation").to.equal(await cacheKey(root));
+      appendFileSync(join(copy, "osd-xref.mjs"), "\n// a change to the derivation\n");
+      const derivation = await cacheKey(root, {tools: `${copy}/`});
+      expect(derivation, "osd-xref.mjs changed and the key did not").to.not.equal(same);
+      appendFileSync(join(copy, "osd-store.mjs"), "\n// a change to what it parses with\n");
+      expect(await cacheKey(root, {tools: `${copy}/`}), "osd-store.mjs changed and the key did not").to.not.equal(derivation);
+    } finally {
+      rmSync(copy, {recursive: true, force: true});
+    }
+  });
+
+  // **The restart the image makes: the same database file, twice.** Through
+  // the supervisor (tools/osd-runtime.mjs), which is how the workbench and
+  // the image start and stop the runtime, so the second start opens a file
+  // the first one closed, checkpointed and left.
+  for (const [db, name] of [["duckdb", "DuckDB"], ["file", "SQLite"]]) {
+    it(`a restart over a persistent ${name} file (STG_DB=${db}) seeds the same rows again`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), `osd-xref-${db}-`));
+      const counts = [];
+      try {
+        for (let start = 0; start < 2; start++) {
+          const runtime = new ServingRuntime({database: join(dir, `osd.${db}`), env: {STG_DB: db}});
+          try {
+            await runtime.start();
+            const answer = await fetch(`${runtime.url}/osd/sql`, {
+              method: "POST",
+              headers: {"content-type": "application/json"},
+              body: JSON.stringify({sql: "SELECT COUNT(*) AS n FROM wbcrossgt", max: 1}),
+            });
+            counts.push(count(await answer.json()));
+          } finally {
+            await runtime.stop();
+          }
+        }
+      } finally {
+        rmSync(dir, {recursive: true, force: true});
+      }
+      expect(counts).to.deep.equal([expected, expected]);
+    });
+  }
 
   it("the cache is per generation: a new object in gen/ is a new key and new rows", async function () {
     const root = process.cwd();

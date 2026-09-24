@@ -42,7 +42,9 @@
 //                                  with a value longer than its column is
 //                                  left out (overlong(rows) names them)
 //   await applyRows(client, rows)  runs them on a DatabaseClient in one
-//                                  transaction; returns the counts + refused
+//                                  transaction; returns the counts + refused.
+//                                  Refuses a connection with a transaction
+//                                  already open: a seed is not part of an LUW
 //   await seedAtStartup(client, {root, say})  rows + applyRows, reported;
 //                                  never throws, returns the counts or undefined
 //
@@ -139,7 +141,7 @@ export function wellFormed(tables) {
  *    identity, already inside hashOf, stands for them.
  *
  *  Undefined where there is no tree to hash, which only costs the cache. */
-export async function cacheKey(root) {
+export async function cacheKey(root, options = {}) {
   try {
     const {hashOf, genHash, generatorClosure} = await import(/* webpackIgnore: true */ "./osd-build.mjs");
     const {hosted} = await import(/* webpackIgnore: true */ "./osd-host.mjs");
@@ -149,7 +151,9 @@ export async function cacheKey(root) {
     const h = createHash("sha256");
     h.update(DERIVATION).update("\0").update(hashOf(root)).update("\0").update(genHash(root)).update("\0");
     if (!hosted()) {
-      const tools = fileURLToPath(new URL(".", import.meta.url));
+      // `tools` is for the test that proves a change to the derivation
+      // moves the key, over a copy of this folder
+      const tools = options.tools ?? fileURLToPath(new URL(".", import.meta.url));
       for (const f of generatorClosure(tools, [["osd-xref.mjs"], ["osd-xref-seed.mjs"]])) {
         h.update(f.slice(tools.length)).update("\0").update(readFileSync(f)).update("\0");
       }
@@ -205,6 +209,14 @@ export function insertStatements(tables, options = {}) {
  *  test/setup.mjs has beginTransaction / commit / rollback (the interface
  *  requires them). */
 export async function applyRows(client, tables) {
+  // **Outside an LUW, or not at all.** beginTransaction() on every client
+  // is a no-op when a transaction is already open, so inside somebody's LUW
+  // the COMMIT below would commit their work with ours and a ROLLBACK would
+  // take theirs back. A seed runs at start, before any dialog step; one
+  // that finds a transaction open is a caller in the wrong place.
+  if (inTransaction(client)) {
+    throw new Error("the cross-reference is seeded outside an LUW, and this connection has one open");
+  }
   await client.beginTransaction();
   try {
     for (const sql of insertStatements(tables)) {
@@ -219,6 +231,13 @@ export async function applyRows(client, tables) {
   const n = counts(tables);
   for (const {table} of refused) n[table] -= 1;
   return {...n, refused};
+}
+
+/** Whether a DatabaseClient has a transaction open. The SQLite, DuckDB,
+ *  DuckDB-wasm and HANA clients keep `inTransaction`; the PostgreSQL client
+ *  holds a checked-out `client` for exactly as long as one is open. */
+export function inTransaction(client) {
+  return client.inTransaction === true || (client.pool !== undefined && client.client !== undefined);
 }
 
 export const counts = (tables) => Object.fromEntries(TABLES.map((t) => [t, (tables[t] ?? []).length]));

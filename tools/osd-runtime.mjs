@@ -100,6 +100,9 @@ export class ServingRuntime {
     this.child = undefined;
     this.ready = undefined;
     this.recycling = undefined;
+    // the spawn in flight: a child exists before it says "ready", and
+    // `running` only knows about a child that has said it
+    this.starting = undefined;
     // what the last unexpected death said, for a caller that wants to
     // report why nothing is serving rather than only that nothing is
     this.died = undefined;
@@ -129,6 +132,17 @@ export class ServingRuntime {
     }
     return this.#spawn();
   }
+
+  // **One child at a time, counting the one that is still coming up.**
+  // `running` is true only once a child has said "ready", so between the
+  // spawn and that message a second caller -- an OData request, the status
+  // refresh, a healthcheck -- saw "nothing is serving" and spawned another
+  // child over the same database. SQLite tolerates two processes on one
+  // file; DuckDB does not, and the file came back unreadable on the next
+  // start ("Failed to deserialize: field id mismatch"). The window was a
+  // second wide until the start-up grew by the cross-reference parse
+  // (tools/osd-xref-seed.mjs), and then the image's DuckDB check fell in it.
+  // Every path that spawns goes through here and joins the spawn in flight.
 
   // what a proxy wants when it does not care why nothing is serving: a
   // runtime, now. It waits out a recycle, starts one after a crash, and is
@@ -160,6 +174,9 @@ export class ServingRuntime {
       // unhandled rejection would take the process down with it
       this.ready.catch(() => undefined);
       try {
+        // a child still coming up is a child: let it finish, then stop it,
+        // rather than start a second one beside it
+        await this.starting?.catch(() => undefined);
         await this.#stopChild();
         const answer = await this.#spawn({announce: pending});
         return {...answer, ms: Date.now() - began, recycled: true};
@@ -178,12 +195,28 @@ export class ServingRuntime {
   }
 
   async stop() {
+    // a child still coming up would outlive a stop that only looked at the
+    // ready one
+    await this.starting?.catch(() => undefined);
     await this.#stopChild();
     this.ready = undefined;
     this.port = undefined;
   }
 
   #spawn(options = {}) {
+    if (this.starting !== undefined) {
+      return this.starting;
+    }
+    const starting = this.#spawnOne(options);
+    this.starting = starting;
+    const clear = () => {
+      if (this.starting === starting) this.starting = undefined;
+    };
+    starting.then(clear, clear);
+    return starting;
+  }
+
+  #spawnOne(options = {}) {
     return new Promise((resolve, reject) => {
       const epoch = this.epoch + 1;
       const generation = liveHash(this.root) ?? String(epoch);

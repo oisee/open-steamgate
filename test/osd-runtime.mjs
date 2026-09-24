@@ -55,6 +55,29 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     expect(runtime.url).to.equal(undefined);
   });
 
+  it("a start and the requests that arrive while it comes up are one process", async () => {
+    // Found by the image's DuckDB check: the facade starts the runtime at
+    // listen, an OData request or the status refresh calls ensure() before
+    // the child has said "ready", and a second child opened the same
+    // database. DuckDB does not survive two writers, and the file could not
+    // be opened on the next start.
+    const runtime = new ServingRuntime();
+    try {
+      const answers = await Promise.all([runtime.start(), runtime.ensure(), runtime.ensure(), runtime.start()]);
+      expect(new Set(answers.map((a) => a.pid)).size, "one process").to.equal(1);
+      expect(answers.map((a) => a.epoch)).to.deep.equal([1, 1, 1, 1]);
+      expect(runtime.epoch).to.equal(1);
+    } finally {
+      await runtime.stop();
+    }
+    // and a stop that arrives while one is still coming up stops it
+    const late = new ServingRuntime();
+    const coming = late.start();
+    await late.stop();
+    const first = await coming;
+    expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
+  });
+
   it("a recycle is a new process, and the old one is gone", async () => {
     const runtime = new ServingRuntime();
     try {
