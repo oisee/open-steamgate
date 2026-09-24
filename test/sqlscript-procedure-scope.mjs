@@ -715,6 +715,22 @@ for (const {dialect, make} of ENGINES) describe(`string scalars as measured on A
     expect(await value("DECLARE c NVARCHAR(10) = 'x  '; rv = CASE WHEN :c = 'x' THEN 1 ELSE 0 END;")).to.equal(0);
   });
 
+  it("the host keeps three-valued logic: a text compared with NULL is neither equal nor unequal", async () => {
+    expect(await value(`DECLARE b NVARCHAR(10);
+      IF NOT (:b = 'x') THEN rv = 1; ELSEIF :b = 'x' THEN rv = 2; ELSE rv = 3; END IF;`)).to.equal(3);
+    expect(await value(`DECLARE b NVARCHAR(10);
+      IF :b <> 'x' THEN rv = 1; ELSEIF NOT (:b <> 'x') THEN rv = 2; ELSE rv = 3; END IF;`)).to.equal(3);
+    expect(await value(`DECLARE c NVARCHAR(10) = 'x  ';
+      IF :c <> 'x' THEN rv = 1; ELSE rv = 0; END IF;`)).to.equal(1);
+  });
+
+  it("COALESCE on the host hands back the text as it is, blanks included", async () => {
+    const text = async (body) => (await runProcedure(program(body, "RETURNING VALUE(rv) TYPE string"),
+      {client, dialect, inputCatalogue: CATALOGUE})).value;
+    expect(await text("DECLARE b NVARCHAR(10); DECLARE a NVARCHAR(10) = 'ab  '; rv = COALESCE(:b, :a);")).to.equal("ab  ");
+    expect(await text("DECLARE b NVARCHAR(10) = 'x '; DECLARE a NVARCHAR(10) = 'ab'; rv = COALESCE(:b, :a);")).to.equal("x ");
+  });
+
   it("a text longer than the declared length raises, as on A4H", async () => {
     let caught;
     try { await value("DECLARE a NVARCHAR(3) = 'abcdef'; rv = 1;"); } catch (error) { caught = error; }

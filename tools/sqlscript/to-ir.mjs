@@ -78,14 +78,17 @@ function literalType(token) {
 
 const measuredTextType = (type) => {
   if (type?.abap === "STRING") return Object.keys(type).length === 1;
-  return type?.abap === "C" && Object.keys(type).length === 2
+  // a declared NVARCHAR(n) variable is C of n marked `variable` (never padded)
+  const keys = Object.keys(type ?? {}).filter((key) => !(key === "variable" && type.variable === true));
+  return type?.abap === "C" && keys.length === 2
     && Number.isSafeInteger(type.len) && type.len >= 0;
 };
 
 const mergedTextType = (left, right) => {
   if (!measuredTextType(left) || !measuredTextType(right)) return undefined;
   if (left.abap === "STRING" || right.abap === "STRING") return T.str;
-  return T.char(Math.max(Number(left.len), Number(right.len)));
+  const merged = T.char(Math.max(Number(left.len), Number(right.len)));
+  return left.variable === true || right.variable === true ? {...merged, variable: true} : merged;
 };
 
 export function toIr(tree, options = {}) {
