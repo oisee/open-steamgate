@@ -14,6 +14,15 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // ultra/itab, A4H 2026-09-24 ($ZOSG_TMP_0400, ABAP Unit probes of the same
+  // classes). APPEND LINES OF [FROM] [TO]: sy-subrc untouched, sy-tabix
+  // lines(target) afterwards, c rows into a string table converted, itab
+  // TO itab doubles it (FROM 0 and TO 0 dump TABLE_INVALID_INDEX there)
+  ZCL_GOGEN_T_APPL: "all:4/6[0;1;2;3;4;5;] ft:4/3[2;3;4;] f:[4;5;] t:[1;2;] rev:0/0[] past:[] clamp:[3;4;5;] empty:4/3[3;4;5;] call:6[3;4;5;7;8;9;]<q ><ab><xyz> self:[1;2;3;4;5;1;2;3;4;5;]",
+  // SORT: without BY by the default key (the line; for a structure its c
+  // and string components, not the i), DESCENDING, STABLE BY, mixed
+  // directions; a string "a" sorts before "a "
+  ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H
   ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",
