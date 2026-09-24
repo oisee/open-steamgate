@@ -253,9 +253,11 @@ const routeOf = (p) => {
 };
 const shape = (p) => p.split("?")[0].replace(/\('[^']*'\)|\([^)]*=[^)]*\)|\(\d+\)/g, "(…)");
 
-// Differences that are known and deliberate, named so they are not read as
-// work: a test counted here still fails, and the score says so, but the
-// report puts it apart with the reason.
+// Differences where OSGo answers what a system answers and Node does not
+// ("go-matches-system": Go = system, Node = anomaly, each backed by an
+// ANORMALIES entry). Such a test is no work for OSGo: the headline score
+// leaves it out of the denominator, and the report lists it apart as
+// closer to the reference, with the anomaly it rests on.
 //
 // Implicit MANDT: the seed row T0009 ("Other client, must not leak") is client
 // 001. The transpiler has no implicit client, so OSG on Node serves it and the
@@ -264,7 +266,7 @@ const shape = (p) => p.split("?")[0].replace(/\('[^']*'\)|\([^)]*=[^)]*\)|\(\d+\
 // filters it, so every count over ZSTG_DEMO is one lower. OSGo is the one
 // that behaves like SAP here.
 const KNOWN = [
-  {name: "implicit MANDT: T0009 (client 001) filtered by OSGo, served by Node",
+  {name: "Go = system, Node = anomaly: implicit MANDT (ANORMALIES ANOMALY-2026-09-11-no-implicit-mandt): T0009 (client 001) filtered by OSGo, served by Node",
     test: (t, text) => /T0009/.test(text) ||
       (/Travel|list report/i.test(`${t.title} ${t.osgo?.requests?.map((q) => q.path).join(" ") ?? ""}`) &&
         /2 != 3|length 3, not 4|does not contain 4|expected 2 to equal 3|length of 4 but got 3|expected '3' to equal '4'|Expected: 4\s+Received: 3|Expected: 3\s+Received: 2/.test(text))},
@@ -276,7 +278,7 @@ function classify(t) {
     const text = `${o.err?.message ?? ""} ${o.err?.expected ?? ""} ${o.err?.actual ?? ""}`;
     const nc = o.requests.some((q) => q.status >= 500);
     const known = nc ? undefined : KNOWN.find((k) => k.test(t, text));
-    if (known) return {cat: "known divergence", key: known.name, detail: text.replace(/\s+/g, " ").slice(0, 200)};
+    if (known) return {cat: "go-matches-system", key: known.name, detail: text.replace(/\s+/g, " ").slice(0, 200)};
   }
   if (o === undefined) {
     const hook = t.osgoRun.hookFailures[0];
@@ -363,15 +365,26 @@ const summary = {
 };
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 
-const known = failing.filter((t) => t.cat.cat === "known divergence").length;
-summary.scoreExcludingKnown = denom.length - known ? passed.length / (denom.length - known) : null;
-summary.totals.knownDivergences = known;
+// the headline leaves the go-matches-system tests out of the denominator:
+// OSGo answers them as a system does (scoreRaw keeps them in)
+const known = failing.filter((t) => t.cat.cat === "go-matches-system").length;
+summary.scoreRaw = summary.score;
+summary.score = denom.length - known ? passed.length / (denom.length - known) : null;
+summary.totals.goMatchesSystem = known;
+summary.closerToReference = failing.filter((t) => t.cat.cat === "go-matches-system").map((t) => ({file: t.file, title: t.title, why: t.cat.key}));
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 const pct = (x) => x === null ? "n/a" : `${(x * 100).toFixed(1)}%`;
 const md = [];
 md.push(`# OSG parity: Node vs OSGo`, "", `${summary.when}, checkout \`${root}\`.`, "");
-md.push(`**Score: ${pct(summary.score)}** -- ${passed.length} of ${denom.length} HTTP-level tests that pass on Node also pass on OSGo.`, "");
-md.push(`Without the ${known} known divergence(s) (see the group so named): ${pct(summary.scoreExcludingKnown)} (${passed.length} of ${denom.length - known}).`, "");
+md.push(`**Score: ${pct(summary.score)}** -- ${passed.length} of ${denom.length - known} HTTP-level tests that pass on Node also pass on OSGo, not counting the ${known} where OSGo is closer to the reference (below).`, "");
+md.push(`Counting those as failures: ${pct(summary.scoreRaw)} (${passed.length} of ${denom.length}).`, "");
+if (known) {
+  md.push(`**Closer to the reference** (go-matches-system: OSGo answers as a system does, Node's answer is an ANORMALIES entry) -- ${known} test(s):`, "");
+  const why = new Map();
+  for (const t of summary.closerToReference) why.set(t.why, (why.get(t.why) ?? 0) + 1);
+  for (const [w, n] of why) md.push(`- ${n}: ${w}`);
+  md.push("");
+}
 md.push(`| | count |`, `|---|---:|`);
 for (const [k, v] of Object.entries(summary.totals)) md.push(`| ${k} | ${v ?? "?"} |`);
 md.push("", "## Failures by category", "", "| category | tests |", "|---|---:|");
@@ -409,6 +422,6 @@ ranked.forEach((g, i) => {
 }
 if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
-console.log(`\nscore ${pct(summary.score)}, ${pct(summary.scoreExcludingKnown)} without ${known} known divergence(s)`);
-console.log(`score ${pct(summary.score)} (${passed.length}/${denom.length}); ${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
+console.log(`\nscore ${pct(summary.score)} (${passed.length}/${denom.length - known}, ${known} closer to the reference left out); ${pct(summary.scoreRaw)} counting them (${passed.length}/${denom.length})`);
+console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
 console.log(`-> ${join(out, "parity.md")}`);
