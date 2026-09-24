@@ -386,6 +386,8 @@ export function orderedRelation(rel) {
         if (input?.rel === "project") {
           const names = new Set(input.items.map((one) => upper(one.as)));
           const missing = r.keys.filter((k) => !names.has(upper(k.col)));
+          // widening a DISTINCT changes what it removes
+          if (input.distinct && missing.length > 0) return undefined;
           if (missing.length > 0) input = {...input, items: [...input.items, ...missing.map((k) => ({as: k.col, expr: col(k.col, undefined)}))]};
         }
         return {rel: input, keys: r.keys};
@@ -810,7 +812,14 @@ export async function runProcedure(program, {
         if (client?.native === undefined) {
           throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: its rows come from the database, and this run has none`, statement);
         }
+        // the checks an assignment and SELECT ... INTO make
+        const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
+        assertExpandedRelationBudget(statement.cursor, budget);
         const frozen = freezeRelation(statement.cursor, relations, scalars, session);
+        assertExpandedRelationBudget(frozen, budget);
+        if (effects(frozen).nonDeterministic) {
+          throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: a non-deterministic relation is outside the portable subset`, statement);
+        }
         const known = orderedRelation(frozen);
         if (known === undefined) {
           const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: the order of its rows is not known at run time`, statement);
@@ -825,13 +834,22 @@ export async function runProcedure(program, {
           throw error;
         }
         const answer = await ask(compiled);
-        orderTrace.push({cursor: statement.cursorName, order: `${statement.order.kind}(${statement.order.why}), observed`});
+        const seen = orderTrace.find((one) => one.cursor === statement.cursorName);
+        if (seen !== undefined) seen.opened += 1;
+        else orderTrace.push({cursor: statement.cursorName, order: `${statement.order.kind}(${statement.order.why})`,
+          basis: statement.order.basis ?? "assumed", keys: known.keys.map((k) => k.col), opened: 1});
         for (const row of answer.rows) {
           step(statement);
           for (const [column, type] of Object.entries(statement.schema)) {
-            let value = row[column] ?? row[column.toLowerCase()] ?? null;
-            if (typeof value === "bigint") value = Number(value);
-            scalars.set(`${upper(statement.row)}.${upper(column)}`, {type, value});
+            const raw = row[column] ?? row[column.toLowerCase()] ?? null;
+            // the INTEGER range and a BIGINT's precision, as SELECT ... INTO has them
+            if (raw !== null && type?.abap === "I" && type.bits === undefined) {
+              const n = Number(raw);
+              if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) {
+                throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: ${raw} does not fit an INTEGER`, statement);
+              }
+            }
+            scalars.set(`${upper(statement.row)}.${upper(column)}`, {type, value: intoVariable(raw, undefined, type, `${statement.row}.${column}`)});
           }
           await execute(statement.body);
         }

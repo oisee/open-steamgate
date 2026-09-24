@@ -1029,10 +1029,16 @@ type, and single ones further on.
 19 bodies HANA accepts stopped at `FOR r AS c DO`.*
 
 A cursor a FOR loop reads is a relation of the body; the loop visits its
-rows in the order they are known to come in -- defined by ORDER BY or by the
-caller's rows, inherited through a filter or a projection, unknown after
-DISTINCT, a join, a union, grouping or a database table without ORDER BY
-(observed on HXE and A4H, `docs/sqlscript-hana-observed.md`). A loop over an
+rows in the order they are known to come in, and only what was measured or
+what SQL guarantees counts: the cursor query's own ORDER BY (guaranteed, and
+only over the columns it sorts by -- ties come in any order, measured), the
+caller's rows of a table parameter (observed), inherited through a scan, a
+filter without a subquery and a projection without a window or a subquery
+(observed on HXE and A4H, `docs/sqlscript-hana-observed.md`). Unknown: an
+ORDER BY inside a table variable (HANA may drop it when it inlines one),
+DISTINCT, a join, a union, grouping, LIMIT, a semi-join, a window, a database
+table without ORDER BY, a table variable assigned inside a loop or
+differently on different paths. A loop over an
 unknown order is refused with the reason `order`; at run time the known
 order becomes an ORDER BY -- the caller's row positions, or the ORDER BY keys
 carried as hidden columns through the projections above -- and the trace
