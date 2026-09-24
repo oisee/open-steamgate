@@ -81,6 +81,13 @@ const charlike = (t) => t.k === "c" || t.k === "string";
 export function compileProgram({folders, objects, tolerant = false, skip = () => false}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
+  // only the syntax check and parser errors are read below (parser_error is a
+  // rule too: without it a statement that does not parse is dropped silently);
+  // the default config runs every lint rule, which was 45 % of a build
+  config.rules = {check_syntax: true, parser_error: true};
+  // a counter per program, so a second compileProgram in one process names
+  // its FOR ALL ENTRIES rows as the first did (incremental rebuilds)
+  FAE_N = 0;
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   // every file of the folders is loaded, so a class sees what it refers to;
   // only the objects named are compiled, and only their syntax errors count
