@@ -5,7 +5,7 @@
 //        [--port 4720] [--jobs N] [--out <dir>] [--node-ref <file>]
 //        [--suites a,b] [--changed] [--only node|osgo]
 //        [--reuse-node | --fresh-node] [--timeout 30000] [--no-count]
-//        [--e2e] [--fast] [--report-only]
+//        [--e2e] [--fast] [--report-only] [--host-tool-deferred]
 //
 // --report-only reads the last run's results (<out>/node-reference.json and
 // <out>/osgo-results.json) and only classifies and writes the summary again.
@@ -434,6 +434,24 @@ const osgoOnly = http.filter((t) => t.node.state !== "passed" && t.osgo?.state =
 // headline's numerator and denominator alike and listed on their own line
 const ADT_PATH = /^\/sap\/bc\/adt(\/|$|\?)|^\/osd\/not-served(\/|$|\?)/;
 const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?? []), ...(t.osgo?.requests ?? [])].some((q) => ADT_PATH.test(q.path ?? ""));
+// "host-tool-deferred" (parity-wave2, PROPOSED, not yet confirmed by Alice):
+// a test whose Node answer is computed by a JavaScript tool of the Node host
+// that is not ABAP -- abaplint, behind DESTINATION 'STORE' (TOKENS: the
+// statement parser's keyword colouring; CHECK / ACTIVATE: abaplint over the
+// whole system, then a build) -- where OSGo answers the command with an
+// explicit refusal naming the missing tool (go/abap/store.go
+// storeNoCompiler), never a wrong answer, and where making it pass means
+// porting abaplint into the binary. Each entry names its test and the tool;
+// a test is not added for any other reason. Until the rule is confirmed the
+// headline counts them as failures; --host-tool-deferred takes them out of
+// numerator and denominator the way adt-deferred is, and the report prints
+// the score both ways.
+const HOST_TOOL = [
+  {file: "test/editor.mjs", title: /coloured by the parser/, tool: "abaplint's statement parser (STORE TOKENS: a keyword is what the grammar matched)"},
+  {file: "test/editor.mjs", title: /checks the source it was POSTED/, tool: "abaplint's check over the whole system (STORE CHECK)"},
+];
+const hostToolOf = (t) => HOST_TOOL.find((h) => h.file === t.file && h.title.test(t.title));
+const hostToolDeferred = flag("host-tool-deferred");
 
 function dumpKey(body) {
   let text = body;
@@ -472,6 +490,8 @@ const KNOWN = [
 
 function classify(t) {
   if (isAdt(t)) return {cat: "adt-deferred", key: "the ADT facade (/sap/bc/adt, /osd/not-served): a JS module of the Node host, postponed", detail: String(t.osgo?.err?.message ?? "").split("\n")[0].slice(0, 200)};
+  const ht = hostToolOf(t);
+  if (ht) return {cat: "host-tool-deferred", key: `a JS tool of the Node host, not in the binary: ${ht.tool}`, detail: String(t.osgo?.err?.message ?? "").split("\n")[0].slice(0, 200)};
   const o = t.osgo;
   if (o !== undefined && o.state !== "passed") {
     const text = `${o.err?.message ?? ""} ${o.err?.expected ?? ""} ${o.err?.actual ?? ""}`;
@@ -568,10 +588,18 @@ writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 // OSGo answers them as a system does (scoreRaw keeps them in)
 const known = failing.filter((t) => t.cat.cat === "go-matches-system").length;
 const adtAll = denom.filter(isAdt).length;
-const passedH = passed.filter((t) => !isAdt(t)).length;
-const denomH = denom.length - known - adtAll;
+const hostAll = denom.filter((t) => !isAdt(t) && hostToolOf(t)).length;
+const hostPassed = passed.filter((t) => !isAdt(t) && hostToolOf(t)).length;
+const passedWithHost = passed.filter((t) => !isAdt(t)).length;
+const denomWithHost = denom.length - known - adtAll;
+const passedH = hostToolDeferred ? passedWithHost - hostPassed : passedWithHost;
+const denomH = hostToolDeferred ? denomWithHost - hostAll : denomWithHost;
 summary.scoreRaw = summary.score;
 summary.score = denomH ? passedH / denomH : null;
+summary.scoreHostCounted = denomWithHost ? passedWithHost / denomWithHost : null;
+summary.scoreHostDeferred = denomWithHost - hostAll ? (passedWithHost - hostPassed) / (denomWithHost - hostAll) : null;
+summary.totals.hostToolDeferred = hostAll;
+summary.totals.hostToolDeferredApplied = hostToolDeferred;
 summary.totals.goMatchesSystem = known;
 summary.totals.adtDeferred = adtAll;
 summary.totals.headlinePassed = passedH;
@@ -584,6 +612,10 @@ md.push(`# OSG parity: Node vs OSGo`, "", `${summary.when}, checkout \`${root}\`
 md.push(`**Score: ${pct(summary.score)}** -- ${passedH} of ${denomH} HTTP-level tests that pass on Node also pass on OSGo (${denom.length} pass on Node, less ${known} go-matches-system and ${adtAll} adt-deferred).`, "");
 md.push(`**adt-deferred** -- ${adtAll} test(s) of the ADT facade (/sap/bc/adt, /osd/not-served), postponed; ${passed.length - passedH} of them pass on OSGo.`, "");
 md.push(`Counting those as failures: ${pct(summary.scoreRaw)} (${passed.length} of ${denom.length}).`, "");
+if (hostAll) {
+  md.push(`**host-tool-deferred** (proposed, ${hostToolDeferred ? "applied with --host-tool-deferred" : "NOT applied: counted as failures above"}) -- ${hostAll} test(s) answered on Node by abaplint, which the binary does not carry; ${hostPassed} of them pass on OSGo. `
+    + `Score with them counted: ${pct(summary.scoreHostCounted)} (${passedWithHost}/${denomWithHost}); with them deferred: ${pct(summary.scoreHostDeferred)} (${passedWithHost - hostPassed}/${denomWithHost - hostAll}).`, "");
+}
 if (known) {
   md.push(`**Closer to the reference** (go-matches-system: OSGo answers as a system does, Node's answer is an ANORMALIES entry) -- ${known} test(s):`, "");
   const why = new Map();
@@ -634,7 +666,8 @@ summary.wallMs = Date.now() - T0;
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 md.push("## Wall time", "", "| phase | s |", "|---|---:|", ...phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`), `| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
-console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
+console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred${hostToolDeferred ? ` - ${hostAll} host-tool-deferred` : ""}); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
+if (hostAll) console.log(`host-tool-deferred (proposed): ${hostAll}; counted ${pct(summary.scoreHostCounted)}, deferred ${pct(summary.scoreHostDeferred)}`);
 console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
 console.log(`wall ${(summary.wallMs / 1000).toFixed(1)} s: ${phases.map((p) => `${p.name} ${(p.ms / 1000).toFixed(1)} s`).join("; ")}`);
 console.log(`-> ${join(out, "parity.md")}`);

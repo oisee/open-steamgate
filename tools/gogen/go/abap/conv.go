@@ -3,6 +3,7 @@ package abap
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"math"
 	"net/url"
 	"strconv"
@@ -77,21 +78,55 @@ func IToX(v int32, n int) string {
 // XToHex is an x field as text: two upper-case hex digits per byte.
 func XToHex(v string) string { return strings.ToUpper(hex.EncodeToString([]byte(v))) }
 
-// ParseF converts a character value to f: blanks are 0, a trailing minus
-// is a sign, anything else that is not a number raises.
+// ParseF converts a character value to f, as A4H does (parity-wave2,
+// ZCL_GOGEN_T_C2NUM): leading blanks skipped, the first word read and the
+// rest of the text ignored ('12 abc' is 12, '12 -' is 12); in that word a
+// leading + or -, or a trailing -, digits with at most one point (at least
+// one digit) and an exponent E or e with an optional sign and digits.
+// Blanks are 0. A value past f's range raises CX_SY_CONVERSION_OVERFLOW, as
+// do the words nan, inf and Infinity; a value below it is 0. Anything else
+// is CX_SY_CONVERSION_NO_NUMBER. Other spellings of nan / inf are not
+// measured and dump as not compiled.
 func ParseF(v string) float64 {
-	t := strings.TrimSpace(v)
+	t := strings.TrimLeft(v, " ")
 	if t == "" {
 		return 0
 	}
-	neg := false
-	if strings.HasSuffix(t, "-") {
-		neg = true
-		t = strings.TrimSpace(t[:len(t)-1])
+	if i := strings.IndexByte(t, ' '); i >= 0 {
+		t = t[:i]
 	}
-	f, err := strconv.ParseFloat(t, 64)
-	if err != nil {
+	switch t {
+	case "nan", "inf", "Infinity":
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
+	}
+	for _, w := range []string{"nan", "inf", "infinity"} {
+		if strings.Contains(strings.ToLower(t), w) {
+			panic(NotCompiled("move to f", "a text naming "+w+" in a spelling not measured: "+t))
+		}
+	}
+	neg, body, ok := numSign(t)
+	if !ok {
 		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	mant, exp := body, ""
+	if i := strings.IndexAny(body, "Ee"); i >= 0 {
+		mant, exp = body[:i], body[i+1:]
+		if exp != "" && (exp[0] == '+' || exp[0] == '-') {
+			exp = exp[1:]
+		}
+		if exp == "" || !allDigits(exp) {
+			panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+		}
+	}
+	if !decimalDigits(mant) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	f, err := strconv.ParseFloat(body, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	if math.IsInf(f, 0) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
 	}
 	if neg {
 		f = -f
@@ -99,9 +134,83 @@ func ParseF(v string) float64 {
 	return f
 }
 
-// ParseI converts a character value to i, rounding a fraction half away
-// from zero.
-func ParseI(v string) int32 { return F2I(ParseF(v)) }
+// numSign takes the sign off a number's text: a leading + or -, or a
+// trailing -, never two (A4H: '+-1' and '-1-' are no number); blanks
+// between the sign and the digits stay for the caller to judge
+func numSign(t string) (neg bool, body string, ok bool) {
+	signs := 0
+	if t != "" && (t[0] == '+' || t[0] == '-') {
+		signs++
+		neg = t[0] == '-'
+		t = t[1:]
+	}
+	if t != "" && t[len(t)-1] == '-' {
+		signs++
+		neg = true
+		t = t[:len(t)-1]
+	}
+	return neg, t, signs <= 1
+}
+
+func allDigits(t string) bool {
+	for i := 0; i < len(t); i++ {
+		if t[i] < '0' || t[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// decimalDigits: digits with at most one point, at least one digit ('.5'
+// and '5.' are numbers, '.' is not)
+func decimalDigits(t string) bool {
+	i := strings.IndexByte(t, '.')
+	if i < 0 {
+		return t != "" && allDigits(t)
+	}
+	return len(t) > 1 && allDigits(t[:i]) && allDigits(t[i+1:])
+}
+
+// ParseI converts a character value to i, as A4H does (parity-wave2,
+// ZCL_GOGEN_T_C2NUM): blanks around it, one sign -- a leading + or -, or a
+// trailing -, a blank between it and the digits allowed ('- 12' and '12 -'
+// are -12) -- and digits with at most one point; no exponent, nothing after
+// a blank. The fraction rounds half away from zero; past i's range is
+// CX_SY_CONVERSION_OVERFLOW, anything else CX_SY_CONVERSION_NO_NUMBER.
+// Blanks are 0.
+func ParseI(v string) int32 {
+	t := strings.Trim(v, " ")
+	if t == "" {
+		return 0
+	}
+	neg, body, ok := numSign(t)
+	body = strings.Trim(body, " ")
+	if !ok || !decimalDigits(body) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->i"})
+	}
+	whole, frac := body, ""
+	if i := strings.IndexByte(body, '.'); i >= 0 {
+		whole, frac = body[:i], body[i+1:]
+	}
+	whole = strings.TrimLeft(whole, "0")
+	if len(whole) > 10 {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+	}
+	var n int64
+	for i := 0; i < len(whole); i++ {
+		n = n*10 + int64(whole[i]-'0')
+	}
+	if frac != "" && frac[0] >= '5' {
+		n++
+	}
+	if neg {
+		n = -n
+	}
+	if n > math.MaxInt32 || n < math.MinInt32 {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+	}
+	return int32(n)
+}
 
 // I8ToI and F2I8: int8 into i with an overflow check, f into int8 rounded.
 func I8ToI(v int64) int32 { return check(v, "int8->i") }

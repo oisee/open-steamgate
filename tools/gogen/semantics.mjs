@@ -120,6 +120,17 @@ const EXPECT = {
   // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
   // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
   ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0082, ABAP Unit probe of this
+  // class, in two runs whose outputs are joined here): a text into an i is
+  // blanks, one sign (leading + -, or trailing -, a blank after or before
+  // it allowed), digits with at most one point, rounded half away from
+  // zero, NN for anything else (an exponent, nan, 1_0, 0x10) and OV past
+  // the range. Into an f the first word counts and the rest is ignored
+  // ('12 abc' is 12, '- 12' NN), an exponent is allowed, 1E400 and the
+  // words nan inf Infinity are OV, 1E-400 is 0. Go and JS both took
+  // strconv.ParseFloat / Number( ) before (the $batch of mocha.mjs dumps
+  // on Seats = "abc" by design: NN either way)
+  ZCL_GOGEN_T_C2NUM: "[12]12/12.000 [ 12 ]12/12.000 [-12]-12/-12.000 [12-]-12/-12.000 [+12]12/12.000 [2.5]3/2.500 [-2.5]-3/-2.500 [.5]1/0.500 [5.]5/5.000 [1E3]NN/1000.000 [1e3]NN/1000.000 [1.5E+2]NN/150.000 [nan]NN/OV [inf]NN/OV [Infinity]NN/OV [0x10]NN/NN [1_0]NN/NN [1,5]NN/NN [12 3]NN/12.000 [abc]NN/NN []0/0.000 [   ]0/0.000 [-]NN/NN [3000000000]OV/3000000000.000 [12 abc]NN/12.000 [1 2 3]NN/1.000 [- 12]-12/NN [12 -]-12/12.000 [ -12 ]-12/-12.000 [1E 3]NN/NN [E3]NN/NN [1E]NN/NN [1e+]NN/NN [1.5.2]NN/NN [+-1]NN/NN [--1]NN/NN [-1-]NN/NN [0012]12/12.000 [.]NN/NN [+]NN/NN [2147483647.4]2147483647/2147483647.400 [2147483647.5]OV/2147483647.500 [-2147483648.5]OV/-2147483648.500 [-2147483648.4]-2147483648/-2147483648.400 [1.49999]1/1.500 [12 3 ]NN/12.000 [1E400]NN/OV [1E-400]NN/0.000 [1.5E3-]NN/-1500.000 [1.5D3]NN/NN [12a]NN/NN [1.e2]NN/100.000 [.5e1]NN/5.000 [1E+03]NN/1000.000 ",
   // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0081, ABAP Unit probe of this
   // class): CREATE DATA LIKE LINE OF a generic table of elementary rows is
   // a new initial value of the row type (d 00000000, n zeros, i 0), which

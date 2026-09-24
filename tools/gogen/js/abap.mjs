@@ -119,16 +119,48 @@ export function IToX(v, n) {
   return String.fromCharCode(...out);
 }
 export const XToHex = (v) => [...v].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase();
-export function ParseF(v) {
-  let t = v.trim();
-  if (t === "") return 0;
+// text into f and into i, as A4H does (parity-wave2, ZCL_GOGEN_T_C2NUM;
+// the rules are written out at go/abap/conv.go ParseF / ParseI)
+function numSign(t) {
+  let signs = 0;
   let neg = false;
-  if (t.endsWith("-")) { neg = true; t = t.slice(0, -1).trim(); }
-  const f = Number(t);
-  if (Number.isNaN(f)) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->f");
+  if (t !== "" && (t[0] === "+" || t[0] === "-")) { signs++; neg = t[0] === "-"; t = t.slice(1); }
+  if (t !== "" && t.endsWith("-")) { signs++; neg = true; t = t.slice(0, -1); }
+  return {neg, body: t, ok: signs <= 1};
+}
+const decimalDigits = (t) => /^(\d+\.?\d*|\.\d+)$/.test(t);
+export function ParseF(v) {
+  let t = v.replace(/^ +/, "");
+  if (t === "") return 0;
+  const sp = t.indexOf(" ");
+  if (sp >= 0) t = t.slice(0, sp);
+  if (t === "nan" || t === "inf" || t === "Infinity") throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->f");
+  for (const w of ["nan", "inf", "infinity"]) {
+    if (t.toLowerCase().includes(w)) notCompiled(`move to f: a text naming ${w} in a spelling not measured: ${t}`);
+  }
+  const {neg, body, ok} = numSign(t);
+  const m = /^([^Ee]*)(?:[Ee]([+-]?)(\d+))?$/.exec(body);
+  if (!ok || m === null || !decimalDigits(m[1])) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->f");
+  const f = Number(body);
+  if (!Number.isFinite(f)) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->f");
   return neg ? -f : f;
 }
-export const ParseI = (v) => F2I(ParseF(v));
+export function ParseI(v) {
+  const t = v.replace(/^ +| +$/g, "");
+  if (t === "") return 0;
+  const {neg, body: raw, ok} = numSign(t);
+  const body = raw.replace(/^ +| +$/g, "");
+  if (!ok || !decimalDigits(body)) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->i");
+  const dot = body.indexOf(".");
+  const whole = (dot < 0 ? body : body.slice(0, dot)).replace(/^0+/, "");
+  const frac = dot < 0 ? "" : body.slice(dot + 1);
+  if (whole.length > 10) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
+  let n = whole === "" ? 0 : Number(whole);
+  if (frac !== "" && frac[0] >= "5") n++;
+  if (neg) n = -n;
+  if (n > 2147483647 || n < -2147483648) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
+  return n;
+}
 export const ToUpper = (v) => v.toUpperCase();
 export const ToLower = (v) => v.toLowerCase();
 export const Strlen = (v) => [...v].length;
