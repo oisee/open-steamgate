@@ -1494,3 +1494,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (runtime `expandIN`)
 - Regression-test location: `tools/gogen/go/abap/ranges_test.go` (the rules), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELCNT / ZCL_GOGEN_T_SELDUMP
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-select-loop-sy — `SELECT ... ENDSELECT` in the transpiler runtime leaves sy-subrc and sy-dbcnt as the whole SELECT set them
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (`build/src/structures/select.js`, `SelectTranspiler`), `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM dbtab INTO wa ... ENDSELECT` (the loop form), with or without `EXIT`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_selloop.clas.abap` (two rows of `ZGOGEN_T_DBW`)
+- Exact command used to run it: A4H, the same class with `ZGOGEN_T_DBW` in `$ZOSG_TMP_0195` through an ABAP Unit probe (2026-09-24, both deleted after); the transpiler: `abap_transpile` 2.13.89 over the class, the table and open-abap-core, run with `@abaplint/database-sqlite`; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2`: each pass starts with sy-subrc 0 and sy-dbcnt the rows read so far, whatever the body left on the pass before; after ENDSELECT, or an EXIT out of the loop, sy-subrc 0 and sy-dbcnt the rows read, even when the body's last statement set sy-subrc 4; without a row 4 / 0 and the work area untouched. The same statements over T000 (two clients) answered the same shape.
+- Actual open-abap behaviour: `n:2 in:2/0,2/4, after:4/2 exit:0/2/A exitmiss:4/2 none:4/0/QQQ cont:0/2/2 corr:5/A elem:   A/2 exit2:0/2`. The rows are read with one `SELECT ... INTO TABLE` before the loop, which sets sy-subrc and sy-dbcnt once (sy-dbcnt the total from the first pass on, also after an EXIT at the first row); nothing in the loop sets sy again, so a pass sees what the body left on the one before and the loop ends with it. The elementary target of `SELECT id ... INTO lv_id` (c10) printed with three leading blanks in the template; not investigated further.
+- Impact on open-steamgate: an ABAP loop that counts with sy-dbcnt or tests sy-subrc after ENDSELECT behaves differently on the Node host than on a system. `ZCL_OSD_WEBGUI=>MENU` and `ZCL_OSD_STATUS=>SNAPSHOT` use the loop form but test neither.
+- Smallest safe workaround: the Go backend (`tools/gogen`, `select_loop`) sets sy as A4H does; the Node host has none
+- Upstream: **needs an issue** in abaplint/transpiler (`SelectTranspiler`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELLOOP
+- Upstream version containing a fix: none yet
