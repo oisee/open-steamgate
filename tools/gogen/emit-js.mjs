@@ -639,6 +639,25 @@ function stmt(st, ctx, d) {
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
       const bind = st.fs ? `${ident(st.fs)} = r${n};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(r${n})` : `r${n}`};` : "";
+      // ultra/events (fix round): a SORTED table, as emit-go
+      if (st.sorted) {
+        const kv = (j) => `k${n}_${j}`;
+        const get = (k) => (k.line ? `r${n}` : `r${n}.${ident(k.name)}`);
+        const all = st.keys.map((k, j) => `${get(k)} === ${kv(j)}`).join(" && ");
+        const decl = st.keys.map((k, j) => `${t}  const ${kv(j)} = ${expr(k.value, ctx)};`);
+        const found = `{ ${bind} s.sy.subrc = 0; s.sy.tabix = i${n} + 1; hit${n} = true; break; }`;
+        if (st.sorted.prefix.length === 0) {
+          return [`${t}{`, ...decl, `${t}  let hit${n} = false;`, `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`,
+            `${t}    if (${all}) ${found}`, `${t}  }`, `${t}  if (!hit${n}) { s.sy.subrc = 4; s.sy.tabix = 0; }`, `${t}}`];
+        }
+        const cmp = st.sorted.prefix.map((j) => `if (${get(st.keys[j])} !== ${kv(j)}) return ${get(st.keys[j])} > ${kv(j)} ? 1 : -1;`).join(" ");
+        return [`${t}{`, ...decl, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`, `${t}  let pos${n} = -1, hit${n} = false;`,
+          `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`, `${t}    const c${n} = cmp${n}(r${n});`,
+          `${t}    if (c${n} < 0) continue;`, `${t}    if (pos${n} < 0) pos${n} = i${n};`, `${t}    if (c${n} > 0) break;`, `${t}    if (${all}) ${found}`, `${t}  }`,
+          `${t}  if (!hit${n}) {`,
+          ...(st.sorted.extra ? [`${t}    throw new abap.AbapError("NOT_COMPILED", "READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured");`] : []),
+          `${t}    s.sy.subrc = 4;`, `${t}    if (pos${n} < 0) { pos${n} = ${tb}.length; s.sy.subrc = 8; }`, `${t}    s.sy.tabix = pos${n} + 1;`, `${t}  }`, `${t}}`];
+      }
       return [`${t}{`, `${t}  s.sy.subrc = 4;`, `${t}  for (let i${n} = 0; i${n} < ${tb}.length; i${n}++) {`, `${t}    const r${n} = ${tb}[i${n}];`,
         `${t}    if (${cond}) { ${bind} s.sy.subrc = 0; s.sy.tabix = ${st.hashed ? "0" : `i${n} + 1`}; break; }`, `${t}  }`, `${t}}`];
     }

@@ -1,9 +1,11 @@
 * READ TABLE ... WITH [TABLE] KEY on a SORTED table (ultra/events fix
 * round): sy-subrc and sy-tabix on a hit and on each kind of miss (in the
 * middle, before the first row, past the last, the whole key, a leading
-* part of a two-component key, a key and a component outside it, only
-* components outside the key, TABLE_LINE), and whether a miss touches the
-* work area. Before each READ, READ ... INDEX 2 sets sy-tabix to 2.
+* part of a two-component key, only components outside the key,
+* TABLE_LINE), a hit with a key and a component outside it, and whether a
+* miss touches the work area. Before each READ, READ ... INDEX 2 sets
+* sy-tabix to 2. The misses with a key part and a component outside the
+* key are in ZCL_GOGEN_T_SORTRD2.
 CLASS zcl_gogen_t_sortrd DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_kv,
@@ -67,14 +69,8 @@ CLASS zcl_gogen_t_sortrd IMPLEMENTATION.
     READ TABLE lt_s INTO ls_kv WITH KEY v = 9.
     rv = |{ rv },{ sy-subrc }/{ sy-tabix }|.
     READ TABLE lt_s INTO ls_kv INDEX 2.
-    READ TABLE lt_s INTO ls_kv WITH KEY k = `m` v = 9.
-    rv = |{ rv } kv:{ sy-subrc }/{ sy-tabix }|.
-    READ TABLE lt_s INTO ls_kv INDEX 2.
-    READ TABLE lt_s INTO ls_kv WITH KEY k = `x` v = 9.
-    rv = |{ rv },{ sy-subrc }/{ sy-tabix }|.
-    READ TABLE lt_s INTO ls_kv INDEX 2.
     READ TABLE lt_s INTO ls_kv WITH KEY v = 3 k = `m`.
-    rv = |{ rv },{ sy-subrc }/{ sy-tabix }|.
+    rv = |{ rv } kv:{ sy-subrc }/{ sy-tabix }|.
 
     ls_ab-a = '1'. ls_ab-b = '3'. ls_ab-v = 2. INSERT ls_ab INTO TABLE lt_2.
     ls_ab-a = '1'. ls_ab-b = '1'. ls_ab-v = 1. INSERT ls_ab INTO TABLE lt_2.
@@ -101,9 +97,6 @@ CLASS zcl_gogen_t_sortrd IMPLEMENTATION.
     READ TABLE lt_2 INTO ls_ab INDEX 2.
     READ TABLE lt_2 INTO ls_ab WITH KEY b = '9'.
     rv = |{ rv },{ sy-subrc }/{ sy-tabix }|.
-    READ TABLE lt_2 INTO ls_ab INDEX 2.
-    READ TABLE lt_2 INTO ls_ab WITH KEY a = '2' v = 9.
-    rv = |{ rv } av:{ sy-subrc }/{ sy-tabix }|.
     READ TABLE lt_2 INTO ls_ab INDEX 2.
     READ TABLE lt_2 INTO ls_ab WITH TABLE KEY a = '2' b = '3'.
     rv = |{ rv } tk2:{ sy-subrc }/{ sy-tabix }|.

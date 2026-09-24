@@ -404,13 +404,32 @@ const EXPECT = {
   // line_exists( ), NS / CN, reference comparison (two objects of a class
   // without fields are two), a SORTED unique table (INSERT INTO TABLE leaves
   // sy-tabix alone, rows in binary key order, a duplicate is sy-subrc 4),
-  // APPEND ... ASSIGNING, CONCATENATE (c operands lose trailing blanks, the
+  // CONCATENATE (c operands lose trailing blanks, the
   // separator keeps them, a c target is cut with sy-subrc 4, LINES OF an
   // empty table clears), FIND ALL ... MATCH COUNT (0 and sy-subrc 4 when
-  // none; a CL_ABAP_REGEX object), escape( ) e_html_attr. The JS emitter
-  // holds no field symbol of a string and refuses the method
-  ZCL_GOGEN_T_WGUI1: {Go: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 ap:2 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI1=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  // none; a CL_ABAP_REGEX object), escape( ) e_html_attr. APPEND ...
+  // ASSIGNING with a field symbol of a string is in WGUI3 (fix round,
+  // re-measured on A4H 2026-09-24, $ZOSG_TMP_0441), so the JS emitter
+  // compiles WGUI1 and must give the same string
+  ZCL_GOGEN_T_WGUI1: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
+  // the JS emitter holds no field symbol of a string and refuses the method
+  ZCL_GOGEN_T_WGUI3: {Go: "ap:2 fs:[p!/r!]",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI3=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  // READ TABLE WITH [TABLE] KEY on a SORTED table (A4H 2026-09-24,
+  // $ZOSG_TMP_0441, fix round): a search by the key's leading components,
+  // a miss is 4 and the row the key would go before, or 8 and lines + 1;
+  // without the first key component linear, a miss 4/0; the work area is
+  // left alone on a miss
+  ZCL_GOGEN_T_SORTRD: "hit:0/3/3 mid:4/3/c first:4/1 past:8/5 tk:4/3,8/5 fs:4/4 nf:8/5 nonkey:0/4,4/0 kv:0/3 lead:0/1/1,0/3/3,4/2,8/5,4/1 second:0/3,4/0 tk2:4/4 line:4/2/f,0/2/q,8/3",
+  // a miss with a key part and a component outside the key: A4H gave 4/3,
+  // 8/5 and 4/-1 (k = m v = 9, k = x v = 9, a = 2 v = 9), no rule; refused
+  // at the miss, the hit before it still answers
+  ZCL_GOGEN_T_SORTRD2: {Go: "ERROR NOT_COMPILED in READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured at zcl_gogen_t_sortrd2.clas.abap:28",
+    JS: "ERROR NOT_COMPILED in READ TABLE: a miss on a SORTED table with a key part and components outside the key: not measured"},
+  // a handler FOR EVENT e OF a subclass, FOR ALL INSTANCES: senders of the
+  // subclass only, whatever the static type of the reference raising it
+  // (A4H 2026-09-24, $ZOSG_TMP_0441, fix round)
+  ZCL_GOGEN_T_EVENTS3: "all:b(base)s(sub)b(sub)s(sub2)b(sub2) one:s(sub2)",
   // a class constructor runs at the first use of its class: a static method
   // call, a CREATE OBJECT of it or of a subclass (the superclass's first),
   // once (A4H 2026-09-24, $ZOSG_TMP_0440; the transpiler runs them all when
@@ -495,6 +514,25 @@ for (const [line, want] of Object.entries(REFUSED)) {
 }
 for (const [line, msg] of got) {
   if (REFUSED[line] === undefined) { bad += 1; console.log(`FAIL refused :${line}: must compile, got ${msg}`); }
+}
+// ultra/events (fix round): what fills a SORTED table other than INSERT
+// INTO TABLE is refused, each at its line: a move from a STANDARD table, a
+// VALUE with rows, a move between SORTED tables of other keys, a STANDARD
+// actual for a SORTED IMPORTING parameter. VALUE #( ) and a move out of a
+// SORTED table into a STANDARD one compile. A4H: see the comment at the
+// top of testdata-refused/zcl_gogen_t_rf_sort.clas.abap
+const REFUSED_SORT = {
+  40: "a move into a SORTED table from a table of another kind or key",
+  42: "VALUE with rows for a SORTED table",
+  44: "a move into a SORTED table from a table of another kind or key",
+  50: "a move into a SORTED table from a table of another kind or key",
+};
+const rsort = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_sort"], tolerant: true});
+const rgot = new Map(rsort.partial.map((x) => [Number(/zcl_gogen_t_rf_sort\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const line of new Set([...Object.keys(REFUSED_SORT).map(Number), ...rgot.keys()])) {
+  const ok = rgot.get(line) === REFUSED_SORT[line];
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused sort :${line}: ${rgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${REFUSED_SORT[line] ?? "(compiled)"}`}`);
 }
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;

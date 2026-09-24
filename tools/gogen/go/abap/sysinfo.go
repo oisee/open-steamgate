@@ -62,11 +62,16 @@ func TimeStamp(dec int) string {
 }
 
 // TstmpSubtract is CL_ABAP_TSTMP=>SUBTRACT as open-abap-core computes it:
-// the seconds from t2 to t1, fractions cut off. A value that is not a valid
-// time stamp is refused.
+// the seconds from t2 to t1. That copies open-abap-core, it is not measured
+// on a system, whose result is a p with seven decimals: so a value with a
+// fraction (a TIMESTAMPL), where the two would differ, is refused rather
+// than cut, as is a value that is not a valid time stamp.
 func TstmpSubtract(s *Session, t1, t2 string) int32 {
 	parse := func(v string) time.Time {
 		if i := strings.IndexByte(v, '.'); i >= 0 {
+			if strings.Trim(v[i+1:], "0") != "" {
+				panic(NotCompiled("CL_ABAP_TSTMP=>SUBTRACT", "a time stamp with a fraction (TIMESTAMPL): "+v))
+			}
 			v = v[:i]
 		}
 		t, err := time.Parse("20060102150405", fmt.Sprintf("%014s", v))

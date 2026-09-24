@@ -1229,6 +1229,30 @@ ${t}	}`));
       const cond = st.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       if (st.into?.conv) throw new Error("READ TABLE INTO a work area of another type");
       const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.into ? `${place(st.into, ctx)} = ${copied(`r${n}`, st.into.type)}` : null;
+      // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs
+      if (st.sorted) {
+        const kv = (j) => `k${n}_${j}`;
+        const get = (k) => (k.line ? `r${n}` : `r${n}.${ident(k.name)}`);
+        const all = st.keys.map((k, j) => `${get(k)} == ${kv(j)}`).join(" && ");
+        const decl = st.keys.flatMap((k, j) => [`${t}\t${kv(j)} := ${expr(k.value, ctx)}`, `${t}\t_ = ${kv(j)}`]);
+        const found = [...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\t\thit${n} = true`, `${t}\t\t\tbreak`];
+        if (st.sorted.prefix.length === 0) {
+          return [`${t}{`, ...decl, `${t}\thit${n} := false`, `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif ${all} {`, ...found, `${t}\t\t}`, `${t}\t}`,
+            `${t}\tif !hit${n} {`, `${t}\t\ts.Sy.Subrc = 4`, `${t}\t\ts.Sy.Tabix = 0`, `${t}\t}`, `${t}}`];
+        }
+        // c: the row's key part against the key given, -1 / 0 / 1; pos: the
+        // first row whose key part is not less than the key given
+        const cmp = st.sorted.prefix.map((j) => `if a, b := ${get(st.keys[j])}, ${kv(j)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto cmp${n} }`);
+        return [`${t}{`, ...decl, `${t}\tpos${n} := -1`, `${t}\thit${n} := false`,
+          `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tc${n} := 0`, ...cmp.map((x) => `${t}\t\t${x}`), `${t}\tcmp${n}:`,
+          `${t}\t\tif c${n} < 0 {`, `${t}\t\t\tcontinue`, `${t}\t\t}`,
+          `${t}\t\tif pos${n} < 0 {`, `${t}\t\t\tpos${n} = i${n}`, `${t}\t\t}`,
+          `${t}\t\tif c${n} > 0 {`, `${t}\t\t\tbreak`, `${t}\t\t}`,
+          `${t}\t\tif ${all} {`, ...found, `${t}\t\t}`, `${t}\t}`,
+          `${t}\tif !hit${n} {`,
+          ...(st.sorted.extra ? [`${t}\t\t${LINES && st.pos ? `/*line ${st.pos.file}:${st.pos.row}*/ ` : ""}panic(abap.NotCompiled("READ TABLE", "a miss on a SORTED table with a key part and components outside the key: not measured"))`] : []),
+          `${t}\t\ts.Sy.Subrc = 4`, `${t}\t\tif pos${n} < 0 {`, `${t}\t\t\tpos${n} = len(${tb})`, `${t}\t\t\ts.Sy.Subrc = 8`, `${t}\t\t}`, `${t}\t\ts.Sy.Tabix = int32(pos${n} + 1)`, `${t}\t}`, `${t}}`];
+      }
       return [`${t}{`, `${t}\ts.Sy.Subrc = 4`, `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\t_, _ = i${n}, r${n}`, `${t}\t\tif ${cond} {`,
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];

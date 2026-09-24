@@ -1573,7 +1573,29 @@ function statement(node, ctx) {
       into = lvalue(tgt, ctx);
       if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
-    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed};
+    // ultra/events (fix round): a SORTED table is searched by its key (A4H
+    // 2026-09-24, ZCL_GOGEN_T_SORTRD). The key components given from the
+    // left of the table key (the whole key or a leading part of it) find the
+    // first row whose key part is not less: a hit is the first row of that
+    // range matching every component; a miss is sy-subrc 4 and sy-tabix that
+    // row, or 8 and lines + 1 past the end. Without the first key
+    // component the search is linear and a miss is 4 / 0. A leading part
+    // with components outside the key besides gave misses no rule covers
+    // (4/3, 8/5 and 4/-1 on A4H), so such a miss is NOT_COMPILED at run time.
+    let sorted = null;
+    if (table.type.sorted) {
+      const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
+      const prefix = [];
+      for (const k of table.type.sorted) {
+        const hit = line ? keys.find((x) => x.line) : keys.find((x) => !x.line && x.name === fieldOf(ctx, table.type.row, k, text).name);
+        if (!hit) break;
+        const kt = line ? table.type.row : fieldOf(ctx, table.type.row, k, text).type;
+        if (!["c", "string", "n", "d", "t", "i", "int8"].includes(kt.k)) throw new Unsupported(`READ TABLE of a SORTED table keyed on a ${kt.k}`);
+        prefix.push(keys.indexOf(hit));
+      }
+      sorted = {prefix, extra: keys.length > prefix.length};
+    }
+    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed, sorted};
   }
   if (isStmt(node, Statements.ReadTable)) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
@@ -4100,6 +4122,10 @@ function call(chain, ctx, statement, hint) {
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);
   const full = param?.findDirectExpression(Expressions.MethodParameters);
+  // ultra/events (fix round): CL_ABAP_RANDOM->INT is a host function that
+  // ignores a seed (as open-abap-core's @KERNEL line does), so a seeded
+  // generator, whose sequence would be the contract, is refused
+  if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
   if (receiver === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
