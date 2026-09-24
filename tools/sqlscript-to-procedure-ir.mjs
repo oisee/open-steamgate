@@ -11,7 +11,7 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
-  ifElse, callProcedure, forCursor, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 
@@ -423,6 +423,9 @@ export function compileProcedure(method, types, options = {}) {
   const rowVariables = {};
   const cursors = new Map();
   const openCursors = new Set();
+  // the variables of the numeric FOR loops being compiled: one inside
+  // another over the same variable is not measured, and is refused
+  const openRanges = new Set();
   // a table variable is read as a relation, so an ORDER BY at its top is an
   // ORDER BY inside whatever reads it; paths meeting are merged above
   const noteOrder = (name, rel) => relationOrders.set(upper(name), orderOf(rel, relationOrders, false));
@@ -615,6 +618,31 @@ export function compileProcedure(method, types, options = {}) {
         }
         relationSchemas[calledOutput] = structuredClone(output.schema);
         result.push(callProcedure(procedureLeaves[0].value, input, calledOutput, node));
+      } else if (node.node === "For" && child(node, "ForRange") !== undefined) {
+        // measured on HXE: the variable must be declared (else "identifier
+        // must be declared"), and a bound must be an integer (a DECIMAL or a
+        // NULL does not compile)
+        const name = nameOf(children(node, "Name")[0]);
+        const type = scalarTypes[name];
+        if (type === undefined) throw new UnsupportedSqlScript(`FOR ${name} IN ...: ${name} is not declared, which HANA refuses`, node);
+        if (!((type.abap === "I" && type.bits === undefined) || type.abap === "INT8")) {
+          throw new UnsupportedSqlScript(`FOR ${name} IN ...: the loop variable is ${type.abap}, not INTEGER or BIGINT`, node);
+        }
+        const range = child(node, "ForRange");
+        const [fromNode, toNode] = children(range, "Expr");
+        const bound = (one) => {
+          const e = bind(one, "expression");
+          if (!["I", "INT8"].includes(e?.type?.abap)) throw new UnsupportedSqlScript(`FOR ${name}: a bound of type ${e?.type?.abap ?? "NULL"} is not an integer, which HANA refuses`, node);
+          return e;
+        };
+        const reverse = (range.children ?? []).some((one) => one.node === "word" && upper(one.value) === "REVERSE");
+        if (openRanges.has(name)) throw new UnsupportedSqlScript(`a FOR over ${name} inside a FOR over ${name} is not measured`, node);
+        const from = bound(fromNode);
+        const to = bound(toNode);
+        openRanges.add(name);
+        let body;
+        try { body = compileStatements({children: children(node, "Statement")}); } finally { openRanges.delete(name); }
+        result.push(forRange(name, from, to, reverse, body, node));
       } else if (node.node === "For") {
         const [rowName, cursorName] = children(node, "Name").map(nameOf);
         const query = cursors.get(cursorName);

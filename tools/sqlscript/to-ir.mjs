@@ -550,6 +550,14 @@ export function toIr(tree, options = {}) {
         if (sessionKeyword && (name === "TRUE" || name === "FALSE")) {
           throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
         }
+        // a scalar written without its colon in a scalar statement --
+        // `v = :v || i`, `IF i > 3` -- outside any query: HANA reads the
+        // variable (measured on HXE, a numeric FOR's loop variable)
+        if (sourceName === undefined && ["expression", "condition"].includes(options.fragment)
+            && Object.keys(columns).length === 0 && columns[name] === undefined
+            && scalarTypes[name] !== undefined) {
+          return param(name, scalarTypes[name]);
+        }
         // `r.col` inside `FOR r AS c DO`: a column of the loop's current row,
         // a scalar of the procedure (R.COL), unless the query in hand has a
         // source of that name
@@ -1511,8 +1519,9 @@ export function toIr(tree, options = {}) {
         // procedural compiler consumes this node and invokes this binder for
         // each relational assignment with the current immutable bindings.
         throw new BindError("While is parsed but belongs to the procedural IR, not the relational IR", node);
+      case "ForRange":
       case "For":
-        // the same: a loop over a cursor's rows is the procedural compiler's
+        // the same: a loop over a cursor's rows or a range is the procedural compiler's
         throw new BindError("For is parsed but belongs to the procedural IR, not the relational IR", node);
       case "word":
       case "operator":

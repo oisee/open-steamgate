@@ -3,6 +3,7 @@
 // unknown), observed on HXE and A4H (docs/sqlscript-hana-observed.md, "The
 // order a cursor's rows come in"). A loop over an unknown order is refused.
 import {expect} from "chai";
+import {lex} from "../tools/sqlscript/lexer.mjs";
 import {compileProcedure, orderOf} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure, orderedRelation, UnsupportedSqlScript, procedure, forCursor, assignScalar} from "../tools/sqlscript-procedure-ir.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
@@ -188,3 +189,50 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
     });
   });
 }
+
+// FOR i IN [REVERSE] a .. b, as measured on HXE (docs/sqlscript-hana-observed.md,
+// "A numeric FOR loop"): every case here is the value HANA returned
+describe("FOR over a range of integers, as HANA Express ran it", () => {
+  const SIG1 = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
+  const run = async (loop) => (await runProcedure(compileProcedure({...SIG1,
+    body: `DECLARE v NVARCHAR(200) = ''; DECLARE n INTEGER = 0; DECLARE i INTEGER = 0; ${loop} ev = :v;`}, new Map(), {}), {})).value;
+  for (const [name, loop, hana] of [
+    ["inclusive", "FOR i IN 1 .. 3 DO v = :v || i || ','; END FOR;", "1,2,3,"],
+    ["from above to: no turn", "FOR i IN 3 .. 1 DO v = :v || i || ','; END FOR;", ""],
+    ["REVERSE counts down", "FOR i IN REVERSE 1 .. 3 DO v = :v || i || ','; END FOR;", "3,2,1,"],
+    ["the bounds are read once", "n = 3; FOR i IN 1 .. :n DO n = 1; v = :v || i || ','; END FOR;", "1,2,3,"],
+    ["1..:n without blanks", "n = 2; FOR i IN 1..:n DO v = :v || i || ','; END FOR;", "1,2,"],
+    ["the counter is the loop's own", "FOR i IN 1 .. 3 DO i = 5; v = :v || i || ','; END FOR;", "5,5,5,"],
+    ["the variable keeps the last value", "FOR i IN 1 .. 2 DO v = :v || i; END FOR; v = :v || '|' || :i;", "12|2"],
+    ["bounds are expressions", "n = 2; FOR i IN :n - 1 .. :n * 2 DO v = :v || i || ','; END FOR;", "1,2,3,4,"],
+    ["no turn leaves the variable as it was", "i = 7; FOR i IN 3 .. 1 DO v = :v || i; END FOR; v = :v || '|' || :i;", "|7"],
+    ["after REVERSE, the last value visited", "FOR i IN REVERSE 1 .. 3 DO v = :v || i; END FOR; v = :v || '|' || :i;", "321|1"],
+  ]) it(`${name}: ${JSON.stringify(hana)}`, async () => expect(await run(loop)).to.equal(hana));
+
+  it("refuses what HANA refuses: an undeclared variable, a non-integer bound", () => {
+    const compile1 = (body) => compileProcedure({...SIG1, body}, new Map(), {});
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; FOR i IN 1 .. 3 DO v = :v || i; END FOR; ev = :v;")).to.throw(/i is not declared|I is not declared/);
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2.7 DO v = :v || i; END FOR; ev = :v;")).to.throw(/not an integer/);
+    expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE s NVARCHAR(3); FOR s IN 1 .. 2 DO v = :v; END FOR; ev = :v;")).to.throw(/not INTEGER or BIGINT/);
+  });
+
+  // not measured on HANA: how this runtime spells and bounds the loop
+  it("reads every spelling of the range: 1..3, 1 ..3, :n..3, 1.5..2 lexes as three tokens", async () => {
+    expect(await run("FOR i IN 1..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(await run("FOR i IN 1 ..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(await run("n = 1; FOR i IN :n..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(lex("1.5..2").filter((t) => t.kind !== "eof").map((t) => t.value)).to.deep.equal(["1.5", ".", ".", "2"]);
+    expect(lex("x = .5").filter((t) => t.kind !== "eof").map((t) => t.value)).to.deep.equal(["x", "=", ".5"]);
+  });
+
+  it("refuses what it does not count exactly or was not measured: a BIGINT bound past 2^53, a FOR inside a FOR over the same variable", async () => {
+    const SIGB = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
+    let caught;
+    try {
+      await runProcedure(compileProcedure({...SIGB, body: "DECLARE v NVARCHAR(200) = ''; DECLARE b BIGINT = 0; FOR b IN 9007199254740991 .. 9007199254740993 DO v = :v || 'x'; END FOR; ev = :v;"}, new Map(), {}), {});
+    } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/past 2\^53/);
+    expect(() => compileProcedure({...SIGB, body: "DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2 DO FOR i IN 1 .. 2 DO v = :v || i; END FOR; END FOR; ev = :v;"}, new Map(), {}))
+      .to.throw(/a FOR over I inside a FOR over I is not measured/);
+  });
+});
