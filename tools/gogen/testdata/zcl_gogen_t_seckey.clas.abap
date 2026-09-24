@@ -29,9 +29,9 @@ CLASS zcl_gogen_t_seckey IMPLEMENTATION.
       rv = |{ rv }{ ls-n }/{ sy-tabix },|.
     ENDLOOP.
     rv = |{ rv } after:{ sy-tabix }|.
-* a row inserted before the others in the primary index
-    ls-p = 'b'. ls-u = 'u0'. ls-n = 0. INSERT ls INTO lt INDEX 1.
-    rv = |{ rv } ins:|.
+* one more duplicate, appended last
+    ls-p = 'b'. ls-u = 'u0'. ls-n = 0. APPEND ls TO lt.
+    rv = |{ rv } app:|.
     LOOP AT lt INTO ls USING KEY k_p WHERE p = 'b'.
       rv = |{ rv }{ ls-n }/{ sy-tabix },|.
     ENDLOOP.
@@ -43,6 +43,11 @@ CLASS zcl_gogen_t_seckey IMPLEMENTATION.
     LOOP AT lt INTO ls USING KEY k_p WHERE p = 'a'.
       rv = |{ rv }{ ls-n }/{ sy-tabix },|.
     ENDLOOP.
+* the unique key's whole order, through a field symbol
+    rv = |{ rv } all:|.
+    LOOP AT lt ASSIGNING <ls> USING KEY k_u.
+      rv = |{ rv }{ <ls>-n }/{ sy-tabix },|.
+    ENDLOOP.
 * READ with the unique key and with the non-unique one
     READ TABLE lt INTO ls WITH KEY k_u COMPONENTS u = 'u3'.
     rv = |{ rv } ru:{ sy-subrc }/{ ls-n }/{ sy-tabix }|.
@@ -50,5 +55,9 @@ CLASS zcl_gogen_t_seckey IMPLEMENTATION.
     rv = |{ rv } rp:{ sy-subrc }/{ ls-n }/{ sy-tabix }|.
     READ TABLE lt INTO ls WITH KEY k_u COMPONENTS u = 'zz'.
     rv = |{ rv } rmiss:{ sy-subrc }/{ ls-n }/{ sy-tabix }|.
+    READ TABLE lt INTO ls WITH KEY k_u COMPONENTS u = 'a'.
+    rv = |{ rv } rlow:{ sy-subrc }/{ ls-n }/{ sy-tabix }|.
+    READ TABLE lt ASSIGNING <ls> WITH KEY k_u COMPONENTS u = 'u2'.
+    rv = |{ rv } rfs:{ sy-subrc }/{ <ls>-n }/{ sy-tabix }|.
   ENDMETHOD.
 ENDCLASS.

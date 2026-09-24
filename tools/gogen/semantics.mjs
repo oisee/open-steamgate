@@ -322,6 +322,14 @@ const EXPECT = {
   // after the loop (EXIT too) when a row was read, 4/0 and the work area
   // kept when none was. The transpiler reads the rows and loops without
   // touching sy (ANORMALIES select-loop-sy)
+  // sorted secondary keys (ultra/json, /UI2/CL_JSON's parser): A4H
+  // 2026-09-24, ZCL_GOGEN_T_SECKEY in $ZOSG_TMP_0420. Equal keys come
+  // newest first, a key changed through a field symbol keeps the row's
+  // place, sy-tabix is the key's position; a READ that misses leaves the
+  // target alone, sy-tabix where the value would go, sy-subrc 4 inside and
+  // 8 past the end (ANORMALIES secondary-key-duplicates: the transpiler
+  // runtime answers otherwise)
+  ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:5 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
   ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity

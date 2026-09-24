@@ -1122,3 +1122,39 @@ export const DBSys = "sqlite";
 export const SapRl = "OPEN";
 export const Datum = () => new Date().toISOString().slice(0, 10).replaceAll("-", "");
 export const Uzeit = () => new Date().toISOString().slice(11, 19).replaceAll(":", "");
+
+// Sorted secondary keys (ultra/json), as go/abap/seckey.go: components
+// ascending, equal keys newest (higher index) first, measured on A4H
+// 2026-09-24. Strings compare by code point, as Go compares UTF-8 bytes.
+export function cmpKey(a, b) {
+  if (typeof a === "string") {
+    const x = Array.from(a, (c) => c.codePointAt(0));
+    const y = Array.from(b, (c) => c.codePointAt(0));
+    for (let i = 0; i < x.length && i < y.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+    return x.length === y.length ? 0 : x.length < y.length ? -1 : 1;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function keyOrder(tb, c, unique) {
+  const ord = tb.map((_, i) => tb.length - 1 - i);
+  ord.sort((x, y) => c(tb[x], tb[y]));
+  if (unique) for (let i = 1; i < ord.length; i++) if (c(tb[ord[i - 1]], tb[ord[i]]) === 0) notCompiled(`secondary key ${unique}: a unique key holds a value twice`);
+  return ord;
+}
+
+export function keyRead(tb, c, unique) {
+  let less = 0, pick = -1, equal = 0;
+  tb.forEach((r, i) => {
+    const x = c(r);
+    if (x < 0) less++;
+    else if (x === 0) { equal++; if (i > pick) pick = i; }
+  });
+  if (unique && equal > 1) notCompiled(`secondary key ${unique}: a unique key holds a value twice`);
+  if (pick >= 0) return [pick, less + 1, 0];
+  return [-1, less + 1, less === tb.length ? 8 : 4];
+}
+
+export function uniqueKeyCheck(tb, dup, key) {
+  if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key} (not measured on A4H)`);
+}

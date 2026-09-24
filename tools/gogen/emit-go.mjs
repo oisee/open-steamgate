@@ -658,6 +658,53 @@ function appendsOnly(body, name) {
 }
 
 /** a loop's lines, wrapped in the builders of the strings it only appends to */
+/*
+ * A sorted secondary key (frontend secondaryKey, ultra/json): the rows in the
+ * key's order, taken once before the first pass (abap.KeyOrder: components
+ * ascending, equal keys newest first, as A4H orders them); sy-tabix is the
+ * position in that order. A unique key that holds a value twice is refused.
+ */
+function keyCmp(key, tb) {
+  const parts = key.comps.map((c) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[a].${ident(c.name)}, ${tb}[b].${ident(c.name)}); c != 0 {\n\t\treturn c\n\t}`);
+  return `func(a, b int) int {\n\t${parts.join("\n\t")}\n\treturn 0\n}`;
+}
+
+function keyLoop(st, ctx, t, d) {
+  const n = ctx.loop++;
+  const tb = expr(st.table, ctx);
+  const i = `ord${n}[k${n}]`;
+  const bind = st.fs ? `${ident(st.fs)} = &${tb}[${i}]` : `${place(st.into, ctx)} = ${copied(`${tb}[${i}]`, st.into.type)}`;
+  const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
+  return [
+    `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
+    `${t}\tord${n} := abap.KeyOrder(len(${tb}), ${keyCmp(st.key, tb).replace(/\n/g, `\n${t}\t`)}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
+    `${t}\tfor k${n} := range ord${n} {`,
+    ...(skip ? [skip] : []),
+    `${t}\t\ts.Sy.Tabix = int32(k${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
+    `${t}\t\t${bind}`,
+    ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+    `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
+  ];
+}
+
+/*
+ * READ TABLE ... WITH KEY k COMPONENTS over a sorted secondary key: the
+ * first row of the key's order with that value (abap.KeyRead), sy-tabix its
+ * position; not found, sy-tabix is where it would go and sy-subrc 4, or 8
+ * past the last row, and the target is left alone (A4H 2026-09-24).
+ */
+function readSecKey(st, ctx, t) {
+  const n = ctx.loop++;
+  const tb = expr(st.table, ctx);
+  const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
+  const cmp = st.key.comps.map((c, j) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[i].${ident(c.name)}, v${n}_${j}); c != 0 {\n${t}\t\treturn c\n${t}\t}`);
+  const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.into ? `${place(st.into, ctx)} = ${copied(`${tb}[i${n}]`, st.into.type)}` : null;
+  return [`${t}{`, ...vals,
+    `${t}\ti${n}, pos${n}, sub${n} := abap.KeyRead(len(${tb}), func(i int) int {\n${t}\t${cmp.join(`\n${t}\t`)}\n${t}\treturn 0\n${t}\t}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
+    `${t}\tif sub${n} == 0 {`, ...(bind ? [`${t}\t\t${bind}`] : []), `${t}\t}`, `${t}\t_ = i${n}`,
+    `${t}\ts.Sy.Subrc, s.Sy.Tabix = sub${n}, pos${n}`, `${t}}`];
+}
+
 function withBuilders(body, ctx, t, emitLoop) {
   const names = builders(body, ctx);
   ctx.builders ??= new Map();
@@ -722,6 +769,15 @@ function stmtLines(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
       const tb = place(st.table, ctx);
+      const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
+      if (unique.length) {
+        // a unique secondary key (ultra/json): a row that would repeat a key
+        // value is refused, not added -- what A4H does then is not measured
+        const n = ctx.loop++;
+        return [`${t}{`, `${t}	v${n} := ${copied(expr(st.value, ctx), st.value.type, st.value)}`,
+          ...unique.map((k) => `${t}	abap.UniqueKeyCheck(len(${tb}), func(i int) bool { return ${k.comps.map((c) => `${tb}[i].${ident(c)} == v${n}.${ident(c)}`).join(" && ")} }, ${JSON.stringify(k.name)})`),
+          `${t}	${tb} = append(${tb}, v${n})`, `${t}}`, `${t}s.Sy.Tabix = int32(len(${tb}))`];
+      }
       return [`${t}${tb} = append(${tb}, ${copied(expr(st.value, ctx), st.value.type, st.value)})`, `${t}s.Sy.Tabix = int32(len(${tb}))`];
     }
     case "read_index": {
@@ -837,6 +893,7 @@ function stmtLines(st, ctx, d) {
       ];
     });
     case "loop": return withBuilders(st.body, ctx, t, () => {
+      if (st.key) return keyLoop(st, ctx, t, d);
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
       const n = ctx.loop++;
@@ -1072,6 +1129,7 @@ function stmtLines(st, ctx, d) {
     }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
+    case "read_seckey": return readSecKey(st, ctx, t);
     case "read_key": {
       const tb = expr(st.table, ctx);
       const n = ctx.loop++;

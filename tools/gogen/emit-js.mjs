@@ -307,6 +307,38 @@ function place(p, ctx) {
 /** a value moved somewhere: a structure or table read out of a place is copied */
 const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
 
+/* sorted secondary keys (frontend secondaryKey, ultra/json): as emit-go keyLoop / readSecKey */
+function keyCmpJs(key, x, y) {
+  return key.comps.map((c) => `abap.cmpKey(${x}.${ident(c.name)}, ${y}.${ident(c.name)})`).join(" || ") + " || 0";
+}
+
+function keyLoop(st, ctx, t, d) {
+  const n = ctx.loop++;
+  const tb = expr(st.table, ctx);
+  const r = `${tb}[ord${n}[k${n}]]`;
+  const bind = st.fs ? `${ident(st.fs)} = ${r}` : `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${r})` : r}`;
+  return [
+    `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
+    `${t}  const ord${n} = abap.keyOrder(${tb}, (a, b) => ${keyCmpJs(st.key, "a", "b")}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
+    `${t}  for (let k${n} = 0; k${n} < ord${n}.length; k${n}++) {`,
+    ...(st.where ? [`${t}    if (!(${st.where.map((w) => `${r}.${ident(w.name)} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`).join(" && ")})) continue;`] : []),
+    `${t}    s.sy.tabix = k${n} + 1; s.sy.subrc = 0;`, `${t}    ${bind};`,
+    ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+    `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`,
+  ];
+}
+
+function readSecKey(st, ctx, t) {
+  const n = ctx.loop++;
+  const tb = expr(st.table, ctx);
+  const vals = `[${st.values.map((v) => expr(v, ctx)).join(", ")}]`;
+  const cmp = st.key.comps.map((c, j) => `abap.cmpKey(r.${ident(c.name)}, v${n}[${j}])`).join(" || ") + " || 0";
+  const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}];` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
+  return [`${t}{`, `${t}  const v${n} = ${vals};`,
+    `${t}  const [i${n}, pos${n}, sub${n}] = abap.keyRead(${tb}, (r) => ${cmp}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
+    `${t}  if (sub${n} === 0) { ${bind} }`, `${t}  s.sy.subrc = sub${n}; s.sy.tabix = pos${n};`, `${t}}`];
+}
+
 function stmt(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
@@ -321,6 +353,14 @@ function stmt(st, ctx, d) {
       return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
+      const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
+      if (unique.length) {
+        // a unique secondary key (ultra/json): as emit-go, a repeated value is refused
+        const n = ctx.loop++;
+        return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`,
+          ...unique.map((k) => `${t}  abap.uniqueKeyCheck(${tb}, (r) => ${k.comps.map((c) => `r.${ident(c)} === v${n}.${ident(c)}`).join(" && ")}, ${JSON.stringify(k.name)});`),
+          `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}s.sy.tabix = ${tb}.length;`];
+      }
       return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`];
     }
     case "read_index": {
@@ -473,6 +513,7 @@ function stmt(st, ctx, d) {
       ];
     }
     case "loop": {
+      if (st.key) return keyLoop(st, ctx, t, d);
       const n = ctx.loop++;
       const tb = expr(st.table, ctx);
       const start = st.from ? `Math.max(${expr(st.from, ctx)} - 1, 0)` : "0";
@@ -542,6 +583,7 @@ function stmt(st, ctx, d) {
       return [`${t}if (!(${cond(st.cond, ctx)})) throw new abap.AbapError("ASSERTION_FAILED", ${JSON.stringify(st.text)});`];
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.createAs(s, ${expr(st.name, ctx)}, ${JSON.stringify(st.target.type.name)});`];
+    case "read_seckey": return readSecKey(st, ctx, t);
     case "read_key": {
       const tb = expr(st.table, ctx);
       const n = ctx.loop++;

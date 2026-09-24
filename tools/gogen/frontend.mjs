@@ -635,7 +635,13 @@ function typeOf(t, where, program) {
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
-    if (access === "STANDARD") return {k: "table", row};
+    // secondary keys (ultra/json): carried with the type, used by LOOP ...
+    // USING KEY and READ ... WITH KEY k COMPONENTS (secondaryKey below);
+    // a hashed one is refused where it is used
+    const secondary = (t.getOptions().secondary ?? []).map((k) => ({name: upper(k.name), sorted: String(k.type).toUpperCase() === "SORTED",
+      hashed: String(k.type).toUpperCase() === "HASHED", unique: k.isUnique === true, comps: k.keyFields.map(upper)}));
+    if (secondary.length && access !== "STANDARD") throw new Unsupported(`${where}: secondary keys on a ${access} table`);
+    if (access === "STANDARD") return secondary.length ? {k: "table", row, secondary} : {k: "table", row};
     // a HASHED table loops in insertion order, so it is a slice whose
     // INSERT keeps the key unique; SORTED is not here yet
     if (access === "HASHED") {
@@ -1228,8 +1234,27 @@ function structure(node, ctx) {
   if (isStruct(node, Structures.Loop)) {
     const st = node.findDirectStatement(Statements.Loop);
     const text = st.concatTokens();
-    if (/\b(REFERENCE|GROUP|USING|CASTING)\b/i.test(text)) throw new Unsupported(`LOOP form: ${text}`);
+    // USING KEY <sorted secondary key> (ultra/json): the key's order, see secondaryKey
+    const using = /\bUSING\s+KEY\s+([\w~]+)/i.exec(text);
+    if (/\b(REFERENCE|GROUP|CASTING)\b/i.test(text) || (/\bUSING\b/i.test(text) && using === null)) throw new Unsupported(`LOOP form: ${text}`);
     const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
+    if (using !== null) {
+      if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
+      if (/\b(FROM|TO)\b/i.test(text)) throw new Unsupported(`LOOP ... USING KEY with FROM / TO: ${text}`);
+      // the order is taken once, before the first pass: a body that could
+      // change the table (a call, or a statement naming it) is refused
+      const name = upper(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+      for (const s of node.findAllStatementNodes()) {
+        if (s === st) continue;
+        const stext = upper(s.concatTokens());
+        if (s.findFirstExpression(Expressions.MethodCallChain) || s.findFirstExpression(Expressions.MethodCall) || isStmt(s, Statements.Call)) {
+          throw new Unsupported(`LOOP ... USING KEY whose body calls a method: ${s.concatTokens()}`);
+        }
+        if (/^(APPEND|INSERT|DELETE|MODIFY|SORT|CLEAR|REFRESH|FREE)\b/.test(stext) && new RegExp(`(^|[^\\w>-])${name.replace(/[^\w]/g, "\\$&")}([^\\w-]|$)`).test(stext)) {
+          throw new Unsupported(`LOOP ... USING KEY whose body changes the table: ${s.concatTokens()}`);
+        }
+      }
+    }
     if (table.type.k === "data") {
       // LOOP AT <generic table> ASSIGNING <generic>: row by row, bound
       const nm = /ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1];
@@ -1258,9 +1283,58 @@ function structure(node, ctx) {
     // WHERE comp op value [AND ...]: a row that fails it is not a pass
     const cc = st.findDirectExpression(Expressions.ComponentCond);
     const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
-    return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, body: bodyOf(node, ctx)};
+    const key = using === null ? null : secondaryKey(table.type, using[1], ctx, text);
+    return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), body: bodyOf(node, ctx)};
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
+}
+
+/*
+ * A sorted secondary key of a standard table (ultra/json, /UI2/CL_JSON's
+ * LCL_PARSER). Measured on A4H 2026-09-24 (ZCL_GOGEN_T_SECKEY): the key's
+ * order is its components ascending, and rows with the same key value come
+ * newest first -- in the order they were created, last one first, a key
+ * changed through a field symbol keeping the row's place; sy-tabix in a LOOP
+ * USING KEY and after a READ ... WITH KEY k COMPONENTS is the position in
+ * that order; a READ that finds nothing leaves the target alone and sets
+ * sy-tabix to where the value would go, with sy-subrc 4 when that is before
+ * a row and 8 when it is past the last one.
+ *
+ * "Created" is the primary index as long as rows are only added at the end,
+ * so the statements that would put a row elsewhere or free a slot (INSERT
+ * ... INDEX, SORT, DELETE) are refused on a table with a non-unique sorted
+ * key (keyGuard). A hashed secondary key is not in the subset. The order is
+ * computed where it is used (abap.KeyOrder), never cached, so a key changed
+ * in place is always seen.
+ *
+ * Node's runtime sorts a copy stably, so its duplicates come oldest first:
+ * ANORMALIES secondary-key-duplicates. The Go and JS emitters follow A4H.
+ */
+function secondaryKey(tableType, keyName, ctx, text) {
+  const name = upper(keyName);
+  if (name === "PRIMARY_KEY") return null;
+  const k = (tableType.secondary ?? []).find((x) => x.name === name);
+  if (k === undefined) throw new Unsupported(`key ${name}: not a secondary key of the table (${text})`);
+  if (!k.sorted) throw new Unsupported(`key ${name}: a hashed secondary key (${text})`);
+  if (tableType.row.k !== "struct") throw new Unsupported(`key ${name} over rows that are not structures`);
+  const comps = k.comps.map((c) => {
+    const f = fieldOf(ctx, tableType.row, c, text);
+    if (!["string", "c", "n", "d", "t", "i", "int8", "f"].includes(f.type.k)) throw new Unsupported(`key ${name}: component ${c} of type ${f.type.k}`);
+    return {name: f.name, type: f.type, num: numeric(f.type)};
+  });
+  return {name, unique: k.unique, comps};
+}
+
+/** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
+function keyGuard(tableType, what) {
+  const nonUnique = (tableType?.secondary ?? []).filter((k) => !k.unique);
+  if (nonUnique.length) throw new Unsupported(`${what} on a table with the non-unique secondary key ${nonUnique[0].name}: the order of its duplicates is measured for rows added at the end only`);
+}
+
+/** statements that add rows other than APPEND, on a table with a unique secondary key */
+function uniqueGuard(tableType, what) {
+  const unique = (tableType?.secondary ?? []).filter((k) => k.unique);
+  if (unique.length) throw new Unsupported(`${what} on a table with the unique secondary key ${unique[0].name}`);
 }
 
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
@@ -1434,6 +1508,21 @@ function statement(node, ctx) {
       into = lvalue(tgt, ctx);
       if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
+    // WITH [TABLE] KEY k COMPONENTS c = v ...: a secondary key's order (secondaryKey)
+    // with every component of the key given, each once; it was read as a
+    // primary-order search until ultra/json, silently
+    const named = /\bWITH\s+(?:TABLE\s+)?KEY\s+([\w~]+)\s+COMPONENTS\b/i.exec(text);
+    if (named !== null) {
+      const key = secondaryKey(table.type, named[1], ctx, text);
+      if (key === null) throw new Unsupported(`READ TABLE WITH KEY primary_key COMPONENTS: ${text}`);
+      const given = keys.map((x) => x.name);
+      if (keys.some((x) => x.line) || given.length !== key.comps.length || new Set(given).size !== given.length || !key.comps.every((c) => given.includes(c.name))) {
+        throw new Unsupported(`READ TABLE WITH KEY ${key.name}: not every component of the key once (${text})`);
+      }
+      // the values in the key's own order
+      const values = key.comps.map((c) => keys.find((x) => x.name === c.name).value);
+      return {s: "read_seckey", table, key, values, into, fs};
+    }
     return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed};
   }
   if (isStmt(node, Statements.ReadTable)) {
@@ -1470,6 +1559,7 @@ function statement(node, ctx) {
       if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
       keys.push({name: f.name, type: f.type, desc});
     }
+    keyGuard(table.type, "SORT");
     return {s: "sort", table, keys};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
@@ -1477,6 +1567,7 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const cc = node.findDirectExpression(Expressions.ComponentCond);
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
+    keyGuard(table.type, "DELETE");
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
   }
   if (isStmt(node, Statements.DeleteInternal)) {
@@ -1486,6 +1577,7 @@ function statement(node, ctx) {
     if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    keyGuard(table.type, "DELETE");
     return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};
   }
   if (isStmt(node, Statements.InsertInternal) && /\bINTO\s+TABLE\b/i.test(text)) {
@@ -1497,6 +1589,7 @@ function statement(node, ctx) {
     const keys = table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE") ? table.type.hashed : null;
     if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
     for (const k of keys ?? []) fieldOf(ctx, table.type.row, k, text);
+    uniqueGuard(table.type, "INSERT INTO TABLE");
     return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
@@ -1507,6 +1600,8 @@ function statement(node, ctx) {
     const srcs = node.findDirectExpressions(Expressions.Source).concat(node.findDirectExpressions(Expressions.SimpleSource4));
     const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? srcs[0];
     const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    keyGuard(table.type, "INSERT ... INDEX");
+    uniqueGuard(table.type, "INSERT ... INDEX");
     return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
   }
   if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text);
