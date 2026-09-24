@@ -69,7 +69,9 @@ const charlike = (t) => t.k === "c" || t.k === "string";
  * one or more folders of abapGit files. `files` narrows each folder to the
  * objects wanted, so a big pack can be read without parsing all of it.
  */
-export function compileProgram({folders, objects, tolerant = false}) {
+// skip(path): a file not to load, for a layered build where a later folder
+// hides an object an earlier one holds (osg-build.mjs; ultra/packs)
+export function compileProgram({folders, objects, tolerant = false, skip = () => false}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
@@ -83,6 +85,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
+      else if (skip(path)) continue;
       else if (/\.(abap|xml)$/i.test(e.name)) reg.addFile(new abaplint.MemoryFile(e.name, readFileSync(path, "utf8")));
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
