@@ -95,17 +95,17 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE (or HANDLER, SECTION, PARAMETER) activates here and not on a system
 
-- Status: `workaround` (ZONE: the table field is renamed in #67, the CDS element in #69, and ZC_OSD_TAXICUBE activates on A4H; HANDLER, SECTION, PARAMETER: the fields and the elements are renamed in fix/reserved-words, and every table and view they were in activates on A4H)
+- Status: `workaround` (ZONE: the table field is renamed in #67, the CDS element in #69, and ZC_OSD_TAXICUBE activates on A4H; HANDLER, SECTION, PARAMETER: the fields and the elements are renamed in #73, and every table and view they were in activates on A4H)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/cli` 2.120.50 (the `npm run lint` pass, `open-abap` syntax version, reports nothing), `@abaplint/core` 2.120.55, `@abaplint/transpiler` 2.13.89 (creates the column)
 - Affected ABAP statement, runtime API or adapter: a TABL field, or a CDS element, named like a word the dictionary reserves; here `ZOSD_TAXIFACT-ZONE` (`src/ddic/zosd_taxifact.tabl.xml`) and the element `Zone` of `ZC_OSD_TAXICUBE`; `HANDLER` in `ZOSD_ICF_APC`, `ZOSD_ICF_ASIDE` and `ZOSD_SVC`, `SECTION` in `ZOSD_DB`, `PARAMETER` in `ZSTG_FM_PARAM`; the elements `Handler` of `ZC_OSD_ICF_APC`, `ZC_OSD_ICF_HANDLER` and `ZC_OSD_SERVICE` and `Section` of `ZC_OSD_DATABASE`
 - Minimal ABAP reproducer: a transparent table with a field `ZONE` of any type; a CDS view with an element `... as Zone`
-- Exact command used to run it: **measured on A4H 2026-09-24** twice. `$ZOSG_TMP_0462` (ultra/demodata): ZOSD_TAXIFACT created over ADT with its eleven fields; activation cancelled with "ZONE is a reserved word (choose another field name)" and "TABL ZOSD_TAXIFACT was not activated" (D0 408). `$ZOSG_TMP_0025` (fix/taxi-pickup-zone), saving the DDL source over ADT: a table with `zone : abap.char(80)` is not saved, "ZONE is a reserved word (choose another field name)"; the same eleven fields with `pickup_zone` save and activate. A DDIC-based CDS view (`@AbapCatalog.sqlViewName`) over that table with `pickup_zone as Zone` is not saved, "ZONE is a reserved word; choose another word"; a view entity with the same element, "ZONE is a reserved word (choose another field name)"; `pickup_zone as PickupZone` activates. All probes were deleted. `$ZOSG_TMP_0025` also found HANDLER, SECTION and PARAMETER refused in a table (TEXT and LENGTH, also in `TRESE`, accepted) and `Handler` / `Section` refused as view-entity elements. `$ZOSG_TMP_0040` (fix/reserved-words): `ZOSD_SVC` with `handler` is not saved, "HANDLER is a reserved word (choose another field name)"; `ZC_OSD_ICF_HANDLER` with `icfhandler as Handler` is not saved, "HANDLER is a reserved word; choose another word", and `ZC_OSD_DATABASE` with `category as Section`, "SECTION is a reserved word; choose another word" (both DDIC-based views).
+- Exact command used to run it: **measured on A4H 2026-09-24** twice. `$ZOSG_TMP_0462` (ultra/demodata): ZOSD_TAXIFACT created over ADT with its eleven fields; activation cancelled with "ZONE is a reserved word (choose another field name)" and "TABL ZOSD_TAXIFACT was not activated" (D0 408). `$ZOSG_TMP_0025` (#67), saving the DDL source over ADT: a table with `zone : abap.char(80)` is not saved, "ZONE is a reserved word (choose another field name)"; the same eleven fields with `pickup_zone` save and activate. A DDIC-based CDS view (`@AbapCatalog.sqlViewName`) over that table with `pickup_zone as Zone` is not saved, "ZONE is a reserved word; choose another word"; a view entity with the same element, "ZONE is a reserved word (choose another field name)"; `pickup_zone as PickupZone` activates. All probes were deleted. `$ZOSG_TMP_0025` also found HANDLER, SECTION and PARAMETER refused in a table (TEXT and LENGTH, also in `TRESE`, accepted) and `Handler` / `Section` refused as view-entity elements. `$ZOSG_TMP_0040` (#73): `ZOSD_SVC` with `handler` is not saved, "HANDLER is a reserved word (choose another field name)"; `ZC_OSD_ICF_HANDLER` with `icfhandler as Handler` is not saved, "HANDLER is a reserved word; choose another word", and `ZC_OSD_DATABASE` with `category as Section`, "SECTION is a reserved word; choose another word" (both DDIC-based views).
 - Expected SAP behaviour: neither the table nor the view activates. The list is the dictionary table `TRESE` (453 names on A4H; `ZONE` carries the source hint `DB6, MSS`)
 - Actual open-abap behaviour: abaplint reports nothing, the transpiler creates `"zone"`, and the table, the CDS cube `ZC_OSD_TAXICUBE` over it and the Analytical List Page work
-- Impact on open-steamgate: ZOSD_TAXIFACT, and with it the taxi cube and page, could not be deployed to a system. The table field is now `PICKUP_ZONE` (#67) and the cube's element `PickupZone` (`pickup_zone as PickupZone`), so the OData property is `PICKUPZONE`; the page's annotations, its e2e test and the taxi bench follow it. The demo's OData has no outside consumers, so a system that activates the cube was put before the old property name (decided 2026-09-24). Measured on A4H after the rename (`$ZOSG_TMP_0026`): ZOSD_TAXIFACT with `PICKUP_ZONE` and ZC_OSD_TAXICUBE / ZVOSDTAXICUBE with this tree's source (without `@OData.publish`, which would register a service) activate, and a Data Preview `SELECT PickupZone, SUM( Trips ) ... GROUP BY PickupZone` answers; both were deleted. The same for the other three words (fix/reserved-words): the table fields are `ZOSD_ICF_APC-CLASS_NAME` (SAPC's own name for it), `ZOSD_ICF_ASIDE-ICF_HANDLER`, `ZOSD_SVC-HANDLER_NAME` (a DPC, a handler class, an APC class or an app id), `ZOSD_DB-CATEGORY` and `ZSTG_FM_PARAM-PARAM_NAME`; the elements are `ClassName`, `IcfHandler` (`ZC_OSD_ICF_HANDLER`, like its `IcfName`/`IcfOrder`/`IcfTyp`), `HandlerName` and `Category`, and the OData properties of ZOSD_ICF_SRV and ZOSD_STATUS_SRV follow them (the Fiori pages are annotation-driven from the YAML; the zvdb pack page and the preview e2e read `Category`). `ModuleParameterSet` keeps its property `Parameter`: it is table-mapped, not a CDS element, and only its `sap:label` changes. The JSON the hosts post to `/sap/bc/osd/status/` keeps its keys `handler` and `section`. Measured on A4H (`$ZOSG_TMP_0040`): the five tables and the four DDIC-based views with this tree's sources activate (the views only warn "DDIC-based CDS views are obsolete", `ZC_OSD_ICF_HANDLER` also that ICFTYP is not in its key) and a Data Preview of each view answers with the new column; all deleted. The structures with COUNT, FILE, PACKAGE, ROWCOUNT and RULE (`ZOSD_TYPE_S`, `ZOSD_OBJECT_S`, `ZOSD_SQLTRACE_S`, `ZOSD_ISSUE_S`) are left as they are: a structure has no database table, and among the dictionary objects A4H activated since 2024-01-01 (DD03L joined to DD02L, active version) these names occur in structures only, never in a transparent table: COUNT in 23 structures, FILE 1, PACKAGE 9, ROWCOUNT 2, RULE 2, and PARAMETER 39, HANDLER 1, SECTION 1; a structure of ours could not be activated directly, because vsp creates only transparent tables
+- Impact on open-steamgate: ZOSD_TAXIFACT, and with it the taxi cube and page, could not be deployed to a system. The table field is now `PICKUP_ZONE` (#67) and the cube's element `PickupZone` (`pickup_zone as PickupZone`), so the OData property is `PICKUPZONE`; the page's annotations, its e2e test and the taxi bench follow it. The demo's OData has no outside consumers, so a system that activates the cube was put before the old property name (decided 2026-09-24). Measured on A4H after the rename (`$ZOSG_TMP_0026`): ZOSD_TAXIFACT with `PICKUP_ZONE` and ZC_OSD_TAXICUBE / ZVOSDTAXICUBE with this tree's source (without `@OData.publish`, which would register a service) activate, and a Data Preview `SELECT PickupZone, SUM( Trips ) ... GROUP BY PickupZone` answers; both were deleted. The same for the other three words (#73): the table fields are `ZOSD_ICF_APC-CLASS_NAME` (SAPC's own name for it), `ZOSD_ICF_ASIDE-ICF_HANDLER`, `ZOSD_SVC-HANDLER_NAME` (a DPC, a handler class, an APC class or an app id), `ZOSD_DB-CATEGORY` and `ZSTG_FM_PARAM-PARAM_NAME`; the elements are `ClassName`, `IcfHandler` (`ZC_OSD_ICF_HANDLER`, like its `IcfName`/`IcfOrder`/`IcfTyp`), `HandlerName` and `Category`, and the OData properties of ZOSD_ICF_SRV and ZOSD_STATUS_SRV follow them (the Fiori pages are annotation-driven from the YAML; the zvdb pack page and the preview e2e read `Category`). `ModuleParameterSet` keeps its property `Parameter`: it is table-mapped, not a CDS element, and only its `sap:label` changes. The JSON the hosts post to `/sap/bc/osd/status/` keeps its keys `handler` and `section`. Measured on A4H (`$ZOSG_TMP_0040`): the five tables and the four DDIC-based views with this tree's sources activate (the views only warn "DDIC-based CDS views are obsolete", `ZC_OSD_ICF_HANDLER` also that ICFTYP is not in its key) and a Data Preview of each view answers with the new column; all deleted. The structures with COUNT, FILE, PACKAGE, ROWCOUNT and RULE (`ZOSD_TYPE_S`, `ZOSD_OBJECT_S`, `ZOSD_SQLTRACE_S`, `ZOSD_ISSUE_S`) are left as they are: a structure has no database table, and among the dictionary objects A4H activated since 2024-01-01 (DD03L joined to DD02L, active version) these names occur in structures only, never in a transparent table: COUNT in 23 structures, FILE 1, PACKAGE 9, ROWCOUNT 2, RULE 2, and PARAMETER 39, HANDLER 1, SECTION 1; a structure of ours could not be activated directly, because vsp creates only transparent tables
 - Smallest safe workaround: the renames above. DuckDB files made before it are migrated at boot and by the import (`tools/osd-db-migrate.mjs`, one transaction), **one way**: a build from before the rename cannot read a migrated file (its first `SELECT zone` fails). Views the running build does not have are logged and left, and one of them that names `zone` breaks. A kept HANA schema is not migrated and is refused at boot with the way out (`STG_DB_FRESH=1`); the stamped backends rebuild or set the file aside by their own drift policy. **The migration covers DuckDB only.** A SQLite file (`STG_DB=file`, `STG_DB_PATH` with SQLite) that sees this DDIC drift is moved aside to `*.drift` and the system starts empty: the module signatures imported into `ZSTG_FM_PARAM` and the records in `ZOSD_ICF_ASIDE` are not carried over. The way back is `POST FunctionGroupSet` with the same `*.fugr.xml` again; the aside records are kept in the `*.drift` file only and are not restored by anything (they are written again only when an object next replaces an edited ICF row)
-- Upstream issue: needs an issue (abaplint: a check of TABL field names and CDS element names against the dictionary's reserved words); not filed yet
+- Upstream issue: [abaplint/abaplint#4331](https://github.com/abaplint/abaplint/issues/4331), filed 2026-09-24: abaplint's `cds_check_syntax` already refuses BEGIN, NUMBER and POSITION; the issue asks for ZONE, HANDLER and SECTION there and a TABL field counterpart
 - Regression-test location: `test/db-migrate.mjs` (the migration, including a renamed key column), `test/taxi-import.mjs` (an import into an old-shaped file), `test/reserved-words.mjs` (no field of an own transparent table and no CDS element is one of the names A4H was seen refusing: ZONE, HANDLER, SECTION, PARAMETER; checked failing on the tree before the renames)
 - Upstream version containing a fix: `unknown`
 
@@ -136,27 +136,9 @@ DELETE ADJACENT DUPLICATES FROM lt.
 - Upstream version containing a fix: `unknown`
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
-**A POSTed form field is not there.** On a system, ICF fills the form fields of
-a request from an `application/x-www-form-urlencoded` **body** as well as from
-the query string, so `if_http_request~get_form_field( 'x' )` answers for both.
-`cl_express_icf_shim` fills them only from the query string
-(`cl_express_icf_shim=>request` splits `~request_uri` at `?` and hands that to
-`cl_http_utility=>string_to_fields`); the body is set as data and never parsed.
-
-**Why it is worth an entry rather than a shrug:** the failure is silent and
-well-disguised. `get_form_field` answers an empty string, which is exactly what
-a person submitting an empty box would produce, so the screen shows "nothing to
-run" and the developer looks at the form, the browser and the encoding before
-looking at the shim.
-
-Found building the AMDP sandbox (backlog G.8): the body typed on the page never
-arrived. **Workaround**, in `zcl_osd_amdp_sbx=>posted_body`: read
-`get_cdata( )` and parse the pairs by hand. Two lines of it are their own trap
-and are commented where they are -- a form sends a space as `+`, and
-`REPLACE ... WITH ' '` in ABAP replaces it with *nothing*, because a text
-literal loses its trailing blanks; it has to be written `` WITH ` ` ``.
-
-**Upstream:** open-abap/express-icf-shim. Not yet drafted.
+The same defect as ANOMALY-2026-09-19-posted-form-has-no-fields, found a day
+earlier building the AMDP sandbox (backlog G.8); the entries are merged there
+(2026-09-24), with this one's workaround and its `+`-to-space trap.
 
 ### ANOMALY-2026-09-18-call-function-parameter-case — A destination call is made in lower case and the declaration is upper, so it answers into nothing
 
@@ -381,7 +363,7 @@ DATA(lv_c) = lv_i * '2.5'.    " SAP: P(8,0) 8    open-abap: Float 7.5
 
 ### ANOMALY-2026-09-16-mod-result-integer — `MOD` with a float operand answers an integer
 
-- Status: `fixed locally, PR open`
+- Status: `fixed upstream: abaplint/transpiler#1863, merged 2026-09-18, released in @abaplint/runtime 2.13.88; this tree already has it`
 - Discovery date: `2026-09-16`
 - Affected versions: `@abaplint/runtime 2.13.86` and 2.13.87 (`operators/mod.ts`)
 - Affected ABAP statement, runtime API or adapter: `a MOD b` where either operand is a float (or a packed number with decimals)
@@ -702,7 +684,7 @@ DATA(b) = sin( lv_t * 3 + lv_t * 4 ) * 10.
 
 ### ANOMALY-2026-09-14-arithmetic-typed-as-character — Arithmetic with a character literal is typed by the literal
 
-- Status: `PR open: abaplint/abaplint#4293`
+- Status: `fixed upstream: abaplint/abaplint#4293, merged 2026-09-14, first released in @abaplint/core 2.120.53; this tree already has it`
 - Discovery date: `2026-09-14`
 - Affected versions: `@abaplint/core 2.120.50`
 - Affected ABAP statement, runtime API or adapter: the inferred type of `DATA(x) = <arithmetic expression>`
@@ -939,7 +921,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-13-default-ignore — `DEFAULT IGNORE` is parsed and not honoured, and the project cannot switch the rule off
 
-- Status: `PR open: abaplint/abaplint#4291`
+- Status: `fixed upstream: abaplint/abaplint#4291, merged 2026-09-14, first released in @abaplint/core 2.120.53; this tree already has it`
 - Discovery date: `2026-09-13`
 - Affected versions: `@abaplint/core 2.120.5`, `@abaplint/transpiler-cli 2.13.86`
 - Affected ABAP statement, runtime API or adapter: `METHODS m DEFAULT IGNORE` / `DEFAULT FAIL` in an interface
@@ -1088,7 +1070,7 @@ twice out loud before reading the code that answers it.
 
 ### ANOMALY-2026-09-14-general-get-random-int — `GENERAL_GET_RANDOM_INT` is not implemented
 
-- Status: `reported` — open-abap-core#1221, opened 2026-09-14
+- Status: `fixed upstream elsewhere: open-abap-core#1221 was closed, and the module landed in open-abap/open-abap-deprecated#2 (merged 2026-09-18)`
 - Discovery date: `2026-09-14`
 - Affected versions: `open-abap-core` as cloned 2026-09-14
 - Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'GENERAL_GET_RANDOM_INT'`
@@ -1129,15 +1111,15 @@ twice out loud before reading the code that answers it.
 - Expected SAP behaviour: **documented, not measured.** No system was asked (the sandbox is only used when Alice asks), so this claims nothing about a particular release. It does not have to: the interface open-abap ships says it itself — `get_form_fields_cs` takes `search_option TYPE i DEFAULT co_body_before_query_string`. A default named "body before query string" is only meaningful if the body is a source of form fields, and here it never is
 - Actual open-abap behaviour: the body survives intact as the request's data (`get_cdata` returns it), so nothing is lost — it is simply not parsed into fields. The failure is therefore **silent and total** for a posting screen: no error, no empty-ness anywhere a caller can see, just every field reading as if nobody filled it in
 - Impact on open-steamgate: the editor screen (G.8) is the first page here that posts a form at all. The screens written before it did not meet this — SE16 navigates by GET, and the webgui posts through `sapevent`, which carries its payload in the URL. So the gap is one this tree could only find the day it wrote a text area
-- Smallest safe workaround: `src/webgui/zcl_osd_form.clas.abap` — the query-string fields as the shim gives them, plus the body parsed when the method is POST or PUT and the content type is `application/x-www-form-urlencoded`. It is **not** `cl_http_utility=>string_to_fields`, and the two differences are required by the encoding rather than chosen: `+` is a space (that method decodes with `decodeURIComponent`, which leaves `+` alone, so a source posted through a text area would come back with its indentation turned into plus signs), and the **name** is unescaped too
-- Upstream issue: none yet. The fix belongs in the shim, where the request is assembled, and it is small — parse the body into fields when the content type says it is a form. `docs/upstream.md` carries it; it goes out under the critic gate like the rest
+- Smallest safe workaround: `src/webgui/zcl_osd_form.clas.abap` — the query-string fields as the shim gives them, plus the body parsed when the method is POST or PUT and the content type is `application/x-www-form-urlencoded`. (Found first on 2026-09-18 in the AMDP sandbox, whose `zcl_osd_amdp_sbx=>posted_body` parses the pairs by hand; a form sends a space as `+`, and `REPLACE ... WITH ' '` replaces it with nothing, since a text literal loses its trailing blanks -- it has to be written `` WITH ` ` ``.) It is **not** `cl_http_utility=>string_to_fields`, and the two differences are required by the encoding rather than chosen: `+` is a space (that method decodes with `decodeURIComponent`, which leaves `+` alone, so a source posted through a text area would come back with its indentation turned into plus signs), and the **name** is unescaped too
+- Upstream issue: none yet; the repository is open-abap/express-icf-shim. The fix belongs in the shim, where the request is assembled, and it is small — parse the body into fields when the content type says it is a form. `docs/upstream.md` carries it; it goes out under the critic gate like the rest
 - Regression-test location: `test/unit/zcl_osd_form_test` — the decoding rules, and separately `the_gap_this_exists_for`, which asserts that `get_form_field` over a posted body answers **nothing**. That is the expiry: when the shim learns to parse a body, that test fails and says to delete the workaround rather than to adjust an expectation
 - Upstream version containing a fix: `unknown`
 
 
 ### ANOMALY-2026-09-19-form-field-name-case — `get_form_field` lower-cases the question and not the answer
 
-- Status: `reported`
+- Status: `fixed upstream: open-abap/open-abap-core#1253, merged 2026-09-19`
 - Discovery date: `2026-09-19`
 - Affected versions: `open-abap-core` as cloned 2026-09-19
 - Affected ABAP statement, runtime API or adapter: `if_http_entity~get_form_field` / `~set_form_fields`
@@ -1153,7 +1135,7 @@ twice out loud before reading the code that answers it.
 
 ### ANOMALY-2026-09-19-bang-value — abaplint does not parse a method declared `!VALUE(x)`, and the method is lost
 
-- Status: `reported`
+- Status: `fixed upstream: abaplint/abaplint#4311, merged 2026-09-20, first released in @abaplint/core 2.120.57; this tree still pins an older core`
 - Discovery date: `2026-09-19`
 - Affected versions: `@abaplint/core` 2.120.55
 - Affected ABAP statement, runtime API or adapter: `METHODS` / `CLASS-METHODS` with a parameter written `!VALUE(name)`
@@ -1486,13 +1468,13 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: `set1:1/1=12` (one byte stored), `set5:5=1200000000` (five bytes in a RAW(4)), `[12ab]=12`, `[1234567890AB]=1234567890AB`; `eqs1:` / `gts1:A B D` / `[r = '12']:` answer rows or none where a system raises; a seeded 96-byte value of a RAW(192) reads back as 96 bytes into an xstring. (The same runs also show CHAR read into a string keeping its trailing blanks, `new:0/[A   ]`, where A4H gives `[A]`.)
 - Impact on open-steamgate: the zvdb pack reads and writes QBITS only through `x LENGTH 192` fields and validates the hex first, so its answers are the same on both hosts (checked request by request); a program that reads a RAW column into an xstring, compares one with an xstring or writes a shorter value sees other bytes than on a system
 - Smallest safe workaround: the portable IR binds and compares a RAW as HANA does (`tools/ir-osql-where.mjs`, `tools/ir-writes.mjs`, the RAW pairs in `test/fixtures/ir-pairs/`), and `test/seed.mjs` pads seeded RAW values; the Go backend keeps the store as HANA does (`go/abap/dbraw.go`, `dbstore.go` pads seeded RAW values to 2n upper-case digits at open), binds every value at n bytes and raises where A4H raises
-- Upstream: **needs an issue** in abaplint/transpiler (runtime Open SQL on RAW columns)
+- Upstream: [abaplint/transpiler#1896](https://github.com/abaplint/transpiler/issues/1896), filed 2026-09-24; no fix offered
 - Regression-test location: `test/ir-osql-where.mjs`, `test/ir-writes.mjs` (the RAW cases); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_RAWRD, _RAWSEL, _RAWSTR, _RAWDYN
 - Upstream version containing a fix: none yet
 
 ### ANOMALY-2026-09-24-c-to-x — a character value moved into an x keeps the characters after a non-hex one in the transpiler runtime
 
-- Status: `open`
+- Status: `reported` (transpiler#1857, fix offered in PR #1895)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`Hex.set` of a character value takes it as it stands and pads with 0)
 - Affected ABAP statement, runtime API or adapter: `x = string`, `x = c` (and `UPDATE ... SET raw = string`, ANOMALY-2026-09-24-raw-columns)
@@ -1502,6 +1484,6 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: into x LENGTH 4, `ABG10000`, `AB CD000`, `0a1B0000` and `AB    00` (the blanks of the c kept), none of them hex; into an xstring the same as A4H
 - Impact on open-steamgate: none seen; the zvdb DPC upper-cases and validates VectorHex before the move
 - Smallest safe workaround: the IR writes a RAW by the A4H rule (`tools/ir-writes.mjs` bindValue); the Go backend has it too (`go/abap/conv.go` CToX)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, `Hex.set`)
+- Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (a related, older issue about conversion type c; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895)
 - Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
 - Upstream version containing a fix: none yet
