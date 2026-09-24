@@ -343,6 +343,16 @@ export function compileProcedure(method, types, options = {}) {
     signature: method, arrayValues, catalogue, ...(targetSchema === undefined ? {} : {targetSchema}),
   });
 
+  // HANA refuses a bare BOOLEAN as a condition (`IF :g THEN` is a syntax
+  // error, measured on A4H): it wants `IF :g = TRUE`
+  const condition = (node) => {
+    const bound = bind(node, "condition");
+    if (bound?.node === "param") {
+      throw new UnsupportedSqlScript(
+        `a bare :${String(bound.name).toLowerCase()} is not a condition on HANA (a syntax error there); write :${String(bound.name).toLowerCase()} = TRUE`, node);
+    }
+    return bound;
+  };
   const compileStatements = (container, allowArrayDeclarations = false, returnAllowed = false) => {
     const result = [];
     const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation"]);
@@ -507,7 +517,7 @@ export function compileProcedure(method, types, options = {}) {
         relationSchemas[calledOutput] = structuredClone(output.schema);
         result.push(callProcedure(procedureLeaves[0].value, input, calledOutput, node));
       } else if (node.node === "While") {
-        result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
+        result.push(whileLoop(condition(child(node, "Condition")), compileStatements(node), node));
       } else if (node.node === "Block") {
         const mode = (node.children ?? []).filter((one) => one.node === "word")
           .map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one));
@@ -553,7 +563,7 @@ export function compileProcedure(method, types, options = {}) {
             break;
           } else if (part.node === "Condition" && current?.condition === null) {
             restoreEnvironment(before);
-            current.condition = bind(part, "condition");
+            current.condition = condition(part);
           } else if (part.node === "Statement" && current !== undefined) {
             current.statements.push(part);
           }

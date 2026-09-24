@@ -101,9 +101,13 @@ function initialOf(type) {
  * longer than the field; a STRING keeps it as it is.
  */
 function intoOutput(value, type, name) {
-  if (value == null) return initialOf(type);
+  // what ABAP receives for a scalar OUT the body set to NULL is not measured
+  // (only one left alone is), so it is refused rather than guessed
+  if (value == null) throw new UnsupportedSqlScript(`output ${name} was assigned NULL; what ABAP receives then is not measured yet`);
   if (type?.abap === "C") {
     const text = String(value).replace(/ +$/, "");
+    // a guard, not the rule: the body's variable of this type was assigned
+    // through intoVariable, which raises first
     if (Number.isInteger(type.len) && text.length > type.len) {
       throw new ScalarTooLong(`output ${name}: ${JSON.stringify(text)} is longer than its ${type.len} characters; HANA raises CX_AMDP_EXECUTION_FAILED here`);
     }
@@ -431,6 +435,18 @@ export async function runProcedure(program, {
   callDepth = 0, deferRelation = false, closedRelationInputs = false,
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
+  // every statement sent to the database is counted here, whatever sent it
+  // (a scalar the host does not evaluate, SELECT ... INTO, an INT2 probe, the
+  // answer), so the trace says the database was used when it was
+  let dbStatements = 0;
+  let dbParams = 0;
+  const ask = (compiled) => {
+    dbStatements += 1;
+    dbParams += compiled.params.length;
+    return client.native({...compiled, expect: "rows"});
+  };
+  const traced = (hostSteps, extra = {}) => ({engine: dbStatements > 0 ? dialect : "host", fallback: false, hostSteps, ...extra,
+    databaseStatements: dbStatements, boundParameters: dbParams});
   session = session ?? {};
   if (typeof session !== "object" || Array.isArray(session)) {
     throw new UnsupportedSqlScript("SQLScript session must be an object");
@@ -543,7 +559,7 @@ export async function runProcedure(program, {
       let probe;
       try { probe = lower(limit(filter(value, outside), 1), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
       catch (error) { throw new UnsupportedSqlScript(`cannot check INT2 columns of relation input ${name}: ${error.message}`); }
-      const found = await client.native({...probe, expect: "rows"});
+      const found = await ask(probe);
       if (found.rows.length > 0) {
         throw new Int2OutOfRange(`relation input ${name}: a row is outside INT2 (-32768..32767) in ${int2Inputs.join(", ")}; an ABAP int2 table cannot carry it`);
       }
@@ -598,8 +614,19 @@ export async function runProcedure(program, {
       && (!(textual(e.left) || textual(e.right)) || ["||", "AND", "OR"].includes(e.op)
         || (["=", "<>", "!="].includes(e.op) && textual(e.left) && textual(e.right))))
     || (e.node === "call" && e.fn === "COALESCE" && (e.args ?? []).length === 2 && e.args.every(hostCapable)));
+  // a comparison of a text with a number is not measured on HANA, and the
+  // engines disagree (DuckDB raises, SQLite answers false): refused
+  const mixedComparison = (e) => e != null && (
+    (e.node === "bin" && ["=", "<>", "!=", "<", ">", "<=", ">="].includes(e.op)
+      && e.left != null && e.right != null && textual(e.left) !== textual(e.right))
+    || ["left", "right", "expr", "otherwise"].some((k) => mixedComparison(e[k]))
+    || (e.args ?? []).some(mixedComparison) || (e.values ?? []).some(mixedComparison)
+    || (e.whens ?? []).some((w) => mixedComparison(w.when) || mixedComparison(w.then)));
   const evaluate = async (expr, context) => {
     sameParamTypes(expr, context);
+    if (mixedComparison(expr)) {
+      throw new UnsupportedSqlScript(`${context}: comparing a text with a number is not measured on HANA yet`);
+    }
     if (hostCapable(expr)) {
       assertPortableHostExpression(expr, context, scalars);
       return evaluateScalar(expr, scalars);
@@ -614,7 +641,7 @@ export async function runProcedure(program, {
       if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
       throw error;
     }
-    const answer = await client.native({...compiled, expect: "rows"});
+    const answer = await ask(compiled);
     const value = answer.rows[0]?.V ?? null;
     if (typeof value === "bigint") return Number(value);
     // SQLite answers a comparison as 1 / 0
@@ -655,7 +682,7 @@ export async function runProcedure(program, {
           if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
           throw error;
         }
-        const answer = await client.native({...compiled, expect: "rows"});
+        const answer = await ask(compiled);
         let values;
         if (answer.rows.length > 1) {
           throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found more than one row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
@@ -746,20 +773,23 @@ export async function runProcedure(program, {
     // A4H); a RETURNING one stays refused, as it was not measured
     if ((scalar === undefined || !assignedScalars.has(program.output)) && program.outputInitialWhenUnassigned === true) {
       return {value: initialOf(program.outputType), outputType: program.outputType,
-        trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
+        trace: traced(steps)};
     }
     if (scalar === undefined || !assignedScalars.has(program.output)) {
       throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
     }
     if (["C", "STRING"].includes(program.outputType.abap)) {
       return {value: intoOutput(scalar.value, program.outputType, program.output), outputType: program.outputType,
-        trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
+        trace: traced(steps)};
     }
     // no range check here: a scalar INT2 output can only be assigned an INT2
     // value (an INTEGER into it is refused as not an identical measured type),
     // so it is always in range; the INT2 scalar boundary itself is unmeasured
+    if (scalar.value == null) {
+      throw new UnsupportedSqlScript(`output ${program.output} was assigned NULL; what ABAP receives then is not measured yet`);
+    }
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
-      trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
+      trace: traced(steps)};
   }
   // An OUT table the path taken did not assign is an empty table (measured
   // on A4H: the caller's rows are replaced by none); one assigned nowhere in
@@ -768,29 +798,24 @@ export async function runProcedure(program, {
   // declared columns (a typed empty SELECT would render literals whose SQL
   // type is not the declared one, and some types have no literal at all)
   const emptyAnswer = (schema) => ({rows: [], columns: Object.keys(schema).map((name) => ({name})), outputSchema: schema,
-    trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps, nestedCalls, databaseStatements: 0, boundParameters: 0}});
+    trace: traced(steps + nestedSteps, {nestedCalls})});
   if (Array.isArray(program.outputs) && program.outputs.length > 1) {
     if (deferRelation) {
       throw new UnsupportedSqlScript(`a nested CALL of ${program.outputs.length} outputs is not carried; a CALL hands on one relation`);
     }
     const outputs = {};
-    let statements = 0;
-    let bound = 0;
     for (const one of program.outputs) {
       if (one.scalar !== undefined) {
         // an OUT scalar: what the body assigned, its initial value otherwise
         const held = scalars.get(one.name);
-        outputs[one.name] = {value: assignedScalars.has(one.name) ? intoOutput(held?.value ?? null, one.scalar, one.name) : initialOf(one.scalar)};
+        outputs[one.name] = {value: assignedScalars.has(one.name) ? intoOutput(held?.value, one.scalar, one.name) : initialOf(one.scalar)};
         continue;
       }
       const assignedRel = relations.get(one.name);
       const answer = assignedRel === undefined ? emptyAnswer(one.schema) : await finishOne(one.name, one.schema, assignedRel);
       outputs[one.name] = {rows: answer.rows, columns: answer.columns, outputSchema: one.schema};
-      statements += answer.trace.databaseStatements;
-      bound += answer.trace.boundParameters;
     }
-    return {outputs, trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
-      databaseStatements: statements, boundParameters: bound}};
+    return {outputs, trace: traced(steps + nestedSteps, {nestedCalls})};
   }
   const single = relations.get(program.output);
   if (single === undefined && deferRelation) {
@@ -858,8 +883,7 @@ export async function runProcedure(program, {
       throw new UnsupportedSqlScript(`output ${outputName} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
     }
     return {relation: output, outputSchema: outputSchema,
-      trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
-        nestedCalls, databaseStatements: 0, boundParameters: 0}};
+      trace: traced(steps + nestedSteps, {nestedCalls})};
   }
   let compiled;
   try {
@@ -871,7 +895,7 @@ export async function runProcedure(program, {
   if (compiled.params.length > maxParameters) {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }
-  const answer = await client.native({...compiled, expect: "rows"});
+  const answer = await ask(compiled);
   for (const row of answer.rows) {
     for (const column of int2Columns) {
       if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${outputName}.${column}`);
@@ -881,8 +905,7 @@ export async function runProcedure(program, {
     rows: answer.rows,
     columns: answer.columns,
     outputSchema: outputSchema,
-    trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
-      databaseStatements: 1, boundParameters: compiled.params.length},
+    trace: traced(steps + nestedSteps, {nestedCalls}),
   };
   }
 }

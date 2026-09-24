@@ -545,18 +545,27 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
   });
 
   it("a NULL in the one row assigns NULL", async () => {
-    const nulled = program("SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO rv FROM src WHERE id = :iv;");
-    expect((await run(nulled, 5)).value).to.equal(null);
+    // read inside the body: a NULL handed to an ABAP output is not measured
+    const nulled = program(`DECLARE n INTEGER;
+      SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO n FROM src WHERE id = :iv;
+      IF :n IS NULL THEN rv = 99; ELSE rv = :n; END IF;`);
+    expect((await run(nulled, 5)).value).to.equal(99);
     expect((await run(nulled, 1)).value).to.equal(1);
+    let caught;
+    try { await run(program("SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO rv FROM src WHERE id = :iv;"), 5); }
+    catch (error) { caught = error; }
+    expect(caught?.message).to.match(/output RV was assigned NULL; what ABAP receives then is not measured yet/);
   });
 
   it("COUNT is BIGINT and fills an INTEGER scalar, always one row; MAX of no rows is NULL", async () => {
     const counted = program("SELECT count(*) INTO rv FROM src WHERE id > :iv;");
     expect((await run(counted, 100)).value).to.equal(0);
     expect((await run(counted, 0)).value).to.equal(3);
-    const maxed = program("SELECT max(id) INTO rv FROM src WHERE id > :iv;");
+    const maxed = program(`DECLARE m INTEGER;
+      SELECT max(id) INTO m FROM src WHERE id > :iv;
+      IF :m IS NULL THEN rv = 99; ELSE rv = :m; END IF;`);
     expect((await run(maxed, 0)).value).to.equal(20);
-    expect((await run(maxed, 100)).value).to.equal(null);
+    expect((await run(maxed, 100)).value).to.equal(99);
   });
 
   it("refuses a target that is not declared, a type that differs, a count that differs, and INTO where rows are wanted", () => {
@@ -685,7 +694,22 @@ for (const {dialect, make} of ENGINES) describe(`several OUT tables as measured 
 // observed.md): a text is kept as it is, never padded, NULL until assigned,
 // NULL through ||, a number becomes its digits, one too long raises; a text
 // scalar is evaluated by the engine, as the same expression in a SELECT
-for (const {dialect, make} of ENGINES) describe(`string scalars as measured on A4H, as procedures on ${dialect}`, function () {
+// sql.js is the preview's engine: the string rules are checked on it too
+const SQLJS = {dialect: "sqlite", name: "sql.js", make: () => {
+  const client = {
+    async connect() {
+      const initSqlJs = (await import("sql.js")).default;
+      const SQL = await initSqlJs({locateFile: () => new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname});
+      const {installNative} = await import("../tools/sqljs-native.mjs");
+      client.sqlite = new SQL.Database();
+      installNative(client);
+    },
+    async disconnect() { client.sqlite?.close(); },
+  };
+  return client;
+}};
+
+for (const {dialect, make, name = dialect} of [...ENGINES, SQLJS]) describe(`string scalars as measured on A4H, as procedures on ${name}`, function () {
   this.timeout(30000);
   let client;
   beforeEach(async () => {
@@ -729,6 +753,40 @@ for (const {dialect, make} of ENGINES) describe(`string scalars as measured on A
       {client, dialect, inputCatalogue: CATALOGUE})).value;
     expect(await text("DECLARE b NVARCHAR(10); DECLARE a NVARCHAR(10) = 'ab  '; rv = COALESCE(:b, :a);")).to.equal("ab  ");
     expect(await text("DECLARE b NVARCHAR(10) = 'x '; DECLARE a NVARCHAR(10) = 'ab'; rv = COALESCE(:b, :a);")).to.equal("x ");
+  });
+
+  it("an empty text is a text, not NULL, through COALESCE", async () => {
+    const text = async (body) => (await runProcedure(program(body, "RETURNING VALUE(rv) TYPE string"),
+      {client, dialect, inputCatalogue: CATALOGUE})).value;
+    expect(await text("DECLARE e NVARCHAR(10) = ''; DECLARE z NVARCHAR(10) = 'z'; rv = COALESCE(:e, :z);")).to.equal("");
+  });
+
+  it("a concatenation is as long as both sides: two NVARCHAR(3) fill an NVARCHAR(6)", async () => {
+    expect(await value("DECLARE a NVARCHAR(3) = 'abc'; DECLARE b NVARCHAR(3) = 'def'; DECLARE c NVARCHAR(6); c = :a || :b; rv = LENGTH(:c);")).to.equal(6);
+    const compiled = program("DECLARE a NVARCHAR(3) = 'abc'; DECLARE b NVARCHAR(3) = 'def'; DECLARE c NVARCHAR(6); c = :a || :b; rv = 1;");
+    const concat = compiled.body.find((one) => one.stmt === "assign-scalar" && one.name === "C").expr;
+    expect(concat.type).to.deep.equal({abap: "C", len: 6, variable: true});
+  });
+
+  it("refuses what is not measured: a text compared with a number, a bare BOOLEAN condition", async () => {
+    let caught;
+    try { await value("DECLARE s NVARCHAR(10) = 'ab'; IF :s = 5 THEN rv = 1; ELSE rv = 0; END IF;"); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/comparing a text with a number is not measured on HANA yet/);
+    expect(() => program("DECLARE g BOOLEAN; IF :g THEN rv = 1; ELSE rv = 0; END IF;"))
+      .to.throw(UnsupportedSqlScript, /a bare :g is not a condition on HANA .*write :g = TRUE/);
+    expect(() => program("DECLARE g BOOLEAN; WHILE :g DO rv = 1; END WHILE; rv = 0;"))
+      .to.throw(UnsupportedSqlScript, /a bare :g is not a condition on HANA/);
+  });
+
+  it("the trace counts every statement the database answered, a scalar one included", async () => {
+    const onHost = await runProcedure(program("DECLARE s NVARCHAR(10) = 'ab'; IF :s = 'ab' THEN rv = 1; ELSE rv = 0; END IF;"),
+      {client, dialect, inputCatalogue: CATALOGUE});
+    expect(onHost.trace).to.include({engine: "host", databaseStatements: 0});
+    const viaEngine = await runProcedure(program("DECLARE s NVARCHAR(10) = 'ab'; rv = LENGTH(:s);"),
+      {client, dialect, inputCatalogue: CATALOGUE});
+    expect(viaEngine.value).to.equal(2);
+    expect(viaEngine.trace).to.include({engine: dialect, databaseStatements: 1});
+    expect(viaEngine.trace.boundParameters).to.be.greaterThan(0);
   });
 
   it("a text longer than the declared length raises, as on A4H", async () => {

@@ -220,7 +220,8 @@ describe("the typed SQLScript procedural IR", function () {
     failure = undefined;
     try { await runProcedure(wide); } catch (error) { failure = error; }
     // a text RETURNING is carried and evaluated on the host; too long for
-    // c LENGTH 3 raises, as on A4H
+    // c LENGTH 3 raises -- measured on a c LENGTH 3 OUT, carried over to
+    // RETURNING by inference, not measured there
     expect(failure).to.be.instanceOf(ScalarTooLong);
 
     const optionalChar = procedure({parameters: [{name: "IV", type: T.char(3), optional: true}],

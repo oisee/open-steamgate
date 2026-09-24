@@ -293,7 +293,15 @@ export function toIr(tree, options = {}) {
           // INT2 arithmetic is INTEGER's: 32767 + 32767 is 65534 on A4H, no
           // SMALLINT overflow, so the INT2 range does not travel into a result
           const widened = (t) => (t?.abap === "I" && t.bits !== undefined ? T.int : t);
-          const type = op === "/" ? T.dec(15, 2)
+          // a concatenation is as long as both sides together; a STRING or
+          // a number on either side makes it a STRING
+          const concatenated = () => {
+            const [a, b] = [left.type, right.type];
+            if (a?.abap !== "C" || b?.abap !== "C" || !Number.isInteger(a.len) || !Number.isInteger(b.len)) return T.str;
+            const joined = T.char(a.len + b.len);
+            return a.variable === true || b.variable === true ? {...joined, variable: true} : joined;
+          };
+          const type = op === "||" ? concatenated() : op === "/" ? T.dec(15, 2)
             : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
           left = bin(op, left, right, type);
         }

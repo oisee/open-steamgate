@@ -1292,3 +1292,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: the range check is the transpiler runtime's (**needs an issue** once reduced to the runtime alone); the `EPOCH_MS` fix is ours
 - Regression-test location: `tools/gogen/semantics.mjs` on branch spike/go-backend, ZCL_GOGEN_T_RQDATE (`dOVF`); the Go backend computes `i` as A4H does and stopped at this method
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-amdp-execution-failed-class — a data error in a portable AMDP run reaches ABAP as `CX_SY_DYN_CALL_ILLEGAL_FUNC`, where a system raises `CX_AMDP_EXECUTION_FAILED`
+
+- Status: `open`
+- Discovery date: `2026-09-24` (foreman-dell's critic on #44)
+- Affected versions: `tools/amdp-destination.mjs` since the portable route; open-abap-core has no `CX_AMDP_EXECUTION_FAILED`
+- Affected ABAP statement, runtime API or adapter: a call of an AMDP method that the portable runtime answers, inside `TRY. ... CATCH cx_amdp_execution_failed. ... ENDTRY.`
+- Minimal ABAP reproducer: an AMDP procedure with `DECLARE a NVARCHAR(3) = 'abcdef';` (or an INT2 out of range, or `SELECT ... INTO` of two rows), called inside `CATCH cx_amdp_execution_failed`.
+- Expected SAP behaviour (measured on A4H for the three cases, 2026-09-23): the call raises `CX_AMDP_EXECUTION_FAILED`, which the CATCH takes.
+- Actual open-abap behaviour: the runtime raises `ScalarTooLong` / `Int2OutOfRange` / `SelectIntoRows`, and the destination hands every failure to ABAP as `CX_SY_DYN_CALL_ILLEGAL_FUNC`, so that CATCH does not take it and the program dumps where it would have recovered.
+- Impact on open-steamgate: none on the measured corpus yet (no body catches it in a path we run); a program that recovers from a data error behaves differently here.
+- Smallest safe workaround: none yet. The fix is to raise `CX_AMDP_EXECUTION_FAILED` for a data error the kernel raises, and to keep `CX_SY_DYN_CALL_ILLEGAL_FUNC` for "cannot be run here" (no engine, no procedure, a refusal).
+- Upstream issue: the class is missing from open-abap-core -- **needs an issue** there (or a PR from the fork, per the branch-not-fork exception); not yet filed, goes out through the critic gate.
+- Upstream version containing a fix: none yet
+- Regression-test location: none yet
