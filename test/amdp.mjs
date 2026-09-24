@@ -245,6 +245,20 @@ ENDCLASS.
     const inComment = extract(cls("    x = 1; -- ENDMETHOD."), "zcl_r.clas.abap");
     expect(inComment.methods.map((m) => [m.name, m.body])).to.deep.equal([["a", "declare x integer;\n    x = 1; -- ENDMETHOD."], ["b", "declare y integer;"]]);
   });
+  it("keeps an `=>` type of a parameter whole: if_x=>ty, a table, and a component", () => {
+    const src = `CLASS zcl_t DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS m IMPORTING VALUE(iv) TYPE zif_x=>ty VALUE(it) TYPE zif_x=>tt VALUE(iv2) TYPE zif_x=>ty_s-f.
+ENDCLASS.
+CLASS zcl_t IMPLEMENTATION.
+  METHOD m BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+    declare x integer;
+  ENDMETHOD.
+ENDCLASS.
+`;
+    expect(extract(src, "zcl_t.clas.abap").methods[0].parameters.map((p) => p.abapType)).to.deep.equal(["zif_x=>ty", "zif_x=>tt", "zif_x=>ty_s-f"]);
+  });
   it("reads a header with a \" comment in it, a dot inside the comment", () => {
     const r = extract(cls("    x = 1;", `  METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT " note. with a dot
     OPTIONS READ-ONLY USING zt_one.`), "zcl_r.clas.abap");

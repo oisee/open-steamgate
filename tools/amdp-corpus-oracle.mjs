@@ -81,6 +81,10 @@ function statementsOf(source) {
 }
 
 /** the TYPES of one source: Map NAME -> {kind: "alias", of} | {kind: "table", of} | {kind: "structure", components} */
+/** the old length form: `name(len) [TYPE t] [DECIMALS d]`, type c when none */
+const OLD_LENGTH = /^(\w+)\((\d+)\)(?: TYPE (\w+))?(?: DECIMALS (\d+))?$/i;
+const oldLengthType = (x) => `${x[3] ?? "c"} LENGTH ${x[2]}${x[4] === undefined ? "" : ` DECIMALS ${x[4]}`}`;
+
 export function typesOfSource(source) {
   const types = new Map();
   for (const statement of statementsOf(source)) {
@@ -95,6 +99,10 @@ export function typesOfSource(source) {
       x = /^END OF (\w+)$/i.exec(part);
       if (x !== null) { if (structure !== undefined) types.set(structure.name, {kind: "structure", components: structure.components}); structure = undefined; continue; }
       if (structure !== undefined) {
+        // the old length form: `priority(2) TYPE n`, and `name(10)` alone,
+        // whose type is c
+        x = OLD_LENGTH.exec(part);
+        if (x !== null) { structure.components.push({name: x[1], abapType: oldLengthType(x)}); continue; }
         x = /^(\w+) TYPE (.+)$/i.exec(part);
         if (x !== null) structure.components.push({name: x[1], abapType: x[2].trim()});
         else structure.components.push({name: part, abapType: "", unreadable: true});
@@ -102,6 +110,8 @@ export function typesOfSource(source) {
       }
       x = /^(\w+) TYPE (?:STANDARD |SORTED |HASHED )?TABLE OF ([\w\/=>-]+)/i.exec(part);
       if (x !== null) { types.set(upper(x[1]), {kind: "table", of: upper(x[2])}); continue; }
+      x = OLD_LENGTH.exec(part);
+      if (x !== null) { types.set(upper(x[1]), {kind: "alias", of: oldLengthType(x)}); continue; }
       x = /^(\w+) TYPE (.+)$/i.exec(part);
       if (x !== null && !/\bRANGE OF\b|\bREF TO\b/i.test(x[2])) types.set(upper(x[1]), {kind: "alias", of: x[2].trim()});
     }
@@ -303,15 +313,20 @@ function ddicColumns(store, name) {
  * table type -- the class's own (`types`, amdp-extract's reading) or a
  * dictionary one.
  */
-export function hanaParameterType(abapType, types, store) {
+const STRUCT_FIELD = /^([\w\/]+(?:=>[\w\/]+)?)-([\w\/]+)$/;
+
+export function hanaParameterType(abapType, types, store, asScalar = false) {
   const name = upper(abapType);
   const builtin = hanaOfBuiltin(name);
   if (builtin !== undefined) return builtin;
-  if (name.includes("=>")) {
+  // `struct-field` is always a scalar, the component's type -- tested before
+  // `=>`, which `if_x=>ty_s-f` also contains
+  if (!asScalar && STRUCT_FIELD.test(name)) return hanaParameterType(abapType, types, store, true);
+  if (!asScalar && name.includes("=>")) {
     const [owner, inner] = name.split("=>");
     const theirs = CLASS_TYPES.get(owner);
     if (theirs?.has(inner)) return hanaParameterType(inner, theirs, store);
-    throw new TypeGap(`${name}: the types of ${owner} are not in this corpus`);
+    throw new TypeGap(theirs === undefined ? `${name}: the types of ${owner} are not in this corpus` : `${owner} has no type ${inner} here`);
   }
   const local = types?.get?.(name);
   // a scalar component or row: built-in, an alias of this owner, another
@@ -322,11 +337,37 @@ export function hanaParameterType(abapType, types, store) {
     if (b !== undefined) return b;
     const alias = types?.get?.(t);
     if (alias?.kind === "alias") return scalarOf(alias.of);
+    // `struct-field`: the type of one component -- a structure of this
+    // owner, another owner's (`if_x=>ty_s-f`), or a table of the dictionary.
+    // A structure the owner declares hides a dictionary object of the same
+    // name, as in ABAP: a component it lacks is a gap, not a dictionary field
+    const component = STRUCT_FIELD.exec(t);
+    if (component !== null && !/^(?:SY|SYST)$/.test(component[1])) {
+      const [, owner, field] = component;
+      const [ownerClass, ownerType] = owner.includes("=>") ? owner.split("=>") : [undefined, owner];
+      const scope = ownerClass === undefined ? types : CLASS_TYPES.get(ownerClass);
+      const row = scope?.get?.(ownerType);
+      if (row !== undefined) {
+        const c = row.kind === "structure" ? row.components.find((one) => upper(one.name) === field) : undefined;
+        if (c === undefined || c.unreadable) {
+          throw new TypeGap(`${text}: component ${field} of ${owner} is ${c === undefined ? "not there" : "not read here"}`);
+        }
+        return ownerClass === undefined ? scalarOf(c.abapType) : hanaParameterType(c.abapType, scope, store);
+      }
+      if (ownerClass !== undefined) {
+        throw new TypeGap(scope === undefined ? `${text}: the types of ${ownerClass} are not in this corpus` : `${ownerClass} has no type ${ownerType} here`);
+      }
+      const column = ddicColumns(store, owner)?.find((one) => one.name === field);
+      if (column !== undefined) return column.type;
+    }
     if (t.includes("=>")) {
       const [owner, inner] = t.split("=>");
-      const theirs = CLASS_TYPES.get(owner)?.get(inner);
+      const known = CLASS_TYPES.get(owner);
+      const theirs = known?.get(inner);
       if (theirs?.kind === "alias") return scalarOf(theirs.of);
-      if (theirs === undefined) {
+      // the dictionary only for an owner this corpus does not hold at all:
+      // a known owner without the type is a gap, not a data element of that name
+      if (known === undefined) {
         const d = resolveTypeX(store, inner);
         if (d.KIND === "DTEL") return hanaOfDdic(d, text);
       }
@@ -348,8 +389,15 @@ export function hanaParameterType(abapType, types, store) {
         return {name: upper(c.name), type: scalarOf(c.abapType)};
       });
     }
-    return ddicColumns(store, upper(rowName).split("=>").pop());
+    // another owner's row type: from that owner, or a gap -- never a
+    // dictionary structure that happens to share the inner name
+    if (upper(rowName).includes("=>")) {
+      const [owner, inner] = upper(rowName).split("=>");
+      throw new TypeGap(CLASS_TYPES.has(owner) ? `${owner} has no structure ${inner} here` : `${rowName}: the types of ${owner} are not in this corpus`);
+    }
+    return ddicColumns(store, upper(rowName));
   };
+  if (asScalar) return scalarOf(abapType);
   if (local !== undefined) {
     if (local.kind === "alias") return hanaParameterType(local.of, types, store);
     if (local.kind === "table") {

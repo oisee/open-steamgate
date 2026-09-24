@@ -191,3 +191,83 @@ ENDINTERFACE.`]]);
     expect(bodies[2].signature.parameters).to.deep.equal([]);
   });
 });
+
+describe("the corpus oracle: type texts it reads", () => {
+  it("reads the old length form of a component and of an alias, `x(2) TYPE n` and `x(10)`", () => {
+    const types = typesOfSource(`CLASS zcl_old DEFINITION.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_s,
+             priority(2) TYPE n,
+             label(10),
+           END OF ty_s,
+           ty_code(4) TYPE c.
+ENDCLASS.`);
+    expect(types.get("TY_S").components).to.deep.equal([{name: "priority", abapType: "n LENGTH 2"}, {name: "label", abapType: "c LENGTH 10"}]);
+    expect(types.get("TY_CODE")).to.deep.equal({kind: "alias", of: "c LENGTH 4"});
+  });
+
+  it("types a `struct-field` parameter by the component, and an `if_x=>ty` one by the interface", () => {
+    const sql = createStatement(body([
+      {name: "iv_carrid", direction: "IN", abapType: "ty_row-carrid"},
+      {name: "et_rows", direction: "OUT", abapType: "tt_rows"},
+    ], "et_rows = SELECT * FROM :et_rows;"), undefined);
+    expect(sql).to.contain("IN iv_carrid NVARCHAR(3)");
+  });
+});
+
+describe("the corpus oracle: a type the owner declares hides the dictionary's", () => {
+  const SRC = `CLASS zcl_mine DEFINITION.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_row,
+             amt(8) TYPE p DECIMALS 2,
+             code(2) TYPE n,
+             raw(4) TYPE x,
+             sub TYPE ty_other,
+           END OF ty_row,
+           ty_n(2) TYPE n,
+           ty_p(8) TYPE p DECIMALS 2.
+ENDCLASS.`;
+  // a dictionary holding an object of the same name, with other fields
+  const store = {
+    lookup: () => undefined,
+    resolver: () => () => undefined,
+  };
+  const types = typesOfSource(SRC);
+  const typed = (t) => createStatement({className: "ZCL_MINE", types, signature: {name: "RUN", language: "SQLSCRIPT", parameters: [{name: "iv", direction: "IN", abapType: t}], body: "x"}, body: "x"}, undefined).split("\n")[0];
+
+  it("reads the old length form with DECIMALS, for a component and an alias, and n, x, p", () => {
+    expect(types.get("TY_ROW").components.slice(0, 3)).to.deep.equal([
+      {name: "amt", abapType: "p LENGTH 8 DECIMALS 2"}, {name: "code", abapType: "n LENGTH 2"}, {name: "raw", abapType: "x LENGTH 4"}]);
+    expect(types.get("TY_N")).to.deep.equal({kind: "alias", of: "n LENGTH 2"});
+    expect(typed("ty_p")).to.contain("IN iv DECIMAL(15, 2)");
+    expect(typed("ty_row-amt")).to.contain("IN iv DECIMAL(15, 2)");
+    expect(typed("ty_row-raw")).to.contain("IN iv VARBINARY(4)");
+  });
+
+  it("refuses a component the owner's structure lacks, or does not read, rather than ask the dictionary", () => {
+    expect(() => typed("ty_row-nope")).to.throw(/component NOPE of TY_ROW is not there/);
+    expect(() => typed("ty_row-sub-f")).to.throw();
+  });
+});
+
+describe("the corpus oracle: another owner's types, through `=>`", () => {
+  it("reads if_x=>ty and if_x=>ty_s-f from the interface, and says so when the owner lacks the type", async () => {
+    const {mkdtempSync, writeFileSync, rmSync} = await import("node:fs");
+    const {tmpdir} = await import("node:os");
+    const {join} = await import("node:path");
+    const {readOwnerTypes} = await import("../tools/amdp-corpus-oracle.mjs");
+    const dir = mkdtempSync(join(tmpdir(), "osd-owner-"));
+    try {
+      writeFileSync(join(dir, "zif_osd_x.intf.abap"), `INTERFACE zif_osd_x PUBLIC.
+  TYPES: BEGIN OF ty_s, code TYPE c LENGTH 4, n TYPE i, END OF ty_s,
+         ty_code TYPE c LENGTH 7.
+ENDINTERFACE.`);
+      readOwnerTypes([dir]);
+      const typed = (t) => createStatement({className: "ZCL_Y", types: new Map(), signature: {name: "RUN", language: "SQLSCRIPT", parameters: [{name: "iv", direction: "IN", abapType: t}], body: "x"}, body: "x"}, undefined).split("\n")[0];
+      expect(typed("zif_osd_x=>ty_code")).to.contain("IN iv NVARCHAR(7)");
+      expect(typed("zif_osd_x=>ty_s-code")).to.contain("IN iv NVARCHAR(4)");
+      expect(() => typed("zif_osd_x=>ty_missing")).to.throw(/ZIF_OSD_X has no type TY_MISSING here/);
+      expect(() => typed("zif_osd_x=>ty_s-nope")).to.throw(/component NOPE of ZIF_OSD_X=>TY_S is not there/);
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+});
