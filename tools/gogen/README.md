@@ -720,3 +720,27 @@ two RAISE EVENTs) answers byte for byte as on Node, the page and the clicks
 (`.local/ultra-wip/events/pw/clicks.mjs` in Playwright). A transaction of
 the Easy Access menu (ZOSD_NOTE) still stops where its session row is
 written: `tools/ir-writes.mjs` has no initial value for a P column.
+
+Fix round, same day (all measured on A4H in `$ZOSG_TMP_0441`):
+
+- A SORTED table is filled only by `INSERT ... INTO TABLE` (row by row, the
+  unique rule) and `APPEND` of an equal-kind table. A move from a table of
+  another kind or key, a VALUE with rows and a STANDARD actual for a SORTED
+  IMPORTING parameter are refused (testdata-refused/zcl_gogen_t_rf_sort, the
+  last one does not even activate on a system).
+- `READ TABLE ... WITH [TABLE] KEY` on a SORTED table answers a miss as a
+  system does: 4 and the row it would go before, or 8 and lines + 1; only
+  components outside the key is a linear search (ZCL_GOGEN_T_SORTRD). A miss
+  that names a key part and a component outside it had no rule and is
+  refused (ZCL_GOGEN_T_SORTRD2).
+- A handler FOR EVENT e OF a subclass, FOR ALL INSTANCES, gets senders of
+  that subclass only (ZCL_GOGEN_T_EVENTS3).
+- An exception out of a class constructor is a runtime error no CATCH takes
+  (ZCL_GOGEN_T_CCBOOM2), as on a system.
+- WGUI1 is compiled by the JS emitter too; its string field symbols moved to
+  WGUI3, which JS refuses.
+- Host functions copied from open-abap-core rather than measured:
+  `CL_ABAP_TSTMP=>SUBTRACT` (whole seconds, an int; a TIMESTAMPL argument
+  with a fraction is refused) and `CL_ABAP_RANDOM=>CREATE( )->INT( )`
+  (unseeded only; a seed is refused, since a seeded generator's sequence is
+  the system's and not reproducible here).

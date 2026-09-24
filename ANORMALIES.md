@@ -576,7 +576,7 @@ WRITE / 'after'.
 ```
 
 - Exact command used to run it: transpile and run; measured 2026-09-14
-- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Verified on A4H 2026-09-24** (ultra/events, `$ZOSG_TMP_0440`): `tools/gogen/testdata/zcl_gogen_t_cctor.clas.abap` with `_CC1`, `_CC2` (a subclass), `_CC3` and `_CCLOG` answered `a cc3 t3 t3 b cc1 cc2 t1 c ` — at the first static call, at the first CREATE OBJECT of a subclass (the superclass's first), once; the transpiler 2.13.89 answers `cc3 cc1 cc2 a t3 t3 b t1 c `. The Go backend and the IR's JS emitter now run it at the first use (`Ensure_<class>`, emit-go `chainCctor`); until then neither ran a class constructor at all
+- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Verified on A4H 2026-09-24** (ultra/events, `$ZOSG_TMP_0440`): `tools/gogen/testdata/zcl_gogen_t_cctor.clas.abap` with `_CC1`, `_CC2` (a subclass), `_CC3` and `_CCLOG` answered `a cc3 t3 t3 b cc1 cc2 t1 c ` — at the first static call, at the first CREATE OBJECT of a subclass (the superclass's first), once; the transpiler 2.13.89 answers `cc3 cc1 cc2 a t3 t3 b t1 c `. The Go backend and the IR's JS emitter now run it at the first use (`Ensure_<class>`, emit-go `chainCctor`); until then neither ran a class constructor at all. An exception out of a class constructor (`zcl_gogen_t_ccboom2.clas.abap`, `$ZOSG_TMP_0441`) is a runtime abortion on A4H that no CATCH takes, `CX_SY_ZERODIVIDE`, `CX_SY_NO_HANDLER` or `CX_ROOT`; the transpiler raises it while the modules load, before any statement of the program, so nothing can catch it either, but the program never starts; the Go backend and the JS emitter end the request with a runtime error at the first use
 - Actual open-abap behaviour: `ctor / before / touch / after`. The constructor runs eagerly, before the program's own statements, which is what an ES module initialising at import time does
 - Impact on open-steamgate: subtle and real, because a class constructor can touch `sy-tabix`. A registry filled with `APPEND` in a class constructor leaves `sy-tabix` at the last appended index; run lazily inside a loop body that reads `sy-tabix` afterwards, the first iteration sees that index rather than its own row number. Measured: `12` here where a system would give `32` for the same program. Found by larshp reviewing `abaplint/transpiler#1848`, who asked whether a test should expect `,a,b,c` — it depends entirely on this
 - Smallest safe workaround: do not read `sy-tabix` after a call that may be a class's first access; or touch the class once before the loop, which is what that test now does
@@ -1618,7 +1618,8 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Impact on open-steamgate: the WEBGUI's GUI control substitutes (open-abap-gui, `cl_gui_html_viewer` raising `sapevent`, abapGit's viewer re-raising it) register one handler per sender, so the sapevent round trip answers the same on both hosts; code that registers a handler twice, reorders handlers or relies on the order against FOR ALL INSTANCES would not
 - Smallest safe workaround: none on Node; the Go backend and the IR's JS emitter implement the measured rules (`tools/gogen/go/abap/events.go`, `js/abap.mjs` setHandler / raiseEvent)
 - Upstream: **needs an issue** in abaplint/transpiler (runtime, SET HANDLER / RAISE EVENT)
-- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_EVENTS, ZCL_GOGEN_T_EVENTS2
+- Also (fix round, 2026-09-24, `$ZOSG_TMP_0441`): `zcl_gogen_t_events3.clas.abap` (with `zcl_gogen_t_evb`, `zcl_gogen_t_evs`) answered `all:b(base)s(sub)b(sub)s(sub2)b(sub2) one:s(sub2)` on A4H: a handler FOR EVENT e OF a subclass, registered FOR ALL INSTANCES, is called for senders of that subclass only, whatever the static type of the raising reference. The transpiler runtime does not get there: `SET HANDLER h->on_s h->on_b FOR ALL INSTANCES ACTIVATION abap_false` raises `ABAPEventing.setHandler: deactivation of multiple methods not supported, todo`
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_EVENTS, ZCL_GOGEN_T_EVENTS2, ZCL_GOGEN_T_EVENTS3
 - Upstream version containing a fix: none yet
 
 ### ANOMALY-2026-09-24-concatenate-cut-subrc — `CONCATENATE` into a c field too short leaves sy-subrc 0 in the transpiler runtime
@@ -1635,4 +1636,36 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: none needed; the Go backend sets 4 (`abap.ConcatFit`)
 - Upstream: **needs an issue** in abaplint/transpiler (runtime, CONCATENATE)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_WGUI1
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-sorted-read-miss-tabix — a key READ that misses on a SORTED table sets sy-tabix one row short in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/read_table`)
+- Affected ABAP statement, runtime API or adapter: `READ TABLE <sorted> ... WITH [TABLE] KEY ...` that finds nothing, where the key's first component is given
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_sortrd.clas.abap`
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0441` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `RUN` called from Node; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `hit:0/3/3 mid:4/3/c first:4/1 past:8/5 tk:4/3,8/5 fs:4/4 nf:8/5 nonkey:0/4,4/0 kv:0/3 lead:0/1/1,0/3/3,4/2,8/5,4/1 second:0/3,4/0 tk2:4/4 line:4/2/f,0/2/q,8/3`: a miss is sy-subrc 4 with sy-tabix the row the key would go before, or sy-subrc 8 with sy-tabix lines + 1 when it would go after the last row; a key given only in components outside the table key is a linear search, a miss 4/0; a miss leaves the work area alone
+- Actual open-abap behaviour: `... past:8/4 tk:4/3,8/4 ... nf:8/4 ... lead:0/1/1,0/3/3,4/1,8/4,4/1 ... tk2:4/3 line:4/2/f,0/2/q,8/2`: past the last row sy-tabix is lines, not lines + 1; a miss inside a leading part of a two-component key (`a = '1' b = '2'` between `11` and `13`) and a miss of the whole two-component key point one row too early
+- Impact on open-steamgate: none found; code that uses sy-tabix after a miss to `INSERT ... INDEX sy-tabix` into a sorted table would place the row wrong or dump
+- Smallest safe workaround: none needed; the Go backend and the IR's JS emitter follow A4H (a miss with a key part and a component outside the key, `ZCL_GOGEN_T_SORTRD2`, had no rule derivable from the measurements and is refused)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, READ TABLE on sorted tables)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTRD, ZCL_GOGEN_T_SORTRD2
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-sorted-importing-standard — abaplint accepts a STANDARD table for an IMPORTING parameter typed SORTED, which does not activate on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` as used by `abap_transpile` 2.13.89
+- Affected ABAP statement, runtime API or adapter: a method call passing a STANDARD table to `IMPORTING it TYPE <sorted table type>`
+- Minimal ABAP reproducer: `tools/gogen/testdata-refused/zcl_gogen_t_rf_sort.clas.abap`, its last line (`show( lt_t )`)
+- Exact command used to run it: A4H, `$ZOSG_TMP_0441` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89
+- Expected SAP behaviour: the class does not activate: "LT_T is not type-compatible with formal parameter IT". Without that line A4H answers `mv:ab vl:cd rk:dc empty:0 back:2`: a move and a VALUE into a SORTED table sort the rows, a move between SORTED tables of different keys re-sorts them
+- Actual open-abap behaviour: abaplint reports nothing, the transpiler writes it and the run answers `mv:ab vl:cd rk:dc empty:0 back:2 pm:cd`. The moves themselves answer as A4H
+- Impact on open-steamgate: none found; a source that passes this check here may fail to activate on a system
+- Smallest safe workaround: none needed; the Go backend refuses the call (and, for now, every move or VALUE that would fill a SORTED table from rows in another order)
+- Upstream: **needs an issue** in abaplint/abaplint (check_syntax, parameter type compatibility)
+- Regression-test location: `tools/gogen/semantics.mjs` REFUSED_SORT
 - Upstream version containing a fix: none yet
