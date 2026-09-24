@@ -2965,7 +2965,10 @@ function dynamicSelect(sel, ctx, text) {
     table = convert(v, S);
   } else {
     const name = upper(from[0].concatTokens());
-    if (!ctx.reg.getObject("TABL", name) && !ctx.reg.getObject("VIEW", name)) throw new Unsupported(`SELECT FROM ${name}: not a table of the dictionary in this program`);
+    // a table or view of the dictionary, and not a view that hides the
+    // client (refused here as a static read is; by name it is refused when
+    // it arrives)
+    dbTable(ctx, name, "SELECT FROM");
     table = {e: "str", value: name, type: S};
   }
   // the field list: * (null), (x), or plain column names
