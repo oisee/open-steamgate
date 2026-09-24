@@ -12,7 +12,7 @@
 // process channel: it says "ready" with the port it got, and it exits when
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
-import {dialogStep} from "./osd-dialog-step.mjs";
+import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
 import express from "express";
@@ -160,11 +160,12 @@ hostNodes.sql = (a, node) => a.post(node.path, async function (req, res) {
     return;
   }
   try {
+    // the shared connection, read between steps rather than inside one
     if (asked.check === true) {
-      await data.check(String(asked.sql ?? ""));
+      await exclusive(() => data.check(String(asked.sql ?? "")));
       res.json({ok: true});
     } else {
-      res.json(await data.query(String(asked.sql ?? ""), {max: Number(asked.max ?? 100)}));
+      res.json(await exclusive(() => data.query(String(asked.sql ?? ""), {max: Number(asked.max ?? 100)})));
     }
   } catch (e) {
     res.status(e?.code === "NOT_BUILT" ? 503 : 400).json({error: {code: e?.code ?? "FAILED", message: String(e?.message ?? e)}});
@@ -258,20 +259,40 @@ process.on("message", (message) => {
   // the exit hook that exports it — closing it first is how a recycle once
   // lost every row — while the file client is closed here so it commits
   // and checkpoints, which process.exit alone would not do.
-  const leave = async () => {
+  //
+  // The commit waits for the work process: committing while a step is
+  // half-way would make its half permanent. If no step lets go within the
+  // grace, the process leaves without committing, and the step that did not
+  // finish is rolled back rather than half-written.
+  const grace = Number(message.grace ?? 2000);
+  let leaving;
+  const leave = () => (leaving ??= (async () => {
     const db = connection();
+    let committed = false;
     try {
-      await db.commit?.();
-      if (typeof db.export !== "function") {
-        await db.disconnect?.();
-      }
+      await Promise.race([
+        exclusive(async () => {
+          await db.commit?.();
+          committed = true;
+          if (typeof db.export !== "function") {
+            await db.disconnect?.();
+          }
+        }, "leaving for a recycle"),
+        new Promise((resolve) => setTimeout(resolve, grace).unref()),
+      ]);
+      // the grace won: the step still holding the work process is rolled
+      // back here, because the exit hook of a client that persists by
+      // exporting (sql.js, tools/osd-persist.mjs) commits what is open
+      // before it exports -- "leaving without committing" would otherwise
+      // hold only for DuckDB and the file clients
+      if (committed === false) await db.rollback?.();
     } catch {
       // leaving anyway; the supervisor has a new runtime answering
     }
     process.exit(0);
-  };
+  })());
   server.close(leave);
   // a client holding a connection open must not keep a replaced runtime
   // alive; the supervisor already has a new one answering
-  setTimeout(leave, Number(message.grace ?? 2000)).unref();
+  setTimeout(leave, grace).unref();
 });
