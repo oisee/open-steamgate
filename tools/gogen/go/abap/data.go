@@ -32,6 +32,9 @@ type Type struct {
 	Append func(p any) any
 	// Delete removes row i (from 0) of a standard table; nil for a hashed one
 	Delete func(p any, i int)
+	// New allocates a new initial value of this type and returns its
+	// address (CREATE DATA through a descriptor, tables.go NewData)
+	New func() any
 }
 
 type Comp struct {
@@ -127,6 +130,22 @@ func DeleteIndex(d Data, i int32) bool {
 	}
 	d.T.Delete(d.P, int(i-1))
 	return true
+}
+
+// AppendData is APPEND v TO a generic standard table: a new row, v moved
+// into it; the new row's index (sy-tabix)
+func AppendData(t, v Data) int {
+	n := Lines(t)
+	if t.T.Append == nil {
+		panic(NotCompiled("APPEND", "to a generic table that is not a standard table"))
+	}
+	row := t.T.Append(t.P)
+	if v.T == t.T.Row && t.T.Row.Copy != nil {
+		t.T.Row.Copy(row, v.P)
+	} else {
+		MoveData(Data{P: row, T: t.T.Row}, v)
+	}
+	return n + 1
 }
 
 // Row is row i (from 0) of a generic table, bound to the row itself.

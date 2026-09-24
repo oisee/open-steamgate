@@ -144,7 +144,71 @@ export function compileProgram({folders, objects, tolerant = false}) {
   }
   program.rtti = rttiTable(reg, program);
   program.exceptionSupers = exceptionSupers(reg, program);
+  program.tables = tableRegistry(reg, program);
   return program;
+}
+
+/**
+ * The table registry (go/abap tables.go, README "The table registry"): every
+ * TABL and DDIC view the registry has, in name order, as
+ *   {name, view, client, key: [..], columns: [{name, kind, len, dec, key, type}],
+ *    row: <the Go struct type, when every column is in the subset> | why}
+ * where kind is the type kind letter (C N D T I 8 F P g y X), len the
+ * characters of C N X and the bytes of P, and type the column's type in the
+ * relational IR (sqlscript-ir.mjs T: C/len for C and N, I, INT8, P/digits/
+ * dec, STRING, D, X/len, XSTRING; null where the IR has none). Built from
+ * the same DDIC facts the SELECT path reads (dbTable), after the classes, so
+ * that the row types it adds change nothing they compiled.
+ */
+/** the table registry as the column registry of the dynamic Open SQL
+ * condition parser: {NAME: {view, client, key, columns: [{name, kind, len,
+ * dec, key, type}]}}, JSON as it stands (README "The table registry") */
+export function columnRegistry(program) {
+  return Object.fromEntries((program.tables ?? []).map((t) => [t.name, {view: t.view, client: t.client, key: t.key,
+    columns: t.columns.map((c) => ({name: c.name, kind: c.kind, len: c.len, dec: c.dec, key: c.key, type: c.type}))}]));
+}
+
+export function tableRegistry(reg, program) {
+  const out = [];
+  const saved = [program.currentClass, program.currentTypes];
+  program.currentClass = undefined;
+  program.currentTypes = undefined;
+  try {
+    for (const obj of reg.getObjects()) {
+      const view = obj instanceof abaplint.Objects.View;
+      if (!(obj instanceof abaplint.Objects.Table) && !view) continue;
+      const name = upper(obj.getName());
+      let st;
+      try { st = obj.parseType(reg); } catch { continue; }
+      if (!(st instanceof BasicTypes.StructureType)) continue;
+      let key = [];
+      try { key = view ? [] : (obj.listKeys?.(reg) ?? []).map(upper); } catch { key = []; }
+      const columns = st.getComponents().map((c) => {
+        const kind = typeKindOf(c.type);
+        const len = ["C", "N", "X"].includes(kind) ? c.type.getLength() : kind === "P" ? c.type.getLength() : 0;
+        const dec = kind === "P" ? c.type.getDecimals() : 0;
+        const ir = {C: {abap: "C", len}, N: {abap: "C", len}, I: {abap: "I"}, 8: {abap: "INT8"}, P: {abap: "P", len: 2 * len - 1, dec},
+          g: {abap: "STRING"}, D: {abap: "D"}, X: {abap: "X", len}, y: {abap: "XSTRING"}}[kind] ?? null;
+        return {name: upper(c.name), kind, len, dec, key: key.includes(upper(c.name)), type: ir};
+      });
+      const entry = {name, view, client: columns.some((c) => c.name === "MANDT"), key, columns};
+      try {
+        entry.row = typeOf(st, name, program);
+        if (entry.row.k !== "struct") throw new Unsupported(`${name}: not a flat structure`);
+      } catch (e) {
+        if (!(e instanceof Unsupported)) throw e;
+        delete entry.row;
+        entry.why = e.message;
+      }
+      out.push(entry);
+    }
+  } finally {
+    [program.currentClass, program.currentTypes] = saved;
+  }
+  // the other names of the dictionary: CREATE DATA ... TYPE (name) of one
+  // of them is refused by name, an unknown name is CX_SY_CREATE_DATA_ERROR
+  program.ddicNames = [...program.rtti.known].filter((n) => !/=>/.test(n) && !out.some((t) => t.name === n)).sort();
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -950,7 +1014,7 @@ function blockList(children, ctx) {
  */
 const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
   "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
-  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
+  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_CREATE_DATA_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
   "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND",
   // the string functions (repeat( ) replace( ): a parameter out of range)
   "CX_SY_STRG_PAR_VAL",
@@ -1247,6 +1311,13 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // APPEND wa TO <generic table> (a field symbol TYPE STANDARD TABLE, the
+    // rows of CREATE DATA ... TYPE STANDARD TABLE OF (name)): a new row, the
+    // value moved into it as a move into generic data converts it
+    if (table.type.k === "data") {
+      const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+      return {s: "append_data", table, value: convert(source(value, ctx), {k: "data"})};
+    }
     if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
@@ -3064,6 +3135,22 @@ function assignStatement(node, ctx, text) {
  * TO, LENGTH / DECIMALS and HANDLE are other forms, not taken here.
  */
 function createDataStatic(node, ctx, text) {
+  // CREATE DATA r TYPE (name) / TYPE STANDARD TABLE OF (name): a table or
+  // view of the dictionary, looked up at run time in the table registry
+  // (A4H ZCL_GOGEN_T_CRDYN: the name in any case, an unknown one
+  // CX_SY_CREATE_DATA_ERROR with the reference untouched)
+  const dyn = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?\(\s*([^()\s]+)\s*\)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
+  if (dyn) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
+    const src = node.findDirectExpression(Expressions.Dynamic)?.findFirstExpression(Expressions.FieldChain)
+      ?? node.findFirstExpression(Expressions.Dynamic)?.findFirstExpression(Expressions.FieldChain);
+    let name;
+    if (src) name = convert(fieldChain(src, ctx), S);
+    else if (/^'.*'$/.test(dyn[2])) name = {e: "str", value: dyn[2].slice(1, -1), type: S};
+    else throw new Unsupported(`CREATE DATA TYPE (${dyn[2]}): the name`);
+    return {s: "create_data_dyn", target, name, table: !!dyn[1]};
+  }
   const m = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?([\w\/=>~-]+)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
   if (!m || /^(REF|LINE|RANGE|SORTED|HASHED|TABLE)$/i.test(m[2])) throw new Unsupported(`statement CreateData: ${text}`);
   const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);

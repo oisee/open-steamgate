@@ -368,6 +368,8 @@ function stmt(st, ctx, d) {
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)};`];
     // a move into generic data writes into the slot it is bound to
+    case "append_data":
+      return [`${t}s.sy.tabix = abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)});`];
     case "set_data":
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)});`];
     case "clear_data":
@@ -377,6 +379,9 @@ function stmt(st, ctx, d) {
     // CREATE DATA ... TYPE <static type> (ultra/sadl): a new initial value
     case "create_data":
       return [`${t}${place(st.target, ctx)} = abap.cell(${zero(st.type)}, ${desc(st.type)});`];
+    // the table registry is the Go host's (go/abap tables.go)
+    case "create_data_dyn":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", "CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)");`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = ${expr(st.x, ctx)}.t.kind;`];
     // DELETE / READ TABLE ... INDEX on a generic table (ultra/sadl, the SADL DPC's paging)

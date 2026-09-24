@@ -85,7 +85,9 @@ func TestPackedA4H(t *testing.T) {
 		}
 		return out + PFit(ModP("7.5", "0.4"), 8, 2, true)
 	}, "3.00/1.50 -3.00/1.50 -4.00/0.50 4.00/0.50 0.30")
-	add("zero", func() string { return DivP("0", "0") + "," + catch(func() string { return DivP("7.5", "0") }) + "," + catch(func() string { return ModP("7.5", "0") }) }, "0,ZD,ZD")
+	add("zero", func() string {
+		return DivP("0", "0") + "," + catch(func() string { return DivP("7.5", "0") }) + "," + catch(func() string { return ModP("7.5", "0") })
+	}, "0,ZD,ZD")
 	nines := "9999999999999999999999999999999"
 	add("31 nines + 1", func() string { return PFit(AddP(nines, "1"), 16, 0, true) }, "AO")
 	add("63 digits", func() string { return PFit(DivP(DivP(MulP(MulP(nines, nines), "10"), nines), "10"), 16, 0, true) }, nines)
@@ -93,7 +95,9 @@ func TestPackedA4H(t *testing.T) {
 	add("small arith", func() string { return PFit(MulP("5", "1000"), 3, 2, true) }, "AO")
 	add("small /", func() string { return PFit(DivP("999999.99", "1000"), 3, 2, true) }, "AO")
 	// templates and functions
-	add("fmt", func() string { return FmtP("", 2) + "," + FmtP("0", 0) + "," + FmtP("-0.05", 2) + "," + FmtP("0.005", 3) }, "0.00,0,-0.05,0.005")
+	add("fmt", func() string {
+		return FmtP("", 2) + "," + FmtP("0", 0) + "," + FmtP("-0.05", 2) + "," + FmtP("0.005", 3)
+	}, "0.00,0,-0.05,0.005")
 	add("DECIMALS", func() string {
 		return FmtPDec("1.25", 1) + "," + FmtPDec("1.25", 3) + "," + FmtPDec("1.25", 0) + "," + FmtPDec("-1.25", 1) + "," + FmtPDec("2.50", 0) + "," + FmtPDec("42", 2)
 	}, "1.3,1.250,1,-1.3,3,42.00")

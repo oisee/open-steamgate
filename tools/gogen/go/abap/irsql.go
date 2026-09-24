@@ -23,12 +23,17 @@ type IRType struct {
 	Abap string `json:"abap"`
 	Len  int    `json:"len,omitempty"`
 	Bits int    `json:"bits,omitempty"`
+	// Dec is the decimals of a P ({abap: "P", len: digits, dec})
+	Dec int `json:"dec,omitempty"`
 }
 
 // seam is the type as the seam names it (seamType in sqlscript-ir.mjs).
 func (t *IRType) seam() string {
 	if t == nil {
 		return "STRING"
+	}
+	if t.Abap == "P" && t.Len > 0 {
+		return fmt.Sprintf("P(%d,%d)", t.Len, t.Dec)
 	}
 	if t.Len > 0 {
 		return fmt.Sprintf("%s(%d)", t.Abap, t.Len)

@@ -352,6 +352,13 @@ const EXPECT = {
   ZCL_GOGEN_T_PDTPL: "t:2.25,0.75,-1.25",
   ZCL_GOGEN_T_PDTPLM: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_PDTPLM=>RUN (zcl_gogen_t_pdtplm.clas.abap:10): an arithmetic expression of type p with * or / in a string template: its decimals are not measured at zcl_gogen_t_pdtplm.clas.abap:10",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_PDTPLM=>RUN (zcl_gogen_t_pdtplm.clas.abap:10): an arithmetic expression of type p with * or / in a string template: its decimals are not measured"},
+  // CREATE DATA ... TYPE [STANDARD TABLE OF] (name) through the table
+  // registry (A4H 2026-09-24, $ZOSG_TMP_0270, the same code): a new initial
+  // table / row, APPEND of a generic row to it, the name in any case, an
+  // unknown name CX_SY_CREATE_DATA_ERROR with the reference kept. The JS
+  // emitter has no registry and refuses
+  ZCL_GOGEN_T_CRDYN: {Go: "a:0/h b:u/0[] c:2 lower:ok unknown:err kept:0",
+    JS: "ERROR NOT_COMPILED in CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

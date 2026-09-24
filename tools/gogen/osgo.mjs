@@ -13,7 +13,7 @@
 import {execFileSync} from "node:child_process";
 import {existsSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
-import {compileProgram} from "./frontend.mjs";
+import {columnRegistry, compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 
@@ -73,6 +73,8 @@ if (echo) {
 const go = emitGo(program);
 writeFileSync(join(dir, "zz_generated.go"), go);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
+// the table registry as JSON, the column registry a dynamic WHERE parser reads
+writeFileSync(join(dir, "zz_tables.json"), JSON.stringify(columnRegistry(program), null, 1));
 const has = (fn) => go.includes(`\nfunc ${fn}(`);
 const boots = ["ZCL_STG_SEGW_REGISTRY_REGISTER", "ZCL_STG_SHLP_REGISTRY_REGISTER"].filter(has);
 writeFileSync(join(dir, "zz_boot.go"), `package main

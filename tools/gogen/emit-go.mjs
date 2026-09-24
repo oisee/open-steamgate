@@ -126,6 +126,26 @@ function descFuncs() {
   return [...out, "", "func init() {", ...inits, "}", ""];
 }
 
+/**
+ * The table registry (frontend tableRegistry, go/abap tables.go): every
+ * TABL and DDIC view with its columns, key and client flag, and the
+ * descriptors of a row and of a STANDARD TABLE of rows where the row type
+ * is in the subset
+ */
+function tableRegistry(program) {
+  const tables = program.tables ?? [];
+  if (tables.length === 0) return [];
+  const irType = (t) => (t === null ? "nil" : `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`);
+  const lines = tables.map((t) => {
+    const cols = t.columns.map((c) => `{Name: ${JSON.stringify(c.name)}, Kind: '${c.kind}', Len: ${c.len}, Dec: ${c.dec}, Key: ${c.key}, IR: ${irType(c.type)}}`);
+    const types = t.row ? `Row: ${desc(t.row)}, Rows: ${desc({k: "table", row: t.row})}` : `Why: ${JSON.stringify(t.why)}`;
+    return `		&abap.Table{Name: ${JSON.stringify(t.name)}, View: ${t.view}, Client: ${t.client}, Key: []string{${t.key.map((k) => JSON.stringify(k)).join(", ")}}, Columns: []abap.Column{${cols.join(", ")}}, ${types}},`;
+  });
+  const names = program.ddicNames ?? [];
+  return ["func init() {", "	abap.RegisterTables(", ...lines, "	)",
+    ...(names.length ? [`	abap.RegisterDDICNames(${names.map((n) => JSON.stringify(n)).join(", ")})`] : []), "}", ""];
+}
+
 /** a structure that holds a string, a table or a reference, at any depth */
 export function deepType(t) {
   if (["string", "xstring", "table", "ref", "exc", "dref", "data"].includes(t?.k)) return true;
@@ -133,10 +153,11 @@ export function deepType(t) {
   return false;
 }
 
-/** the Copy and Zero of a generated descriptor: a whole move and a CLEAR through generic data */
+/** the Copy, Zero and New of a generated descriptor: a whole move, a CLEAR
+ * and a CREATE DATA through generic data */
 function copyZero(t) {
   const g = goType(t);
-  return `Copy: func(dst, src any) { *dst.(*${g}) = ${copied(`*src.(*${g})`, t)} }, Zero: func(p any) { *p.(*${g}) = ${zero(t)} }`;
+  return `Copy: func(dst, src any) { *dst.(*${g}) = ${copied(`*src.(*${g})`, t)} }, Zero: func(p any) { *p.(*${g}) = ${zero(t)} }, New: func() any { p := new(${g}); *p = ${zero(t)}; return p }`;
 }
 
 /** a structure with a d, t or n field somewhere (and nothing IsInitialData cannot read) */
@@ -258,6 +279,7 @@ export function emitGo(program, pkg = "main") {
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
   out.push(...nativeCodepage(classes));
+  out.push(...tableRegistry(program));
   // descriptors first: their Copy asks for clone functions
   const descs = descFuncs();
   out.push(...cloneFuncs());
@@ -911,6 +933,8 @@ function stmtLines(st, ctx, d) {
     // a move into generic data writes into the slot it is bound to
     case "set_data":
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)})`];
+    case "append_data":
+      return [`${t}s.Sy.Tabix = int32(abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)}))`];
     case "clear_data":
       return [`${t}abap.ClearData(${expr(st.target, ctx)})`];
     case "get_ref":
@@ -918,6 +942,9 @@ function stmtLines(st, ctx, d) {
     // CREATE DATA ... TYPE <static type> (ultra/sadl): a new initial value
     case "create_data":
       return [`${t}${place(st.target, ctx)} = abap.Data{P: new(${goType(st.type)}), T: ${desc(st.type)}}`];
+    // CREATE DATA ... TYPE [STANDARD TABLE OF] (name): the table registry
+    case "create_data_dyn":
+      return [`${t}${place(st.target, ctx)} = abap.CreateDataByName(${expr(st.name, ctx)}, ${st.table})`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
     case "move_corr_data":
