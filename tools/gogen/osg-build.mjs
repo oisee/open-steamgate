@@ -56,9 +56,9 @@ function filteredLib(name) {
 const abapgit = filteredLib("abapgit");
 if (abapgit) libs.push(abapgit);
 
-/** every class and interface of the layers and libraries, compiled (a statement outside the subset is a stub) */
+/** every class, interface and function group of the layers and libraries, compiled (a statement outside the subset is a stub) */
 export function compileOsg() {
-  const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => !hidden.has(f) && /\.(clas|intf)\.abap$/.test(f) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
+  const objects = [...new Set([...layers, ...libs].flatMap(walk).filter((f) => !hidden.has(f) && (/\.(clas|intf)\.abap$/.test(f) || /\.fugr\.xml$/.test(f)) && !f.includes("testclasses")).map((f) => f.split("/").pop().split(".")[0]))];
   const t0 = performance.now();
   const program = compileProgram({folders: [...layers, ...libs], objects, tolerant: true, skip: (path) => hidden.has(path)});
   const summary = `front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`;

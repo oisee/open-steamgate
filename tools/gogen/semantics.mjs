@@ -33,6 +33,12 @@ const EXPECT = {
   // describe_by_data's OUTPUT_LENGTH of a dictionary type: the domain's
   // OUTPUTLEN, or the data element's without a domain (A4H ran it with SAP's
   // data elements of the same shape, see the class)
+  // CALL FUNCTION of a module compiled with the program: by-value EXPORTING
+  // starts initial in the module; after RAISE the caller's EXPORTING and
+  // CHANGING fields keep their values and the TABLES rows appended stay;
+  // an optional importing left out is initial, OTHERS takes an exception
+  // not named
+  ZCL_GOGEN_T_FM: "ok:0/6/11/2/in:3/0/10/1 boom:4/5/10/3/keep opt:0/11/4 oth:7/11/5,X0,F3,F4,F0,F0",
   ZCL_GOGEN_T_RTTIOL: {Go: "C/80/0/10 C/2/0/80 C/10/0/5 P/8/0/19 N/4/0/1 ",
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // ultra/itab, A4H 2026-09-24 ($ZOSG_TMP_0400, ABAP Unit probes of the same
@@ -653,6 +659,8 @@ for (const f of demoCopies) {
 }
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
+// the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
+const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fugr.xml")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
@@ -660,7 +668,7 @@ const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
-const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
+const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));

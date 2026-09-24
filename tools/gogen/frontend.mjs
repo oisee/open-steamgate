@@ -130,10 +130,26 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       localDefs.push(l);
     }
   }
+  // parity-wave1: the function groups named are compiled too, one pseudo
+  // class FUGR:<group> per group with a static method per module; their
+  // signatures are known before any class compiles, so a CALL FUNCTION of
+  // one of their modules is a call (functionGroupSignatures, callFunction)
+  program.functionModules = new Map();
+  const groups = [...reg.getObjects()].filter((o) => o instanceof abaplint.Objects.FunctionGroup && wanted.includes(o.getName().toLowerCase()));
+  // a group the front end cannot even read (an error that is not a refusal)
+  // is left out whole, named in skipped, and its modules stay refused
+  const readable = groups.filter((g) => {
+    try { functionGroupSignatures(ctx0, g); return true; } catch (e) {
+      program.skipped.push(`${fugrOwner(g)}: ${e.message}`);
+      for (const [k, v] of program.functionModules) if (v.owner === fugrOwner(g)) program.functionModules.delete(k);
+      return false;
+    }
+  });
   for (const obj of reg.getObjects()) {
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
   }
   for (const l of localDefs) program.classes.push(classIr(ctx0, l));
+  for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
@@ -421,6 +437,116 @@ function localClasses(reg, obj) {
 }
 
 /*
+ * Function modules (parity-wave1, A4H ZCL_GOGEN_T_FM): a function group is
+ * compiled as a pseudo class FUGR:<group> whose static methods are its
+ * modules. A module's parameters are typed from its function scope (the
+ * signature in the group's XML, as abaplint reads it): IMPORTING, EXPORTING
+ * and CHANGING as a method's, TABLES as a CHANGING table by reference. The
+ * caller does the VALUE( ) part (callFunction): an EXPORTING or CHANGING
+ * passed by value goes through a copy that is written back only when the
+ * module ends normally, which is what A4H showed for a RAISE. A group with
+ * global data (DATA in its TOP include) or a module with a global
+ * interface is not compiled: its modules are stubs that dump.
+ */
+function fugrOwner(g) { return `FUGR:${upper(g.getName())}`; }
+
+function functionGroupSignatures(ctx0, g) {
+  const {reg, program} = ctx0;
+  const owner = fugrOwner(g);
+  program.wanted.add(owner);
+  program.currentClass = goName(owner);
+  program.currentOwner = owner;
+  program.currentTypes = new Set();
+  let top;
+  try { top = new abaplint.SyntaxLogic(reg, g).run().spaghetti.getTop(); } catch { top = undefined; }
+  const globalData = g.getABAPFiles().some((f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some((st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
+  for (const m of g.getModules()) {
+    const name = upper(m.getName());
+    const where = `${owner}=>${name}`;
+    let sig;
+    try {
+      if (globalData) throw new Unsupported(`function group ${upper(g.getName())} has global data (DATA in its TOP include), not in the subset`);
+      if (m.isGlobalParameters()) throw new Unsupported(`${name}: a module with a global interface`);
+      const scope = top && findScopeNamed(top, "function", name);
+      if (!scope) throw new Unsupported(`${name}: no function scope`);
+      const vars = scope.getData().vars;
+      const params = m.getParameters().map((p) => {
+        const pn = upper(p.name);
+        const id = vars[pn] ?? vars[pn.toLowerCase()];
+        if (!id) throw new Unsupported(`${name}: parameter ${pn} has no type in the function scope`);
+        // a TABLES parameter is a standard table with a default key (abaplint
+        // types it as a table with a header line and no access kind); the
+        // header line itself is not in the subset, a use of it is refused
+        const it = id.getType();
+        const type = p.direction === "tables" && it instanceof BasicTypes.TableType
+          ? {k: "table", row: typeOf(it.getRowType(), `${where} ${pn}`, program), skey: "default"} : typeOf(it, `${where} ${pn}`, program);
+        if (p.direction === "tables" && type.k !== "table") throw new Unsupported(`${name}: TABLES ${pn} is a ${type.k}`);
+        if (p.defaultValue !== undefined) throw new Unsupported(`${name}: parameter ${pn} has a DEFAULT, not in the subset`);
+        const dir = p.direction === "tables" ? "changing" : p.direction;
+        return {name: pn, dir, byValue: p.direction === "tables" ? false : p.passByValue, type, optional: p.optional || p.direction === "exporting", tables: p.direction === "tables"};
+      });
+      sig = {name, static: true, private: false, abstract: false, params, returning: null, fm: true};
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      sig = {name, unsupported: e.message};
+    }
+    program.functionModules.set(name, {owner, group: g, module: m, sig, top});
+  }
+}
+
+function functionGroupIr(ctx0, g) {
+  const {reg, program} = ctx0;
+  const owner = fugrOwner(g);
+  program.currentClass = goName(owner);
+  program.currentOwner = owner;
+  program.currentTypes = new Set();
+  const signatures = new Map();
+  const cls = {name: owner, attributes: [], methods: [], constructor: null, stubs: [], interfaces: [], super: null, abstract: false, abstracts: [], signatures, instanceEvents: false};
+  const fms = [...program.functionModules.values()].filter((x) => x.owner === owner);
+  for (const x of fms) signatures.set(x.sig.name ?? upper(x.module.getName()), x.sig);
+  for (const x of fms) {
+    const name = upper(x.module.getName());
+    const sig = x.sig;
+    const skip = (why) => {
+      program.skipped.push(`${owner}=>${name}: ${why}`);
+      if (!sig.unsupported) cls.stubs.push({...sig, reason: why});
+    };
+    if (sig.unsupported) { skip(sig.unsupported); continue; }
+    const file = g.getABAPFiles().find((f) => f.getStructure()?.findAllStructures(Structures.FunctionModule)
+      .some((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name));
+    const node = file?.getStructure()?.findAllStructures(Structures.FunctionModule)
+      .find((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name);
+    if (!file || !node) { skip("no source"); continue; }
+    try {
+      const scope = findScopeNamed(x.top, "function", name);
+      const ctx = {program, reg, className: owner, scopeName: owner, owner, method: name, sig, signatures, scope, file, spaghetti: null, locals: new Map(), temps: 0};
+      const known = new Set(sig.params.map((p) => p.name));
+      ctx.fieldSymbols = new Map();
+      for (const [vname, id] of Object.entries(scope.getData().vars)) {
+        if (known.has(vname)) continue;
+        const t = typeOf(id.getType(), `${owner}=>${name} ${vname}`, program);
+        if (vname.startsWith("<")) {
+          if (!["struct", "data", "table", "string", "c", "i", "int8", "n", "d", "t", "x", "xstring", "p", "f"].includes(t.k)) throw new Unsupported(`field symbol ${vname} of a ${t.k}`);
+          ctx.fieldSymbols.set(vname, t);
+        } else {
+          ctx.locals.set(vname, t);
+        }
+      }
+      const body = node.findDirectStructure(Structures.Body);
+      ctx.inits = [];
+      const compiled = body === undefined ? [] : block(body, ctx);
+      compiled.unshift(...ctx.inits);
+      cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
+        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      skip(e.message);
+    }
+  }
+  return cls;
+}
+
+/*
  * Statements A4H does not activate, which abaplint takes and the transpiler
  * gives a meaning; refused everywhere (ANORMALIES), except in the methods
  * named here, which are compiled with the transpiler's meaning until the
@@ -654,6 +780,7 @@ function callFunction(node, ctx, text) {
   // host function like NATIVE_FM, reached only through its destination
   const viaDest = dest === undefined ? undefined : DESTINATION_FM.get(`${upper(dest)} ${name}`);
   const fm = viaDest ?? (dest === undefined ? NATIVE_FM.get(name) : undefined);
+  if (fm === undefined && dest === undefined && ctx.program.functionModules?.has(name)) return compiledFunctionCall(node, ctx, text, name);
   if (fm === undefined && dest !== undefined) throw new Unsupported(`CALL FUNCTION '${name}' DESTINATION '${dest}': no host implementation of this destination`);
   if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text) || (viaDest === undefined && /\bDESTINATION\b/i.test(text))) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
@@ -702,6 +829,90 @@ function callFunction(node, ctx, text) {
     }
   }
   return {s: "call_fm", name, fn: fm.fn, args, exceptions};
+}
+
+/** CALL FUNCTION of a module compiled with the program (functionGroupIr):
+ * a static call of FUGR:<group>=><module>, EXPORTING to its importing
+ * parameters, IMPORTING from its exporting ones, TABLES and CHANGING to
+ * its changing ones. An EXPORTING or CHANGING parameter passed by value
+ * goes through a temporary written back only when the module returns
+ * normally (A4H ZCL_GOGEN_T_FM: after RAISE the caller's fields keep their
+ * values, a TABLES table keeps what the module appended). Without
+ * EXCEPTIONS sy-subrc is 0 afterwards and a RAISE dumps. */
+function compiledFunctionCall(node, ctx, text, name) {
+  const {owner, sig} = ctx.program.functionModules.get(name);
+  if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|DESTINATION|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
+  if (sig.unsupported) throw new Unsupported(`CALL FUNCTION '${name}': ${sig.unsupported}`);
+  const fp = node.findDirectExpression(Expressions.FunctionParameters);
+  const given = new Map();
+  const targets = new Map();
+  let exceptions = null;
+  if (fp !== undefined) {
+    const kids = fp.getChildren();
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (isExpr(k, Expressions.FunctionExporting)) {
+        for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
+          given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+        }
+      } else if (isExpr(k, Expressions.ParameterListT)) {
+        const kw = upper(kids[i - 1]?.concatTokens() ?? "");
+        if (!["IMPORTING", "TABLES", "CHANGING"].includes(kw)) throw new Unsupported(`CALL FUNCTION '${name}': ${kw} parameters`);
+        for (const p of k.findDirectExpressions(Expressions.ParameterT)) {
+          targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), {kw, target: lvalue(p.findDirectExpression(Expressions.Target), ctx)});
+        }
+      } else if (isExpr(k, Expressions.ParameterListExceptions)) {
+        exceptions = {map: {}, others: 0};
+        for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
+          const v = x.findDirectExpression(Expressions.Integer);
+          if (!v || Number(v.concatTokens()) === 0) throw new Unsupported(`EXCEPTIONS with a value that is not a number other than 0: ${x.concatTokens()}`);
+          const nm = x.findDirectExpression(Expressions.ParameterName);
+          if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
+          else exceptions.others = Number(v.concatTokens());
+        }
+      } else if (!(k instanceof Nodes.TokenNode)) {
+        throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+      }
+    }
+  }
+  const known = new Set(sig.params.map((p) => p.name));
+  for (const pn of [...given.keys(), ...targets.keys()]) if (!known.has(pn)) throw new Unsupported(`CALL FUNCTION '${name}': ${pn} is not a parameter of the module`);
+  const before = [];
+  const after = [];
+  const args = sig.params.map((p) => {
+    if (p.dir === "importing") {
+      if (targets.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': importing ${p.name} passed as ${targets.get(p.name).kw}`);
+      const s = given.get(p.name);
+      if (s === undefined) {
+        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+        throw new Unsupported(`CALL FUNCTION '${name}': parameter ${p.name} not supplied`);
+      }
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
+    }
+    if (given.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': ${p.dir} ${p.name} passed as EXPORTING`);
+    const want = p.dir === "exporting" ? "IMPORTING" : p.tables ? "TABLES" : "CHANGING";
+    const got = targets.get(p.name);
+    if (got !== undefined && got.kw !== want) throw new Unsupported(`CALL FUNCTION '${name}': ${p.name} passed as ${got.kw}, it is ${want}`);
+    if (got === undefined) {
+      if (!p.optional) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${p.name} not supplied`);
+      return {dir: p.dir, place: null, type: p.type};
+    }
+    const t = got.target;
+    if (!sameType(t.type, p.type)) throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
+    if (!p.byValue) return {dir: p.dir, place: t, type: p.type};
+    const tmp = {e: "var", name: `FMV_${ctx.temps++}`, type: p.type};
+    ctx.locals.set(tmp.name, p.type);
+    if (p.dir === "changing") before.push({s: "assign", target: tmp, value: t});
+    else before.push({s: "clear", target: tmp});
+    after.push({s: "assign", target: t, value: tmp});
+    return {dir: p.dir, place: tmp, type: p.type};
+  });
+  const call = {s: "call", call: {e: "call", method: name, static: true, owner, receiver: null, sup: null, args, type: {k: "void"}, exceptions, receiving: null, callee: name}};
+  const subrc = {e: "sy", field: "Subrc", type: I};
+  const tail = exceptions
+    ? (after.length ? [{s: "if", branches: [{cond: {c: "cmp", op: "=", l: subrc, r: {e: "int", value: 0, type: I}, type: I}, body: after}], else: null}] : [])
+    : [...after, {s: "assign", target: subrc, value: {e: "int", value: 0, type: I}}];
+  return {s: "seq", body: [...before, call, ...tail]};
 }
 
 /**
