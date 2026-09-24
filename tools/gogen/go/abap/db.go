@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-
-	_ "modernc.org/sqlite" // pure Go, the product default
 )
 
 // The database interface of the kernel: one database per process. The Node
@@ -25,7 +23,7 @@ func OpenDB(script []byte) error {
 	if err := json.Unmarshal(script, &stmts); err != nil {
 		return err
 	}
-	d, err := sql.Open("sqlite", ":memory:")
+	d, err := openSQL(":memory:")
 	if err != nil {
 		return err
 	}

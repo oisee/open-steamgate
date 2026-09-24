@@ -2,7 +2,6 @@ package abap
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -36,7 +35,7 @@ func OpenDBFile(path string, script []byte) (seeded bool, err error) {
 	if _, err := os.Stat(path); err != nil && !os.IsNotExist(err) {
 		return false, err
 	}
-	d, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	d, err := openSQL("file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return false, err
 	}

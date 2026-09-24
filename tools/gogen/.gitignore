@@ -5,3 +5,17 @@ go/cmd/*/zz_*.json
 go/cmd/gateway/main.go
 go/cmd/semantics/main.go
 go/cmd/httpc/main.go
+# `go build ./cmd/<name>` run inside go/ drops the binary there
+go/apcprobe
+go/bench
+go/demo
+go/mediacheck
+go/o4dserve
+go/osgo
+go/scene
+go/semantics
+go/storecmp
+go/zork
+go/gateway
+go/httpc
+go/scenewasm

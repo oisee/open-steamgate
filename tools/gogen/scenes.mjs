@@ -16,6 +16,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo, funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
+import {SCENES} from "./scene-defs.mjs";
 import {copyFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 
@@ -29,21 +30,6 @@ const pack = existsSync(upstream) ? upstream : resolve(`${home}/packs/o4d/upstre
 const recording = flag("recording", `${home}/.local/o4d-a4h-${scene}.jsonl`);
 const repeat = Number(flag("repeat", 20));
 
-// what each scene reads from its context, beyond t
-// The beat position is computed the way ZCL_O4D_APC_HANDLER=>CALC_BEAT_INFO
-// does, in the same double arithmetic: 152 bpm, a 16th is beat_sec / 4.
-const BEAT_SEC = 60 / 152;
-const pos16 = (gt) => Math.floor(gt / (BEAT_SEC / 4));
-const SCENES = {
-  glitch: {cls: "ZCL_O4D_GLITCH", ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}}`,
-    jsCtx: (m, r) => Object.assign(m.new_ZIF_O4D_EFFECT__TY_RENDER_CTX(), {t: r.t})},
-  // NEW #( ) in the handler: the constructor's defaults 640 x 400, scale 20
-  plasma: {cls: "ZCL_O4D_PLASMA", init: "obj.CONSTRUCTOR(s, 640, 400, 20)",
-    ctx: (r) => `ZIF_O4D_EFFECT__TY_RENDER_CTX{t: ${r.t}, gt: ${r.gt}, gbi: ZIF_O4D_EFFECT__TY_BEAT_INFO{pos_16: ${pos16(r.gt)}}}`,
-    jsInit: (obj, s) => obj.CONSTRUCTOR(s, 640, 400, 20),
-    jsCtx: (m, r) => Object.assign(m.new_ZIF_O4D_EFFECT__TY_RENDER_CTX(), {t: r.t, gt: r.gt,
-      gbi: Object.assign(m.new_ZIF_O4D_EFFECT__TY_BEAT_INFO(), {pos_16: pos16(r.gt)})})},
-};
 const sc = SCENES[scene];
 if (!sc) throw new Error(`no scene ${scene} (known: ${Object.keys(SCENES).join(", ")})`);
 
