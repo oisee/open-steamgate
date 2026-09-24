@@ -1172,3 +1172,41 @@ export function F2I8(f) {
   if (Number.isNaN(r) || r >= 9.223372036854775807e18 || r < -9.223372036854775808e18) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "f->int8");
   return BigInt(r);
 }
+
+// generic arithmetic (ultra/itab): as go/abap genarith.go
+export function CalcKind(statics, charTarget, target, leaves) {
+  const ks = statics.split("");
+  for (const d of leaves) {
+    if (d === null) throw notAssigned("arithmetic");
+    ks.push(d.t.kind);
+  }
+  if (target !== null) {
+    const k = target.t.kind;
+    if ("I8FP".includes(k)) ks.push(k);
+    else if (k === "C" || k === "g") charTarget = true;
+    else if (k === "X") ks.push("I");
+    else return "";
+  }
+  const has = (set) => ks.some((k) => set.includes(k));
+  if (!has("F") && ks.some((k) => !"I8FPCgN".includes(k))) return "";
+  if (has("F")) return "F";
+  if (has("PCgN")) return "P";
+  if (charTarget) return "";
+  if (has("8")) return "8";
+  return "I";
+}
+export function DataI8(d) {
+  if (d.t.kind === "I") return BigInt(d.get());
+  if (d.t.kind === "8") return d.get();
+  throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an int8`);
+}
+export function DataF(d) {
+  const v = d.get();
+  switch (d.t.kind) {
+    case "I": case "F": return v;
+    case "8": return Number(v);
+    case "P": return PToF(v);
+    case "C": case "g": case "N": return ParseF(v);
+    default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an f`);
+  }
+}

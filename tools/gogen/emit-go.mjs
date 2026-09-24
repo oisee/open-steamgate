@@ -1242,6 +1242,18 @@ function expr(e, ctx) {
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
     // a typed slot seen as generic data: its address and its descriptor
     case "lrow": return ctx.lrow;
+    // ultra/itab: generic arithmetic (frontend.mjs genericArith)
+    case "unwrap_calc": {
+      const d = expr(e.x, ctx);
+      return e.type.k === "i" ? `abap.DataI(${d})` : e.type.k === "int8" ? `abap.DataI8(${d})` : e.type.k === "f" ? `abap.DataF(${d})` : `abap.DataP(${d})`;
+    }
+    case "gen_arith": {
+      const sel = `abap.CalcKind(${JSON.stringify(e.statics)}, ${e.charTarget}, ${e.target ? expr(e.target, ctx) : "abap.Data{}"}${e.leaves.map((l) => `, ${expr(l, ctx)}`).join("")})`;
+      const arms = Object.entries(e.branches).map(([code, b]) => (b.reason !== undefined
+        ? `case '${code}': panic(abap.NotCompiled("arithmetic", ${JSON.stringify(b.reason)}))`
+        : `case '${code}': return ${expr(b, ctx)}`));
+      return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
+    }
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;

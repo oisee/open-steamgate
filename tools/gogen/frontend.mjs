@@ -1369,7 +1369,11 @@ function statement(node, ctx) {
     // a ?= b: a down-cast, checked at run time
     if (node.getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(src, ctx), target.type, node.concatTokens())};
     // a generic target is a binding: the value is written into its slot
-    if (target.type.k === "data") return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)};
+    // (ultra/itab: genericArith reads the target's kind through ctx.genTarget)
+    if (target.type.k === "data") {
+      ctx.genTarget = target;
+      try { return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)}; } finally { ctx.genTarget = undefined; }
+    }
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
@@ -2250,6 +2254,9 @@ function source(node, ctx, outer, hint = outer) {
     }
     return arith(node, ctx, leaves[0]);
   }
+  // ultra/itab: a generic operand or a generic target decides the
+  // calculation type at run time (genericArith)
+  if (outer?.k === "data" || leafTypes(node, ctx).some((t) => t.k === "data")) return genericArith(node, ctx, outer);
   // an x target computes as i and the i result is converted into it
   // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
   // both give FF, 300 gives 2C)
@@ -2281,6 +2288,74 @@ function source(node, ctx, outer, hint = outer) {
   if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
   if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
+}
+
+/*
+ * ultra/itab: arithmetic with a generic operand (TYPE any) or into a generic
+ * target. A4H 2026-09-24 (ZCL_GOGEN_T_GENAR, $ZOSG_TMP_0400): the
+ * calculation type is the one the static rule above gives for the types the
+ * field symbols have at run time, as if they had been declared with them
+ * ("<a> / 2 * 2" into i is 8 for an i, 7 for a c, a string, an n and a p
+ * 7.50, 8 for an f; a p target makes it p). So every calculation type that
+ * can come out is compiled here as ordinary typed arithmetic, a generic
+ * operand read into that type (unwrap_calc), and abap.CalcKind picks the
+ * branch at run time from the static kinds, the operands' descriptors and
+ * the target's. A branch that does not compile, and a combination the static
+ * rule refuses (a character target of an i result, a d or x operand), is
+ * NOT_COMPILED when it is reached, not before. A generic operand is read
+ * twice (kind, then value), so only a place is taken.
+ */
+let GEN_CALC = false;
+const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N", d: "D", t: "T", x: "X", xstring: "y"};
+function genericArith(node, ctx, outer) {
+  const text = node.concatTokens();
+  if (outer === undefined) throw new Unsupported(`arithmetic with a generic operand outside an assignment: ${text}`);
+  if (hasBitOp(node)) throw new Unsupported(`bit operation with a generic operand: ${text}`);
+  const statics = [];
+  for (const t of leafTypes(node, ctx)) {
+    if (t.k === "data") continue;
+    if (CALC_CODE[t.k] === undefined) throw new Unsupported(`calculation type with a ${t.k} operand: ${text}`);
+    statics.push(CALC_CODE[t.k]);
+  }
+  // ** computes in f (the static rule)
+  if (hasPow(node)) statics.push("F");
+  let charTarget = false;
+  if (outer.k !== "data") {
+    if (charlike(outer)) charTarget = true;
+    else if (outer.k === "x") statics.push("I");
+    else if (["i", "int8", "f", "p"].includes(outer.k)) statics.push(CALC_CODE[outer.k]);
+    else throw new Unsupported(`calculation type of ${text} into a ${outer.k}`);
+  }
+  const target = outer.k === "data" ? ctx.genTarget : null;
+  if (outer.k === "data" && !target) throw new Unsupported(`generic arithmetic into a generic value that is not a target: ${text}`);
+  const branches = {};
+  let leaves = null;
+  for (const [code, calc] of [["I", I], ["8", INT8], ["P", P31], ["F", F]]) {
+    GEN_CALC = true;
+    try {
+      const v = arith(node, ctx, calc);
+      if (leaves === null) {
+        leaves = [];
+        const walk = (n) => {
+          if (Array.isArray(n)) { n.forEach(walk); return; }
+          if (!n || typeof n !== "object") return;
+          if (n.e === "unwrap_calc") { leaves.push(n.x); return; }
+          for (const [k, x] of Object.entries(n)) if (k !== "type") walk(x);
+        };
+        walk(v);
+      }
+      branches[code] = outer.k === "data" ? {e: "wrap", x: v, type: {k: "data"}} : convert(v, outer);
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      branches[code] = {reason: `calculation type ${calc.k} of ${text}: ${e.message}`};
+    } finally {
+      GEN_CALC = false;
+    }
+  }
+  if (leaves === null) throw new Unsupported(`calculation type of ${text}: ${branches.I.reason}`);
+  const PLACE = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
+  for (const l of leaves) if (!PLACE.has(l.e)) throw new Unsupported(`a generic operand that is not a field in ${text}`);
+  return {e: "gen_arith", statics: statics.join(""), charTarget, target, leaves, branches, text, type: outer.k === "data" ? {k: "data"} : outer};
 }
 
 /** a ComponentChain (a-b-c) read off a structured value */
@@ -4014,6 +4089,8 @@ export function convert(expr, to) {
     return {e: "wrap", x: expr, type: to};
   }
   if (expr.type.k === "data") {
+    // ultra/itab: an operand of generic arithmetic, read into one calculation type
+    if (GEN_CALC && (["i", "int8", "f"].includes(to.k) || (to.k === "p" && to.calc))) return {e: "unwrap_calc", x: expr, type: to};
     if (!["string", "c", "i", "d", "t", "p"].includes(to.k) || to.calc) throw new Unsupported(`a generic value moved into a ${to.k}`);
     return {e: "unwrap", x: expr, type: to};
   }
