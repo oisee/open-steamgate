@@ -5,7 +5,9 @@ decision: whether to support the ABAP Daemon Framework (ADF) and ABAP
 Messaging Channels (AMC) on both hosts, and above all what a running daemon
 does when a new generation is served. No SAP system was called for this
 note; every statement about SAP's behaviour below is either marked as read
-from documentation or listed as a probe to run on A4H first.*
+from documentation or listed as a probe to run on A4H first. The probes P0
+to P11 ran on 2026-09-24: the section "Measured on A4H" has the results, and
+the text is marked where they confirm or overturn it.*
 
 ---
 
@@ -75,7 +77,7 @@ Two facts from the reading that matter below and are easy to miss:
 - **Class data is per process on both hosts.** A JavaScript class's statics
   and Go's package-level variables are shared by every session in the
   process. On a system a daemon runs in an ABAP session of its own, with its
-  own static attributes (to be confirmed by probe P9). Run in a work
+  own static attributes (**confirmed by P9**, "Measured on A4H"). Run in a work
   process as it is, a daemon here would share its statics with every HTTP
   request of that process. That is state outliving a call, shared across
   sessions, which Alice's decision of 2026-09-24 rules out, so it is not
@@ -96,14 +98,14 @@ exact parameter names and types are the first thing to read (step 0).
 | SAP name | role | what it calls into | open-abap today |
 | --- | --- | --- | --- |
 | `IF_ABAP_DAEMON_EXTENSION` | the callbacks | — | absent |
-| `CL_ABAP_DAEMON_EXT_BASE` | abstract base a daemon inherits, every callback an empty default | — | absent |
+| `CL_ABAP_DAEMON_EXT_BASE` | abstract base a daemon inherits. ~~every callback an empty default~~ **Overturned by P0: every callback is abstract; a daemon implements all nine** | — | absent |
 | `ON_ACCEPT` | the start request arrives; the daemon accepts or rejects (a setup mode out) | caller info, start parameter | — |
 | `ON_START` | first callback of an accepted instance | `IF_ABAP_DAEMON_CONTEXT`: start parameter (a PCP message), instance ID, daemon info | — |
 | `ON_MESSAGE` | a message sent through a handle | the context and the message, an `IF_AC_MESSAGE_TYPE_PCP` | — |
-| `ON_TIMEOUT` | a timer the daemon armed has expired. On a system this is `IF_ABAP_TIMER_HANDLER~ON_TIMEOUT`, which the daemon class implements itself; it is not a method of the extension interface (to confirm in step 0) | the timeout context | — |
-| `ON_STOP` | stopped through a handle, optionally with a PCP message | the context, the message | — |
-| `ON_ERROR` | **unverified until P3.** Most likely called in the *new* instance after the previous one dumped: a session that has dumped cannot run ABAP any more, so it cannot be the one that hears about its own error | the context | — |
-| `ON_RESTART` | **unverified until P3.** Most likely the first callback of a new instance after a restart the *system* decided (announced to the old instance by `ON_BEFORE_RESTART_BY_SYSTEM`), rather than after a dump | the context, the original start parameter | — |
+| `ON_TIMEOUT` | a timer the daemon armed has expired. On a system this is `IF_ABAP_TIMER_HANDLER~ON_TIMEOUT`, which the daemon class implements itself; it is not a method of the extension interface (**confirmed by P0**; any object can be the handler) | the timeout context | — |
+| `ON_STOP` | stopped through ~~a handle~~ `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP` or `IF_ABAP_DAEMON_CONTEXT~STOP` (**P0: the handle has no `STOP`**), optionally with a PCP message; without one it still gets a bound, empty message (P11) | the context, the message | — |
+| `ON_ERROR` | **Confirmed by P3:** called in a *new* session after the previous one dumped, with `i_code = 103` and the runtime error's text, as the first callback there (no `ON_RESTART`): a session that has dumped cannot run ABAP any more, so it cannot be the one that hears about its own error | the context | — |
+| `ON_RESTART` | **Confirmed by P10 and P11:** the first callback of a new session after a restart the *system* decided (announced to the old load by `ON_BEFORE_RESTART_BY_SYSTEM`, code 202 on re-activation) or the daemon asked for (`IF_ABAP_DAEMON_CONTEXT~RESTART`); **not** after a dump (P3) | the context, the original start parameter | — |
 | `ON_BEFORE_RESTART_BY_SYSTEM` | the system is about to restart the daemon for a reason of its own; the old, still healthy instance's last word | the context | — |
 | `ON_SERVER_SHUTDOWN` | the application server the daemon runs on is going down | the context | — |
 | `ON_SYSTEM_SHUTDOWN` | the whole system is going down; no restart follows | the context | — |
@@ -112,16 +114,16 @@ exact parameter names and types are the first thing to read (step 0).
 
 | SAP name | methods | open-abap today |
 | --- | --- | --- |
-| `CL_ABAP_DAEMON_CLIENT_MANAGER` | `START` (class name, daemon name, a PCP start parameter; returns an instance ID), `ATTACH` (instance ID; returns a handle), `GET_DAEMON_INFO` (by class name; a table of instances: name, instance ID, server, start time, restart count and whatever else A4H's structure carries) | absent |
-| `IF_ABAP_DAEMON_HANDLE` | `SEND` (a PCP message), `STOP` (optionally with a PCP message); any further getters as read | absent |
-| `CX_ABAP_DAEMON_ERROR` | what `START` / `ATTACH` / `SEND` raise (name to confirm) | absent |
+| `CL_ABAP_DAEMON_CLIENT_MANAGER` | `START` (class name, daemon name, a PCP start parameter; returns an instance ID; **P0: `EXPORTING e_instance_id e_setup_mode`, a reject is not an exception**), `STOP` (**P0: here, by instance ID, not on the handle**), `ATTACH` (instance ID; returns a handle), `GET_DAEMON_INFO` (by class name; a table of instances: name, instance ID, server, start time, ~~restart count~~ and whatever else A4H's structure carries; **P0: no state and no restart count; P6: answers only the program that called `START`**) | absent |
+| `IF_ABAP_DAEMON_HANDLE` | `SEND` (a PCP message). ~~`STOP` (optionally with a PCP message); any further getters as read~~ **P0: `SEND` is its only method** | absent |
+| `CX_ABAP_DAEMON_ERROR` | what `START` / `ATTACH` / `SEND` raise (**name confirmed by P0**, a `CX_STATIC_CHECK`) | absent |
 
 ### Timers
 
 | SAP name | methods | open-abap today |
 | --- | --- | --- |
 | `CL_ABAP_TIMER_MANAGER` | `GET_TIMER_MANAGER` returns the session's manager | absent |
-| `IF_ABAP_TIMER_MANAGER` | `START_TIMER` (handler, timeout in milliseconds, optional context; returns a timer ID), `STOP_TIMER` | absent |
+| `IF_ABAP_TIMER_MANAGER` | `START_TIMER` (handler, timeout in milliseconds~~, optional context; returns a timer ID~~), `STOP_TIMER` (handler). **P0: no context and no timer ID; the handler object is the key, one timer per handler (P2)** | absent |
 | `IF_ABAP_TIMER_HANDLER` | `ON_TIMEOUT` | absent |
 
 Timers are not a daemon feature on a system: they also fire in stateful APC
@@ -134,7 +136,7 @@ with the widest use.
 | --- | --- | --- |
 | `IF_AC_MESSAGE_TYPE_PCP` | Push Channel Protocol message: a set of name/value fields and a body (text or binary) | absent |
 | `CL_AC_MESSAGE_TYPE_PCP` | `CREATE` returns one; `SET_FIELD` / `GET_FIELD` / `GET_FIELDS`, `SET_TEXT` / `GET_TEXT`, `SET_BINARY` / `GET_BINARY`, and the serialised form | absent |
-| the wire form | fields as `name:value` lines, an empty line, the body; the WebSocket subprotocol `v10.pcp.sap.com` | absent |
+| the wire form | fields as `name:value` lines, an empty line, the body; the WebSocket subprotocol `v10.pcp.sap.com`. **Captured in P1: LF line ends, `pcp-action` and `pcp-body-type` first, `:` in a value escaped as `\:`** | absent |
 
 PCP is the one piece that must be exactly right on the wire, because it is
 what a page reads. It is also the piece that makes the generation rule
@@ -200,6 +202,247 @@ reading, not running, and is the only one that stays unmeasured.
 
 ---
 
+## Measured on A4H
+
+*Run on 2026-09-24 on an ABAP 7.5x system (the A4H sandbox), in one
+throwaway package, as the batch P0 to P11 of decision D8. The probe was a
+daemon class (a subclass of `CL_ABAP_DAEMON_EXT_BASE` that also implements
+`IF_ABAP_TIMER_HANDLER`), a timer-handler class, and a driver class whose
+ABAP Unit test starts daemons, sends to them and polls a log table
+(`ZOSD_T_DLOG`, written through a service connection with its own
+`COMMIT CONNECTION`, so a callback's log row survives its own rollback) with
+`WAIT UP TO '0.2' SECONDS` and a bound. Times are `GET TIME STAMP FIELD`
+differences, in milliseconds. Every object and every daemon was removed
+afterwards; the runtime table of running daemons counted zero at the end.
+Probe sources and raw logs stay under `.local/daemon-probes/`. Where this
+section and the text above disagree, this section is the measurement and
+the text above is marked.*
+
+### The result in one table
+
+| # | question | observed | what it decides |
+| --- | --- | --- | --- |
+| P0 | signatures | read, see "P0" below. Three guesses in section 1 were wrong: the base class has **no** default callbacks, `IF_ABAP_DAEMON_HANDLE` has **only** `SEND`, and `START_TIMER` returns nothing and takes no context | the API table is corrected; the stop button calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP` |
+| P1 | `ON_MESSAGE` serialised? | yes. 20 × 200 ms messages: entries and exits strictly 1..20, never interleaved, 1 ms between an exit and the next entry, 4029.7 ms for all 20 (4031.7 ms in a second run). `SEND` through a held handle returns in 0.15 to 0.24 ms, before the callback runs | **confirms** the per-instance mailbox (one queue, one at a time, FIFO) and an asynchronous `SEND` |
+| P2 | timers | late by 0.3 to 1.7 ms, never early (table below). 0 and negative accepted and fire at once, 1000 timers in one daemon all fire, a timer due during a callback runs after it | a `setTimeout` posted into the mailbox is faithful; no rounding, no floor to emulate; **one timer per handler object** |
+| P3 | a dump in `ON_MESSAGE` | the session ends; about 30 to 100 ms later **`ON_ERROR`** runs in a **new** session (statics and attributes initial), `i_code = 103` (runtime error), `i_reason` the runtime error's short text. **No** `ON_RESTART`, **no** `ON_BEFORE_RESTART_BY_SYSTEM`. The instance ID survives. The message that dumped is **not** redelivered; the ones queued behind it are delivered, in order | the first callback after a dump is `ON_ERROR`, not `ON_RESTART`; the failed message is **dropped** (at most once); timers are gone |
+| P4 | restart limits | **none found**: 42 dumps in two instances (12 at 5 s intervals, 30 back to back) and the daemon was still listed and still served the next message. Recovery takes ~34 ms after an isolated dump and **~1.04 s** when the previous recovery was less than about a second ago. A dump in `ON_START` or in `ON_TIMEOUT` gives one `ON_ERROR` and nothing else: nothing re-runs `ON_START`, so the timer is not re-armed and there is no dump loop | no FAILED state from a restart count; a back-off of about a second between recoveries instead |
+| P5 | one instance per name? | **many.** `START` twice with the same class and name makes two instances with two IDs; `GET_DAEMON_INFO` lists both under the same name. `ON_ACCEPT` returning `reject` makes `START` return `e_setup_mode = 2`, an initial instance ID and **no exception**; no `ON_START` follows | the registry is keyed by instance ID; a name is a label |
+| P6 | users, clients, programs | the daemon runs as the user and in the client that called `START` (`sy-uname`, `sy-mandt` in every callback). **`GET_DAEMON_INFO` and `ATTACH` are restricted to the program that called `START`**: from another class of the same user and client, `GET_DAEMON_INFO` returns 0 rows and `ATTACH`/`SEND` raises "No access right for program <program>." Even the daemon's own class sees 0 rows. Cross-client and cross-user: **blocked** (one logon) | the registry records the creator program, and the client manager checks the caller's program |
+| P7 | the LUW of a callback | **each callback is a dialog step**: an insert without `COMMIT WORK` is invisible to another session while the callback runs and visible once it returns; a dump rolls it back. `COMMIT WORK` and `ROLLBACK WORK` inside a callback are allowed and take effect at once. **`WAIT UP TO` and `SUBMIT` are illegal**: runtime error `DAEMON_ILLEGAL_STATEMENT` ("Illegal statement in ABAP daemon session in program ..."), then `ON_ERROR`, and the insert before the `WAIT` is rolled back. `CALL FUNCTION ... STARTING NEW TASK` is allowed (sy-subrc 0) | **confirms** the step-per-callback rule; **overturns** "`WAIT` releases the lock" as a daemon concern: a daemon step never waits, and `WAIT` is a dump there |
+| P8 | AMC ordering and LUW | **mostly blocked**, see below. Measured: `co_comm_type_synchronous` is refused by `CREATE_MESSAGE_PRODUCER` ("Communication type 1 is not supported."); authorisation is checked at `SEND` and at `START_MESSAGE_DELIVERY`, not when the producer or consumer object is created | synchronous is not a mode to build; the program check belongs at send/subscribe time |
+| P9 | the daemon's statics | its own. The starting session reads the static attribute the daemon set as initial; the daemon keeps its value after the starting session changed its own copy | **confirms** the divergence D4 records |
+| P10 | re-activation while running | nothing happens while the daemon is idle. At its **next event**, `ON_BEFORE_RESTART_BY_SYSTEM` runs in the **old** load (`i_code = 202`, `program_version_changed`; statics still set, instance attributes initial), then `ON_RESTART` in the **new** load in a new session (same instance ID, statics and attributes initial), about 5 ms later. No dump, no `ON_ERROR`. A timer armed before the activation fired on time (45 001 ms) in the old session before the restart; a `STOP` that was the next event was delivered to the new instance after `ON_RESTART` | **confirms** option A of D2 and names its callbacks: `ON_BEFORE_RESTART_BY_SYSTEM(202)` in the old generation, `ON_RESTART` in the new. The system restarts lazily, we eagerly; the sequence a daemon sees is the same |
+| P11 | stop | `STOP` returns in 0.36 to 1.7 ms (once 4.3 ms) and is **queued behind everything already sent, including messages sent after `STOP` returned**: five queued messages and two sent after `STOP` all ran, then `ON_STOP` with the stop's PCP message (1.5 s later). A `STOP` without a parameter still passes a bound, empty message. After `ON_STOP`: `SEND` on an old handle raises `CX_ABAP_DAEMON_ERROR` "Consumer is not available (for AMC application ID ABAP_DAEMONS, Channel ID /command ...)", `ATTACH` and a second `STOP` raise "The ABAP Daemon instance is not available (...)", a malformed ID "Invalid input parameter.". `GET_DAEMON_INFO` still lists the instance until `ON_STOP` has run | `STOP` is a message in the same mailbox, drained first; a send after `ON_STOP` raises (demo test 6 stands) |
+
+### P0: the signatures as read
+
+- **`CL_ABAP_DAEMON_EXT_BASE`** is abstract and declares every method of
+  `IF_ABAP_DAEMON_EXTENSION` `ABSTRACT` (aliases for all nine). A daemon
+  must implement `ON_ACCEPT`, `ON_START`, `ON_MESSAGE`, `ON_STOP`,
+  `ON_ERROR`, `ON_RESTART`, `ON_BEFORE_RESTART_BY_SYSTEM`,
+  `ON_SERVER_SHUTDOWN` and `ON_SYSTEM_SHUTDOWN`.
+- **`IF_ABAP_DAEMON_EXTENSION`**: `ON_ACCEPT( i_context_base TYPE REF TO
+  if_abap_daemon_context_base ) EXPORTING e_setup_mode`; `ON_START`,
+  `ON_RESTART`, `ON_SERVER_SHUTDOWN`, `ON_SYSTEM_SHUTDOWN( i_context )`;
+  `ON_MESSAGE( i_message TYPE REF TO if_ac_message_type_pcp, i_context )`;
+  `ON_STOP( i_message OPTIONAL, i_context )`; `ON_ERROR( i_code TYPE i
+  OPTIONAL, i_reason TYPE string OPTIONAL, i_context )`;
+  `ON_BEFORE_RESTART_BY_SYSTEM( i_context, i_code TYPE i )`. None declares
+  `RAISING`, so every static-check exception a callback can meet (PCP,
+  daemon, timer errors) has to be caught inside it. Constants:
+  `co_setup_mode` accept 1, reject 2, server_shutdown 3, system_shutdown 4,
+  max_daemons_reached 5, server_not_ready 6, s_start_auth_failed 7,
+  reject_offset 1000; `co_on_error_code` others 100, error_message 101,
+  abort_message 102, runtime_error 103, cancel 104;
+  `co_on_before_restart_syst_code` manually_by_admin 201,
+  program_version_changed 202.
+- **`IF_ABAP_DAEMON_CONTEXT`**: `GET_START_PARAMETER`,
+  `GET_START_CALLER_INFO`, `SET_APPLICATION_PARAMETER` /
+  `GET_APPLICATION_PARAMETER`, `GET_INSTANCE_ID`, `RESTART`, `STOP(
+  i_parameter OPTIONAL )`, all `RAISING cx_abap_daemon_error`.
+  **`IF_ABAP_DAEMON_CONTEXT_BASE`** (what `ON_ACCEPT` gets):
+  `GET_START_PARAMETER`, `GET_START_CALLER_INFO`, `GET_SETTINGS_MANAGER`.
+- **`CL_ABAP_DAEMON_CLIENT_MANAGER`** (final, create private, all static):
+  `START( i_daemon_id OPTIONAL, i_class_name OPTIONAL, i_destination
+  DEFAULT 'NONE', i_name, i_parameter OPTIONAL, i_priority DEFAULT
+  co_session_priority_normal ) EXPORTING e_setup_mode e_instance_id` (not
+  a `RETURNING`); `STOP( i_instance_id, i_parameter OPTIONAL )`; `ATTACH(
+  i_instance_id ) RETURNING r_handle`; `GET_DAEMON_INFO( i_daemon_id
+  OPTIONAL, i_class_name OPTIONAL ) RETURNING r_info_table`, raising
+  "class and daemon ID initial" when both are empty. Priorities high 0,
+  normal 1, low 2. All raise `CX_ABAP_DAEMON_ERROR` (a `CX_STATIC_CHECK`,
+  with `error_code`, `error_text`, `exception_text`, `application_id`).
+- **`IF_ABAP_DAEMON_HANDLE`** has one method, `SEND( i_message OPTIONAL )`.
+  Stopping is `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP` by instance ID, or
+  `IF_ABAP_DAEMON_CONTEXT~STOP` from inside.
+- **`GET_DAEMON_INFO`** returns a table of `ABAP_DAEMON_INFO`: `NAME` CHAR 60,
+  `INSTANCE_ID` SSTRING 255, `CREATOR_CLIENT` CLNT 3, `CREATOR_USER` CHAR
+  12, `USED_DEST` CHAR 40, `CREATION_TIME` DEC 15 (`TIMESTAMP`),
+  `APPLICATION_SERVER` CHAR 40. **No state and no restart count.**
+  `GET_START_CALLER_INFO` returns client, user, destination, `PROGRAM` CHAR
+  40 (the program that called `START`), application server, name, priority
+  INT4. Other widths: class name CHAR 30, daemon (application) ID CHAR 30,
+  setup mode INT4.
+- **The instance ID** is 64 characters of base64 over `<CLASS>@<32 hex
+  digits>`; the hex part is the ID of the daemon's command channel and
+  embeds the application server's address, so real IDs are not copied
+  anywhere tracked. The same 32 hex digits appear as the channel extension
+  ID in the errors of P11.
+- **Timers.** `CL_ABAP_TIMER_MANAGER=>GET_TIMER_MANAGER( )` raises
+  `CX_ABAP_TIMER_ERROR` (`session_type_not_supported`) outside a
+  non-blocking session (stateful APC, daemon), read from its source.
+  `IF_ABAP_TIMER_MANAGER~START_TIMER( i_timer_handler TYPE REF TO
+  if_abap_timer_handler, i_timeout TYPE i )` and `STOP_TIMER(
+  i_timer_handler )`: **no timer ID and no context**; the handler object is
+  the key. `IF_ABAP_TIMER_HANDLER~ON_TIMEOUT` has no parameters, and any
+  object may be the handler (the probe used a separate class).
+- **PCP.** `IF_AC_MESSAGE_TYPE_PCP`: static `DESERIALIZE`, `SET_FIELD`,
+  `GET_FIELD( i_name ) EXPORTING e_exists RETURNING r_value`, `GET_FIELDS`,
+  `DELETE_FIELD`, `SET_TEXT`, `SET_BINARY`, `GET_TEXT`, `GET_BINARY`,
+  `SERIALIZE`, all `RAISING cx_ac_message_type_pcp_error`;
+  `CL_AC_MESSAGE_TYPE_PCP=>CREATE`.
+- **AMC.** `CREATE_MESSAGE_PRODUCER( i_application_id, i_channel_id,
+  i_channel_extension_id OPTIONAL, i_communication_type DEFAULT
+  asynchronous (2), i_suppress_echo DEFAULT false, i_channel_filter
+  OPTIONAL )`; `CREATE_MESSAGE_CONSUMER( i_application_id, i_channel_id,
+  i_channel_extension_id OPTIONAL, i_channel_filter OPTIONAL )`;
+  `IF_AMC_MESSAGE_PRODUCER_PCP~SEND( i_message )`;
+  `IF_AMC_MESSAGE_RECEIVER_PCP~RECEIVE( i_message, i_context TYPE REF TO
+  if_amc_message_context )`, the context giving `GET_PRODUCER_CLIENT` and
+  `GET_PRODUCER_USERNAME`. Channel IDs are lower-cased before lookup.
+- **What the system keeps.** The standard runtime holds running daemons in
+  a table of runtime entries (`ABAP_DAEMON_RT`), startup configuration in
+  another (`ABAP_DAEMON_ST`), and the design time of daemon types in
+  `ABAP_DAEMON_DT` / `ABAP_DAEMON_TEXT` (object type DMON). Daemon messages
+  themselves travel over AMC: the standard application `ABAP_DAEMONS`,
+  channel `/command`, message type PCP, **scope client**; a message an
+  `ON_MESSAGE` receives carries a `pcp-channel` field naming that channel
+  and the instance's extension ID. That the system's own state is a table
+  is some support for D9.
+
+### P2: the timer measurements
+
+| requested | samples | observed (ms) |
+| --- | --- | --- |
+| 1 ms | 19 | 1.325 to 1.447 (a 20th, the first timer the session ever armed, took 305.054; three more after a restart: 1.371 to 1.496) |
+| 10 ms | 20 | 10.329 to 11.020 |
+| 50 ms | 20 | 50.351 to 50.802 |
+| 100 ms | 20 | 100.427 to 101.452 |
+| 1000 ms | 20 | 1000.605 to 1001.675 |
+
+Re-armed from `ON_TIMEOUT` each time. Also measured: `START_TIMER` with 0
+and with -5 is accepted and the timer fires about 1.5 ms after the arming
+callback ends. `START_TIMER` twice on the same handler raises "Timer object
+is already active." and the first timer stands (it fired at 300.976 ms of
+300). `STOP_TIMER` on a handler with no timer raises "Timer objects is not
+active." (sic); on an armed one it succeeds and the timer never fires. A
+handler object nobody else references still fires (the timer keeps it).
+1000 handler objects armed at 100 ms from one callback: all accepted, all
+1000 fired between 91.5 and 105.7 ms after the arming loop ended, in one
+batch. A 10 ms timer armed at the start of a 500 ms callback fired at 502.5
+ms, 1.4 ms after the callback returned.
+
+### P8 and the AMC half of P6: blocked, and why
+
+An AMC channel needs an AMC application (object type `SAMC`). The ADT
+client used for the probes cannot create one ("unsupported object type:
+SAMC"). The standard applications that exist (`ABAP_DAEMONS`, a daemon
+test application) authorise named SAP programs only, and the probe program
+was refused at `SEND` and at `START_MESSAGE_DELIVERY` with "No
+authorization for program <program> to access to ABAP Messaging Channel
+with application ID ... and Channel ...". Adding the probe to their
+authorised programs would change an SAP object, which the probe rules
+forbid. So these stay **unmeasured**: message order for one and for two
+producers, delivery at `SEND` or at `COMMIT WORK`, delivery of a message
+sent in a rolled-back LUW, `i_suppress_echo`, the APC binding, and
+cross-client delivery for each scope value. The AMC paragraph of section 3
+("not decided until P8") therefore still holds. The route to measure them
+is an abapGit import of a `*.samc.xml` into a throwaway package, which
+needs Alice's go, or a channel created by hand in transaction SAMC.
+
+The cross-client and cross-user half of P6 is blocked for a simpler
+reason: the probes ran under one logon.
+
+### What the measurements force in the design
+
+1. **A daemon implements all nine callbacks** (P0). The base class the
+   runtime ships must declare them abstract too, or a daemon written here
+   compiles and one written for a system does not, and vice versa.
+2. **After a dump, `ON_ERROR` is the first callback of the new session, not
+   `ON_RESTART`** (P3, P4). The daemon host calls `ON_ERROR( i_code = 103,
+   i_reason = <runtime error text> )` on a fresh object, drops the message
+   that dumped, and goes on with the queue. Section 4, option A, point 2
+   ("treated as P3 says a dumped message is treated") now reads: dropped.
+   Timers do not survive; a daemon that wants its timer back re-arms it in
+   `ON_ERROR`, which the ticker demo must do (its `ON_START` / `ON_RESTART`
+   alone would leave it silent after a `boom`).
+3. **No restart limit and no FAILED state from counting** (P4). Replace
+   "the same number of restarts in the same window as a system, then the
+   row is FAILED" by a back-off: an `ON_ERROR` recovery waits about a
+   second when the previous one was less than a second ago. A daemon that
+   dumps on every message then costs one step per second, not a loop.
+4. **The generation swap uses `ON_BEFORE_RESTART_BY_SYSTEM( i_code = 202 )`
+   in the old generation and `ON_RESTART` in the new** (P10), with the same
+   instance ID. That settles the "which callback" question of section 4,
+   point 1, against `ON_SERVER_SHUTDOWN`. Two details to mirror: on a system
+   `ON_BEFORE_RESTART_BY_SYSTEM` saw initial instance attributes but the
+   old statics, so it is apparently called on a fresh object of the old
+   class, not on the live one; and the restart happens at the next event, so a daemon
+   that never gets one never restarts there. Restarting eagerly at the
+   swap is our divergence, and it is invisible to the daemon's code.
+5. **A daemon step never contains a `WAIT`** (P7). `WAIT UP TO` and
+   `SUBMIT` are `DAEMON_ILLEGAL_STATEMENT` dumps, so the daemon host raises
+   the same runtime error for them instead of releasing the step lock.
+   `WAIT FOR MESSAGING CHANNELS` was not probed and is presumably illegal
+   too. The ack design loses the `WAIT` commit point inside daemon steps;
+   `COMMIT WORK` stays a mid-step commit point (allowed, effective at once).
+   The lock release on `WAIT` in `tools/osd-dialog-step.mjs` is still
+   needed, for requests and APC steps.
+6. **The registry is keyed by instance ID and records the creator program**
+   (P5, P6). Names repeat. `GET_DAEMON_INFO` and `ATTACH` answer only the
+   program that called `START`, which needs the caller's program in the
+   runtime (on a system the manager asks the kernel for the calling
+   program; the transpiled runtime has no such call yet, so this is new
+   work in step 5, or an ANORMALIES entry if it is skipped). `GET_DAEMON_INFO` carries no state
+   and no restart count: those columns of `ZOSD_DAEMON` are ours, for the
+   status list, and not part of the API.
+7. **`STOP` is the last entry of the mailbox, not a cut** (P11). Messages
+   sent before and even shortly after `STOP` are delivered first; `ON_STOP`
+   gets the stop's message, or a bound empty one. After `ON_STOP` the
+   instance is gone and every `SEND`, `ATTACH`, `STOP` raises. The status
+   list shows it until `ON_STOP` has run.
+8. **One timer per handler object, no timer ID** (P0, P2). The timer
+   manager keys by handler object; a second `START_TIMER` on the same object
+   raises. Zero and negative timeouts are legal. The Node `setTimeout`
+   design stands, with the lateness measured here as the tolerance for demo
+   test 2 (a few milliseconds, never early).
+9. **`IF_ABAP_DAEMON_HANDLE` has no `STOP`** (P0): the status list's stop
+   button calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP`.
+10. **PCP on the wire uses LF, not CRLF** (captured in P1): `SERIALIZE` of a
+    message with fields `cmd`, `a`, `b` = `x:y` and the text
+    `hello<LF>world` gave exactly
+    `pcp-action:MESSAGE\npcp-body-type:text\ncmd:pcp\na:1\nb:x\:y\n\nhello\nworld`:
+    the two `pcp-` header fields first, the application fields in the order
+    set, a colon inside a value escaped as `\:`, an empty line, the body.
+    The received copy has a `pcp-channel` field as its second line. This is
+    the byte string step 2 tests against.
+
+Recommendations of the note, as measured: **confirmed** — per-instance
+serialisation and FIFO (P1), asynchronous `SEND` (P1), a callback is a
+dialog step with commit on return and rollback on a dump (P7), `ON_TIMEOUT`
+is `IF_ABAP_TIMER_HANDLER`'s and not the extension's (P0), a daemon's own
+statics (P9, D4), `ON_ERROR` in the new instance (P3), option A of D2 and
+its callbacks (P10), timers lost on a restart after an error (P3/P4), a
+table as the registry (the system keeps one, D9). **Overturned** — empty
+default callbacks, `STOP` on the handle, a timer ID and a timer context,
+restart count in `GET_DAEMON_INFO`, a restart limit with a FAILED state,
+`ON_RESTART` after a dump, `WAIT` inside a daemon step, one instance per
+name. **Still open** — everything AMC (P8), cross-client and cross-user
+(P6), the shutdown callbacks (P12, reading only).
+
+---
+
 ## 3. The mapping per host
 
 ### The shape both hosts share
@@ -244,7 +487,7 @@ other step takes**: on Node the step queue of osg-i7's PR in
 `tools/osd-dialog-step.mjs`, on Go `abap.WorkProcess`. There is no lock of
 the daemon's own. The queue is released for the length of a `WAIT` and taken
 again after it. Inside the lock, `dialogStep` / `DialogStep` commits on
-return and rolls back on a dump, unless P7 says a system does otherwise.
+return and rolls back on a dump, **which P7 confirmed** on a system.
 The rule lives in the module every host already imports (CLAUDE.md, "A
 rule written once ... does not survive the second caller"), so the daemon
 driver calls it rather than repeating it.
@@ -270,12 +513,15 @@ its mechanism is the first thing step 5 has to demonstrate.
   pins a socket today.
 - **The mailbox.** A per-instance promise chain, the same device as the
   `turn` chain in `serveChannel`: messages and timer expiries are appended
-  to one queue and run one at a time, which is what P1 is expected to
+  to one queue and run one at a time, which is what P1 **confirmed** (strict FIFO, never interleaved), and what it is expected to
   confirm. Each entry of the chain is then queued in the one step queue of
   `tools/osd-dialog-step.mjs` (osg-i7's PR), the same queue requests and APC
   callbacks go through, so a daemon step and an HTTP request never share a
   LUW and never overlap.
-- **`WAIT` releases the lock.** A lock held across `WAIT UP TO` or `WAIT FOR
+- **`WAIT` releases the lock.** (**P7: `WAIT UP TO` inside a daemon is a
+  `DAEMON_ILLEGAL_STATEMENT` dump on a system, so a daemon step never
+  waits; what follows holds for requests and APC steps, and the daemon host
+  raises the same runtime error instead.**) A lock held across `WAIT UP TO` or `WAIT FOR
   MESSAGING CHANNELS` deadlocks: the daemon waits for a message that only a
   step it is blocking could send. On a system `WAIT` rolls the session out
   and frees the work process, so here the lock is released for the length
@@ -301,7 +547,8 @@ its mechanism is the first thing step 5 has to demonstrate.
   has (`process.send`, the same channel as `say` and `ready`), and the
   supervisor appends it to the instance's mailbox and forwards it to child
   B. With one child the round trip is the same and only shorter.
-- **AMC.** When a publication leaves is **not decided until P8**. A system
+- **AMC.** When a publication leaves is **not decided until P8** (**still open: P8
+  was blocked, see "Measured on A4H"**). A system
   may send at `SEND`, independently of `COMMIT WORK`, in which case a
   rolled-back step has still published; or it may hold messages until the
   commit. The host supports both shapes (hand each message to the
@@ -446,7 +693,7 @@ The options, with the rule "only data crosses a generation" as the test:
 
 | option | what happens | verdict |
 | --- | --- | --- |
-| **A. restart in the new generation** | admission to the daemon's mailbox is held in the stable layer; the old instance finishes the callback it is in (the drain, bounded by the quiesce grace); it gets its last word; its timers are dropped; the new generation creates a new object from the class of the same name, gives it its first callback (`ON_RESTART`, or whatever P3/P10 show a system calls) with the same instance ID and the original start parameter; the held mailbox is released to it in order, each message removed only on an ack after its step committed | **recommended** |
+| **A. restart in the new generation** | admission to the daemon's mailbox is held in the stable layer; the old instance finishes the callback it is in (the drain, bounded by the quiesce grace); it gets its last word; its timers are dropped; the new generation creates a new object from the class of the same name, gives it its first callback (`ON_RESTART`, **as P10 shows**; the old one's last word is `ON_BEFORE_RESTART_BY_SYSTEM` with code 202) with the same instance ID and the original start parameter; the held mailbox is released to it in order, each message removed only on an ack after its step committed | **recommended** |
 | B. pin the daemon to its generation | the old generation stays up for as long as the daemon runs | rejected: a daemon never ends by itself, so the old generation never retires, and every activation adds a process |
 | C. migrate the object | serialise the daemon's attributes, rebuild them in the new generation | rejected: this is option 2's roll-area serialisation, the part the reload strategy removed on purpose, and an attribute of a changed class may no longer exist |
 | D. stop and forget | the daemon is stopped with the old generation and not restarted; whoever started it starts it again | honest and smallest, but an activation would silently end every daemon, and the status list would be the only place to notice |
@@ -471,12 +718,17 @@ Under option A, precisely:
    a call, and the note records that as a divergence in `ANORMALIES.md`.
    From P10 we take which callbacks run and in what order; if a system runs
    none in the old load, the old-generation callback is skipped and only
-   the new instance's first callback runs.
+   the new instance's first callback runs. **Measured (P10): a system keeps
+   the old load only until the daemon's next event, then runs
+   `ON_BEFORE_RESTART_BY_SYSTEM( i_code = 202 )` in the old load and
+   `ON_RESTART` in the new one, same instance ID. Option A reproduces that
+   sequence; the only difference is that we restart at the swap and a
+   system at the next event.**
 2. **The message being processed** completes in the old generation, under
    the quiesce grace (2 s today, which a daemon may need raised). If the
    grace runs out, the step is killed. A kill **before** the step commits
    rolls its LUW back (the dialog-step rule), and the message is treated as
-   P3 says a dumped message is treated. A kill **after** the commit but
+   P3 says a dumped message is treated (**P3: dropped, not redelivered**). A kill **after** the commit but
    before the supervisor hears of it would make the message run twice in
    the new generation. So a message leaves the mailbox only on an
    **acknowledgement sent after the commit**, and every message carries an
@@ -491,7 +743,9 @@ Under option A, precisely:
      commit**, the one at its end. A step can commit in the middle:
      `WAIT UP TO` does (`@abaplint/runtime` `statements/wait.js`,
      `implicitCommit`, the `commit()` call at line 9), and `COMMIT WORK` may
-     be allowed in a daemon (P7). So the ID is written at **every** commit
+     be allowed in a daemon (P7). (**P7: `COMMIT WORK` is allowed and
+     commits at once; `WAIT` is illegal in a daemon, so inside daemon steps
+     the `WAIT` commit point below does not arise.**) So the ID is written at **every** commit
      point of a daemon step, not only at the end. The hook for the `WAIT`
      case is `installWait` in `tools/osd-dialog-step.mjs` from osg-i7's dialog-step lock PR (#75):
      a `WAIT` inside a step passes through it, so it writes the ID into the
@@ -522,7 +776,7 @@ Under option A, precisely:
    A sender never sees an error for a swap.
 5. **Timers** are dropped. The new instance re-arms in `ON_RESTART`, which a
    well-written daemon does on a system anyway, because a restart after an
-   error loses them there too (to confirm by P3/P10).
+   error loses them there too (**confirmed by P3/P4**).
 6. **AMC publications** already handed to the broker are delivered; the
    broker is in the stable layer. Whether a step that was killed or rolled
    back had already published depends on P8 (at `SEND`, or at commit); no
@@ -576,9 +830,13 @@ offer it behind a switch, because a local runtime is restarted far more
 often than a system is, and a demo that stops every time the laptop sleeps
 is not a demo. Decision D5.
 
-Restart after a failure follows P3/P4: the same number of restarts in the
+~~Restart after a failure follows P3/P4: the same number of restarts in the
 same window as a system, then the row is FAILED and the daemon stays down
-until someone starts it.
+until someone starts it.~~ **Overturned by P4:** a system showed no restart
+limit (42 dumps, the daemon still served the next message), only a pause of
+about a second between recoveries that follow each other. The host does the
+same: `ON_ERROR` on a fresh object, a back-off of about a second, no FAILED
+state from counting.
 
 ### Observability
 
@@ -589,7 +847,7 @@ process (pid), generation, state, restart count, mailbox depth, armed timers,
 last callback and its duration, last error. The mailbox depth and timers are
 host facts, so the supervisor fills them into the table the way
 `tools/osd-status.mjs` fills `zosd_proc` today. A stop button calls
-`IF_ABAP_DAEMON_HANDLE~STOP` through an action; a start is left to the
+~~`IF_ABAP_DAEMON_HANDLE~STOP`~~ `CL_ABAP_DAEMON_CLIENT_MANAGER=>STOP` (P0) through an action; a start is left to the
 application, as on a system. `osd-runtime.mjs ps` gains the same list for a
 terminal, and every callback that dumps goes to the dumps list with the
 daemon's name in the step description, as a request's dump does.
@@ -603,7 +861,7 @@ existing APC channel through AMC.** It proves every piece in one path:
 
 | piece | object |
 | --- | --- |
-| the daemon | `ZCL_OSD_DAEMON_TICKER`, inheriting `CL_ABAP_DAEMON_EXT_BASE` and implementing `IF_ABAP_TIMER_HANDLER`. `ON_START` / `ON_RESTART` arm a timer (start parameter field `interval`, default 1000 ms). `ON_TIMEOUT` reads the counters (trip count per pickup borough from the taxi facts, or the demo's travel count where the taxi data is absent), publishes them as a PCP message with a sequence number, the instance's restart count and the generation, and re-arms. `ON_MESSAGE` takes `interval` and `pause` fields. |
+| the daemon | `ZCL_OSD_DAEMON_TICKER`, inheriting `CL_ABAP_DAEMON_EXT_BASE` and implementing `IF_ABAP_TIMER_HANDLER`. `ON_START` / `ON_RESTART` arm a timer (start parameter field `interval`, default 1000 ms), and so does `ON_ERROR` (P3: after a dump nothing else runs, and the timer is gone). `ON_TIMEOUT` reads the counters (trip count per pickup borough from the taxi facts, or the demo's travel count where the taxi data is absent), publishes them as a PCP message with a sequence number, the instance's restart count and the generation, and re-arms. `ON_MESSAGE` takes `interval` and `pause` fields. |
 | the channel | `ZOSD_TICKER`, an AMC application with channel `/counters`, message type PCP (`*.samc.xml`) |
 | the socket | `ZCL_OSD_APC_TICKER`, a stateless PCP APC handler whose `ON_START` binds the connection to `/counters` and which otherwise does nothing: every frame the page sees came through AMC, none through `on_message` |
 | the controls | an ICF node (or a function import on an existing service) that calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>START`, `ATTACH`+`SEND` and `STOP` |
@@ -614,14 +872,14 @@ What it shows, as tests (`test/daemon.mjs`, and the same file against OSGo):
 1. start the daemon, open the socket, receive at least three messages with
    consecutive sequence numbers;
 2. send `interval=200`, observe the rate change (P2's granularity decides
-   the tolerance);
+   the tolerance: a system's timers were 0.3 to 1.7 ms late and never early);
 3. insert taxi facts through OData, see the counter move in the next tick
    (the daemon reads committed rows, P7);
 4. **recycle the generation** with a changed daemon class (a new field in
    the message): after the reconnect the messages carry the new generation,
    the restart count is 1, and a message sent during the recycle arrived;
-5. send `boom`: the dump is in the dumps list, `ON_ERROR` / `ON_RESTART`
-   ran as P3 says, ticks resume;
+5. send `boom`: the dump is in the dumps list, `ON_ERROR` ran (P3; not
+   `ON_RESTART`), ticks resume;
 6. stop the daemon: ticks stop, the status list says STOPPED, a `SEND`
    raises.
 
@@ -639,7 +897,7 @@ cost here (the APC host, the RFC channel, the pool).
 
 | step | what | days |
 | --- | --- | --- |
-| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` | 1.5 |
+| 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 blocked**) | 1.5 |
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
@@ -677,11 +935,11 @@ deployed to a system is decided by the deploy manifest, not by the name.
 | # | decision | decided (as recommended) |
 | --- | --- | --- |
 | D1 | Build ADF at all, or stop after AMC and timers (steps 1 to 4)? | build, in this order; stop after step 4 is a valid answer if daemons are not wanted now |
-| D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, mailbox held and replayed with an ack after commit and a message-ID dedup. P10 decides which callbacks run, not whether the old load keeps running: if a system keeps the old load, we still restart, and record the divergence |
+| D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, mailbox held and replayed with an ack after commit and a message-ID dedup. P10 decides which callbacks run, not whether the old load keeps running: if a system keeps the old load, we still restart, and record the divergence. **P10 measured: `ON_BEFORE_RESTART_BY_SYSTEM(202)` in the old load, `ON_RESTART` in the new, lazily at the next event; option A confirmed** |
 | D3 | Do queued messages survive a *process* restart (a crash, a Go swap without a dispatcher), i.e. is the mailbox also written to `ZOSD_DAEMON_MSG`? | no in the first version: the mailbox lives in the supervisor on Node, which survives a swap; a crash loses it, as a crashed server does. Revisit with the Go dispatcher |
-| D4 | Daemon statics and where a daemon runs | model (b), the foreman's choice: in the host process and thread, under the same step lock, and class data read or written from a daemon step is a recorded runtime error (ANORMALIES, P9). A thread or process of its own only as an explicit opt-in, for daemons without database access, or later with SQL routed to the main connection. Not isolation by default, because the default database is in-memory sql.js, where a second connection is a separate copy, and a file has one holder |
+| D4 | Daemon statics and where a daemon runs | model (b), the foreman's choice: in the host process and thread, under the same step lock, and class data read or written from a daemon step is a recorded runtime error (ANORMALIES, P9; **P9 confirmed a daemon's statics are its own on a system**). A thread or process of its own only as an explicit opt-in, for daemons without database access, or later with SQL routed to the main connection. Not isolation by default, because the default database is in-memory sql.js, where a second connection is a separate copy, and a file has one holder |
 | D5 | Restart daemons after a process or system restart | yes for a process restart (same path as the swap); after a whole-system restart, mirror P12, with a switch to restart anyway for local use |
 | D6 | Where the ABAP lives | proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core. Nothing of this goes to the upstream repositories: they receive only fixes for differences from A4H, and ADF, AMC and the timer manager are new work |
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
-| D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time |
-| D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too; the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
+| D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time. **Run 2026-09-24; P8 and the cross-client half of P6 blocked** |
+| D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too (**P0: in a runtime table of its own**); the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
