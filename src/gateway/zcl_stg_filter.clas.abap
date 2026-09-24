@@ -529,6 +529,7 @@ CLASS zcl_stg_filter IMPLEMENTATION.
     DATA ls_node   TYPE ty_node.
     DATA ls_group  TYPE ty_group.
     DATA ls_option TYPE /iwbep/s_cod_select_option.
+    DATA lv_cp_value TYPE string.
     DATA lt_left   TYPE ty_groups.
     DATA lt_right  TYPE ty_groups.
     DATA ls_left   TYPE ty_group.
@@ -572,13 +573,19 @@ CLASS zcl_stg_filter IMPLEMENTATION.
       WHEN 'fn'.
         ls_option-sign   = 'I'.
         ls_option-option = 'CP'.
+* the value is text, and * + # are CP's own characters: each is made
+* literal with # before the wildcards go around it, or
+* substringof('*',x) would match every row and startswith(x,'A#B') would
+* read the # as an escape
+        lv_cp_value = ls_node-value.
+        REPLACE ALL OCCURRENCES OF REGEX '([*+#])' IN lv_cp_value WITH '#$1'.
         CASE ls_node-op.
           WHEN 'startswith'.
-            ls_option-low = |{ ls_node-value }*|.
+            ls_option-low = |{ lv_cp_value }*|.
           WHEN 'endswith'.
-            ls_option-low = |*{ ls_node-value }|.
+            ls_option-low = |*{ lv_cp_value }|.
           WHEN 'substringof'.
-            ls_option-low = |*{ ls_node-value }*|.
+            ls_option-low = |*{ lv_cp_value }*|.
           WHEN OTHERS.
             RETURN.
         ENDCASE.

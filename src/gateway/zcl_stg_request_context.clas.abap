@@ -139,7 +139,10 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
       WHEN 'CP' OR 'NP'.
 * * is any string, + one character, # makes the next character literal; a
 * literal % or _ (or #) is escaped with # and the condition says ESCAPE '#'
-* (measured on A4H: LIKE 'L#_' ESCAPE '#' finds only L_)
+* (measured on A4H: LIKE 'L#_' ESCAPE '#' finds only L_). Not measured: a
+* # before an ordinary character (it drops, the character stays) and a # at
+* the very end, which escapes a padding blank in ABAP's CP and is dropped
+* here, as a CHAR column holds no trailing blank to match
         lv_len = strlen( is_option-low ).
         DO lv_len TIMES.
           lv_off = sy-index - 1.

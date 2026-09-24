@@ -376,6 +376,7 @@ CLASS ltcl_filter DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINA
     METHODS or_same_property FOR TESTING RAISING cx_static_check.
     METHODS ge_le_to_bt FOR TESTING RAISING cx_static_check.
     METHODS functions FOR TESTING RAISING cx_static_check.
+    METHODS functions_quote_cp_chars FOR TESTING RAISING cx_static_check.
     METHODS ne_and_not FOR TESTING RAISING cx_static_check.
     METHODS quotes_in_value FOR TESTING RAISING cx_static_check.
     METHODS not_expressible FOR TESTING RAISING cx_static_check.
@@ -489,6 +490,19 @@ CLASS ltcl_filter IMPLEMENTATION.
                                         exp = 'BT' ).
     cl_abap_unit_assert=>assert_equals( act = ls_option-low
                                         exp = '2' ).
+  ENDMETHOD.
+
+  METHOD functions_quote_cp_chars.
+* * + # in an OData value are text: made literal with # in the CP pattern
+    DATA lt_filter TYPE /iwbep/t_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+
+    lt_filter = parse( `substringof('*',Description)` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low exp = '*#**' ).
+    lt_filter = parse( `startswith(Description,'A#B+C')` ).
+    ls_option = option( it_filter = lt_filter iv_property = 'Description' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_option-low exp = 'A##B#+C*' ).
   ENDMETHOD.
 
   METHOD functions.
@@ -1893,6 +1907,11 @@ CLASS ltcl_osql_where IMPLEMENTATION.
     APPEND option( iv_sign = 'I' iv_option = 'CP' iv_low = '50%*#*' ) TO lt_options.
     cl_abap_unit_assert=>assert_equals( act = where( lt_options )
                                         exp = `( STATUS LIKE '50#%%*' ESCAPE '#' )` ).
+* a literal _, + as one character, #_ a literal _, ## a literal #
+    CLEAR lt_options.
+    APPEND option( iv_sign = 'I' iv_option = 'CP' iv_low = 'a_+#_##' ) TO lt_options.
+    cl_abap_unit_assert=>assert_equals( act = where( lt_options )
+                                        exp = `( STATUS LIKE 'a#__#_##' ESCAPE '#' )` ).
   ENDMETHOD.
 
   METHOD exclusions_alone.
