@@ -315,7 +315,7 @@ export function toIr(tree, options = {}) {
           const operand = expression((node.children ?? []).find((c) => c.node !== "word"));
           if (operand.node === "lit" && typeof operand.value === "number") return lit(-operand.value, operand.type);
           const type = operand.type?.abap === "I" && operand.type.bits !== undefined ? T.int : operand.type;
-          if (!["I", "INT8", "P", "F"].includes(type?.abap)) throw new BindError(`a leading minus before a ${type?.abap ?? "value"} of no number type`, node);
+          if (!["I", "INT8", "P"].includes(type?.abap)) throw new BindError(`a leading minus before a ${type?.abap ?? "value"} of no number type`, node);
           return bin("-", lit(0, T.int), operand, type);
         }
         const inner = (node.children ?? []).filter((c) => c.node !== "word");

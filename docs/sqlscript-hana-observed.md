@@ -786,3 +786,27 @@ HANA (the #56 critic):
 - each turn costs a step, as a WHILE's does, and the body's statements cost
   theirs: `FOR i IN 1 .. 5000 DO n = :n + 1; END FOR;` already reaches the
   default limit of 10000 steps.
+
+## DECLARE ... DEFAULT and CONSTANT, and a leading minus (measured on HXE 2.00.088, 2026-09-24)
+
+| body | HANA |
+| --- | --- |
+| `DECLARE x INTEGER DEFAULT 5` | 5 -- DEFAULT is `=` |
+| `DECLARE x CONSTANT INTEGER = 7`, `... CONSTANT INTEGER DEFAULT 8` | 7, 8 |
+| `DECLARE x CONSTANT INTEGER;` | accepted; `:x` is NULL |
+| `x = 2` on a CONSTANT | does not compile: `cannot modify constant variable` |
+| `FOR x IN 1 .. 3` on a CONSTANT | does not compile: `cannot modify constant variable` |
+| `SELECT 5 INTO x` on a CONSTANT | does not compile: `Not allowed expression for INTO-target: cannot modify constant variable` |
+| `DECLARE x ...; DECLARE x ...` | does not compile: `at most one declaration is permitted in the declaration section` |
+| `-(-3) + 1`, `-(2 + 3) * 2` | 4, -10 |
+| `-:n`, n = -2147483648 | `numeric overflow` |
+| `-:n`, n NULL | NULL |
+| `-:s`, s = '5' | -5 -- the text converted; the portable compiler refuses a minus before a text |
+| `-x`, `0 - x`, x DECIMAL(10,3) = 1.555 | -1.555, -1.555 -- the scale is kept |
+
+The last row says the binary rule of `tools/sqlscript/to-ir.mjs` -- any
+arithmetic with a packed operand is P(15,2) -- is wrong for a scale above 2:
+HANA keeps 1.555's three decimals in `0 - x`, and SQLite's rounding to the
+declared scale cuts it to 1.55 (DuckDB widens the type and keeps the value).
+The leading minus takes its operand's type and is right; the binary rule is
+an older defect, left for its own change with its own measurements.

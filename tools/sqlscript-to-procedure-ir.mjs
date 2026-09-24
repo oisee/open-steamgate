@@ -424,8 +424,17 @@ export function compileProcedure(method, types, options = {}) {
   const rowVariables = {};
   const cursors = new Map();
   const openCursors = new Set();
-  // scalars declared CONSTANT: an assignment to one does not compile on HANA
+  // scalars declared CONSTANT: an assignment to one does not compile on HANA,
+  // whoever writes it -- `=`, a numeric FOR, SELECT ... INTO (each measured on
+  // HXE, each in HANA's words); one rule for every writer (the #62 critic)
   const constants = new Set();
+  // the scalars this body's DECLAREs introduced (not the parameters)
+  const declaredHere = new Set();
+  const assertAssignable = (name, node, how) => {
+    if (constants.has(name)) {
+      throw new UnsupportedSqlScript(`${name} is a CONSTANT, which HANA refuses ${how} ("cannot modify constant variable")`, node);
+    }
+  };
   // a table variable assigned inside a loop -- WHILE or a numeric FOR -- has,
   // on the next turn, whatever order the last turn gave it, or the one
   // before the loop: unknown throughout, rather than a first turn's order
@@ -558,6 +567,12 @@ export function compileProcedure(method, types, options = {}) {
         }
         const name = nameOf(child(node, "Name"));
         if (cursorNames.has(name)) throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
+        // measured on HXE: "at most one declaration is permitted in the
+        // declaration section"
+        if (scalarTypes[name] !== undefined && declaredHere.has(name)) {
+          throw new UnsupportedSqlScript(`${name} is declared twice, which HANA refuses ("at most one declaration is permitted")`, node);
+        }
+        declaredHere.add(name);
         const type = declaredScalarType(child(node, "TypeName"), node);
         scalarTypes[name] = type;
         if ((node.children ?? []).some((one) => one.node === "word" && upper(one.value) === "CONSTANT")) constants.add(name);
@@ -566,8 +581,7 @@ export function compileProcedure(method, types, options = {}) {
           initialNode === undefined ? undefined : bind(initialNode, "expression"), node));
       } else if (node.node === "Assignment") {
         const name = nameOf(child(node, "Name"));
-        // measured on HXE: "cannot modify constant variable", at CREATE
-        if (constants.has(name)) throw new UnsupportedSqlScript(`${name} is a CONSTANT, which HANA refuses to assign ("cannot modify constant variable")`, node);
+        assertAssignable(name, node, "to assign");
         const unnest = child(node, "UnnestCall");
         if (unnest !== undefined) {
           const host = (unnest.children ?? []).find((one) => one.node === "host");
@@ -642,6 +656,7 @@ export function compileProcedure(method, types, options = {}) {
         // NULL does not compile)
         const name = nameOf(children(node, "Name")[0]);
         const type = scalarTypes[name];
+        assertAssignable(name, node, "as a FOR variable");
         if (type === undefined) throw new UnsupportedSqlScript(`FOR ${name} IN ...: ${name} is not declared, which HANA refuses`, node);
         if (!((type.abap === "I" && type.bits === undefined) || type.abap === "INT8")) {
           throw new UnsupportedSqlScript(`FOR ${name} IN ...: the loop variable is ${type.abap}, not INTEGER or BIGINT`, node);
@@ -800,6 +815,7 @@ export function compileProcedure(method, types, options = {}) {
         const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         targets.forEach((target, i) => {
           if (scalarTypes[target] === undefined) throw new UnsupportedSqlScript(`SELECT ... INTO undeclared scalar ${target}`, node);
+          assertAssignable(target, node, "as an INTO target");
           // BIGINT into an INTEGER scalar: `SELECT COUNT(*) INTO lv` with
           // lv INTEGER compiles and assigns on A4H; the value is range-checked
           const narrowing = shape[i][1]?.abap === "INT8" && same(scalarTypes[target], T.int);
