@@ -3488,6 +3488,17 @@ const andIr = (a, b) => (a === null ? b : b === null ? a : RIR.bin("AND", a, b, 
 /** a host value of Open SQL: [@]name[-comp...], the parser leaving a
  * component after @ as siblings (Dash, SQLFieldName) */
 function sqlHost(src, trailing, ctx, text) {
+  // FOR ALL ENTRIES IN itab: itab-comp is the component of the driving row
+  // the statement is run for (selectStatement, parity-wave1)
+  if (ctx.fae) {
+    const whole = [src, ...trailing].map((x) => x.concatTokens()).join("").replace(/^@/, "");
+    const m = /^([\w\/]+)-([\w\/]+)$/.exec(whole);
+    if (m && upper(m[1]) === ctx.fae.name) {
+      if (upper(m[2]) === "TABLE_LINE") throw new Unsupported(`FOR ALL ENTRIES: ${whole}: an elementary driving table is not in the subset`);
+      const f = fieldOf(ctx, ctx.fae.row, m[2], text);
+      return {e: "field", base: {e: "fae_row", n: ctx.fae.n, type: ctx.fae.row}, name: f.name, type: f.type};
+    }
+  }
   const sk = [...src.getChildren().filter((c) => !isTok(c, "@")), ...trailing];
   const simple = sk[0];
   if (isExpr(simple, Expressions.Source)) {
@@ -3814,7 +3825,24 @@ function selectStatement(node, ctx, text) {
   if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  // parity-wave1: SELECT ... FOR ALL ENTRIES IN itab WHERE ... itab-comp ...
+  // (A4H ZCL_GOGEN_T_FAE): the statement once per driving row, the rows
+  // made unique over the columns selected (sy-dbcnt counts them), and an
+  // empty driving table ignores the whole WHERE, the client aside. With
+  // GROUP BY, aggregates or ORDER BY it is refused (not measured)
+  const faeNode = sel.findFirstExpression(Expressions.SQLForAllEntries);
+  let fae = null;
+  if (faeNode) {
+    const drvSrc = faeNode.findDirectExpression(Expressions.SQLSource);
+    const drv = drvSrc ? sqlHost(drvSrc, [], ctx, text) : null;
+    if (!drv || drv.type.k !== "table" || drv.type.row.k !== "struct") throw new Unsupported(`FOR ALL ENTRIES IN a ${drv?.type.k === "table" ? `table of ${drv.type.row.k}` : drv?.type.k ?? "?"}: ${text}`);
+    if (sel.findDirectExpression(Expressions.SQLGroupBy) || sel.findFirstExpression(Expressions.SQLAggregation) || sel.findDirectExpression(Expressions.SQLOrderBy)) {
+      throw new Unsupported(`FOR ALL ENTRIES with GROUP BY, an aggregate or ORDER BY: not measured: ${text}`);
+    }
+    FAE_N += 1;
+    fae = {name: upper(drvSrc.concatTokens().replace(/^@/, "")), row: drv.type.row, n: FAE_N, table: drv};
+  }
   const tb = selectTable(sel, ctx, text);
   // ultra/itab: aggregates and GROUP BY (groupedColumns below)
   const grouped = sel.findDirectExpression(Expressions.SQLGroupBy) !== undefined && sel.findDirectExpression(Expressions.SQLGroupBy) !== null;
@@ -3853,7 +3881,11 @@ function selectStatement(node, ctx, text) {
     return {field: f.name, type: f.type};
   });
   const acc = {hosts: [], ranges: []};
-  const pred = wherePred(sel, ctx, tb, acc);
+  const pred = (() => {
+    const saved = ctx.fae;
+    ctx.fae = fae ?? undefined;
+    try { return wherePred(sel, ctx, tb, acc); } finally { ctx.fae = saved; }
+  })();
   const order = orderByOf(sel, tb);
   let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
@@ -3870,8 +3902,19 @@ function selectStatement(node, ctx, text) {
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
   refuseSorted(target, "SELECT INTO TABLE");
+  if (fae) {
+    // the same columns without the WHERE, for an empty driving table
+    const accAll = {hosts: [], ranges: []};
+    let relAll = RIR.scan(lowName(tb.name));
+    if (tb.client) relAll = RIR.filter(relAll, mandtPred());
+    relAll = RIR.project(relAll, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+    const all = lowerOrRefuse("SELECT", relAll);
+    return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc),
+      fae: {n: fae.n, table: fae.table, sql: all.sql, ...loweredArgs(all, accAll)}};
+  }
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
+let FAE_N = 0;
 
 /** a SELECT with a part given at run time: FROM (name), a field list,
  * WHERE, GROUP BY or ORDER BY in parentheses */

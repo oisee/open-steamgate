@@ -1428,6 +1428,29 @@ ${t}	}`));
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
+      if (st.fae) {
+        // FOR ALL ENTRIES (frontend selectStatement): once per driving row,
+        // a row kept only the first time its columns are seen; an empty
+        // driving table runs the statement without its WHERE
+        const fr = `fae${st.fae.n}`;
+        return [`${t}${tgt} = nil`, `${t}{`,
+          `${t}\ttype faekey${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
+          `${t}\tseen${n} := map[faekey${n}]bool{}`,
+          `${t}\trow${n} := func(scan func(dest ...any) error) {`,
+          `${t}\t\tvar k faekey${n}`,
+          `${t}\t\tabap.Must(scan(${st.cols.map((_, i) => `&k.c${i}`).join(", ")}))`,
+          `${t}\t\tif seen${n}[k] {`, `${t}\t\t\treturn`, `${t}\t\t}`, `${t}\t\tseen${n}[k] = true`,
+          ...st.cols.map((_, i) => `${t}\t\tc${i}_${n} := k.c${i}\n${t}\t\t_ = c${i}_${n}`),
+          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), `${t}\t\t${tgt} = append(${tgt}, r)`, `${t}\t}`,
+          `${t}\tif drv${n} := ${expr(st.fae.table, ctx)}; len(drv${n}) == 0 {`,
+          `${t}\t\tabap.Select(s, ${JSON.stringify(st.fae.sql)}, ${sqlArgs(st.fae.args, ctx)}, ${hostPreds(st.fae.preds, ctx)}, row${n})`,
+          `${t}\t} else {`,
+          `${t}\t\tfor _, ${fr} := range drv${n} {`, `${t}\t\t\t_ = ${fr}`,
+          `${t}\t\t\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, row${n})`,
+          `${t}\t\t}`, `${t}\t}`,
+          `${t}\tif len(seen${n}) > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(len(seen${n}))`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
+          `${t}}`];
+      }
       return [`${t}${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -1720,6 +1743,7 @@ function expr(e, ctx) {
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
+    case "fae_row": return `fae${e.n}`;
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;
     default: throw new Error(`no Go for expression ${e.e}`);
   }
