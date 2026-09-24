@@ -4987,6 +4987,14 @@ export function convert(expr, to) {
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
   if (to.k === "x" && from.k === "i") return ok("i2x");
+  // a c literal of upper-case hex digit pairs into an xstring, or into an x
+  // it fills exactly: its bytes, as VALUE gives them (ultra/bytecmp: every
+  // probe of ZCL_GOGEN_T_XCMP sets its operands so, and what A4H answered
+  // depends on those bytes; lower case, odd lengths and shorter literals
+  // are other rules of c -> x, not measured)
+  if ((to.k === "xstring" || (to.k === "x" && expr.value?.length === 2 * to.len)) && expr.e === "chars" && /^([0-9A-F]{2})*$/.test(expr.value)) {
+    return {e: "xbytes", value: expr.value, type: to};
+  }
   // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
   // Into calculation type p: exact, nothing rounded yet
   if (to.k === "p" && to.calc) {
@@ -5208,6 +5216,14 @@ function compare(node, ctx) {
       throw new Unsupported(`an arithmetic expression compared with the character operand ${other.concatTokens()} (does not activate on A4H)`);
     }
   }
+  // byte-like operands (ultra/bytecmp, A4H 2026-09-24, $ZOSG_TMP_0480,
+  // testdata ZCL_GOGEN_T_XCMP / _XCMPN)
+  if (!arithL && !arithR && types.some((t) => t.k === "x" || t.k === "xstring")) {
+    const bl = source(sources[0], ctx);
+    const br = source(sources[1], ctx);
+    const r2 = compareBytes(op, bl, br, node);
+    if (r2) return not ? {c: "not", x: r2} : r2;
+  }
   // calculation type p for the comparison (A4H 2026-09-24, PDFMT c: and
   // PDCMP): a p on either side, or a character operand inside arithmetic
   // (`lv_i * 86400 * 1000 > lv_s + 0` does not overflow i); a p against a
@@ -5260,6 +5276,49 @@ function lineExists(chain, ctx) {
   }
   if (keys.length === 0) throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
   return {c: "line_exists", table, keys};
+}
+
+/** A comparison with an x or an xstring on either side, as A4H answers it
+ * (ultra/bytecmp, 2026-09-24, $ZOSG_TMP_0480; the transpiler differs in
+ * the x-x and numeric rules, ANORMALIES byte-like-comparisons):
+ * - x against x: the shorter is padded with 00 on the right (x'AB' = x'AB00');
+ * - xstring against xstring or an x: the bytes in order, a prefix is the
+ *   smaller (x'AB' < xstring AB00), an x keeps its trailing 00 bytes;
+ *   v+off(len) of an xstring is an xstring;
+ * - against c or string (literal or not): the byte operand becomes its hex
+ *   digits in upper case, then it is a character comparison (x'FF' <> 'ff',
+ *   x'FF' < 'ff', x'00' <> '0', an empty xstring = ' ');
+ * - against i or n: the last four bytes, 00 on the left, read as a signed
+ *   int32 (x'FF' = 255, x'FFFFFFFF' = -1, x'0100000002' = 2, empty = 0).
+ * Anything else with a byte operand (p, f, int8, d, t, ...) is refused.
+ * null when neither side is byte-like. */
+function compareBytes(op, l, r, node) {
+  const isB = (t) => t.k === "x" || t.k === "xstring";
+  if (!isB(l.type) && !isB(r.type)) return null;
+  const conv = (x, kind, to) => ({e: "conv", kind, from: x.type, to, x, type: to});
+  if (isB(l.type) && isB(r.type)) {
+    if (l.type.k === "x" && r.type.k === "x") {
+      const len = Math.max(l.type.len, r.type.len);
+      const pad = (x) => (x.type.len === len ? x : conv(x, "xs2x", X(len)));
+      return {c: "cmp", op, l: pad(l), r: pad(r), type: X(len)};
+    }
+    const xs = (x) => (x.type.k === "xstring" ? x : {...x, type: XS});
+    return {c: "cmp", op, l: xs(l), r: xs(r), type: XS};
+  }
+  const [b, o] = isB(l.type) ? [l, r] : [r, l];
+  const side = (x) => (x === b ? null : x);
+  if (charlike(o.type)) {
+    const hex = conv(b, "x2s", S);
+    const ch = convert(o, S);
+    return {c: "cmp", op, l: side(l) ? ch : hex, r: side(r) ? ch : hex, type: S};
+  }
+  if (o.type.k === "i" || o.type.k === "n") {
+    const n = conv(b, "x2i", I);
+    // n: its digits as a number, as the c2n of a comparison with i reads them
+    const other = o.type.k === "n" ? conv(o, "c2n", I) : o;
+    return {c: "cmp", op, l: side(l) ? other : n, r: side(r) ? other : n, type: I};
+  }
+  throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}: not measured: ${node.concatTokens()}`);
 }
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */

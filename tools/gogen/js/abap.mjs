@@ -218,10 +218,12 @@ export function BitX(op, a, b) {
   }
   return out;
 }
-// an x of fewer than four bytes into an i: 00 on the left, read unsigned
+// an x or xstring as an i: the last four bytes, 00 on the left, read as a
+// signed int32 (A4H 2026-09-24, ZCL_GOGEN_T_XCMPN: FF 255, FFFFFFFF -1,
+// 0100000002 2, empty 0); a move takes fewer than four bytes only
 export function XToI(v) {
   let r = 0;
-  for (let i = 0; i < v.length; i++) r = r * 256 + v.charCodeAt(i);
+  for (let i = 0; i < v.length; i++) r = (r << 8) | v.charCodeAt(i);
   return r;
 }
 
