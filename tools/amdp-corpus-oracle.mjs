@@ -546,7 +546,8 @@ export function missingObject(message) {
   // HXE 2.00.088 says "no procedure with name X=>Y found" after the colon;
   // read the name there, not the word "no" (the passes only used the kind,
   // the library-absent class needs the name)
-  m = /no procedure with name "?([^\s"]+)"? found/i.exec(text);
+  // (a quoted or schema-qualified name keeps the routine, not the schema)
+  m = /no procedure with name (?:"?[^\s".]+"?\.)?"?([^\s"]+)"? found/i.exec(text);
   if (m !== null) return {kind: "routine", name: m[1]};
   m = /(?:invalid name of function or procedure|Could not find (?:procedure|function))[:\s]+"?([^\s":]+(?:=>[^\s":]+)?)"?/i.exec(text);
   if (m !== null) return {kind: "routine", name: m[1]};
@@ -554,7 +555,7 @@ export function missingObject(message) {
 }
 
 /** a HANA message that names a library schema neither A4H nor HXE has */
-export const ABSENT_LIBRARY = /(?:invalid schema name:\s*|unknown type\s+)"?(SAP_PA_APL|SAP_HANA_UMML\w*)\b/i;
+export const ABSENT_LIBRARY = /(?:invalid schema name:\s*|unknown type\s+"?|in schema\s+|name\s+)"?(SAP_PA_APL|SAP_HANA_UMML\w*)(?![\w])/i;
 
 /** the keys of the refused bodies that need an absent library: a body whose
  *  refusal names one, and, to a fixpoint, a body refused because a routine
