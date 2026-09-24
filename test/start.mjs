@@ -20,6 +20,7 @@ import {mountServices, services as icfServices, servicesFromRows, channels as pu
 import {mountChannels} from "../tools/osd-apc.mjs";
 import {mountHost, nodes} from "../tools/osd-nodes.mjs";
 import {applyAtStartup, currentRows} from "../tools/osd-icf-apply.mjs";
+import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
@@ -65,6 +66,9 @@ async function loadInline() {
   const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root: process.cwd()});
   if (registry === undefined) throw new Error("the ICF registry could not be applied");
   const icf = servicesFromRows(await currentRows(globalThis.abap.context.databaseConnections.DEFAULT));
+  // the cross-reference (CROSS, WBCROSSGT, WBCROSSGTX, D010INC), derived from
+  // the files per generation -- one module for every host, tools/osd-xref-seed.mjs
+  await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root: process.cwd()});
   // the SEGW registration objects (IWSV/IWMO in src/) say which service is
   // served by which MPC/DPC classes; tools/segw-registry.mjs generated this
   await zcl_stg_segw_registry.register();

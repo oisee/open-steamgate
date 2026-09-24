@@ -1,5 +1,4 @@
 import {expect} from "chai";
-import {existsSync} from "node:fs";
 import {Data, NotAllowed, openSqlToSql} from "../tools/osd-data.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
@@ -9,14 +8,9 @@ describe("tools/osd-data: the rows of the local system", function () {
   this.timeout(120000);
   const data = new Data();
 
-  // the cross-reference rows are derived and git-ignored, so a fresh
-  // checkout has none until they are built; this test reads them
-  before(async () => {
-    if (existsSync("data/wbcrossgt.tabu.json") === false) {
-      const {CrossReference} = await import("../tools/osd-xref.mjs");
-      new CrossReference().build().write();
-    }
-  });
+  // the cross-reference rows are derived from the files and seeded by the
+  // runtime this suite boots (tools/osd-xref-seed.mjs), so they are there
+  // in a fresh checkout without anybody generating anything first
 
   it("the system has its tables: ours, the runtime's own, and the cross-reference", async () => {
     const tables = await data.tables();

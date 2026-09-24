@@ -12,6 +12,8 @@ import {Buffer} from "buffer";
 import {seed, buildId, database} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 import {registry as icfRegistry} from "./generated/icf.mjs";
+import {xref} from "./generated/xref.mjs";
+import {applyRows as applyXref} from "../tools/osd-xref-seed.mjs";
 import {servicesFromRows, serviceForPath} from "../tools/osd-icf-routing.mjs";
 import {currentRows} from "../tools/osd-icf-apply.mjs";
 
@@ -380,6 +382,10 @@ export async function startBackend(stored, options = {}) {
   const {applyTo} = await import("../tools/osd-icf-apply.mjs");
   await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry, {say: console.log});
   registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
+  // the cross-reference the build derived from the files, applied by the
+  // module every host uses (tools/osd-xref-seed.mjs); replaces, so a stored
+  // database from an older build ends with this build's rows
+  await applyXref(abap.context.databaseConnections.DEFAULT, xref);
   await registerServices();
   await refreshStatus();
 }
@@ -399,6 +405,7 @@ export function resetBackend() {
     const {applyTo} = await import("../tools/osd-icf-apply.mjs");
     await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
     registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
+    await applyXref(abap.context.databaseConnections.DEFAULT, xref);
     // the status tables went with the database; fill them again rather than
     // leaving the app empty until somebody opens it
     await refreshStatus();

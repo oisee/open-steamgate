@@ -21,8 +21,10 @@
 // INCLUDE is the object that holds the reference. A real system writes
 // ZCL_FOO=======CM001 there; we write the object's own name, which vsp
 // reads the same way and a human can read too.
-import {writeFileSync} from "node:fs";
-import {join} from "node:path";
+//
+// This file derives; it does not write. The rows reach the database through
+// tools/osd-xref-seed.mjs, which every host calls at start (or at build, for
+// the browser preview and OSGo), once per generation.
 import {ObjectStore} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -154,27 +156,18 @@ export class CrossReference {
       d010inc: this.d010inc,
     };
   }
-
-  // the rows land where the runtime's seed reads them, so they are in the
-  // database the freestyle SQL endpoint queries
-  write(dataDir = "data") {
-    const written = {};
-    for (const [table, rows] of Object.entries(this.tables())) {
-      const file = join(dataDir, `${table}.tabu.json`);
-      writeFileSync(file, JSON.stringify(rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase(), v]))), undefined, 1) + "\n");
-      written[table] = rows.length;
-    }
-    return written;
-  }
 }
 
 function main(args) {
+  if (args.includes("--write")) {
+    // the tables are seeded by every host at start now, from the files, per
+    // generation (tools/osd-xref-seed.mjs); a seed file in data/ would only
+    // be a second, stale copy of them
+    console.error("--write is gone: every host seeds CROSS/WBCROSSGT/WBCROSSGTX/D010INC at start (tools/osd-xref-seed.mjs)");
+    return 2;
+  }
   const xref = new CrossReference().build();
   const counts = Object.fromEntries(Object.entries(xref.tables()).map(([t, rows]) => [t, rows.length]));
-  if (args.includes("--write")) {
-    console.log(`written to data/: ${Object.entries(xref.write()).map(([t, n]) => `${t} ${n}`).join(", ")}`);
-    return 0;
-  }
   if (args[0] === "--who-calls" && args[1] !== undefined) {
     const needle = args[1].toUpperCase();
     for (const row of [...xref.cross, ...xref.wbcrossgt, ...xref.wbcrossgtx]) {
@@ -185,7 +178,7 @@ function main(args) {
     return 0;
   }
   console.log(`cross ${counts.cross}, wbcrossgt ${counts.wbcrossgt}, wbcrossgtx ${counts.wbcrossgtx}, d010inc ${counts.d010inc}`);
-  console.log("usage: osd-xref.mjs [--write] [--who-calls NAME]");
+  console.log("usage: osd-xref.mjs [--who-calls NAME]");
   return 0;
 }
 
