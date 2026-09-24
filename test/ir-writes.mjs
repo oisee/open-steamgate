@@ -6,8 +6,8 @@ import {readFileSync} from "node:fs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
-import {insertRows, insertFrom, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
-import {CASES, SEED, PAIRS_FILE, render, P_CASES, P_SEED, W_CASES, W_SEED, W_EXACT} from "../tools/ir-writes-pairs.mjs";
+import {insertRows, insertFrom, update, upsert, remove, bindValue, initialValue, WriteError} from "../tools/ir-writes.mjs";
+import {CASES, SEED, PAIRS_FILE, render, P_CASES, P_SEED, W_CASES, W_SEED, W_EXACT, R_CASES, R_SEED} from "../tools/ir-writes-pairs.mjs";
 import {T, lit, col, bin, project, scan} from "../tools/sqlscript-ir.mjs";
 
 const ENGINES = [
@@ -142,7 +142,54 @@ for (const {dialect, make} of ENGINES) describe(`a P 31,14 column written as IR,
   }
 });
 
+const R_AFTER = {
+  "INSERT a RAW as its 8 hex digits": ["1|0000000A", "2|DEADBEEF"],
+  "INSERT a short RAW: padded with 00": ["1|0000000A", "3|12000000"],
+  "INSERT a long RAW: cut to 4 bytes": ["1|0000000A", "4|12345678"],
+  "INSERT a text by the c -> x rule: the hex prefix, an odd count padded": ["1|0000000A", "5|ABC00000"],
+  "INSERT a lower-case text: the prefix ends at once (measured: 12ab gives 12000000, ANOMALY-2026-09-24-raw-columns)": ["1|0000000A", "7|12000000"],
+  "INSERT a text past F: no prefix, 4 zero bytes": ["1|0000000A", "8|00000000"],
+  "INSERT an empty text: 4 zero bytes": ["1|0000000A", "9|00000000"],
+  "MODIFY with the RAW left out writes 4 zero bytes": ["1|0000000A", "6|00000000"],
+};
+for (const {dialect, make} of ENGINES) describe(`a RAW column written as IR, on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "R" ("MANDT" VARCHAR(3), "ID" INTEGER, "R" VARCHAR(8), PRIMARY KEY ("MANDT", "ID"))', expect: "none"});
+    for (const [m, i, r] of R_SEED) await client.native({sql: `INSERT INTO "R" VALUES ('${m}', ${i}, '${r}')`, expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  for (const one of R_CASES) {
+    it(`${one.name}`, async () => {
+      await client.native({...lower(one.stmt(), dialect), expect: "none"});
+      const rows = (await client.native({sql: 'SELECT "ID", "R" FROM "R" ORDER BY "ID"', expect: "rows"})).rows.map((r) => `${Number(r.ID)}|${r.R}`);
+      expect(rows).to.deep.equal(R_AFTER[one.name]);
+    });
+  }
+});
+
 describe("writes as IR: the pairs and the refusals", () => {
+  it("binds a RAW as its upper-case hex, cut or padded with 00, and a text by the c -> x rule", () => {
+    const X = {abap: "X", len: 4};
+    expect(bindValue("DEADBEEF", X)).to.include({value: "DEADBEEF"});
+    // the prefix is [0-9A-F] only: lower case ends it, as any other character does
+    expect(bindValue("deadbeef", X)).to.include({value: "00000000"});
+    expect(bindValue("12", X)).to.include({value: "12000000"});
+    expect(bindValue("1234567890", X)).to.include({value: "12345678"});
+    expect(bindValue("ABC", X)).to.include({value: "ABC00000"});
+    expect(bindValue("ABCg12", X)).to.include({value: "ABC00000"});
+    expect(bindValue("", X)).to.include({value: "00000000"});
+    expect(bindValue(undefined, X)).to.include({value: "00000000"});
+    expect(initialValue(X)).to.include({value: "00000000"});
+    expect(initialValue({abap: "XSTRING"})).to.include({value: ""});
+    expect(bindValue("ABC", {abap: "XSTRING"})).to.include({value: "ABC0"});
+    // a number would go by the i -> x rule (12 is 0000000C), which is not this one
+    expect(() => bindValue(12, X)).to.throw(WriteError, /not a hex text/);
+    expect(() => bindValue(12n, X)).to.throw(WriteError, /not a hex text/);
+  });
   it("binds a packed value as the decimal string of its type, and refuses one a work area could not hold", () => {
     const P = {abap: "P", len: 15, dec: 2};
     expect(bindValue("12.5", P)).to.include({value: "12.50"});
