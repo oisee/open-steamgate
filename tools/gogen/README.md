@@ -1063,7 +1063,7 @@ OSGo runs `ZCL_OSD_DEMO_DATA=>BOOT( OSD_DEMO_ROWS )` after `boot` in a
 dialog step of its own; a dump there is logged and the server starts without
 the rows. Measured on the workstation, OSGo built from the demodata tree:
 20000 rows written in 571 ms on a new file, 332 ms for the unchanged second
-start, checksum 999629773 as on Node and A4H; the cube's 555 groups by
+start, checksum 999629773 as on Node and A4H (163171580 since the checksum folds the client, zone and payment in, #65 review); the cube's 555 groups by
 borough, payment and hour equal Node's. The OSG build went from 1195 to 1053
 statement stubs (11 of them in the demo classes).
 
