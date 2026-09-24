@@ -76,6 +76,11 @@ function intoVariable(value, fromType, type, name) {
   if (value == null) return null;
   if (type?.abap === "C" || type?.abap === "STRING") {
     const text = typeof value === "string" ? value : String(value);
+    // a character outside the BMP raised on A4H even with room to spare
+    // (NVARCHAR(10), two of them), and JavaScript counts it as two: refused
+    if (/[\uD800-\uDFFF]/.test(text)) {
+      throw new UnsupportedSqlScript(`${name}: a character outside the Basic Multilingual Plane is not carried (HANA raised on it, measured)`);
+    }
     if (type.abap === "C" && Number.isInteger(type.len) && text.length > type.len) {
       throw new ScalarTooLong(`${name}: ${JSON.stringify(text)} is longer than its ${type.len} characters; HANA raises CX_AMDP_EXECUTION_FAILED here`);
     }
@@ -101,9 +106,9 @@ function initialOf(type) {
  * longer than the field; a STRING keeps it as it is.
  */
 function intoOutput(value, type, name) {
-  // what ABAP receives for a scalar OUT the body set to NULL is not measured
-  // (only one left alone is), so it is refused rather than guessed
-  if (value == null) throw new UnsupportedSqlScript(`output ${name} was assigned NULL; what ABAP receives then is not measured yet`);
+  // NULL into a scalar output is its initial value: 0 for i, '' for string
+  // and c LENGTH 3, alone or beside others, OUT or RETURNING (measured on A4H)
+  if (value == null) return initialOf(type);
   if (type?.abap === "C") {
     const text = String(value).replace(/ +$/, "");
     // a guard, not the rule: the body's variable of this type was assigned
@@ -234,6 +239,16 @@ export function evaluateScalar(expr, scalars) {
     if (expr.args.length !== 2) throw new UnsupportedSqlScript("scalar COALESCE currently requires exactly two arguments", expr);
     const first = evaluateScalar(expr.args[0], scalars);
     return first == null ? evaluateScalar(expr.args[1], scalars) : first;
+  }
+  if (expr.node === "call" && (expr.fn === "UPPER" || expr.fn === "LOWER") && (expr.args ?? []).length === 1) {
+    const value = evaluateScalar(expr.args[0], scalars);
+    if (value == null) return null;
+    // one character in, one out, as on A4H: UPPER('äö') is 'ÄÖ', and
+    // UPPER('straße') keeps its ß (length 6) where JavaScript would write SS
+    return [...String(value)].map((ch) => {
+      const mapped = expr.fn === "UPPER" ? ch.toUpperCase() : ch.toLowerCase();
+      return [...mapped].length === 1 ? mapped : ch;
+    }).join("");
   }
   if (expr.node !== "bin") throw new UnsupportedSqlScript(`scalar ${expr.node} is not supported yet`, expr);
   const left = evaluateScalar(expr.left, scalars);
@@ -613,7 +628,8 @@ export async function runProcedure(program, {
     || (e.node === "bin" && hostCapable(e.left) && hostCapable(e.right)
       && (!(textual(e.left) || textual(e.right)) || ["||", "AND", "OR"].includes(e.op)
         || (["=", "<>", "!="].includes(e.op) && textual(e.left) && textual(e.right))))
-    || (e.node === "call" && e.fn === "COALESCE" && (e.args ?? []).length === 2 && e.args.every(hostCapable)));
+    || (e.node === "call" && e.fn === "COALESCE" && (e.args ?? []).length === 2 && e.args.every(hostCapable))
+    || (e.node === "call" && ["UPPER", "LOWER"].includes(e.fn) && (e.args ?? []).length === 1 && hostCapable(e.args[0])));
   // a comparison of a text with a number is not measured on HANA, and the
   // engines disagree (DuckDB raises, SQLite answers false): refused
   const mixedComparison = (e) => e != null && (
@@ -786,7 +802,7 @@ export async function runProcedure(program, {
     // value (an INTEGER into it is refused as not an identical measured type),
     // so it is always in range; the INT2 scalar boundary itself is unmeasured
     if (scalar.value == null) {
-      throw new UnsupportedSqlScript(`output ${program.output} was assigned NULL; what ABAP receives then is not measured yet`);
+      return {value: initialOf(program.outputType), outputType: program.outputType, trace: traced(steps)};
     }
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
       trace: traced(steps)};

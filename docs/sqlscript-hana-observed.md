@@ -603,11 +603,17 @@ deleted afterwards.
 | a STRING OUT assigned `'ab  '` | `'ab  '` in ABAP, the blanks kept |
 | a `c LENGTH 3` OUT assigned `'ab '` / `'abcdef'` | `'ab'` / raises |
 | a scalar OUT the path left alone | its initial value (`''`, `0`) |
+| a scalar OUT or RETURNING assigned NULL (`i`, `string`, `c LENGTH 3`; alone or beside others; a scalar function) | its initial value, no raise (2026-09-24) |
+| `UPPER(NCHAR(228) \|\| NCHAR(246))` / `LOWER` of the capitals | `'ÄÖ'` / `'äö'`: DuckDB agrees, SQLite and sql.js do not |
+| `UPPER('stra' \|\| NCHAR(223) \|\| 'e')` | `'STRAßE'`, length 6: one character in, one out (DuckDB writes the capital sharp s, JavaScript writes SS) |
+| `:i \|\| :i` with `i = 5` | `'55'` |
+| `''` in an NVARCHAR, `IS NULL` | false: an empty text is not NULL |
+| `NCHAR(128512) \|\| NCHAR(128512)` into NVARCHAR(2) or NVARCHAR(10) | raises in both |
 
 The portable runtime declares NVARCHAR / VARCHAR / CHAR / NCHAR of a length,
 NCLOB / CLOB, BIGINT and BOOLEAN. The host evaluates what is measured here
 itself -- literals, variables, `||`, `=` / `<>` between two texts, IS NULL,
-COALESCE -- so those mean what they mean on HANA on every backend and the IR
+COALESCE, UPPER / LOWER with the one-to-one mapping measured above -- so those mean what they mean on HANA on every backend and the IR
 needs no engine for them. Anything else (ordering a text, a CASE, a function)
 still goes to the engine as `SELECT <expr> FROM DUMMY` through the same
 lowering as a query, and is refused where the run has no engine; each such

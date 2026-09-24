@@ -551,10 +551,8 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
       IF :n IS NULL THEN rv = 99; ELSE rv = :n; END IF;`);
     expect((await run(nulled, 5)).value).to.equal(99);
     expect((await run(nulled, 1)).value).to.equal(1);
-    let caught;
-    try { await run(program("SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO rv FROM src WHERE id = :iv;"), 5); }
-    catch (error) { caught = error; }
-    expect(caught?.message).to.match(/output RV was assigned NULL; what ABAP receives then is not measured yet/);
+    // NULL into the output itself is its initial value (measured on A4H)
+    expect((await run(program("SELECT CASE WHEN id = 5 THEN NULL ELSE id END AS n INTO rv FROM src WHERE id = :iv;"), 5)).value).to.equal(0);
   });
 
   it("COUNT is BIGINT and fills an INTEGER scalar, always one row; MAX of no rows is NULL", async () => {
@@ -787,6 +785,29 @@ for (const {dialect, make, name = dialect} of [...ENGINES, SQLJS]) describe(`str
     expect(viaEngine.value).to.equal(2);
     expect(viaEngine.trace).to.include({engine: dialect, databaseStatements: 1});
     expect(viaEngine.trace.boundParameters).to.be.greaterThan(0);
+  });
+
+  it("UPPER and LOWER map one character to one, as on A4H, on every engine", async () => {
+    const text = async (body) => (await runProcedure(program(body, "RETURNING VALUE(rv) TYPE string"),
+      {client, dialect, inputCatalogue: CATALOGUE})).value;
+    expect(await text("DECLARE a NVARCHAR(10) = '\u00e4\u00f6'; rv = UPPER(:a);")).to.equal("\u00c4\u00d6");
+    expect(await text("DECLARE a NVARCHAR(10) = '\u00c4\u00d6'; rv = LOWER(:a);")).to.equal("\u00e4\u00f6");
+    // the sharp s stays itself (length 6 on A4H), not SS and not the capital sharp s
+    expect(await text("DECLARE a NVARCHAR(10) = 'stra\u00dfe'; rv = UPPER(:a);")).to.equal("STRA\u00dfE");
+  });
+
+  it("a number concatenated is its digits, and NULL into an output is its initial value", async () => {
+    const text = async (body) => (await runProcedure(program(body, "RETURNING VALUE(rv) TYPE string"),
+      {client, dialect, inputCatalogue: CATALOGUE})).value;
+    expect(await text("DECLARE i INTEGER = 5; rv = :i || :i;")).to.equal("55");
+    expect(await text("DECLARE b NVARCHAR(10); rv = :b;")).to.equal("");
+    expect(await value("DECLARE n INTEGER; rv = :n;")).to.equal(0);
+  });
+
+  it("refuses a character outside the BMP, on which HANA raised", async () => {
+    let caught;
+    try { await value("DECLARE a NVARCHAR(10) = '\ud83d\ude00'; rv = 1;"); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/outside the Basic Multilingual Plane is not carried/);
   });
 
   it("a text longer than the declared length raises, as on A4H", async () => {
