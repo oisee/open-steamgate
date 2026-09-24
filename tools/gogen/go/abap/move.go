@@ -1,5 +1,7 @@
 package abap
 
+import "strings"
+
 // A move into generic data: the target is a binding, so the value is
 // converted to the type of the slot it is bound to and written there, never
 // rebound (ABAP: <fs> = 5 writes into what <fs> points to). The pairs are
@@ -104,6 +106,27 @@ func MoveData(dst, src Data) {
 		if sk == 'X' {
 			*dst.P.(*string) = XFit(*src.P.(*string), dst.T.Len)
 			return
+		}
+	case 'N':
+		// characters into n: only the shape whose result is not a question,
+		// digits that fit, zero-padded on the left (the NUMC rule A4H showed
+		// for a literal, docs/osql-where.md: '400' into NUMC4 is 0400);
+		// blanks, signs, letters or a cut are conversion rules not measured
+		if sk == 'g' || sk == 'C' || (sk == 'N' && src.T.Len <= dst.T.Len) {
+			v := *src.P.(*string)
+			if sk == 'C' {
+				v = strings.TrimRight(v, " ")
+			}
+			digits := v != ""
+			for _, r := range v {
+				if r < '0' || r > '9' {
+					digits = false
+				}
+			}
+			if digits && len(v) <= dst.T.Len {
+				*dst.P.(*string) = strings.Repeat("0", dst.T.Len-len(v)) + v
+				return
+			}
 		}
 	case 'y', 'D', 'T':
 		if sk == dk {

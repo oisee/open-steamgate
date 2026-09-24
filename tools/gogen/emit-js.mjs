@@ -78,6 +78,7 @@ function desc(t) {
     case "d": return "abap.TD";
     case "p": return `abap.TP(${t.len ?? 8}, ${t.dec ?? 0})`;
     case "t": return "abap.TT";
+    case "n": return `abap.TN(${t.len})`;
     case "dref": return "abap.TRef";
     case "ref": case "exc": return "abap.TObj";
     case "struct": case "table": {

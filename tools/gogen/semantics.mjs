@@ -295,6 +295,13 @@ const EXPECT = {
   // measured): not assigned after, the variable and the row untouched; SE16's
   // ROWS_OF needs it
   ZCL_GOGEN_T_UNASSIGN: "XX/  /7/1",
+  // a string into an n through generic data: digits that fit, zero-padded
+  // (the NUMC rule A4H showed for a WHERE literal, docs/osql-where.md); a
+  // letter is not measured and refused. The SADL DPC's synthetic keys do the
+  // first (the aggregated flight cube's FACTID)
+  ZCL_GOGEN_T_MOVEN: "004711/012345",
+  ZCL_GOGEN_T_MOVENX: {Go: "ERROR NOT_COMPILED in move: a value of type kind g into generic data of type kind N at zcl_gogen_t_movenx.clas.abap:22",
+    JS: "ERROR NOT_COMPILED in move: a value of type kind g into generic data of type kind N"},
   ZCL_GOGEN_T_SELVIEWN: {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT at zcl_gogen_t_selviewn.clas.abap:11",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT"},

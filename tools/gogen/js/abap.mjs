@@ -635,6 +635,7 @@ export const TObj = {kind: "r"};
 export const TC = (n) => sizedType("C", n);
 export const TX = (n) => sizedType("X", n);
 export const TP = (n, dec) => sizedType("P", n, dec);
+export const TN = (n) => sizedType("N", n);
 
 // a value that is no place of its own, seen as generic data: a slot of its own
 export function cell(v, t) {
@@ -729,6 +730,7 @@ export function IsInitialData(d) {
     case "g": case "y": case "C": return v === "";
     case "D": return v === "" || v === "00000000";
     case "T": return v === "" || v === "000000";
+    case "N": return /^0*$/.test(v);
     case "X": return /^\u0000*$/.test(v);
     case "P": return v.replaceAll(".", "").replace(/^[0-]+/, "") === "";
     case "h": return v.length === 0;
@@ -802,6 +804,14 @@ export function MoveData(dst, src) {
     case "X":
       if (sk === "X") return dst.set(XFit(v, dst.t.len));
       break;
+    case "N": {
+      // digits that fit, zero-padded (go/abap MoveData)
+      if (sk === "g" || sk === "C" || (sk === "N" && src.t.len <= dst.t.len)) {
+        const x = sk === "C" ? v.replace(/ +$/, "") : v;
+        if (/^[0-9]+$/.test(x) && x.length <= dst.t.len) return dst.set(x.padStart(dst.t.len, "0"));
+      }
+      break;
+    }
     case "y": case "D": case "T":
       if (sk === dk) return dst.set(v);
       break;
