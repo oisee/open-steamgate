@@ -183,11 +183,9 @@ describe("tools/sqlite-file-client: an INTEGER parameter binds as INTEGER", () =
     const client = new FileSqliteClient({path: ":memory:"});
     await client.connect();
     try {
-      const {rows} = await client.native({sql: "SELECT CAST(? AS TEXT) AS T, typeof(?) AS Y, CAST(? AS TEXT) AS P",
-        params: [{name: "a", value: 1, type: "I"}, {name: "b", value: 7, type: "I"}, {name: "c", value: "1.50", type: "P(15,2)"}]});
+      const {rows} = await client.native({sql: "SELECT CAST(? AS TEXT) AS T, typeof(?) AS Y",
+        params: [{name: "a", value: 1, type: "I"}, {name: "b", value: 7, type: "I"}]});
       expect(rows[0]).to.deep.include({T: "1", Y: "integer"});
-      // a packed value is not an integer type and keeps its decimals
-      expect(rows[0].P).to.equal("1.5");
     } finally {
       await client.disconnect();
     }

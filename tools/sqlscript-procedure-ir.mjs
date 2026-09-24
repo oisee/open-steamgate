@@ -378,9 +378,14 @@ function freezeExpr(expr, scalars, freezeRel, session) {
 export function orderedRelation(rel) {
   let hidden = 0;
   const singleRow = (r) => r?.rel === "project" && r.input?.rel === "scan" && upper(r.input.table) === "DUMMY";
-  const ordered = (r) => {
+  // `ties`: the output columns an ORDER BY sorted by (null: no ties). Only
+  // the cursor query's own ORDER BY counts -- one inside, as a caller's
+  // relation or a table variable brings it, HANA may drop (the compiler's
+  // rule, orderOf); ties are carried through renames the way it does
+  const ordered = (r, top) => {
     switch (r?.rel) {
       case "order": {
+        if (!top) return undefined;
         let input = r.input;
         // a key the projection below does not output is added to it
         if (input?.rel === "project") {
@@ -390,29 +395,30 @@ export function orderedRelation(rel) {
           if (input.distinct && missing.length > 0) return undefined;
           if (missing.length > 0) input = {...input, items: [...input.items, ...missing.map((k) => ({as: k.col, expr: col(k.col, undefined)}))]};
         }
-        return {rel: input, keys: r.keys};
+        return {rel: input, keys: r.keys, ties: new Set(r.keys.map((k) => upper(k.col)))};
       }
-      case "filter": { const o = ordered(r.input); return o && {rel: {...r, input: o.rel}, keys: o.keys}; }
-      case "alias": { const o = ordered(r.input); return o && {rel: {...r, input: o.rel}, keys: o.keys}; }
+      case "filter": { const o = ordered(r.input, false); return o && {rel: {...r, input: o.rel}, keys: o.keys, ties: o.ties}; }
+      case "alias": { const o = ordered(r.input, false); return o && {rel: {...r, input: o.rel}, keys: o.keys, ties: o.ties}; }
       case "project": {
         if (r.distinct) return undefined;
-        const o = ordered(r.input);
+        const o = ordered(r.input, false);
         if (o === undefined) return undefined;
         const carried = o.keys.map((k) => ({key: k, as: `__ORD${hidden++}`}));
+        const ties = o.ties === null ? null : new Set(r.items.filter((item) => item.expr?.node === "col" && o.ties.has(upper(item.expr.name))).map((item) => upper(item.as)));
         return {rel: {...r, input: o.rel, items: [...r.items, ...carried.map((c) => ({as: c.as, expr: col(c.key.col, undefined)}))]},
-          keys: carried.map((c) => ({col: c.as, desc: c.key.desc}))};
+          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties};
       }
-      case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: []} : undefined;
+      case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: [], ties: null} : undefined;
       case "union": {
         if (r.all !== true || !r.inputs.every(singleRow)) return undefined;
         const name = `__ORD${hidden++}`;
         return {rel: {...r, inputs: r.inputs.map((part, i) => ({...part, items: [...part.items, {as: name, expr: lit(i, T.int)}]}))},
-          keys: [{col: name, desc: false}]};
+          keys: [{col: name, desc: false}], ties: null};
       }
       default: return undefined;
     }
   };
-  return ordered(rel);
+  return ordered(rel, true);
 }
 
 export function freezeRelation(rel, relations, scalars, session = {}) {
@@ -823,6 +829,12 @@ export async function runProcedure(program, {
         const known = orderedRelation(frozen);
         if (known === undefined) {
           const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: the order of its rows is not known at run time`, statement);
+          refusal.reason = "order";
+          throw refusal;
+        }
+        const outside = known.ties === null ? [] : Object.keys(statement.schema).filter((column) => !known.ties.has(upper(column)));
+        if (outside.length > 0) {
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and the loop reads ${outside.join(", ")}`, statement);
           refusal.reason = "order";
           throw refusal;
         }

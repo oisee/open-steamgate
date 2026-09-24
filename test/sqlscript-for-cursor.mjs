@@ -4,10 +4,10 @@
 // order a cursor's rows come in"). A loop over an unknown order is refused.
 import {expect} from "chai";
 import {compileProcedure, orderOf} from "../tools/sqlscript-to-procedure-ir.mjs";
-import {runProcedure, orderedRelation, UnsupportedSqlScript} from "../tools/sqlscript-procedure-ir.mjs";
+import {runProcedure, orderedRelation, UnsupportedSqlScript, procedure, forCursor, assignScalar} from "../tools/sqlscript-procedure-ir.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
-import {project, union, scan, lit, filter, order, join, bin, col, aggregate, limit, subquery, T} from "../tools/sqlscript-ir.mjs";
+import {project, union, scan, lit, filter, order, join, bin, col, aggregate, limit, subquery, varRef, T} from "../tools/sqlscript-ir.mjs";
 
 const TYPES = new Map([["TT", {kind: "table", of: "TY"}],
   ["TY", {kind: "structure", components: [{name: "n", abapType: "i"}, {name: "k", abapType: "i"}]}]]);
@@ -88,6 +88,16 @@ describe("the order of a relation's rows, as the compiler classifies it", () => 
       FOR r AS c DO lt = SELECT n FROM :it WHERE n > 1; v = :v || r.n; END FOR; ev = :v;`).message).to.match(/a table it reads is assigned inside the loop/);
   });
 
+  it("carries ties through a rename: ORDER BY an alias it reads is fine, reading past it is not", () => {
+    expect(() => compile(LOOP("SELECT n AS m FROM :it ORDER BY m").replace(/r\.n/g, "r.m"))).not.to.throw();
+    const it = {rel: "var", name: "IT"};
+    const known = orderedRelation(order(project(IT, [{as: "KK", expr: col("K", T.int)}, {as: "N", expr: col("N", T.int)}]), [{col: "KK", desc: false}]));
+    expect([...known.ties]).to.deep.equal(["KK"]);
+    // an ORDER BY below the cursor's own query, as a caller's relation brings it, counts for nothing
+    expect(orderedRelation(project(filter(order(IT, [{col: "K", desc: false}]), lit(true, T.bool)), [{as: "N", expr: col("N", T.int)}]))).to.equal(undefined);
+    expect(it.rel).to.equal("var");
+  });
+
   it("a query's own source named like the row wins, and the row is gone after END FOR", () => {
     // inside the loop, `r.n` in a query FROM :it AS r is the table's column
     expect(() => compile(`DECLARE v NVARCHAR(100) = ''; DECLARE m INTEGER; DECLARE CURSOR c FOR SELECT n, k FROM :it;
@@ -107,9 +117,14 @@ describe("the order of a relation's rows, as the compiler classifies it", () => 
     const numbered = orderedRelation(IT);
     expect(numbered.keys).to.have.length(1);
     expect(numbered.rel.inputs.map((part) => part.items.at(-1).expr.value)).to.deep.equal([0, 1, 2]);
-    const projected = orderedRelation(project(order(IT, [{col: "K", desc: true}]), [{as: "N", expr: col("N", T.int)}]));
-    expect(projected.rel.items.map((one) => one.as)).to.deep.equal(["N", "__ORD0"]);
-    expect(projected.keys).to.deep.equal([{col: "__ORD0", desc: true}]);
+    // the caller's positions, carried as a hidden column through a projection above them
+    const projected = orderedRelation(project(IT, [{as: "N", expr: col("N", T.int)}]));
+    expect(projected.rel.items.map((one) => one.as)).to.deep.equal(["N", "__ORD1"]);
+    expect(projected.keys).to.deep.equal([{col: "__ORD1", desc: false}]);
+    expect(projected.ties).to.equal(null);
+    // the cursor's own ORDER BY, over the projection it orders
+    const own = orderedRelation(order(project(IT, [{as: "N", expr: col("N", T.int)}]), [{col: "N", desc: true}]));
+    expect(own.keys).to.deep.equal([{col: "N", desc: true}]);
     expect(orderedRelation(scan("SFLIGHT"))).to.equal(undefined);
   });
 });
@@ -129,6 +144,21 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
       expect(out.trace.order).to.deep.equal([{cursor: "C", order: "inherited(the caller's rows of :it)",
         basis: "observed:docs/sqlscript-hana-observed.md#the-order-a-cursors-rows-come-in", keys: ["__ORD1"], opened: 1}]);
     });
+    it("refuses at run time a loop reading past its ORDER BY's keys, whatever the compiler was told", async () => {
+      // a program built by hand, as another front end could: ORDER BY K, the loop reads N too
+      const program = procedure({
+        relationParameters: [{name: "IT", schema: {N: T.int, K: T.int}}], output: "RV", outputType: T.int,
+        body: [
+          forCursor("R", "C", order(project(varRef("IT"), [{as: "N", expr: col("N", T.int)}, {as: "K", expr: col("K", T.int)}]), [{col: "K", desc: false}]),
+            {N: T.int, K: T.int}, [], {kind: "defined", why: "told so", ties: null}),
+          assignScalar("RV", lit(1, T.int)),
+        ]});
+      let caught;
+      try { await runProcedure(program, {client, dialect, relationInputs: {IT}}); } catch (error) { caught = error; }
+      expect(caught).to.include({reason: "order"});
+      expect(caught.message).to.match(/rows equal in its ORDER BY come in any order, and the loop reads N/);
+    });
+
     it("refuses at run time a caller's table whose rows have no positions (a database table)", async () => {
       await client.native({sql: 'CREATE TABLE IF NOT EXISTS "SRC" ("N" INTEGER, "K" INTEGER)', expect: "none"});
       let caught;

@@ -171,7 +171,12 @@ export const DIALECTS = {
   },
   sqlite: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
-    placeholder: () => "?",
+    // SQLite types a parameter by the value bound: node:sqlite binds every
+    // JavaScript number as REAL, sql.js any number past int32 as REAL, and an
+    // INTEGER read back as text was then '1.0' where HANA gives '1'
+    // (measured 2026-09-24). An integer parameter says what it is, as the
+    // HANA dialect's already does
+    placeholder: (_n, type) => (/^(?:[IBS](?:\(|$)|INT8$)/.test(String(type ?? "").toUpperCase()) ? "CAST(? AS INTEGER)" : "?"),
     // `/` over two integers truncates here and does NOT on HANA, so a
     // decimal division has to be forced. This is the typed rewrite the
     // conformance table found, and it exists only for this engine.
