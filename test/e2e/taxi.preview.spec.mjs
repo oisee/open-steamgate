@@ -20,12 +20,12 @@ test("browser SQLite preview serves taxi F4 values and applies the selection", a
     await expect(valueHelp).toBeVisible();
     await valueHelp.click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText("Items (4)");
+    await expect(dialog).toContainText("Items (8)");
     const row = dialog.getByRole("row", {name: /Manhattan/});
     const selectionId = (await row.getAttribute("aria-owns")).split(" ")[0];
     await page.locator(`[id="${selectionId}"]`).click();
     await dialog.getByRole("button", {name: "OK", exact: true}).click();
-    await expect(page.locator("body")).toContainText("Taxi trips (1)");
+    await expect(page.locator("body")).toContainText("Taxi trips (331)");
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});

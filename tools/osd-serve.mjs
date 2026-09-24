@@ -13,6 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep} from "./osd-dialog-step.mjs";
+import {ensureDemoData} from "./osd-demo-data.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
 import express from "express";
 import {join} from "node:path";
@@ -76,6 +77,8 @@ const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections
 await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
+// the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
+await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
 
 const app = express();
 app.disable("x-powered-by");
