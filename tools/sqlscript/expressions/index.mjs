@@ -288,7 +288,22 @@ export class Select extends Expression {
       opt(seq(str("HAVING"), new Condition())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
       opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))),
+      opt(new ForUpdate()),
       opt(new Hint()));
+  }
+}
+
+/** `FOR UPDATE [OF col, ...] [NOWAIT | WAIT n]`: a row lock until the LUW
+ *  ends, measured on HXE 2.00.088 (docs/sqlscript-hana-observed.md, "FOR
+ *  UPDATE") -- the same rows as without it, and refused in a READ-ONLY
+ *  procedure. The portable engines have one work process
+ *  (tools/osd-dialog-step.mjs), so no other step can hold the rows and the
+ *  lock changes nothing there; it is read and not rendered. */
+export class ForUpdate extends Expression {
+  getRunnable() {
+    return seq(str("FOR"), str("UPDATE"),
+      opt(seq(str("OF"), new Expr(), star(seq(",", new Expr())))),
+      opt(altPrio(str("NOWAIT"), seq(str("WAIT"), new Expr()))));
   }
 }
 
@@ -339,7 +354,8 @@ export class SetOperation extends Expression {
     return seq(opt(seq(str("WITH"), opt(str("RECURSIVE")), new CteDef(), star(seq(",", new CteDef())))), new Select(),
       star(seq(altPrio(seq(str("UNION"), opt(str("ALL"))), str("INTERSECT"), str("EXCEPT")), new Select())),
       opt(seq(str("ORDER"), str("BY"), new OrderKey(), star(seq(",", new OrderKey())))),
-      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))));
+      opt(seq(str("LIMIT"), new Expr(), opt(seq(str("OFFSET"), new Expr())))),
+      opt(new ForUpdate()));
   }
 }
 

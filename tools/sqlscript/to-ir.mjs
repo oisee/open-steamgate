@@ -1129,6 +1129,12 @@ export function toIr(tree, options = {}) {
   }
 
   function select(node) {
+    // `FOR UPDATE` (ForUpdate) is a row lock until the LUW ends: the same rows
+    // on HANA (measured, HXE 2.00.088), and on the portable engines, which
+    // have one work process (tools/osd-dialog-step.mjs), no other step can
+    // hold them. Read, and not rendered; READ-ONLY refuses it in the
+    // procedure compiler, as HANA does when it creates the procedure.
+    void kid(node, "ForUpdate");
     // `SELECT ... INTO v` fills scalars; it is a statement, and the procedural
     // compiler takes the IntoClause off before binding what is left as a
     // relation. One that reaches here stands where rows were expected.
