@@ -72,7 +72,13 @@ keeps the element `Zone`, so the OData property is still `ZONE`. A DuckDB
 file booted or imported before the rename is migrated when a server opens it
 and when the import runs (`tools/osd-db-migrate.mjs`): the column is renamed
 in place, the rows stay, and the file's views are made again from the
-running build. Nothing needs to be imported again.
+running build, all in one transaction. Nothing needs to be imported again.
+The migration is one way: a build from before the rename cannot read the
+file afterwards. A view in the file that the running build does not have (a
+deleted CDS view, one made by hand) is named in the log and left as it is;
+if it selects `zone`, it no longer works. A kept HANA schema
+(`STG_DB=hana`) is not migrated: the boot refuses it and names
+`STG_DB_FRESH=1`.
 
 Adding the DDIC table changes the generated schema. Existing OSD database
 volumes need the planned non-destructive migration before this branch can be

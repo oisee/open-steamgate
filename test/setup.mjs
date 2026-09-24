@@ -203,6 +203,9 @@ export async function setup(abap, schemas, insert) {
     if (await db.hasSchema() && db.droppedSchema !== true) {
       await requireCurrentSchema(db, hanaSchema(schemas, ddicBinary), "HANA",
         "Use a fresh HANA_SCHEMA, or explicitly recreate it with STG_DB_FRESH=1");
+      // not migrated: a column renamed since is named, not met at a SELECT
+      const {refuseUnmigratedHana} = await import("../tools/osd-db-migrate.mjs");
+      await refuseUnmigratedHana(db, db.schema);
       return;
     }
     await db.execute(hanaSchema(schemas, ddicBinary));
@@ -219,17 +222,19 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_PATH && await db.hasSchema()) {
-      // a file made by an earlier build: the column renames since then are
-      // applied before anything reads it, and its views are the running
-      // generation's (tools/osd-db-migrate.mjs)
-      const {migrateDuckdbColumns, refreshDuckdbViews} = await import("../tools/osd-db-migrate.mjs");
-      const access = {query: (sql) => db.query(sql), execute: (sql) => db.execute(sql)};
-      for (const done of await migrateDuckdbColumns(access)) {
-        console.log(`${process.env.STG_DB_PATH}: renamed ${done}`);
-      }
-      await refreshDuckdbViews(access, duckdbSchema(schemas));
       await requireCurrentSchema(db, duckdbSchema(schemas), "DuckDB",
         "Use a new STG_DB_PATH after preserving the old file");
+      // a file made by an earlier build: the column renames since then are
+      // applied before anything reads it, and its views are the running
+      // generation's, in one transaction (tools/osd-db-migrate.mjs)
+      const {migrateDuckdbFile} = await import("../tools/osd-db-migrate.mjs");
+      const migrated = await migrateDuckdbFile({query: (sql) => db.query(sql), execute: (sql) => db.execute(sql)}, duckdbSchema(schemas));
+      for (const done of migrated.renamed) {
+        console.log(`${process.env.STG_DB_PATH}: renamed ${done}`);
+      }
+      if (migrated.foreign.length > 0) {
+        console.log(`${process.env.STG_DB_PATH}: views this build does not have, left as they are: ${migrated.foreign.join(", ")}`);
+      }
       // A persistent database keeps its business rows, but the generated
       // repository catalog must follow the running generation. Otherwise a
       // new BSP page is in the registry while its WWWPARAMS object is absent.
