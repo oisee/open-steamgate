@@ -207,6 +207,11 @@ ABAP) and the generated classes with their XML (`GenerateSet`). The test
 compiles the demo YAML, imports it and expects the registration objects to
 equal stg-compile's byte for byte and the classes segw-gen's.
 
+`segw:tree repo` refuses to write unless a unit of `deploy/manifest.json`
+lists every object of the repository and none has an SAP-owned name (the
+check `segw:zip` makes, `docs/a4h-deploy.md`); the OData sets are not
+checked and are not a route to a system on their own.
+
 That is how a project reaches a system: abapGit pulls the repository and
 creates and activates the classes, we write nothing into a live system.
 The other route, a class that creates and activates objects through the

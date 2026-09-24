@@ -24,8 +24,11 @@ What travels, in the order it was made to travel:
 | 007 | one seed row fewer | a client-dependent row does not survive a client-rewriting import |
 | 008 | the Fiori app as a BSP application **and its ICF node** | the system serves the page |
 
-`.local/make-level.sh <nnn>` builds one attempt; `tools/osd-bsp-app.mjs`
-builds the application. Both are described at the end.
+An attempt was assembled by a local script that is no longer kept; the
+recipe is `tools/osd-rename.mjs` over the compiled project, its `_EXT` pair
+and its DDIC, then `segw:zip --unit demo` (the test in
+`test/osd-abapgit-zip.mjs` rebuilds attempt 004 exactly that way).
+`tools/osd-bsp-app.mjs` builds the application. Both are described at the end.
 
 ---
 
@@ -391,13 +394,78 @@ Measured through OSD into A4H: `POST TravelSet` inside a changeset answered
 | command | what it makes |
 | --- | --- |
 | `npm run stg:compile -- <x>.stg.yaml` | IWPR + IWSV/IWMO + the four classes |
-| `npm run segw:zip -- <folder> --out <f>.zip [--data <dir>]` | an abapGit offline repository; refuses a nested folder, drops other-client rows, names what it did not carry |
+| `npm run segw:zip -- <folder> --out <f>.zip [--unit <u>] [--data <dir>]` | an abapGit offline repository of one deploy unit; refuses anything the unit does not list and any SAP-owned name, refuses a nested folder, drops other-client rows, names what it did not carry |
 | `node tools/osd-rename.mjs --from ZSTG_ --to ZOSD_008_ …` | a whole object set under another prefix, re-padding the versioned names |
 | `node tools/osd-bsp-app.mjs <webapp> --name <APP> --out <dir> [--service <SRV>]` | a BSP application and its ICF node; refuses a name over 15 |
-| `.local/make-level.sh <nnn> [outdir]` | one numbered attempt, end to end |
 
 The zips of one evening are eight numbered files; nothing about the route
 depends on which number an attempt has.
+
+## What may leave for a system
+
+This tree reimplements SAP's public API under SAP's own names (`CL_*`,
+`IF_*`, `CX_*`, `/IWBEP/*`, `/UI2/*`) and keeps kernel stand-ins beside it.
+None of that may ever be imported into a system: a class named like a
+delivered one would replace it. The zip used to copy every file of its folder
+and refuse one kind of object, a node on a path the system delivers. That is
+a blocklist, and it is only as good as the last thing somebody thought of.
+
+So what ships is a list. [`deploy/manifest.json`](../deploy/manifest.json)
+names each **deploy unit** and every object it carries, by type and name
+(`CLAS ZCL_ZSTG_DEMO_MPC`, `IWSV ZSTG_DEMO_SRV 0001`, a node by its URL,
+`TABU <table>` for rows). `tools/osd-abapgit-zip.mjs` fails closed on it
+(`tools/osd-deploy-manifest.mjs`):
+
+- **an object the unit does not list is refused**, and so is a data table
+  whose rows the unit does not list, and a file that is not an object;
+- **an SAP-owned name is refused even when it is listed**: `CL_`/`IF_`/`CX_`,
+  any `/namespace/` the manifest does not declare as a customer namespace
+  (`/IWBEP/`, `/UI2/`, `/OSD/` alike), and anything outside `Y*`/`Z*`, which
+  is where the standard DDIC lives. An entry
+  `{"object": "...", "intended": "<why>"}` is the one way past it;
+- **without a unit nothing goes.** The unit is the one whose `sources` name
+  the input, or `--unit <name>`. Its `data` is the default `--data`, and its
+  `customerNamespaces` add to the manifest's.
+
+Every refusal names the object, the file and the rule, and nothing is copied
+on the way to refusing. A unit may carry `{nnn}` in a name for an attempt
+number, and `attempt: {from, to}` accepts its names as `tools/osd-rename.mjs`
+renames them, so `ZSTG_DEMO` and `ZOSD_004_DEMO` are the same entry and
+`ZOSD_X_DEMO` is not.
+
+The other writer of a repository, `zcl_stg_segw_repo`, goes through the
+same check when it is taken out: `npm run segw:tree repo <P> --out <dir>
+[--zip <f>] [--unit u]` admits the project's files against the unit that
+lists `IWPR <P>` before it writes anything, refuses a path outside `src/`
+other than `.abapgit.xml`, and makes the zip here out of the admitted files
+rather than fetching `RepoSet`'s, so the bytes that leave are the bytes that
+were checked. `GET RepoFileSet` and
+`GET RepoSet('P')` themselves are the tree's export over OData and are **not**
+checked; they are not a route to a system unless they pass through that
+command or through `segw:zip`.
+
+**What v1 checks is names.** An object's own name, and it is taken from
+the file **and** from the XML, which must agree: abapGit creates the object
+the XML names (its CLAS deserializer takes `VSEOCLASS-CLSNAME`), so a
+`zcl_ok.clas.xml` carrying `CL_GUI_ALV_GRID` is refused, and so is a type
+for which no rule says which tag holds the name (`NAME_TAGS` in
+`tools/osd-deploy-manifest.mjs`). A function group is named by its file, and
+its includes must be its own (`L<group>*`, `SAPL<group>`). Beyond that, an
+ICF node's `ICF_NAME`, and the names an object creates that its files
+already state: each `FUNCNAME` of a function group and a DDLS's SQL view in
+any spelling (`@AbapCatalog.sqlViewName`, `@AbapCatalog: { sqlViewName }`,
+`sqlViewAppendName`). An enhancement (`ENHO`, `ENHS`, `ENHC`, `ENSC`)
+changes an SAP object rather than adding one, and is refused by its type.
+The object part of a file name is `[a-z0-9_#-]`, and only the suffixes
+abapGit writes are accepted. Anything else an object creates when it is
+activated -- a message class's messages, whatever a class does at runtime --
+is not read.
+
+The units today are what has reached A4H: `demo` (the service, its DDIC and
+rows), `demo-app` (the BSP application and its node), `lsd-a4h-011` and
+`zvdb`. `packs/lsd` is not one, and the rule says why: its player node is
+named `LSD`, outside the customer namespace, which is why the installation
+went as `ZOSD_011_LSD`.
 
 ## A BSP page round trip does not preserve bytes
 

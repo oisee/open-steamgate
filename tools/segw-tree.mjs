@@ -19,7 +19,9 @@
 // ExportSet('P'), the file written by zcl_stg_segw_export in ABAP
 // (--rows instead: GET every set ordered by StgSeq and write it here).
 // repo writes the whole abapGit repository of a project (RepoFileSet, and
-// RepoSet for the same as one zip), what a system pulls to have it.
+// RepoSet for the same as one zip), what a system pulls to have it -- and
+// only when a unit of deploy/manifest.json lists every object in it
+// (--unit, or the unit that lists IWPR <PROJECT>), never an SAP-owned name.
 //
 // Usage: node tools/segw-tree.mjs import <file.iwpr.xml> [--data data]
 //        node tools/segw-tree.mjs export <PROJECT> [--data data] [--out <file>]
@@ -27,11 +29,14 @@
 //        node tools/segw-tree.mjs push <file.iwpr.xml> [--rows] [--url http://localhost:3030]
 //        node tools/segw-tree.mjs pull <PROJECT> [--rows] [--url http://localhost:3030] [--out <file>]
 //        node tools/segw-tree.mjs generate <PROJECT> [--url http://localhost:3030] [--out <dir>]
-//        node tools/segw-tree.mjs repo <PROJECT> --out <dir> [--zip <file>] [--url ...]
-import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+//        node tools/segw-tree.mjs repo <PROJECT> --out <dir> [--zip <file>] [--unit u] [--url ...]
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {admit, loadManifest, refusalMessage, unitForProject} from "./osd-deploy-manifest.mjs";
+import {zip as zipFolder} from "./osd-abapgit-zip.mjs";
 
 export const DATA_DIR = "data";
 export const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
@@ -238,6 +243,26 @@ export async function repoFiles(base, project) {
   return Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
 }
 
+/** The repository's objects against deploy/manifest.json: the same check
+ *  osd-abapgit-zip makes, because this is the other writer of a repository
+ *  a system can pull. Throws with every refusal named. Only `.abapgit.xml`
+ *  and flat `src/` objects may be in it; the zip is then made here out of
+ *  the admitted files, never fetched from RepoSet, so the bytes that leave
+ *  are the bytes that were checked. */
+export function admitRepo(files, project, {manifest = loadManifest(), unit} = {}) {
+  const chosen = unitForProject(manifest, project, unit);
+  const src = Object.fromEntries(Object.entries(files)
+    .filter(([name]) => name.startsWith("src/")).map(([name, content]) => [name.slice(4), content]));
+  const nested = Object.keys(src).filter((n) => n.includes("/"));
+  const refusals = admit({files: Object.keys(src).filter((n) => !n.includes("/")), read: (f) => src[f], unit: chosen});
+  for (const n of nested) refusals.push({file: n, key: "?", rule: "not-an-object", why: "a sub-folder is a sub-package"});
+  for (const n of Object.keys(files).filter((p) => !p.startsWith("src/") && p !== ".abapgit.xml")) {
+    refusals.push({file: n, key: "?", rule: "not-an-object", why: "outside src/, and not .abapgit.xml"});
+  }
+  if (refusals.length > 0) throw new Error(refusalMessage(`RepoFileSet ${project}`, refusals));
+  return chosen;
+}
+
 // the same as one zip (base64 from the service)
 export async function repoZip(base, project) {
   const json = await odata(base, "GET", `/RepoSet('${encodeURIComponent(project).replaceAll("'", "''")}')?$format=json`);
@@ -275,7 +300,7 @@ export function firstDifference(a, b) {
   return undefined;
 }
 
-async function main(args) {
+export async function main(args) {
   const spec = readSpec();
   const opt = (name, fallback) => {
     const at = args.indexOf(name);
@@ -361,22 +386,31 @@ async function main(args) {
   if (cmd === "repo") {
     const out = opt("--out");
     const files = await repoFiles(url, rest[0]);
-    for (const [name, content] of Object.entries(files)) {
-      if (out) {
-        const target = join(out, name);
+    // fail closed before anything is written: this is a route to a system
+    try {
+      admitRepo(files, rest[0], {unit: opt("--unit")});
+    } catch (e) {
+      console.error(e.message);
+      return 1;
+    }
+    const zipFile = opt("--zip");
+    // the zip is made from exactly the admitted files, not fetched again
+    const into = out ?? (zipFile ? mkdtempSync(join(tmpdir(), "segw-repo-")) : undefined);
+    if (into) {
+      for (const [name, content] of Object.entries(files)) {
+        const target = join(into, name);
         mkdirSync(dirname(target), {recursive: true});
         writeFileSync(target, content);
       }
     }
-    const zipFile = opt("--zip");
     if (zipFile) {
-      const {zip} = await repoZip(url, rest[0]);
-      writeFileSync(zipFile, zip);
+      zipFolder(into, zipFile);
+      if (!out) rmSync(into, {recursive: true, force: true});
     }
     console.log(`${rest[0]}: ${Object.keys(files).length} files${out ? ` written to ${out}/` : ""}${zipFile ? `, zip ${zipFile}` : ""}`);
     return 0;
   }
-  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>... [--data dir] | push <file> | pull <PROJECT> [--out f] | generate <PROJECT> [--out dir] | repo <PROJECT> --out <dir> [--zip f] [--url u]");
+  console.log("usage: segw-tree.mjs import <file> | export <PROJECT> [--out f] | check <file>... [--data dir] | push <file> | pull <PROJECT> [--out f] | generate <PROJECT> [--out dir] | repo <PROJECT> --out <dir> [--zip f] [--unit u] [--url u]");
   return 2;
 }
 

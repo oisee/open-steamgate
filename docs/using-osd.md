@@ -449,13 +449,17 @@ system checks and this runtime does not, is
 ### The service
 
 ```bash
-npm run segw:zip -- src/demo --out /tmp/zstg_demo.zip --data data
+npm run segw:zip -- src/demo/zstg_demo.stg.yaml --out /tmp/zstg_demo.zip --data data
 ```
 
 In abapGit on the system: **New Offline Repository** → pick a package →
 *Import zip* → *Pull zip*. The zip names no package, so nothing in it
 decides where it lands.
 
+Only what the deploy unit `demo` in `deploy/manifest.json` lists goes in,
+and never an SAP-owned name (`CL_`, `IF_`, `CX_`, a foreign `/namespace/`,
+the standard DDIC); anything else refuses the build and is named
+([`a4h-deploy.md`](a4h-deploy.md#what-may-leave-for-a-system)).
 It prints what it carried, **by object and not by file**, and names what it
 did not carry and why — a `.tabu.json` with no `.conf.json` beside it, a row
 written for a client other than the file's own (abapGit deserializes into
@@ -483,7 +487,7 @@ creates the first and not the second, so both are generated:
 ```bash
 node tools/osd-bsp-app.mjs webapp --name ZOSD_008_APP --out <dir> \
      --service ZOSD_006_DEMO_SRV
-npm run segw:zip -- <dir> --out /tmp/app.zip
+npm run segw:zip -- <dir> --unit demo-app --out /tmp/app.zip
 ```
 
 The name is at most **15 characters** — it becomes the ICF node name — and

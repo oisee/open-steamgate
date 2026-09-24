@@ -1,12 +1,15 @@
 // What goes into a zip that reaches a real system, and what must not.
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 import {createHash} from "node:crypto";
 import {layout, preparePack} from "../tools/osd-abapgit-zip.mjs";
-import {icfNodeFile, pageFile} from "../tools/osd-bsp-app.mjs";
+import {buildApp, icfNodeFile, pageFile} from "../tools/osd-bsp-app.mjs";
 import {SAP_DELIVERED} from "../tools/osd-nodes.mjs";
+import {MANIFEST, loadManifest, objectOf, unitFor} from "../tools/osd-deploy-manifest.mjs";
+import {compileFile} from "../tools/stg-compile.mjs";
+import {renameAll} from "../tools/osd-rename.mjs";
 
 const node = (url, name) => `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_SICF">
@@ -14,6 +17,9 @@ const node = (url, name) => `<?xml version="1.0" encoding="utf-8"?>
    <URL>${url}</URL>
    <ICFSERVICE><ICF_NAME>${name}</ICF_NAME><ORIG_NAME>${name.toLowerCase()}</ORIG_NAME></ICFSERVICE>
  </asx:values></asx:abap></abapGit>`;
+
+// the deploy unit a probe folder is, listing exactly what each test puts in
+const probe = (...objects) => ({name: "probe", objects});
 
 describe("tools/osd-abapgit-zip: what may leave for a system", () => {
   it("the LSD service has the filename required by the A4H abapGit SICF mapper", () => {
@@ -52,7 +58,7 @@ describe("tools/osd-abapgit-zip: what may leave for a system", () => {
 
   it("an ordinary node of ours goes in", () => {
     writeFileSync(join(dir, "zosd_thing.sicf.xml"), node("/sap/bc/osd/thing/", "ZOSD_THING"));
-    const made = layout(dir, out, "a probe");
+    const made = layout(dir, out, "a probe", undefined, probe("SICF /sap/bc/osd/thing"));
     expect(made.objects.get("SICF")).to.not.equal(undefined);
     expect(readdirSync(join(out, "src"))).to.include("zosd_thing.sicf.xml");
   });
@@ -66,8 +72,9 @@ describe("tools/osd-abapgit-zip: what may leave for a system", () => {
     // inventory" is not a gate.
     const url = Object.keys(SAP_DELIVERED)[0];
     writeFileSync(join(dir, "zosd_claim.sicf.xml"), node(`${url}/`, "ZOSD_CLAIM"));
-    expect(() => layout(dir, out, "a probe")).to.throw(/a real system delivers itself/);
-    expect(() => layout(dir, out, "a probe")).to.throw(url);
+    const unit = probe(`SICF ${url}`);
+    expect(() => layout(dir, out, "a probe", undefined, unit)).to.throw(/a real system delivers itself/);
+    expect(() => layout(dir, out, "a probe", undefined, unit)).to.throw(url);
   });
 
   it("refuses rather than dropping it, because a zip with a hole is worse", () => {
@@ -77,7 +84,7 @@ describe("tools/osd-abapgit-zip: what may leave for a system", () => {
     const url = Object.keys(SAP_DELIVERED)[0];
     writeFileSync(join(dir, "zosd_ok.sicf.xml"), node("/sap/bc/osd/ok/", "ZOSD_OK"));
     writeFileSync(join(dir, "zosd_claim.sicf.xml"), node(`${url}/`, "ZOSD_CLAIM"));
-    expect(() => layout(dir, out, "a probe")).to.throw();
+    expect(() => layout(dir, out, "a probe", undefined, probe("SICF /sap/bc/osd/ok", `SICF ${url}`))).to.throw();
     // and nothing of the folder was copied on the way to refusing
     expect(readdirSync(join(out, "src")).filter((f) => f.endsWith(".sicf.xml"))).to.deep.equal([]);
   });
@@ -88,7 +95,7 @@ describe("tools/osd-abapgit-zip: what may leave for a system", () => {
     // it would stop the thing that works
     writeFileSync(join(dir, "zosd_008.sicf.xml"),
       node("/sap/bc/ui5_ui5/sap/zosd_008_app/", "ZOSD_008_APP"));
-    expect(() => layout(dir, out, "a probe")).to.not.throw();
+    expect(() => layout(dir, out, "a probe", undefined, probe("SICF /sap/bc/ui5_ui5/sap/zosd_{nnn}_app"))).to.not.throw();
   });
 
   it("builds a complete pack: compiled SEGW, authored override, TABU and WAPA", () => {
@@ -136,9 +143,312 @@ entities:
     const carriedManifest = JSON.parse(readFileSync(join(objects, pageFile(app, "manifest.json")), "utf8"));
     expect(carriedManifest["sap.app"].dataSources.main.uri).to.equal("../../../../opu/odata/sap/ZPROBE_SRV/");
 
-    const made = layout(prepared.objects, out, "Pack probe", prepared.data);
+    const made = layout(prepared.objects, out, "Pack probe", prepared.data, probe(
+      "IWPR ZPROBE", "IWSV ZPROBE_SRV 0001", "IWMO ZPROBE_MDL 0001",
+      "CLAS ZCL_ZPROBE_MPC", "CLAS ZCL_ZPROBE_MPC_EXT", "CLAS ZCL_ZPROBE_DPC", "CLAS ZCL_ZPROBE_DPC_EXT",
+      `WAPA ${app}`, `SICF /sap/bc/ui5_ui5/sap/${app}`, "TABU ZPROBE"));
     expect(made.rows.carried).to.deep.equal(["zprobe"]);
     expect(readFileSync(join(out, "data", "zprobe.tabu.json"), "utf8")).to.contain('"ID": "1"');
     expect(made.objects.get("WAPA")).to.deep.equal(new Set([app.toLowerCase()]));
+  });
+});
+
+describe("deploy/manifest.json: only listed objects leave, never an SAP-owned name", () => {
+  let dir;
+  let out;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "allow-in-"));
+    out = mkdtempSync(join(tmpdir(), "allow-out-"));
+  });
+  afterEach(() => {
+    rmSync(dir, {recursive: true, force: true});
+    rmSync(out, {recursive: true, force: true});
+  });
+  const clas = (file, name) => {
+    writeFileSync(join(dir, `${file}.clas.abap`), `CLASS ${name} DEFINITION PUBLIC. ENDCLASS.\n`);
+    writeFileSync(join(dir, `${file}.clas.xml`), `<VSEOCLASS><CLSNAME>${name.toUpperCase()}</CLSNAME></VSEOCLASS>\n`);
+  };
+  const copied = () => readdirSync(join(out, "src")).filter((f) => f !== "package.devc.xml");
+
+  it("an object the unit does not list is refused, by name, and nothing is copied", () => {
+    clas("zcl_osd_listed", "zcl_osd_listed");
+    clas("zcl_osd_stray", "zcl_osd_stray");
+    const unit = probe("CLAS ZCL_OSD_LISTED");
+    expect(() => layout(dir, out, "p", undefined, unit)).to.throw(/CLAS ZCL_OSD_STRAY[\s\S]*not-in-manifest/);
+    expect(copied()).to.deep.equal([]);
+  });
+
+  it("without a unit nothing goes: fail closed, not open", () => {
+    clas("zcl_osd_listed", "zcl_osd_listed");
+    expect(() => layout(dir, out, "p")).to.throw(/no-unit/);
+  });
+
+  it("a file that is not <object>.<type>.<ext> is refused", () => {
+    writeFileSync(join(dir, "README"), "notes\n");
+    expect(() => layout(dir, out, "p", undefined, probe())).to.throw(/not-an-object/);
+  });
+
+  it("an SAP-named shim is refused even when it is listed", () => {
+    // the public API this tree reimplements under SAP's names; imported, it
+    // would overwrite the system's own class
+    clas("cl_http_client", "cl_http_client");
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    const unit = probe("CLAS CL_HTTP_CLIENT", "CLAS ZCL_OSD_OK");
+    expect(() => layout(dir, out, "p", undefined, unit)).to.throw(/CLAS CL_HTTP_CLIENT[\s\S]*sap-api-name/);
+    expect(copied()).to.deep.equal([]);
+  });
+
+  it("IF_ and CX_ are SAP's too, and so is a standard DDIC name", () => {
+    writeFileSync(join(dir, "if_http_extension.intf.abap"), "INTERFACE if_http_extension PUBLIC. ENDINTERFACE.\n");
+    writeFileSync(join(dir, "cx_sy_conversion_error.clas.abap"), "CLASS cx_sy_conversion_error DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(dir, "t000.tabl.xml"), "<abapGit/>\n");
+    const unit = probe("INTF IF_HTTP_EXTENSION", "CLAS CX_SY_CONVERSION_ERROR", "TABL T000");
+    let message = "";
+    try { layout(dir, out, "p", undefined, unit); } catch (e) { message = e.message; }
+    expect(message).to.match(/INTF IF_HTTP_EXTENSION[\s\S]*sap-api-name/);
+    expect(message).to.match(/CLAS CX_SY_CONVERSION_ERROR[\s\S]*sap-api-name/);
+    expect(message).to.match(/TABL T000[\s\S]*sap-name/);
+  });
+
+  it("any /namespace/ that is not declared ours is refused, /OSD/ and /IWBEP/ alike", () => {
+    writeFileSync(join(dir, "#osd#smoke.tabl.xml"), "<abapGit/>\n");
+    clas("#iwbep#cl_mgw_abs_data", "/iwbep/cl_mgw_abs_data");
+    clas("#ui2#cl_json", "/ui2/cl_json");
+    const unit = probe("TABL /OSD/SMOKE", "CLAS /IWBEP/CL_MGW_ABS_DATA", "CLAS /UI2/CL_JSON");
+    let message = "";
+    try { layout(dir, out, "p", undefined, unit); } catch (e) { message = e.message; }
+    expect(message).to.match(/TABL \/OSD\/SMOKE[\s\S]*foreign-namespace/);
+    expect(message).to.match(/CLAS \/IWBEP\/CL_MGW_ABS_DATA[\s\S]*foreign-namespace/);
+    expect(message).to.match(/CLAS \/UI2\/CL_JSON[\s\S]*foreign-namespace/);
+    expect(copied()).to.deep.equal([]);
+  });
+
+  it("a namespace the manifest declares as ours is a customer name", () => {
+    clas("#zns#cl_thing", "/zns/cl_thing");
+    expect(() => layout(dir, out, "p", undefined, {...probe("CLAS /ZNS/CL_THING"), customerNamespaces: ["/ZNS/"]}))
+      .to.not.throw();
+  });
+
+  it("an SAP-owned name goes only when its entry says why it is intended", () => {
+    clas("cl_http_client", "cl_http_client");
+    expect(() => layout(dir, out, "p", undefined, probe({object: "CLAS CL_HTTP_CLIENT", intended: ""}))).to.throw(/sap-api-name/);
+    expect(() => layout(dir, out, "p", undefined,
+      probe({object: "CLAS CL_HTTP_CLIENT", intended: "a probe of the rule itself"}))).to.not.throw();
+  });
+
+  it("a table's rows travel only if the unit lists them", () => {
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    const data = join(dir, "..", `${basename(dir)}-data`);
+    mkdirSync(data, {recursive: true});
+    try {
+      writeFileSync(join(data, "zosd_rows.tabu.json"), "[]\n");
+      writeFileSync(join(data, "zosd_rows.conf.json"), "{}\n");
+      expect(() => layout(dir, out, "p", data, probe("CLAS ZCL_OSD_OK"))).to.throw(/TABU ZOSD_ROWS[\s\S]*not-in-manifest/);
+      expect(() => layout(dir, out, "p", data, probe("CLAS ZCL_OSD_OK", "TABU ZOSD_ROWS"))).to.not.throw();
+    } finally {
+      rmSync(data, {recursive: true, force: true});
+    }
+  });
+
+  it("a suffix abapGit does not write is refused, and so is an upper-case name", () => {
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    writeFileSync(join(dir, "zcl_osd_ok.clas.abap.bak"), "old\n");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK"))).to.throw(/zcl_osd_ok\.clas\.abap\.bak[\s\S]*not-an-object/);
+    rmSync(join(dir, "zcl_osd_ok.clas.abap.bak"));
+    writeFileSync(join(dir, "ZCL_OSD_UP.CLAS.abap"), "x\n");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK", "CLAS ZCL_OSD_UP"))).to.throw(/lower case/);
+  });
+
+  it("the suffixes abapGit does write pass", () => {
+    for (const f of ["zcl_osd_a.clas.abap", "zcl_osd_a.clas.xml", "zcl_osd_a.clas.testclasses.abap",
+      "zcl_osd_a.clas.locals_imp.abap", "zosd_fg.fugr.xml", "zosd_fg.fugr.lzosd_fgtop.abap",
+      "zosd_fg.fugr.z_osd_fm.xml", "zosd_m.w3mi.xml", "zosd_m.w3mi.data.m4a", "zosd_app.wapa.xml",
+      "zosd_app.wapa.i18n_-i18n.properties", "zosd_v.ddls.asddls", "zosd_v.ddls.xml"]) {
+      writeFileSync(join(dir, f), "x\n");
+    }
+    // each object's XML states its own name, as abapGit's do
+    writeFileSync(join(dir, "zcl_osd_a.clas.xml"), "<CLSNAME>ZCL_OSD_A</CLSNAME>\n");
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"), "<SOBJ_NAME>LZOSD_FGTOP</SOBJ_NAME><SOBJ_NAME>SAPLZOSD_FG</SOBJ_NAME>\n");
+    writeFileSync(join(dir, "zosd_m.w3mi.xml"), "<NAME>ZOSD_M</NAME>\n");
+    writeFileSync(join(dir, "zosd_app.wapa.xml"), "<APPLNAME>ZOSD_APP</APPLNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.xml"), "<DDLNAME>ZOSD_V</DDLNAME>\n");
+    const unit = probe("CLAS ZCL_OSD_A", "FUGR ZOSD_FG", "W3MI ZOSD_M", "WAPA ZOSD_APP", "DDLS ZOSD_V");
+    expect(() => layout(dir, out, "p", undefined, unit)).to.not.throw();
+  });
+
+  it("an object whose XML names another object is refused: abapGit creates the one in the XML", () => {
+    // abapGit's CLAS deserializer takes VSEOCLASS-CLSNAME, not the file name
+    writeFileSync(join(dir, "zcl_osd_ok.clas.abap"), "CLASS zcl_osd_ok DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(dir, "zcl_osd_ok.clas.xml"), "<VSEOCLASS><CLSNAME>CL_GUI_ALV_GRID</CLSNAME></VSEOCLASS>\n");
+    writeFileSync(join(dir, "zosd_tab.tabl.xml"), "<DD02V><TABNAME>T000</TABNAME></DD02V>\n");
+    writeFileSync(join(dir, "zosd_srv 0001.iwsv.xml"), "<TECHNICAL_NAME>ZOSD_SRV</TECHNICAL_NAME><VERSION>0002</VERSION>\n");
+    writeFileSync(join(dir, "zcl_osd_bare.clas.abap"), "CLASS zcl_osd_bare DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(dir, "zosd_x.zzzz.xml"), "<X/>\n");
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"), "<SOBJ_NAME>LSVRSTOP</SOBJ_NAME>\n");
+    let message = "";
+    try {
+      layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK", "TABL ZOSD_TAB", "IWSV ZOSD_SRV 0001",
+        "CLAS ZCL_OSD_BARE", "ZZZZ ZOSD_X", "FUGR ZOSD_FG"));
+    } catch (e) { message = e.message; }
+    expect(message).to.match(/CLAS ZCL_OSD_OK[\s\S]*name-not-stated: the file says ZCL_OSD_OK and its <CLSNAME> says CL_GUI_ALV_GRID/);
+    expect(message).to.match(/TABL ZOSD_TAB[\s\S]*<TABNAME> says T000/);
+    expect(message).to.match(/IWSV ZOSD_SRV 0001[\s\S]*says ZOSD_SRV 0002/);
+    expect(message).to.match(/CLAS ZCL_OSD_BARE[\s\S]*has no \.clas\.xml/);
+    expect(message).to.match(/ZZZZ ZOSD_X[\s\S]*no rule says where a ZZZZ names itself/);
+    expect(message).to.match(/FUGR ZOSD_FG[\s\S]*include LSVRSTOP is not one of the group's own/);
+    expect(copied()).to.deep.equal([]);
+  });
+
+  it("an enhancement is refused by its type unless intended: it changes an SAP object", () => {
+    writeFileSync(join(dir, "zosd_enh.enho.xml"), "<X/>\n");
+    expect(() => layout(dir, out, "p", undefined, probe("ENHO ZOSD_ENH"))).to.throw(/ENHO ZOSD_ENH[\s\S]*modifies-sap/);
+  });
+
+  it("an object part outside [a-z0-9_#-] is refused (a dotless i upper-cases to I)", () => {
+    clas("zcl_osd_\u0131", "zcl_osd_i");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_I"))).to.throw(/not-an-object[\s\S]*is not an object name/);
+  });
+
+  it("every spelling of a DDLS's SQL view is read, and an append view too", () => {
+    writeFileSync(join(dir, "zosd_v.ddls.xml"), "<DDLNAME>ZOSD_V</DDLNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.asddls"),
+      "@AbapCatalog: { sqlViewName: 'V_T001', compiler.compareFilter: true }\ndefine view ZOSD_V as select from t001 { bukrs }\n");
+    writeFileSync(join(dir, "zosd_e.ddls.xml"), "<DDLNAME>ZOSD_E</DDLNAME>\n");
+    writeFileSync(join(dir, "zosd_e.ddls.asddls"),
+      "@AbapCatalog.sqlViewAppendName: 'T001_APPEND'\nextend view I_X with ZOSD_E { x }\n");
+    let message = "";
+    try { layout(dir, out, "p", undefined, probe("DDLS ZOSD_V", "DDLS ZOSD_E")); } catch (e) { message = e.message; }
+    expect(message).to.match(/DDLS ZOSD_V creates SQL view V_T001/);
+    expect(message).to.match(/DDLS ZOSD_E creates SQL append view T001_APPEND/);
+  });
+
+  it("a lower-case entry matches its attempt form: every {nnn}, every SICF URL", () => {
+    writeFileSync(join(dir, "zosd_004_app.sicf.xml"), node("/sap/bc/zosd_004_app/", "ZOSD_004_APP"));
+    const unit = {name: "probe", attempt: {from: "ZSTG_", to: "ZOSD_{nnn}_"}, objects: ["SICF /sap/bc/zstg_app"]};
+    expect(() => layout(dir, out, "p", undefined, unit)).to.not.throw();
+    rmSync(join(dir, "zosd_004_app.sicf.xml"));
+    writeFileSync(join(dir, "zosd_004_x_005.sicf.xml"), node("/sap/bc/zosd_004_x_005/", "ZOSD_004_X_005"));
+    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/zosd_{nnn}_x_{nnn}"))).to.not.throw();
+  });
+
+  it("a Z function group that creates an SAP-named module is refused, and so is a Z DDLS with an SAP SQL view", () => {
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"),
+      "<FUNCNAME>Z_OSD_FINE</FUNCNAME><FUNCNAME>SCMS_BINARY_TO_XSTRING</FUNCNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.asddls"), "@AbapCatalog.sqlViewName: 'V_T000'\ndefine view ZOSD_V as select from t000 { mandt }\n");
+    let message = "";
+    try { layout(dir, out, "p", undefined, probe("FUGR ZOSD_FG", "DDLS ZOSD_V")); } catch (e) { message = e.message; }
+    expect(message).to.match(/FUGR ZOSD_FG creates FUNC SCMS_BINARY_TO_XSTRING[\s\S]*sap-name/);
+    expect(message).to.match(/DDLS ZOSD_V creates SQL view V_T000[\s\S]*sap-name/);
+    expect(message).to.not.match(/Z_OSD_FINE/);
+  });
+
+  it("a node at a listed URL with an SAP ICF_NAME is refused", () => {
+    writeFileSync(join(dir, "zosd_thing.sicf.xml"), node("/sap/bc/osd/thing/", "SAPNODE"));
+    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/osd/thing"))).to.throw(/SICF \/sap\/bc\/osd\/thing[\s\S]*sap-name/);
+  });
+
+  it("a name that only starts like a listed one is not it; {nnn} is three digits", () => {
+    clas("zcl_osd_004_demo_evil", "zcl_osd_004_demo_evil");
+    const attempt = {name: "probe", objects: ["CLAS ZCL_OSD_{nnn}_DEMO"]};
+    expect(() => layout(dir, out, "p", undefined, attempt)).to.throw(/ZCL_OSD_004_DEMO_EVIL[\s\S]*not-in-manifest/);
+    for (const wrong of ["zcl_osd_04_demo", "zcl_osd_1234_demo"]) {
+      rmSync(dir, {recursive: true, force: true});
+      mkdirSync(dir);
+      clas(wrong, wrong);
+      expect(() => layout(dir, out, "p", undefined, attempt), wrong).to.throw(/not-in-manifest/);
+    }
+    rmSync(dir, {recursive: true, force: true});
+    mkdirSync(dir);
+    clas("zcl_osd_004_demo", "zcl_osd_004_demo");
+    expect(() => layout(dir, out, "p", undefined, attempt)).to.not.throw();
+  });
+
+  it("the folder's own package.devc.xml does not replace the one the layout writes", () => {
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    writeFileSync(join(dir, "package.devc.xml"), "<CTEXT>from the folder</CTEXT>\n");
+    layout(dir, out, "the zip's own", undefined, probe("CLAS ZCL_OSD_OK"));
+    const devc = readFileSync(join(out, "src", "package.devc.xml"), "utf8");
+    expect(devc).to.contain("the zip's own");
+    expect(devc).to.not.contain("from the folder");
+  });
+
+  it("a missing, broken or foreign-version manifest refuses; two units with one source ask for --unit", () => {
+    expect(() => loadManifest(join(dir, "nope.json"))).to.throw(/no deploy manifest/);
+    writeFileSync(join(dir, "broken.json"), "{ not json");
+    expect(() => loadManifest(join(dir, "broken.json"))).to.throw();
+    writeFileSync(join(dir, "v2.json"), JSON.stringify({version: 2, units: {}}));
+    expect(() => loadManifest(join(dir, "v2.json"))).to.throw(/version 2/);
+    const twice = {file: "m", units: {a: {sources: ["src/demo"]}, b: {sources: ["src/demo"]}}};
+    expect(() => unitFor(twice, "src/demo")).to.throw(/2 deploy units \(a, b\): pass --unit/);
+    expect(unitFor(twice, "src/demo", "b").name).to.equal("b");
+    expect(() => unitFor(twice, "src/demo", "c")).to.throw(/deploy unit "c" is not in/);
+  });
+
+  it("a unit's own customer namespaces add to the manifest's", () => {
+    const m = {file: "m", customerNamespaces: ["/ZA/"], units: {u: {sources: [], customerNamespaces: ["/ZB/"], objects: []}}};
+    expect(unitFor(m, undefined, "u").customerNamespaces).to.deep.equal(["/ZA/", "/ZB/"]);
+  });
+
+  // ------------------------------------------------ what is deployed today
+
+  const manifest = loadManifest(MANIFEST);
+  const unit = (name) => unitFor(manifest, undefined, name);
+
+  it("every unit's sources name the unit", () => {
+    for (const [name, u] of Object.entries(manifest.units)) {
+      for (const s of u.sources) expect(unitFor(manifest, s).name).to.equal(name);
+    }
+    expect(() => unitFor(manifest, "src/gateway")).to.throw(/not the source of any deploy unit/);
+  });
+
+  it("the demo service passes as compiled, and as a numbered attempt with its DDIC", () => {
+    const objects = join(dir, "demo");
+    compileFile("src/demo/zstg_demo.stg.yaml", objects);
+    expect(() => layout(objects, out, "demo", "data", unit("demo"))).to.not.throw();
+
+    // the attempt as the levels were assembled: compiled, the authored _EXT
+    // pair over it, the demo's DDIC beside it, renamed ZSTG_ -> ZOSD_004_
+    for (const f of readdirSync("src/demo").filter((x) => x.endsWith(".clas.abap"))) {
+      cpSync(join("src/demo", f), join(objects, f));
+    }
+    for (const f of ["zstg_demo.tabl.xml", "zstg_demo_bk.tabl.xml", "zstg_photo.tabl.xml",
+      "zstg_status.tabl.xml", "zstg_status_sh.shlp.xml"]) {
+      cpSync(join("src/ddic", f), join(objects, f));
+    }
+    const attempt = join(dir, "attempt");
+    renameAll([objects], attempt, "ZSTG_", "ZOSD_004_");
+    const made = layout(attempt, out, "demo 004", undefined, unit("demo"));
+    expect([...made.objects.get("TABL")]).to.include("zosd_004_demo");
+    expect([...made.objects.get("IWSV")][0]).to.match(/^zosd_004_demo_srv +0001$/);
+
+    // a prefix that is not an attempt is not the unit
+    const stray = join(dir, "stray");
+    renameAll([objects], stray, "ZSTG_", "ZOSD_X_");
+    expect(() => layout(stray, out, "demo x", undefined, unit("demo"))).to.throw(/ZOSD_X_DEMO[\s\S]*not-in-manifest/);
+  });
+
+  it("the demo app passes as a BSP application and its node", () => {
+    const objects = join(dir, "app");
+    mkdirSync(objects);
+    buildApp({from: "webapp", app: "ZOSD_008_APP", out: objects, text: "demo app", service: "ZOSD_006_DEMO_SRV"});
+    expect(() => layout(objects, out, "app", undefined, unit("demo-app"))).to.not.throw();
+  });
+
+  it("the LSD installation and the ZVDB pack pass", () => {
+    expect(() => layout("deploy/lsd-a4h-011/src", out, "lsd", undefined, unit("lsd-a4h-011"))).to.not.throw();
+    const objects = join(dir, "zvdb");
+    const prepared = preparePack("packs/zvdb", objects);
+    const made = layout(objects, out, "zvdb", prepared.data, unit("zvdb"));
+    expect(made.rows.carried).to.deep.equal(["zvdb_100_vec"]);
+  });
+
+  it("packs/lsd is not a deployable: its player node is named LSD, outside the customer namespace", () => {
+    // which is why the installation on a system is deploy/lsd-a4h-011, where
+    // the node is ZOSD_011_LSD
+    const everything = probe(...readdirSync("packs/lsd/src").map((f) => {
+      const o = objectOf(f, () => readFileSync(join("packs/lsd/src", f), "utf8"));
+      return o.key;
+    }));
+    expect(() => layout("packs/lsd/src", out, "lsd", undefined, everything)).to.throw(/SICF \/sap\/bc\/lsd[\s\S]*sap-name/);
   });
 });
