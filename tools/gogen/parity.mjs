@@ -60,7 +60,7 @@
 // Writes <out>/parity.json and <out>/parity.md (default .local/parity/).
 import {spawn, spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
-import {existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream} from "node:fs";
+import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, createWriteStream} from "node:fs";
 import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {home} from "./home.mjs";
@@ -217,6 +217,54 @@ async function pool(items, n, work) {
   }));
 }
 
+// ---- the checkout's gen/ is guarded ----------------------------------------
+// A suite may write into the checkout it runs in, and one does at load time:
+// test/shadowed-objects.mjs calls compileAll("src", "gen/stg") in its
+// describe body, so even `mocha --dry-run` runs it, and its sweep ("what this
+// run did not write, it removes") deletes the gen/stg folders of every model
+// it was not given -- the CDS-published services and the packs' (measured
+// 2026-09-24: the count of the previous full run left parity-home without
+// ZC_STG_TRAVEL_CDS & co., and the next osgo built from it could not create
+// their classes). So gen/ is copied aside at the start, compared after each
+// phase, and put back, with what changed named.
+const genDir = join(root, "gen");
+const genSnap = join(out, "runs", "gen.snapshot");
+const genList = (dir) => {
+  const acc = [];
+  const walk = (d, rel) => {
+    for (const e of readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (rel === "" && e.name === "segw-editor") continue; // the editor's "Save to gen/" writes here on purpose
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p, `${rel}${e.name}/`);
+      else { const st = statSync(p); acc.push(`${rel}${e.name}\t${st.size}\t${st.mtimeMs}`); }
+    }
+  };
+  if (existsSync(dir)) walk(dir, "");
+  return acc;
+};
+let genBefore;
+if (!flag("report-only") && existsSync(genDir)) {
+  rmSync(genSnap, {recursive: true, force: true});
+  cpSync(genDir, genSnap, {recursive: true, preserveTimestamps: true});
+  genBefore = genList(genDir);
+}
+function guardGen(when) {
+  if (!genBefore) return;
+  const now = genList(genDir);
+  if (now.join("\n") === genBefore.join("\n")) return;
+  const a = new Set(genBefore.map((l) => l.split("\t")[0]));
+  const b = new Set(now.map((l) => l.split("\t")[0]));
+  const gone = [...a].filter((f) => !b.has(f));
+  const added = [...b].filter((f) => !a.has(f));
+  const changed = now.filter((l) => a.has(l.split("\t")[0]) && !genBefore.includes(l)).map((l) => l.split("\t")[0]);
+  const dirs = (fs) => [...new Set(fs.map((f) => f.split("/").slice(0, 2).join("/")))].slice(0, 12).join(", ");
+  console.log(`WARNING gen/ of the checkout changed during ${when}: ${gone.length} removed (${dirs(gone)}), ${added.length} added (${dirs(added)}), ${changed.length} rewritten (${dirs(changed)}); put back`);
+  for (const e of readdirSync(genDir)) if (e !== "segw-editor") rmSync(join(genDir, e), {recursive: true, force: true});
+  for (const e of readdirSync(genSnap)) if (e !== "segw-editor") cpSync(join(genSnap, e), join(genDir, e), {recursive: true, preserveTimestamps: true});
+  genWarnings.push({when, removed: gone.length, added: added.length, rewritten: changed.length, removedDirs: dirs(gone)});
+}
+const genWarnings = [];
+
 // ---- the Node reference: reused or stale ---------------------------------
 function checkoutId() {
   const git = (...a) => spawnSync("git", ["-C", root, ...a], {encoding: "utf8"}).stdout?.trim() ?? "";
@@ -297,7 +345,8 @@ if (!reportOnly) {
     if (only !== "node") results.osgo[file] = await runOne("osgo");
   });
   if (e2e) httpSuites.push("test/e2e");
-  phase(`suites (${work.length} job(s), ${jobs} at a time${nodeRan ? ", Node included" : ", Node reused"})`);
+  guardGen("the suites");
+  phase(`suites (${work.length} job(s), ${jobs} at a time${nodeRan ? ", Node included" : only === "osgo" ? ", Node not run" : ", Node reused"})`);
 }
 
 // the Playwright specs, one server per backend for the whole run
@@ -351,6 +400,7 @@ if (reportOnly && existsSync(join(out, "runs", "na.mocha.json"))) {
   const m = await runMocha(naSuites, basePort, join(out, "runs", "na.records.json"), join(out, "runs", "na.mocha.json"), ["--dry-run"]);
   naCount = {suites: naSuites.length, tests: m.report?.stats?.tests ?? (m.report?.tests ?? []).length, counted: m.report !== undefined};
   if (nodeMeta && naCount.counted) { nodeMeta.naCount = naCount; nodeRan = true; }
+  guardGen("the in-process count (mocha --dry-run)");
   phase("in-process suites counted (--dry-run)");
 }
 
@@ -579,6 +629,7 @@ ranked.forEach((g, i) => {
 if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
 phase("compare and report");
 summary.phases = phases;
+summary.genWarnings = genWarnings;
 summary.wallMs = Date.now() - T0;
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 md.push("## Wall time", "", "| phase | s |", "|---|---:|", ...phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`), `| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
