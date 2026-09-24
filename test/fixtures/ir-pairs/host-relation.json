@@ -1,0 +1,506 @@
+{
+  "note": "Host relations (tools/ir-host-relation.mjs). A host hands rows = {length, get(i, column)}; the relation holds, per row, the schema's columns and then OSD_ORD, the row's index from 0. `held` is each value as text, as ABAP holds it: get() never answers null, a field not named is the type's initial value (C '', I/INT8 0, P '0.00', D '00000000', STRING ''), C is right-trimmed, P the decimal string of its type (abapNumber's grammar, extra decimals refused), D is CHAR 8. Rows come in index order and nothing is pushed down. The handle lives one call; a second drop is not an error. `rows` is what a host hands over: a number, a string or (INT8 past 2^53, written here as a string) a BigInt; a P may come as a number or as text, with a trailing sign. What the relation must hold, per type: I, INT8 and OSD_ORD as integers (INT8 exact past 2^53), P as a number (DECIMAL where the engine has it; SQLite keeps a REAL), C, D and STRING as text -- a P or an INT8 held as text sorts and compares wrongly, which the two sorting pairs catch. `lowered` renders the query with the relation named \"IT\" (substitute the relation's own name); a param's `type` is the ABAP type code (C(3), I, INT8, P(15,2), D, STRING); `answer` is its rows as text.",
+  "schema": {
+    "MANDT": {
+      "abap": "C",
+      "len": 3
+    },
+    "ID": {
+      "abap": "I"
+    },
+    "BIG": {
+      "abap": "INT8"
+    },
+    "AMOUNT": {
+      "abap": "P",
+      "len": 15,
+      "dec": 2
+    },
+    "DAY": {
+      "abap": "D"
+    },
+    "NOTE": {
+      "abap": "STRING"
+    }
+  },
+  "ordinal": "OSD_ORD",
+  "ddl": {
+    "sqlite": {
+      "MANDT": "TEXT",
+      "ID": "INTEGER",
+      "BIG": "INTEGER",
+      "AMOUNT": "DECIMAL(15, 2)",
+      "DAY": "TEXT",
+      "NOTE": "TEXT",
+      "OSD_ORD": "INTEGER"
+    },
+    "duckdb": {
+      "MANDT": "VARCHAR(3)",
+      "ID": "INTEGER",
+      "BIG": "BIGINT",
+      "AMOUNT": "DECIMAL(15, 2)",
+      "DAY": "VARCHAR(8)",
+      "NOTE": "VARCHAR",
+      "OSD_ORD": "INTEGER"
+    },
+    "postgres": {
+      "MANDT": "VARCHAR(3)",
+      "ID": "INTEGER",
+      "BIG": "BIGINT",
+      "AMOUNT": "DECIMAL(15, 2)",
+      "DAY": "VARCHAR(8)",
+      "NOTE": "VARCHAR",
+      "OSD_ORD": "INTEGER"
+    },
+    "hana": {
+      "MANDT": "NVARCHAR(3)",
+      "ID": "INTEGER",
+      "BIG": "BIGINT",
+      "AMOUNT": "DECIMAL(15, 2)",
+      "DAY": "NVARCHAR(8)",
+      "NOTE": "NCLOB",
+      "OSD_ORD": "INTEGER"
+    }
+  },
+  "pairs": [
+    {
+      "name": "every type, as ABAP holds it: CHAR right-trimmed, P the decimal string, a trailing sign, a blank date, INT8 past 2^53",
+      "rows": [
+        {
+          "MANDT": "001",
+          "ID": 3,
+          "BIG": "9007199254740993",
+          "AMOUNT": "12.5",
+          "DAY": "20260924",
+          "NOTE": "three"
+        },
+        {
+          "MANDT": "001 ",
+          "ID": 1,
+          "BIG": "-5",
+          "AMOUNT": 3,
+          "DAY": "",
+          "NOTE": ""
+        },
+        {
+          "MANDT": "002",
+          "ID": 2,
+          "BIG": "12",
+          "AMOUNT": "0.5-",
+          "DAY": "20261231",
+          "NOTE": "two"
+        }
+      ],
+      "held": [
+        [
+          "001",
+          "3",
+          "9007199254740993",
+          "12.50",
+          "20260924",
+          "three",
+          "0"
+        ],
+        [
+          "001",
+          "1",
+          "-5",
+          "3.00",
+          "00000000",
+          "",
+          "1"
+        ],
+        [
+          "002",
+          "2",
+          "12",
+          "-0.50",
+          "20261231",
+          "two",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "a field the row does not name is the type's initial value",
+      "rows": [
+        {
+          "ID": 7
+        }
+      ],
+      "held": [
+        [
+          "",
+          "7",
+          "0",
+          "0.00",
+          "00000000",
+          "",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "a filter with arithmetic on a packed column, sorted: the host relation answers as the rows would",
+      "rows": [
+        {
+          "MANDT": "001",
+          "ID": 3,
+          "AMOUNT": "10.00"
+        },
+        {
+          "MANDT": "001",
+          "ID": 1,
+          "AMOUNT": "2.50"
+        },
+        {
+          "MANDT": "002",
+          "ID": 2,
+          "AMOUNT": "7.75"
+        }
+      ],
+      "held": [
+        [
+          "001",
+          "3",
+          "0",
+          "10.00",
+          "00000000",
+          "",
+          "0"
+        ],
+        [
+          "001",
+          "1",
+          "0",
+          "2.50",
+          "00000000",
+          "",
+          "1"
+        ],
+        [
+          "002",
+          "2",
+          "0",
+          "7.75",
+          "00000000",
+          "",
+          "2"
+        ]
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE ((\"AMOUNT\" * 2) > CAST(? AS NUMERIC)) ORDER BY \"ID\" ASC NULLS FIRST",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5.00",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE ((\"AMOUNT\" * 2) > CAST(? AS DECIMAL(15,2))) ORDER BY \"ID\" ASC NULLS FIRST",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5.00",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE ((\"AMOUNT\" * 2) > $1::numeric(15,2)) ORDER BY \"ID\" ASC NULLS FIRST",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5.00",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE ((\"AMOUNT\" * 2) > CAST(? AS DECIMAL(15,2))) ORDER BY \"ID\" ASC NULLS FIRST",
+          "params": [
+            {
+              "name": "p0",
+              "value": "5.00",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        }
+      },
+      "answer": [
+        [
+          "2",
+          "7.75"
+        ],
+        [
+          "3",
+          "10.00"
+        ]
+      ]
+    },
+    {
+      "name": "sorted by a packed column: numbers, not text",
+      "rows": [
+        {
+          "ID": 1,
+          "AMOUNT": "10.00"
+        },
+        {
+          "ID": 2,
+          "AMOUNT": "9.50"
+        },
+        {
+          "ID": 3,
+          "AMOUNT": "100.00"
+        },
+        {
+          "ID": 4,
+          "AMOUNT": "-2.00"
+        }
+      ],
+      "held": [
+        [
+          "",
+          "1",
+          "0",
+          "10.00",
+          "00000000",
+          "",
+          "0"
+        ],
+        [
+          "",
+          "2",
+          "0",
+          "9.50",
+          "00000000",
+          "",
+          "1"
+        ],
+        [
+          "",
+          "3",
+          "0",
+          "100.00",
+          "00000000",
+          "",
+          "2"
+        ],
+        [
+          "",
+          "4",
+          "0",
+          "-2.00",
+          "00000000",
+          "",
+          "3"
+        ]
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"AMOUNT\" ASC NULLS FIRST",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"AMOUNT\" ASC NULLS FIRST",
+          "params": []
+        },
+        "postgres": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"AMOUNT\" ASC NULLS FIRST",
+          "params": []
+        },
+        "hana": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"AMOUNT\" ASC NULLS FIRST",
+          "params": []
+        }
+      },
+      "answer": [
+        [
+          "4"
+        ],
+        [
+          "2"
+        ],
+        [
+          "1"
+        ],
+        [
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "sorted by an INT8 column past 2^53: numbers, not text",
+      "rows": [
+        {
+          "ID": 1,
+          "BIG": "9007199254740993"
+        },
+        {
+          "ID": 2,
+          "BIG": "20"
+        },
+        {
+          "ID": 3,
+          "BIG": "100"
+        },
+        {
+          "ID": 4,
+          "BIG": "-9007199254740993"
+        }
+      ],
+      "held": [
+        [
+          "",
+          "1",
+          "9007199254740993",
+          "0.00",
+          "00000000",
+          "",
+          "0"
+        ],
+        [
+          "",
+          "2",
+          "20",
+          "0.00",
+          "00000000",
+          "",
+          "1"
+        ],
+        [
+          "",
+          "3",
+          "100",
+          "0.00",
+          "00000000",
+          "",
+          "2"
+        ],
+        [
+          "",
+          "4",
+          "-9007199254740993",
+          "0.00",
+          "00000000",
+          "",
+          "3"
+        ]
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"BIG\" DESC NULLS LAST",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"BIG\" DESC NULLS LAST",
+          "params": []
+        },
+        "postgres": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"BIG\" DESC NULLS LAST",
+          "params": []
+        },
+        "hana": {
+          "sql": "SELECT \"ID\" AS \"ID\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" ORDER BY \"BIG\" DESC NULLS LAST",
+          "params": []
+        }
+      },
+      "answer": [
+        [
+          "1"
+        ],
+        [
+          "3"
+        ],
+        [
+          "2"
+        ],
+        [
+          "4"
+        ]
+      ]
+    },
+    {
+      "name": "the caller's order, read through the ordinal",
+      "rows": [
+        {
+          "ID": 30
+        },
+        {
+          "ID": 10
+        },
+        {
+          "ID": 20
+        }
+      ],
+      "held": [
+        [
+          "",
+          "30",
+          "0",
+          "0.00",
+          "00000000",
+          "",
+          "0"
+        ],
+        [
+          "",
+          "10",
+          "0",
+          "0.00",
+          "00000000",
+          "",
+          "1"
+        ],
+        [
+          "",
+          "20",
+          "0",
+          "0.00",
+          "00000000",
+          "",
+          "2"
+        ]
+      ],
+      "lowered": {
+        "sqlite": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"OSD_ORD\" AS \"OSD_ORD\" FROM \"IT\" ORDER BY \"OSD_ORD\" ASC NULLS FIRST",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"OSD_ORD\" AS \"OSD_ORD\" FROM \"IT\" ORDER BY \"OSD_ORD\" ASC NULLS FIRST",
+          "params": []
+        },
+        "postgres": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"OSD_ORD\" AS \"OSD_ORD\" FROM \"IT\" ORDER BY \"OSD_ORD\" ASC NULLS FIRST",
+          "params": []
+        },
+        "hana": {
+          "sql": "SELECT \"ID\" AS \"ID\", \"OSD_ORD\" AS \"OSD_ORD\" FROM \"IT\" ORDER BY \"OSD_ORD\" ASC NULLS FIRST",
+          "params": []
+        }
+      },
+      "answer": [
+        [
+          "30",
+          "0"
+        ],
+        [
+          "10",
+          "1"
+        ],
+        [
+          "20",
+          "2"
+        ]
+      ]
+    }
+  ]
+}

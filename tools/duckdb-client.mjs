@@ -234,7 +234,7 @@ export class DuckDBDatabaseClient {
 
   /** A named relation later statements may refer to. The name is ours: the
    *  caller may not invent one, because quoting is the engine's business. */
-  async defineRelation({name = "rel", sql, params = [], materialise}) {
+  async defineRelation({name = "rel", sql, params = [], materialise, ddl}) {
     // A **definition** carrying bind values would have to keep them alive for
     // the life of the relation, which is why this refuses. A **materialised**
     // relation would not: `CREATE TABLE ... AS <select>` consumes the values
@@ -253,13 +253,24 @@ export class DuckDBDatabaseClient {
     // an ordinary table rather than a temporary one, for the same reason as
     // in the HANA client: the reference must be spliceable anywhere. The
     // client drops it, so a conformance run leaves nothing behind.
-    if (materialise === undefined) {
+    if (ddl !== undefined) {
+      // a table the caller fills (tools/ir-host-relation.mjs): created from
+      // the caller's column list, empty, and dropped like any materialised one
+      if (materialise === undefined) throw new Error("defineRelation: a ddl relation is materialised");
+      // a process that died left its tables in a persistent file, and a
+      // later one with the same pid would collide with them
+      await this.execute(`DROP TABLE IF EXISTS ${handle.ref}`);
+      await this.execute(ddl(handle.ref));
+    } else if (materialise === undefined) {
       await this.execute(`CREATE VIEW ${handle.ref} AS ${sql}`);
     } else {
       await this.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
     }
     return handle;
   }
+
+  /** defineRelation takes `ddl`: host relations can be created here */
+  get relationDdl() { return true; }
 
   relationRef(handle) {
     return handle.ref;

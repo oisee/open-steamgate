@@ -334,7 +334,7 @@ export class FileSqliteClient {
     return {rows, columns, rowCount: rows.length};
   }
 
-  async defineRelation({name = "rel", sql, params = [], materialise}) {
+  async defineRelation({name = "rel", sql, params = [], materialise, ddl}) {
     // A **definition** carrying bind values would have to keep them alive for
     // the life of the relation, which is why this refuses. A **materialised**
     // relation would not: `CREATE TABLE ... AS <select>` consumes the values
@@ -353,13 +353,24 @@ export class FileSqliteClient {
       kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
     // an ordinary table, not a temporary one: the reference has to be
     // spliceable anywhere, and the client drops it itself
-    if (materialise === undefined) {
+    if (ddl !== undefined) {
+      // a table the caller fills (tools/ir-host-relation.mjs): created from
+      // the caller's column list, empty, and dropped like any materialised one
+      if (materialise === undefined) throw new Error("defineRelation: a ddl relation is materialised");
+      // a process that died left its tables in a persistent file, and a
+      // later one with the same pid would collide with them
+      this.db.exec(`DROP TABLE IF EXISTS ${handle.ref}`);
+      this.db.exec(ddl(handle.ref));
+    } else if (materialise === undefined) {
       this.db.exec(`CREATE VIEW ${handle.ref} AS ${sql}`);
     } else {
       await this.native({sql: `CREATE TABLE ${handle.ref} AS ${sql}`, params, expect: "none"});
     }
     return handle;
   }
+
+  /** defineRelation takes `ddl`: host relations can be created here */
+  get relationDdl() { return true; }
 
   relationRef(handle) {
     return handle.ref;
