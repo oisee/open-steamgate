@@ -267,6 +267,10 @@ const EXPECT = {
   // VALUE '...', leading zeros dropped) and p compared with p and with i
   // (A4H 2026-09-24, $ZOSG_TMP_0041, the same code): the SADL MPCs' dates
   ZCL_GOGEN_T_PCMP: "c:20260912010000 z:12 v:20260912010001 gt lt eq ne zi ilt neg init",
+  // CREATE DATA ... TYPE <static type> / TYPE STANDARD TABLE OF <ddic
+  // table>: a new initial value each time, a reference kept apart from the
+  // next CREATE (A4H 2026-09-24, $ZOSG_TMP_0041, the same code)
+  ZCL_GOGEN_T_CRDATA: "t000:0 tt:1 fresh:0 kept:1 n0:0 n1:42 n2:0",
   ZCL_GOGEN_T_X2S: "a:AB b:00 c:2C d:FF e:[0A0B] f:[DEADBEEF] g:[] h:[0A0] i:FF",
   // SMW0 through the host: WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING, A4H
   // 2026-09-23 ($ZOSG_TMP_0230) answered this string over an object of its

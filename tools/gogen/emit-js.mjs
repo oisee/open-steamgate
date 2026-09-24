@@ -374,6 +374,9 @@ function stmt(st, ctx, d) {
       return [`${t}abap.ClearData(${expr(st.target, ctx)});`];
     case "get_ref":
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)};`];
+    // CREATE DATA ... TYPE <static type> (ultra/sadl): a new initial value
+    case "create_data":
+      return [`${t}${place(st.target, ctx)} = abap.cell(${zero(st.type)}, ${desc(st.type)});`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = ${expr(st.x, ctx)}.t.kind;`];
     case "loop_data": {

@@ -163,6 +163,9 @@ function rttiTable(reg, program) {
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
       if (obj instanceof abaplint.Objects.Table) add(n, obj.parseType(reg));
+      // a DDIC view (the SQL views of OSG's CDS entities, gen/cds/*.view.xml)
+      // is a structure of its fields too (ultra/sadl: the SADL MPC's entity types)
+      if (obj instanceof abaplint.Objects.View) add(n, obj.parseType(reg));
       if (obj instanceof abaplint.Objects.Class && program.wanted.has(n)) {
         for (const td of obj.getDefinition()?.getTypeDefinitions().getAll() ?? []) {
           known.add(`${n}=>${upper(td.type.getName())}`);
@@ -1146,6 +1149,7 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
+  if (isStmt(node, Statements.CreateData)) return createDataStatic(node, ctx, text);
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
@@ -2916,6 +2920,30 @@ function assignStatement(node, ctx, text) {
     return {s: "assign_deref", fs, ref};
   }
   return {s: "assign_data", fs, value: convert(source(inner, ctx), fsType)};
+}
+
+/**
+ * CREATE DATA dref TYPE t | TYPE STANDARD TABLE OF t [WITH DEFAULT KEY], with
+ * t a type known at build time (ultra/sadl: the generated CDS and table
+ * sources of OSG's SADL runtime). The reference points at a new initial
+ * value of that type. A type given by name at run time ((name)), LIKE, REF
+ * TO, LENGTH / DECIMALS and HANDLE are other forms, not taken here.
+ */
+function createDataStatic(node, ctx, text) {
+  const m = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?([\w\/=>~-]+)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
+  if (!m || /^(REF|LINE|RANGE|SORTED|HASHED|TABLE)$/i.test(m[2])) throw new Unsupported(`statement CreateData: ${text}`);
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
+  const name = upper(m[2]);
+  let t;
+  const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
+  if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
+    let at;
+    try { at = ddic.parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
+    t = typeOf(at, name, ctx.program);
+  } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? {concatTokens: () => m[2]}, ctx);
+  if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA TYPE ${name}: a ${t.k}`);
+  return {s: "create_data", target, type: m[1] ? {k: "table", row: t} : t};
 }
 
 /**
