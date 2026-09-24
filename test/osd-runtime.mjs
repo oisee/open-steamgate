@@ -3,7 +3,7 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawn} from "node:child_process";
-import {ServingRuntime} from "../tools/osd-runtime.mjs";
+import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
 
 // is that process still there?
 const alive = (pid) => {
@@ -53,6 +53,55 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     }
     expect(runtime.running).to.equal(false);
     expect(runtime.url).to.equal(undefined);
+  });
+
+  // a wrong supervisor leaves children behind, and a child keeps mocha alive
+  // long after the case has failed: whatever is left is killed here
+  afterEach(() => {
+    for (const child of liveChildren()) child.kill("SIGKILL");
+  });
+
+  it("a request during a stop waits for the old process to be gone before a new one", async () => {
+    // Found by review of #60: #stopChild forgot the child at once and waited
+    // up to ten seconds for it to exit, so an ensure() in that window saw
+    // nothing running and started a second process on the same database.
+    const runtime = new ServingRuntime();
+    // how many serving processes existed at once, sampled while it happens
+    let most = 0;
+    const sampler = setInterval(() => {
+      most = Math.max(most, liveChildren().filter((c) => c.exitCode === null && c.signalCode === null).length);
+    }, 2);
+    try {
+      const first = await runtime.start();
+      const stopped = runtime.stop();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const second = await runtime.ensure();
+      await stopped;
+      expect(second.pid).to.not.equal(first.pid);
+      expect(alive(first.pid), "the old process is gone").to.equal(false);
+      expect(most, "two serving processes at once").to.equal(1);
+    } finally {
+      clearInterval(sampler);
+      await runtime.stop();
+    }
+  });
+
+  it("a start during a recycle waits for it, and the recycle's readiness is announced", async () => {
+    // Found by review of #60: start() did not wait for a recycle, joined its
+    // spawn, and the recycle's announcement was lost -- whenReady() hung.
+    const runtime = new ServingRuntime();
+    try {
+      await runtime.start();
+      const recycled = runtime.recycle();
+      const started = runtime.start();
+      const [r, s] = await Promise.all([recycled, started]);
+      expect(s.pid).to.equal(r.pid);
+      const ready = await Promise.race([runtime.whenReady(), new Promise((resolve) => setTimeout(() => resolve("HANGS"), 5000))]);
+      expect(ready).to.not.equal("HANGS");
+      expect(ready.pid).to.equal(r.pid);
+    } finally {
+      await runtime.stop();
+    }
   });
 
   it("a start and the requests that arrive while it comes up are one process", async () => {

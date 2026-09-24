@@ -4,6 +4,8 @@ import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
+import {applyAtStartup} from "../tools/osd-icf-apply.mjs";
+import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import initSqlJs from "sql.js";
 import {TABLES, WIDTHS, applyRows, cacheKey, insertStatements, overlong, rows} from "../tools/osd-xref-seed.mjs";
 
@@ -111,6 +113,41 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
       refused = `pg: ${e.message}`;
     });
     expect(refused).to.equal("pg: the cross-reference is seeded outside an LUW, and this connection has one open");
+  });
+
+  it("a start leaves no transaction open, so the seed is not refused on a client whose execute() opens one (HANA)", async () => {
+    // HanaDatabaseClient.execute() opens a transaction implicitly. The ICF
+    // registry is written through execute() at start, and used to be left
+    // pending; the seed then found a transaction open and refused, on every
+    // HANA start.
+    const log = [];
+    const hana = {
+      inTransaction: false,
+      beginTransaction: async () => {
+        hana.inTransaction = true;
+      },
+      commit: async () => {
+        if (hana.inTransaction) log.push("COMMIT");
+        hana.inTransaction = false;
+      },
+      rollback: async () => {
+        hana.inTransaction = false;
+      },
+      execute: async (sql) => {
+        hana.inTransaction = true;
+        log.push(String(sql).split(" ")[0]);
+      },
+      select: async () => ({rows: []}),
+    };
+    const said = [];
+    const registry = await applyAtStartup(hana, {root: process.cwd(), say: (l) => said.push(l)});
+    expect(registry, said.join("\n")).to.be.an("array");
+    expect(hana.inTransaction, "the ICF registry left its transaction open").to.equal(false);
+    const seeded = await seedAtStartup(hana, {root: process.cwd(), say: (l) => said.push(l)});
+    expect(seeded, said.join("\n")).to.not.equal(undefined);
+    expect(seeded.WBCROSSGT).to.equal(expected);
+    expect(hana.inTransaction).to.equal(false);
+    expect(log.filter((l) => l === "COMMIT")).to.have.length(2);
   });
 
   it("the key moves when the derivation does: tools/osd-xref.mjs and what it imports", async () => {

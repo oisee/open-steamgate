@@ -217,14 +217,16 @@ export async function applyRows(client, tables) {
   if (inTransaction(client)) {
     throw new Error("the cross-reference is seeded outside an LUW, and this connection has one open");
   }
-  await client.beginTransaction();
+  // optional, so a client that only records statements (OSGo's build does)
+  // can take them too
+  await client.beginTransaction?.();
   try {
     for (const sql of insertStatements(tables)) {
       await client.execute(sql);
     }
-    await client.commit();
+    await client.commit?.();
   } catch (e) {
-    await client.rollback();
+    await client.rollback?.();
     throw e;
   }
   const refused = overlong(tables);

@@ -298,7 +298,24 @@ export async function applyAtStartup(client, options = {}) {
       throw new Error(`no *.sicf.xml under ${options.root ?? process.cwd()}: refusing to apply an empty registry over `
         + `what is there. If this really is an empty tree, the root is wrong -- check OSD_ROOT.`);
     }
-    const {actions, report: lines} = await applyTo(client, objects);
+    // **Its own transaction, committed.** A start is outside every LUW, and
+    // what it writes is finished when it returns: HANA's execute() opens a
+    // transaction implicitly, so these rows used to stay pending on the
+    // connection until somebody else's COMMIT happened to take them -- the
+    // cross-reference seed's, until that learned to refuse a connection
+    // with a transaction open (tools/osd-xref-seed.mjs) and was then
+    // refused on every HANA start. SQLite, DuckDB and sql.js commit each
+    // statement anyway; for them this is one transaction instead of many.
+    await client.beginTransaction?.();
+    let result;
+    try {
+      result = await applyTo(client, objects);
+      await client.commit?.();
+    } catch (e) {
+      await client.rollback?.();
+      throw e;
+    }
+    const {actions, report: lines} = result;
     for (const line of lines) say(line);
     // **What was applied, not what was looked at.** `!== "KEEP"` counted an
     // ORPHAN as applied, so a start that wrote nothing and kept one row it

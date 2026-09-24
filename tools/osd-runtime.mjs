@@ -36,6 +36,10 @@ const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 // hours, found by vsp rather than by anything of ours. A child is not
 // something to leave behind because the parent was not asked to tidy up.
 const CHILDREN = new Set();
+
+/** every serving child this process started and has not seen exit: for a
+ *  test that must not leave one behind when the code under test is wrong */
+export const liveChildren = () => [...CHILDREN];
 let reaperInstalled = false;
 
 function reapOnExit() {
@@ -103,6 +107,9 @@ export class ServingRuntime {
     // the spawn in flight: a child exists before it says "ready", and
     // `running` only knows about a child that has said it
     this.starting = undefined;
+    // a stop in flight: the child is no longer `running` from the moment it
+    // is asked to go, and it holds the database until it has gone
+    this.stopping = undefined;
     // what the last unexpected death said, for a caller that wants to
     // report why nothing is serving rather than only that nothing is
     this.died = undefined;
@@ -126,9 +133,22 @@ export class ServingRuntime {
     return this.ready ?? Promise.reject(new NotServing());
   }
 
+  // what every path that may spawn waits out first: a recycle (which has a
+  // child of its own coming) and a stop (whose child still holds the
+  // database). A spawn that did not wait them out was a second process on
+  // the same file, found twice by review of #60.
+  async #settled() {
+    for (;;) {
+      const busy = this.recycling ?? this.stopping;
+      if (busy === undefined) return;
+      await busy.catch(() => undefined);
+    }
+  }
+
   async start() {
+    await this.#settled();
     if (this.running === true) {
-      return {url: this.url, generation: this.generation, epoch: this.epoch, started: false};
+      return {url: this.url, generation: this.generation, epoch: this.epoch, pid: this.child?.pid, started: false};
     }
     return this.#spawn();
   }
@@ -149,9 +169,7 @@ export class ServingRuntime {
   // idempotent while one is up. The crash is not hidden, because the
   // generation it answers with is a new one.
   async ensure() {
-    if (this.recycling !== undefined) {
-      await this.recycling.catch(() => undefined);
-    }
+    await this.#settled();
     if (this.running === true) {
       return this.whenReady();
     }
@@ -177,6 +195,7 @@ export class ServingRuntime {
         // a child still coming up is a child: let it finish, then stop it,
         // rather than start a second one beside it
         await this.starting?.catch(() => undefined);
+        await this.stopping?.catch(() => undefined);
         await this.#stopChild();
         const answer = await this.#spawn({announce: pending});
         return {...answer, ms: Date.now() - began, recycled: true};
@@ -195,16 +214,30 @@ export class ServingRuntime {
   }
 
   async stop() {
-    // a child still coming up would outlive a stop that only looked at the
-    // ready one
-    await this.starting?.catch(() => undefined);
-    await this.#stopChild();
-    this.ready = undefined;
-    this.port = undefined;
+    if (this.stopping !== undefined) {
+      return this.stopping;
+    }
+    const stopping = (async () => {
+      // a child still coming up would outlive a stop that only looked at
+      // the ready one; so would the one a recycle is bringing up
+      await this.recycling?.catch(() => undefined);
+      await this.starting?.catch(() => undefined);
+      await this.#stopChild();
+      this.ready = undefined;
+      this.port = undefined;
+    })();
+    this.stopping = stopping;
+    try {
+      await stopping;
+    } finally {
+      if (this.stopping === stopping) this.stopping = undefined;
+    }
   }
 
   #spawn(options = {}) {
     if (this.starting !== undefined) {
+      // joined, and whoever waits on the announcement still hears it
+      this.starting.then(options.announce?.resolve, options.announce?.reject);
       return this.starting;
     }
     const starting = this.#spawnOne(options);
@@ -274,9 +307,13 @@ export class ServingRuntime {
         }
       });
 
+      // **Refused once it has gone, not when it was told to go.** Rejecting
+      // at the kill ended the spawn in flight while the child still held
+      // the database, and an ensure() in that window started another.
+      let timedOut;
       const timer = setTimeout(() => {
+        timedOut = new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`);
         child.kill("SIGKILL");
-        reject(new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`));
       }, this.timeout);
 
       // **`on`, not `once`, and that distinction cost every test in this
@@ -331,7 +368,7 @@ export class ServingRuntime {
         }
         // an exit before "ready" is a runtime that could not come up, and
         // the output is the only explanation anyone will get
-        reject(new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
+        reject(timedOut ?? new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
       });
     });
   }
@@ -342,7 +379,7 @@ export class ServingRuntime {
     const child = this.child;
     this.child = undefined;
     this.port = undefined;
-    if (child === undefined || child.exitCode !== null) {
+    if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
@@ -350,9 +387,10 @@ export class ServingRuntime {
         clearTimeout(timer);
         resolve();
       };
+      // insisted on, then waited for: a stop is over when the process is,
+      // because until then it holds the database the next one opens
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve();
       }, this.grace + 8000);
       child.once("exit", done);
       try {
