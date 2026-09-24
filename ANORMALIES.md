@@ -178,7 +178,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: the euro sign goes out as the single byte `AC` (each UTF-16 code unit written as its low byte), `content-length` counts UTF-16 code units, so a non-Latin-1 body is both corrupted and cut short; a body `set_data` filled with bytes that are not UTF-8 raises `CX_SY_CONVERSION_CODEPAGE` in `get_cdata` before anything is sent
 - Impact on open-steamgate: any request body outside Latin-1 is corrupted on the wire; ZCL_OSD_GIT's upload-pack request is ASCII and is not affected
 - Smallest safe workaround: none in OSG (a caller can `set_data( cl_abap_codepage=>convert_to( text ) )` itself, which is what a system does anyway)
-- Upstream: PR from branch `httpc-body-utf8` in open-abap/open-abap-core (not sent yet): send the bytes of `request->get_data( )`, which are UTF-8 for a `set_cdata` body, with `content-length` from their length; `get_cdata` of bytes that are not UTF-8 answers empty
+- Upstream: [open-abap/open-abap-core#1268](https://github.com/open-abap/open-abap-core/pull/1268) (branch `httpc-body-utf8`), opened 2026-09-25, not merged: send the bytes of `request->get_data( )`, which are UTF-8 for a `set_cdata` body, with `content-length` from their length; `get_cdata` of bytes that are not UTF-8 answers empty
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend (Node and Go compared, not against a system); the system side is the probe sources above
 - Upstream version containing a fix: none yet
 
@@ -237,7 +237,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: `~status_code`, `~status_reason` and `~server_protocol` are empty and `get_header_fields( )` has no `~` field; `get_status( )` gives the code and an empty reason
 - Impact on open-steamgate: ZCL_OSD_GIT's 4xx/5xx check read `~status_code` and never fired, on Node or on OSGo, so an error answer was parsed as refs
 - Smallest safe workaround: read `get_status( )` instead, in the ABAP that is ours: ZCL_OSD_GIT does since PR #84 (`test/osd-git.mjs`, "a remote that answers 404", red before)
-- Upstream: PR from branch `httpc-status-fields` in open-abap/open-abap-core (not sent yet): set `~status_code`, `~status_reason` (Node's `statusMessage`) and `~server_protocol` on the response, and `get_status`'s reason
+- Upstream: [open-abap/open-abap-core#1269](https://github.com/open-abap/open-abap-core/pull/1269) (branch `httpc-status-fields`), opened 2026-09-25, not merged: set `~status_code`, `~status_reason` (Node's `statusMessage`) and `~server_protocol` on the response, and `get_status`'s reason
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
 - Upstream version containing a fix: none yet
 
@@ -256,7 +256,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: a POST always gets the fields as its body, replacing a body set before (`set_cdata`), with no query on the request line and no `content-type`
 - Impact on open-steamgate: none found (git's smart HTTP puts `?service=` on GETs only)
 - Smallest safe workaround: none in OSG
-- Upstream: PR from branch `httpc-post-query` in open-abap/open-abap-core (not sent yet), narrow: when a POST has a body, put the fields on the URL as for GET; when it has none, keep writing them into the body and add `content-type: application/x-www-form-urlencoded` unless one is set. PUT and other methods were not measured
+- Upstream: [open-abap/open-abap-core#1270](https://github.com/open-abap/open-abap-core/pull/1270) (branch `httpc-post-query`), opened 2026-09-25, not merged, narrow: when a POST has a body, put the fields on the URL as for GET; when it has none, keep writing them into the body and add `content-type: application/x-www-form-urlencoded` unless one is set. PUT and other methods were not measured
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe sources above
 - Upstream version containing a fix: none yet
 
