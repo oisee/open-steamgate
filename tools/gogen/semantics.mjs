@@ -552,6 +552,10 @@ const EXPECT = {
   // not an A4H value: a generic table's rows keep their type (the Go
   // emitter gave a c 3 table the descriptor of a string table: "g g")
   ZCL_GOGEN_T_DESCKEY: "g C",
+  // not an A4H value: sy-subrc written and read back, concat_lines_of( )
+  // over a table of strings with sep '&', none and ', ' (ultra/httpc; the
+  // transpiler on Node answers the same)
+  ZCL_GOGEN_T_SUBRCW: "subrc:7,0 empty:[] cat:[a&&b c][ab c][a, , b c]",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

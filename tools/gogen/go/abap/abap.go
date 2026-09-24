@@ -34,6 +34,9 @@ type Session struct {
 	// outermost first, each asking whether it takes a recovered value. A
 	// CLEANUP runs only when one of them does (see Handled).
 	Handlers []func(any) bool
+	// httpc: what Node keeps on each CL_HTTP_CLIENT object (its socket, the
+	// headers and the answer of a SEND), by the object (httpc.go)
+	httpc map[any]*httpcClient
 }
 
 // ArithmeticError is a class-based ABAP exception, raised as a Go panic and

@@ -315,6 +315,7 @@ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.box ? `${ident(p.name)}.v` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
+    case "sy": return `s.sy.${p.field.toLowerCase()}`;
     case "const": return p.go;
     case "static": {
       const [cls, attr] = p.go.split("__");

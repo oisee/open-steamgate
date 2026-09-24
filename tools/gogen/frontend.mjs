@@ -482,6 +482,11 @@ const NATIVE = new Map([
   ["ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8", {fn: "abap.XStringToStringUTF8", args: ["IV_DATA:xstring", "IV_LENGTH:i"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
+  // ultra/httpc: what CL_HTTP_CLIENT needs around its kernel lines. The
+  // answer to accept-encoding: gzip is inflated with zlib.gunzipSync, a
+  // string as base64 is Buffer.from(string) (UTF-8) as base64 (authenticate)
+  ["CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", {fn: "abap.GunzipWithHeader", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring"]}],
+  ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~ENCODE_BASE64", {fn: "abap.EncodeBase64", args: ["UNENCODED:string"]}],
 ]);
 
 /*
@@ -512,6 +517,50 @@ const KERNEL = new Map([
   ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.path);", {fn: "abap.ICFRequestPath", args: ["REQ:data", "&LV_VALUE:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.append(ls_field.get().name.get(), ls_field.get().value.get());", {fn: "abap.ICFResponseAppend", args: ["RES:data", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.status(lv_code.get()).send(Buffer.from(lv_xstr.get(), \"hex\"));", {fn: "abap.ICFResponseSend", args: ["RES:data", "LV_CODE:i", "LV_XSTR:xstring"]}],
+  // ultra/httpc: open-abap-core's CL_HTTP_CLIENT sends with Node's http /
+  // https modules (go/abap/httpc.go). `headers` and `response` are the
+  // JavaScript locals of SEND; here they live with the client object (ME).
+  // The lines that import the modules, declare postData and pick the agent
+  // are nops: HTTPCSend does all of that
+  ...[
+    ["let headers = {};", {fn: "abap.HTTPCHeadersNew", args: ["ME:ref"]}],
+    ["headers[ls_field.get().name.get()] = ls_field.get().value.get();", {fn: "abap.HTTPCHeader", args: ["ME:ref", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
+    ["headers[\"content-type\"] = lv_content_type.get();", {fn: "abap.HTTPCContentType", args: ["ME:ref", "LV_CONTENT_TYPE:string"]}],
+    ["headers[\"accept-encoding\"] = \"gzip\";", {fn: "abap.HTTPCAcceptGzip", args: ["ME:ref"]}],
+    ["headers[\"content-length\"] = lv_body.get().length;", {fn: "abap.HTTPCContentLength", args: ["ME:ref", "LV_BODY:string"]}],
+    ...[
+      "const https = await import(\"https\");",
+      "const http = await import(\"http\");",
+      "function postData(url, options, requestBody) {",
+      "return new Promise((resolve, reject) => {",
+      "const prot = url.startsWith(\"http://\") ? http : https;",
+      "const req = prot.request(url, options,",
+      "(res) => {",
+      "let chunks = [];",
+      "res.on(\"data\", (chunk) => {chunks.push(chunk);});",
+      "res.on(\"error\", reject);",
+      "res.on(\"end\", () => {",
+      "resolve({statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks)});",
+      "});",
+      "req.on(\"error\", reject);",
+      "req.write(requestBody, \"binary\");",
+      "req.end();",
+      "const prot = lv_url.get().startsWith(\"http://\") ? http : https;",
+      "if (this.agent === undefined) {this.agent = new prot.Agent({keepAlive: true, maxSockets: 1});}",
+    ].map((line) => [line, {nop: true}]),
+    ["let response = await postData(lv_url.get(), {method: lv_method.get(), headers: headers, agent: this.agent}, lv_body.get());",
+      {fn: "abap.HTTPCSend", args: ["ME:ref", "LV_URL:string", "LV_METHOD:string", "LV_BODY:string"]}],
+    // Node gives set-cookie as an array, which the loop skips: HTTPCResponseHeaders leaves it out
+    ["for (const h in response.headers) {", {loop: "abap.HTTPCResponseHeaders", args: ["ME:ref"], binds: ["LV_NAME", "LV_VALUE"]}],
+    ["lv_name.set(h);", {bound: "LV_NAME"}],
+    ["if (Array.isArray(response.headers[h])) continue;", {bound: "LV_NAME"}],
+    ["lv_value.set(response.headers[h]);", {bound: "LV_VALUE"}],
+    // the same text closes postData above the loop, a nop there
+    ["}", {end: true, nop: true}],
+    ["lo_entity.get().mv_content_type.set(response.headers[\"content-type\"] || \"\");", {fn: "abap.HTTPCResponseContentType", args: ["ME:ref", "&LO_ENTITY->MV_CONTENT_TYPE:string"]}],
+    ["lo_entity.get().mv_status.set(response.statusCode);", {fn: "abap.HTTPCResponseStatus", args: ["ME:ref", "&LO_ENTITY->MV_STATUS:i"]}],
+    ["lo_entity.get().mv_data.set(response.body.toString(\"hex\").toUpperCase());", {fn: "abap.HTTPCResponseBody", args: ["ME:ref", "&LO_ENTITY->MV_DATA:xstring"]}],
+  ].map(([line, k]) => [`CL_HTTP_CLIENT=>IF_HTTP_CLIENT~SEND|${line}`, k]),
 ]);
 
 /** the line of a WRITE '@KERNEL ...' as the JavaScript it holds, else undefined */
@@ -529,14 +578,18 @@ function kernelOf(node, ctx) {
 /** the arguments of a host function (see KERNEL), resolved in the method */
 function nativeArgs(specs, ctx) {
   return specs.map((spec) => {
-    const m = /^(&?)([\w\/~]+)(?:-([\w]+))?:(\w+)$/.exec(spec);
+    const m = /^(&?)([\w\/~]+)(?:(->|-)([\w]+))?:(\w+)$/.exec(spec);
     if (m === null) throw new Error(`host function argument ${spec}`);
-    let value = variable(m[2], ctx);
-    if (m[3] !== undefined) {
-      const f = fieldOf(ctx, value.type, m[3], `${ctx.className}=>${ctx.method}`);
+    const [, ref, name, sel, comp, kind] = m;
+    let value = variable(name, ctx);
+    if (sel === "->") {
+      // an attribute of the object a reference points to (LO_ENTITY->MV_DATA)
+      value = refAttribute(value, {concatTokens: () => comp}, ctx, ref === "&");
+    } else if (sel === "-") {
+      const f = fieldOf(ctx, value.type, comp, `${ctx.className}=>${ctx.method}`);
       value = {e: "field", base: value, name: f.name, type: f.type};
     }
-    if (value.type.k !== m[4]) throw new Unsupported(`host function argument ${spec} is a ${value.type.k}`);
+    if (value.type.k !== kind) throw new Unsupported(`host function argument ${spec} is a ${value.type.k}`);
     return {ref: m[1] === "&", value};
   });
 }
@@ -2186,6 +2239,9 @@ function statement(node, ctx) {
     const k = kernelOf(node, ctx);
     if (k?.fn !== undefined) return {s: "native", fn: k.fn, args: nativeArgs(k.args, ctx), stmt: true};
     if (k?.bound !== undefined && ctx.kernelLoop?.binds.includes(k.bound)) return {s: "nop"};
+    // a line whose work the host does elsewhere (a JavaScript declaration the
+    // host function of a later line does not need)
+    if (k?.nop === true) return {s: "nop"};
     if (/'@KERNEL/i.test(node.concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
     return {s: "nop"};
   }
@@ -2461,6 +2517,11 @@ function lvalue(target, ctx) {
     if (a === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
     place = a;
     i = 3;
+  } else if (upper(first.concatTokens()) === "SY" && isExpr(first, Expressions.TargetField) && kids.length === 3 && isTok(kids[1], "-")
+      && upper(kids[2].concatTokens()) === "SUBRC" && !isVariableName("SY", ctx)) {
+    // ultra/httpc: sy-subrc written, as open-abap-core's methods with
+    // classic exceptions do (cl_http_client's send, receive, create_by_url)
+    return {e: "sy", field: "Subrc", type: I};
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
     i = 1;
@@ -4618,6 +4679,26 @@ function call(chain, ctx, statement, hint) {
     return {e: "str_fn", fn: "EscapeHTMLAttr", args: [convert(v, S)], type: S};
   }
   if (receiver === null && owner === null && STRING_FNS[name] && !ctx.signatures.has(name)) return stringFn(name, direct, named, ctx, chain.concatTokens());
+  // ultra/httpc: concat_lines_of( table = t sep = s ) over a table of
+  // strings (cl_http_utility=>fields_to_string): the rows joined by sep. A
+  // row type other than string is refused (what a c row keeps of its
+  // trailing blanks is not measured), and so is a table without sep only
+  // when sep is not a character operand
+  if (receiver === null && owner === null && name === "CONCAT_LINES_OF" && !ctx.signatures.has(name)) {
+    const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
+    const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
+    const tabNode = direct ?? arg("TABLE");
+    if (tabNode === undefined || ps.some((x) => !["TABLE", "SEP"].includes(upper(x.findDirectExpression(Expressions.ParameterName).concatTokens())))) throw new Unsupported(`concat_lines_of( ) form: ${chain.concatTokens()}`);
+    const tab = source(tabNode, ctx);
+    if (tab.type.k !== "table" || tab.type.row.k !== "string") throw new Unsupported(`concat_lines_of( ) of a ${tab.type.k === "table" ? `table of ${tab.type.row.k}` : tab.type.k}: only a table of strings is in the subset`);
+    let sep = {e: "str", value: "", type: S};
+    if (arg("SEP") !== undefined) {
+      const x = source(arg("SEP"), ctx);
+      if (!charlike(x.type)) throw new Unsupported(`concat_lines_of( ) sep of a ${x.type.k}`);
+      sep = convert(x, S);
+    }
+    return {e: "str_fn", fn: "ConcatLinesOf", args: [tab, sep], type: S};
+  }
   if (receiver === null && owner === null && ["TO_LOWER", "TO_UPPER"].includes(name) && !ctx.signatures.has(name)) {
     const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
     return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(argNode, ctx), S), type: S};

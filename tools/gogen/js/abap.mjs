@@ -1387,3 +1387,7 @@ export function cctorDump(cls, e) {
   if (!classBased(e)) return e;
   return new AbapError("RUNTIME_ERROR", `${cls}=>CLASS_CONSTRUCTOR: ${e.message}`);
 }
+// concat_lines_of( table = t sep = sep ) over a table of strings (go/abap ConcatLinesOf)
+export function ConcatLinesOf(t, sep) {
+  return t.join(sep);
+}

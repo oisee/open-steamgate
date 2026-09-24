@@ -851,6 +851,7 @@ function place(p, ctx) {
     case "attr": return `me.${ident(p.name)}`;
     case "static": return p.go;
     case "const": return p.go;
+    case "sy": return `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
     case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;

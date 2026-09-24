@@ -499,3 +499,11 @@ func SubstringAfter(v, sub string) string {
 	}
 	return ""
 }
+
+// ConcatLinesOf is concat_lines_of( table = t sep = sep ) over a table of
+// strings (ultra/httpc, cl_http_utility=>fields_to_string): the rows joined
+// by sep, an empty table the empty string. The front end admits string rows
+// only.
+func ConcatLinesOf(t []string, sep string) string {
+	return strings.Join(t, sep)
+}
