@@ -64,6 +64,7 @@ func TestRangesPairs(t *testing.T) {
 		t.Fatal("no pairs")
 	}
 	same, raised := 0, 0
+	dialects := map[string]int{}
 	for _, c := range file.Pairs {
 		rows := make([]RangeRow, len(c.Rows))
 		for i, r := range c.Rows {
@@ -115,8 +116,26 @@ func TestRangesPairs(t *testing.T) {
 			t.Errorf("%s: params %v, want %v", c.Name, params, want.Params)
 		}
 		same++
+		// and the other three dialects of the pairs (PostgreSQL's LIKE says
+		// ESCAPE '' since #47)
+		for _, d := range []string{"duckdb", "postgres", "hana"} {
+			w, ok := c.Lowered[d]
+			if !ok {
+				t.Errorf("%s: no %s pair", c.Name, d)
+				continue
+			}
+			text, params, err := LowerPredicateIn(pred, d)
+			if params == nil {
+				params = []Param{}
+			}
+			if err != nil || text != w.SQL || !reflect.DeepEqual(normal(t, params), normal(t, w.Params)) {
+				t.Errorf("%s (%s):\n got  %s %v %v\n want %s %v", c.Name, d, text, params, err, w.SQL, w.Params)
+				continue
+			}
+			dialects[d]++
+		}
 	}
-	t.Logf("%d pairs: %d rendered byte for byte, %d outcomes the same", len(file.Pairs), same, raised)
+	t.Logf("%d pairs: %d rendered byte for byte (duckdb %d, postgres %d, hana %d), %d outcomes the same", len(file.Pairs), same, dialects["duckdb"], dialects["postgres"], dialects["hana"], raised)
 }
 
 // A4H's measurement (a throwaway table of 31 rows, 80 cases) replayed on a

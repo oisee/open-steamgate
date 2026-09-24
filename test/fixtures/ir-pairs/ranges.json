@@ -848,7 +848,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -994,7 +994,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1055,7 +1055,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1367,7 +1367,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1430,7 +1430,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" NOT LIKE $1::text)",
+          "sql": "(\"COL\" NOT LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1576,7 +1576,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1637,7 +1637,7 @@
           ]
         },
         "postgres": {
-          "sql": "(\"COL\" LIKE $1::text)",
+          "sql": "(\"COL\" LIKE $1::text ESCAPE '')",
           "params": [
             {
               "name": "p0",
@@ -1820,7 +1820,7 @@
           ]
         },
         "postgres": {
-          "sql": "(NOT (\"COL\" NOT LIKE $1::text))",
+          "sql": "(NOT (\"COL\" NOT LIKE $1::text ESCAPE ''))",
           "params": [
             {
               "name": "p0",

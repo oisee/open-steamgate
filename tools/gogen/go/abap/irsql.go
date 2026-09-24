@@ -2,6 +2,7 @@ package abap
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -129,7 +130,90 @@ type Refused struct{ Reason string }
 
 func (r Refused) Error() string { return r.Reason }
 
-type lowering struct{ params []Param }
+// lowering renders for one dialect; "" is SQLite, the one the host runs.
+// The other three (duckdb, postgres, hana) are the dialects of
+// tools/sqlscript-lower.mjs for the expression nodes a predicate has: the
+// placeholder and LIKE differ, nothing else a predicate uses does. They are
+// what the pairs files check the port against, all four of them.
+type lowering struct {
+	params  []Param
+	dialect string
+}
+
+// placeholder is the dialect's placeholder for the n-th parameter (from 1)
+// of the seam type code (DIALECTS[d].placeholder).
+var (
+	seamInteger = regexp.MustCompile(`^[IBS](\(|$)`)
+	seamDouble  = regexp.MustCompile(`^F(\(|$)`)
+	seamPacked  = regexp.MustCompile(`^P\(\d+,\d+\)$`)
+	seamChar    = regexp.MustCompile(`^C\(\d+\)$`)
+)
+
+func (l *lowering) placeholder(n int, code string) string {
+	if l.dialect == "" || l.dialect == "duckdb" {
+		return "?"
+	}
+	code = strings.ToUpper(code)
+	integer := seamInteger.MatchString(code)
+	double := seamDouble.MatchString(code)
+	packed := seamPacked.MatchString(code)
+	switch l.dialect {
+	case "hana":
+		switch {
+		case integer:
+			return "CAST(? AS INTEGER)"
+		case double:
+			return "CAST(? AS DOUBLE)"
+		case packed:
+			return "CAST(? AS DECIMAL" + code[1:] + ")"
+		}
+		return "?"
+	case "postgres":
+		var pg string
+		switch {
+		case integer:
+			pg = "integer"
+		case double:
+			pg = "double precision"
+		case packed:
+			pg = "numeric" + code[1:]
+		case seamChar.MatchString(code):
+			pg = "varchar" + code[1:]
+		case code == "STRING":
+			pg = "text"
+		default:
+			c := code
+			if c == "" {
+				c = "(missing)"
+			}
+			panic(Refused{"the ABAP type " + c + " has no PostgreSQL parameter type"})
+		}
+		return fmt.Sprintf("$%d::%s", n, pg)
+	}
+	return "?"
+}
+
+// like is DIALECTS[d].like: PostgreSQL always says ESCAPE, '' when the
+// condition has none (its default escape is a backslash, which neither
+// ABAP nor the other engines have)
+func (l *lowering) like(e, p string, esc *string, neg bool) string {
+	n := ""
+	if neg {
+		n = " NOT"
+	}
+	if l.dialect == "postgres" {
+		x := "''"
+		if esc != nil {
+			x = *esc
+		}
+		return "(" + e + n + " LIKE " + p + " ESCAPE " + x + ")"
+	}
+	tail := ""
+	if esc != nil {
+		tail = " ESCAPE " + *esc
+	}
+	return "(" + e + n + " LIKE " + p + tail + ")"
+}
 
 func quote(id string) string { return `"` + strings.ReplaceAll(id, `"`, `""`) + `"` }
 
@@ -164,14 +248,17 @@ func (l *lowering) expr(e *IR) string {
 		}
 		// a string literal still goes through a parameter
 		l.params = append(l.params, Param{Name: fmt.Sprintf("p%d", len(l.params)), Value: e.Value, Type: e.Type.seam(), IsNull: e.Value == nil})
-		return "?"
+		return l.placeholder(len(l.params), e.Type.seam())
 	case "param":
 		l.params = append(l.params, Param{Name: e.Name, Value: e.Value, Type: e.Type.seam(), IsNull: e.IsNull})
-		return "?"
+		return l.placeholder(len(l.params), e.Type.seam())
 	case "bin":
 		left := l.expr(e.Left)
 		right := l.expr(e.Right)
 		if e.Op == "/" {
+			if l.dialect != "" {
+				panic(Refused{"division is rendered for SQLite only here"})
+			}
 			if e.Type != nil && e.Type.Abap == "I" {
 				return "(" + left + " / " + right + ")"
 			}
@@ -185,15 +272,12 @@ func (l *lowering) expr(e *IR) string {
 	case "like":
 		x := l.expr(e.Expr)
 		p := l.expr(e.Pattern)
-		neg := ""
-		if e.Negated {
-			neg = " NOT"
-		}
-		esc := ""
+		var esc *string
 		if e.Escape != nil {
-			esc = " ESCAPE " + l.expr(e.Escape)
+			v := l.expr(e.Escape)
+			esc = &v
 		}
-		return "(" + x + neg + " LIKE " + p + esc + ")"
+		return l.like(x, p, esc, e.Negated)
 	case "in":
 		x := l.expr(e.Expr)
 		vals := make([]string, len(e.Values))
@@ -335,6 +419,24 @@ func catchRefused(err *error) {
 func LowerPredicate(pred *IR) (sql string, params []Param, err error) {
 	defer catchRefused(&err)
 	l := &lowering{}
+	sql = l.expr(pred)
+	return sql, l.params, nil
+}
+
+// LowerPredicateIn renders a condition alone in one of the four dialects
+// of tools/sqlscript-lower.mjs (sqlite, duckdb, postgres, hana), as
+// lowerPredicate(pred, dialect) of ir-ranges.mjs does. Only SQLite runs
+// here; the other three are what the pairs check the port against.
+func LowerPredicateIn(pred *IR, dialect string) (sql string, params []Param, err error) {
+	defer catchRefused(&err)
+	switch dialect {
+	case "sqlite", "":
+		dialect = ""
+	case "duckdb", "postgres", "hana":
+	default:
+		panic(Refused{"no dialect " + dialect})
+	}
+	l := &lowering{dialect: dialect}
 	sql = l.expr(pred)
 	return sql, l.params, nil
 }
