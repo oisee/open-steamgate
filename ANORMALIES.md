@@ -205,7 +205,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: a JavaScript error no `CATCH` takes (a dump) for the refused, TLS, scheme and header-newline cases; the classic exceptions are never raised and sy-subrc is 0 whenever the call returns; `get_last_error` has no message
 - Impact on open-steamgate: ZCL_OSD_GIT (and any client) cannot report an unreachable remote; the dialog step dumps; our own calls had no `EXCEPTIONS` either, so ZCL_OSD_GIT dumped on a system too and needed `EXCEPTIONS http_communication_failure = 1 ...` on its SEND/RECEIVE whatever upstream does. It has them now (`ZCL_OSD_GIT=>EXCHANGE`, PR #84): on a system an unreachable remote is a `zcx_abapgit_exception` with `get_last_error`'s text; here it still dumps until the upstream fix
 - Smallest safe workaround: `EXCEPTIONS` on every SEND and RECEIVE of our own ABAP (ZCL_OSD_GIT has them); it is right on a system and changes nothing here until the upstream fix
-- Upstream: PR from branch `httpc-communication-failure` in open-abap/open-abap-core (not sent yet): catch the request's error in `SEND`, keep it, and let `RECEIVE` set sy-subrc 1 with the message in `get_last_error`; the response status the ICM invents (404/500/400) is secondary. Classic exceptions from a method in the transpiler are the underlying gap the source comment names
+- Upstream: [open-abap/open-abap-core#1271](https://github.com/open-abap/open-abap-core/pull/1271) (branch `httpc-communication-failure`), opened 2026-09-25, not merged: catch the request's error in `SEND`, keep it, and let `RECEIVE` set sy-subrc 1 with the message in `get_last_error`; the response status the ICM invents (404/500/400) is secondary. Classic exceptions from a method in the transpiler are the underlying gap the source comment names
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
 - Upstream version containing a fix: none yet
 
@@ -221,7 +221,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: the request waits as long as the socket stays open, whatever `timeout` says; an invalid value is not refused
 - Impact on open-steamgate: a remote that hangs hangs the dialog step
 - Smallest safe workaround: none in OSG
-- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`), after the `httpc-communication-failure` PR: a positive `timeout` as a socket timeout on the request, surfacing at `RECEIVE` as `http_communication_failure` (together with the failure entry above); a value below -1 is `http_invalid_timeout` from `SEND`
+- Upstream: [open-abap/open-abap-core#1272](https://github.com/open-abap/open-abap-core/issues/1272), filed 2026-09-25 (the fix follows #1271): a positive `timeout` as a socket timeout on the request, surfacing at `RECEIVE` as `http_communication_failure` (together with the failure entry above); a value below -1 is `http_invalid_timeout` from `SEND`
 - Regression-test location: none here (no timing test); the system side is the probe source above
 - Upstream version containing a fix: none yet
 
