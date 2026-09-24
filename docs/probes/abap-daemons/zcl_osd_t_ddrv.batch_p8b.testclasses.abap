@@ -100,6 +100,8 @@ CLASS ltcl_p8 IMPLEMENTATION.
       CATCH cx_amc_error INTO DATA(lx).
         zcl_osd_t_ddrv=>dlog( iv_probe = 'P8B' iv_cb = 'SELF_SUB_ERR' iv_txt = lx->get_text( ) ).
     ENDTRY.
+    " labels: ECHO_OFF = echo suppression off (i_suppress_echo = abap_false),
+    " ECHO_ON = echo suppression on (i_suppress_echo = abap_true)
     send( iv_ch = `/pc` iv_tag = `E1` iv_n = 1 iv_suppress_echo = abap_false ).
     COMMIT WORK.
     WAIT FOR MESSAGING CHANNELS UNTIL lines( mt_got ) >= 1 UP TO 2 SECONDS.

@@ -389,7 +389,12 @@ logs the first message, the last and any gap. The driver ran two batches:
 [`batch_p8b`](probes/abap-daemons/zcl_osd_t_ddrv.batch_p8b.testclasses.abap)
 (the LUW, echo, a daemon as producer; 7.5 s; on the system the include still
 held batch A's method, no longer marked `FOR TESTING`). Times are log-row
-timestamp differences. Afterwards the handler's `DELETE` removed the
+timestamp differences. The "at `SEND`" proof does not depend on
+comparing clocks: everything ran on one application server with one
+clock, the log rows are written over a separate database connection with
+its own commit (so a receiver's row is visible whatever the sender's LUW
+does), and the driver read `received=1` for the message **before** it
+executed `COMMIT WORK`. Afterwards the handler's `DELETE` removed the
 application; it leaves the object directory entry behind, which abapGit's
 `ZIF_ABAPGIT_TADIR~DELETE_SINGLE` removed
 ([`install`](probes/abap-daemons/zcl_osd_t_samc.install.testclasses.abap),
@@ -405,9 +410,9 @@ daemons counted zero at the end.*
 | order, one producer | 1000 messages in one loop: all 1000 received, sequence 1..1000 with no gap and no duplicate. `SEND` of 1000 PCP messages (each built fresh) took 210 ms, 0.21 ms per message; the receiving daemon had processed all 1000 about 280 ms after the first `SEND`, 66 ms after the sender's commit |
 | order, two producers | a daemon sent 500 (tag B, 175 ms for its loop) while the session sent 500 (tag C) on the same channel: both streams complete, each in its own order with no gap, and the receiver switched between them 868 times in 1000 messages. Order holds per producer; across producers there is none, not even in blocks |
 | `i_suppress_echo` | the session subscribed to `/pc` itself. With `abap_false` it received its own message (`WAIT FOR MESSAGING CHANNELS` returned with `sy-subrc = 0`); with `abap_true` it did not (`sy-subrc = 8` after the 2 s limit), while the daemon subscribed to the same channel received both |
-| where a session's receiver runs | in `WAIT FOR MESSAGING CHANNELS`, and also during a plain `WAIT UP TO` of a polling loop: the test session, still subscribed, had its receiver called for the daemons' later messages while it sat in the `WAIT UP TO '0.2' SECONDS` of its poll |
+| where a session's receiver runs | in `WAIT FOR MESSAGING CHANNELS`, and also during a plain `WAIT UP TO` of a polling loop: the test session, still subscribed, had its receiver called for the daemons' later messages while it sat in the `WAIT UP TO '0.2' SECONDS` of the driver's `waitfor` loop |
 | scope | `/pu` (user) and `/ps` (system) delivered to the same user in the same client; `/pc` (client) likewise, and every receiver saw `GET_PRODUCER_CLIENT` and `GET_PRODUCER_USERNAME` equal to its own. What each scope does **across** clients and users: not measured (one logon) |
-| latency | session to daemon 0.5 to 0.6 ms; daemon to daemon 1.1 to 2.0 ms; session to itself about 1 ms |
+| latency | session to daemon 0.5 to 0.6 ms; daemon to daemon 1.1 to 2.0 ms; daemon to a session (its receiver called during `WAIT UP TO`) 0.2 to 0.3 ms; session to itself at most about 1 ms (an upper bound: the interval includes the `SEND`) |
 
 Not measured: the APC binding (`BIND_AMC_MESSAGE_CONSUMER` delivering to a
 socket), cross-client and cross-user delivery per scope, and whether
@@ -506,17 +511,32 @@ reason: the probes ran under one logon.
     the byte string step 2 tests against.
 11. **An AMC publication leaves at `SEND`** (P8). It is not part of the LUW:
     the host hands each message to the broker when `SEND` returns, and a
-    later `ROLLBACK WORK`, a dump or a killed step does not retract it. This
+    later `ROLLBACK WORK` or a dump does not retract it (measured); that a
+    step killed from outside does not retract it either is inferred from
+    those two, not measured. This
     settles the open AMC paragraph of section 3 and step 6 of section 4.
     Order is per producer only; the broker must keep each producer's
     messages in `SEND` order and may interleave producers freely, so a test
     may assert per-producer order and must not assert a global one.
     `i_suppress_echo` is a per-producer flag that skips the sending
     session's own consumers. A session's receiver is called in
-    `WAIT FOR MESSAGING CHANNELS` and also during `WAIT UP TO`, so
-    `KERNEL_PUSH_CHANNELS=>wait` delivers in both. The object type `SAMC` is
-    deployable through abapGit's handler as it stands, which is the path the
-    demo's `ZOSD_TICKER` takes to a system.
+    `WAIT FOR MESSAGING CHANNELS` and also during `WAIT UP TO`, so local
+    delivery hooks in twice: `KERNEL_PUSH_CHANNELS=>wait`, which the
+    transpiler (`statements/wait.ts`) calls for `WAIT FOR ...` only, and
+    `installWait` in `tools/osd-dialog-step.mjs`, which since #75 replaces
+    a plain `WAIT UP TO` / `UNTIL` inside a step (commit, release the work
+    process, sleep or poll every 500 ms). The receiver runs while the step
+    is released, so it must take the work process back first: a receiver
+    call is a step of its own. `KERNEL_PUSH_CHANNELS=>wait` does not go
+    through `installWait` today and does not release the lock, so it has to
+    be brought under the same rule before it can deliver. The local exit of
+    `WAIT FOR MESSAGING CHANNELS` at the time limit also differs from a
+    system (`ANOMALY-2026-09-24-wait-for-channels-subrc`). What was measured
+    of deployment is `ZCL_ABAPGIT_OBJECT_SAMC->DESERIALIZE` called
+    directly, not an abapGit zip or repository pull; the demo's
+    `ZOSD_TICKER` would take the zip route, and once #79 lands (the zip
+    ships only what `deploy/manifest.json` lists) its `SAMC` needs a unit
+    entry in that manifest.
 
 Recommendations of the note, as measured: **confirmed** — per-instance
 serialisation and FIFO (P1), asynchronous `SEND` (P1), a callback is a
@@ -650,10 +670,14 @@ its mechanism is the first thing step 5 has to demonstrate.
   the supervisor and fanned out in each producer's publish order (producers
   interleave, P8) to every subscriber: a bound APC socket in any child, or
   an ABAP session waiting in `WAIT FOR MESSAGING CHANNELS` or in
-  `WAIT UP TO` (P8 saw a receiver called in both). The socket side needs `serveChannel` to
-  accept frames that did not come from `on_message`; the waiting side needs
-  `KERNEL_PUSH_CHANNELS=>wait` to see a delivered message instead of only
-  polling a condition (it can keep polling at 100 ms in a first version).
+  `WAIT UP TO` (P8 saw a receiver called in both). The socket side needs
+  `serveChannel` to accept frames that did not come from `on_message`. The
+  waiting side hooks in twice (design point 11): `KERNEL_PUSH_CHANNELS=>wait`
+  for `WAIT FOR MESSAGING CHANNELS`, which must then release the work
+  process as `installWait` does (it does not today), and `installWait` in
+  `tools/osd-dialog-step.mjs` for `WAIT UP TO`; in both, a receiver call
+  re-acquires the work process and runs as a step. Polling at 100 ms or
+  500 ms is enough for a first version.
 - **Statics: a guard, not isolation, and the guard is unproven.** The
   daemon runs in the work process, so it could see the class statics of the
   requests it shares the process with. The step sets a flag in

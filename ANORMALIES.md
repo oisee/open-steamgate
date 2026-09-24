@@ -77,6 +77,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: none yet (`test/daemon.mjs`, demo test 4, planned)
 - Upstream version containing a fix: `not applicable`
 
+### ANOMALY-2026-09-24-wait-for-channels-subrc -- WAIT FOR MESSAGING CHANNELS that reaches its time limit sets sy-subrc 8 on a system and 4 here, and a non-positive UP TO asserts here
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler 2.13.89`, `@abaplint/runtime 2.13.89`, open-abap-core `src/kernel/kernel_push_channels.clas.abap` (current `main`)
+- Affected ABAP statement, runtime API or adapter: `WAIT FOR MESSAGING CHANNELS UNTIL <cond> UP TO <n> SECONDS` (every `WAIT FOR ...` transpiles to `KERNEL_PUSH_CHANNELS=>wait`)
+- Minimal ABAP reproducer: `docs/probes/abap-daemons/zcl_osd_t_ddrv.batch_p8b.testclasses.abap`, method `p08b_luw`, the `ECHO_ON` step: a session subscribed to a channel sends with `i_suppress_echo = abap_true`, so the condition never becomes true, and waits `UP TO 2 SECONDS`
+- Exact command used to run it: the ABAP Unit driver `ZCL_OSD_T_DDRV` (sources in `docs/probes/abap-daemons/`), run on A4H 2026-09-24 in `$ZOSG_TMP_0061`, all objects deleted afterwards
+- Expected SAP behaviour: after the time limit `sy-subrc = 8` (probe P8, logged as `ECHO_ON subrc=8`); when the condition is met `sy-subrc = 0` (`ECHO_OFF subrc=0`). A non-positive `UP TO` was not measured.
+- Actual open-abap behaviour: `KERNEL_PUSH_CHANNELS=>wait` returns `sy-subrc = 4` at the time limit, and `ASSERT lv_seconds > 0` dumps for an `UP TO` of zero or less (read from the source, not run)
+- Impact on open-steamgate: code that branches on `sy-subrc = 8` after a timed-out wait takes the wrong branch locally; nothing here depends on it yet (AMC is step 4 of `docs/abap-daemons.md`)
+- Smallest safe workaround: test `sy-subrc <> 0` rather than a specific value
+- Upstream issue: none yet; to be proposed to open-abap-core together with the AMC work, after the value for `UP TO 0` is measured
+- Regression-test location: none yet (step 4 of `docs/abap-daemons.md`)
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE (or HANDLER, SECTION, PARAMETER) activates here and not on a system
 
 - Status: `workaround` (ZONE: the table field is renamed in #67, the CDS element in #69, and ZC_OSD_TAXICUBE activates on A4H; HANDLER, SECTION, PARAMETER: the fields and the elements are renamed in fix/reserved-words, and every table and view they were in activates on A4H)
