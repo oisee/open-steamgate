@@ -220,7 +220,9 @@ describe("the typed SQLScript procedural IR", function () {
     failure = undefined;
     try { await runProcedure(wide); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/scalar RETURNING is limited to ABAP INTEGER/);
+    // a text RETURNING is carried, and a text scalar is the database's to
+    // evaluate: without one, refused by name
+    expect(failure.message).to.match(/goes to the database, and this run has none/);
 
     const optionalChar = procedure({parameters: [{name: "IV", type: T.char(3), optional: true}],
       output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
@@ -249,7 +251,8 @@ describe("the typed SQLScript procedural IR", function () {
     failure = undefined;
     try { await runProcedure(stringCondition, {inputs: {IV: "x"}}); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    expect(failure.message).to.match(/IF condition cannot evaluate STRING on the portable host yet/);
+    // a text condition is the database's to evaluate, and this run has none
+    expect(failure.message).to.match(/IF condition: a text scalar, or one the host does not evaluate, goes to the database, and this run has none/);
 
     const forgedStringCondition = procedure({parameters: [{name: "IV", type: T.str}],
       output: "RV", outputType: T.int, body: [

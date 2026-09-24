@@ -584,3 +584,28 @@ The portable compiler carries several OUT tables: each is what the body
 assigned, an empty relation where the path assigned none, and an OUT
 assigned nowhere is refused in HANA's words. A scalar OUT beside table OUTs
 and a nested CALL inside such a procedure are refused by name for now.
+
+## String and other scalar variables (measured on A4H, 2026-09-23)
+
+A throwaway class with AMDP procedures, called through `execute_abap`,
+deleted afterwards.
+
+| case | on A4H |
+| --- | --- |
+| `DECLARE v NVARCHAR(10);` | NULL until assigned |
+| `DECLARE c NVARCHAR(10) = 'x  '` | kept: length 3; `'x  ' = 'x'` is false |
+| `DECLARE d CHAR(5) = 'a'` | `'a'`, length 1 -- a variable is never padded |
+| `e = :e \|\| :b` with `b` NULL | NULL |
+| `f = 42` into an NVARCHAR | `'42'` |
+| `DECLARE a NVARCHAR(3) = 'abcdef'` | raises (`CX_AMDP_EXECUTION_FAILED`), not truncated |
+| `DECLARE i NCLOB = 'long text'`, `DECLARE j BIGINT = 3000000000` | as given |
+| `DECLARE g BOOLEAN = TRUE; IF :g THEN` | a syntax error: `IF :g = TRUE THEN` |
+| a STRING OUT assigned `'ab  '` | `'ab  '` in ABAP, the blanks kept |
+| a `c LENGTH 3` OUT assigned `'ab '` / `'abcdef'` | `'ab'` / raises |
+| a scalar OUT the path left alone | its initial value (`''`, `0`) |
+
+The portable runtime declares NVARCHAR / VARCHAR / CHAR / NCHAR of a length,
+NCLOB / CLOB, BIGINT and BOOLEAN, and evaluates a scalar the host does not
+(any text, a CASE, a function) in the engine as `SELECT <expr> FROM DUMMY`,
+rendered by the same lowering as a query, so a string scalar means there
+what the same expression in a SELECT means.

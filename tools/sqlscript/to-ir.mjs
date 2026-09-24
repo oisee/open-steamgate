@@ -413,6 +413,8 @@ export function toIr(tree, options = {}) {
         // doubling 2147483647 overflows for MAX(int) and not for COUNT(*).
         // SUM(int) overflowed too on HANA, where DuckDB widens: not typed yet.
         if (fn === "COUNT") resultType = T.int8;
+        // LENGTH of a text is an INTEGER (A4H: LENGTH('x  ') is 3)
+        if (fn === "LENGTH" && args.length === 1 && ["C", "STRING"].includes(args[0].type?.abap)) resultType = T.int;
         if (["MIN", "MAX"].includes(fn) && args.length === 1 && args[0].type !== undefined && !isUnresolved(args[0].type)) resultType = args[0].type;
         if (fn === "LOWER") {
           if (args.length !== 1 || !measuredTextType(args[0]?.type)) {

@@ -9,7 +9,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
-import {runProcedure, UnsupportedSqlScript, Int2OutOfRange, SelectIntoRows} from "../tools/sqlscript-procedure-ir.mjs";
+import {runProcedure, UnsupportedSqlScript, Int2OutOfRange, SelectIntoRows, ScalarTooLong} from "../tools/sqlscript-procedure-ir.mjs";
 import {extract} from "../tools/amdp-extract.mjs";
 import {scan} from "../tools/sqlscript-ir.mjs";
 import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
@@ -572,7 +572,7 @@ for (const {dialect, make} of ENGINES) describe(`SELECT ... INTO as measured on 
     // DEFAULT values must be one per target
     expect(() => program("DECLARE la INTEGER; SELECT id, id * 2 AS d INTO rv, la DEFAULT 1 FROM src WHERE id = :iv;")).to.throw(/1 DEFAULT value\(s\) for 2 target\(s\)/);
     // a BIGINT fills a plain INTEGER only, never an INT2
-    expect(() => program("SELECT count(*) INTO rv FROM src;", "RETURNING VALUE(rv) TYPE int2")).to.throw(/column 1 \(V\) is INT8, the scalar I; not an identical measured type/);
+    expect(() => program("SELECT count(*) INTO rv FROM src;", "RETURNING VALUE(rv) TYPE int2")).to.throw(/scalar outputs are limited to ABAP INTEGER, fixed-length character and STRING/);
     expect(() => program("et_rows = select id, txt into rv from src;", "EXPORTING VALUE(et_rows) TYPE tt_rows")).to.throw(/SELECT \.\.\. INTO fills scalars; it is a statement, not a relation/);
   });
 });
@@ -667,7 +667,85 @@ for (const {dialect, make} of ENGINES) describe(`several OUT tables as measured 
   it("refuses an OUT assigned nowhere, in HANA's words, and a scalar OUT beside table OUTs", () => {
     expect(() => program("EXPORTING VALUE(et_a) TYPE tt_n VALUE(et_b) TYPE tt_n", "et_a = select id as n from src;"))
       .to.throw(UnsupportedSqlScript, /some out table variable is not assigned: ET_B/);
-    expect(() => program("EXPORTING VALUE(ev) TYPE i VALUE(et_a) TYPE tt_n", "et_a = select id as n from src; ev = 1;"))
-      .to.throw(UnsupportedSqlScript, /a scalar OUT beside table OUTs is not carried yet/);
+  });
+
+  it("a scalar OUT beside table OUTs is what the body assigned, its initial value where the path left it alone", async () => {
+    const prog = program("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i VALUE(ev_t) TYPE string VALUE(et_a) TYPE tt_n",
+      "et_a = select id as n from src; IF :iv = 1 THEN ev = 7; ev_t = 'ab  '; END IF;");
+    const set = await run(prog, {IV: 1});
+    expect(set.outputs.EV.value).to.equal(7);
+    expect(set.outputs.EV_T.value).to.equal("ab  ");
+    const left = await run(prog, {IV: 2});
+    expect(left.outputs.EV.value).to.equal(0);
+    expect(left.outputs.EV_T.value).to.equal("");
+  });
+});
+
+// string scalars as SQLScript variables behave on A4H (docs/sqlscript-hana-
+// observed.md): a text is kept as it is, never padded, NULL until assigned,
+// NULL through ||, a number becomes its digits, one too long raises; a text
+// scalar is evaluated by the engine, as the same expression in a SELECT
+for (const {dialect, make} of ENGINES) describe(`string scalars as measured on A4H, as procedures on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "SRC" ("ID" INTEGER, "TXT" VARCHAR)', expect: "none"});
+    await client.native({sql: 'INSERT INTO "SRC" VALUES (1, \'one\'), (5, \'five\'), (20, \'twenty\')', expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  const program = (body, signature = "RETURNING VALUE(rv) TYPE i") => {
+    const {methods, types} = extract(CLASS(signature, body), "cl_t.clas.abap");
+    return compileProcedure(methods[0], types, {catalogue: CATALOGUE});
+  };
+  const value = async (body) => (await runProcedure(program(body), {client, dialect, inputCatalogue: CATALOGUE})).value;
+  const rows = async (body) => (await runProcedure(program(body, "EXPORTING VALUE(et_rows) TYPE tt_rows"),
+    {client, dialect, inputCatalogue: CATALOGUE})).rows.map((r) => r.ID).sort((a, b) => a - b);
+
+  it("a text keeps its trailing blanks and is never padded; NULL until assigned; a number becomes its digits", async () => {
+    expect(await value("DECLARE c NVARCHAR(10) = 'x  '; rv = LENGTH(:c);")).to.equal(3);
+    expect(await value("DECLARE d CHAR(5) = 'a'; rv = LENGTH(:d);")).to.equal(1);
+    expect(await value("DECLARE b NVARCHAR(10); rv = CASE WHEN :b IS NULL THEN 1 ELSE 0 END;")).to.equal(1);
+    expect(await value("DECLARE f NVARCHAR(10); f = 42; rv = LENGTH(:f);")).to.equal(2);
+  });
+
+  it("NULL through || stays NULL, and 'x  ' is not 'x'", async () => {
+    expect(await value("DECLARE b NVARCHAR(10); DECLARE e NVARCHAR(10) = 'p'; e = :e || :b; rv = CASE WHEN :e IS NULL THEN 1 ELSE 0 END;")).to.equal(1);
+    expect(await value("DECLARE c NVARCHAR(10) = 'x  '; rv = CASE WHEN :c = 'x' THEN 1 ELSE 0 END;")).to.equal(0);
+  });
+
+  it("a text longer than the declared length raises, as on A4H", async () => {
+    let caught;
+    try { await value("DECLARE a NVARCHAR(3) = 'abcdef'; rv = 1;"); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(ScalarTooLong);
+  });
+
+  it("a text scalar in a WHERE, in an IF and filled by SELECT ... INTO", async () => {
+    expect(await rows("DECLARE t NVARCHAR(10) = 'five'; et_rows = select id, txt from src where txt = :t;")).to.deep.equal([5]);
+    expect(await rows(`DECLARE t NVARCHAR(10) = 'five';
+      IF :t = 'five' THEN et_rows = select id, txt from src where id > 1; ELSE et_rows = select id, txt from src; END IF;`)).to.deep.equal([5, 20]);
+    expect(await rows("DECLARE t NVARCHAR(10); SELECT txt INTO t FROM src WHERE id = 20; et_rows = select id, txt from src where txt = :t;")).to.deep.equal([20]);
+  });
+
+  it("BIGINT keeps what INTEGER cannot, and is range-checked into an INTEGER", async () => {
+    expect(await value("DECLARE j BIGINT = 3000000000; rv = CASE WHEN :j > 2147483647 THEN 1 ELSE 0 END;")).to.equal(1);
+    let caught;
+    try { await value("DECLARE j BIGINT = 3000000000; rv = :j;"); } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/outside SQLScript INTEGER/);
+  });
+
+  it("text outputs as A4H hands them to ABAP: STRING as it is, c LENGTH 3 without trailing blanks, too long raises, left alone initial", async () => {
+    const run1 = async (signature, body, inputs = {}) => runProcedure(program(body, signature), {client, dialect, inputs, inputCatalogue: CATALOGUE});
+    expect((await run1("RETURNING VALUE(rv) TYPE string", "rv = 'ab  ' || 'c';")).value).to.equal("ab  c");
+    expect((await run1("EXPORTING VALUE(ev) TYPE c LENGTH 3", "ev = 'ab ';")).value).to.equal("ab");
+    expect((await run1("IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE c LENGTH 3", "IF :iv = 1 THEN ev = 'x'; END IF;", {IV: 2})).value).to.equal("");
+    let caught;
+    try { await run1("EXPORTING VALUE(ev) TYPE c LENGTH 3", "ev = 'abcdef';"); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(ScalarTooLong);
+  });
+
+  it("refuses a DECLARE of a type not measured, by name", () => {
+    expect(() => program("DECLARE d DECIMAL(5,2); rv = 1;")).to.throw(UnsupportedSqlScript, /a scalar DECLARE of DECIMAL\(5,2\) is not measured yet/);
   });
 });

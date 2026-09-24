@@ -521,8 +521,9 @@ describe("independent AMDP clean-room corpus", () => {
     const scalar = compileProcedure(scalarMethod, matrix.types);
     const charReturning = {...scalarMethod, parameters: scalarMethod.parameters.map((one) =>
       one.direction === "RETURNING" ? {...one, abapType: "c LENGTH 3"} : one)};
-    expect(() => compileProcedure(charReturning, matrix.types))
-      .to.throw(UnsupportedSqlScript, /scalar RETURNING support is limited to ABAP INTEGER/);
+    // a fixed-length character RETURNING is carried now (an INTEGER value
+    // into it becomes its digits, measured on A4H)
+    expect(compileProcedure(charReturning, matrix.types).outputType).to.deep.equal({abap: "C", len: 3});
     const relationalScalar = {...scalarMethod,
       body: "tmp = SELECT key_id FROM :it_left; rv_value = :iv_seed + 4;",
       parameters: [
