@@ -425,9 +425,44 @@ an SQLite file in WAL mode, seeded once when it has no tables and marked
 with a hash of the build's tables and seed rows (`PRAGMA user_version`); a
 file another build seeded, or nobody marked, is refused at start rather than
 used. `ZOSD_STATUS_SRV` and the webgui read the five status tables, which
-the Node hosts refresh before each such request (`withFreshStatus`); OSGo
-has no refresh yet, so they answer out of the seed with
-`X-Osgo-Status-Snapshot: seed; not refreshed`.
+the Node hosts refresh before each such request (`withFreshStatus`). OSGo
+does the same with a snapshot of its own process (`go/cmd/osgo/status.go`,
+the build-time half from `status.mjs` into `zz_status.go`), at start and
+before each `ZOSD_STATUS_SRV` request, through the compiled
+`ZCL_OSD_STATUS=>REFRESH` and open-abap-core's `/UI2/CL_JSON=>DESERIALIZE`
+(ultra/json, below). Every row is a fact of the process or of the build:
+host kind `abap-go`, its pid, port, sockets and RSS, the program's own
+generation (`go:` and a hash of the generated code; `gen_live` is the tree's
+Node build, so "in step" says no), the OData services and SICF nodes it
+serves, the apps under `-root`, the pack pages it serves, SQLite and the
+platform. Left out, not invented: the RFC and DIAG port rows (Node's JS
+protocol listeners), push channels, and the services and packs OSGo does
+not serve.
+
+### JSON into ABAP: `/UI2/CL_JSON=>DESERIALIZE` (ultra/json)
+
+The deserializer of open-abap-core, compiled as it stands, local classes
+included (`LOCAL_CLASSES`), with the two pieces that are JavaScript on Node
+as host functions: `LCL_JSON_PARSER=>PARSE` (`go/abap/jsonparse.go`,
+JSON.parse's grammar, key order and number text, tested against Node's
+answers) and `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA` (`emit-go.mjs`
+`nativeRttiData`, A4H's lengths, output lengths and absolute names:
+`ZCL_GOGEN_T_RTTI`). What it needed of the front end: sorted secondary
+keys (`LOOP ... USING KEY`, `READ ... WITH KEY k COMPONENTS`, duplicates
+newest first as A4H orders them: `ZCL_GOGEN_T_SECKEY`), `INSERT INTO TABLE`
+and `CREATE DATA ... LIKE LINE OF` of generic tables, `CREATE DATA ref.`,
+`LOOP AT ref->* ASSIGNING <typed>`, a variable named `value`, and `=` / `<>`
+of two object references (`ZCL_GOGEN_T_JSONGEN`, `_DREFLOOP`). The whole
+path is pinned by `ZCL_GOGEN_T_JSONDES`. Two consequences of following A4H:
+the parser reads an array's members through a non-unique sorted key, so a
+JSON array fills its table in reverse (ANORMALIES
+secondary-key-duplicates; the status tables read with ORDER BY do not show
+it, DatabaseSet and the services of the object page do), and
+`CREATE DATA ref LIKE LINE OF data` on a `TYPE data` parameter does not
+activate on A4H: it is refused everywhere but in `/UI2/CL_JSON=>_DESERIALIZE`
+(`TRANSPILER_MEANING`, ANORMALIES create-data-like-line-generic). The
+reference branch of `_DESERIALIZE` (deserializing into `REF TO data`) stays
+statement stubs.
 
 The front-end changes this needed that are not ICF-specific (findScope by
 class name, `DEFAULT <constant>`, the flattened block list,
