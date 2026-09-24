@@ -29,7 +29,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
-### ANOMALY-2026-09-24-zone-reserved-word — A table field named ZONE (or HANDLER, SECTION, PARAMETER) activates here and not on a system
+### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE (or HANDLER, SECTION, PARAMETER) activates here and not on a system
 
 - Status: `workaround` (ZONE: the table field is renamed in #67, the CDS element in #69, and ZC_OSD_TAXICUBE activates on A4H; HANDLER, SECTION, PARAMETER: the fields and the elements are renamed in fix/reserved-words, and every table and view they were in activates on A4H)
 - Discovery date: `2026-09-24`
@@ -40,11 +40,36 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: neither the table nor the view activates. The list is the dictionary table `TRESE` (453 names on A4H; `ZONE` carries the source hint `DB6, MSS`)
 - Actual open-abap behaviour: abaplint reports nothing, the transpiler creates `"zone"`, and the table, the CDS cube `ZC_OSD_TAXICUBE` over it and the Analytical List Page work
 - Impact on open-steamgate: ZOSD_TAXIFACT, and with it the taxi cube and page, could not be deployed to a system. The table field is now `PICKUP_ZONE` (#67) and the cube's element `PickupZone` (`pickup_zone as PickupZone`), so the OData property is `PICKUPZONE`; the page's annotations, its e2e test and the taxi bench follow it. The demo's OData has no outside consumers, so a system that activates the cube was put before the old property name (decided 2026-09-24). Measured on A4H after the rename (`$ZOSG_TMP_0026`): ZOSD_TAXIFACT with `PICKUP_ZONE` and ZC_OSD_TAXICUBE / ZVOSDTAXICUBE with this tree's source (without `@OData.publish`, which would register a service) activate, and a Data Preview `SELECT PickupZone, SUM( Trips ) ... GROUP BY PickupZone` answers; both were deleted. The same for the other three words (fix/reserved-words): the table fields are `ZOSD_ICF_APC-CLASS_NAME` (SAPC's own name for it), `ZOSD_ICF_ASIDE-ICF_HANDLER`, `ZOSD_SVC-HANDLER_NAME` (a DPC, a handler class, an APC class or an app id), `ZOSD_DB-CATEGORY` and `ZSTG_FM_PARAM-PARAM_NAME`; the elements are `ClassName`, `IcfHandler` (`ZC_OSD_ICF_HANDLER`, like its `IcfName`/`IcfOrder`/`IcfTyp`), `HandlerName` and `Category`, and the OData properties of ZOSD_ICF_SRV and ZOSD_STATUS_SRV follow them (the Fiori pages are annotation-driven from the YAML; the zvdb pack page and the preview e2e read `Category`). `ModuleParameterSet` keeps its property `Parameter`: it is table-mapped, not a CDS element, and only its `sap:label` changes. The JSON the hosts post to `/sap/bc/osd/status/` keeps its keys `handler` and `section`. Measured on A4H (`$ZOSG_TMP_0040`): the five tables and the four DDIC-based views with this tree's sources activate (the views only warn "DDIC-based CDS views are obsolete", `ZC_OSD_ICF_HANDLER` also that ICFTYP is not in its key) and a Data Preview of each view answers with the new column; all deleted. The structures with COUNT, FILE, PACKAGE, ROWCOUNT and RULE (`ZOSD_TYPE_S`, `ZOSD_OBJECT_S`, `ZOSD_SQLTRACE_S`, `ZOSD_ISSUE_S`) are left as they are: a structure has no database table, and among the dictionary objects A4H activated since 2024-01-01 (DD03L joined to DD02L, active version) these names occur in structures only, never in a transparent table: COUNT in 23 structures, FILE 1, PACKAGE 9, ROWCOUNT 2, RULE 2, and PARAMETER 39, HANDLER 1, SECTION 1; a structure of ours could not be activated directly, because vsp creates only transparent tables
-- Smallest safe workaround: the renames above. DuckDB files made before it are migrated at boot and by the import (`tools/osd-db-migrate.mjs`, one transaction), **one way**: a build from before the rename cannot read a migrated file (its first `SELECT zone` fails). Views the running build does not have are logged and left, and one of them that names `zone` breaks. A kept HANA schema is not migrated and is refused at boot with the way out (`STG_DB_FRESH=1`); the stamped backends rebuild or set the file aside by their own drift policy
+- Smallest safe workaround: the renames above. DuckDB files made before it are migrated at boot and by the import (`tools/osd-db-migrate.mjs`, one transaction), **one way**: a build from before the rename cannot read a migrated file (its first `SELECT zone` fails). Views the running build does not have are logged and left, and one of them that names `zone` breaks. A kept HANA schema is not migrated and is refused at boot with the way out (`STG_DB_FRESH=1`); the stamped backends rebuild or set the file aside by their own drift policy. **The migration covers DuckDB only.** A SQLite file (`STG_DB=file`, `STG_DB_PATH` with SQLite) that sees this DDIC drift is moved aside to `*.drift` and the system starts empty: the module signatures imported into `ZSTG_FM_PARAM` and the records in `ZOSD_ICF_ASIDE` are not carried over. The way back is `POST FunctionGroupSet` with the same `*.fugr.xml` again; the aside records are kept in the `*.drift` file only and are not restored by anything (they are written again only when an object next replaces an edited ICF row)
 - Upstream issue: needs an issue (abaplint: a check of TABL field names and CDS element names against the dictionary's reserved words); not filed yet
 - Regression-test location: `test/db-migrate.mjs` (the migration, including a renamed key column), `test/taxi-import.mjs` (an import into an old-shaped file), `test/reserved-words.mjs` (no field of an own transparent table and no CDS element is one of the names A4H was seen refusing: ZONE, HANDLER, SECTION, PARAMETER; checked failing on the tree before the renames)
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-24-delete-adjacent-default-key -- DELETE ADJACENT DUPLICATES compares every component of a DEFAULT KEY table
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.x as this tree pins it
+- Affected ABAP statement, runtime API or adapter: `DELETE ADJACENT DUPLICATES FROM itab` without `COMPARING`, on a standard table of a structure `WITH DEFAULT KEY`
+- Minimal ABAP reproducer:
+
+```abap
+TYPES: BEGIN OF ty, c TYPE c LENGTH 1, i TYPE i, END OF ty.
+DATA lt TYPE STANDARD TABLE OF ty WITH DEFAULT KEY.
+" rows (a,2) (a,1) (b,1)
+SORT lt.                          " both: a2 a1 b1
+DELETE ADJACENT DUPLICATES FROM lt.
+" SAP: 2 rows -- open-abap: 3 rows
+```
+
+- Exact command used to run it: **measured on A4H 2026-09-24** (`$ZOSG_TMP_0462`, ultra/demodata), an ABAP Unit probe with the lines above: `a2 a1 b1  lines:2`; the same class transpiled here: `a2 a1 b1  lines:3`. The probe was deleted.
+- Expected SAP behaviour: the default key of a structured line is its character-like components, so the comparison leaves the `i` out, as `SORT` already does here
+- Actual open-abap behaviour: `SORT` uses the default key (the order agrees), `DELETE ADJACENT DUPLICATES` compares the whole line
+- Impact on open-steamgate: found by `ZCL_OSD_DEMO_TAXI`'s grain test, which passed here and failed on A4H; the test now sorts and compares by every component explicitly, which both answer alike
+- Smallest safe workaround: name the key: `SORT ... BY` and `COMPARING ALL FIELDS` (or the components)
+- Upstream issue: needs an issue (transpiler runtime); not filed yet
+- Regression-test location: `src/demo_data/zcl_osd_demo_taxi.clas.testclasses.abap` (`grain_and_marks`) uses the portable form; no test pins the anomaly
+- Upstream version containing a fix: `unknown`
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 **A POSTed form field is not there.** On a system, ICF fills the form fields of

@@ -60,13 +60,44 @@ describe("analytics: NYC taxi cube through SADL", () => {
     expect(xml).to.match(/Name="TIP"[^>]*sap:aggregation-role="measure"/);
   });
 
-  it("groups the four attributed TLC sample rows before sending them to Fiori", async () => {
-    const url = S + "/Zc_Osd_TaxicubeSet?$select=BOROUGH,TRIPS,FARE,TIP&$orderby=BOROUGH&$format=json";
+  it("keeps the four attributed TLC sample rows beside the synthetic ones", async () => {
+    // the synthetic facts are FACT_ID 9000000001 and up (ZCL_OSD_DEMO_DATA);
+    // everything below is sample or imported data and is never touched
+    const url = S + "/Zc_Osd_TaxicubeSet?$select=BOROUGH,TRIPS,FARE,TIP&$filter=FACTID lt '9000000000'&$orderby=BOROUGH&$format=json";
     const response = await fetch(url);
     expect(response.status).to.equal(200);
     const rows = (await response.json()).d.results;
     expect(rows.map((row) => row.BOROUGH)).to.deep.equal(["Bronx", "Brooklyn", "Manhattan", "Queens"]);
     expect(rows.reduce((n, row) => n + row.TRIPS, 0)).to.equal(4);
     expect(rows.reduce((n, row) => n + Number(row.FARE), 0)).to.be.closeTo(99.4, 0.001);
+  });
+
+  it("serves the synthetic month with a plausible shape", async () => {
+    // the host started with the default size (tools/osd-demo-data.mjs):
+    // 20000 synthetic groups, the same on every host for the same seed
+    const count = await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text();
+    expect(Number(count)).to.equal(20000);
+    const url = S + "/Zc_Osd_TaxicubeSet?$select=BOROUGH,TRIPS,FARE,TIP,DISTANCE&$filter=FACTID ge '9000000000'&$format=json";
+    const rows = (await (await fetch(url)).json()).d.results;
+    const by = Object.fromEntries(rows.map((row) => [row.BOROUGH.trim(), row]));
+    const trips = rows.reduce((n, row) => n + row.TRIPS, 0);
+    expect(trips).to.be.greaterThan(50000);
+    expect(Object.keys(by).sort()).to.deep.equal(["Bronx", "Brooklyn", "EWR", "Manhattan", "N/A", "Queens", "Staten Island", "Unknown"]);
+    // Manhattan dominates, as it does in the TLC's yellow-cab records
+    expect(by.Manhattan.TRIPS / trips).to.be.within(0.8, 0.95);
+    // the airports make Queens trips long and dear
+    const perTrip = (b, m) => Number(by[b][m]) / by[b].TRIPS;
+    expect(perTrip("Queens", "DISTANCE")).to.be.greaterThan(3 * perTrip("Manhattan", "DISTANCE"));
+    expect(perTrip("Manhattan", "FARE")).to.be.within(8, 20);
+    // tips mostly on card, next to none on cash
+    const pay = (await (await fetch(S + "/Zc_Osd_TaxicubeSet?$select=PAYMENT,TRIPS,FARE,TIP&$filter=FACTID ge '9000000000'&$format=json")).json()).d.results;
+    const p = Object.fromEntries(pay.map((row) => [row.PAYMENT.trim(), row]));
+    expect(Number(p.Card.TIP) / Number(p.Card.FARE)).to.be.within(0.12, 0.22);
+    expect(Number(p.Cash.TIP) / Number(p.Cash.FARE)).to.be.below(0.01);
+    expect(p.Card.TRIPS / trips).to.be.within(0.6, 0.85);
+    // night low, evening peak
+    const hours = (await (await fetch(S + "/Zc_Osd_TaxicubeSet?$select=PICKUPHOUR,TRIPS&$filter=FACTID ge '9000000000'&$format=json")).json()).d.results;
+    const h = Object.fromEntries(hours.map((row) => [row.PICKUPHOUR, row.TRIPS]));
+    expect(h[18]).to.be.greaterThan(5 * h[4]);
   });
 });

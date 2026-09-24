@@ -20,6 +20,7 @@
     "test/amdp-pack.mjs",
     "test/analytics.mjs",
     "test/taxi-import.mjs",
+    "test/demo-data.mjs",
     "test/telegram-notify.mjs",
     "test/batch-inserts.mjs",
     "test/bsp-app.mjs",
