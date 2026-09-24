@@ -2344,6 +2344,11 @@ function items(node) {
       if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
       out.push({group: kids[i + 1]});
       i += 2;
+    } else if (isExpr(k, Expressions.MethodCallChain) && isExpr(kids[i + 1], Expressions.Arrow) && isExpr(kids[i + 2], Expressions.AttributeChain)) {
+      // ultra/events: m( )->attr, an attribute of what the call returns (only
+      // describe_by_data( )->type_kind / ->length are compiled: descrAttr)
+      out.push({descr: {call: k, attr: kids[i + 2]}});
+      i += 2;
     } else if (isExpr(k, Expressions.MethodCallChain) && isTok(kids[i + 1], "-") && isExpr(kids[i + 2], Expressions.ComponentChain)) {
       // m( )-comp: a component of what the call returns
       out.push({node: k, comps: kids[i + 2]});
@@ -2368,6 +2373,7 @@ function leafTypes(node, ctx) {
     for (const it of items(n)) {
       if (it.ctor) out.push(constructor(it.ctor, ctx).type);
       else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
+      else if (it.descr) out.push(descrAttr(it.descr.call, it.descr.attr, ctx).type);
       else if (it.group) walk(it.group);
       else if (it.node && isExpr(it.node, Expressions.Source)) walk(it.node);
       else if (it.node && it.comps) out.push(componentsOf(sourceOperand(it.node, ctx), it.comps, ctx).type);
@@ -2391,19 +2397,27 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * calculation type of all its leaves plus `outer` (the target, or the other
  * side of a comparison), as ABAP computes it.
  */
-function source(node, ctx, outer, hint = outer) {
-  // cl_abap_typedescr=>describe_by_data( x )->type_kind (ultra/events,
-  // ZCL_ABAPGIT_HTML~ADD): the type kind DESCRIBE FIELD x TYPE gives, which is
-  // what the descriptor's TYPE_KIND holds; no descriptor object is made
-  const sk = node?.getChildren?.() ?? [];
-  if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)
-    && /^cl_abap_typedescr=>describe_by_data\($/i.test(sk[0].concatTokens().replace(/\(.*$/s, "(")) && ["TYPE_KIND", "LENGTH"].includes(upper(sk[2].concatTokens()))) {
-    const arg = sk[0].findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
-    if (!arg) throw new Unsupported(`describe_by_data form: ${node.concatTokens()}`);
-    // ->length: the length in bytes, two per character of a c (ZCL_ABAPGIT_CONVERT=>STRING_TO_TAB)
-    if (upper(sk[2].concatTokens()) === "LENGTH") return {e: "type_length", x: convert(source(arg, ctx), {k: "data"}), type: I};
-    return {e: "type_kind", x: convert(source(arg, ctx), {k: "data"}), type: C(1)};
+/*
+ * cl_abap_typedescr=>describe_by_data( x )->type_kind / ->length (ultra/events:
+ * ZCL_ABAPGIT_HTML~ADD, ZCL_ABAPGIT_CONVERT=>STRING_TO_TAB): the type kind
+ * DESCRIBE FIELD x TYPE gives, the length in bytes (two per character of a
+ * c); no descriptor object is made. Any other attribute of a call's result
+ * is refused.
+ */
+function descrAttr(call, attr, ctx) {
+  const a = upper(attr.concatTokens());
+  if (!/^cl_abap_typedescr=>describe_by_data\($/i.test(call.concatTokens().replace(/\(.*$/s, "(")) || !["TYPE_KIND", "LENGTH"].includes(a)) {
+    throw new Unsupported(`an attribute of a call's result: ${call.concatTokens()}->${attr.concatTokens()}`);
   }
+  const arg = call.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+  if (!arg) throw new Unsupported(`describe_by_data form: ${call.concatTokens()}`);
+  const x = convert(source(arg, ctx), {k: "data"});
+  return a === "LENGTH" ? {e: "type_length", x, type: I} : {e: "type_kind", x, type: C(1)};
+}
+
+function source(node, ctx, outer, hint = outer) {
+  const sk = node?.getChildren?.() ?? [];
+  if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)) return descrAttr(sk[0], sk[2], ctx);
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
   const bits = hasBitOp(node);
   if (bits) {
@@ -2471,6 +2485,7 @@ function arith(node, ctx, calc, hint) {
       const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
       return t === undefined ? v : convert(v, t);
     }
+    if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
     let v = sourceOperand(item.node, ctx, item.hint);
