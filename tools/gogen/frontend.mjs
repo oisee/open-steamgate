@@ -3893,6 +3893,16 @@ function call(chain, ctx, statement, hint) {
       len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
   }
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
+  // ultra/itab: uccp( 'FEFF' ), the character of a code point given as four
+  // hex digits (open-abap-core: the text into x(2), that into i, uccpi( )).
+  // Its parameter is TYPE simple, outside the subset, so only a literal of
+  // four hex digits is taken (zcl_stg_segw_gen's BOM)
+  if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCP") {
+    // (lower case is no hex digit there: A4H gives U+0000 for '00e4')
+    const lit = /^'([0-9A-F]{4})'$/.exec(direct?.concatTokens() ?? "");
+    if (!lit) throw new Unsupported(`cl_abap_conv_in_ce=>uccp( ) of other than a literal of four hex digits: ${chain.concatTokens()}`);
+    return {e: "uccpi", x: {e: "int", value: parseInt(lit[1], 16), type: I}, type: C(1)};
+  }
   // an ALIASES name is the component it stands for; through an interface
   // reference, a method is otherwise the interface's own: I~M
   const alias = owner !== null && !name.includes("~") ? aliasTarget(ctx.reg, owner, name)
