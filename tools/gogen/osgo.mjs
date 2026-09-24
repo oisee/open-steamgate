@@ -48,6 +48,17 @@ if (echo) {
   const media = collectMedia(layers.filter(existsSync));
   statements = replaceWwwparams(statements, media);
   writeMedia(media, join(here, ".out", "media"));
+  // the ICF registry as the Node hosts apply it at start (test/start.mjs
+  // applyAtStartup): the same decision over the same *.sicf.xml, recorded
+  // against an empty registry at build time and written as seed rows, so the
+  // ICF services app and the status tables do not start empty
+  const {applyAtStartup} = await import(`${home}/tools/osd-icf-apply.mjs`);
+  const icfSql = [];
+  const recorder = {select: async () => ({rows: []}), execute: async (sql) => { icfSql.push(sql); }};
+  const icfActions = await applyAtStartup(recorder, {root: home, say: () => {}});
+  if (icfActions === undefined) throw new Error("ICF registry could not be applied at build time");
+  statements = [...statements, ...icfSql];
+  console.log(`ICF registry: ${icfActions.length} nodes, ${icfSql.length} statements into the seed`);
   console.log(`media: ${media.length} W3MI objects, ${Math.round(media.reduce((n, o) => n + o.size, 0) / 1024)} KB -> .out/media`);
   // the SICF nodes of the tree, as the Node hosts mount them, minus the
   // paths src/icf/nodes.json gives to another front, minus a handler class
