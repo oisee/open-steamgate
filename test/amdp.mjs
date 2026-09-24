@@ -210,11 +210,6 @@ describe("AMDP: cutting a body out of a class", () => {
 
 });
 
-// abaplint parses `!x` and parses `VALUE(x)` and does not parse the two
-// together: the statement comes back `Unknown` and the whole class loses its
-// parameters (ANORMALY-2026-09-19-bang-value). SE24 writes exactly that
-// combination, so a corpus class declared by the editor arrived signatureless
-// and its bodies then looked as though they read undeclared table variables.
 describe("the database methods are cut out of the text, not out of abaplint's statements", () => {
   // abaplint 2.120.59 lexes a SQLScript body as ABAP: one `}` in it -- in a
   // SQLScript comment, too -- and ENDMETHOD is no longer a statement, so the
@@ -242,6 +237,20 @@ ENDCLASS.
       ["b", "declare y integer;"],
     ]);
   });
+  it("ends a body at its last ENDMETHOD before the next method: a pragma, a statement before it on the line, one in a comment", () => {
+    const pragma = extract(cls("    x = 1;").replace("  ENDMETHOD.\n  METHOD b", "  ENDMETHOD ##NEEDED.\n  METHOD b"), "zcl_r.clas.abap");
+    expect(pragma.methods.map((m) => [m.name, m.body])).to.deep.equal([["a", "declare x integer;\n    x = 1;"], ["b", "declare y integer;"]]);
+    const sameLine = extract(cls("    x = 1; ENDMETHOD.").replace("x = 1; ENDMETHOD.\n  ENDMETHOD.", "x = 1; ENDMETHOD."), "zcl_r.clas.abap");
+    expect(sameLine.methods.map((m) => [m.name, m.body])).to.deep.equal([["a", "declare x integer;\n    x = 1;"], ["b", "declare y integer;"]]);
+    const inComment = extract(cls("    x = 1; -- ENDMETHOD."), "zcl_r.clas.abap");
+    expect(inComment.methods.map((m) => [m.name, m.body])).to.deep.equal([["a", "declare x integer;\n    x = 1; -- ENDMETHOD."], ["b", "declare y integer;"]]);
+  });
+  it("reads a header with a \" comment in it, a dot inside the comment", () => {
+    const r = extract(cls("    x = 1;", `  METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT " note. with a dot
+    OPTIONS READ-ONLY USING zt_one.`), "zcl_r.clas.abap");
+    expect(r.methods.map((m) => m.name)).to.deep.equal(["a", "b"]);
+    expect([r.methods[1].readOnly, r.methods[1].usings]).to.deep.equal([true, ["zt_one"]]);
+  });
   it("reads USING without the ABAP comment lines inside it, and no header from a comment", () => {
     const r = extract(cls("    x = 1;", `  METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT USING zt_one
 *                                zt_commented_out
@@ -252,6 +261,11 @@ ENDCLASS.
   });
 });
 
+// abaplint parses `!x` and parses `VALUE(x)` and does not parse the two
+// together: the statement comes back `Unknown` and the whole class loses its
+// parameters (ANORMALY-2026-09-19-bang-value). SE24 writes exactly that
+// combination, so a corpus class declared by the editor arrived signatureless
+// and its bodies then looked as though they read undeclared table variables.
 describe("a parameter written !VALUE(x) is still a parameter", () => {
   const withBody = (decl) => `CLASS c DEFINITION PUBLIC.
   PUBLIC SECTION.

@@ -673,7 +673,17 @@ function is ours and was not read off a system:
   portable run that scans the table itself reads the same rows;
 - parameter types are generated table types (`...=>P00000#ttyp`);
 - `$ABAP.type( x )` in a body is replaced by x's HANA type, and a full-line
-  ABAP comment (`*` in column one) is removed, before HANA sees it.
+  ABAP comment (`*` in column one) is removed, before HANA sees it -- but
+  not inside a SQLScript block comment: the line `*/` in column one that
+  closes one is kept (read off a generated procedure's body, 2026-09-24);
+- an IN parameter's ABAP `DEFAULT` becomes a HANA `DEFAULT`: an INTEGER
+  `DEFAULT 1` is `DEFAULT '1'` -- the literal's text, quoted -- and an
+  optional table parameter is `DEFAULT EMPTY` (both read off
+  `SYS.PROCEDURES`, 2026-09-24). Not measured, and written by the stand on
+  the same pattern: a negative or decimal literal (`-1` as `'-1'`, `1.5` as
+  `'1.5'`), a quoted text literal; a constant or a system field
+  (`abap_true`, `sy-datum`) gets none. Not measured either: that a `*` line
+  inside a SQLScript string is kept, which the stand assumes.
 
 `tools/amdp-corpus-oracle.mjs` creates every corpus body on the local HANA
 Express in that form (one schema, dropped and recreated per run), with an

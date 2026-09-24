@@ -366,19 +366,28 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
   // line -- `endmethod.` among them -- so two methods came out as one and
   // the second was lost (a corpus class whose SQLScript comment ends in
   // `] ) }`; HANA then refused the merged body "near <the next method>").
-  // Found in a copy with the ABAP comments blanked, offset for offset: a
-  // `*` line inside a USING list is not a table, and a header or an
-  // ENDMETHOD in a comment is none. The body is cut from the source itself.
+  // Searched in copies with the ABAP comments blanked, offset for offset:
+  // a `*` line inside a USING list is not a table, a header in a comment is
+  // none. `"` is blanked only where the header is looked for -- in a
+  // SQLScript body it opens a quoted name, not a comment. The body is cut
+  // from the source itself, and ends at the LAST `ENDMETHOD` (pragmas
+  // allowed) before the next METHOD or ENDCLASS: an `ENDMETHOD.` in a
+  // comment of the body comes earlier, and `x = 1; ENDMETHOD.` or
+  // `ENDMETHOD ##NEEDED.` still end it. No ENDMETHOD before that boundary:
+  // the method is left out rather than merged with the next.
   const out = [];
-  const blanked = source.split("\n").map((line) => (line.startsWith("*") ? " ".repeat(line.length)
-    : line.replace(/"[^\n]*$/, (c) => " ".repeat(c.length)))).join("\n");
+  const starless = source.split("\n").map((line) => (line.startsWith("*") ? " ".repeat(line.length) : line)).join("\n");
+  const blanked = starless.split("\n").map((line) => line.replace(/"[^\n]*$/, (c) => " ".repeat(c.length))).join("\n");
   const headerAt = /^[ \t]*METHOD\s+([\w\/~]+)\s+BY\s+DATABASE\s+(PROCEDURE|FUNCTION)\b[^.]*\./gim;
   for (const header of blanked.matchAll(headerAt)) {
     const text = header[0];
     const bodyStart = header.index + text.length;
-    const endAt = /^[ \t]*ENDMETHOD[ \t]*\./im.exec(blanked.slice(bodyStart));
-    if (endAt === null) continue;
-    const body = source.slice(bodyStart, bodyStart + endAt.index).trim();
+    const rest = starless.slice(bodyStart);
+    const boundary = /^[ \t]*(?:METHOD\s|ENDCLASS\b)/im.exec(rest);
+    const region = boundary === null ? rest : rest.slice(0, boundary.index);
+    const ends = [...region.matchAll(/\bENDMETHOD(?:\s+##\w+)*\s*\./gi)];
+    if (ends.length === 0) continue;
+    const body = source.slice(bodyStart, bodyStart + ends.at(-1).index).trim();
     const name = header[1];
     const tableFunction = tableFunctions.get(name.toUpperCase());
     out.push({

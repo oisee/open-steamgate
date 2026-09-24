@@ -97,7 +97,7 @@ export function classesIn(zip, dir) {
 
 /**
  * A database method whose class declares no parameters for it gets them
- * from where they are declared, in place: `METHODS m REDEFINITION.` from
+ * from where they are declared, in place: a redefinition from
  * the superclass up the INHERITING FROM chain, `METHOD if_x~m` from the
  * interface -- read from the export's own sources (a body whose ancestor is
  * not in the export keeps none). The ancestor's types come along, the
@@ -124,7 +124,11 @@ export function inheritedSignatures(bodies, classSources, interfaceSources) {
       }
       continue;
     }
-    if (!new RegExp(`METHODS\\s+${name.replace(/[/~]/g, "\\$&")}\\s+REDEFINITION\\b`, "i").test(own)) continue;
+    // no parameters and a superclass: walk up. Not gated on the text
+    // `METHODS m REDEFINITION` -- `FINAL REDEFINITION` and a `METHODS:` chain
+    // spell it otherwise, and a method without parameters of its own that the
+    // superclass also declares can only be a redefinition. ALIASES are not
+    // followed.
     let source = own;
     const inherited = new Map();
     for (let depth = 0; depth < 8; depth++) {

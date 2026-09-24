@@ -47,6 +47,11 @@ describe("the corpus oracle: the kernel's form of a created procedure", () => {
     expect(sql).to.contain('IN it_rows TABLE ("CARRID" NVARCHAR(3), "SEATSMAX" INTEGER) DEFAULT EMPTY');
     expect(sql).to.contain("IN iv_plain INTEGER,");
     expect(sql).not.to.match(/et_rows[^,)]*DEFAULT/);
+    // an optional OUT with a default gets none: DEFAULT is an input's
+    const out = createStatement(body([
+      {name: "ev_n", direction: "OUT", abapType: "i", optional: true, default: "1"},
+    ], "ev_n = 1;"), undefined);
+    expect(out).not.to.contain("DEFAULT");
     // a constant or a system field is not measured: no DEFAULT at all
     expect(defaultClause({default: "abap_true"}, "NVARCHAR(1)")).to.equal("");
     expect(defaultClause({default: "sy-datum"}, "NVARCHAR(8)")).to.equal("");
@@ -154,7 +159,7 @@ describe("the corpus oracle: a signature declared elsewhere", () => {
     const classSources = new Map([
       ["ZCL_CHILD", `CLASS zcl_child DEFINITION INHERITING FROM zcl_mid.
   PUBLIC SECTION.
-    METHODS get_max REDEFINITION.
+    METHODS get_max FINAL REDEFINITION.
     INTERFACES zif_exit.
 ENDCLASS.`],
       ["ZCL_MID", "CLASS zcl_mid DEFINITION INHERITING FROM zcl_base ABSTRACT.\nENDCLASS."],
@@ -171,7 +176,7 @@ ENDCLASS.`],
   METHODS process IMPORTING VALUE(iv_name) TYPE string EXPORTING VALUE(ev_value) TYPE string.
 ENDINTERFACE.`]]);
     const bodies = [
-      {className: "ZCL_CHILD", signature: {name: "get_max", parameters: []}, types: new Map()},
+      {className: "ZCL_CHILD", signature: {name: "get_max", parameters: []}, types: new Map([["TY_ROW", {kind: "structure", components: [{name: "own", abapType: "i"}]}]])},
       {className: "ZCL_CHILD", signature: {name: "zif_exit~process", parameters: []}, types: new Map()},
       {className: "ZCL_CHILD", signature: {name: "not_declared_anywhere", parameters: []}, types: new Map()},
     ];
@@ -179,6 +184,8 @@ ENDINTERFACE.`]]);
     expect(bodies[0].signature.parameters.map((p) => [p.name.toUpperCase(), p.direction])).to.deep.equal([["IV_ID", "IN"], ["IT_ROWS", "IN"], ["EV_MAX", "OUT"]]);
     expect(bodies[0].signature.signatureSource).to.equal("superclass");
     expect([bodies[0].types.has("TY_ROW"), bodies[0].types.has("TT_ROWS")]).to.deep.equal([true, true]);
+    // the class's own type wins a name it shares with an ancestor
+    expect(bodies[0].types.get("TY_ROW").components[0].name).to.equal("own");
     expect(bodies[1].signature.parameters.map((p) => p.name.toUpperCase())).to.deep.equal(["IV_NAME", "EV_VALUE"]);
     expect(bodies[1].signature.signatureSource).to.equal("interface");
     expect(bodies[2].signature.parameters).to.deep.equal([]);
