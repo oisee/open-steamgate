@@ -3,9 +3,9 @@
 * the SAP demo handler /sap/bc/abap/demo_post (echoes the query string in
 * its form's action, and with input=X in the query the body's &-separated
 * parts), or /sap/bc/soap/rfc calling the probe's own RFC module
-* ZOSG_HTTPC_SLEEP (a bounded WAIT, at most 10 seconds). The call logs on
+* Z_OSD_T_HTTPC_SLEEP (a bounded WAIT, at most 10 seconds). The call logs on
 * with an assertion ticket of the current user, so no password is involved.
-CLASS zcl_osg_httpc_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+CLASS zcl_osd_t_httpc DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     CONSTANTS base TYPE string VALUE `http://localhost:50000`.
     CLASS-METHODS call
@@ -33,7 +33,7 @@ CLASS zcl_osg_httpc_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_str) TYPE string.
 ENDCLASS.
 
-CLASS zcl_osg_httpc_probe IMPLEMENTATION.
+CLASS zcl_osd_t_httpc IMPLEMENTATION.
 
   METHOD utf8.
     rv_str = cl_abap_codepage=>convert_from( iv_hex ).
@@ -41,9 +41,9 @@ CLASS zcl_osg_httpc_probe IMPLEMENTATION.
 
   METHOD soap_sleep.
     rv_xml = `<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/">`
-      && `<soap-env:Body><urn:ZOSG_HTTPC_SLEEP xmlns:urn="urn:sap-com:document:sap:rfc:functions">`
+      && `<soap-env:Body><urn:Z_OSD_T_HTTPC_SLEEP xmlns:urn="urn:sap-com:document:sap:rfc:functions">`
       && |<IV_SECONDS>{ iv_seconds }</IV_SECONDS><IV_TEXT>{ iv_text }</IV_TEXT>|
-      && `</urn:ZOSG_HTTPC_SLEEP></soap-env:Body></soap-env:Envelope>`.
+      && `</urn:Z_OSD_T_HTTPC_SLEEP></soap-env:Body></soap-env:Envelope>`.
   ENDMETHOD.
 
   METHOD call.

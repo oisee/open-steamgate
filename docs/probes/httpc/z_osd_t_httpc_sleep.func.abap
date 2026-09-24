@@ -1,9 +1,9 @@
-* RFC-enabled, in function group ZOSG_HTTPC. Reached over HTTP through the
+* RFC-enabled, in function group ZOSD_T_HTTPC. Reached over HTTP through the
 * SOAP-RFC handler at /sap/bc/soap/rfc: a slow endpoint for the timeout probe
 * (a bounded WAIT, at most 10 seconds) and an echo of the text the SOAP
 * runtime decoded from the posted body (EV_HEX is its UTF-8, base64 on the
 * wire).
-FUNCTION zosg_httpc_sleep
+FUNCTION z_osd_t_httpc_sleep
   IMPORTING
     VALUE(iv_seconds) TYPE i
     VALUE(iv_text) TYPE string OPTIONAL

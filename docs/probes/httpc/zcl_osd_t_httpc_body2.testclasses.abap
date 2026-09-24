@@ -1,5 +1,5 @@
 * Request body, SOAP pass. The SOAP-RFC handler parses the posted envelope
-* and calls ZOSG_HTTPC_SLEEP, which answers the IV_TEXT it received as UTF-8
+* and calls Z_OSD_T_HTTPC_SLEEP, which answers the IV_TEXT it received as UTF-8
 * in EV_HEX (base64 in the answer). Text: a, e-acute, euro sign, z
 * (UTF-8 61 C3A9 E282AC 7A). c1 and c3 post known UTF-8 bytes with set_data
 * and calibrate the receiving side: it decodes UTF-8 whatever the charset
@@ -22,11 +22,11 @@ ENDCLASS.
 
 CLASS ltcl IMPLEMENTATION.
   METHOD text.
-    rv = zcl_osg_httpc_probe=>soap_sleep( iv_seconds = 0 iv_text = zcl_osg_httpc_probe=>utf8( '61C3A9E282AC7A' ) ).
+    rv = zcl_osd_t_httpc=>soap_sleep( iv_seconds = 0 iv_text = zcl_osd_t_httpc=>utf8( '61C3A9E282AC7A' ) ).
   ENDMETHOD.
   METHOD go.
     cl_abap_unit_assert=>fail( level = if_aunit_constants=>tolerable msg =
-      zcl_osg_httpc_probe=>call( iv_url = zcl_osg_httpc_probe=>base && `/sap/bc/soap/rfc`
+      zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/soap/rfc`
         iv_method = `POST` iv_ctype = iv_ctype iv_ctype_after = iv_after iv_body = iv_body iv_xbody = iv_xbody
         iv_find = `<EV_HEX>` iv_len = 60 ) ).
   ENDMETHOD.

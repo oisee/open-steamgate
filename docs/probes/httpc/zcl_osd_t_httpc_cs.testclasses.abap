@@ -11,7 +11,7 @@ ENDCLASS.
 CLASS ltcl IMPLEMENTATION.
   METHOD one.
     DATA li_client TYPE REF TO if_http_client.
-    cl_http_client=>create_by_url( EXPORTING url = zcl_osg_httpc_probe=>base IMPORTING client = li_client ).
+    cl_http_client=>create_by_url( EXPORTING url = zcl_osd_t_httpc=>base IMPORTING client = li_client ).
     CASE iv_how.
       WHEN 1.
         li_client->request->set_content_type( iv_ctype ).
@@ -20,7 +20,7 @@ CLASS ltcl IMPLEMENTATION.
       WHEN 3.
         li_client->request->set_header_field( name = `Content-Type` value = iv_ctype ).
     ENDCASE.
-    li_client->request->set_cdata( zcl_osg_httpc_probe=>utf8( '61C3A9E282AC7A' ) ).
+    li_client->request->set_cdata( zcl_osd_t_httpc=>utf8( '61C3A9E282AC7A' ) ).
     rv = |[{ iv_how }:{ iv_ctype }]={ li_client->request->get_data( ) } |.
     li_client->close( ).
   ENDMETHOD.

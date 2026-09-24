@@ -4,7 +4,7 @@
 * <span class="nprpnwrp">. The demo handler's own unescape_url turns every
 * non-ASCII character into #, so this pass shows the client side
 * (reqdata = request->get_data( ) before and after SEND) and only a count of
-* characters on the server side; the SOAP pass (zcl_osg_httpc_body2) shows
+* characters on the server side; the SOAP pass (zcl_osd_t_httpc_body2) shows
 * the decoded text.
 CLASS ltcl DEFINITION FINAL FOR TESTING DURATION MEDIUM RISK LEVEL HARMLESS.
   PRIVATE SECTION.
@@ -26,16 +26,16 @@ CLASS ltcl IMPLEMENTATION.
     DATA lv_body TYPE string.
     lv_body = iv_body.
     IF lv_body IS INITIAL AND iv_xbody IS INITIAL.
-      lv_body = zcl_osg_httpc_probe=>utf8( '61C3A9E282AC7A' ).
+      lv_body = zcl_osd_t_httpc=>utf8( '61C3A9E282AC7A' ).
     ENDIF.
     cl_abap_unit_assert=>fail( level = if_aunit_constants=>tolerable msg =
-      zcl_osg_httpc_probe=>call( iv_url = zcl_osg_httpc_probe=>base && `/sap/bc/abap/demo_post?input=X`
+      zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/demo_post?input=X`
         iv_method = `POST` iv_ctype = iv_ctype iv_ctype_after = iv_after iv_body = lv_body iv_xbody = iv_xbody
         iv_find = `"nprpnwrp">` iv_len = 30 ) ).
   ENDMETHOD.
   METHOD m0_transport.
     DATA lv_body TYPE string.
-    lv_body = zcl_osg_httpc_probe=>utf8( '61C3A9E282AC7A' ).
+    lv_body = zcl_osd_t_httpc=>utf8( '61C3A9E282AC7A' ).
     cl_abap_unit_assert=>fail( level = if_aunit_constants=>tolerable msg = |strlen:{ strlen( lv_body ) } text:{ lv_body }| ).
   ENDMETHOD.
   METHOD b1_utf8.
@@ -60,7 +60,7 @@ CLASS ltcl IMPLEMENTATION.
     DATA li_client TYPE REF TO if_http_client.
     DATA lv_out TYPE string.
     DATA lx TYPE REF TO cx_root.
-    cl_http_client=>create_by_url( EXPORTING url = zcl_osg_httpc_probe=>base IMPORTING client = li_client ).
+    cl_http_client=>create_by_url( EXPORTING url = zcl_osd_t_httpc=>base IMPORTING client = li_client ).
     li_client->request->set_data( '61E97A' ).
     TRY.
         lv_out = li_client->request->get_cdata( ).
@@ -84,6 +84,6 @@ CLASS ltcl IMPLEMENTATION.
     cl_abap_unit_assert=>fail( level = if_aunit_constants=>tolerable msg = lv_out ).
   ENDMETHOD.
   METHOD b8_emoji.
-    go( iv_ctype = `text/plain; charset=utf-8` iv_body = zcl_osg_httpc_probe=>utf8( '61F09F98807A' ) ).
+    go( iv_ctype = `text/plain; charset=utf-8` iv_body = zcl_osd_t_httpc=>utf8( '61F09F98807A' ) ).
   ENDMETHOD.
 ENDCLASS.

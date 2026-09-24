@@ -1,4 +1,4 @@
-* SEND's TIMEOUT against ZOSG_HTTPC_SLEEP behind /sap/bc/soap/rfc (waits
+* SEND's TIMEOUT against Z_OSD_T_HTTPC_SLEEP behind /sap/bc/soap/rfc (waits
 * IV_SECONDS, at most 10), and q5: a POST with a query and no body.
 CLASS ltcl DEFINITION FINAL FOR TESTING DURATION MEDIUM RISK LEVEL HARMLESS.
   PRIVATE SECTION.
@@ -18,8 +18,8 @@ CLASS ltcl IMPLEMENTATION.
     cl_abap_unit_assert=>fail( level = if_aunit_constants=>tolerable msg = iv ).
   ENDMETHOD.
   METHOD sleep.
-    out( zcl_osg_httpc_probe=>call( iv_url = zcl_osg_httpc_probe=>base && `/sap/bc/soap/rfc` iv_method = `POST`
-      iv_ctype = `text/xml; charset=utf-8` iv_body = zcl_osg_httpc_probe=>soap_sleep( iv_seconds = iv_seconds iv_text = `t` )
+    out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/soap/rfc` iv_method = `POST`
+      iv_ctype = `text/xml; charset=utf-8` iv_body = zcl_osd_t_httpc=>soap_sleep( iv_seconds = iv_seconds iv_text = `t` )
       iv_timeout = iv_timeout iv_find = `<EV_TEXT>` iv_len = 20 ) ).
   ENDMETHOD.
   METHOD t0_constants.
@@ -41,7 +41,7 @@ CLASS ltcl IMPLEMENTATION.
     sleep( iv_seconds = 2 iv_timeout = if_http_client=>co_timeout_infinite ).
   ENDMETHOD.
   METHOD q5_post_query_nobody_uri.
-    out( zcl_osg_httpc_probe=>call( iv_url = zcl_osg_httpc_probe=>base && `/sap/bc/abap/demo_post?k=v&z=1`
+    out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/demo_post?k=v&z=1`
       iv_method = `POST` iv_find = `action=` iv_len = 80 ) ).
   ENDMETHOD.
 ENDCLASS.
