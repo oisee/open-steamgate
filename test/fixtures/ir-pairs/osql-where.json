@@ -1,0 +1,1512 @@
+{
+  "note": "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error. {every: true} is no condition. BETWEEN renders as (>= AND <=), as the ranges do.",
+  "columns": {
+    "CARRID": {
+      "type": {
+        "abap": "C",
+        "len": 3
+      }
+    },
+    "CONNID": {
+      "type": {
+        "abap": "C",
+        "len": 4
+      },
+      "kind": "NUMC"
+    },
+    "SEATSMAX": {
+      "type": {
+        "abap": "I"
+      }
+    },
+    "PRICE": {
+      "type": {
+        "abap": "P",
+        "len": 15,
+        "dec": 2
+      }
+    },
+    "NOTE": {
+      "type": {
+        "abap": "STRING"
+      }
+    }
+  },
+  "pairs": [
+    {
+      "name": "empty: every row",
+      "where": "",
+      "outcome": {
+        "every": true
+      }
+    },
+    {
+      "name": "blank: every row",
+      "where": "   ",
+      "outcome": {
+        "every": true
+      }
+    },
+    {
+      "name": "equality on CHAR",
+      "where": "carrid = 'LH'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a column name in any case",
+      "where": "Carrid = 'LH'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a literal is case-sensitive",
+      "where": "carrid = 'lh'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "lh",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "lh",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "lh",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "lh",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a CHAR literal cut to the column's length",
+      "where": "carrid = 'LH X'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a doubled quote is one quote",
+      "where": "carrid = 'L''H'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L'H",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L'H",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L'H",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L'H",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a quoted number against INT4",
+      "where": "seatsmax = '385'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "an unquoted number against INT4",
+      "where": "seatsmax = 385",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"SEATSMAX\" = 385)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "NUMC zero-padded, quoted",
+      "where": "connid = '400'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CONNID\" = $1::varchar(4))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NUMC zero-padded, unquoted",
+      "where": "connid = 400",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CONNID\" = $1::varchar(4))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CONNID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a decimal against a packed column",
+      "where": "price > '500.5'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"PRICE\" > 500.5)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"PRICE\" > 500.5)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"PRICE\" > 500.5)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"PRICE\" > 500.5)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "keyword comparisons",
+      "where": "carrid EQ 'LH' OR carrid NE 'AA'",
+      "lowered": {
+        "sqlite": {
+          "sql": "((\"CARRID\" = ?) OR (\"CARRID\" <> ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "((\"CARRID\" = ?) OR (\"CARRID\" <> ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "((\"CARRID\" = $1::varchar(3)) OR (\"CARRID\" <> $2::varchar(3)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "((\"CARRID\" = ?) OR (\"CARRID\" <> ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "every comparison",
+      "where": "seatsmax < 1 OR seatsmax > 2 OR seatsmax <= 3 OR seatsmax >= 4 OR seatsmax <> 5",
+      "lowered": {
+        "sqlite": {
+          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "params": []
+        },
+        "hana": {
+          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "AND binds tighter than OR",
+      "where": "carrid = 'LH' OR carrid = 'AA' AND seatsmax > 300",
+      "lowered": {
+        "sqlite": {
+          "sql": "((\"CARRID\" = ?) OR ((\"CARRID\" = ?) AND (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "((\"CARRID\" = ?) OR ((\"CARRID\" = ?) AND (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "((\"CARRID\" = $1::varchar(3)) OR ((\"CARRID\" = $2::varchar(3)) AND (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "((\"CARRID\" = ?) OR ((\"CARRID\" = ?) AND (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "parentheses",
+      "where": "( carrid = 'LH' OR carrid = 'AA' ) AND seatsmax > 300",
+      "lowered": {
+        "sqlite": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (\"SEATSMAX\" > 300))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (\"SEATSMAX\" > 300))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(((\"CARRID\" = $1::varchar(3)) OR (\"CARRID\" = $2::varchar(3))) AND (\"SEATSMAX\" > 300))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (\"SEATSMAX\" > 300))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT without parentheses",
+      "where": "NOT carrid = 'LH'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(NOT (\"CARRID\" = $1::varchar(3)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT ( ... ), as the producers write it",
+      "where": "NOT ( carrid = 'LH' )",
+      "lowered": {
+        "sqlite": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(NOT (\"CARRID\" = $1::varchar(3)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(NOT (\"CARRID\" = ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "BETWEEN",
+      "where": "connid BETWEEN '0000' AND '0400'",
+      "lowered": {
+        "sqlite": {
+          "sql": "((\"CONNID\" >= ?) AND (\"CONNID\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "((\"CONNID\" >= ?) AND (\"CONNID\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "((\"CONNID\" >= $1::varchar(4)) AND (\"CONNID\" <= $2::varchar(4)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "((\"CONNID\" >= ?) AND (\"CONNID\" <= ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT BETWEEN",
+      "where": "connid NOT BETWEEN '0' AND '400'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(NOT ((\"CONNID\" >= ?) AND (\"CONNID\" <= ?)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(NOT ((\"CONNID\" >= ?) AND (\"CONNID\" <= ?)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(NOT ((\"CONNID\" >= $1::varchar(4)) AND (\"CONNID\" <= $2::varchar(4))))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(NOT ((\"CONNID\" >= ?) AND (\"CONNID\" <= ?)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000",
+              "type": "C(4)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "0400",
+              "type": "C(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "LIKE",
+      "where": "carrid LIKE 'L%'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT LIKE",
+      "where": "carrid NOT LIKE 'L%'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" NOT LIKE $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" NOT LIKE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L%",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "LIKE with ESCAPE",
+      "where": "carrid LIKE 'L#_' ESCAPE '#'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L#_",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L#_",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" LIKE $1::text ESCAPE $2::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L#_",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" LIKE ? ESCAPE ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "L#_",
+              "type": "STRING",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "#",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "IN",
+      "where": "carrid IN ('LH','AA')",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" IN (?, ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" IN (?, ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" IN ($1::varchar(3), $2::varchar(3)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" IN (?, ?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT IN",
+      "where": "carrid NOT IN ('LH')",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" NOT IN (?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" NOT IN (?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" NOT IN ($1::varchar(3)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" NOT IN (?))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "IS NULL",
+      "where": "carrid IS NULL",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" IS NULL)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" IS NULL)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" IS NULL)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"CARRID\" IS NULL)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "IS NOT NULL",
+      "where": "carrid IS NOT NULL",
+      "lowered": {
+        "sqlite": {
+          "sql": "(NOT (\"CARRID\" IS NULL))",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(NOT (\"CARRID\" IS NULL))",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(NOT (\"CARRID\" IS NULL))",
+          "params": []
+        },
+        "hana": {
+          "sql": "(NOT (\"CARRID\" IS NULL))",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "a STRING column",
+      "where": "note = 'a b '",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"NOTE\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "a b ",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"NOTE\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "a b ",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"NOTE\" = $1::text)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "a b ",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"NOTE\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "a b ",
+              "type": "STRING",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a select-options group as the request context writes it",
+      "where": "( CARRID = 'LH' OR CARRID = 'AA' ) AND ( NOT ( SEATSMAX > 300 ) )",
+      "lowered": {
+        "sqlite": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (NOT (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (NOT (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(((\"CARRID\" = $1::varchar(3)) OR (\"CARRID\" = $2::varchar(3))) AND (NOT (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(((\"CARRID\" = ?) OR (\"CARRID\" = ?)) AND (NOT (\"SEATSMAX\" > 300)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            },
+            {
+              "name": "p1",
+              "value": "AA",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an unknown column is semantics",
+      "where": "nosuch = '1'",
+      "outcome": {
+        "error": "OsqlWhereSemantics",
+        "abap": "CX_SY_DYNAMIC_OSQL_SEMANTICS"
+      }
+    },
+    {
+      "name": "a literal on the left is semantics",
+      "where": "1 = 1",
+      "outcome": {
+        "error": "OsqlWhereSemantics",
+        "abap": "CX_SY_DYNAMIC_OSQL_SEMANTICS"
+      }
+    },
+    {
+      "name": "a missing value is syntax",
+      "where": "carrid = ",
+      "outcome": {
+        "error": "OsqlWhereSyntax",
+        "abap": "CX_SY_DYNAMIC_OSQL_SYNTAX"
+      }
+    },
+    {
+      "name": "!= is syntax",
+      "where": "carrid != 'LH'",
+      "outcome": {
+        "error": "OsqlWhereSyntax",
+        "abap": "CX_SY_DYNAMIC_OSQL_SYNTAX"
+      }
+    },
+    {
+      "name": "an unterminated literal is syntax",
+      "where": "carrid = 'LH",
+      "outcome": {
+        "error": "OsqlWhereSyntax",
+        "abap": "CX_SY_DYNAMIC_OSQL_SYNTAX"
+      }
+    },
+    {
+      "name": "text against INT4 is a dump",
+      "where": "seatsmax = 'abc'",
+      "outcome": {
+        "error": "OsqlWhereDump"
+      }
+    },
+    {
+      "name": "a host variable is refused",
+      "where": "carrid = lv_c",
+      "outcome": {
+        "error": "Refused",
+        "reason": "host variable"
+      }
+    },
+    {
+      "name": "a column against a column is refused",
+      "where": "carrid = connid",
+      "outcome": {
+        "error": "Refused",
+        "reason": "column to column"
+      }
+    },
+    {
+      "name": "a qualified name is refused",
+      "where": "sflight~carrid = 'LH'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "qualified name"
+      }
+    },
+    {
+      "name": "an unquoted number against CHAR is refused",
+      "where": "carrid = 5",
+      "outcome": {
+        "error": "Refused",
+        "reason": "number into char"
+      }
+    },
+    {
+      "name": "a NUMC literal that is not digits is refused",
+      "where": "connid = 'A1'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "numc"
+      }
+    }
+  ]
+}
