@@ -7,6 +7,7 @@
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
+import {packedText, WriteError} from "./ir-writes.mjs";
 
 export class UnsupportedSqlScript extends Error {
   constructor(message, node) {
@@ -131,6 +132,16 @@ function scalarForType(value, type, name) {
   // particularly dangerous accidental answer for an INTEGER parameter.
   if (value == null) return null;
   if (type?.abap === "I") return integer(value, name);
+  // a packed input given as text binds as that text (abap-types bindValue),
+  // so it must be the decimal string of its type: '1.5E3' or '12.50 ' would
+  // otherwise reach the engine as they are (the #55 critic)
+  if (type?.abap === "P" && typeof value === "string") {
+    try { return packedText(value, type, name); }
+    catch (error) {
+      if (error instanceof WriteError) throw new UnsupportedSqlScript(error.message);
+      throw error;
+    }
+  }
   if (type?.abap === "STRING" && typeof value !== "string") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript string`);
   }
