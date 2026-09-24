@@ -119,7 +119,10 @@ export const DIALECTS = {
       `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, strpos(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
     toChar: (x) => `CAST(${x()} AS VARCHAR)`,
     locate: (s, x) => `strpos(${s()}, ${x()})`,
-    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
+    // PostgreSQL escapes with a backslash by default, which neither ABAP nor
+    // the other engines do: 'a\\%' would mean a literal % there only. ESCAPE ''
+    // switches it off, so a pattern means the same on every engine
+    like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p} ESCAPE ${esc === undefined ? "''" : esc})`,
     aggName: () => "string_agg",
     dummy: "(SELECT 1) AS dummy",
   },

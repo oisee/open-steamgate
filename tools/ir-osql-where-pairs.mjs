@@ -9,17 +9,18 @@
 import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {osqlWherePredicate, errorCode} from "./ir-osql-where.mjs";
+import {osqlWherePredicate, errorCode, MAX_DEPTH, MAX_TERMS, REASONS} from "./ir-osql-where.mjs";
 import {lowerPredicate} from "./ir-ranges.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // the shape of SFLIGHT, which the A4H measurement ran on (docs/osql-where.md):
-// CHAR3, NUMC4, INT4, CURR 15,2, and a STRING for the string case
+// CHAR3, NUMC4, INT4, CURR 15,2 (8 bytes), DATS, and a STRING for the string case
 export const COLUMNS = {
   CARRID: {type: {abap: "C", len: 3}},
   CONNID: {type: {abap: "C", len: 4}, kind: "NUMC"},
   SEATSMAX: {type: {abap: "I"}},
-  PRICE: {type: {abap: "P", len: 15, dec: 2}},
+  PRICE: {type: {abap: "P", len: 8, dec: 2}},
+  FLDATE: {type: {abap: "D"}},
   NOTE: {type: {abap: "STRING"}},
 };
 
@@ -37,6 +38,7 @@ export const CASES = [
   {name: "NUMC zero-padded, quoted", where: "connid = '400'"},
   {name: "NUMC zero-padded, unquoted", where: "connid = 400"},
   {name: "a decimal against a packed column", where: "price > '500.5'"},
+  {name: "a date", where: "fldate = '20161115'"},
   {name: "keyword comparisons", where: "carrid EQ 'LH' OR carrid NE 'AA'"},
   {name: "every comparison", where: "seatsmax < 1 OR seatsmax > 2 OR seatsmax <= 3 OR seatsmax >= 4 OR seatsmax <> 5"},
   {name: "AND binds tighter than OR", where: "carrid = 'LH' OR carrid = 'AA' AND seatsmax > 300"},
@@ -52,15 +54,43 @@ export const CASES = [
   {name: "NOT IN", where: "carrid NOT IN ('LH')"},
   {name: "IS NULL", where: "carrid IS NULL"},
   {name: "IS NOT NULL", where: "carrid IS NOT NULL"},
-  {name: "a STRING column", where: "note = 'a b '"},
+  {name: "a quoted literal into STRING drops trailing blanks (ABAP's C to STRING)", where: "note = 'a b '"},
+  {name: "a backtick literal into STRING keeps them", where: "note = `a b `"},
+  {name: "a backtick literal against CHAR", where: "carrid = `AA`"},
+  {name: "an INT4 literal rounds half away from zero", where: "seatsmax = '384.5'"},
+  {name: "an INT4 literal rounds down below the half", where: "seatsmax = '385.4'"},
+  {name: "a leading plus", where: "seatsmax = '+385'"},
+  {name: "a trailing minus is negative", where: "seatsmax = '385-'"},
+  {name: "an empty literal against INT4 is 0", where: "seatsmax = ''"},
+  {name: "an unquoted negative number", where: "seatsmax > -5"},
+  {name: "a packed literal rounds to the column's decimals", where: "price = '422.935'"},
+  {name: "a packed literal is bound as a decimal string", where: "price = '1234567890123.5'"},
+  {name: "a date cut to eight characters", where: "fldate = '20161115000000'"},
+  {name: "a date with dashes is cut, not read", where: "fldate = '2016-11-15'"},
+  {name: "a trailing blank in a LIKE pattern on CHAR", where: "carrid LIKE 'AA '"},
+  {name: "a CHAR literal is cut in UTF-16 units", where: "carrid = '\u00c4bcd'"},
+  {name: "the three producers: a SADL key", where: "( CARRID = 'LH' ) AND ( CONNID = '0400' )"},
+  {name: "the three producers: the search help, in lower case", where: "( carrid = 'LH' OR carrid = 'AA' ) AND ( connid = '0400' )"},
+  {name: "the three producers: SE16, a negated pattern", where: "NOT ( carrid LIKE 'L%' )"},
   {name: "a select-options group as the request context writes it", where: "( CARRID = 'LH' OR CARRID = 'AA' ) AND ( NOT ( SEATSMAX > 300 ) )"},
   // what A4H refused, and how
   {name: "an unknown column is semantics", where: "nosuch = '1'"},
   {name: "a literal on the left is semantics", where: "1 = 1"},
   {name: "a missing value is syntax", where: "carrid = "},
   {name: "!= is syntax", where: "carrid != 'LH'"},
-  {name: "an unterminated literal is syntax", where: "carrid = 'LH"},
+  {name: "an operator not between blanks is syntax", where: "carrid='LH'"},
+  {name: "IS INITIAL is semantics", where: "carrid IS INITIAL"},
+  {name: "an escaped host variable is semantics", where: "carrid = @lv_c"},
+  {name: "ESCAPE with a wildcard is semantics", where: "carrid LIKE 'A%' ESCAPE '%'"},
   {name: "text against INT4 is a dump", where: "seatsmax = 'abc'"},
+  {name: "an exponent against INT4 is a dump", where: "seatsmax = '1e3'"},
+  {name: "past INT4 is a dump", where: "seatsmax = '99999999999'"},
+  {name: "past the packed digits is a dump", where: "price = '1234567890123456'"},
+  {name: "an unterminated literal is malformed, not measured", where: "carrid = 'LH"},
+  {name: "a sign on both sides is a format not measured", where: "seatsmax = '-5-'"},
+  {name: "a no-break space is not a blank", where: "carrid\u00a0= 'LH'"},
+  {name: "a non-BMP literal is refused", where: "carrid = '\ud83d\ude00'"},
+  {name: "nesting past the limit is refused", where: "( ".repeat(300) + "carrid = 'LH'" + " )".repeat(300)},
   // what is not carried
   {name: "a host variable is refused", where: "carrid = lv_c"},
   {name: "a column against a column is refused", where: "carrid = connid"},
@@ -84,7 +114,8 @@ export function pairs() {
 
 export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "osql-where.json");
 const render = () => JSON.stringify({
-  note: "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error. {every: true} is no condition. BETWEEN renders as (>= AND <=), as the ranges do.",
+  note: "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error. {every: true} is no condition. BETWEEN renders as (>= AND <=), as the ranges do. An INTEGER is inlined after its range check; a packed value is bound as a decimal string. Blanks are space, tab, CR and LF only. Limits: nesting depth " + MAX_DEPTH + ", comparisons " + MAX_TERMS + ". Refusal reasons are the closed list in REASONS.",
+  reasons: REASONS,
   columns: COLUMNS,
   pairs: pairs(),
 }, undefined, 2) + "\n";
