@@ -52,36 +52,18 @@ them.
 
 ## Local only — ready to send, in this order
 
-Ordered by what breaks without them, most first.
+Checked against GitHub on 2026-09-24. What stood here as items 1 to 5 has gone
+out and is merged: `fix/w3mi-objid` (abaplint/transpiler#1846),
+`fix/percent-in-filename` (#1844), `fix/compare-character-literal` (#1862),
+`fix/binary-file-copy` (#1845), and the two builtin anomalies of
+`fix/builtin-not-a-method`, which went away upstream in 2.13.88 without our
+branch. What is left:
 
-1. **`fix/w3mi-objid`** — `ANOMALY-2026-09-13-w3mi-objid-encoded`. A Web
-   Repository object is keyed on the name in its own XML, not on the escaped
-   file name. Without it every W3MI with a dot in its name (all the demo's
-   media) is registered under `ZO4D_00_SALES%2EPNG` and `init.mjs` imports a
-   specifier Node cannot resolve; measured 2026-09-16 when `npm install`
-   silently swapped the link for the published package. Needs an issue. Test:
-   none yet — write one over a `.w3mi.data.png` whose name carries a dot.
-2. **`fix/percent-in-filename`** — `ANOMALY-2026-09-13-percent-in-filename`.
-   The other half of the same defect: the import specifier escapes the percent
-   before the slash. Test in the transpiler's `test/files.ts` on the branch.
-   Needs an issue; send with 1 or right after, they are one story.
-3. **`fix/compare-character-literal`** — `ANOMALY-2026-09-16-float-vs-character-compare`.
-   `0.06 > '0.5'` was true: the generic tail of `compare/gt.ts` read a
-   character operand with `parseInt`; `parse()` reads it the way ABAP
-   converts it. One commit on a worktree at `.local/pr-compare-char`, based on
-   `origin/main`, the runtime's tests (10) and lint green, a regression test
-   in `packages/runtime/test/compare.ts`. Found by comparing the demo frame by
-   frame with a real system. Issue #1859; **PR #1862**, 2026-09-17.
-4. **`fix/binary-file-copy`** — `ANOMALY-2026-09-13-binary-file-to-output`.
-   A binary file survives the copy to output (read and written as latin1).
-   Needs an issue.
-5. **`fix/builtin-not-a-method`** — `ANOMALY-2026-09-13-builtin-as-method` and
-   `ANOMALY-2026-09-14-builtin-positional-argument`. Two commits, not pushed.
-   Needs an issue.
 6. **`fix/sy-tabix-restore`, the remaining commit** — "Take the
    class-constructor timing out of …", `ANOMALY-2026-09-14-class-constructor-eager`.
-   #1848 took the sy-tabix half; this half is still local. Rebase the branch
-   on `origin/main` and it is one commit. Needs an issue.
+   #1848 took the sy-tabix half. The issue is filed
+   (abaplint/transpiler#1849); the commit is still local. Rebase the branch
+   on `origin/main`, and it is one commit to offer against #1849.
 
 7. **express-icf-shim: a posted form has no form fields** —
    `ANOMALY-2026-09-19-posted-form-has-no-fields`. `cl_express_icf_shim`
