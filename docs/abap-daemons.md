@@ -283,7 +283,7 @@ its mechanism is the first thing step 5 has to demonstrate.
   matches: `@abaplint/runtime` `statements/wait.js` commits every open
   connection before it sleeps (`implicitCommit`, the `commit()` call at
   line 9), which is the database commit a roll-out implies. After
-  osg-i7's dialog-step lock PR (#TBD), a `WAIT` inside a step no longer does this in the runtime's
+  osg-i7's dialog-step lock PR (#75), a `WAIT` inside a step no longer does this in the runtime's
   JavaScript alone: it goes through `installWait` in
   `tools/osd-dialog-step.mjs`, which releases the lock around the wait. The
   daemon driver uses the same queue and the same release.
@@ -425,7 +425,7 @@ worker, and none are needed; the daemon runs in the worker's one thread.
 But the preview is not ready for it as it stands. Today `openChannel`,
 `channelMessage` and `closeChannel` (`web/preview-backend.mjs`, lines
 201-240) bypass both `serialized( )` and `dialogStep`, and `serialized( )`
-is not released on `WAIT`. osg-i7's dialog-step lock PR (#TBD) changes that: APC callbacks go through
+is not released on `WAIT`. osg-i7's dialog-step lock PR (#75) changes that: APC callbacks go through
 `dialogStep`, the lock is released on `WAIT`, and a database reset runs
 under the lock exclusively. The daemon's callbacks in the preview are built
 on that PR, the same queue as on Node, and the class-data guard is the
@@ -493,7 +493,7 @@ Under option A, precisely:
      `implicitCommit`, the `commit()` call at line 9), and `COMMIT WORK` may
      be allowed in a daemon (P7). So the ID is written at **every** commit
      point of a daemon step, not only at the end. The hook for the `WAIT`
-     case is `installWait` in `tools/osd-dialog-step.mjs` from osg-i7's dialog-step lock PR (#TBD):
+     case is `installWait` in `tools/osd-dialog-step.mjs` from osg-i7's dialog-step lock PR (#75):
      a `WAIT` inside a step passes through it, so it writes the ID into the
      LUW just before the commit it triggers. For `COMMIT WORK` the same
      write goes into the host's commit path of the daemon step.
