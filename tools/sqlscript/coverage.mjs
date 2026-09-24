@@ -95,6 +95,57 @@ export function classesIn(zip, dir) {
   return found;
 }
 
+/**
+ * A database method whose class declares no parameters for it gets them
+ * from where they are declared, in place: `METHODS m REDEFINITION.` from
+ * the superclass up the INHERITING FROM chain, `METHOD if_x~m` from the
+ * interface -- read from the export's own sources (a body whose ancestor is
+ * not in the export keeps none). The ancestor's types come along, the
+ * class's own winning a name they share. Answers how many were filled.
+ */
+export function inheritedSignatures(bodies, classSources, interfaceSources) {
+  let read = 0;
+  for (const one of bodies) {
+    if (one.signature === undefined || (one.signature.parameters ?? []).length > 0) continue;
+    const own = classSources.get(String(one.className).toUpperCase());
+    if (own === undefined) continue;
+    const name = String(one.signature.name).toUpperCase();
+    // `METHOD if_x~m BY DATABASE ...`: the signature is the interface's
+    if (name.includes("~")) {
+      const [intf, method] = name.split("~");
+      const source = interfaceSources.get(intf);
+      const params = source === undefined ? undefined : extractor.definitionsByText(source).get(method);
+      if (params !== undefined && params.length > 0) {
+        one.signature = {...one.signature, parameters: params, signatureSource: "interface"};
+        const types = new Map(extractor.localTypes(source));
+        for (const [k, v] of one.types ?? []) types.set(k, v);
+        one.types = types;
+        read += 1;
+      }
+      continue;
+    }
+    if (!new RegExp(`METHODS\\s+${name.replace(/[/~]/g, "\\$&")}\\s+REDEFINITION\\b`, "i").test(own)) continue;
+    let source = own;
+    const inherited = new Map();
+    for (let depth = 0; depth < 8; depth++) {
+      const parent = /INHERITING\s+FROM\s+([\w\/]+)/i.exec(source)?.[1]?.toUpperCase();
+      source = parent === undefined ? undefined : classSources.get(parent);
+      if (source === undefined) break;
+      for (const [k, v] of extractor.localTypes(source)) if (!inherited.has(k)) inherited.set(k, v);
+      const params = extractor.definitionsByText(source).get(name);
+      if (params !== undefined && params.length > 0) {
+        one.signature = {...one.signature, parameters: params, signatureSource: "superclass"};
+        const types = new Map(inherited);
+        for (const [k, v] of one.types ?? []) types.set(k, v);
+        one.types = types;
+        read += 1;
+        break;
+      }
+    }
+  }
+  return read;
+}
+
 /** what stopped this body, in a form that can be counted */
 export function reasonOf(error, tokens) {
   if (error instanceof LexError) return `lex: ${error.message.replace(/: line.*/, "")}`;
@@ -118,12 +169,25 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   // the oldest and most general, `--ddic` more specific, and a package's own
   // export -- taken off the system that runs it -- the most specific of all.
   const ddic = new FolderDdic(existingFolders([RELEASED_DDIC, ...(options.ddic ?? [])]));
+  // every class of the export by name, for a REDEFINITION's signature
+  const classSources = new Map();
+  const interfaceSources = new Map();
   for (const zip of zips) {
     const pkg = zip.replace(/\.zip$/, "");
     const which = isTeaching(pkg) ? "teaching" : "working";
     for (const file of classesIn(join(root, zip), join(scratch, pkg))) {
-      for (const one of bodiesOf(readFileSync(file, "utf8"), file.split("/").pop())) corpora[which].push({...one, pkg});
+      const source = readFileSync(file, "utf8");
+      classSources.set(file.split("/").pop().replace(/\.clas\.abap$/i, "").toUpperCase(), source);
+      for (const one of bodiesOf(source, file.split("/").pop())) corpora[which].push({...one, pkg});
     }
+    // the interfaces of the package, for an `IF_X~m` implementation's signature
+    const walkIntf = (d) => {
+      for (const e of readdirSync(d, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
+        if (e.isDirectory()) walkIntf(join(d, e.name));
+        else if (e.name.endsWith(".intf.abap")) interfaceSources.set(e.name.replace(/\.intf\.abap$/i, "").toUpperCase(), readFileSync(join(d, e.name), "utf8"));
+      }
+    };
+    walkIntf(join(scratch, pkg));
     ddic.add(join(scratch, pkg));
   }
   const resolveType = ddic.resolver();
@@ -158,6 +222,9 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     one.signature = {...one.signature, parameters: tf.parameters, returns: tf.returns};
     tableFunctionsRead += 1;
   }
+
+  const redefinitionsRead = inheritedSignatures([...corpora.teaching, ...corpora.working], classSources, interfaceSources);
+
 
   // **The catalogue, closed over the dictionary.** Three things a body reads
   // that the instrument used to describe with nothing: the tables its USING
@@ -388,6 +455,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   report.registry = {size: new Set(Object.values(tableFunctions)).size, ddls: new Set(Object.values(fromDdls.registry)).size, skipped: registrySkipped};
   report.signatures = {classesByText, crossCheck};
   report.scratch = scratch;
+  report.redefinitions = {read: redefinitionsRead};
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
   return report;
 }

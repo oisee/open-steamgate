@@ -1335,3 +1335,36 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: none (ours)
 - Upstream version containing a fix: none yet
 - Regression-test location: none yet
+
+### ANOMALY-2026-09-24-amdp-body-brace — one `}` in an AMDP body hides its ENDMETHOD from abaplint, and the next method is lost
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` 2.120.55 (as installed) and 2.120.59 (the latest on npm, checked the same day)
+- Affected ABAP statement, runtime API or adapter: the body of `METHOD … BY DATABASE PROCEDURE|FUNCTION …`, lexed by abaplint as ABAP. A `}` anywhere in it -- a SQLScript line comment included -- switches the lexer into a state where each following line is one token, so `ENDMETHOD.` is not a statement and the next `METHOD … BY DATABASE …` is not one either. `)` and `]` do not do it.
+- Minimal reproducer (clean-room):
+  ```abap
+  CLASS zcl_r DEFINITION PUBLIC.
+    PUBLIC SECTION.
+      INTERFACES if_amdp_marker_hdb.
+      CLASS-METHODS a.
+      CLASS-METHODS b.
+  ENDCLASS.
+  CLASS zcl_r IMPLEMENTATION.
+    METHOD a BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+      declare x integer;
+      x = 1; -- closing }
+    ENDMETHOD.
+    METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+      declare y integer;
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+- Exact command used to run it: `new abaplint.Registry().addFile(new MemoryFile("zcl_r.clas.abap", src)).parse()`, then the statement kinds of the file: `MethodDef MethodDef MethodImplementation` -- no `EndMethod`, no second `MethodImplementation`. With `-- closing )` in place of `-- closing }`: `… MethodImplementation EndMethod MethodImplementation EndMethod`.
+- Expected SAP behaviour: the body is SQLScript and the kernel ends it at `ENDMETHOD.`; both methods exist.
+- Actual open-abap behaviour: abaplint reports one method whose body runs to the end of the next one.
+- Impact on open-steamgate: `tools/amdp-extract.mjs` cut bodies between abaplint's `MethodImplementation` and `EndMethod`, so on the A4H export **64 database methods were lost** (452 found, 516 there; 56 of them SQLScript), and 5 bodies came out merged with the method after them -- which the corpus oracle then counted as HXE refusing them ("incorrect syntax near <the next method's name>").
+- Smallest safe workaround: the extractor now finds the database methods in the text -- `METHOD m BY DATABASE …` to the first line that is `ENDMETHOD.` -- in a copy with the ABAP comment lines and `"` comments blanked offset for offset (a `*` line inside a USING list is not a table; a header in a comment is none), and cuts the body from the source itself. Checked against the old cut on every class of the export and of this tree: the 452 methods it found are unchanged except the 5 merged ones.
+- Upstream issue: **needs an issue** in `abaplint/abaplint` (the lexer's handling of a native-SQL / AMDP body); not yet filed -- goes out through the critic gate. `oisee` has no push rights there, so it is an issue with the reproducer above.
+- Regression-test location: `test/amdp.mjs` ("the database methods are cut out of the text, not out of abaplint's statements")
+- Upstream version containing a fix: `unknown`

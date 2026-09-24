@@ -215,6 +215,43 @@ describe("AMDP: cutting a body out of a class", () => {
 // parameters (ANORMALY-2026-09-19-bang-value). SE24 writes exactly that
 // combination, so a corpus class declared by the editor arrived signatureless
 // and its bodies then looked as though they read undeclared table variables.
+describe("the database methods are cut out of the text, not out of abaplint's statements", () => {
+  // abaplint 2.120.59 lexes a SQLScript body as ABAP: one `}` in it -- in a
+  // SQLScript comment, too -- and ENDMETHOD is no longer a statement, so the
+  // next method was swallowed into this one and lost
+  const cls = (line, header2 = "  METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.") => `CLASS zcl_r DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS a.
+    CLASS-METHODS b.
+ENDCLASS.
+CLASS zcl_r IMPLEMENTATION.
+  METHOD a BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+    declare x integer;
+${line}
+  ENDMETHOD.
+${header2}
+    declare y integer;
+  ENDMETHOD.
+ENDCLASS.
+`;
+  it("keeps both methods when a body has a } in it", () => {
+    const r = extract(cls("    x = 1; -- closing ] ) }"), "zcl_r.clas.abap");
+    expect(r.methods.map((m) => [m.name, m.body])).to.deep.equal([
+      ["a", "declare x integer;\n    x = 1; -- closing ] ) }"],
+      ["b", "declare y integer;"],
+    ]);
+  });
+  it("reads USING without the ABAP comment lines inside it, and no header from a comment", () => {
+    const r = extract(cls("    x = 1;", `  METHOD b BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT USING zt_one
+*                                zt_commented_out
+                                 zt_two.`).replace("CLASS zcl_r IMPLEMENTATION.", `CLASS zcl_r IMPLEMENTATION.
+*  METHOD c BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.`), "zcl_r.clas.abap");
+    expect(r.methods.map((m) => m.name)).to.deep.equal(["a", "b"]);
+    expect(r.methods[1].usings).to.deep.equal(["zt_one", "zt_two"]);
+  });
+});
+
 describe("a parameter written !VALUE(x) is still a parameter", () => {
   const withBody = (decl) => `CLASS c DEFINITION PUBLIC.
   PUBLIC SECTION.
