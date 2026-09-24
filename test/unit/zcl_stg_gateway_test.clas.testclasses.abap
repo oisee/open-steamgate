@@ -1806,9 +1806,14 @@ CLASS ltcl_osql_where DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS 
     METHODS exclusion_binds_all FOR TESTING RAISING cx_static_check.
     METHODS inclusions_alone FOR TESTING RAISING cx_static_check.
     METHODS exclusions_alone FOR TESTING RAISING cx_static_check.
+    METHODS exclusion_first FOR TESTING RAISING cx_static_check.
+    METHODS nb_and_np FOR TESTING RAISING cx_static_check.
+    METHODS cp_escapes_a_literal FOR TESTING RAISING cx_static_check.
     METHODS option
       IMPORTING iv_sign   TYPE string
                 iv_low    TYPE string
+                iv_option TYPE string DEFAULT 'EQ'
+                iv_high   TYPE string OPTIONAL
       RETURNING VALUE(rs) TYPE /iwbep/s_cod_select_option.
     METHODS where
       IMPORTING it_options TYPE /iwbep/t_cod_select_options
@@ -1819,8 +1824,9 @@ CLASS ltcl_osql_where IMPLEMENTATION.
 
   METHOD option.
     rs-sign   = iv_sign.
-    rs-option = 'EQ'.
+    rs-option = iv_option.
     rs-low    = iv_low.
+    rs-high   = iv_high.
   ENDMETHOD.
 
   METHOD where.
@@ -1857,6 +1863,36 @@ CLASS ltcl_osql_where IMPLEMENTATION.
     APPEND option( iv_sign = 'I' iv_low = 'B' ) TO lt_options.
     cl_abap_unit_assert=>assert_equals( act = where( lt_options )
                                         exp = `( STATUS = 'A' OR STATUS = 'B' )` ).
+  ENDMETHOD.
+
+  METHOD exclusion_first.
+* E X then I X: nothing, not everything -- the inclusion is not OR-ed to
+* the exclusion before it
+    DATA lt_options TYPE /iwbep/t_cod_select_options.
+
+    APPEND option( iv_sign = 'E' iv_low = 'X' ) TO lt_options.
+    APPEND option( iv_sign = 'I' iv_low = 'X' ) TO lt_options.
+    cl_abap_unit_assert=>assert_equals( act = where( lt_options )
+                                        exp = `( ( STATUS = 'X' ) AND NOT ( STATUS = 'X' ) )` ).
+  ENDMETHOD.
+
+  METHOD nb_and_np.
+    DATA lt_options TYPE /iwbep/t_cod_select_options.
+
+    APPEND option( iv_sign = 'I' iv_option = 'NB' iv_low = 'A' iv_high = 'M' ) TO lt_options.
+    APPEND option( iv_sign = 'I' iv_option = 'NP' iv_low = 'X*' ) TO lt_options.
+    cl_abap_unit_assert=>assert_equals(
+      act = where( lt_options )
+      exp = `( STATUS NOT BETWEEN 'A' AND 'M' OR STATUS NOT LIKE 'X%' )` ).
+  ENDMETHOD.
+
+  METHOD cp_escapes_a_literal.
+* 50% off: the % is a character, the * a wildcard; #* is a literal *
+    DATA lt_options TYPE /iwbep/t_cod_select_options.
+
+    APPEND option( iv_sign = 'I' iv_option = 'CP' iv_low = '50%*#*' ) TO lt_options.
+    cl_abap_unit_assert=>assert_equals( act = where( lt_options )
+                                        exp = `( STATUS LIKE '50#%%*' ESCAPE '#' )` ).
   ENDMETHOD.
 
   METHOD exclusions_alone.

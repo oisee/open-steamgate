@@ -112,6 +112,12 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
 
   METHOD where_for_option.
     DATA lv_pattern TYPE string.
+    DATA lv_char    TYPE string.
+    DATA lv_len     TYPE i.
+    DATA lv_off     TYPE i.
+    DATA lv_hash    TYPE abap_bool.
+    DATA lv_escape  TYPE abap_bool.
+    DATA lv_like    TYPE string.
 
     CASE is_option-option.
       WHEN 'EQ'.
@@ -128,11 +134,48 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
         rv_clause = |{ iv_field } <= { sql_literal( is_option-low ) }|.
       WHEN 'BT'.
         rv_clause = |{ iv_field } BETWEEN { sql_literal( is_option-low ) } AND { sql_literal( is_option-high ) }|.
-      WHEN 'CP'.
-        lv_pattern = is_option-low.
-        REPLACE ALL OCCURRENCES OF '*' IN lv_pattern WITH '%'.
-        REPLACE ALL OCCURRENCES OF '+' IN lv_pattern WITH '_'.
-        rv_clause = |{ iv_field } LIKE { sql_literal( lv_pattern ) }|.
+      WHEN 'NB'.
+        rv_clause = |{ iv_field } NOT BETWEEN { sql_literal( is_option-low ) } AND { sql_literal( is_option-high ) }|.
+      WHEN 'CP' OR 'NP'.
+* * is any string, + one character, # makes the next character literal; a
+* literal % or _ (or #) is escaped with # and the condition says ESCAPE '#'
+* (measured on A4H: LIKE 'L#_' ESCAPE '#' finds only L_)
+        lv_len = strlen( is_option-low ).
+        DO lv_len TIMES.
+          lv_off = sy-index - 1.
+          lv_char = substring( val = is_option-low off = lv_off len = 1 ).
+          IF lv_hash = abap_true.
+            lv_hash = abap_false.
+            IF lv_char = '%' OR lv_char = '_' OR lv_char = '#'.
+              lv_escape = abap_true.
+              lv_pattern = lv_pattern && '#' && lv_char.
+            ELSE.
+              lv_pattern = lv_pattern && lv_char.
+            ENDIF.
+            CONTINUE.
+          ENDIF.
+          CASE lv_char.
+            WHEN '#'.
+              lv_hash = abap_true.
+            WHEN '*'.
+              lv_pattern = lv_pattern && '%'.
+            WHEN '+'.
+              lv_pattern = lv_pattern && '_'.
+            WHEN '%' OR '_'.
+              lv_escape = abap_true.
+              lv_pattern = lv_pattern && '#' && lv_char.
+            WHEN OTHERS.
+              lv_pattern = lv_pattern && lv_char.
+          ENDCASE.
+        ENDDO.
+        lv_like = 'LIKE'.
+        IF is_option-option = 'NP'.
+          lv_like = 'NOT LIKE'.
+        ENDIF.
+        rv_clause = |{ iv_field } { lv_like } { sql_literal( lv_pattern ) }|.
+        IF lv_escape = abap_true.
+          rv_clause = |{ rv_clause } ESCAPE '#'|.
+        ENDIF.
       WHEN OTHERS.
         rv_clause = |{ iv_field } = { sql_literal( is_option-low ) }|.
     ENDCASE.
