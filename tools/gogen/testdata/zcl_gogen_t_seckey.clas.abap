@@ -23,7 +23,10 @@ CLASS zcl_gogen_t_seckey IMPLEMENTATION.
     ls-p = 'b'. ls-u = 'u3'. ls-n = 3. APPEND ls TO lt.
     ls-p = 'a'. ls-u = 'u2'. ls-n = 4. APPEND ls TO lt.
     ls-p = 'b'. ls-u = 'u1'. ls-n = 5. APPEND ls TO lt.
-* the duplicates of one key value: their order and sy-tabix
+* the duplicates of one key value: their order and sy-tabix; sy-tabix
+* after ENDLOOP is its value before the loop (READ INDEX 2 sets it apart
+* from the last pass's 5; A4H 2026-09-24, $ZOSG_TMP_0422: after:2)
+    READ TABLE lt INTO ls INDEX 2.
     rv = 'w:'.
     LOOP AT lt INTO ls USING KEY k_p WHERE p = 'b'.
       rv = |{ rv }{ ls-n }/{ sy-tabix },|.

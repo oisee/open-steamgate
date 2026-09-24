@@ -931,7 +931,8 @@ function stmtLines(st, ctx, d) {
       const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
       if (unique.length) {
         // a unique secondary key (ultra/json): a row that would repeat a key
-        // value is refused, not added -- what A4H does then is not measured
+        // value is refused, not added -- A4H raises the catchable
+        // CX_SY_ITAB_DUPLICATE_KEY (2026-09-24, ZCL_GOGEN_T_SECKEYDUP)
         const n = ctx.loop++;
         return [`${t}{`, `${t}	v${n} := ${copied(expr(st.value, ctx), st.value.type, st.value)}`,
           ...unique.map((k) => `${t}	abap.UniqueKeyCheck(len(${tb}), func(i int) bool { return ${k.comps.map((c) => `${tb}[i].${ident(c)} == v${n}.${ident(c)}`).join(" && ")} }, ${JSON.stringify(k.name)})`),

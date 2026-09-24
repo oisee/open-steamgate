@@ -75,7 +75,7 @@ func KeyRead(n int, c func(i int) int, unique string) (int, int32, int32) {
 func UniqueKeyCheck(n int, dup func(i int) bool, key string) {
 	for i := 0; i < n; i++ {
 		if dup(i) {
-			panic(NotCompiled("APPEND", "a row repeating the value of the unique secondary key "+key+" (not measured on A4H)"))
+			panic(NotCompiled("APPEND", "a row repeating the value of the unique secondary key "+key+": A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not"))
 		}
 	}
 }

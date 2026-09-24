@@ -1174,5 +1174,5 @@ export function keyRead(tb, c, unique) {
 }
 
 export function uniqueKeyCheck(tb, dup, key) {
-  if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key} (not measured on A4H)`);
+  if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key}: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not`);
 }

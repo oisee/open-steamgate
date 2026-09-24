@@ -329,7 +329,7 @@ const EXPECT = {
   // target alone, sy-tabix where the value would go, sy-subrc 4 inside and
   // 8 past the end (ANORMALIES secondary-key-duplicates: the transpiler
   // runtime answers otherwise)
-  ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:5 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
+  ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:2 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
   // the generic statements of /UI2/CL_JSON's deserializer (ultra/json), A4H
   // 2026-09-24 (the same code in ZCL_GOGEN_T_SECKEY's probe include): INSERT
   // INTO TABLE of a generic standard table appends and leaves sy-tabix alone,
@@ -339,8 +339,15 @@ const EXPECT = {
   ZCL_GOGEN_T_JSONGEN: "ins:0/1/2 new:0 value:3 lt:2 row2:7/x cd:0 ins:0/2/1 new:0 after:1 eq ne",
   // = and <> between object references of different static types
   // (ultra/json fix round): two initial references are equal whatever their
-  // static types
+  // static types. A4H 2026-09-24 ($ZOSG_TMP_0422, the same statements over
+  // CL_ABAP_STRUCTDESCR/CL_ABAP_TYPEDESCR and CX_SY_ZERODIVIDE/IF_MESSAGE)
+  // answered this line exactly; the transpiler too
   ZCL_GOGEN_T_REFEQ: "sb:eq bs:eq ci:eq ic:eq b1:ne b2:ne same:eq isame:eq icl:ne clr:eq",
+  // APPEND repeating a unique secondary key: A4H raises the catchable
+  // CX_SY_ITAB_DUPLICATE_KEY ("caught"), the transpiler appends; both
+  // backends refuse (ultra/json fix round)
+  ZCL_GOGEN_T_SECKEYDUP: {Go: "ERROR NOT_COMPILED in APPEND: a row repeating the value of the unique secondary key K_U: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not at zcl_gogen_t_seckeydup.clas.abap:27",
+    JS: "ERROR NOT_COMPILED in APPEND: a row repeating the value of the unique secondary key K_U: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not"},
   // LOOP ... USING KEY over zcl_x=>gt with APPEND ... TO gt in the body
   // (ultra/json fix round): A4H visits the appended row (app:1/1,3/2,2/3,
   // lines:3, see the class); the key order taken once would not, so both
