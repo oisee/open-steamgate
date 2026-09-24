@@ -130,22 +130,61 @@ func checkLines(p, s, where string) {
 // empty section, where only an empty pattern is found (at the offset,
 // length 0). A match must lie inside the section.
 func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, int32, []string) {
-	r := []rune(s)
-	if off < 0 || off > int32(len(r)) || n < -1 {
+	// the section by byte index, walked to once: no []rune of the whole
+	// text per call (a loop of FIND ... SECTION OFFSET over a long text was
+	// quadratic in allocations, 45 s of an ImportSet in ZCL_STG_SADL_DEF)
+	if off < 0 || n < -1 {
 		rangeError()
 	}
-	end := int32(len(r))
-	if n >= 0 {
-		if off+n > end {
+	var from, to int
+	if isASCII(s) {
+		if int(off) > len(s) || (n >= 0 && int(off+n) > len(s)) {
 			rangeError()
 		}
-		end = off + n
+		from, to = int(off), len(s)
+		if n >= 0 {
+			to = int(off + n)
+		}
+	} else if m := memoOf(s); m != nil {
+		if int(off) > m.runes || (n >= 0 && int(off+n) > m.runes) {
+			rangeError()
+		}
+		from, to = m.byteAt(s, int(off)), len(s)
+		if n >= 0 {
+			to = m.byteAt(s, int(off+n))
+		}
+	} else {
+		var ok bool
+		if from, ok = charsToByte(s, 0, int(off)); !ok {
+			rangeError()
+		}
+		to = len(s)
+		if n >= 0 {
+			if to, ok = charsToByte(s, from, int(n)); !ok {
+				rangeError()
+			}
+		}
 	}
-	ok, o, l, subs := FindStmt(string(r[off:end]), p, false, icase, nsub)
-	if !ok {
+	found, o, l, subs := FindStmt(s[from:to], p, false, icase, nsub)
+	if !found {
 		return false, 0, 0, subs
 	}
 	return true, off + o, l, subs
+}
+
+// charsToByte is the byte index k characters after byte index from in s;
+// false when s ends before that.
+func charsToByte(s string, from, k int) (int, bool) {
+	i := from
+	for ; k > 0 && i < len(s); k-- {
+		if s[i] < utf8.RuneSelf {
+			i++
+			continue
+		}
+		_, w := utf8.DecodeRuneInString(s[i:])
+		i += w
+	}
+	return i, k == 0
 }
 
 // FindTable is FIND [REGEX] p IN TABLE itab (rows of strings), measured on

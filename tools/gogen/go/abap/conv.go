@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"unicode"
 	"unicode/utf8"
 	"unsafe"
 )
@@ -810,7 +811,7 @@ func CP(a, p string, cpat bool) bool {
 		case 'e':
 			return t.r == c
 		default:
-			return strings.EqualFold(string(t.r), string(c))
+			return foldEq(t.r, c)
 		}
 	}
 	for i < len(ar) {
@@ -832,6 +833,29 @@ func CP(a, p string, cpat bool) bool {
 		j++
 	}
 	return j == len(ps)
+}
+
+// foldEq is strings.EqualFold of two single characters, without making
+// two strings per comparison (CP ran it for every character it tried)
+func foldEq(a, b rune) bool {
+	if a == b {
+		return true
+	}
+	if a < utf8.RuneSelf && b < utf8.RuneSelf {
+		if 'A' <= a && a <= 'Z' {
+			a += 'a' - 'A'
+		}
+		if 'A' <= b && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		return a == b
+	}
+	for r := unicode.SimpleFold(a); r != a; r = unicode.SimpleFold(r) {
+		if r == b {
+			return true
+		}
+	}
+	return false
 }
 
 // CA: a contains any character of b, case-sensitive (A4H); an empty operand

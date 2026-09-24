@@ -27,6 +27,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"path"
@@ -362,6 +363,16 @@ func main() {
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	flag.Parse()
 	started := time.Now()
+	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
+	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
+	if a := os.Getenv("OSGO_PPROF"); a != "" {
+		pm := http.NewServeMux()
+		pm.HandleFunc("/debug/pprof/", pprof.Index)
+		pm.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pm.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		go func() { log.Printf("pprof: %v", http.ListenAndServe(a, pm)) }()
+		log.Printf("pprof: http://%s/debug/pprof/", a)
+	}
 	abap.HostFacts = append(abap.HostFacts, "host\tosgo: net/http in front of cl_express_icf_shim, one dialog step per request", buildFacts)
 
 	if *media == "" {
