@@ -259,20 +259,32 @@ process.on("message", (message) => {
   // the exit hook that exports it — closing it first is how a recycle once
   // lost every row — while the file client is closed here so it commits
   // and checkpoints, which process.exit alone would not do.
-  const leave = async () => {
+  //
+  // The commit waits for the work process: committing while a step is
+  // half-way would make its half permanent. If no step lets go within the
+  // grace, the process leaves without committing, and the step that did not
+  // finish is rolled back rather than half-written.
+  const grace = Number(message.grace ?? 2000);
+  let leaving;
+  const leave = () => (leaving ??= (async () => {
     const db = connection();
     try {
-      await db.commit?.();
-      if (typeof db.export !== "function") {
-        await db.disconnect?.();
-      }
+      await Promise.race([
+        exclusive(async () => {
+          await db.commit?.();
+          if (typeof db.export !== "function") {
+            await db.disconnect?.();
+          }
+        }, "leaving for a recycle"),
+        new Promise((resolve) => setTimeout(resolve, grace).unref()),
+      ]);
     } catch {
       // leaving anyway; the supervisor has a new runtime answering
     }
     process.exit(0);
-  };
+  })());
   server.close(leave);
   // a client holding a connection open must not keep a replaced runtime
   // alive; the supervisor already has a new one answering
-  setTimeout(leave, Number(message.grace ?? 2000)).unref();
+  setTimeout(leave, grace).unref();
 });

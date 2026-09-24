@@ -1,5 +1,5 @@
 import {databasePath} from "../tools/osd-persist.mjs";
-import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
@@ -193,7 +193,9 @@ export function startServer(quiet) {
     : undefined;
   const data = MODE === "child"
     ? new Data({root: process.cwd(), runtime})
-    : new Data({client: abap.context.databaseConnections["DEFAULT"]});
+    // the facade's reads share the one connection with the steps, so they
+    // wait for the work process like a step (tools/osd-dialog-step.mjs)
+    : new Data({client: lockedClient(abap.context.databaseConnections["DEFAULT"], "the ADT facade's data preview")});
   const facade = adtRouter({
     store,
     data,
@@ -246,10 +248,10 @@ export function startServer(quiet) {
   app.all("/sap/bc/gui/sap/its/webgui*", withFreshStatus);
   let icf;
   if (MODE === "inline") {
-    icf = mountServices(app, (args) => inline.cl_express_icf_shim.run({
+    icf = mountServices(app, (args) => dialogStep(() => inline.cl_express_icf_shim.run({
       ...args,
       base: new abap.types.String().set(args.base),
-    }), {root: process.cwd(), claimed, from: inline.icf});
+    }), `ICF ${args.base}`), {root: process.cwd(), claimed, from: inline.icf});
   } else {
     // **The child owns the registry, so the parent forwards the branch and
     // does not keep a list of its own.**
@@ -320,7 +322,7 @@ export function startServer(quiet) {
     const body = JSON.stringify(await statusSnapshot(process.cwd(), {runtime, listeners}));
     if (runtime === undefined) {
       // inline: this process holds the tables
-      await inline.zcl_osd_status.refresh({iv_json: body});
+      await dialogStep(() => inline.zcl_osd_status.refresh({iv_json: body}), "the status refresh");
       return;
     }
     await runtime.ensure();

@@ -400,6 +400,9 @@ export async function startBackend(stored, options = {}) {
   await refreshStatus();
 }
 
+// serialized() around the step as well as the step's own lock: a WAIT in
+// an HTTP step gives the work process to an APC event, never to the next
+// request, which waits here for the shim's static server
 export function handleRequest(request) {
   return serialized(() => invoke(request));
 }

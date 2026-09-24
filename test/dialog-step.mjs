@@ -7,7 +7,7 @@
 // with nothing of the ABAP around them: the host's rule, alone.
 import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
-import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
+import {dialogStep, exclusive, workProcess} from "../tools/osd-dialog-step.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -16,23 +16,26 @@ describe("a dialog step has the work process to itself", function () {
   let client;
   let saved;
   let subrc;
+  let runtimeWaits;
   beforeEach(async () => {
     saved = globalThis.abap;
     client = new DuckDBDatabaseClient();
     await client.connect();
     await client.native({sql: 'CREATE TABLE "R" ("ID" INTEGER)', expect: "none"});
     subrc = [];
+    runtimeWaits = 0;
     globalThis.abap = {
       context: {databaseConnections: {DEFAULT: client}},
-      // the runtime's own WAIT would commit every connection whenever it ran;
-      // inside a step the host's takes over, so this one must not be reached
-      statements: {wait: async () => { throw new Error("the runtime's WAIT ran inside a step"); }},
+      // the runtime's own WAIT, counted: inside a step the host's takes over
+      statements: {wait: async () => { runtimeWaits += 1; }},
       builtin: {sy: {get: () => ({subrc: {set: (value) => subrc.push(value)}})}},
     };
   });
   afterEach(async () => {
     globalThis.abap = saved;
     await client.disconnect();
+    // a case that left the work process held would hang every case after it
+    expect(workProcess(), "the work process is free after the case").to.deep.include({held: false, waiting: 0});
   });
   const insert = (id) => client.write({sql: `INSERT INTO "R" VALUES (${id})`});
   const ids = async () => (await client.native({sql: 'SELECT "ID" FROM "R" ORDER BY "ID"', expect: "rows"})).rows.map((r) => Number(r.ID));
@@ -94,6 +97,54 @@ describe("a dialog step has the work process to itself", function () {
     }).catch(() => undefined);
     expect(await ids()).to.deep.equal([]);
     expect(subrc).to.deep.equal([0]);
+  });
+
+  it("a commit that fails inside a WAIT ends that step and not the process", async () => {
+    // the #75 critic's hang: the flag said "released" before the commit ran,
+    // so a failed commit re-acquired a lock it still held
+    const commit = client.commit.bind(client);
+    let failOnce = true;
+    client.commit = async () => {
+      if (failOnce) { failOnce = false; throw new Error("could not serialize access"); }
+      return commit();
+    };
+    let flag = false;
+    const a = dialogStep(async () => {
+      await insert(1);
+      await globalThis.abap.statements.wait({seconds: {get: () => 1}, cond: () => flag});
+    });
+    const outcome = await a.then(() => "committed", (e) => String(e.message));
+    expect(outcome).to.equal("could not serialize access");
+    await dialogStep(async () => { await insert(2); });
+    expect(await ids(), "the failed step rolled back, the next one ran").to.deep.equal([2]);
+    expect(runtimeWaits).to.equal(0);
+  });
+
+  it("a WAIT outside any step is the runtime's own and leaves the step that holds the work process alone", async () => {
+    let inStep;
+    const holding = new Promise((resolve) => { inStep = resolve; });
+    const order = [];
+    const a = dialogStep(async () => {
+      await insert(1);
+      inStep();
+      await sleep(60);
+      order.push("A done");
+    });
+    await holding;
+    // not inside A: it must not commit A's LUW nor hand A's work process on
+    await globalThis.abap.statements.wait({seconds: {get: () => 0.01}});
+    const b = dialogStep(async () => { order.push("B runs"); });
+    await Promise.all([a, b]);
+    expect(runtimeWaits, "the runtime's WAIT answered it").to.equal(1);
+    expect(order).to.deep.equal(["A done", "B runs"]);
+  });
+
+  it("a step inside a step is refused by name rather than waiting for itself", async () => {
+    const outcome = await dialogStep(() => dialogStep(async () => undefined, "the inner one"))
+      .then(() => "ran", (e) => String(e.message));
+    expect(outcome).to.match(/a nested dialog step \(the inner one\)/);
+    const read = await dialogStep(() => exclusive(async () => undefined, "a read")).then(() => "ran", (e) => String(e.message));
+    expect(read).to.match(/a nested dialog step \(a read\)/);
   });
 
   it("a read of the shared connection waits for the step in progress", async () => {
