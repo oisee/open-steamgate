@@ -29,6 +29,80 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-23-div-mod-negative-divisor — DIV and MOD can be wrong when the divisor is negative
+
+- Status: `reported`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 on npm, the pinned `oisee/transpiler` 0263e42, and `abaplint/transpiler` main at 6014241 (2026-09-22): `packages/runtime/src/operators/div.ts` and `mod.ts`
+- Affected ABAP statement, runtime API or adapter: `DIV` and `MOD` with a negative right operand, for `i`, `int8` and `f`
+- Minimal ABAP reproducer:
+
+```abap
+DATA d TYPE i.
+DATA m TYPE i.
+d = 7 DIV -2.    " SAP: -3 -- open-abap: -4
+d = -7 DIV -2.   " SAP: 4  -- open-abap: 3
+m = 7 MOD -3.    " SAP: 1  -- open-abap: 2
+m = -7 MOD -3.   " SAP: 2  -- open-abap: 1
+m = 11 MOD -4.   " SAP: 3  -- open-abap: 1
+```
+
+- Exact command used to run it: found by the Go backend spike (`tools/gogen/run.mjs` on branch `spike/go-backend`), which compares the transpiled JS against ABAP's documented rules. **Measured on A4H, 2026-09-23**, ABAP Unit probes in throwaway `$` packages. For `i`, `int8` and `f`: `7 DIV -2 = -3`, `-7 DIV -2 = 4`, `6 DIV -2 = -3`, `7 MOD -3 = 1`, `-7 MOD -3 = 2`, `11 MOD -4 = 3`, `-11 MOD -4 = 1`, and `6 MOD -2 = 0` for `i`. For `f` and `p` with fractional operands of both signs (20 pairs): `7.5 MOD -2 = 1.5`, `-7 DIV -2.5 = 3`, `-7.5 DIV 2.5 = -3` with MOD 0, and more. For `f` near the limits of double precision: `0.5 DIV/MOD 0.1 = 5 / 0`, `0.5 DIV/MOD -0.1 = -5 / 0`, `-0.5 DIV/MOD 0.1 = -5 / 0`, `0.3 DIV/MOD 0.1 = 2 / 0.09999999999999998`, `-0.25 DIV/MOD -2^54 = 1 / 2^54`. The measured `f` cases match `MOD = a - b * ( a DIV b )` computed in double precision.
+- Expected SAP behaviour: for `i` and `int8`, `a MOD b` lies in `[0, |b|)` for any signs, and `a DIV b` is the quotient that goes with it. For `f`, MOD is `a - b * ( a DIV b )` computed in double precision.
+- Actual open-abap behaviour: `div` floors, which is right only for a positive divisor; the `int8` branch applies the same floor (abaplint/transpiler#1411). `mod` computes `((l % r) + r) % r` and takes the absolute value, which gives `|b| - r` for a negative divisor. The only negative divisor in upstream's tests is -2, where `r = |b| - r = 1`. The `f` remainder by `%` also differs from a system for a positive divisor: `0.5 MOD 0.1` is 0.09999999999999998 here and 0 there.
+- Impact on open-steamgate: none seen in the served tree yet. Some `DIV` and `MOD` expressions with a negative divisor answer differently (`6 DIV -2` and `6 MOD -2` happen to agree). The ZO4D scenes only use positive divisors, which is why the frame oracle never saw it.
+- Smallest safe workaround: none in ABAP; the code is right as written
+- Upstream issue: branch `fix/div-mod-negative-divisor` in `abaplint/transpiler` (worktree `.local/lars/transpiler-div`, one commit on origin/main 6014241). `div` rounds up for a negative divisor; for number operands `mod` computes `a - b * ( a DIV b )` with the same quotient rule, and the `int8` branch normalises the bigint remainder. The critic gate and codex (gpt-6-sol) agreed with changes, which are applied. On the i7, `TZ=UTC npm test` with Postgres 16 in Docker: base 2419 passing / 0 failing, patched 2422 / 0 (the three new tests). Filed 2026-09-23: issue [abaplint/transpiler#1884](https://github.com/abaplint/transpiler/issues/1884), PR [#1885](https://github.com/abaplint/transpiler/pull/1885) from the branch inside the repository, and Regression runs on it.
+- Regression-test location: upstream `test/operators/arithmetics.ts` ("DIV and MOD, negative divisor", "…, float") and `test/types/integer8.ts`; locally the Go spike's semantic table in `tools/gogen/run.mjs`
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-mod-packed-drops-fraction — MOD with packed operands returns an integer
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89, `abaplint/transpiler` main at 6014241: `packages/runtime/src/operators/mod.ts`, which answers a `Float` only when an operand is `Float` and an `Integer` otherwise
+- Affected ABAP statement, runtime API or adapter: `MOD` where an operand is `p` with decimals
+- Minimal ABAP reproducer:
+
+```abap
+DATA a TYPE p LENGTH 8 DECIMALS 2.
+DATA m TYPE p LENGTH 8 DECIMALS 2.
+a = '7.5'.
+m = a MOD 2.     " SAP: 1.50 -- open-abap: 2.00
+```
+
+- Exact command used to run it: **measured on A4H 2026-09-23** in the same fractional probe as the entry above: all ten `p` pairs agree with `f` on the system (`7.5 MOD 2 = 1.5`, `-7.5 MOD -2 = 0.5`, `7 MOD -2.5 = 2`, …). The runtime rounds the remainder into an `Integer`: `7.5 MOD 2` gives 2, `-7 MOD 2.5` gives 1. The checked positive-divisor `DIV` cases with `p` agree; with a negative divisor `DIV` has the defect of the entry above.
+- Expected SAP behaviour: with calculation type `p`, the remainder keeps its decimals
+- Actual open-abap behaviour: the remainder is stored in an `Integer` and rounded
+- Impact on open-steamgate: none seen yet; `MOD` on packed fields with a fractional remainder and no `f` operand
+- Smallest safe workaround: none in ABAP
+- Upstream issue: not filed. It is a separate defect from the sign rule above, so it gets its own branch and PR after that one: `mod` should answer a `Packed` when an operand is packed, the way the other operators do
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-f-to-i-no-overflow — An f too large for i is stored instead of raising
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 and `abaplint/transpiler` main at 6014241: `packages/runtime/src/types/integer.ts`, whose range check at the end of `set()` is commented out
+- Affected ABAP statement, runtime API or adapter: assignment of an out-of-range `f` to an `i`
+- Minimal ABAP reproducer:
+
+```abap
+DATA f TYPE f VALUE '3000000000'.
+DATA i TYPE i.
+i = f.           " SAP: CX_SY_CONVERSION_OVERFLOW -- open-abap: 3000000000
+```
+
+- Exact command used to run it: found by the Go backend spike's semantic table. **Measured on A4H 2026-09-23**, ABAP Unit: inline, and through a method that declares `RAISING cx_sy_conversion_overflow`, both `3e9` and `-3e9` raise `CX_SY_CONVERSION_OVERFLOW`. Through a method that does not declare it, the caller sees `CX_SY_NO_HANDLER`.
+- Expected SAP behaviour: `CX_SY_CONVERSION_OVERFLOW`, catchable
+- Actual open-abap behaviour: the `Integer` holds 3000000000, a value no `i` can hold, and nothing is raised
+- Impact on open-steamgate: none seen yet; wrong silently instead of loudly
+- Smallest safe workaround: none
+- Upstream issue: not filed, and no PR, on purpose. The range check in `Integer.set` was commented out upstream, and the same `set()` receives the results of integer arithmetic, where a system raises `CX_SY_ARITHMETIC_OVERFLOW` and not the conversion error. Arithmetic overflow into `i` needs its own measured test before choosing where to enforce the range, so this goes to Lars as a question with the measurement, after the DIV/MOD PR.
+- Regression-test location: `tools/gogen/run.mjs` (the Go runtime raises it; the JS column shows the anomaly)
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 **A POSTed form field is not there.** On a system, ICF fills the form fields of
