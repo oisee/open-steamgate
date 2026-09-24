@@ -777,8 +777,6 @@ HANA (the #56 critic):
 - an INTEGER variable past 2^31 is refused at the turn that overflows,
   after the turns before it ran -- HANA raises `numeric overflow`, and when
   it raises was not measured;
-- a leading minus (`-2 .. 0`, and `i = -2` anywhere) does not parse yet --
-  a gap of the expression grammar, not of the loop; `(0 - 2) .. 0` does;
 - a range with more turns than what is left of the step budget is refused
   before its first turn, the turns counted by arithmetic;
 - a table assigned inside any loop -- WHILE, a numeric FOR, a FOR over a

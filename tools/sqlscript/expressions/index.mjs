@@ -91,6 +91,8 @@ export class Term extends Expression {
 export class Factor extends Expression {
   getRunnable() {
     return altPrio(
+      // a leading minus: `-1`, `-:x + 1` (measured on HXE: -(-3) + 1 is 4)
+      seq("-", new Factor()),
       new Cast(),
       new Case(),
       new ReplaceRegexpr(),
@@ -391,7 +393,9 @@ export class Declare extends Expression {
       altPrio(
         seq(new Name(), str("TABLE"), "(", new ColumnDef(), star(seq(",", new ColumnDef())), ")"),
         seq(str("CURSOR"), new Name(), str("FOR"), new SetOperation()),
-        seq(new Name(), new TypeName(), opt(str("ARRAY")), opt(seq(altPrio(":=", "="), new Expr())))),
+        // CONSTANT, and DEFAULT for the initial value (measured on HXE:
+        // DEFAULT is `=`, and a CONSTANT cannot be assigned afterwards)
+        seq(new Name(), opt(str("CONSTANT")), new TypeName(), opt(str("ARRAY")), opt(seq(altPrio(":=", "=", str("DEFAULT")), new Expr())))),
       ";");
   }
 }

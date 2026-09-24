@@ -424,6 +424,8 @@ export function compileProcedure(method, types, options = {}) {
   const rowVariables = {};
   const cursors = new Map();
   const openCursors = new Set();
+  // scalars declared CONSTANT: an assignment to one does not compile on HANA
+  const constants = new Set();
   // a table variable assigned inside a loop -- WHILE or a numeric FOR -- has,
   // on the next turn, whatever order the last turn gave it, or the one
   // before the loop: unknown throughout, rather than a first turn's order
@@ -558,11 +560,14 @@ export function compileProcedure(method, types, options = {}) {
         if (cursorNames.has(name)) throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
         const type = declaredScalarType(child(node, "TypeName"), node);
         scalarTypes[name] = type;
+        if ((node.children ?? []).some((one) => one.node === "word" && upper(one.value) === "CONSTANT")) constants.add(name);
         const initialNode = child(node, "Expr");
         result.push(declareScalar(name, type,
           initialNode === undefined ? undefined : bind(initialNode, "expression"), node));
       } else if (node.node === "Assignment") {
         const name = nameOf(child(node, "Name"));
+        // measured on HXE: "cannot modify constant variable", at CREATE
+        if (constants.has(name)) throw new UnsupportedSqlScript(`${name} is a CONSTANT, which HANA refuses to assign ("cannot modify constant variable")`, node);
         const unnest = child(node, "UnnestCall");
         if (unnest !== undefined) {
           const host = (unnest.children ?? []).find((one) => one.node === "host");
