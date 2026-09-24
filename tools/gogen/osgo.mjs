@@ -27,6 +27,8 @@ let statements = [];
 let services = [];
 const notServed = [];
 let tiles = {tiles: []};
+// the object store's facts (tools/gogen/store.mjs): none for --echo
+let store = "";
 let webapps = [];
 // the push channels (*.sapc.xml) whose handler class this program has, and
 // the ones left out; served by go/apc around the compiled ZCL_APC_HOST
@@ -87,6 +89,11 @@ if (echo) {
     else if (!compiled.has(String(c.handler).toUpperCase())) channelsLeftOut.push({path: c.path, handler: String(c.handler).toUpperCase(), why: `${String(c.handler).toUpperCase()} is not in this program`});
     else channels.push({path: c.path, name: c.name, handler: String(c.handler).toUpperCase()});
   }
+  // DESTINATION 'STORE' over the files of the tree (go/abap/store.go)
+  const {storeConfig} = await import("./store.mjs");
+  const cfg = await storeConfig(home);
+  store = JSON.stringify(cfg);
+  console.log(`store: ${cfg.roots.length} roots, ${cfg.libs.length} libraries (${cfg.libs.reduce((n, l) => n + l.files.length, 0)} files), ${Object.keys(cfg.built).length} files of this generation`);
   const {tilesOf, webappsOf} = await import(`${home}/tools/osd-packs.mjs`);
   tiles = {tiles: tilesOf(home)};
   webapps = webappsOf(home).map((p) => ({path: `/app/${p.name}`, dir: p.dir}));
@@ -95,6 +102,7 @@ if (echo) {
 const go = emitGo(program);
 writeFileSync(join(dir, "zz_generated.go"), go);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
+writeFileSync(join(dir, "zz_store.json"), store);
 // the table registry as JSON, the column registry a dynamic WHERE parser reads
 writeFileSync(join(dir, "zz_tables.json"), JSON.stringify(columnRegistry(program), null, 1));
 const has = (fn) => go.includes(`\nfunc ${fn}(`);

@@ -560,6 +560,25 @@ const NATIVE_FM = new Map([
     params: {INPUT_LENGTH: "exporting", FIRST_LINE: "exporting", LAST_LINE: "exporting", BUFFER: "importing", BINARY_TAB: "tables"}}],
 ]);
 
+/**
+ * Function modules a DESTINATION of the host answers, by destination and
+ * name: the Node host installs the same destinations in test/setup.mjs.
+ * 'STORE' is the object store over the files of the tree
+ * (tools/osd-store-destination.mjs on Node, go/abap/store.go here): the
+ * editor screen's LIST READ WRITE, and CHECK ACTIVATE TOKENS answered as
+ * work this binary has no compiler for. The signature is ZOSD_STORE's
+ * (src/webgui/zosd_store.fugr.xml).
+ */
+const DESTINATION_FM = new Map([
+  ["STORE ZOSD_STORE", {fn: "abap.ZOSD_STORE", params: {
+    IV_COMMAND: "exporting", IV_TYPE: "exporting", IV_NAME: "exporting", IV_INCLUDE: "exporting",
+    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting",
+    EV_SOURCE: "importing", EV_FILE: "importing", EV_PACKAGE: "importing", EV_VERSION: "importing",
+    EV_WRITABLE: "importing", EV_ACTIVE: "importing", EV_LIVE: "importing", EV_NOTE: "importing",
+    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing",
+    ET_OBJECT: "tables", ET_ISSUE: "tables", ET_TYPE: "tables", ET_TOKEN: "tables"}}],
+]);
+
 /** CALL FUNCTION of a module the host implements (NATIVE_FM) */
 function callFunction(node, ctx, text) {
   const nameNode = node.findDirectExpression(Expressions.FunctionName);
@@ -571,15 +590,20 @@ function callFunction(node, ctx, text) {
   // CX_SY_DYN_CALL_ILLEGAL_FUNC from the destination before any parameter
   // is passed, and the ABAP around such a call catches cx_root to say so
   // (ZCL_OSD_AMDP_SBX=>ENGINE answers "none"); the Go host raises the same
-  // class at the call. Any other destination stays refused.
+  // class at the call. 'STORE' is answered below (DESTINATION_FM); any
+  // other destination stays refused.
   const dest = /\bDESTINATION\s+'([^']*)'/i.exec(text)?.[1];
   if (dest !== undefined && upper(dest) === "AMDP" && !/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text)) {
     return {s: "raise_runtime", cls: "CX_SY_DYN_CALL_ILLEGAL_FUNC",
       op: `CALL FUNCTION '${name}' DESTINATION 'AMDP': this host has no database that speaks SQLScript (OSGo runs on SQLite; an AMDP method needs a HANA)`};
   }
-  const fm = NATIVE_FM.get(name);
+  // DESTINATION 'STORE' and the module it answers (DESTINATION_FM): a
+  // host function like NATIVE_FM, reached only through its destination
+  const viaDest = dest === undefined ? undefined : DESTINATION_FM.get(`${upper(dest)} ${name}`);
+  const fm = viaDest ?? (dest === undefined ? NATIVE_FM.get(name) : undefined);
+  if (fm === undefined && dest !== undefined) throw new Unsupported(`CALL FUNCTION '${name}' DESTINATION '${dest}': no host implementation of this destination`);
   if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
-  if (/\b(DESTINATION|IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
+  if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text) || (viaDest === undefined && /\bDESTINATION\b/i.test(text))) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
   const args = [];
   let exceptions = null;

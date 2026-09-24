@@ -44,6 +44,12 @@ import (
 //go:embed zz_db.json
 var dbScript []byte
 
+// what the build says about the tree the object store answers over
+// (tools/gogen/store.mjs, go/abap/store.go): empty when it was built without one
+//
+//go:embed zz_store.json
+var storeConfig []byte
+
 // one work process: class statics are per process (see the package comment).
 // It is abap.WorkProcess, the lock the APC channels' steps take as well
 // (go/abap/apc.go), so an ICF request and a push-channel message never run
@@ -372,6 +378,12 @@ func main() {
 		log.Printf("media: %s", *media)
 	} else {
 		log.Printf("media: none (every WWWDATA_IMPORT is IMPORT_ERROR)")
+	}
+
+	// DESTINATION 'STORE' (ZOSD_STORE): the object store over the files of
+	// -root, the tree this binary was built from unless told another
+	if err := abap.SetStore(*root, storeConfig, ""); err != nil {
+		log.Fatalf("store: %v", err)
 	}
 
 	if *dbFile == "" {
