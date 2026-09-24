@@ -452,7 +452,12 @@ function stmt(st, ctx, d) {
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
     }
     // CONCATENATE ... IN BYTE MODE (ultra/packs; see emit-go.mjs)
+    case "shift_left_circ_bytes": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = ${p}.slice(1) + ${p}.slice(0, 1);`];
+    }
     case "concat_bytes":
+      if (st.fixed !== undefined) return [`${t}{ const j = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}; ${place(st.target, ctx)} = abap.XFit(j, ${st.fixed}); s.sy.subrc = j.length > ${st.fixed} ? 4 : 0; }`];
       return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")};`, `${t}s.sy.subrc = 0;`];
     case "condense": {
       const p = place(st.target, ctx);

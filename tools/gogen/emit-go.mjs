@@ -1390,7 +1390,12 @@ ${t}	}`));
     }
     // CONCATENATE ... IN BYTE MODE into an xstring (ultra/packs): the bytes
     // joined, the operands read before the target is written
+    case "shift_left_circ_bytes": {
+      const p = place(st.target, ctx);
+      return [`${t}if len(${p}) > 0 {`, `${t}\t${p} = ${p}[1:] + ${p}[:1]`, `${t}}`];
+    }
     case "concat_bytes":
+      if (st.fixed !== undefined) return [`${t}${place(st.target, ctx)}, s.Sy.Subrc = abap.CatBytesX(${st.fixed}, ${st.parts.map((x) => expr(x, ctx)).join(" + ")})`];
       return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}`, `${t}s.Sy.Subrc = 0`];
     case "condense": {
       const p = place(st.target, ctx);

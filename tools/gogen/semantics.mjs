@@ -120,6 +120,19 @@ const EXPECT = {
   // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
   // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
   ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0083, ABAP Unit probes of these
+  // classes; CL_ABAP_ZIP's CRC-32 needs both). An x or xstring operand of
+  // arithmetic is its move into an i (the last four bytes, signed) and
+  // counts as an i for the calculation type; CONCATENATE IN BYTE MODE into
+  // an x pads with 00 (sy-subrc 0) or cuts (sy-subrc 4)
+  ZCL_GOGEN_T_XARITH: "div:F6DC4190/-153337456 mod:00000002 mul:000003FC ff:FFFFFFFF/0 x1:256 x2:65536 x8:255 xs:256 p:11.50 f:10.25 div2:4",
+  // CL_ABAP_ZIP=>SAVE of two files, run against SAP's own CL_ABAP_ZIP on
+  // A4H ($ZOSG_TMP_0083) and open-abap-core's here: the same frame, entry
+  // count, first name and CRC-32 (zlib's too); SHIFT LEFT CIRCULAR IN BYTE
+  // MODE rotates one byte. JS has no codepage host function
+  ZCL_GOGEN_T_ZIP: {Go: "shift:BBAA/02030401 head:504B0304 eocd:504B0506 entries:0200 name:612E747874 crc:-1167589325",
+    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+  ZCL_GOGEN_T_BYTECATX: "exact:000000AB/0 short:ABCDEF00/0 long:CDEF1234/4 rev:04030201/0 sub:000000B2/0",
   // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0082, ABAP Unit probe of this
   // class, in two runs whose outputs are joined here): a text into an i is
   // blanks, one sign (leading + -, or trailing -, a blank after or before
@@ -693,8 +706,8 @@ const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
-  // raw DEFLATE (parity-wave2, ZCL_GOGEN_T_GZIP)
-  "CL_ABAP_GZIP"];
+  // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
+  "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

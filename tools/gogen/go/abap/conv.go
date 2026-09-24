@@ -737,6 +737,16 @@ func XFit(v string, n int) string {
 	return v + strings.Repeat("\x00", n-len(v))
 }
 
+// CatBytesX is CONCATENATE ... INTO x IN BYTE MODE for an x of n bytes (A4H
+// 2026-09-24, ZCL_GOGEN_T_BYTECATX): the bytes padded with 00 and sy-subrc
+// 0, or cut to n and sy-subrc 4
+func CatBytesX(n int, joined string) (string, int32) {
+	if len(joined) > n {
+		return joined[:n], 4
+	}
+	return XFit(joined, n), 0
+}
+
 // Uccpi is cl_abap_conv_in_ce=>uccpi: the character of a code point, as a
 // c(1) (a blank is stored as the empty c).
 func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }
