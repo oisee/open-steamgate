@@ -904,9 +904,35 @@ function stmtLines(st, ctx, d) {
     }
     case "sort": {
       // SORT is not stable in ABAP; stable here, so equal keys keep their order
+      // (ultra/itab: a key may be the line itself; p compares as a number)
       const tb = place(st.table, ctx);
-      const cmp = st.keys.map((k) => `if x.${ident(k.name)} != y.${ident(k.name)} { return x.${ident(k.name)} ${k.desc ? ">" : "<"} y.${ident(k.name)} }`);
+      const cmp = st.keys.map((k) => {
+        const [xv, yv] = k.line ? ["x", "y"] : [`x.${ident(k.name)}`, `y.${ident(k.name)}`];
+        if (k.type.k === "p") return `if c := abap.CmpP(${xv}, ${yv}); c != 0 { return c ${k.desc ? ">" : "<"} 0 }`;
+        return `if ${xv} != ${yv} { return ${xv} ${k.desc ? ">" : "<"} ${yv} }`;
+      });
       return [`${t}sort.SliceStable(${tb}, func(a, b int) bool { x, y := ${tb}[a], ${tb}[b]; ${cmp.join("; ")}; return false })`];
+    }
+    // ultra/itab: APPEND LINES OF (frontend.mjs); lrow is the source row
+    case "append_lines": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const out = [`${t}{`, `${t}	src${n} := ${expr(st.src, ctx)}`, `${t}	lo${n}, hi${n} := 1, len(src${n})`];
+      const bound = (v, name, set) => [`${t}	if b := int(${expr(v, ctx)}); b <= 0 {`,
+        `${t}		panic(abap.ArithmeticError{Class: "TABLE_INVALID_INDEX", Op: "APPEND LINES OF ... ${name} " + abap.FmtI(int32(b))})`, `${t}	} else ${set}`];
+      if (st.from) out.push(...bound(st.from, "FROM", `{
+${t}		lo${n} = b
+${t}	}`));
+      if (st.to) out.push(...bound(st.to, "TO", `if b < hi${n} {
+${t}		hi${n} = b
+${t}	}`));
+      const saved = ctx.lrow;
+      ctx.lrow = `r${n}`;
+      const v = st.value.e === "lrow" ? copied(`r${n}`, st.value.type) : expr(st.value, ctx);
+      ctx.lrow = saved;
+      out.push(`${t}	for i${n} := lo${n}; i${n} <= hi${n}; i${n}++ {`, `${t}		r${n} := src${n}[i${n}-1]`, `${t}		${tb} = append(${tb}, ${v})`, `${t}	}`,
+        `${t}	s.Sy.Tabix = int32(len(${tb}))`, `${t}}`);
+      return out;
     }
     case "insert_table": {
       const tb = place(st.table, ctx);
@@ -1215,6 +1241,7 @@ function expr(e, ctx) {
     }
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
     // a typed slot seen as generic data: its address and its descriptor
+    case "lrow": return ctx.lrow;
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;

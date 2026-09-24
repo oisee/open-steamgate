@@ -627,7 +627,13 @@ function typeOf(t, where, program) {
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
-    if (access === "STANDARD") return {k: "table", row};
+    // ultra/itab: the primary key, for SORT without BY: "default", the
+    // component names of a user key, or [] for an empty one
+    if (access === "STANDARD") {
+      const o = t.getOptions();
+      const skey = o.keyType === "DEFAULT" ? "default" : o.keyType === "EMPTY" ? [] : (o.primaryKey?.keyFields ?? []).map(upper);
+      return {k: "table", row, skey};
+    }
     // a HASHED table loops in insertion order, so it is a slice whose
     // INSERT keeps the key unique; SORTED is not here yet
     if (access === "HASHED") {
@@ -1367,6 +1373,31 @@ function statement(node, ctx) {
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
   }
+  // ultra/itab: APPEND LINES OF src [FROM i] [TO j] TO itab (A4H 2026-09-24,
+  // ZCL_GOGEN_T_APPL): the rows i..j of src in order, j clamped to lines(src),
+  // nothing when i > j or i past the end; FROM or TO below 1 is the
+  // uncatchable TABLE_INVALID_INDEX; sy-subrc untouched, sy-tabix
+  // lines(itab) afterwards, whatever was appended; each row converted as a
+  // move (c into string); src evaluated once, so itab TO itab doubles it
+  if (isStmt(node, Statements.Append) && /^APPEND\s+LINES\s+OF\b/i.test(text)) {
+    if (/\b(ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`APPEND LINES OF into a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    const kids = node.getChildren();
+    const srcNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    const src = source(srcNode, ctx);
+    if (src.type.k !== "table") throw new Unsupported(`APPEND LINES OF a ${src.type.k}`);
+    let from = null;
+    let to = null;
+    for (let i = 0; i + 1 < kids.length; i += 1) {
+      const next = kids[i + 1];
+      if (!isExpr(next, Expressions.Source) || next === srcNode) continue;
+      if (isTok(kids[i], "FROM")) from = convert(source(next, ctx, I), I);
+      else if (isTok(kids[i], "TO")) to = convert(source(next, ctx, I), I);
+    }
+    const value = convert({e: "lrow", type: src.type.row}, table.type.row);
+    return {s: "append_lines", table, src, from, to, value};
+  }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -1445,18 +1476,60 @@ function statement(node, ctx) {
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
     return {s: "read_index", table, index, into};
   }
+  // ultra/itab: SORT itab [ASCENDING|DESCENDING] [STABLE] [BY c [ASC|DESC] ...]
+  // (A4H 2026-09-24, ZCL_GOGEN_T_SORTK). The emitters sort stably, which is
+  // what STABLE asks and what A4H showed for equal keys without it. Without
+  // BY: the primary key, for a table WITH DEFAULT KEY the line itself when it
+  // is elementary, else its c and string components (the ones measured; i is
+  // left out); the direction after SORT itab is that of every component that
+  // names none. AS TEXT (locale collation) is not measured: refused.
   if (isStmt(node, Statements.Sort)) {
-    const m = /^SORT\s+(\S+)\s+BY\s+(.*?)\s*\.?$/i.exec(text);
-    if (m === null || /\b(STABLE|AS TEXT)\b/i.test(text)) throw new Unsupported(`SORT form: ${text}`);
+    const m = /^SORT\s+(\S+)((?:\s+(?:ASCENDING|DESCENDING|STABLE))*)(?:\s+BY\s+(.*?))?\s*\.?$/i.exec(text);
+    if (m === null || /\bAS\s+TEXT\b/i.test(text)) throw new Unsupported(`SORT form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target) ?? node.findFirstExpression(Expressions.Target), ctx);
-    if (table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported("SORT of a table that is not of structures");
+    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`SORT of a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    const allDesc = /\bDESCENDING\b/i.test(m[2]);
+    const row = table.type.row;
+    const sortable = (t) => ["i", "int8", "f", "p", "c", "string", "n", "d", "t", "x", "xstring"].includes(t.k);
     const keys = [];
-    const words = m[2].trim().split(/\s+/);
-    for (let i = 0; i < words.length; i += 1) {
-      const f = fieldOf(ctx, table.type.row, words[i], text);
-      let desc = false;
-      if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
-      keys.push({name: f.name, type: f.type, desc});
+    if (m[3] === undefined) {
+      if (row.k !== "struct") {
+        if (table.type.skey !== "default" && !(Array.isArray(table.type.skey) && table.type.skey.length === 1 && table.type.skey[0] === "TABLE_LINE")) throw new Unsupported(`SORT without BY of a table whose key is not known here: ${text}`);
+        if (!sortable(row)) throw new Unsupported(`SORT of a table of ${row.k}`);
+        keys.push({line: true, type: row, desc: allDesc});
+      } else if (table.type.skey === "default") {
+        for (const f of PROGRAM.structs.get(row.go).fields) {
+          if (f.type.k === "c" || f.type.k === "string") keys.push({name: f.name, type: f.type, desc: allDesc});
+          else if (!["i", "int8", "f", "p"].includes(f.type.k)) throw new Unsupported(`SORT by the default key of a structure with a ${f.type.k} component: not measured`);
+        }
+      } else if (Array.isArray(table.type.skey) && table.type.skey.length > 0) {
+        for (const k of table.type.skey) {
+          const f = fieldOf(ctx, row, k, text);
+          if (!sortable(f.type)) throw new Unsupported(`SORT by a ${f.type.k} component`);
+          keys.push({name: f.name, type: f.type, desc: allDesc});
+        }
+      } else {
+        throw new Unsupported(`SORT without BY of a table whose key is not known here: ${text}`);
+      }
+    } else {
+      if (/[()]/.test(m[3])) throw new Unsupported(`SORT form: ${text}`);
+      const words = m[3].trim().split(/\s+/);
+      for (let i = 0; i < words.length; i += 1) {
+        let key;
+        if (upper(words[i]) === "TABLE_LINE") {
+          if (row.k === "struct" || !sortable(row)) throw new Unsupported(`SORT BY table_line of a table of ${row.k}`);
+          key = {line: true, type: row};
+        } else {
+          if (row.k !== "struct") throw new Unsupported("SORT BY a component of a table that is not of structures");
+          if (words[i].includes("-")) throw new Unsupported(`SORT BY a nested component: ${text}`);
+          const f = fieldOf(ctx, row, words[i], text);
+          if (!sortable(f.type)) throw new Unsupported(`SORT by a ${f.type.k} component`);
+          key = {name: f.name, type: f.type};
+        }
+        let desc = allDesc;
+        if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
+        keys.push({...key, desc});
+      }
     }
     return {s: "sort", table, keys};
   }

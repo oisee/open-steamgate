@@ -527,9 +527,31 @@ function stmt(st, ctx, d) {
     }
     case "raise": return [`${t}throw abap.raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")});`];
     case "sort": {
+      // Array.prototype.sort is stable; a key may be the line itself, p
+      // compares as a number (ultra/itab)
       const tb = place(st.table, ctx);
-      const cmp = st.keys.map((k) => `if (x.${ident(k.name)} !== y.${ident(k.name)}) return (x.${ident(k.name)} < y.${ident(k.name)} ? -1 : 1) * ${k.desc ? -1 : 1};`);
+      const cmp = st.keys.map((k) => {
+        const [xv, yv] = k.line ? ["x", "y"] : [`x.${ident(k.name)}`, `y.${ident(k.name)}`];
+        if (k.type.k === "p") return `{ const c = abap.CmpP(${xv}, ${yv}); if (c !== 0) return c * ${k.desc ? -1 : 1}; }`;
+        return `if (${xv} !== ${yv}) return (${xv} < ${yv} ? -1 : 1) * ${k.desc ? -1 : 1};`;
+      });
       return [`${t}${tb}.sort((x, y) => { ${cmp.join(" ")} return 0; });`];
+    }
+    // ultra/itab: APPEND LINES OF, as emit-go
+    case "append_lines": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const out = [`${t}{`, `${t}  const src${n} = ${expr(st.src, ctx)};`, `${t}  let lo${n} = 1, hi${n} = src${n}.length;`];
+      const bound = (v, name, set) => [`${t}  { const b = ${expr(v, ctx)}; if (b <= 0) throw new abap.AbapError("TABLE_INVALID_INDEX", "APPEND LINES OF ... ${name} " + b); ${set} }`];
+      if (st.from) out.push(...bound(st.from, "FROM", `lo${n} = b;`));
+      if (st.to) out.push(...bound(st.to, "TO", `if (b < hi${n}) hi${n} = b;`));
+      const saved = ctx.lrow;
+      ctx.lrow = `r${n}`;
+      const v = st.value.e === "lrow" ? (composite(st.value.type) ? `abap.copy(r${n})` : `r${n}`) : expr(st.value, ctx);
+      ctx.lrow = saved;
+      out.push(`${t}  for (let i${n} = lo${n}; i${n} <= hi${n}; i${n}++) { const r${n} = src${n}[i${n} - 1]; ${tb}.push(${v}); }`,
+        `${t}  s.sy.tabix = ${tb}.length;`, `${t}}`);
+      return out;
     }
     case "insert_table": {
       const tb = place(st.table, ctx);
@@ -627,6 +649,7 @@ const callee = (e, ctx) => {
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
+const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF", EXP: "Math.exp", LOG: "abap.LogF", LOG10: "Math.log10"};
 
@@ -664,12 +687,12 @@ function expr(e, ctx) {
       const fields = STRUCTS.get(e.type.go).fields;
       return `{${fields.map((f) => `${ident(f.name)}: ${given.has(f.name) ? moved(given.get(f.name), ctx) : zero(f.type)}`).join(", ")}}`;
     }
-    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
+    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "int8" ? `abap.NegI8(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
-      if (e.type.k === "int8") throw new Error("int8 arithmetic in JS: not in this emitter yet");
+      if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
@@ -716,6 +739,7 @@ function expr(e, ctx) {
     case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
     // a typed slot seen as generic data: a binding to it; a value that is no
     // place gets a slot of its own
+    case "lrow": return ctx.lrow;
     case "wrap": return isPlace(e.x) ? bind(e.x, ctx) : `abap.cell(${expr(e.x, ctx)}, ${desc(e.x.type)})`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `abap.Lines(${expr(e.x, ctx)})`;
@@ -762,6 +786,11 @@ function conv(e, ctx) {
     case "num":
       if (from === "i" && to === "f") return x;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;
+      // int8 is a BigInt (ultra/itab)
+      if (from === "i" && to === "int8") return `BigInt(${x})`;
+      if (from === "int8" && to === "i") return `abap.I8ToI(${x})`;
+      if (from === "int8" && to === "f") return `Number(${x})`;
+      if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;

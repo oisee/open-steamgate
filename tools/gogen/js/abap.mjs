@@ -1122,3 +1122,53 @@ export const DBSys = "sqlite";
 export const SapRl = "OPEN";
 export const Datum = () => new Date().toISOString().slice(0, 10).replaceAll("-", "");
 export const Uzeit = () => new Date().toISOString().slice(11, 19).replaceAll(":", "");
+
+// int8 (ultra/itab): BigInt values, overflow checked as go/abap conv.go
+const MAX8 = 9223372036854775807n;
+const MIN8 = -9223372036854775808n;
+const check8 = (v, op) => {
+  if (v > MAX8 || v < MIN8) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", op);
+  return v;
+};
+const abs8 = (v) => (v < 0n ? -v : v);
+export const AddI8 = (a, b) => check8(a + b, "+");
+export const SubI8 = (a, b) => check8(a - b, "-");
+export const MulI8 = (a, b) => check8(a * b, "*");
+export const NegI8 = (a) => check8(-a, "-");
+export function DivI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "/");
+  }
+  let q = a / b;
+  const r = a % b;
+  if (r !== 0n && 2n * abs8(r) >= abs8(b)) q += (a < 0n) !== (b < 0n) ? -1n : 1n;
+  return check8(q, "/");
+}
+export function DivIntI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "DIV");
+  }
+  let q = a / b;
+  if (a % b < 0n) q += b > 0n ? -1n : 1n;
+  return check8(q, "DIV");
+}
+export function ModI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "MOD");
+  }
+  let r = a % b;
+  if (r < 0n) r += abs8(b);
+  return r;
+}
+export function I8ToI(v) {
+  if (v > 2147483647n || v < -2147483648n) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", "int8->i");
+  return Number(v);
+}
+export function F2I8(f) {
+  const r = Math.sign(f) * Math.round(Math.abs(f));
+  if (Number.isNaN(r) || r >= 9.223372036854775807e18 || r < -9.223372036854775808e18) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "f->int8");
+  return BigInt(r);
+}
