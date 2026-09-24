@@ -11,7 +11,7 @@ import (
 
 // A dynamic Open SQL condition (SELECT ... WHERE (lv_where)) as an IR
 // predicate: a port of osqlWherePredicate() of tools/ir-osql-where.mjs
-// (open-steamgate #47), the one place its meaning is written, measured on
+// (open-steamgate #47, fe65935), the one place its meaning is written, measured on
 // A4H over SFLIGHT (docs/osql-where.md there). The string an ABAP program
 // builds at run time is parsed against the columns of the table it reads;
 // every text or decimal value is bound, every integer checked to its range
@@ -158,8 +158,12 @@ func osqlTokens(text []rune) []osqlToken {
 			// stands between blanks
 			before := i == 0 || blank(text[i-1])
 			after := i+len(op) >= len(text) || blank(text[i+len(op)])
-			if !before || !after {
+			if !before && !after {
 				panic(OsqlWhereSyntax{fmt.Sprintf("the operator %s at %d is not between blanks", op, i)})
+			}
+			// a blank on one side only was not measured
+			if !before || !after {
+				refuseWhere("malformed", "the operator %s at %d has a blank on one side only", op, i)
 			}
 			out = append(out, osqlToken{"op", op, i})
 			i += len(op)
@@ -174,12 +178,21 @@ func osqlTokens(text []rune) []osqlToken {
 		if ch == '@' {
 			panic(OsqlWhereSemantics{fmt.Sprintf("an escaped host variable at %d is not allowed in this statement", i)})
 		}
-		if m := osqlNumber.FindString(rest); m != "" {
-			out = append(out, osqlToken{"number", m, i})
-			i += len([]rune(m))
+		if m := osqlNumber.FindStringSubmatch(rest); m != nil {
+			// measured unquoted: 400 and -5; an unquoted decimal is not
+			if m[1] != "" {
+				refuseWhere("number format", "the unquoted decimal %s at %d is not measured", m[0], i)
+			}
+			out = append(out, osqlToken{"number", m[0], i})
+			i += len([]rune(m[0]))
 			continue
 		}
 		if m := osqlName.FindString(rest); m != "" {
+			// a word run straight into a literal or a parenthesis (EQ'LH',
+			// IN('AA')) was not measured
+			if n := i + len([]rune(m)); n < len(text) && (text[n] == '\'' || text[n] == '`' || text[n] == '(') {
+				refuseWhere("malformed", "%s at %d runs into %q without a blank", m, i, string(text[n]))
+			}
 			out = append(out, osqlToken{"name", m, i})
 			i += len([]rune(m))
 			continue
@@ -190,7 +203,7 @@ func osqlTokens(text []rune) []osqlToken {
 }
 
 var (
-	abapNumberShape = regexp.MustCompile(`^([+-]?)([0-9]*)(?:\.([0-9]*))?([+-]?)$`)
+	abapNumberShape = regexp.MustCompile(`^([+-]?)([0-9]+)(?:\.([0-9]+))?([+-]?)$`)
 	abapLetter      = regexp.MustCompile(`[A-Za-z]`)
 	leadingZeros    = regexp.MustCompile(`^0+([0-9])`)
 )
@@ -217,7 +230,9 @@ func AbapNumber(raw string, decimals int, column string) string {
 		return "0." + strings.Repeat("0", decimals)
 	}
 	m := abapNumberShape.FindStringSubmatch(text)
-	if m == nil || (m[1] != "" && m[4] != "") || (m[2] == "" && m[3] == "") {
+	// digits on both sides of a point, when there is one: '385.' and '.5'
+	// are not measured
+	if m == nil || (m[1] != "" && m[4] != "") {
 		if abapLetter.MatchString(text) {
 			panic(OsqlWhereDump{fmt.Sprintf("%q against the numeric column %s is not a number: an uncatchable runtime error on A4H", raw, column)})
 		}
@@ -319,10 +334,12 @@ func valueFor(tok osqlToken, c *OsqlColumn) *IR {
 		return Lit(n.Int64(), t)
 	case "P":
 		value := AbapNumber(raw, t.Dec, c.Name)
-		// a packed number of len bytes holds 2 * len - 1 digits
+		// len is the DDIC length in digits, as everywhere in the IR (CURR
+		// 15,2 is {P, 15, 2}); more digits is an overflow, uncatchable as it
+		// was for INT4
 		room := 31
 		if t.Len > 0 {
-			room = 2*t.Len - 1
+			room = t.Len
 		}
 		d := stripZeros(strings.NewReplacer("-", "", ".", "").Replace(value))
 		if len(d) > room {
@@ -448,23 +465,34 @@ func (p *osqlParser) literal(c *OsqlColumn) *IR {
 	return nil
 }
 
-// a chain of AND / OR becomes a left-deep tree, as in the module
+// a chain of AND / OR becomes a balanced tree, split in the middle (the
+// first ceil(n/2) terms on the left): the meaning is the same, and the depth
+// is log2 of the chain, where a left-deep tree passes SQLite's expression
+// depth of 1000 at 1000 terms
+func balanced(op string, parts []*IR) *IR {
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	h := (len(parts) + 1) / 2
+	return Bin(op, balanced(op, parts[:h]), balanced(op, parts[h:]), TBool)
+}
+
 func (p *osqlParser) orExpr() *IR {
-	out := p.andExpr()
+	parts := []*IR{p.andExpr()}
 	for p.word() == "OR" {
 		p.take()
-		out = Bin("OR", out, p.andExpr(), TBool)
+		parts = append(parts, p.andExpr())
 	}
-	return out
+	return balanced("OR", parts)
 }
 
 func (p *osqlParser) andExpr() *IR {
-	out := p.notExpr()
+	parts := []*IR{p.notExpr()}
 	for p.word() == "AND" {
 		p.take()
-		out = Bin("AND", out, p.notExpr(), TBool)
+		parts = append(parts, p.notExpr())
 	}
-	return out
+	return balanced("AND", parts)
 }
 
 func (p *osqlParser) notExpr() *IR {
@@ -568,7 +596,12 @@ func (p *osqlParser) primary() *IR {
 			}
 			escape = Lit(e.value, TStr)
 		}
-		// measured: LIKE 'AA ' finds what LIKE 'AA' finds on a CHAR column
+		// measured: LIKE 'AA ' finds what LIKE 'AA' finds on a CHAR column --
+		// without an ESCAPE; with one, a trailing blank could be the escaped
+		// character, and that was not measured
+		if escape != nil && strings.HasSuffix(pattern.value, " ") {
+			refuseWhere("like type", "a LIKE pattern with an ESCAPE and a trailing blank is not measured")
+		}
 		return Like(expr, Lit(strings.TrimRight(pattern.value, " "), TStr), escape, negated)
 	case kw == "IN":
 		p.take()
@@ -588,6 +621,9 @@ func (p *osqlParser) primary() *IR {
 		}
 		// measured: IS INITIAL is CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H
 		if p.word() == "INITIAL" {
+			if isNot {
+				refuseWhere("malformed", "IS NOT INITIAL is not measured")
+			}
 			panic(OsqlWhereSemantics{"IS INITIAL is not allowed in a dynamic condition here"})
 		}
 		p.expect("name", "NULL")

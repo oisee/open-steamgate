@@ -156,7 +156,7 @@ func TestOsqlWhereLimits(t *testing.T) {
 // number is a format, a sign on zero is dropped, NUMC of an empty literal is refused
 func TestOsqlWhereEdges(t *testing.T) {
 	cols := []OsqlColumn{{Name: "CARRID", Type: TChar(3)}, {Name: "SEATSMAX", Type: TInt},
-		{Name: "CONNID", Type: TChar(4), Kind: "NUMC"}, {Name: "PRICE", Type: &IRType{Abap: "P", Len: 8, Dec: 2}}}
+		{Name: "CONNID", Type: TChar(4), Kind: "NUMC"}, {Name: "PRICE", Type: &IRType{Abap: "P", Len: 15, Dec: 2}}}
 	for _, c := range []struct{ where, want string }{
 		{"nosuch = 'x' AND carrid = 'LH", "Refused/malformed"},
 		{"seatsmax = '\t5'", "Refused/number format"},
