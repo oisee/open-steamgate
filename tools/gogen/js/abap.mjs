@@ -1122,3 +1122,61 @@ export const DBSys = "sqlite";
 export const SapRl = "OPEN";
 export const Datum = () => new Date().toISOString().slice(0, 10).replaceAll("-", "");
 export const Uzeit = () => new Date().toISOString().slice(11, 19).replaceAll(":", "");
+
+// ---------------------------------------------------------------- class events
+// ultra/events: SET HANDLER / RAISE EVENT, line for line go/abap/events.go
+// (the rules measured on A4H are written there). A sender keeps its
+// registrations in a property of its own, $ev, so they live as long as it.
+function handlerTableSet(t, obj, method, filter, fn, on) {
+  let free = -1;
+  for (let i = 0; i < t.length; i += 1) {
+    const e = t[i];
+    if (e === null) { if (free < 0) free = i; continue; }
+    if (e.obj === obj && e.method === method) {
+      if (!on) { e.dead = true; t[i] = null; }
+      return;
+    }
+  }
+  if (!on) return;
+  const e = {obj, method, filter, fn, dead: false};
+  if (free >= 0) t[free] = e; else t.push(e);
+}
+const allHandlers = new Map();
+const staticHandlers = new Map();
+export function activation(v) {
+  if (v === "X") return true;
+  if (v === "" || v === " ") return false;
+  throw new AbapError("NOT_COMPILED", "SET HANDLER: ACTIVATION with a value that is neither 'X' nor blank is not measured");
+}
+export function setHandler(s, event, forObj, all, isStatic, obj, method, filter, fn, on) {
+  let m;
+  if (isStatic || all) {
+    m = isStatic ? staticHandlers : allHandlers;
+  } else {
+    if (forObj === null || forObj === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "SET HANDLER ... FOR an initial reference");
+    if (!Object.prototype.hasOwnProperty.call(forObj, "$ev")) Object.defineProperty(forObj, "$ev", {value: new Map(), enumerable: false});
+    m = forObj.$ev;
+  }
+  if (!m.has(event)) m.set(event, []);
+  handlerTableSet(m.get(event), obj, method, filter, fn, on);
+}
+// the handler object of SET HANDLER h->m: an initial one is a runtime abortion
+export function boundHandler(o) {
+  if (o === null || o === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "SET HANDLER with an initial handler reference");
+  return o;
+}
+export function raiseEvent(s, event, sender, isStatic, args) {
+  const lists = [];
+  if (isStatic) lists.push([...(staticHandlers.get(event) ?? [])]);
+  else {
+    if (sender?.$ev) lists.push([...(sender.$ev.get(event) ?? [])]);
+    lists.push([...(allHandlers.get(event) ?? [])]);
+  }
+  for (const l of lists) {
+    for (const e of l) {
+      if (e === null || e.dead) continue;
+      if (e.filter && !e.filter(sender)) continue;
+      e.fn(s, sender, args());
+    }
+  }
+}

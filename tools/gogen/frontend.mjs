@@ -101,7 +101,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
-    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: []};
+    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};
@@ -804,6 +804,16 @@ function classIr(ctx0, obj) {
     interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
   cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
   cls.signatures = signatures;
+  // an object of this class can raise instance events (its own, a
+  // superclass's, an interface's): the backends give it its registrations
+  // (ultra/events, go/abap/events.go)
+  cls.instanceEvents = [className, ...ancestors(reg, className)].some((c) => {
+    const d = reg.getObject("CLAS", c)?.getDefinition();
+    if (!d) return false;
+    if (d.getEvents().some((e) => !e.isStatic())) return true;
+    return d.getImplementing().some((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]
+      .some((n) => reg.getObject("INTF", n)?.getDefinition()?.getEvents?.().some((e) => !e.isStatic())));
+  });
   const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   // a local class's methods are the ones of its own CLASS ... IMPLEMENTATION
   const methodNodes = obj.local === undefined ? tree.findAllStructures(Structures.Method)
@@ -1505,6 +1515,9 @@ function statement(node, ctx) {
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
+  // class events (ultra/events): SET HANDLER and RAISE EVENT, see setHandler
+  if (isStmt(node, Statements.SetHandler)) return setHandler(node, ctx, text);
+  if (isStmt(node, Statements.RaiseEvent)) return raiseEvent(node, ctx, text);
   // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
   if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
@@ -3414,6 +3427,151 @@ function raiseException(node, ctx, text) {
   const value = source(src, ctx);
   if (value.type.k !== "ref" || value.type.name === "OBJECT") throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k === "ref" ? "REF TO object" : value.type.k}`);
   return {s: "raise", value, cls: null};
+}
+
+/*
+ * Class events (ultra/events). EVENTS / CLASS-EVENTS of a class or an
+ * interface, SET HANDLER and RAISE EVENT, measured on A4H
+ * (ZCL_GOGEN_T_EVENTS / _EVENTS2, $ZOSG_TMP_0440; go/abap/events.go has the
+ * rules). An event is known by where it is declared, "DECL~EVENT", so a
+ * handler FOR EVENT e OF a subclass and a RAISE EVENT in a subclass meet
+ * the declaring class's event. program.events collects the events used,
+ * for the backends' parameter types.
+ */
+function eventInfo(ctx, owner, evName) {
+  let decl = null;
+  let def = null;
+  let name = upper(evName);
+  if (name.includes("~")) {
+    const [intf, ev] = name.split("~");
+    const idef = ctx.reg.getObject("INTF", intf)?.getDefinition();
+    const found = idef?.getEvents?.().find((e) => upper(e.getName()) === ev);
+    if (found) { decl = intf; def = found; name = ev; }
+  } else if (ctx.reg.getObject("INTF", owner)) {
+    const found = ctx.reg.getObject("INTF", owner).getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+    if (found) { decl = owner; def = found; }
+  } else {
+    for (const c of [owner, ...ancestors(ctx.reg, owner)]) {
+      const found = ctx.reg.getObject("CLAS", c)?.getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+      if (found) { decl = c; def = found; break; }
+    }
+  }
+  if (!def) throw new Unsupported(`event ${evName} of ${owner} is not in the program`);
+  const key = `${decl}~${name}`;
+  if (ctx.program.events.has(key)) return ctx.program.events.get(key);
+  // DEFAULT of an event parameter is not read off the definition (abaplint
+  // keeps no default for it): an event that has one is refused
+  const obj = ctx.reg.getObject("INTF", decl) ?? ctx.reg.getObject("CLAS", decl);
+  for (const f of obj.getABAPFiles()) {
+    for (const st of f.getStatements()) {
+      if (!(st.get() instanceof Statements.Events)) continue;
+      if (upper(st.findDirectExpression(Expressions.EventName)?.concatTokens() ?? "") !== name) continue;
+      if (/\bDEFAULT\b/i.test(st.concatTokens())) throw new Unsupported(`event ${key}: a parameter with DEFAULT`);
+    }
+  }
+  const params = def.getParameters().map((p) => ({name: upper(p.getName()), type: typeOf(p.getType(), `event ${key}`, ctx.program)}));
+  const info = {key, decl, name, static: def.isStatic(), params};
+  ctx.program.events.set(key, info);
+  return info;
+}
+
+/*
+ * SET HANDLER h1 h2 ... [FOR obj | FOR ALL INSTANCES] [ACTIVATION act].
+ * Each handler becomes the call the dispatch makes: its receiver the
+ * handler object as it was when SET HANDLER ran (ev_handler), its IMPORTING
+ * parameters the event's (ev_arg) and SENDER (ev_sender). A handler on me
+ * (bare name or me->m) is called as a call on me.
+ */
+function setHandler(node, ctx, text) {
+  const forAll = /\bFOR\s+ALL\s+INSTANCES\b/i.test(text);
+  const kids = node.getChildren();
+  const forAt = kids.findIndex((k) => isTok(k, "FOR"));
+  const actAt = kids.findIndex((k) => isTok(k, "ACTIVATION"));
+  const forObj = forAt >= 0 && !forAll ? source(kids[forAt + 1], ctx) : null;
+  if (forObj && forObj.type.k !== "ref") throw new Unsupported(`SET HANDLER ... FOR a ${forObj.type.k}`);
+  const activation = actAt >= 0 ? convert(source(kids[actAt + 1], ctx), C(1)) : null;
+  const handlers = [];
+  for (const ms of node.findDirectExpressions(Expressions.MethodSource)) {
+    const mk = ms.getChildren();
+    if (ms.findDirectExpression(Expressions.Dynamic)) throw new Unsupported(`SET HANDLER with a dynamic method: ${text}`);
+    let obj = null;
+    let owner;
+    let mname;
+    let staticRef = false;
+    if (mk.length === 1) {
+      owner = ctx.className;
+      mname = upper(mk[0].concatTokens());
+    } else if (mk.length === 3 && isTok(mk[1], "=>")) {
+      owner = upper(mk[0].concatTokens());
+      mname = upper(mk[2].concatTokens());
+      staticRef = true;
+    } else if (mk.length === 3 && isTok(mk[1], "->") && upper(mk[0].concatTokens()) === "ME") {
+      owner = ctx.className;
+      mname = upper(mk[2].concatTokens());
+    } else if (mk.length === 3 && isTok(mk[1], "->")) {
+      obj = fieldChain(mk[0], ctx);
+      if (obj.type.k !== "ref" || obj.type.intf) throw new Unsupported(`SET HANDLER through ${mk[0].concatTokens()}: not a class reference`);
+      owner = obj.type.name;
+      mname = upper(mk[2].concatTokens());
+    } else {
+      throw new Unsupported(`SET HANDLER handler ${ms.concatTokens()}`);
+    }
+    if (mname.includes("~")) throw new Unsupported(`SET HANDLER of an interface method: ${ms.concatTokens()}`);
+    const at = declaringClass(ctx.reg, owner, mname, "method");
+    if (!at) throw new Unsupported(`SET HANDLER: ${owner} has no method ${mname}`);
+    if (!ctx.program.wanted.has(at)) throw new Unsupported(`SET HANDLER: ${at} is not compiled in this program`);
+    const mdef = declaredMethod(ctx.reg, at, mname);
+    if (!mdef?.isEventHandler?.()) throw new Unsupported(`SET HANDLER: ${at}=>${mname} is not an event handler`);
+    const ev = eventInfo(ctx, upper(mdef.getEventClass()), mdef.getEventName());
+    const sig = methodSignature(ctx, at, mname);
+    if (sig.unsupported) throw new Unsupported(`SET HANDLER: ${at}=>${mname} was skipped: ${sig.unsupported}`);
+    if (sig.static && obj) throw new Unsupported(`SET HANDLER of a static method through a reference: ${ms.concatTokens()}`);
+    if (!sig.static && (staticRef || ctx.sig.static) && !obj) throw new Unsupported(`SET HANDLER of an instance method without an object: ${ms.concatTokens()}`);
+    if (ev.static && (forObj || forAll)) throw new Unsupported(`SET HANDLER ... FOR of a static event: ${text}`);
+    if (!ev.static && !forObj && !forAll) throw new Unsupported(`SET HANDLER of an instance event without FOR: ${text}`);
+    const byName = new Map(ev.params.map((p) => [p.name, p]));
+    const args = sig.params.map((p) => {
+      if (p.dir !== "importing") throw new Unsupported(`handler ${at}=>${mname}: ${p.dir} parameter ${p.name}`);
+      if (p.name === "SENDER") {
+        if (ev.static) throw new Unsupported(`handler ${at}=>${mname}: SENDER of a static event`);
+        return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "ev_sender", type: p.type}};
+      }
+      const ep = byName.get(p.name);
+      if (!ep) throw new Unsupported(`handler ${at}=>${mname}: ${p.name} is no parameter of ${ev.key}`);
+      if (!sameType(ep.type, p.type)) throw new Unsupported(`handler ${at}=>${mname}: ${p.name} typed unlike the event`);
+      return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "ev_arg", name: p.name, type: p.type}};
+    });
+    const call = {e: "call", method: mname, static: sig.static, owner: sig.static ? at : null,
+      receiver: obj ? {e: "ev_handler", type: obj.type} : null, sup: null, args, type: {k: "void"}, exceptions: null, receiving: null, callee: mname};
+    // FOR EVENT e OF a subclass of the declaring class: FOR ALL INSTANCES
+    // only takes senders of that class
+    const of = upper(mdef.getEventClass());
+    let filter = null;
+    if (forAll && of !== ev.decl && !ctx.reg.getObject("INTF", of)) {
+      if (!ctx.program.wanted.has(of)) throw new Unsupported(`SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
+      filter = of;
+    }
+    handlers.push({call, obj, me: !obj && !sig.static, key: sig.static ? `${at}=>${mname}` : mname, event: ev.key, filter});
+  }
+  return {s: "set_handler", handlers, forObj, all: forAll, static: handlers.length > 0 && ctx.program.events.get(handlers[0].event).static, activation};
+}
+
+/*
+ * RAISE EVENT e [EXPORTING p = v ...]: the sender is me (none for a static
+ * event); every parameter's actual is evaluated anew for each handler, as
+ * A4H does (val: in ZCL_GOGEN_T_EVENTS).
+ */
+function raiseEvent(node, ctx, text) {
+  const ev = eventInfo(ctx, ctx.className, node.findDirectExpression(Expressions.EventName).concatTokens());
+  if (!ev.static && ctx.sig.static) throw new Unsupported(`RAISE EVENT of an instance event in a static method: ${text}`);
+  const given = new Map();
+  for (const p of node.findDirectExpression(Expressions.ParameterListS)?.findDirectExpressions(Expressions.ParameterS) ?? []) {
+    given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+  }
+  for (const n of given.keys()) if (!ev.params.some((p) => p.name === n)) throw new Unsupported(`RAISE EVENT ${ev.key}: no parameter ${n}`);
+  const args = ev.params.map((p) => ({name: p.name, type: p.type,
+    value: given.has(p.name) ? convert(source(given.get(p.name), ctx, p.type), p.type) : {e: "zero", type: p.type}}));
+  return {s: "raise_event", event: ev.key, static: ev.static, sender: ev.static ? null : {e: "me", type: {k: "ref", name: ctx.className}}, args};
 }
 
 /**

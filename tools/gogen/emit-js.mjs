@@ -511,6 +511,25 @@ function stmt(st, ctx, d) {
     case "raise_runtime": return [`${t}throw new abap.AbapError(${JSON.stringify(st.cls)}, ${JSON.stringify(st.op)});`];
     case "call_fm": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`CALL FUNCTION '${st.name}': the JS emitter has no host function modules`)});`];
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
+    // ultra/events: SET HANDLER and RAISE EVENT, as emit-go (js/abap.mjs
+    // setHandler / raiseEvent follow go/abap/events.go)
+    case "set_handler": {
+      const lines = [`${t}{`, `${t}  const EvFor = ${st.forObj ? expr(st.forObj, ctx) : "null"};`,
+        `${t}  const EvOn = ${st.activation ? `abap.activation(${expr(st.activation, ctx)})` : "true"};`];
+      for (const h of st.handlers) {
+        const filter = h.filter ? `(o) => !!o?.constructor?.$is?.has(${JSON.stringify(h.filter)})` : "null";
+        const obj = h.obj ? "EvH" : h.me ? "me" : "null";
+        lines.push(`${t}  {`);
+        if (h.obj) lines.push(`${t}    const EvH = abap.boundHandler(${expr(h.obj, ctx)});`);
+        lines.push(`${t}    abap.setHandler(s, ${JSON.stringify(h.event)}, EvFor, ${st.all}, ${st.static}, ${obj}, ${JSON.stringify(h.key)}, ${filter}, (s, EvSender, EvA) => { ${expr(h.call, ctx)}; }, EvOn);`, `${t}  }`);
+      }
+      lines.push(`${t}}`);
+      return lines;
+    }
+    case "raise_event": {
+      const fields = st.args.map((a) => `${ident(a.name)}: ${moved(a.value, ctx)}`).join(", ");
+      return [`${t}abap.raiseEvent(s, ${JSON.stringify(st.event)}, ${st.sender ? expr(st.sender, ctx) : "null"}, ${st.static}, () => ({${fields}}));`];
+    }
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
       const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
@@ -712,6 +731,10 @@ function expr(e, ctx) {
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
     case "me": return "me";
+    // ultra/events: inside a handler's registration (set_handler)
+    case "ev_arg": return `EvA.${ident(e.name)}`;
+    case "ev_sender": return "EvSender";
+    case "ev_handler": return "EvH";
     case "upcast": return expr(e.x, ctx);
     case "cast": return `abap.cast(${expr(e.x, ctx)}, ${JSON.stringify(e.type.name)})`;
     // a typed slot seen as generic data: a binding to it; a value that is no

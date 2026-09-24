@@ -382,6 +382,15 @@ const EXPECT = {
   // emitter has no registry and refuses
   ZCL_GOGEN_T_CRDYN: {Go: "a:0/h b:u/0[] c:2 lower:ok unknown:err kept:0",
     JS: "ERROR NOT_COMPILED in CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)"},
+  // class events (A4H 2026-09-24, $ZOSG_TMP_0440, ultra/events; the rules
+  // in go/abap/events.go): handlers in registration order, per sender a
+  // table with holes (a new one takes the lowest free place), a duplicate
+  // is one, FOR the sender before FOR ALL INSTANCES, a dispatch calls what
+  // was active at its start and still is, the actual read anew per handler
+  // (val), an exception out of a handler ends the dispatch, static events
+  // and handlers, an interface's event through an interface reference
+  ZCL_GOGEN_T_EVENTS: "none:[] order:a.p(2,s)b.q(2)c.p(2,s) other:[] twice:a.p(4,s) off:b.p(5,s) again:a.p(6,s)b.p(6,s) var:a.p(7,s) kill:a.kill kill2:a.kill add:a.add add2:a.addc.p(11,s) boom:a.boom.caught val:a.m(5,105)b.m(105,205) all:a.q(13)c.p(13,x)b.p(14,y)a.q(14)c.p(14,y) both:b.p(15,y)c.p(15,y)a.q(15)c.p(15,y) offone:b.p(16,y)a.q(16)c.p(16,y) offall:b.p(18,y) stat:static(19,s) sev:a.s(20)b.s(20) sev2:b.s(21) intf:a.i(hi,s)",
+  ZCL_GOGEN_T_EVENTS2: "revive:a.revive allfirst:b.p(2,s)c.p(2,s) nest:a.n1(a.n2()b.p(2,s))b.p(1,s) self:a.self3b.p(3,s)b.p(4,s) rev:c.p(5,s)a.p(5,s)b.q(5)b.p(5,s) back:a.p(6,s)b.p(6,s)c.p(6,s) holes:b.q(7)b.p(7,s)a.q(7) holes2:b.q(8)b.p(8,s)a.q(8)",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
