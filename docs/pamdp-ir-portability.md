@@ -96,6 +96,13 @@ now costs little.
 **Statements** (`tools/sqlscript-procedure-ir.mjs`): `assign-relation`,
 `assign-scalar`, `declare-scalar`, `if`, `while` and `call-procedure`.
 
+**Outputs** of a procedure program (2026-09-24):
+- `outputs` is the authority whenever it is there. It never has exactly one entry, and its entries are in the order the signature declares them:
+  - `[]` for a procedure that only writes, answered with `{outputs: {}}`;
+  - several entries, each `{name, schema}` for a table or `{name, scalar}` for an I, C or STRING scalar. This is answered with `{outputs: {NAME: {rows, columns, outputSchema} | {value}}}`, and an OUT the path left alone is empty (a table) or initial (a scalar), as measured on A4H.
+- `output`, with `outputSchema` or `outputType`, names the one output of a procedure that has exactly one. It is absent when `outputs` is there.
+- A nested CALL hands on one relation, so a callee with no output or with several is refused.
+
 ## What it would cost, and in what order
 
 1. The JSON Schema, generated from the constructors above and checked
