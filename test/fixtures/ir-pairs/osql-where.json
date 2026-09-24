@@ -1,5 +1,15 @@
 {
-  "note": "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error. {every: true} is no condition. BETWEEN renders as (>= AND <=), as the ranges do. An INTEGER is inlined after its range check; a packed value is bound as a decimal string. Blanks are space, tab, CR and LF only. Limits: nesting depth 256, comparisons 2000. Refusal reasons are the closed list in REASONS.",
+  "note": "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error class and reason (messages are not part of the contract). {every: true} is no condition.",
+  "conventions": [
+    "BETWEEN renders as (>= AND <=), as the ranges do. A chain of AND or OR is a balanced tree: the first ceil(n/2) terms on the left, the rest on the right, recursively.",
+    "P's len is the DDIC length in digits (T.dec(15, 2) is CURR 15,2); a value with more digits than len is a dump. A packed value is bound as a decimal string with exactly dec decimals, no -0; an INTEGER is inlined after its INT4 range check.",
+    "abapNumber: only spaces around are ignored (a tab is a number format), empty is 0, a sign leads or trails, digits on both sides of a point, rounded half away from zero on the first digit past dec; a letter is a dump, any other shape is refused as 'number format'.",
+    "Errors: the tokenizer runs over the whole string before the parser, so a tokenizer error wins; after that the first error from the left.",
+    "Depth counts each '(' and each NOT; more than 256 is 'too deep'. MAX_TERMS counts comparisons (a column with its operator), not IN values; more than 2000 is 'too deep'.",
+    "Blanks are space, tab, CR and LF. An operator with no blank on either side is _SYNTAX, with a blank on one side only 'malformed'; a word run into a quote or a '(' is 'malformed'.",
+    "D is C(8), the literal cut. A LIKE pattern is a STRING, bound; ESCAPE is a bound one-character STRING; a trailing blank in the pattern is dropped only without an ESCAPE.",
+    "A surrogate anywhere in a literal refuses it before any cut; a CHAR literal is cut in UTF-16 code units. NUMC: spaces trimmed, then zero-padded; not digits (or empty) is 'numc'."
+  ],
   "reasons": [
     "host variable",
     "column to column",
@@ -35,7 +45,7 @@
     "PRICE": {
       "type": {
         "abap": "P",
-        "len": 8,
+        "len": 15,
         "dec": 2
       }
     },
@@ -469,7 +479,7 @@
             {
               "name": "p0",
               "value": "500.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
@@ -480,29 +490,29 @@
             {
               "name": "p0",
               "value": "500.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(\"PRICE\" > $1::numeric(8,2))",
+          "sql": "(\"PRICE\" > $1::numeric(15,2))",
           "params": [
             {
               "name": "p0",
               "value": "500.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(\"PRICE\" > CAST(? AS DECIMAL(8,2)))",
+          "sql": "(\"PRICE\" > CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
               "value": "500.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
@@ -638,19 +648,19 @@
       "where": "seatsmax < 1 OR seatsmax > 2 OR seatsmax <= 3 OR seatsmax >= 4 OR seatsmax <> 5",
       "lowered": {
         "sqlite": {
-          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "sql": "((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR ((\"SEATSMAX\" >= 4) OR (\"SEATSMAX\" <> 5)))",
           "params": []
         },
         "duckdb": {
-          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "sql": "((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR ((\"SEATSMAX\" >= 4) OR (\"SEATSMAX\" <> 5)))",
           "params": []
         },
         "postgres": {
-          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "sql": "((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR ((\"SEATSMAX\" >= 4) OR (\"SEATSMAX\" <> 5)))",
           "params": []
         },
         "hana": {
-          "sql": "(((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR (\"SEATSMAX\" >= 4)) OR (\"SEATSMAX\" <> 5))",
+          "sql": "((((\"SEATSMAX\" < 1) OR (\"SEATSMAX\" > 2)) OR (\"SEATSMAX\" <= 3)) OR ((\"SEATSMAX\" >= 4) OR (\"SEATSMAX\" <> 5)))",
           "params": []
         }
       }
@@ -1685,7 +1695,7 @@
             {
               "name": "p0",
               "value": "422.94",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
@@ -1696,29 +1706,29 @@
             {
               "name": "p0",
               "value": "422.94",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(\"PRICE\" = $1::numeric(8,2))",
+          "sql": "(\"PRICE\" = $1::numeric(15,2))",
           "params": [
             {
               "name": "p0",
               "value": "422.94",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(8,2)))",
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
               "value": "422.94",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
@@ -1735,7 +1745,7 @@
             {
               "name": "p0",
               "value": "1234567890123.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
@@ -1746,29 +1756,201 @@
             {
               "name": "p0",
               "value": "1234567890123.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "postgres": {
-          "sql": "(\"PRICE\" = $1::numeric(8,2))",
+          "sql": "(\"PRICE\" = $1::numeric(15,2))",
           "params": [
             {
               "name": "p0",
               "value": "1234567890123.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
               "isNull": false
             }
           ]
         },
         "hana": {
-          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(8,2)))",
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
               "value": "1234567890123.50",
-              "type": "P(8,2)",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the largest packed value that fits",
+      "where": "price = '9999999999999.99'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"PRICE\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "9999999999999.99",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"PRICE\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "9999999999999.99",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"PRICE\" = $1::numeric(15,2))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "9999999999999.99",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "9999999999999.99",
+              "type": "P(15,2)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the INT4 minimum",
+      "where": "seatsmax = '2147483648-'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"SEATSMAX\" = -2147483648)",
+          "params": []
+        },
+        "duckdb": {
+          "sql": "(\"SEATSMAX\" = -2147483648)",
+          "params": []
+        },
+        "postgres": {
+          "sql": "(\"SEATSMAX\" = -2147483648)",
+          "params": []
+        },
+        "hana": {
+          "sql": "(\"SEATSMAX\" = -2147483648)",
+          "params": []
+        }
+      }
+    },
+    {
+      "name": "nesting at the limit",
+      "where": "( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( carrid = 'LH' ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) )",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"CARRID\" = $1::varchar(3))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"CARRID\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "NOT counts toward the nesting",
+      "where": "NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( carrid = 'LH' ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) )",
+      "lowered": {
+        "sqlite": {
+          "sql": "(NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (\"CARRID\" = ?)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (\"CARRID\" = ?)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (\"CARRID\" = $1::varchar(3))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (NOT (\"CARRID\" = ?)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "LH",
+              "type": "C(3)",
               "isNull": false
             }
           ]
@@ -2358,9 +2540,104 @@
     },
     {
       "name": "past the packed digits is a dump",
-      "where": "price = '1234567890123456'",
+      "where": "price = '99999999999999.99'",
       "outcome": {
         "error": "OsqlWhereDump"
+      }
+    },
+    {
+      "name": "one past the INT4 maximum is a dump",
+      "where": "seatsmax = '2147483648'",
+      "outcome": {
+        "error": "OsqlWhereDump"
+      }
+    },
+    {
+      "name": "nesting one past the limit",
+      "where": "( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( carrid = 'LH' ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) )",
+      "outcome": {
+        "error": "Refused",
+        "reason": "too deep"
+      }
+    },
+    {
+      "name": "NOT past the limit",
+      "where": "NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( carrid = 'LH' ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) )",
+      "outcome": {
+        "error": "Refused",
+        "reason": "too deep"
+      }
+    },
+    {
+      "name": "comparisons past the limit",
+      "where": "carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH' OR carrid = 'LH'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "too deep"
+      }
+    },
+    {
+      "name": "a blank on one side of an operator is not measured",
+      "where": "carrid ='LH'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "a keyword run into its literal is not measured",
+      "where": "carrid EQ'LH'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "IN run into its parenthesis is not measured",
+      "where": "carrid IN('LH')",
+      "outcome": {
+        "error": "Refused",
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "IS NOT INITIAL is not measured",
+      "where": "carrid IS NOT INITIAL",
+      "outcome": {
+        "error": "Refused",
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "an unquoted decimal is not measured",
+      "where": "seatsmax = 1.5",
+      "outcome": {
+        "error": "Refused",
+        "reason": "number format"
+      }
+    },
+    {
+      "name": "a point with no digit after is not measured",
+      "where": "seatsmax = '385.'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "number format"
+      }
+    },
+    {
+      "name": "a point with no digit before is not measured",
+      "where": "seatsmax = '.5'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "number format"
+      }
+    },
+    {
+      "name": "ESCAPE with a trailing blank is not measured",
+      "where": "carrid LIKE 'A# ' ESCAPE '#'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "like type"
       }
     },
     {

@@ -138,6 +138,27 @@ for (const {dialect, make} of ENGINES) describe(`dynamic WHERE as IR, selecting 
     expect(await selected("seatsmax > -5")).to.have.length(5);
     expect(await selected("price = '422.935'")).to.deep.equal(["0017"]);
   });
+  it("runs at its limits: the INT4 minimum, the largest packed value, 256 levels, 2000 comparisons", async () => {
+    expect(await selected("seatsmax = '2147483648-'")).to.deep.equal([]);
+    expect(await selected("price = '9999999999999.99'")).to.deep.equal([]);
+    expect(await selected("price = '1234567890123.5'")).to.deep.equal([]);
+    expect(await selected("( ".repeat(256) + "carrid = 'LH'" + " )".repeat(256))).to.deep.equal(["0400", "0401"]);
+    expect(await selected("NOT ".repeat(128) + "( ".repeat(128) + "carrid = 'LH'" + " )".repeat(128))).to.deep.equal(["0400", "0401"]);
+    expect(await selected(Array(2000).fill("carrid = 'LH'").join(" OR "))).to.deep.equal(["0400", "0401"]);
+  });
+  it("refuses one past each limit, and what was not measured", () => {
+    const reason = (where) => { try { osqlWherePredicate(where, COLUMNS); } catch (error) { return error.reason ?? error.constructor.name; } };
+    expect(reason("seatsmax = '2147483648'")).to.equal("OsqlWhereDump");
+    expect(reason("price = '99999999999999.99'")).to.equal("OsqlWhereDump");
+    expect(reason("( ".repeat(257) + "carrid = 'LH'" + " )".repeat(257))).to.equal("too deep");
+    expect(reason("NOT ".repeat(129) + "( ".repeat(128) + "carrid = 'LH'" + " )".repeat(128))).to.equal("too deep");
+    expect(reason(Array(2001).fill("carrid = 'LH'").join(" OR "))).to.equal("too deep");
+    expect(reason("carrid LIKE 'A%' ESCAPE '%'")).to.equal("OsqlWhereSemantics");
+    expect(reason("carrid LIKE 'A# ' ESCAPE '#'")).to.equal("like type");
+    expect(reason("carrid\u00a0= 'LH'")).to.equal("malformed");
+    expect(reason("carrid ='LH'")).to.equal("malformed");
+    expect(reason("seatsmax = 1.5")).to.equal("number format");
+  });
   it("a date cut to eight characters", async () => {
     expect(await selected("fldate = '20161115000000'")).to.deep.equal(["0017", "0400"]);
     expect(await selected("fldate = '2016-11-15'")).to.deep.equal([]);

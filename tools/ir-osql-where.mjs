@@ -103,7 +103,9 @@ function tokens(text) {
       // stands between blanks
       const before = i === 0 || BLANK.has(text[i - 1]);
       const after = i + op[1].length >= text.length || BLANK.has(text[i + op[1].length]);
-      if (!before || !after) throw new OsqlWhereSyntax(`the operator ${op[1]} at ${i} is not between blanks`);
+      if (!before && !after) throw new OsqlWhereSyntax(`the operator ${op[1]} at ${i} is not between blanks`);
+      // a blank on one side only was not measured
+      if (!before || !after) throw new OsqlWhereError(`the operator ${op[1]} at ${i} has a blank on one side only`, "malformed");
       out.push({kind: "op", value: op[1], at: i});
       i += op[1].length;
       continue;
@@ -114,9 +116,25 @@ function tokens(text) {
     // CX_SY_DYNAMIC_OSQL_SEMANTICS
     if (ch === "@") throw new OsqlWhereSemantics(`an escaped host variable at ${i} is not allowed in this statement`);
     const number = /^-?\d+(\.\d+)?/.exec(text.slice(i));
-    if (number !== null) { out.push({kind: "number", value: number[0], at: i}); i += number[0].length; continue; }
+    if (number !== null) {
+      // measured unquoted: 400 and -5; an unquoted decimal is not
+      if (number[1] !== undefined) throw new OsqlWhereError(`the unquoted decimal ${number[0]} at ${i} is not measured`, "number format");
+      out.push({kind: "number", value: number[0], at: i});
+      i += number[0].length;
+      continue;
+    }
     const name = /^[A-Za-z_\/][A-Za-z0-9_\/~]*/.exec(text.slice(i));
-    if (name !== null) { out.push({kind: "name", value: name[0], at: i}); i += name[0].length; continue; }
+    if (name !== null) {
+      // a word run straight into a literal or a parenthesis (EQ'LH',
+      // IN('AA')) was not measured
+      const next = text[i + name[0].length];
+      if (next === "'" || next === "`" || next === "(") {
+        throw new OsqlWhereError(`${name[0]} at ${i} runs into ${JSON.stringify(next)} without a blank`, "malformed");
+      }
+      out.push({kind: "name", value: name[0], at: i});
+      i += name[0].length;
+      continue;
+    }
     throw new OsqlWhereError(`${JSON.stringify(ch)} at ${i} is not part of a condition this parser reads`, "malformed");
   }
   return out;
@@ -136,8 +154,10 @@ export function abapNumber(raw, decimals, column) {
   // blanks, not Unicode whitespace: what ABAP skips in a number is a space
   const text = String(raw).replace(/^ +| +$/g, "");
   if (text === "") return decimals === 0 ? "0" : `0.${"0".repeat(decimals)}`;
-  const m = /^([+-]?)(\d*)(?:\.(\d*))?([+-]?)$/.exec(text);
-  if (m === null || (m[1] !== "" && m[4] !== "") || (m[2] === "" && (m[3] ?? "") === "")) {
+  // digits on both sides of a point, when there is one: '385.' and '.5' are
+  // not measured
+  const m = /^([+-]?)(\d+)(?:\.(\d+))?([+-]?)$/.exec(text);
+  if (m === null || (m[1] !== "" && m[4] !== "")) {
     if (/[A-Za-z]/.test(text)) {
       throw new OsqlWhereDump(`${JSON.stringify(raw)} against the numeric column ${column} is not a number: an uncatchable runtime error on A4H`);
     }
@@ -177,8 +197,10 @@ function valueFor(token, column) {
   if (type.abap === "P") {
     const dec = Number.isInteger(type.dec) ? type.dec : 0;
     const value = abapNumber(raw, dec, column.name);
-    // a packed number of `len` bytes holds 2 * len - 1 digits
-    const room = Number.isInteger(type.len) ? 2 * type.len - 1 : 31;
+    // `len` is the DDIC length in digits, as everywhere in the IR (T.dec(15, 2)
+    // is CURR 15,2, eight bytes on the database); a value with more digits
+    // is an overflow, uncatchable as it was for INT4
+    const room = Number.isInteger(type.len) ? type.len : 31;
     if (value.replace(/[-.]/g, "").replace(/^0+(?=\d)/, "").length > room) {
       throw new OsqlWhereDump(`${JSON.stringify(raw)} is past the ${room} digits of ${column.name}: an overflow, uncatchable on A4H as it was for INT4`);
     }
@@ -259,17 +281,23 @@ export function osqlWherePredicate(text, columns) {
     throw malformed(`a value was expected at ${one.at}, found ${JSON.stringify(one.value)}`);
   };
 
-  // a chain of AND / OR becomes a left-deep tree, which lower() walks once
-  // per term: MAX_TERMS is what keeps that recursion bounded, on every port
+  // a chain of AND / OR becomes a BALANCED tree, split in the middle: the
+  // meaning is the same (both are associative) and the depth is log2 of the
+  // chain, where a left-deep tree was as deep as the chain -- past SQLite's
+  // expression depth of 1000 at 1000 terms, and one recursion of lower()
+  // per term
+  const balanced = (op, parts) => (parts.length === 1 ? parts[0]
+    : bin(op, balanced(op, parts.slice(0, Math.ceil(parts.length / 2))),
+      balanced(op, parts.slice(Math.ceil(parts.length / 2))), T.bool));
   const orExpr = () => {
     const parts = [andExpr()];
     while (word() === "OR") { take(); parts.push(andExpr()); }
-    return parts.reduce((a, b) => bin("OR", a, b, T.bool));
+    return balanced("OR", parts);
   };
   const andExpr = () => {
     const parts = [notExpr()];
     while (word() === "AND") { take(); parts.push(notExpr()); }
-    return parts.reduce((a, b) => bin("AND", a, b, T.bool));
+    return balanced("AND", parts);
   };
   const notExpr = () => {
     if (word() === "NOT") {
@@ -341,7 +369,12 @@ export function osqlWherePredicate(text, columns) {
         if (e.value === "%" || e.value === "_") throw new OsqlWhereSemantics(`ESCAPE ${JSON.stringify(e.value)} is a wildcard`);
         escape = lit(e.value, T.str);
       }
-      // measured: LIKE 'AA ' finds what LIKE 'AA' finds on a CHAR column
+      // measured: LIKE 'AA ' finds what LIKE 'AA' finds on a CHAR column --
+      // without an ESCAPE; with one, a trailing blank could be the escaped
+      // character, and that was not measured
+      if (escape !== undefined && / $/.test(pattern.value)) {
+        throw new OsqlWhereError("a LIKE pattern with an ESCAPE and a trailing blank is not measured", "like type");
+      }
       return like(expr, lit(pattern.value.replace(/ +$/, ""), T.str), escape, negated);
     }
     if (keyword === "IN") {
@@ -356,8 +389,12 @@ export function osqlWherePredicate(text, columns) {
       take();
       const isNot = word() === "NOT";
       if (isNot) take();
-      // measured: IS INITIAL is CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H
-      if (word() === "INITIAL") throw new OsqlWhereSemantics("IS INITIAL is not allowed in a dynamic condition here");
+      // measured: IS INITIAL is CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H; IS NOT
+      // INITIAL was not measured
+      if (word() === "INITIAL") {
+        if (isNot) throw new OsqlWhereError("IS NOT INITIAL is not measured", "malformed");
+        throw new OsqlWhereSemantics("IS INITIAL is not allowed in a dynamic condition here");
+      }
       expect("name", "NULL");
       return isNot ? not(isNull(expr)) : isNull(expr);
     }

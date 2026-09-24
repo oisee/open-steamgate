@@ -14,12 +14,12 @@ import {lowerPredicate} from "./ir-ranges.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // the shape of SFLIGHT, which the A4H measurement ran on (docs/osql-where.md):
-// CHAR3, NUMC4, INT4, CURR 15,2 (8 bytes), DATS, and a STRING for the string case
+// CHAR3, NUMC4, INT4, CURR 15,2, DATS, and a STRING for the string case
 export const COLUMNS = {
   CARRID: {type: {abap: "C", len: 3}},
   CONNID: {type: {abap: "C", len: 4}, kind: "NUMC"},
   SEATSMAX: {type: {abap: "I"}},
-  PRICE: {type: {abap: "P", len: 8, dec: 2}},
+  PRICE: {type: {abap: "P", len: 15, dec: 2}},
   FLDATE: {type: {abap: "D"}},
   NOTE: {type: {abap: "STRING"}},
 };
@@ -65,6 +65,10 @@ export const CASES = [
   {name: "an unquoted negative number", where: "seatsmax > -5"},
   {name: "a packed literal rounds to the column's decimals", where: "price = '422.935'"},
   {name: "a packed literal is bound as a decimal string", where: "price = '1234567890123.5'"},
+  {name: "the largest packed value that fits", where: "price = '9999999999999.99'"},
+  {name: "the INT4 minimum", where: "seatsmax = '2147483648-'"},
+  {name: "nesting at the limit", where: "( ".repeat(256) + "carrid = 'LH'" + " )".repeat(256)},
+  {name: "NOT counts toward the nesting", where: "NOT ".repeat(128) + "( ".repeat(128) + "carrid = 'LH'" + " )".repeat(128)},
   {name: "a date cut to eight characters", where: "fldate = '20161115000000'"},
   {name: "a date with dashes is cut, not read", where: "fldate = '2016-11-15'"},
   {name: "a trailing blank in a LIKE pattern on CHAR", where: "carrid LIKE 'AA '"},
@@ -85,7 +89,19 @@ export const CASES = [
   {name: "text against INT4 is a dump", where: "seatsmax = 'abc'"},
   {name: "an exponent against INT4 is a dump", where: "seatsmax = '1e3'"},
   {name: "past INT4 is a dump", where: "seatsmax = '99999999999'"},
-  {name: "past the packed digits is a dump", where: "price = '1234567890123456'"},
+  {name: "past the packed digits is a dump", where: "price = '99999999999999.99'"},
+  {name: "one past the INT4 maximum is a dump", where: "seatsmax = '2147483648'"},
+  {name: "nesting one past the limit", where: "( ".repeat(257) + "carrid = 'LH'" + " )".repeat(257)},
+  {name: "NOT past the limit", where: "NOT ".repeat(129) + "( ".repeat(128) + "carrid = 'LH'" + " )".repeat(128)},
+  {name: "comparisons past the limit", where: Array(2001).fill("carrid = 'LH'").join(" OR ")},
+  {name: "a blank on one side of an operator is not measured", where: "carrid ='LH'"},
+  {name: "a keyword run into its literal is not measured", where: "carrid EQ'LH'"},
+  {name: "IN run into its parenthesis is not measured", where: "carrid IN('LH')"},
+  {name: "IS NOT INITIAL is not measured", where: "carrid IS NOT INITIAL"},
+  {name: "an unquoted decimal is not measured", where: "seatsmax = 1.5"},
+  {name: "a point with no digit after is not measured", where: "seatsmax = '385.'"},
+  {name: "a point with no digit before is not measured", where: "seatsmax = '.5'"},
+  {name: "ESCAPE with a trailing blank is not measured", where: "carrid LIKE 'A# ' ESCAPE '#'"},
   {name: "an unterminated literal is malformed, not measured", where: "carrid = 'LH"},
   {name: "a sign on both sides is a format not measured", where: "seatsmax = '-5-'"},
   {name: "a no-break space is not a blank", where: "carrid\u00a0= 'LH'"},
@@ -114,7 +130,17 @@ export function pairs() {
 
 export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "osql-where.json");
 const render = () => JSON.stringify({
-  note: "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error. {every: true} is no condition. BETWEEN renders as (>= AND <=), as the ranges do. An INTEGER is inlined after its range check; a packed value is bound as a decimal string. Blanks are space, tab, CR and LF only. Limits: nesting depth " + MAX_DEPTH + ", comparisons " + MAX_TERMS + ". Refusal reasons are the closed list in REASONS.",
+  note: "osqlWherePredicate(where, columns) lowered per dialect by tools/ir-osql-where-pairs.mjs over the columns below; a port must give the same {sql, params} bytes, or the same error class and reason (messages are not part of the contract). {every: true} is no condition.",
+  conventions: [
+    "BETWEEN renders as (>= AND <=), as the ranges do. A chain of AND or OR is a balanced tree: the first ceil(n/2) terms on the left, the rest on the right, recursively.",
+    "P's len is the DDIC length in digits (T.dec(15, 2) is CURR 15,2); a value with more digits than len is a dump. A packed value is bound as a decimal string with exactly dec decimals, no -0; an INTEGER is inlined after its INT4 range check.",
+    "abapNumber: only spaces around are ignored (a tab is a number format), empty is 0, a sign leads or trails, digits on both sides of a point, rounded half away from zero on the first digit past dec; a letter is a dump, any other shape is refused as 'number format'.",
+    "Errors: the tokenizer runs over the whole string before the parser, so a tokenizer error wins; after that the first error from the left.",
+    "Depth counts each '(' and each NOT; more than " + MAX_DEPTH + " is 'too deep'. MAX_TERMS counts comparisons (a column with its operator), not IN values; more than " + MAX_TERMS + " is 'too deep'.",
+    "Blanks are space, tab, CR and LF. An operator with no blank on either side is _SYNTAX, with a blank on one side only 'malformed'; a word run into a quote or a '(' is 'malformed'.",
+    "D is C(8), the literal cut. A LIKE pattern is a STRING, bound; ESCAPE is a bound one-character STRING; a trailing blank in the pattern is dropped only without an ESCAPE.",
+    "A surrogate anywhere in a literal refuses it before any cut; a CHAR literal is cut in UTF-16 code units. NUMC: spaces trimmed, then zero-padded; not digits (or empty) is 'numc'.",
+  ],
   reasons: REASONS,
   columns: COLUMNS,
   pairs: pairs(),

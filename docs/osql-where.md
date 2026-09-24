@@ -102,6 +102,13 @@ else the parser cannot read is refused with a reason from the closed list
 - blanks are space, tab, CR and LF; a no-break space is not one;
 - a character outside the Basic Multilingual Plane is refused, as it is in
   a SQLScript variable; a CHAR literal is cut in UTF-16 code units;
+- a packed value stays a decimal string up to the pairs and the bound
+  parameter's text; what SQLite and DuckDB's clients do with it after that
+  (`bindValue` may hand them a JavaScript number) is the seam's, not this
+  parser's;
+- a blank on one side of an operator only, `IS NOT INITIAL`, an unquoted
+  decimal and a number with no digit on one side of its point were not
+  measured and are refused as such;
 - nesting deeper than 256, or more than 2000 comparisons, is refused
   ("too deep"): past that a recursive parser or lowering runs out of stack,
   and a port with a growing stack would answer where this one fails.
@@ -117,7 +124,7 @@ column, and TIME or RAW columns.
 - **`1 = 1` is refused by the kernel.** The generated `zcl_stg_tab_*` and
   `zcl_stg_cds_*` sources (`tools/cds2ddic.mjs`) put `'1 = 1'` in place of an
   empty condition, which raises `CX_SY_DYNAMIC_OSQL_SEMANTICS` on a system
-  (fixed in #48); open-abap-odata's search-help reader does the same
+  (fix proposed in #48); open-abap-odata's search-help reader does the same
   (`zcl_oao_shlp_ddic`, an upstream fix). An empty string is already "no
   condition" there.
 - **The request context gets precedence wrong.** `get_osql_where_clause`
@@ -125,7 +132,7 @@ column, and TIME or RAW columns.
   kernel reads as `a OR ( b AND NOT c )`: an exclusion applies to the last
   inclusion only, and an inclusion after an exclusion is OR-ed to it
   (`$filter=Project ne 'X' and Project eq 'X'` returned the row). Its
-  `WHEN OTHERS` also turns NB and NP into `=`. Fixed in #49. The search-help reader in open-abap-odata writes
+  `WHEN OTHERS` also turns NB and NP into `=`. Fix proposed in #49. The search-help reader in open-abap-odata writes
   `( a OR b ) AND NOT c AND ...`, which is the meaning of a select-options
   table.
 - The CP conversion in both (`*` to `%`, `+` to `_`) does not escape a
