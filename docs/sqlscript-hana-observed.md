@@ -633,3 +633,21 @@ Two limits, written down so they are not mistaken for measurements:
   rule (a mapping that would change the length keeps the character): the
   dotted and dotless i (`İ`, `ı`), ligatures (`ﬀ`), `ŉ`, `ǰ`, `ΐ`, and the
   Greek final sigma (`ΣΑΣ` lowers to `σασ`, no `ς`).
+
+## A nested block and its variables (measured on A4H, 2026-09-24)
+
+A throwaway AMDP class, deleted afterwards. A plain `BEGIN ... END` inside a
+procedure body does not hide the procedure's variables from it, nor its own
+from the procedure:
+
+| body | what the procedure returned |
+| --- | --- |
+| `BEGIN lt_x = SELECT 2 ...; END; et = SELECT n FROM :lt_x;` | activates; `n = 2`: a table variable first assigned inside is visible after END |
+| `lt_x = SELECT 1 ...; BEGIN lt_x = SELECT 2 ...; END; et = SELECT n FROM :lt_x;` | `n = 2`: the inner assignment is the outer variable's |
+| `DECLARE v INTEGER = 1; BEGIN v = 2; END; ev = :v;` | `2` |
+
+So a nested block that declares nothing is the same as its statements
+written in place, which is how the portable compiler carries it. One that
+declares (a scope of its own, shadowing, an EXIT HANDLER) was not
+measured and is refused; `BEGIN AUTONOMOUS TRANSACTION`, a handler and a
+label do not parse here, so they are refused before any rule applies.

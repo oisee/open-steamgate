@@ -177,17 +177,17 @@ describe("independent AMDP clean-room corpus", () => {
     const method = extracted.methods.find((one) => one.name === "control_rows");
     expect(() => compileProcedure({...method, body: method.body.replace(
       "BEGIN SEQUENTIAL EXECUTION", "BEGIN PARALLEL EXECUTION")}, extracted.types))
-      .to.throw(UnsupportedSqlScript, /BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output/);
+      .to.throw(UnsupportedSqlScript, /nested BEGIN PARALLEL EXECUTION block is not carried yet/);
     expect(() => compileProcedure({...method, body: method.body.replace(
       "et_mix = SELECT", "lc_values = SELECT")}, extracted.types))
       .to.throw(UnsupportedSqlScript, /declared but unused cursor/);
+    // a block that declares nothing is inlined, whatever it assigns
     expect(() => compileProcedure({...method, body: method.body.replace(
-      "LIMIT :lv_total;", "LIMIT :lv_total;\n      lv_total := 1;")}, extracted.types))
-      .to.throw(UnsupportedSqlScript, /exactly one assignment to the procedure output/);
+      "LIMIT :lv_total;", "LIMIT :lv_total;\n      lv_total := 1;")}, extracted.types)).not.to.throw();
     expect(() => compileProcedure({...method, body: method.body.replace(
       /et_mix = SELECT[\s\S]*?LIMIT :lv_total;/,
       "DECLARE lv_inner INTEGER := 1;")}, extracted.types))
-      .to.throw(UnsupportedSqlScript, /exactly one assignment to the procedure output/);
+      .to.throw(UnsupportedSqlScript, /opens a scope, which is not carried yet/);
     expect(() => compileProcedure({...method, body: method.body.replace(
       "DECLARE CURSOR lc_values FOR SELECT key_id, amount FROM :it_left;",
       "DECLARE CURSOR lc_values FOR SELECT key_id, amount FROM :it_left;\n    DECLARE lc_values INTEGER;")}, extracted.types))

@@ -521,15 +521,19 @@ export function compileProcedure(method, types, options = {}) {
       } else if (node.node === "Block") {
         const mode = (node.children ?? []).filter((one) => one.node === "word")
           .map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one));
+        // A nested BEGIN ... END (plain, or SEQUENTIAL EXECUTION, which only
+        // forbids parallelism) that declares nothing is no scope at all: its
+        // statements are the enclosing body's. One that declares opens a
+        // scope -- shadowing, a variable gone at END, an EXIT HANDLER -- and
+        // that is not measured yet, so it is refused by name.
         const statements = children(node, "Statement");
-        const statement = statements.length === 1
-          ? (statements[0].children ?? []).find((one) => one.node !== "word")
-          : undefined;
-        const assignsOutput = statement?.node === "Assignment"
-          && outputNames.has(nameOf(child(statement, "Name")));
-        if (JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"]) || !assignsOutput) {
-          throw new UnsupportedSqlScript(
-            "initial block support requires BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output", node);
+        if (mode.length !== 0 && JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"])) {
+          throw new UnsupportedSqlScript(`a nested BEGIN ${mode.join(" ")} block is not carried yet`, node);
+        }
+        // every DECLARE the grammar reads (a scalar, a table, a cursor)
+        // arrives as a Declare node; a handler or a label does not parse
+        if (statements.some((one) => (one.children ?? []).some((part) => part.node === "Declare"))) {
+          throw new UnsupportedSqlScript("a nested block with its own DECLARE opens a scope, which is not carried yet", node);
         }
         result.push(...compileStatements({children: statements}));
       } else if (node.node === "If") {
@@ -644,7 +648,8 @@ export function compileProcedure(method, types, options = {}) {
   try {
     // A body wrapped whole in `BEGIN ... END` (plain, or SEQUENTIAL
     // EXECUTION) is the procedure's own scope, as table functions write it:
-    // its statements are the body. A nested block keeps the narrow rule.
+    // its statements are the body. A nested block is inlined by the rule in
+    // compileStatements (measured on A4H: it shares the procedure's variables).
     const topStatements = (tree.children ?? []).filter((one) => one.node === "Statement");
     const onlyNode = topStatements.length === 1 ? (topStatements[0].children ?? []).find((one) => one.node !== "word") : undefined;
     const wrapperMode = onlyNode?.node === "Block"
