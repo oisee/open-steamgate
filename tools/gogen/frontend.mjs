@@ -1230,7 +1230,8 @@ function structure(node, ctx) {
     const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
     if (table.type.k === "data") {
       // LOOP AT <generic table> ASSIGNING <generic>: row by row, bound
-      const nm = /ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1];
+      // (an inline FIELD-SYMBOL( ) too: CL_GUI_HTML_VIEWER=>LOAD_DATA, ultra/events)
+      const nm = /ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1];
       if (!nm || ctx.fieldSymbols.get(upper(nm))?.k !== "data" || /\b(WHERE|FROM|TO|INTO)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       return {s: "loop_data", table, fs: upper(nm), body: bodyOf(node, ctx)};
     }
