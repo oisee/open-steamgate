@@ -59,6 +59,18 @@ export const P_CASES = [
   {name: "MODIFY with the packed fields left out writes their initial values", stmt: () => upsert("P", P_COLS, prow({mandt: "001", id: 6}), ["MANDT", "ID"])},
   {name: "UPDATE a packed amount by key", stmt: () => update("P", [{col: "AMOUNT", expr: bindValue("99.99", P_SCHEMA.AMOUNT)}], bin("AND", peq("MANDT", "001"), peq("ID", 1), T.bool))},
   {name: "MODIFY a TIMESTAMP on an existing row", stmt: () => upsert("P", P_COLS, prow({mandt: "001", id: 2, amount: "0.5", ts: "20261231235959"}), ["MANDT", "ID"])},
+  // arithmetic with a packed parameter: the placeholder says its type, or
+  // DuckDB reads the bound text as VARCHAR (a Binder Error, or '12.50' * 2
+  // cast to INTEGER and answered as 26) and SQLite compares it as text
+  {name: "UPDATE an amount by arithmetic on a packed parameter", stmt: () => update("P",
+    [{col: "AMOUNT", expr: bin("*", col("AMOUNT", P_SCHEMA.AMOUNT), bindValue("2", P_SCHEMA.AMOUNT), P_SCHEMA.AMOUNT)}],
+    bin("AND", peq("MANDT", "001"), peq("ID", 1), T.bool))},
+  {name: "UPDATE where arithmetic on a packed column meets a packed parameter", stmt: () => update("P",
+    [{col: "TS", expr: bindValue("1", P_SCHEMA.TS)}],
+    bin("=", bin("+", col("AMOUNT", P_SCHEMA.AMOUNT), bindValue("0", P_SCHEMA.AMOUNT), P_SCHEMA.AMOUNT), bindValue("10", P_SCHEMA.AMOUNT), T.bool))},
+  {name: "INSERT the product of a packed parameter and an integer", stmt: () => insertRows("P", P_COLS,
+    [[bindValue("001", P_SCHEMA.MANDT), bindValue(7, P_SCHEMA.ID),
+      bin("*", bindValue("12.50", P_SCHEMA.AMOUNT), lit(2, T.int), P_SCHEMA.AMOUNT), bindValue("0", P_SCHEMA.TS)]])},
 ];
 // a wide packed column, P 31,14: past a double's 15 digits, so a value that
 // reaches the engine as a JavaScript number arrives rounded. Exact on the

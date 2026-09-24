@@ -128,7 +128,15 @@ export const DIALECTS = {
   },
   duckdb: {
     quote: (id) => `"${id.replace(/"/g, '""')}"`,
-    placeholder: () => "?",
+    // A packed value is bound as its decimal string (abap-types bindValue),
+    // and a bare `?` bound to a string is VARCHAR here: `A * ?` is a Binder
+    // Error, and `? * 2` casts '12.50' to INTEGER and answers 26 (measured
+    // by the #55 critic, 2026-09-24). The placeholder says its type, as the
+    // HANA and PostgreSQL ones do.
+    placeholder: (_n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      return /^P\(\d+,\d+\)$/.test(code) ? `CAST(? AS DECIMAL${code.slice(1)})` : "?";
+    },
     // `/` is floating point here, which is what HANA does too
     divide: (a, b) => `(${a} / ${b})`,
     // HANA raises on division by zero; this engine answers Infinity or NULL
@@ -176,7 +184,16 @@ export const DIALECTS = {
     // INTEGER read back as text was then '1.0' where HANA gives '1'
     // (measured 2026-09-24). An integer parameter says what it is, as the
     // HANA dialect's already does
-    placeholder: (_n, type) => (/^(?:[IBS](?:\(|$)|INT8$)/.test(String(type ?? "").toUpperCase()) ? "CAST(? AS INTEGER)" : "?"),
+    // A packed one is bound as its decimal string, and a text parameter has
+    // no affinity outside a bare-column comparison: `"A" + 0 = ?` compared
+    // a number with text and matched nothing (the #55 critic). NUMERIC is
+    // the nearest this engine has to a decimal.
+    placeholder: (_n, type) => {
+      const code = String(type ?? "").toUpperCase();
+      if (/^(?:[IBS](?:\(|$)|INT8$)/.test(code)) return "CAST(? AS INTEGER)";
+      if (/^P(?:\(|$)/.test(code)) return "CAST(? AS NUMERIC)";
+      return "?";
+    },
     // `/` over two integers truncates here and does NOT on HANA, so a
     // decimal division has to be forced. This is the typed rewrite the
     // conformance table found, and it exists only for this engine.

@@ -2066,7 +2066,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 3, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 3, CAST(? AS NUMERIC), CAST(? AS NUMERIC))",
             "params": [
               {
                 "name": "p0",
@@ -2089,7 +2089,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 3, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 3, CAST(? AS DECIMAL(15,2)), CAST(? AS DECIMAL(15,0)))",
             "params": [
               {
                 "name": "p0",
@@ -2211,7 +2211,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 4, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 4, CAST(? AS NUMERIC), CAST(? AS NUMERIC))",
             "params": [
               {
                 "name": "p0",
@@ -2234,7 +2234,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 4, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 4, CAST(? AS DECIMAL(15,2)), CAST(? AS DECIMAL(15,0)))",
             "params": [
               {
                 "name": "p0",
@@ -2356,7 +2356,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 5, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 5, CAST(? AS NUMERIC), CAST(? AS NUMERIC))",
             "params": [
               {
                 "name": "p0",
@@ -2379,7 +2379,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 5, ?, ?)",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 5, CAST(? AS DECIMAL(15,2)), CAST(? AS DECIMAL(15,0)))",
             "params": [
               {
                 "name": "p0",
@@ -2504,7 +2504,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 6, ?, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 6, CAST(? AS NUMERIC), CAST(? AS NUMERIC)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
             "params": [
               {
                 "name": "p0",
@@ -2527,7 +2527,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 6, ?, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 6, CAST(? AS DECIMAL(15,2)), CAST(? AS DECIMAL(15,0))) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
             "params": [
               {
                 "name": "p0",
@@ -2670,7 +2670,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "UPDATE \"P\" SET \"AMOUNT\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = CAST(? AS NUMERIC) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
             "params": [
               {
                 "name": "p0",
@@ -2687,7 +2687,7 @@
             ]
           },
           "duckdb": {
-            "sql": "UPDATE \"P\" SET \"AMOUNT\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = CAST(? AS DECIMAL(15,2)) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
             "params": [
               {
                 "name": "p0",
@@ -2794,7 +2794,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 2, ?, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 2, CAST(? AS NUMERIC), CAST(? AS NUMERIC)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
             "params": [
               {
                 "name": "p0",
@@ -2817,7 +2817,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 2, ?, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 2, CAST(? AS DECIMAL(15,2)), CAST(? AS DECIMAL(15,0))) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"AMOUNT\" = excluded.\"AMOUNT\", \"TS\" = excluded.\"TS\"",
             "params": [
               {
                 "name": "p0",
@@ -2880,6 +2880,485 @@
               {
                 "name": "p2",
                 "value": "20261231235959",
+                "type": "P(15,0)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "UPDATE an amount by arithmetic on a packed parameter",
+        "statement": {
+          "write": "update",
+          "table": "P",
+          "set": [
+            {
+              "col": "AMOUNT",
+              "expr": {
+                "node": "bin",
+                "op": "*",
+                "left": {
+                  "node": "col",
+                  "name": "AMOUNT",
+                  "type": {
+                    "abap": "P",
+                    "len": 15,
+                    "dec": 2
+                  }
+                },
+                "right": {
+                  "node": "lit",
+                  "value": "2.00",
+                  "type": {
+                    "abap": "P",
+                    "len": 15,
+                    "dec": 2
+                  }
+                },
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 2
+                }
+              }
+            }
+          ],
+          "pred": {
+            "node": "bin",
+            "op": "AND",
+            "left": {
+              "node": "bin",
+              "op": "=",
+              "left": {
+                "node": "col",
+                "name": "MANDT",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              "type": {
+                "abap": "BOOL"
+              }
+            },
+            "right": {
+              "node": "bin",
+              "op": "=",
+              "left": {
+                "node": "col",
+                "name": "ID",
+                "type": {
+                  "abap": "I"
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": 1,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              "type": {
+                "abap": "BOOL"
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          }
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = (\"AMOUNT\" * CAST(? AS NUMERIC)) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "2.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = (\"AMOUNT\" * CAST(? AS DECIMAL(15,2))) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "2.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = (\"AMOUNT\" * $1::numeric(15,2)) WHERE ((\"MANDT\" = $2::varchar(3)) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "2.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "UPDATE \"P\" SET \"AMOUNT\" = (\"AMOUNT\" * CAST(? AS DECIMAL(15,2))) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "2.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "UPDATE where arithmetic on a packed column meets a packed parameter",
+        "statement": {
+          "write": "update",
+          "table": "P",
+          "set": [
+            {
+              "col": "TS",
+              "expr": {
+                "node": "lit",
+                "value": "1",
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 0
+                }
+              }
+            }
+          ],
+          "pred": {
+            "node": "bin",
+            "op": "=",
+            "left": {
+              "node": "bin",
+              "op": "+",
+              "left": {
+                "node": "col",
+                "name": "AMOUNT",
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 2
+                }
+              },
+              "right": {
+                "node": "lit",
+                "value": "0.00",
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 2
+                }
+              },
+              "type": {
+                "abap": "P",
+                "len": 15,
+                "dec": 2
+              }
+            },
+            "right": {
+              "node": "lit",
+              "value": "10.00",
+              "type": {
+                "abap": "P",
+                "len": 15,
+                "dec": 2
+              }
+            },
+            "type": {
+              "abap": "BOOL"
+            }
+          }
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "UPDATE \"P\" SET \"TS\" = CAST(? AS NUMERIC) WHERE (ROUND((\"AMOUNT\" + CAST(? AS NUMERIC)), 2) = CAST(? AS NUMERIC))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "1",
+                "type": "P(15,0)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "0.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "10.00",
+                "type": "P(15,2)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "UPDATE \"P\" SET \"TS\" = CAST(? AS DECIMAL(15,0)) WHERE ((\"AMOUNT\" + CAST(? AS DECIMAL(15,2))) = CAST(? AS DECIMAL(15,2)))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "1",
+                "type": "P(15,0)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "0.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "10.00",
+                "type": "P(15,2)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "UPDATE \"P\" SET \"TS\" = $1::numeric(15,0) WHERE ((\"AMOUNT\" + $2::numeric(15,2)) = $3::numeric(15,2))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "1",
+                "type": "P(15,0)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "0.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "10.00",
+                "type": "P(15,2)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "UPDATE \"P\" SET \"TS\" = CAST(? AS DECIMAL(15,0)) WHERE ((\"AMOUNT\" + CAST(? AS DECIMAL(15,2))) = CAST(? AS DECIMAL(15,2)))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "1",
+                "type": "P(15,0)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "0.00",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "10.00",
+                "type": "P(15,2)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "INSERT the product of a packed parameter and an integer",
+        "statement": {
+          "write": "insert",
+          "table": "P",
+          "columns": [
+            "MANDT",
+            "ID",
+            "AMOUNT",
+            "TS"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 7,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "bin",
+                "op": "*",
+                "left": {
+                  "node": "lit",
+                  "value": "12.50",
+                  "type": {
+                    "abap": "P",
+                    "len": 15,
+                    "dec": 2
+                  }
+                },
+                "right": {
+                  "node": "lit",
+                  "value": 2,
+                  "type": {
+                    "abap": "I"
+                  }
+                },
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 2
+                }
+              },
+              {
+                "node": "lit",
+                "value": "0",
+                "type": {
+                  "abap": "P",
+                  "len": 15,
+                  "dec": 0
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 7, (CAST(? AS NUMERIC) * 2), CAST(? AS NUMERIC))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12.50",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "0",
+                "type": "P(15,0)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 7, (CAST(? AS DECIMAL(15,2)) * 2), CAST(? AS DECIMAL(15,0)))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12.50",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "0",
+                "type": "P(15,0)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES ($1::varchar(3), 7, ($2::numeric(15,2) * 2), $3::numeric(15,0))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12.50",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "0",
+                "type": "P(15,0)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"P\" (\"MANDT\", \"ID\", \"AMOUNT\", \"TS\") VALUES (?, 7, (CAST(? AS DECIMAL(15,2)) * 2), CAST(? AS DECIMAL(15,0)))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12.50",
+                "type": "P(15,2)",
+                "isNull": false
+              },
+              {
+                "name": "p2",
+                "value": "0",
                 "type": "P(15,0)",
                 "isNull": false
               }
@@ -2960,7 +3439,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, ?)",
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, CAST(? AS NUMERIC))",
             "params": [
               {
                 "name": "p0",
@@ -2977,7 +3456,7 @@
             ]
           },
           "duckdb": {
-            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, ?)",
+            "sql": "INSERT INTO \"W\" (\"MANDT\", \"ID\", \"BIG\") VALUES (?, 2, CAST(? AS DECIMAL(31,14)))",
             "params": [
               {
                 "name": "p0",
@@ -3102,7 +3581,7 @@
         },
         "lowered": {
           "sqlite": {
-            "sql": "UPDATE \"W\" SET \"BIG\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "sql": "UPDATE \"W\" SET \"BIG\" = CAST(? AS NUMERIC) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
             "params": [
               {
                 "name": "p0",
@@ -3119,7 +3598,7 @@
             ]
           },
           "duckdb": {
-            "sql": "UPDATE \"W\" SET \"BIG\" = ? WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
+            "sql": "UPDATE \"W\" SET \"BIG\" = CAST(? AS DECIMAL(31,14)) WHERE ((\"MANDT\" = ?) AND (\"ID\" = 1))",
             "params": [
               {
                 "name": "p0",

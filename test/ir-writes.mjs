@@ -8,7 +8,7 @@ import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
 import {insertRows, insertFrom, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
 import {CASES, SEED, PAIRS_FILE, render, P_CASES, P_SEED, W_CASES, W_SEED, W_EXACT} from "../tools/ir-writes-pairs.mjs";
-import {T, lit, col, bin} from "../tools/sqlscript-ir.mjs";
+import {T, lit, col, bin, project, scan} from "../tools/sqlscript-ir.mjs";
 
 const ENGINES = [
   {dialect: "duckdb", make: () => new DuckDBDatabaseClient({path: ":memory:"})},
@@ -76,6 +76,9 @@ const P_AFTER = {
   "MODIFY with the packed fields left out writes their initial values": [...P_BASE, PS("001", 6, "0.00", "0")],
   "UPDATE a packed amount by key": [PS("001", 1, "99.99", "20260924120000"), PS("001", 2, "0.50", "20260101000000")],
   "MODIFY a TIMESTAMP on an existing row": [PS("001", 1, "10.00", "20260924120000"), PS("001", 2, "0.50", "20261231235959")],
+  "UPDATE an amount by arithmetic on a packed parameter": [PS("001", 1, "20.00", "20260924120000"), PS("001", 2, "0.50", "20260101000000")],
+  "UPDATE where arithmetic on a packed column meets a packed parameter": [PS("001", 1, "10.00", "1"), PS("001", 2, "0.50", "20260101000000")],
+  "INSERT the product of a packed parameter and an integer": [...P_BASE, PS("001", 7, "25.00", "0")],
 };
 
 for (const {dialect, make} of ENGINES) describe(`packed writes as IR, on ${dialect}`, function () {
@@ -184,6 +187,8 @@ describe("writes as IR: the pairs and the refusals", () => {
     expect(() => upsert("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit("1.500", S.AMT)]], ["MANDT"])).to.throw(WriteError, /packed literal/);
     expect(() => update("X", [{col: "AMT", expr: bin("+", col("AMT", S.AMT), lit(1, S.AMT), S.AMT)}], eqM)).to.throw(WriteError, /packed literal 1/);
     expect(insertRows("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit("1.50", S.AMT)]]).rows[0][1].value).to.equal("1.50");
+    expect(() => insertFrom("X", ["MANDT", "AMT"], project(scan("Y"), [{as: "MANDT", expr: col("MANDT", S.MANDT)}, {as: "AMT", expr: lit(0.1 + 0.2, S.AMT)}])))
+      .to.throw(WriteError, /packed literal 0.30000000000000004/);
   });
 
   it("every packed case has an expected table", () => {

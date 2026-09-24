@@ -53,9 +53,12 @@ export function initialValue(type) {
  * The text grammar is abapNumber's (tools/ir-osql-where.mjs): blanks around
  * it are skipped (spaces only -- a tab is not a blank), a sign may lead or
  * trail ('5-' is -5, as ABAP writes it), digits on both sides of a point.
- * The one difference is on purpose: abapNumber converts a WHERE literal and
+ * Two differences, both on purpose. abapNumber converts a WHERE literal and
  * rounds half away from zero, as A4H does; a work area already holds its
- * value, so here extra decimals are refused, never rounded.
+ * value, so here extra decimals are refused, never rounded. And abapNumber
+ * reads an empty or blank literal as 0; here it is refused -- a field left
+ * out is the initial value (undefined), but '' given for a number is a
+ * caller's mistake, not a value a P field holds.
  *
  * A JavaScript number is read by its shortest text and is refused past
  * 2^53, where that text is no longer the number the caller meant: a caller
@@ -127,9 +130,11 @@ export function bindRows(columns, schema, rows) {
 
 /**
  * A packed literal a statement writes must be the decimal string of its
- * type, whoever built it: a lit(1.5, P) made by hand, not through
- * bindValue, would reach the client as a JavaScript number and bind as a
- * double. Checked where values are written (rows, SET), not in conditions.
+ * type, whoever built it: a lit(0.1 + 0.2, P) made by hand, not through
+ * bindValue, would be inlined into the text as 0.30000000000000004 (lower
+ * renders a number literal as String(n)), and 1e21 as '1e+21'. Checked where
+ * values are written (rows, SET, the columns an INSERT FROM selects), not in
+ * conditions.
  */
 function checkWritten(node) {
   if (node === null || typeof node !== "object") return;
@@ -160,6 +165,7 @@ export const insertRows = (table, columns, rows, {onDuplicate = "error"} = {}) =
 /** INSERT dbtab FROM ( SELECT ... ): a relation whose columns are the table's, in order */
 export const insertFrom = (table, columns, rel, {onDuplicate = "error"} = {}) => {
   checkDuplicates(onDuplicate);
+  if (rel?.rel === "project") checkWritten((rel.items ?? []).map((item) => item.expr));
   return {write: "insert", table: upper(table), columns: names(columns), from: rel, onDuplicate};
 };
 /** UPDATE dbtab SET ... WHERE ...; `pred` undefined updates every row */
