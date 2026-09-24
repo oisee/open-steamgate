@@ -67,8 +67,9 @@ table. It is deliberately not a per-trip drilldown. Tip amounts in TLC data
 are most complete for card payments; compare payment methods with that caveat.
 
 The pickup zone is the table field `PICKUP_ZONE`, not `ZONE`: a system
-refuses `ZONE` as a reserved word (ANORMALIES zone-reserved-word). The cube
-keeps the element `Zone`, so the OData property is still `ZONE`. A DuckDB
+refuses `ZONE` as a reserved word (ANORMALIES zone-reserved-word), and it
+refuses the CDS element `Zone` for the same reason, so the cube's element is
+`PickupZone` and the OData property is `PICKUPZONE`. A DuckDB
 file booted or imported before the rename is migrated when a server opens it
 and when the import runs (`tools/osd-db-migrate.mjs`): the column is renamed
 in place, the rows stay, and the file's views are made again from the

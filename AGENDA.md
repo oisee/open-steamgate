@@ -10,10 +10,13 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 ## ZOSD_TAXIFACT-ZONE is PICKUP_ZONE (2026-09-24)
 
 Decided: the taxi fact table's field `ZONE`, a reserved word on a system
-(ANORMALIES zone-reserved-word), is `PICKUP_ZONE`; the cube keeps the element
-`Zone`, so the OData property `ZONE`, `$metadata` and the Analytical List
-Page are unchanged. A DuckDB file made before (`STG_DB_PATH`, the real
-import of `tools/import-nyc-taxi.mjs`) is **migrated, not re-imported**:
+(ANORMALIES zone-reserved-word), is `PICKUP_ZONE`. A4H refuses the CDS
+element `Zone` as well, so the cube's element is `PickupZone` and the OData
+property is `PICKUPZONE` (osg-i7 and the foreman: the demo's OData has no
+outside consumers, and a cube that activates on a system matters more than
+the old property name); the page's annotations, its e2e test and the bench
+follow. A DuckDB file made before (`STG_DB_PATH`, the real import of
+`tools/import-nyc-taxi.mjs`) is **migrated, not re-imported**:
 `tools/osd-db-migrate.mjs` renames the column when the old one is there, from
 the DuckDB branch of `test/setup.mjs` and from the import, and puts back the
 running generation's views, which DuckDB would otherwise keep naming `zone`.
@@ -21,11 +24,6 @@ The stamped backends (SQLite file, SQLite with `STG_DB_PATH`, PostgreSQL)
 already rebuild or set a file aside on any DDIC change and hold only seed rows.
 
 Open:
-- **The element `Zone` is refused on A4H too** ("ZONE is a reserved word;
-  choose another word", DDIC-based view and view entity alike), so the cube
-  still does not activate on a system. `PickupZone` does; it renames the
-  OData property to `PICKUPZONE` here and changes the page's annotations and
-  the bench queries. Not decided.
 - Other names of the tree are in `TRESE` (A4H's list of reserved names, 453
   entries), scanned against every TABL and generated view field. Refused on
   A4H when put in a table (measured the same day): `HANDLER` (ZOSD_ICF_APC,

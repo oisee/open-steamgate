@@ -20,7 +20,8 @@
 
 export const COLUMN_RENAMES = [
   // ZONE is a reserved word in the dictionary of a system: the table does not
-  // activate there (ANORMALIES zone-reserved-word).
+  // activate there (ANORMALIES zone-reserved-word). The CDS element is
+  // PickupZone for the same reason, which the file's views get at boot.
   {table: "zosd_taxifact", from: "zone", to: "pickup_zone"},
 ];
 

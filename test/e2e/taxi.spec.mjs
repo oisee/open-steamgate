@@ -18,7 +18,7 @@ test("NYC TLC analytical page renders chart and grouped table from OData", async
   await expect(page.getByText("Queens").first()).toBeVisible();
   await expect(page.locator(".sapVizFrame svg, .sapSuiteUiCommonsChartContainer svg").first()).toBeVisible();
   expect(calls.some((url) => url.includes("$select=") && url.includes("BOROUGH") && url.includes("TRIPS"))).toBe(true);
-  expect(calls.some((url) => url.includes("$select=BOROUGH,ZONE,PAYMENT,TRIPS"))).toBe(true);
+  expect(calls.some((url) => url.includes("$select=BOROUGH,PICKUPZONE,PAYMENT,TRIPS"))).toBe(true);
   await expect(page.locator("body")).toContainText("Payment");
   if (process.env.OSD_TAXI_FULL === "1") {
     await expect(page.locator("body")).toContainText("Taxi trips (1,148)");
@@ -26,7 +26,7 @@ test("NYC TLC analytical page renders chart and grouped table from OData", async
   }
 
   // The compact filter bar must expose real value help, not merely free-text inputs.
-  for (const field of ["PICKUPDAY", "PICKUPHOUR", "BOROUGH", "ZONE", "PAYMENT"]) {
+  for (const field of ["PICKUPDAY", "PICKUPHOUR", "BOROUGH", "PICKUPZONE", "PAYMENT"]) {
     await expect(page.locator(`[id$="SmartFilterBar-filterItemControl_BASIC-${field}-vhi"]`)).toBeVisible();
   }
   await page.locator('[id$="SmartFilterBar-filterItemControl_BASIC-BOROUGH-vhi"]').click();

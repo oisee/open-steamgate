@@ -7,8 +7,8 @@ const QUERIES = {
   borough: "$select=BOROUGH,TRIPS,FARE,TIP&$orderby=TRIPS desc",
   hour: "$select=PICKUPHOUR,TRIPS&$orderby=PICKUPHOUR",
   payment: "$select=PAYMENT,TRIPS,TIP&$orderby=TRIPS desc",
-  topManhattanZones: "$filter=BOROUGH eq 'Manhattan'&$select=ZONE,TRIPS,TIP&$orderby=TRIPS desc&$top=20",
-  defaultTable: "$select=BOROUGH,ZONE,PAYMENT,TRIPS,FARE,TIP,DISTANCE&$orderby=TRIPS desc&$top=100&$inlinecount=allpages",
+  topManhattanZones: "$filter=BOROUGH eq 'Manhattan'&$select=PICKUPZONE,TRIPS,TIP&$orderby=TRIPS desc&$top=20",
+  defaultTable: "$select=BOROUGH,PICKUPZONE,PAYMENT,TRIPS,FARE,TIP,DISTANCE&$orderby=TRIPS desc&$top=100&$inlinecount=allpages",
 };
 const MAX_GROUPS = {borough: 15, hour: 24, payment: 8, topManhattanZones: 20, defaultTable: 2000};
 
