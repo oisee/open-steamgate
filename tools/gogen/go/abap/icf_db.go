@@ -85,6 +85,13 @@ func OpenDBFile(path string, script []byte) (seeded bool, err error) {
 		}
 		seeded = true
 	}
+	// the store as the in-memory one keeps it (dbstore.go): LIKE
+	// case-sensitive on this connection, CHAR right-trimmed (idempotent, so a
+	// file seeded before is brought to the same state)
+	if err := prepareStore(d); err != nil {
+		d.Close()
+		return false, err
+	}
 	db = d
 	return seeded, nil
 }
