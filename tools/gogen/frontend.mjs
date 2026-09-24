@@ -2934,8 +2934,9 @@ function writeIrType(t, where) {
   if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
   if (t.k === "d") return RIR.T.char(8);
   if (t.k === "t") return RIR.T.char(6);
-  // ultra/events: a p column (ZOSD_TSES-CREATED, a TIMESTAMP), as sqlIrType reads it
-  if (t.k === "p" && !t.calc) return RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0);
+  // ultra/events: a p column (ZOSD_TSES-CREATED) is not written yet because
+  // tools/ir-writes.mjs has no initial value for P ("a column of type P has
+  // no initial value here yet"); the fix belongs there, not here
   throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
 }
 const lowName = (n) => n.toLowerCase();
