@@ -128,7 +128,14 @@ export function resolveType(store, name, seen = new Set()) {
         // two fields is two fields. Only a name on its own path is a cycle.
         const inner = resolveType(store, included, new Set(seen));
         if (inner.KIND === "STRUCTURE") {
-          fields.push(...inner.FIELDS.map((one) => (suffix === "" ? one : {...one, NAME: `${one.NAME}${suffix}`})));
+          // KEYFLAG sits on the include's row: every field it brings is a
+          // key field of this table (the included structure's own fields
+          // carry no flag), as the transpiler's PRIMARY KEY has them
+          const includeIsKey = tag(f, "KEYFLAG") === "X";
+          fields.push(...inner.FIELDS.map((one) => {
+            const named = suffix === "" ? one : {...one, NAME: `${one.NAME}${suffix}`};
+            return includeIsKey ? {...named, KEY: true} : named;
+          }));
         } else {
           fields.push({NAME: `${fieldName} ${included}`, INCLUDE: included, DATATYPE: "", LENG: 0, DECIMALS: 0, LETTER: "",
             REASON: inner.REASON ?? `${included} is ${inner.KIND}, not a structure`});

@@ -244,8 +244,10 @@ export const upsert = (table, columns, rows, key, fill = []) => {
     if (parts.some((e) => e?.node !== "lit")) throw new WriteError("a MODIFY row whose key is not a bound value cannot be ordered by key");
     return JSON.stringify(parts.map((e) => e.value));
   };
-  const last = new Map(rows.map((row, i) => [keyOf(row), i]));
-  const kept = rows.filter((row, i) => last.get(keyOf(row)) === i);
+  // one row needs no ordering by key, and its key may be any expression
+  // (`UPSERT t VALUES (:iv, ...) WITH PRIMARY KEY`, the #64 critic)
+  const last = rows.length === 1 ? undefined : new Map(rows.map((row, i) => [keyOf(row), i]));
+  const kept = rows.length === 1 ? rows : rows.filter((row, i) => last.get(keyOf(row)) === i);
   checkWritten(fill.map((one) => one.expr));
   return {write: "upsert", table: upper(table), columns: cols, rows: kept, key: keys,
     ...(fill.length === 0 ? {} : {fill: fill.map((one) => ({col: upper(one.col), expr: one.expr}))})};

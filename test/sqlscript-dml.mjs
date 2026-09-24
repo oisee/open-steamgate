@@ -205,6 +205,24 @@ describe("UPSERT edges, as HANA Express ran them", () => {
       it("the same with VALUES WITH PRIMARY KEY", async () => {
         expect(await run("UPSERT t (k, v) VALUES (2, 'z') WITH PRIMARY KEY; UPSERT t (k, v) VALUES (4, 'o') WITH PRIMARY KEY; " + agg3)).to.equal("1ax,2zy,4o");
       });
+      it("a key given as a variable in VALUES WITH PRIMARY KEY", async () => {
+        expect(await run("DECLARE n INTEGER = 2; UPSERT t (k, v) VALUES (:n, 'z') WITH PRIMARY KEY; UPSERT t (k, v) VALUES (:n + 3, 'o') WITH PRIMARY KEY; " + agg3)).to.equal("1ax,2zy,5o");
+      });
+      it("a table variable read before an UPSERT keeps the old row", async () => {
+        expect(await run("lt = SELECT k, v, w FROM t WHERE k = 2; UPSERT t (k, v) VALUES (2, 'z') WITH PRIMARY KEY; SELECT MAX(v) AS m INTO s FROM :lt; rv = :s;")).to.equal("b");
+      });
+      it("keeps an UPSERT that read a snapshot through a later failed statement", async () => {
+        await run("lt = SELECT k + 10 AS k, v, w FROM t; UPSERT t SELECT * FROM :lt; rv = 'x';");
+        try { await client.write({sql: "INSERT INTO \"T\" VALUES (1, 'dup', 'd')"}); } catch { /* the duplicate */ }
+        const keys = (await client.native({sql: 'SELECT "K" FROM "T" ORDER BY "K"', expect: "rows"})).rows.map((r) => Number(r.K));
+        expect(keys).to.deep.equal([1, 2, 11, 12]);
+      });
+      it("a NULL in the key of the query is refused, writing nothing (DuckDB: SQLite refuses the CAST first)", async function () {
+        if (dialect === "sqlite") this.skip();
+        let caught;
+        try { await run("lt = SELECT CAST(NULL AS INTEGER) AS k, 'p' AS v, 'q' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/NULL in a key column/);
+      });
       it("a query that brings one key twice raises, as HANA does, and writes nothing", async () => {
         let caught;
         try { await run("lt = SELECT 1 AS k, 'p' AS v, 'q' AS w FROM dummy UNION ALL SELECT 1 AS k, 'r' AS v, 's' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
@@ -214,6 +232,9 @@ describe("UPSERT edges, as HANA Express ran them", () => {
       });
     });
   }
+  it("refuses a text longer than its column in UPSERT VALUES, as INSERT does", () => {
+    expect(() => compile3("UPSERT t VALUES (3, 'abcdefghijklmnop', 'q') WITH PRIMARY KEY; rv = 'x';")).to.throw(/longer than the column's 10/);
+  });
   it("refuses an UPSERT that leaves out a key column", () => {
     expect(() => compile3("UPSERT t (v) VALUES ('z') WITH PRIMARY KEY; rv = 'x';")).to.throw(/leaves out the key column K/);
   });

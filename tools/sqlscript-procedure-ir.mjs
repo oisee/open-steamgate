@@ -917,10 +917,20 @@ export async function runProcedure(program, {
         // raises "unique constraint violated"; SQLite would take the last
         // and DuckDB refuse in its own words, so the query is asked first
         if (w.write === "upsert" && w.from !== undefined) {
+          // the query is asked twice, so it must answer the same both times
+          if (effects(w.from).nonDeterministic) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: a query that may answer differently twice is not carried`, statement);
+          }
           const produced = Object.keys(schemaOf(w.from, inputCatalogue));
           const keyOut = w.key.map((k) => produced[w.columns.indexOf(k)]);
           const inner = lower(w.from, dialect, {relationRef: (handle) => client.relationRef(handle)});
           const quoteId = (id) => `"${String(id).replace(/"/g, '""')}"`;
+          // a NULL in the key: a key column is NOT NULL on HANA, and a
+          // composite key on SQLite would take it (the #64 critic)
+          const nulls = await ask({sql: `SELECT 1 AS "N" FROM (${inner.sql}) AS "q" WHERE ${keyOut.map((k) => `${quoteId(k)} IS NULL`).join(" OR ")}`, params: inner.params});
+          if (nulls.rows.length > 0) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: the query brings a NULL in a key column, which HANA's NOT NULL key refuses`, statement);
+          }
           const twice = await ask({sql: `SELECT 1 AS "D" FROM (${inner.sql}) AS "q" GROUP BY ${keyOut.map(quoteId).join(", ")} HAVING COUNT(*) > 1`, params: inner.params});
           if (twice.rows.length > 0) {
             throw new UnsupportedSqlScript(`UPSERT ${w.table}: the query brings one key twice; HANA raises "unique constraint violated" here`, statement);

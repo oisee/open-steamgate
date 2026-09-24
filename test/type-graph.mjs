@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {resolveType, typeGraph} from "../tools/osd-type-graph.mjs";
-import {ddicCatalogue} from "../tools/sqlscript-ddic-catalogue.mjs";
+import {ddicCatalogue, ddicKeys} from "../tools/sqlscript-ddic-catalogue.mjs";
 import {FolderDdic} from "../tools/sqlscript/folder-ddic.mjs";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -168,6 +168,16 @@ describe("a table's include rows are its fields too", () => {
     store = new FolderDdic([dir]);
   });
   after(() => rmSync(dir, {recursive: true, force: true}));
+
+  it("keys every field of an include whose row is a key, and a key field after a non-key one (ddicKeys)", () => {
+    const keyField = (name, element) => field(name, element).replace("<FIELDNAME>", "<KEYFLAG>X</KEYFLAG><FIELDNAME>");
+    const keyInclude = (row, structure) => include(row, structure).replace("<FIELDNAME>", "<KEYFLAG>X</KEYFLAG><FIELDNAME>");
+    writeFileSync(join(dir, "zkeys.tabl.xml"), tabl("ZKEYS", [field("ID", "ZFLAG"), field("POS", "ZFLAG")]));
+    writeFileSync(join(dir, "zkeyed.tabl.xml"), tabl("ZKEYED", [keyField("MANDT", "ZFLAG"), keyInclude(".INCLUDE", "ZKEYS"), field("TXT", "ZFLAG")]));
+    writeFileSync(join(dir, "zlate.tabl.xml"), tabl("ZLATE", [keyField("A", "ZFLAG"), field("B", "ZFLAG"), keyField("C", "ZFLAG")]));
+    const fresh = new FolderDdic([dir]);
+    expect(ddicKeys(fresh, ["ZKEYED", "ZLATE", "ZPLAIN", "ZNOWHERE"])).to.deep.equal({ZKEYED: ["MANDT", "ID", "POS"], ZLATE: ["A", "C"]});
+  });
 
   it("splices an .INCLUDE where the row stands, in order", () => {
     expect(resolveType(store, "ZPLAIN").FIELDS.map((f) => f.NAME)).to.deep.equal(["A", "ID", "B"]);

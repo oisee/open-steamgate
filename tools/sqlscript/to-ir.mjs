@@ -1481,6 +1481,18 @@ export function toIr(tree, options = {}) {
     return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, canonicalPacked(v)]));
   }
 
+  /** a value written to a column: a literal bound as the column binds it --
+   *  a packed number as the decimal string of its type, a text right-trimmed
+   *  and no longer than the column (HANA: "inserted value too large") --
+   *  and anything else typed by the column, its packed literals canonical */
+  function writtenLiteral(value, type, where, node) {
+    if (value.node === "lit" && ((type?.abap === "P" && typeof value.value === "number") || (type?.abap === "C" && typeof value.value === "string"))) {
+      try { return bindWriteValue(value.value, type); }
+      catch (error) { throw new BindError(`${where}: ${error.message}`, node); }
+    }
+    return canonicalPacked(giveType(value, type));
+  }
+
   function writeNode(node) {
     const targetOf = (rel) => {
       const aliasName = rel.rel === "alias" ? rel.name : undefined;
@@ -1552,11 +1564,7 @@ export function toIr(tree, options = {}) {
       }
       const values = kids(node, "Expr").map(expression);
       if (values.length !== columns.length) throw new BindError(`UPSERT ${table}: ${values.length} values for ${columns.length} columns`, node);
-      const row = values.map((value, i) => {
-        const type = schema[columns[i]];
-        if (type?.abap === "P" && value.node === "lit" && typeof value.value === "number") return bindWriteValue(value.value, type);
-        return giveType(value, type);
-      });
+      const row = values.map((value, i) => writtenLiteral(value, schema[columns[i]], `UPSERT ${table}: ${columns[i]}`, node));
       return upsert(table, columns, [row.map(canonicalPacked)], key, fill);
     }
     if (node.node === "Insert") {
@@ -1594,14 +1602,7 @@ export function toIr(tree, options = {}) {
       // a literal written to a column goes as the column binds it: a packed
       // number as the decimal string of its type, a text right-trimmed and
       // no longer than the column (HANA: "inserted value too large")
-      const row = values.map((value, i) => {
-        const type = schema[columns[i]];
-        if (value.node === "lit" && ((type?.abap === "P" && typeof value.value === "number") || (type?.abap === "C" && typeof value.value === "string"))) {
-          try { return bindWriteValue(value.value, type); }
-          catch (error) { throw new BindError(`INSERT INTO ${table}: ${columns[i]}: ${error.message}`, node); }
-        }
-        return canonicalPacked(giveType(value, type));
-      });
+      const row = values.map((value, i) => writtenLiteral(value, schema[columns[i]], `INSERT INTO ${table}: ${columns[i]}`, node));
       return insertRows(table, [...columns, ...unnamed], [[...row, ...unnamed.map(initialOf)]]);
     }
     throw new BindError(`${node.node} is not a write`, node);
