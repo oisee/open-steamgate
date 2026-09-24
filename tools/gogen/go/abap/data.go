@@ -275,3 +275,31 @@ func InitialCh(v, zero string) bool { return v == "" || v == zero }
 // IsInitialOf is IS INITIAL of a typed value through its descriptor, for a
 // structure whose initial value is not Go's zero value.
 func IsInitialOf[T any](v T, t *Type) bool { return IsInitialData(Data{P: &v, T: t}) }
+
+// AppendInitialData is APPEND INITIAL LINE TO <generic table> ASSIGNING <fs>
+// (ultra/events): the new row bound, and its index (sy-tabix).
+func AppendInitialData(t Data) (Data, int) {
+	n := Lines(t)
+	if t.T.Append == nil {
+		panic(NotCompiled("APPEND INITIAL LINE", "to a generic table that is not a standard table"))
+	}
+	return Data{P: t.T.Append(t.P), T: t.T.Row}, n + 1
+}
+
+// DescrLength is cl_abap_typedescr=>describe_by_data( x )->length: the
+// length in bytes, two per character of c and n (a Unicode system). Other
+// kinds are not measured here and refused.
+func DescrLength(d Data) int32 {
+	if d.T == nil {
+		panic(NotCompiled("describe_by_data( )->length", "of an unassigned field symbol"))
+	}
+	switch d.T.Kind {
+	case 'C', 'N':
+		return int32(2 * d.T.Len)
+	case 'X':
+		return int32(d.T.Len)
+	case 'I':
+		return 4
+	}
+	panic(NotCompiled("describe_by_data( )->length", "of type kind "+string(d.T.Kind)))
+}

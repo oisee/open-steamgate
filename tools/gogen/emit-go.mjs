@@ -1062,6 +1062,11 @@ ${t}	}`));
     // a move into generic data writes into the slot it is bound to
     case "set_data":
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)})`];
+    // ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <generic>
+    case "append_initial_data": {
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}\tr${n}, i${n} := abap.AppendInitialData(${expr(st.table, ctx)})`, `${t}\t${ident(st.fs)} = r${n}`, `${t}\ts.Sy.Tabix = int32(i${n})`, `${t}}`];
+    }
     case "append_data":
       return [`${t}s.Sy.Tabix = int32(abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)}))`];
     case "clear_data":
@@ -1334,6 +1339,7 @@ function expr(e, ctx) {
     }
     case "nop_call": return "";
     case "xbytes": return constLiteral({type: e.type, value: e.value});
+    case "type_length": return `abap.DescrLength(${expr(e.x, ctx)})`;
     case "type_kind": return `string(${expr(e.x, ctx)}.T.Kind)`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;

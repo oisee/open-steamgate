@@ -407,6 +407,9 @@ function stmt(st, ctx, d) {
     case "unassign":
       return [`${t}${ident(st.fs.name)} = null;`];
     // a move into generic data writes into the slot it is bound to
+    // ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <generic> (emit-go)
+    case "append_initial_data":
+      return [`${t}{ const [r, i] = abap.AppendInitialData(${expr(st.table, ctx)}); ${ident(st.fs)} = r; s.sy.tabix = i; }`];
     case "append_data":
       return [`${t}s.sy.tabix = abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)});`];
     case "set_data":
@@ -802,6 +805,7 @@ function expr(e, ctx) {
     }
     case "me": return "me";
     case "xbytes": return literal({type: e.type, value: e.value});
+    case "type_length": return `abap.DescrLength(${expr(e.x, ctx)})`;
     case "type_kind": return `${expr(e.x, ctx)}.t.kind`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;

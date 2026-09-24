@@ -1492,6 +1492,18 @@ function statement(node, ctx) {
     }
     return {s: "concat", target, sep, parts};
   }
+  // ultra/events: APPEND INITIAL LINE TO itab ASSIGNING <fs> (ZCL_ABAPGIT_CONVERT=>
+  // STRING_TO_TAB, over a generic STANDARD TABLE): a new initial row, <fs>
+  // on it, sy-tabix its index
+  if (isStmt(node, Statements.Append) && /^APPEND\s+INITIAL\s+LINE\s+TO\s+\S+\s+ASSIGNING\s+<[\w]+>\s*\.?$/i.test(text)) {
+    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsType = ctx.fieldSymbols.get(fsName);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
+    if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
+    refuseSorted(table, "APPEND to");
+    return {s: "append", table, value: {e: "zero", type: table.type.row}, fs: fsName};
+  }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -2385,9 +2397,11 @@ function source(node, ctx, outer, hint = outer) {
   // what the descriptor's TYPE_KIND holds; no descriptor object is made
   const sk = node?.getChildren?.() ?? [];
   if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)
-    && /^cl_abap_typedescr=>describe_by_data\($/i.test(sk[0].concatTokens().replace(/\(.*$/s, "(")) && upper(sk[2].concatTokens()) === "TYPE_KIND") {
+    && /^cl_abap_typedescr=>describe_by_data\($/i.test(sk[0].concatTokens().replace(/\(.*$/s, "(")) && ["TYPE_KIND", "LENGTH"].includes(upper(sk[2].concatTokens()))) {
     const arg = sk[0].findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
     if (!arg) throw new Unsupported(`describe_by_data form: ${node.concatTokens()}`);
+    // ->length: the length in bytes, two per character of a c (ZCL_ABAPGIT_CONVERT=>STRING_TO_TAB)
+    if (upper(sk[2].concatTokens()) === "LENGTH") return {e: "type_length", x: convert(source(arg, ctx), {k: "data"}), type: I};
     return {e: "type_kind", x: convert(source(arg, ctx), {k: "data"}), type: C(1)};
   }
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);

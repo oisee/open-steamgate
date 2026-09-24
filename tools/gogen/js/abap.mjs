@@ -1247,3 +1247,23 @@ export function FindAllCount(s, p, regex, icase) {
   return ms.length;
 }
 export const EscapeHTMLAttr = (v) => v.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+
+// ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <fs>, and
+// describe_by_data( )->length: go/abap data.go
+export function AppendInitialData(t) {
+  if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND INITIAL LINE: to a generic table that is not a standard table");
+  const n = Lines(t);
+  const rt = t.t.row;
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  t.get().push(zero);
+  return [Row(t, n), n + 1];
+}
+export function DescrLength(d) {
+  if (d === null) throw new AbapError("NOT_COMPILED", "describe_by_data( )->length: of an unassigned field symbol");
+  switch (d.t.kind) {
+    case "C": case "N": return 2 * d.t.len;
+    case "X": return d.t.len;
+    case "I": return 4;
+  }
+  throw new AbapError("NOT_COMPILED", `describe_by_data( )->length: of type kind ${d.t.kind}`);
+}
