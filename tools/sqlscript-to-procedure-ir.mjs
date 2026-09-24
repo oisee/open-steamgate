@@ -295,6 +295,12 @@ export function compileProcedure(method, types, options = {}) {
   const resolve = options.resolveType;
   const store = options.store;
   const tree = parse(new Body(), lex(method.body));
+  // a lock in a READ-ONLY method: HANA refuses it when it creates the
+  // procedure (HXE 2.00.088), whatever statement carries it
+  const locks = (node) => node?.node === "ForUpdate" || (node?.children ?? []).some(locks);
+  if (method?.readOnly === true && locks(tree)) {
+    throw new UnsupportedSqlScript("feature not supported: SELECT statement with lock option is/are not supported in read-only procedure");
+  }
   const output = outputFrom(method, types, resolve, store);
   const outputNames = new Set((output.outputs ?? [output]).map((one) => one.name));
   const outputSchemaOf = (name) => (output.kind !== "relation" ? undefined
