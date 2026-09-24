@@ -15,6 +15,7 @@ import {randomBytes, createHash} from "node:crypto";
 import {hostname} from "node:os";
 import {join, dirname} from "node:path";
 import {fromJson} from "./rfc-replay.mjs";
+import {childBodies} from "./sqlscript-blocks.mjs";
 // **Not a static import.** The preview bundle ignores `amdp-run.mjs` on
 // purpose (it pulls in `hdb` and `fileURLToPath`), and webpack turns a static
 // import of an ignored module into a `webpackMissingModule` that throws the
@@ -124,11 +125,7 @@ function nestedProcedures(program, found = new Set()) {
   const visit = (body) => {
     for (const one of body ?? []) {
       if (one.stmt === "call-procedure") found.add(String(one.procedure).toUpperCase());
-      if (one.stmt === "while") visit(one.body);
-      if (one.stmt === "if") {
-        for (const branch of one.branches ?? []) visit(branch.body);
-        visit(one.otherwise);
-      }
+      childBodies(one).forEach(visit);
     }
   };
   visit(program?.body);

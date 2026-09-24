@@ -7,6 +7,8 @@
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
+import {childBodies} from "./sqlscript-blocks.mjs";
+export {childBodies};
 import {packedText, WriteError} from "./ir-writes.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -554,17 +556,12 @@ export async function runProcedure(program, {
   const containsRelationStatement = (body) => body.some((statement) =>
     statement.stmt === "assign-relation"
       || statement.stmt === "call-procedure"
-      || (statement.stmt === "while" && containsRelationStatement(statement.body ?? []))
-      || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
-        containsRelationStatement(branch.body ?? []))
-        || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
+      || childBodies(statement).some(containsRelationStatement));
   // a scalar output over relations is carried when something reads them into
   // scalars: a FOR loop over a cursor, or SELECT ... INTO
   const readsRelations = (body) => body.some((statement) =>
     statement.stmt === "for-cursor" || statement.stmt === "select-into"
-      || (statement.stmt === "while" && readsRelations(statement.body ?? []))
-      || (statement.stmt === "if" && ((statement.branches ?? []).some((branch) => readsRelations(branch.body ?? []))
-        || readsRelations(statement.otherwise ?? []))));
+      || childBodies(statement).some(readsRelations));
   if (program.outputType !== undefined && !readsRelations(program.body ?? [])
       && ((program.relationParameters ?? []).length > 0 || containsRelationStatement(program.body ?? []))) {
     throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
@@ -840,9 +837,10 @@ export async function runProcedure(program, {
         // that turn -- and the variable keeps the last value it was given
         const from = await evaluate(statement.from, "FOR bound");
         const to = await evaluate(statement.to, "FOR bound");
-        if (from === null || to === null) {
-          throw new UnsupportedSqlScript(`FOR ${statement.variable}: a NULL bound is not measured (a NULL literal does not compile on HANA)`, statement);
-        }
+        // a NULL bound runs no turn and leaves the variable as it was
+        // (measured on HXE: `FOR i IN 1 .. :nn` with nn NULL); a NULL literal
+        // does not compile there, which the compiler refuses
+        if (from === null || to === null) continue;
         // a BIGINT bound past 2^53 would make `c += 1` a no-op in a JavaScript
         // number; refused rather than counted wrongly
         for (const bound of [from, to]) {
@@ -851,13 +849,14 @@ export async function runProcedure(program, {
           }
         }
         const current = scalars.get(statement.variable);
-        const turns = [];
-        for (let c = Number(from); c <= Number(to); c += 1) {
-          turns.push(c);
-          if (turns.length > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, statement);
-        }
-        if (statement.reverse) turns.reverse();
-        for (const c of turns) {
+        // the number of turns by arithmetic, not by building them: a range
+        // past the step budget is refused before the first turn
+        const first = Number(from);
+        const last = Number(to);
+        const count = Math.max(0, last - first + 1);
+        if (count > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, statement);
+        for (let k = 0; k < count; k += 1) {
+          const c = statement.reverse ? last - k : first + k;
           step(statement);
           scalars.set(statement.variable, {type: current.type, value: intoVariable(c, undefined, current.type, statement.variable)});
           assignedScalars.add(statement.variable);
