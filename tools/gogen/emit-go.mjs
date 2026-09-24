@@ -669,7 +669,7 @@ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
 const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
   && (name === undefined || st.target.name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && leftmost(st.value).name === st.target.name;
 
-function builders(body, ctx) {
+function builders(body, ctx, outside = []) {
   const names = new Set();
   let exits = false;
   const walk = (n) => {
@@ -681,7 +681,18 @@ function builders(body, ctx) {
   };
   walk(body);
   if (exits) return [];
-  return [...names].filter((name) => !ctx.builders?.has(name) && appendsOnly(body, name));
+  // ultra/events: a name the loop's own condition (WHILE, LOOP ... WHERE)
+  // reads must stay current on every pass: no builder for it (a WHILE
+  // strlen( v ) < 32 appending to v never ended, ZCL_OSD_TRAN_SESSION=>NEW_ID)
+  const read = new Set();
+  const seen = (n) => {
+    if (Array.isArray(n)) { n.forEach(seen); return; }
+    if (!n || typeof n !== "object") return;
+    if (n.e === "var") read.add(n.name);
+    for (const k of Object.keys(n)) if (k !== "type") seen(n[k]);
+  };
+  seen(outside);
+  return [...names].filter((name) => !read.has(name) && !ctx.builders?.has(name) && appendsOnly(body, name));
 }
 
 function appendsOnly(body, name) {
@@ -699,8 +710,8 @@ function appendsOnly(body, name) {
 }
 
 /** a loop's lines, wrapped in the builders of the strings it only appends to */
-function withBuilders(body, ctx, t, emitLoop) {
-  const names = builders(body, ctx);
+function withBuilders(body, ctx, t, emitLoop, outside = []) {
+  const names = builders(body, ctx, outside);
   ctx.builders ??= new Map();
   for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
   const pre = names.flatMap((n) => [`${t}var ${ctx.builders.get(n)} strings.Builder`, `${t}${ctx.builders.get(n)}.WriteString(${ident(n)})`]);
@@ -927,7 +938,7 @@ function stmtLines(st, ctx, d) {
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}\t}`, `${t}\ts.Sy.Index = save${n}`, `${t}}`,
       ];
-    });
+    }, [st.cond]);
     case "loop": return withBuilders(st.body, ctx, t, () => {
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
@@ -946,7 +957,7 @@ function stmtLines(st, ctx, d) {
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
       ];
-    });
+    }, [st.where, st.from, st.to]);
     case "modify_index": {
       // sy-subrc 0 or 4; sy-tabix is left as it was (A4H 2026-09-24,
       // ZCL_GOGEN_T_MODFROM: "b:0/2" after MODIFY ... INDEX 3)

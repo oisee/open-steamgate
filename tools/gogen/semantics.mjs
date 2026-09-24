@@ -419,6 +419,10 @@ const EXPECT = {
   // substring_before / _after: the first occurrence, empty when none (A4H
   // 2026-09-24, $ZOSG_TMP_0440, ultra/events)
   ZCL_GOGEN_T_WGUI2: "b:[a][][][k] a:[b=c][][x][][c]",
+  // not an A4H value: the language rule that a WHILE condition and a LOOP
+  // ... WHERE read the variable as the body left it (the Go emitter's string
+  // builders kept an appended string out of both until the loop ended)
+  ZCL_GOGEN_T_WHILEAPP: "ababab xxx",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
