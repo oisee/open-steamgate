@@ -1,3 +1,72 @@
+> ## This branch: `spike/go-backend` — ABAP compiled to Go (and to faster JS)
+>
+> **What it is.** A second backend for open-steamgate. Instead of running the
+> abaplint transpiler's JavaScript on Node, `tools/gogen` compiles the same
+> ABAP through a **typed intermediate representation (IR)** into Go, and links
+> it with a small runtime (`tools/gogen/go/abap`) and SQLite into one static
+> binary, **OSGo** (`tools/gogen/go/cmd/osgo`). OSGo serves the same launchpad
+> and the same apps as OSG on Node: Travels, Bookings, SE16, SE80, SEGW, the
+> SADL analytics, WEBGUI, sysinfo, Zork, Vivid Vibes, zvdb and plain OData.
+> It runs on an x86 workstation and on a Raspberry Pi, with no Node and no
+> transpiler at run time.
+>
+> ```
+> ABAP --@abaplint/core--> AST --frontend.mjs--> typed IR --emit-go.mjs--> Go  --go build--> osgo
+>                                                        \--emit-js.mjs--> JS  (same value model)
+> ```
+>
+> **Why.**
+> - *Speed, measured.* On the same kernels Go is 14–105× the transpiler
+>   output, and one session per goroutine scales across every core
+>   (`tools/gogen/README.md`, "Measured").
+> - *Deployment.* One file: `CGO_ENABLED=0 GOARCH=arm64|amd64`, the binary
+>   plus `media/`, and nothing to install.
+> - *Semantics decided once, at compile time, and pinned to a real system.*
+>   The IR fixes the calculation type of every expression (target
+>   included), every conversion and every packed-number rule. Each rule has
+>   a test class in `tools/gogen/testdata/` whose expected answer was
+>   **measured on an SAP system (A4H) with ABAP Unit**. Where the system and
+>   the transpiler disagree, the system wins, and the difference is written
+>   into `ANORMALIES.md`.
+> - *Honest gaps.* What the IR cannot compile yet is `Unsupported` with its
+>   name, and the method answers `NOT_COMPILED` at run time. It never guesses.
+>
+> **How it boosts IR-JS (the JavaScript side).**
+> - *The same IR emits JavaScript* (`emit-js.mjs`, runtime `js/abap.mjs`),
+>   with plain numbers instead of boxed values, synchronous calls instead of
+>   an `await` on every call, and the calculation type decided at compile
+>   time. That JS is **7–28× the transpiler's output** on the kernels, and
+>   2.9× on the median frame of 26 demo scenes, in a browser too. Most of the
+>   gap is the model, not the language. Go only adds 1.2–4× on top.
+> - *One oracle for both.* `semantics.mjs` runs every pinned case on Go
+>   **and** on JS against the A4H answer (236 cases today), so a fix for
+>   one backend is checked on the other.
+> - *A second implementation of the relational IR.* Portable AMDP lowers
+>   SQLScript and Open SQL into a relational IR, which the JS side executes.
+>   Its pairs files (`osql-where`, writes, order provenance, host relations,
+>   RAW) are the specification, and this branch ports them to Go
+>   independently. Every place where two readers of one specification
+>   diverge is an ambiguity found before a user finds it. Several have gone
+>   back as fixes (RAW literals, NULL ordering, `CAST` of parameters).
+> - *Upstream.* Transpiler-vs-A4H differences found here go upstream as
+>   small, measured fixes to the transpiler, open-abap-core and abaplint.
+>   The Go and IR experiments themselves stay here.
+>
+> **Where it stands (2026-09-24).** 956 classes compiled, 894 statements
+> still stubbed, 31 methods refused. The Zork frames equal Node's. Not yet
+> on Go: the ADT/Workbench façade, the abapGit clone, RFC/ST05 and portable
+> AMDP.
+>
+> **Build and run.**
+> ```
+> node tools/gogen/osgo.mjs            # compile the tree, write go/cmd/osgo/zz_*.go, go build
+> tools/gogen/.out/osgo -port 3095 -root <checkout> [-media <dir>]
+> node tools/gogen/semantics.mjs       # the A4H-pinned cases, Go and JS
+> ```
+> The generated `zz_*.go` files are build output and are not tracked. Details,
+> measurements and the full list of semantic rules are in
+> [`tools/gogen/README.md`](tools/gogen/README.md).
+
 > ## ▶ [Run a whole ABAP application server in a browser tab](https://oisee.github.io/open-steamgate/main/app/flp.html)
 >
 > **oisee.github.io/open-steamgate/main/app/flp.html** — nothing to install,
