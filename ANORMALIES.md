@@ -576,7 +576,7 @@ WRITE / 'after'.
 ```
 
 - Exact command used to run it: transpile and run; measured 2026-09-14
-- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Not verified on a system** — this is the documented rule rather than a read of A4H, and it is worth one confirmation the next time someone is there with Alice's say-so
+- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Verified on A4H 2026-09-24** (ultra/events, `$ZOSG_TMP_0440`): `tools/gogen/testdata/zcl_gogen_t_cctor.clas.abap` with `_CC1`, `_CC2` (a subclass), `_CC3` and `_CCLOG` answered `a cc3 t3 t3 b cc1 cc2 t1 c ` — at the first static call, at the first CREATE OBJECT of a subclass (the superclass's first), once; the transpiler 2.13.89 answers `cc3 cc1 cc2 a t3 t3 b t1 c `. The Go backend and the IR's JS emitter now run it at the first use (`Ensure_<class>`, emit-go `chainCctor`); until then neither ran a class constructor at all
 - Actual open-abap behaviour: `ctor / before / touch / after`. The constructor runs eagerly, before the program's own statements, which is what an ES module initialising at import time does
 - Impact on open-steamgate: subtle and real, because a class constructor can touch `sy-tabix`. A registry filled with `APPEND` in a class constructor leaves `sy-tabix` at the last appended index; run lazily inside a loop body that reads `sy-tabix` afterwards, the first iteration sees that index rather than its own row number. Measured: `12` here where a system would give `32` for the same program. Found by larshp reviewing `abaplint/transpiler#1848`, who asked whether a test should expect `,a,b,c` — it depends entirely on this
 - Smallest safe workaround: do not read `sy-tabix` after a call that may be a class's first access; or touch the class once before the loop, which is what that test now does
@@ -1603,4 +1603,36 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Not an anomaly, for the record: a read without ORDER BY answers the rows in another order on the two hosts (SE16 over ZOSD_TAXIFACT, ZSTG_STATUS, ZSTG_SBD_MP; Zc_Osd_TaxicubeSet): the Go backend's `MANDT = '123'` lets SQLite walk the primary key, Node scans in insertion order. Neither order is promised, on a system either
 - Upstream: **needs an issue** in abaplint/transpiler (runtime, dynamic WHERE); open-abap-odata `zcl_oao_shlp_ddic` (`'1 = 1'`)
 - Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go` (the pairs), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_DSEL / ZCL_GOGEN_T_DSELX
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-class-events — the transpiler runtime dispatches class events in another order, twice, to handlers added on the way, and passes the actual by reference
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`SET HANDLER`, `RAISE EVENT`)
+- Affected ABAP statement, runtime API or adapter: `SET HANDLER h->m [FOR obj | FOR ALL INSTANCES] [ACTIVATION act]`, `RAISE EVENT e EXPORTING p = v`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_events.clas.abap` and `zcl_gogen_t_events2.clas.abap` (with `zif_gogen_t_evi`, `zcx_gogen_t_rnochk`)
+- Exact command used to run it: A4H, the same classes as ABAP Unit probes in `$ZOSG_TMP_0440` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the classes and open-abap-core, `RUN` called from Node; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered, for EVENTS, `none:[] order:a.p(2,s)b.q(2)c.p(2,s) other:[] twice:a.p(4,s) off:b.p(5,s) again:a.p(6,s)b.p(6,s) var:a.p(7,s) kill:a.kill kill2:a.kill add:a.add add2:a.addc.p(11,s) boom:a.boom.caught val:a.m(5,105)b.m(105,205) all:a.q(13)c.p(13,x)b.p(14,y)a.q(14)c.p(14,y) both:b.p(15,y)c.p(15,y)a.q(15)c.p(15,y) offone:b.p(16,y)a.q(16)c.p(16,y) offall:b.p(18,y) stat:static(19,s) sev:a.s(20)b.s(20) sev2:b.s(21) intf:a.i(hi,s)` and for EVENTS2 `revive:a.revive allfirst:b.p(2,s)c.p(2,s) nest:a.n1(a.n2()b.p(2,s))b.p(1,s) self:a.self3b.p(3,s)b.p(4,s) rev:c.p(5,s)a.p(5,s)b.q(5)b.p(5,s) back:a.p(6,s)b.p(6,s)c.p(6,s) holes:b.q(7)b.p(7,s)a.q(7) holes2:b.q(8)b.p(8,s)a.q(8)`. The rules read off it: a handler registered twice is called once; the handlers of one sender are a table with holes (a deactivation frees its place, a new registration takes the lowest free one, else it is appended); FOR the sender before FOR ALL INSTANCES whatever the order of registration; a dispatch calls what was active when it started and still is when reached (one added or reactivated on the way is not called); the actual of an event parameter is read anew for each handler (`val`); an exception out of a handler ends the dispatch. A4H-only probe (`ZCL_GOGEN_T_EVGC`, weak references): a registration FOR an object keeps the handler alive as long as the sender lives and does not keep the sender; FOR ALL INSTANCES and a static event keep the handler; a deactivated one is released; a division by zero in a handler arrives as CX_SY_NO_HANDLER (the handler declares no RAISING); SET HANDLER with an initial handler or FOR an initial reference is a runtime abortion CATCH does not take
+- Actual open-abap behaviour: EVENTS `... twice:a.p(4,s)a.p(4,s) ... again:b.p(6,s)a.p(6,s) ... add:a.addc.p(10,s) add2:a.addc.p(11,s)c.p(11,s) ... val:a.m(105,105)b.m(205,205) all:a.q(13)c.p(13,x)a.q(14)b.p(14,y)c.p(14,y) both:a.q(15)b.p(15,y)c.p(15,y)c.p(15,y) offone:a.q(16)b.p(16,y)c.p(16,y) ... sev2: ...` and EVENTS2 `revive:a.revivec.p(1,s) allfirst:c.p(2,s)b.p(2,s) ... self:a.self3b.p(3,s) ... back:b.p(6,s)a.p(6,s)c.p(6,s) holes:b.q(7)a.q(7) holes2:b.q(8)a.q(8)`: a duplicate registration is called twice; a re-registration goes to the end; a handler added or reactivated during a dispatch is called in it; FOR ALL INSTANCES before FOR the sender; the actual is the caller's variable (a change by one handler shows as the next handler's parameter and its own); deactivating one static handler (`sev2`) removes both; a handler that deactivates itself leaves out a later handler on the next dispatch (`self`); a deactivation among three removes another handler's registration too (`holes`)
+- Impact on open-steamgate: the WEBGUI's GUI control substitutes (open-abap-gui, `cl_gui_html_viewer` raising `sapevent`, abapGit's viewer re-raising it) register one handler per sender, so the sapevent round trip answers the same on both hosts; code that registers a handler twice, reorders handlers or relies on the order against FOR ALL INSTANCES would not
+- Smallest safe workaround: none on Node; the Go backend and the IR's JS emitter implement the measured rules (`tools/gogen/go/abap/events.go`, `js/abap.mjs` setHandler / raiseEvent)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, SET HANDLER / RAISE EVENT)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_EVENTS, ZCL_GOGEN_T_EVENTS2
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-concatenate-cut-subrc — `CONCATENATE` into a c field too short leaves sy-subrc 0 in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate`)
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE a b INTO c` with `c` of type c shorter than the result
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_wgui1.clas.abap` (`CONCATENATE 'ab' 'cd' INTO lv_c3.`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0440` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `[abc]4`: the result is cut to the field and sy-subrc is 4
+- Actual open-abap behaviour: `[abc]0`: cut, and sy-subrc 0. Everything else in the class (line_exists, NS / CN, reference comparison, a SORTED table's INSERT INTO TABLE leaving sy-tabix alone, APPEND ... ASSIGNING, the other CONCATENATE forms, FIND ALL OCCURRENCES ... MATCH COUNT with a CL_ABAP_REGEX object, escape( ) for an HTML attribute) answered as A4H
+- Impact on open-steamgate: none found in OSG's code, which concatenates into strings
+- Smallest safe workaround: none needed; the Go backend sets 4 (`abap.ConcatFit`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, CONCATENATE)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_WGUI1
 - Upstream version containing a fix: none yet
