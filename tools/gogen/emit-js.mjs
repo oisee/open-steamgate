@@ -402,6 +402,8 @@ function stmt(st, ctx, d) {
     case "call_dyn_static":
       return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, {${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}});`];
     // the JS side has no database: a SELECT is refused, not guessed
+    case "select_dyn":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`dynamic SELECT: the JS backend has no database (the Go host has SQLite)`)});`];
     case "select_table":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "select_single":

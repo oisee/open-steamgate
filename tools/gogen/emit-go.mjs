@@ -139,7 +139,7 @@ function tableRegistry(program) {
   const lines = tables.map((t) => {
     const cols = t.columns.map((c) => `{Name: ${JSON.stringify(c.name)}, Kind: '${c.kind}', Len: ${c.len}, Dec: ${c.dec}, Key: ${c.key}, IR: ${irType(c.type)}}`);
     const types = t.row ? `Row: ${desc(t.row)}, Rows: ${desc({k: "table", row: t.row})}` : `Why: ${JSON.stringify(t.why)}`;
-    return `\t\t&abap.Table{Name: ${JSON.stringify(t.name)}, View: ${t.view}, Client: ${t.client}, Key: []string{${t.key.map((k) => JSON.stringify(k)).join(", ")}}, Columns: []abap.Column{${cols.join(", ")}}, ${types}${t.sqlView ? `, SQLView: ${JSON.stringify(t.sqlView)}` : ""}${t.cds ? `, CDS: ${JSON.stringify(t.cds)}` : ""}},`;
+    return `\t\t&abap.Table{Name: ${JSON.stringify(t.name)}, View: ${t.view}, Client: ${t.client}, Key: []string{${t.key.map((k) => JSON.stringify(k)).join(", ")}}, Columns: []abap.Column{${cols.join(", ")}}, ${types}${t.sqlView ? `, SQLView: ${JSON.stringify(t.sqlView)}` : ""}${t.cds ? `, CDS: ${JSON.stringify(t.cds)}` : ""}${t.hidesClient ? `, HidesClient: ${JSON.stringify(t.hidesClient)}` : ""}},`;
   });
   const names = program.ddicNames ?? [];
   return ["func init() {", "	abap.RegisterTables(", ...lines, "	)",
@@ -990,6 +990,15 @@ function stmtLines(st, ctx, d) {
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
         `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, r)`,
         `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
+    }
+    case "select_dyn": {
+      // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
+      // as strings, the target as generic data
+      const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
+        : v.type.k === "table" ? expr(v, ctx) : `[]string{${expr(v, ctx)}}`);
+      return [`${t}abap.SelectDyn(s, abap.DynSelect{Table: ${expr(st.table, ctx)}, Fields: ${strs(st.fields)}, Star: ${st.fields === null}, ` +
+        `Where: ${st.where === null ? `""` : expr(st.where, ctx)}, HasWhere: ${st.where !== null}, GroupBy: ${strs(st.groupBy)}, OrderBy: ${strs(st.orderBy)}, ` +
+        `PrimaryKey: ${st.primaryKey}, Corresponding: ${st.corresponding}, Stmt: ${JSON.stringify(st.text)}}, ${expr(st.target, ctx)})`];
     }
     case "select_single": {
       // one row at most; only the fields the columns go to are written, and

@@ -222,6 +222,18 @@ export function tableRegistry(reg, program) {
         return {name: upper(c.name), kind, len, dec, key: key.includes(upper(c.name)), type: ir};
       });
       const entry = {name, view, client: columns.some((c) => c.name === "MANDT"), key, columns};
+      // a view over a client-dependent table without MANDT hides the client
+      // (dbTable refuses it at build time; a read by name at run time does
+      // the same, go/abap selectdyn.go)
+      if (view && !entry.client) {
+        const hidden = [...new Set((obj.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((b) => {
+          try {
+            const bt = reg.getObject("TABL", b)?.parseType(reg);
+            return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
+          } catch { return false; }
+        });
+        if (hidden) entry.hidesClient = hidden;
+      }
       // a CDS name and its SQL view (both are views here, gen/cds writes the
       // DDIC view under each name); the client is the SQL view's, which is
       // where MANDT is (open-steamgate #45)
@@ -1064,6 +1076,8 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   // and INSERT FROM TABLE with a duplicate key; a range value longer than
   // its column; a CP pattern past twice the column (tools/ir-ranges.mjs)
   "CX_SY_OPEN_SQL_DB", "CX_SY_OPEN_SQL_DATA_ERROR", "CX_SY_DYNAMIC_OSQL_SEMANTICS",
+  // a dynamic WHERE A4H refused (go/abap osqlwhere.go, tools/ir-osql-where.mjs)
+  "CX_SY_DYNAMIC_OSQL_SYNTAX",
   // CALL FUNCTION ... DESTINATION 'AMDP' on a host without HANA (callFunction)
   "CX_SY_DYN_CALL_ILLEGAL_FUNC"];
 // the superclass of a runtime exception the registry does not hold, read
@@ -2869,6 +2883,7 @@ function selectLoop(node, ctx) {
  */
 function selectStatement(node, ctx, text) {
   const sel = node.findDirectExpression(Expressions.Select);
+  if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
   if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
@@ -2903,6 +2918,107 @@ function selectStatement(node, ctx, text) {
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+
+/** a SELECT with a part given at run time: FROM (name), a field list,
+ * WHERE, GROUP BY or ORDER BY in parentheses */
+function isDynamicSelect(sel) {
+  const dyn = (n) => n?.findDirectExpression(Expressions.Dynamic) !== undefined && n?.findDirectExpression(Expressions.Dynamic) !== null;
+  const tables = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  const cond = sel.findDirectExpression(Expressions.SQLCond);
+  return tables.some(dyn) || dyn(sel.findDirectExpression(Expressions.SQLFieldList))
+    || (cond !== undefined && cond !== null && cond.findFirstExpression(Expressions.Dynamic) !== undefined && cond.findFirstExpression(Expressions.Dynamic) !== null)
+    || dyn(sel.findDirectExpression(Expressions.SQLGroupBy)) || dyn(sel.findDirectExpression(Expressions.SQLOrderBy));
+}
+
+/** the operand of a dynamic token, (x): a string or c (one line of tokens)
+ * or a table of them (the lines, one after the other) */
+function dynamicTokens(dyn, ctx, what, text) {
+  const fc = dyn.findFirstExpression(Expressions.FieldChain);
+  if (!fc || dyn.getChildren().length !== 3) throw new Unsupported(`dynamic ${what}: ${text}`);
+  const v = fieldChain(fc, ctx);
+  if (["string", "c"].includes(v.type.k)) return v;
+  if (v.type.k === "table" && ["string", "c"].includes(v.type.row.k)) return v;
+  throw new Unsupported(`dynamic ${what} of a ${v.type.k === "table" ? `table of ${v.type.row.k}` : v.type.k}: ${text}`);
+}
+
+/**
+ * Dynamic Open SQL: SELECT [*|(fields)|f ...] FROM <table>|(name) INTO
+ * [CORRESPONDING FIELDS OF] TABLE <itab> [WHERE (cond)] [GROUP BY (g)]
+ * [ORDER BY (o) | PRIMARY KEY | f ...], the form OSG's generated readers
+ * (gen/cds zcl_stg_tab_* / zcl_stg_cds_*) and open-abap-odata's search-help
+ * reader use. Nothing of it is known here but the shape: the runtime
+ * (go/abap selectdyn.go) resolves the table in the registry, parses the
+ * condition with the port of tools/ir-osql-where.mjs, adds the client and
+ * fills the table through its descriptor.
+ */
+function dynamicSelect(sel, ctx, text) {
+  if (/^SELECT\s+SINGLE\b/i.test(text)) throw new Unsupported(`dynamic SELECT SINGLE: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(text)) throw new Unsupported(`dynamic SELECT form: ${text}`);
+  const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (from.length !== 1) throw new Unsupported(`dynamic SELECT FROM form: ${text}`);
+  let table;
+  const tdyn = from[0].findDirectExpression(Expressions.Dynamic);
+  if (tdyn) {
+    const v = dynamicTokens(tdyn, ctx, "FROM", text);
+    if (v.type.k === "table") throw new Unsupported(`FROM of a table of names: ${text}`);
+    table = convert(v, S);
+  } else {
+    const name = upper(from[0].concatTokens());
+    if (!ctx.reg.getObject("TABL", name) && !ctx.reg.getObject("VIEW", name)) throw new Unsupported(`SELECT FROM ${name}: not a table of the dictionary in this program`);
+    table = {e: "str", value: name, type: S};
+  }
+  // the field list: * (null), (x), or plain column names
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  let fields = null;
+  const fdyn = fl?.findDirectExpression(Expressions.Dynamic);
+  if (fdyn) fields = dynamicTokens(fdyn, ctx, "field list", text);
+  else if (!/^\s*\*\s*$/.test(fl?.concatTokens() ?? "")) {
+    const names = (fl?.findAllExpressions(Expressions.SQLField) ?? []).map((f) => {
+      const n = f.findDirectExpression(Expressions.SQLFieldName);
+      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
+      return upper(n.concatTokens());
+    });
+    if (names.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
+    fields = {e: "strlist", values: names};
+  }
+  // WHERE (x) alone: a static condition over a table named at run time has
+  // no columns to be typed against here
+  const cond = sel.findDirectExpression(Expressions.SQLCond);
+  let where = null;
+  if (cond) {
+    const kids = cond.getChildren();
+    const cmp = kids.length === 1 && isExpr(kids[0], Expressions.SQLCompare) ? kids[0] : undefined;
+    const wdyn = cmp && cmp.getChildren().length === 1 && isExpr(cmp.getFirstChild(), Expressions.Dynamic) ? cmp.getFirstChild() : undefined;
+    if (!wdyn) throw new Unsupported(`a WHERE that is not one (condition) in a dynamic SELECT: ${text}`);
+    where = dynamicTokens(wdyn, ctx, "WHERE", text);
+    if (where.type.k === "table") throw new Unsupported(`WHERE of a table of lines (how the lines join is not measured): ${text}`);
+    where = convert(where, S);
+  }
+  const listOf = (node, what) => {
+    if (!node) return null;
+    const d = node.findDirectExpression(Expressions.Dynamic);
+    if (d) return dynamicTokens(d, ctx, what, text);
+    const kids = node.getChildren().filter((c) => !isTok(c, "ORDER") && !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ","));
+    const out = [];
+    for (const k of kids) {
+      if (isTok(k, "ASCENDING") || isTok(k, "DESCENDING")) { out.push(upper(k.concatTokens())); continue; }
+      if (!isExpr(k, Expressions.SQLField) && !isExpr(k, Expressions.SQLFieldName)) throw new Unsupported(`${what} form: ${node.concatTokens()}`);
+      out.push(upper(k.concatTokens()));
+    }
+    return {e: "strlist", values: out};
+  };
+  const groupBy = listOf(sel.findDirectExpression(Expressions.SQLGroupBy), "GROUP BY");
+  const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
+  const primaryKey = ob !== undefined && ob !== null && /^ORDER\s+BY\s+PRIMARY\s+KEY$/i.test(ob.concatTokens());
+  const orderBy = primaryKey ? null : listOf(ob, "ORDER BY");
+  const into = sel.findDirectExpression(Expressions.SQLIntoTable);
+  if (!into) throw new Unsupported(`dynamic SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
+  const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
+  let target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
+  if (target.type.k === "table") target = convert(target, {k: "data", table: true});
+  else if (target.type.k !== "data") throw new Unsupported(`dynamic SELECT INTO TABLE of a ${target.type.k}`);
+  return {s: "select_dyn", table, fields, where, groupBy, orderBy, primaryKey, corresponding, target, text: text.replace(/\s+/g, " ")};
 }
 
 /**

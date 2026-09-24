@@ -279,6 +279,18 @@ const EXPECT = {
   // an A4H value: the Open SQL rule, pinned so the view path stays compiled);
   // a view over a client-dependent table without MANDT is refused
   ZCL_GOGEN_T_SELVIEW: {Go: "0/1 B:2", JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // dynamic Open SQL (go/abap selectdyn.go): a static table and one named
+  // at run time, a CDS name through its SQL view, GROUP BY with SUM, an
+  // empty condition, no row. The rows are ordinary Open SQL, not measured;
+  // '1 = 1' raising CX_SY_DYNAMIC_OSQL_SEMANTICS and an operator without
+  // blanks CX_SY_DYNAMIC_OSQL_SYNTAX are A4H's (docs/osql-where.md, #47)
+  ZCL_GOGEN_T_DSEL: {Go: "static:0/2/CB byname:0/2/AC cds:0/2,B2,C3 empty:0/3 none:4/0/0 sum:0/2,C3,A1 one:semantics syntax:caught",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // a view hiding the client, read by name: refused at run time as the
+  // static read is refused at build time
+  ZCL_GOGEN_T_DSELX: {
+    Go: "ERROR NOT_COMPILED in SELECT ... FROM (ZGOGEN_T_DBWN): ZGOGEN_T_DBWN is a view over the client-dependent ZGOGEN_T_DBW without MANDT: a system reads the logon client's rows, this one would read every client's at zcl_gogen_t_dselx.clas.abap:18",
+    JS: "ERROR NOT_COMPILED in CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)"},
   ZCL_GOGEN_T_SELVIEWN: {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT at zcl_gogen_t_selviewn.clas.abap:11",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT"},

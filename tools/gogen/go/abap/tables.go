@@ -54,6 +54,9 @@ type Table struct {
 	// reverse, on the SQL view
 	SQLView string
 	CDS     string
+	// HidesClient is, for a view without MANDT over a client-dependent
+	// table, that table: a read of it would see every client's rows
+	HidesClient string
 }
 
 // WhereColumn is one column as the dynamic WHERE parser takes it
