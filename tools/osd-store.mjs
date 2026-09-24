@@ -14,7 +14,7 @@
 // activation, since the façade reports both the same way.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
-import {parseDDLS} from "./cds2ddic.mjs";
+import {parseDDLS, viewFieldsOf} from "./cds2ddic.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
@@ -265,7 +265,8 @@ function ddlsIssues(registry, object) {
   const generated = registry.getObject("VIEW", view.sqlView);
   if (generated !== undefined) {
     const exposed = [...(generated.parseType?.(registry)?.getComponents?.() ?? [])].map((c) => c.name.toUpperCase());
-    const now = new Set((view.fields ?? []).filter((f) => !f.virtual).map((f) => String(f.name).toUpperCase()));
+    // the generator's own field list, the client it adds included
+    const now = new Set(viewFieldsOf(view).map((f) => String(f.name).toUpperCase()));
     const gone = exposed.filter((c) => !now.has(c));
     if (gone.length > 0) {
       issues.push({severity: "W", rule: "cds",

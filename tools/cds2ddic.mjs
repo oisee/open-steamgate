@@ -254,8 +254,26 @@ export function parseDDLS(obj, reg) {
     viewAnnotations, label, write};
 }
 
-function viewXml(e) {
-  const dd27 = e.fields.filter((f) => !f.virtual).map((f) => `    <DD27P>
+/** The fields of the generated SQL view, in order. A CDS SQL view over a
+ *  client-dependent table carries the client as its first key field whether
+ *  the DDL names it or not (client handling), so a reader of the view can
+ *  tell one client's rows from another's; without it a runtime that does
+ *  filter by client cannot read the view at all. Named in the DDL, it still
+ *  goes first and into the key. The CDS entity itself has no client
+ *  (`client: false` for the twin written under the CDS name), as on a system.
+ *  One rule, used by the generator and by the CDS check in osd-store. */
+export function viewFieldsOf(e, {client = true} = {}) {
+  const real = (e.fields ?? []).filter((f) => !f.virtual);
+  const isClient = (f) => String(f.base ?? "").toUpperCase() === "MANDT";
+  const rest = real.filter((f) => !isClient(f));
+  if (!client) return rest;
+  const named = real.find(isClient);
+  if (e.write?.mandt !== true) return real;
+  return [{...(named ?? {name: "MANDT", base: "MANDT"}), key: true}, ...rest];
+}
+
+function viewXml(e, options) {
+  const dd27 = viewFieldsOf(e, options).map((f) => `    <DD27P>
      <VIEWFIELD>${f.name}</VIEWFIELD>
      <TABNAME>${e.source}</TABNAME>
      <FIELDNAME>${f.base}</FIELDNAME>${f.key ? "\n     <KEYFLAG>X</KEYFLAG>" : ""}
@@ -1007,6 +1025,25 @@ function main() {
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
   inheritAssociations(views, byName);
   resolveWriteChain(views, byName);
+  // A view that still reads another CDS view (not composed down to a table
+  // by resolveWriteChain) would lose the client: the entity it reads carries
+  // none, so its rows would reach a reader unfiltered. None exists yet, so
+  // it is refused here rather than generated wrong.
+  for (const e of [...views]) {
+    const below = byName.get(String(e.source ?? "").toUpperCase());
+    if (below === undefined) continue;
+    let base = below;
+    for (let hops = 0; base !== undefined && hops < 8; hops += 1) {
+      const next = byName.get(String(base.source ?? "").toUpperCase());
+      if (next === undefined) break;
+      base = next;
+    }
+    if (base?.write?.mandt === true) {
+      console.log(`cds2ddic: ${e.name}: skipped (it reads the CDS view ${below.name} over a client-dependent table, and the client is not carried through a view of a view yet)`);
+      views.splice(views.indexOf(e), 1);
+      byName.delete(e.name.toUpperCase());
+    }
+  }
   for (const e of views) {
     entities.push(e);
     write(e.sqlView.toLowerCase() + ".view.xml", viewXml(e));
@@ -1014,7 +1051,7 @@ function main() {
     // (SELECT FROM zc_stg_travel, TYPES x TYPE zc_stg_travel); the SQL view is
     // the technical twin. Both exist here, over the same columns.
     if (e.name.toUpperCase() !== e.sqlView.toUpperCase()) {
-      write(e.name.toLowerCase() + ".view.xml", viewXml({...e, sqlView: e.name.toUpperCase()}));
+      write(e.name.toLowerCase() + ".view.xml", viewXml({...e, sqlView: e.name.toUpperCase()}, {client: false}));
     }
     write("zcl_stg_cds_" + e.sqlView.toLowerCase() + ".clas.abap", sourceClass(e, byName));
     let published = "";
