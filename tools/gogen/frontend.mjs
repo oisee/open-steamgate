@@ -29,7 +29,10 @@ export class Unsupported extends Error {}
 export const I = {k: "i"};
 export const F = {k: "f"};
 export const INT8 = {k: "int8"};
-const P31 = {k: "p", len: 16, dec: 0};
+// calculation type p: an exact intermediate value (go/abap packed.go),
+// rounded only when it lands in a field; len 16 is the 31 digits a p
+// literal may have
+const P31 = {k: "p", len: 16, dec: 0, calc: true};
 export const S = {k: "string"};
 const C = (len) => ({k: "c", len});
 const X = (len) => ({k: "x", len});
@@ -46,7 +49,8 @@ const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "
 
 export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || sameType(a.row, b.row))
   && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
-  && (a.k !== "ref" || a.name === b.name);
+  && (a.k !== "ref" || a.name === b.name)
+  && (a.k !== "p" || (!!a.calc === !!b.calc && (a.calc || (a.len === b.len && a.dec === b.dec))));
 /*
  * An IMPORTING table or structure passed by reference is the caller's own
  * data: measured on A4H, it sees what a CHANGING of the same table did,
@@ -2047,23 +2051,32 @@ function source(node, ctx, outer, hint = outer) {
   // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
   // both give FF, 300 gives 2C)
   const target = outer?.k === "x" ? I : outer;
-  const types = [...leafTypes(node, ctx), ...(target === undefined ? [] : [target])];
+  const leaves = leafTypes(node, ctx);
+  // a character target (c, string) does not take part: the calculation
+  // type of `s = i + 1` is not measured, so it is refused below unless the
+  // operands decide it (a p or character operand: p, an f: f)
+  const charTarget = target !== undefined && charlike(target);
+  const types = [...leaves, ...(target === undefined || charTarget ? [] : [target])];
   // ** computes in f when the operands are integers (measured on A4H:
   // 2 ** 31 into i overflows "converting from '2.14748e+09'")
   if (types.some((t) => t.k === "f") || hasPow(node)) return arith(node, ctx, F);
-  if (types.some((t) => t.k === "c" || t.k === "string" || t.k === "x")) {
-    throw new Unsupported(`calculation type p (a character operand and no f): ${node.concatTokens()}`);
+  if (types.some((t) => t.k === "x")) throw new Unsupported(`calculation type of an x operand: ${node.concatTokens()}`);
+  // calculation type p (A4H 2026-09-24, ZCL_GOGEN_T_PDCALC): a p operand or
+  // a p target, and a c or string operand too (`lv_s / 2 * 2` into i is 7
+  // for lv_s = '7', not 8), ahead of int8 (int8 / 3 into p is
+  // 1666666666.67). + - * are exact, / keeps 31 significant digits
+  if (types.some((t) => t.k === "p" || charlike(t))) {
+    const odd = types.find((t) => !["p", "i", "int8", "c", "string"].includes(t.k));
+    if (odd) throw new Unsupported(`calculation type p with a ${odd.k} operand: ${node.concatTokens()}`);
+    return arith(node, ctx, P31);
   }
+  if (charTarget) throw new Unsupported(`calculation type of ${node.concatTokens()} into a character field: not measured`);
   if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
   // a d operand counts its days as an i (measured on A4H: ( d / 7 ) * 7
   // into i rounds in between, so the calculation type is i, not p); a d
   // target (days back into a date) is not measured
   if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
   if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
-  // calculation type p, for packed numbers without decimals only: integer
-  // operands and p DECIMALS 0, + - * (31 digits, beyond that
-  // CX_SY_ARITHMETIC_OVERFLOW); decimals, / DIV MOD and ** stay refused
-  if (types.some((t) => t.k === "p") && types.every((t) => (t.k === "p" && t.dec === 0) || t.k === "i" || t.k === "int8")) return arith(node, ctx, P31);
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
@@ -2105,7 +2118,6 @@ function arith(node, ctx, calc, hint) {
     if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
     if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
     if (BIT_OPS.has(op) !== (calc.k === "x")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
-    if (calc.k === "p" && !["+", "-", "*"].includes(op)) throw new Unsupported(`${op} with calculation type p`);
     expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
   } else if (its.length === 1) {
     // a lone constructor takes its # from where the value goes
@@ -2114,7 +2126,7 @@ function arith(node, ctx, calc, hint) {
     throw new Unsupported(`expression shape: ${node.concatTokens()}`);
   }
   if (!negate) return expr;
-  if (!numeric(expr.type)) throw new Unsupported("unary minus on a non-number");
+  if (!numeric(expr.type) && expr.type.k !== "p") throw new Unsupported("unary minus on a non-number");
   return {e: "neg", x: expr, type: expr.type};
 }
 
@@ -2498,7 +2510,10 @@ function dbTable(ctx, tableName, verb) {
 }
 
 /** the IR type of a column in a predicate or a projection */
-const sqlIrType = (t) => (t.k === "i" ? RIR.T.int : t.k === "int8" ? RIR.T.int8 : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date : RIR.T.char(t.len ?? 1));
+// a DEC column: its digits (2n-1 for p LENGTH n) and decimals, as the IR
+// counts them (ANORMALIES NOTE packed-length-is-bytes)
+const sqlIrType = (t) => (t.k === "i" ? RIR.T.int : t.k === "int8" ? RIR.T.int8 : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date
+  : t.k === "p" ? RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0) : RIR.T.char(t.len ?? 1));
 /** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
  * d, t or n is its characters, as the column stores them */
 function writeIrType(t, where) {
@@ -2764,6 +2779,9 @@ function selectStatement(node, ctx, text) {
   const assign = elementary ? [{line: true, type: target.type.row}] : cols.map((c, i) => {
     const f = corresponding ? rowFields.get(c.name) : rowOrder[i];
     if (!f) return null;
+    // a DEC column into a p field, rounded to the field (abap.DBP)
+    if ((c.type.k === "p") !== (f.type.k === "p")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
+    if (c.type.k === "p") return {field: f.name, type: f.type};
     if (!["c", "string", "i", "d", "t", "n"].includes(c.type.k) || !["c", "string", "i", "d", "t"].includes(f.type.k)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     if ((c.type.k === "i") !== (f.type.k === "i")) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
     return {field: f.name, type: f.type};
@@ -2946,7 +2964,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   const target = lvalue(tnode, ctx);
   // a raw column (RAWSTRING) holds its bytes as hex text, the transpiler's
   // storage: it goes into an xstring field only
-  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring")
+  const okCol = (c, f) => (c.type.k === "xstring" && f.type.k === "xstring") || (c.type.k === "p" && f.type.k === "p")
     || (["c", "string", "i", "d", "t", "n"].includes(c.type.k) && ["c", "string", "i", "d", "t"].includes(f.type.k) && (c.type.k === "i") === (f.type.k === "i"));
   let assign;
   if (target.type.k === "struct") {
@@ -2959,7 +2977,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
       if (!okCol(c, f)) throw new Unsupported(`SELECT: column ${c.name} (${c.type.k}) into ${f.name} (${f.type.k})`);
       // by position the move is by flat layout on a system: equal only while
       // each column has its field's type and length
-      if (!corresponding && (c.type.k !== f.type.k || (c.type.len ?? null) !== (f.type.len ?? null))) {
+      if (!corresponding && (c.type.k !== f.type.k || (c.type.len ?? null) !== (f.type.len ?? null) || (c.type.dec ?? null) !== (f.type.dec ?? null))) {
         throw new Unsupported(`SELECT without CORRESPONDING: column ${c.name} (${c.type.k}${c.type.len ?? ""}) into ${f.name} (${f.type.k}${f.type.len ?? ""}) is a layout move`);
       }
       return {field: f.name, type: f.type};
@@ -3229,6 +3247,22 @@ function templateText(raw) {
   return t.replace(/\\([{}|\\nrt])/g, (m, c) => ({n: "\n", r: "\r", t: "\t"})[c] ?? c);
 }
 
+/** the decimals a system prints for a p expression in a template, or null */
+function templateDecimals(v) {
+  if (v.type.k === "p" && !v.type.calc) return v.type.dec ?? 0;
+  if (v.fromP) return v.fromP.dec ?? 0;
+  if (v.type.k === "i" || v.type.k === "int8") return 0;
+  if (v.e === "conv" && ["i2pc"].includes(v.kind)) return 0;
+  if (v.e === "neg") return templateDecimals(v.x);
+  if (v.e === "bin" && (v.op === "+" || v.op === "-")) {
+    const l = templateDecimals(v.l);
+    const r = templateDecimals(v.r);
+    return l === null || r === null ? null : Math.max(l, r);
+  }
+  if (v.e === "str" && /^-?\d+$/.test(v.value)) return 0;
+  return null;
+}
+
 function template(n, ctx) {
   const parts = [];
   for (const c of n.getChildren()) {
@@ -3244,7 +3278,9 @@ function template(n, ctx) {
         for (let i = 0; i < words.length; i += 2) {
           const k = upper(words[i]);
           const val = words[i + 1];
-          if (k === "DECIMALS" && /^\d+$/.test(val) && v.type.k === "f") opts.decimals = Number(val);
+          if (k === "DECIMALS" && /^\d+$/.test(val) && (v.type.k === "f" || v.type.k === "p")) opts.decimals = Number(val);
+          // NUMBER = RAW of a p is its plain form (A4H PDFMT n:)
+          else if (k === "NUMBER" && upper(val) === "RAW" && v.type.k === "p") opts.raw = true;
           else if (k === "WIDTH" && /^\d+$/.test(val)) opts.width = Number(val);
           else if (k === "ALIGN" && /^(LEFT|RIGHT|CENTER)$/i.test(val)) opts.align = upper(val);
           else if (k === "PAD" && /^'.'$/.test(val)) opts.pad = val.slice(1, 2);
@@ -3252,7 +3288,17 @@ function template(n, ctx) {
         }
       }
       // f: seventeen significant digits, positional, measured on A4H (abap.FmtF)
-      if (!["i", "int8", "f", "string", "c", "x", "xstring", "data", "d", "t"].includes(v.type.k) && !(v.type.k === "p" && v.type.dec === 0)) throw new Unsupported(`${v.type.k} in a string template`);
+      // n: its digits as they are (A4H PDCONV pn:0013)
+      if (!["i", "int8", "f", "string", "c", "x", "xstring", "data", "d", "t", "p", "n"].includes(v.type.k)) throw new Unsupported(`${v.type.k} in a string template`);
+      // a p field prints its own decimals; an arithmetic expression of
+      // calculation type p prints decimals a system decides by rules not
+      // fully measured (A4H: 1.25 + 1 is 2.25, but 1.25 * 2 is 2.500 and
+      // 1.25 * 1.25 is 1.56250), so only + and - are taken, with the most
+      // decimals of their operands
+      if (v.type.k === "p") {
+        opts.pdec = v.type.calc ? templateDecimals(v) : v.type.dec;
+        if (opts.pdec === null && opts.decimals === undefined) throw new Unsupported(`an arithmetic expression of type p with * or / in a string template: its decimals are not measured`);
+      }
       parts.push({value: v, opts});
     } else {
       throw new Unsupported(`template part ${c.get().constructor.name}`);
@@ -3521,6 +3567,14 @@ function builtin(name, direct, named, ctx) {
   if (argNode === undefined) throw new Unsupported(`${name}( ) arguments`);
   if (kind === "f") return {e: "fn", name, args: [convert(source(argNode, ctx, F), F)], type: F};
   const arg = source(argNode, ctx);
+  // of a p (A4H PDFMT fn:, PDCMP f:): abs( ) and frac( ) keep its type,
+  // sign( ) is an i, ceil( ) floor( ) trunc( ) have no decimals (-1.5 gives
+  // -1, -2, -1 in a template, -1.0 and -2.0 in a p(8,1))
+  if (arg.type.k === "p") {
+    if (name === "SIGN") return {e: "fn", name, args: [arg], type: I};
+    if (["CEIL", "FLOOR", "TRUNC"].includes(name)) return {e: "fn", name, args: [arg], type: arg.type.calc ? P31 : {k: "p", len: arg.type.len, dec: 0}};
+    return {e: "fn", name, args: [arg], type: arg.type};
+  }
   if (!numeric(arg.type)) throw new Unsupported(`${name}( ) of a ${arg.type.k}`);
   return {e: "fn", name, args: [arg], type: arg.type};
 }
@@ -3532,6 +3586,32 @@ function builtin(name, direct, named, ctx) {
  * agree. The kinds are the ones ABAP's conversion rules separate; a pair
  * that is not listed is refused, not approximated.
  */
+/** CToP and PFit of go/abap packed.go at build time, for a literal: the
+ * value as the field holds it, or null for no number or an overflow */
+export function packedLiteral(text, to) {
+  let t = String(text).replace(/^ +| +$/g, "");
+  let neg = false;
+  if (t.endsWith("-")) { neg = true; t = t.slice(0, -1).replace(/ +$/, ""); } else if (t.startsWith("-")) { neg = true; t = t.slice(1).replace(/^ +/, ""); } else if (t.startsWith("+")) t = t.slice(1).replace(/^ +/, "");
+  if (t === "") t = "0";
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(t);
+  if (!m || (m[1] + (m[2] ?? "")) === "") return null;
+  const frac = m[2] ?? "";
+  let v = BigInt((m[1] || "0") + frac);
+  const dec = to.dec ?? 0;
+  if (frac.length > dec) {
+    const div = 10n ** BigInt(frac.length - dec);
+    const q = v / div;
+    v = (v % div) * 2n >= div ? q + 1n : q;
+  } else {
+    v *= 10n ** BigInt(dec - frac.length);
+  }
+  const digits = v.toString();
+  if (v !== 0n && digits.length > 2 * to.len - 1) return null;
+  const padded = digits.padStart(dec + 1, "0");
+  const out = dec > 0 ? `${padded.slice(0, -dec)}.${padded.slice(-dec)}` : padded;
+  return neg && v !== 0n ? `-${out}` : out;
+}
+
 export function convert(expr, to) {
   // a typed value where a generic one is expected is bound, not copied; a
   // generic one where a type is expected is read through its descriptor
@@ -3542,7 +3622,7 @@ export function convert(expr, to) {
     return {e: "wrap", x: expr, type: to};
   }
   if (expr.type.k === "data") {
-    if (!["string", "c", "i", "d", "t"].includes(to.k)) throw new Unsupported(`a generic value moved into a ${to.k}`);
+    if (!["string", "c", "i", "d", "t", "p"].includes(to.k) || to.calc) throw new Unsupported(`a generic value moved into a ${to.k}`);
     return {e: "unwrap", x: expr, type: to};
   }
   const from = expr.type;
@@ -3577,19 +3657,46 @@ export function convert(expr, to) {
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
   if (to.k === "x" && from.k === "i") return ok("i2x");
-  // packed without decimals: an integer into p, p into a p of another
-  // length (overflow when the digits do not fit, as ABAP raises)
-  if (to.k === "p" && to.dec === 0 && (from.k === "i" || from.k === "int8")) return ok("i2p");
-  if (to.k === "p" && to.dec === 0 && from.k === "p" && from.dec === 0) return ok("p2p");
-  // a character literal of digits only into a p without decimals (ultra/
-  // sadl: CONSTANTS ... TYPE timestamp VALUE '20260912010000', iv_timestamp
-  // = '...'): the digits are the value, decided here at build time; a sign,
-  // a blank, a point or more digits than the p holds is a conversion rule
-  // (or an overflow) not taken here
-  if (to.k === "p" && to.dec === 0 && expr.e === "chars" && /^[0-9]{1,31}$/.test(expr.value)) {
-    const digits = expr.value.replace(/^0+(?=\d)/, "");
-    if (digits.length > 2 * to.len - 1) throw new Unsupported(`the literal '${expr.value}' does not fit p LENGTH ${to.len}`);
-    return {e: "str", value: digits, type: to};
+  // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
+  // Into calculation type p: exact, nothing rounded yet
+  if (to.k === "p" && to.calc) {
+    if (from.k === "p") return {...expr, type: to, fromP: from.calc ? expr.fromP : from};
+    if (from.k === "i" || from.k === "int8") return ok("i2pc");
+    if (charlike(from)) return ok("c2pc");
+    throw new Unsupported(`conversion ${from.k} -> calculation type p`);
+  }
+  // into a p field: rounded half away from zero to its decimals; a value
+  // that does not fit raises CX_SY_ARITHMETIC_OVERFLOW after arithmetic and
+  // CX_SY_CONVERSION_OVERFLOW after a move
+  if (to.k === "p") {
+    const arith = expr.e === "bin" || expr.e === "neg";
+    if (from.k === "p") return {...ok("p2p"), arith};
+    if (from.k === "i" || from.k === "int8") return ok("i2p");
+    if (from.k === "f") return ok("f2p");
+    // a character literal is converted at build time (CONSTANTS ... TYPE
+    // timestamp VALUE '20260912010000'); one that is no number or does not
+    // fit is refused here rather than raised at run time
+    if ((expr.e === "chars" || expr.e === "str") && charlike(from)) {
+      const v = packedLiteral(expr.value, to);
+      if (v === null) throw new Unsupported(`the literal '${expr.value}' is no number or does not fit p LENGTH ${to.len} DECIMALS ${to.dec}`);
+      return {e: "str", value: v, type: to};
+    }
+    if (charlike(from)) return ok("c2p");
+    if (from.k === "n") return ok("c2p");
+    throw new Unsupported(`conversion ${from.k} -> p`);
+  }
+  if (from.k === "p") {
+    const arith = expr.e === "bin" || expr.e === "neg";
+    if (to.k === "i" || to.k === "int8") return {...ok(to.k === "i" ? "p2i" : "p2i8"), arith};
+    if (to.k === "f") return ok("p2f");
+    // into characters and n: the field's own decimals (a calculation type
+    // p value has none fixed, and what a system prints for it is not
+    // measured beyond + and -)
+    if (from.calc && ["string", "c", "n"].includes(to.k)) throw new Unsupported(`an arithmetic expression of type p moved into a ${to.k}: not measured`);
+    if (to.k === "string") return ok("p2s");
+    if (to.k === "c") return ok("p2c");
+    if (to.k === "n") return ok("p2n");
+    throw new Unsupported(`conversion p -> ${to.k}`);
   }
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
@@ -3737,20 +3844,33 @@ function compare(node, ctx) {
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;
-  // packed without decimals against packed or an integer (ultra/sadl, the
-  // SADL MPCs' timestamps): compared as numbers, the operands as they are
-  // (the digits of a p value are exact); an arithmetic operand is refused
-  const pInt = (t) => (t.k === "p" && t.dec === 0) || t.k === "i" || t.k === "int8";
-  if (types.some((t) => t.k === "p") && types.every(pInt) && !hasArith(sources[0]) && !hasArith(sources[1])) {
-    r = {c: "cmp", op, l: convert(source(sources[0], ctx), P31), r: convert(source(sources[1], ctx), P31), type: P31};
+  const arithL = hasArith(sources[0]);
+  const arithR = hasArith(sources[1]);
+  // an arithmetic expression compared with a character operand does not
+  // activate on A4H ("An arithmetic expression cannot be compared with the
+  // non-numeric operand"; `lv_s + 0` can be)
+  for (const [a, other] of [[arithL, sources[1]], [arithR, sources[0]]]) {
+    if (a && !hasArith(other) && leafTypes(other, ctx).some(charlike)) {
+      throw new Unsupported(`an arithmetic expression compared with the character operand ${other.concatTokens()} (does not activate on A4H)`);
+    }
+  }
+  // calculation type p for the comparison (A4H 2026-09-24, PDFMT c: and
+  // PDCMP): a p on either side, or a character operand inside arithmetic
+  // (`lv_i * 86400 * 1000 > lv_s + 0` does not overflow i); a p against a
+  // character operand compares numbers ('1.50' = 1.5)
+  if (!types.some((t) => t.k === "f") && (types.some((t) => t.k === "p") || ((arithL || arithR) && types.some(charlike)))) {
+    const odd = types.find((t) => !["p", "i", "int8", "c", "string"].includes(t.k));
+    if (odd) throw new Unsupported(`comparison of p with a ${odd.k}: ${node.concatTokens()}`);
+    r = {c: "cmp", op, l: convert(arith(sources[0], ctx, arithL ? P31 : undefined), P31), r: convert(arith(sources[1], ctx, arithR ? P31 : undefined), P31), type: P31};
     return not ? {c: "not", x: r} : r;
   }
-  if (types.some(numeric)) {
+  if (types.some(numeric) || (types.some((t) => t.k === "p") && types.some((t) => t.k === "f"))) {
     // numbers compare numerically; a character operand is converted to the
-    // numeric type (f when any operand is f)
+    // numeric type (f when any operand is f). Against i it is converted to
+    // i, rounded (A4H PDCALC: '-0.4' < 0 is false, '1.4' = 1 is true)
     const calc = types.some((t) => t.k === "f") ? F : types.some((t) => t.k === "int8") ? INT8 : I;
-    if (types.some(charlike) && calc.k !== "f") throw new Unsupported(`comparison of i with characters: ${node.concatTokens()}`);
-    r = {c: "cmp", op, l: convert(arith(sources[0], ctx, hasArith(sources[0]) ? calc : undefined), calc), r: convert(arith(sources[1], ctx, hasArith(sources[1]) ? calc : undefined), calc), type: calc};
+    if (types.some(charlike) && calc.k === "int8") throw new Unsupported(`comparison of int8 with characters: ${node.concatTokens()}`);
+    r = {c: "cmp", op, l: convert(arith(sources[0], ctx, arithL ? calc : undefined), calc), r: convert(arith(sources[1], ctx, arithR ? calc : undefined), calc), type: calc};
   } else {
     r = compareValues(op, source(sources[0], ctx), source(sources[1], ctx), ctx);
   }

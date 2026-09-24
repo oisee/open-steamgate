@@ -682,6 +682,7 @@ export function DataString(d) {
   switch (d.t.kind) {
     case "g": case "C": case "D": case "T": case "N": return d.get();
     case "I": return IToString(d.get());
+    case "P": return PToString(d.get(), d.t.dec);
     default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into a string`);
   }
 }
@@ -702,6 +703,7 @@ export function FmtData(d) {
     case "F": return FmtF(d.get());
     case "g": case "C": case "D": case "T": case "N": return d.get();
     case "X": case "y": return XToHex(d.get());
+    case "P": return FmtP(d.get(), d.t.dec);
     default: throw new AbapError("NOT_COMPILED", `string template: a generic value of type kind ${d.t.kind}`);
   }
 }
@@ -753,6 +755,16 @@ export function MoveData(dst, src) {
   const dk = dst.t.kind;
   const sk = src.t.kind;
   const v = src.get();
+  // packed numbers either way (go/abap MoveData)
+  if (dk === "P" && sk !== "u" && sk !== "v" && sk !== "h") return dst.set(PFit(DataP(src), dst.t.len, dst.t.dec, false));
+  if (sk === "P") {
+    if (dk === "I") return dst.set(PToI(v, false));
+    if (dk === "8") return dst.set(PToI8(v, false));
+    if (dk === "F") return dst.set(PToF(v));
+    if (dk === "g") return dst.set(PToString(v, src.t.dec));
+    if (dk === "C") return dst.set(PToC(v, src.t.dec, dst.t.len));
+    if (dk === "N") return dst.set(PToN(v, dst.t.len));
+  }
   switch (dk) {
     case "u": case "v": case "h":
       if (dst.t === src.t) return Overwrite(dst.t, dst.get(), copy(v));
@@ -779,8 +791,8 @@ export function MoveData(dst, src) {
     case "X":
       if (sk === "X") return dst.set(XFit(v, dst.t.len));
       break;
-    case "y": case "D": case "T": case "P":
-      if (sk === dk && (dk !== "P" || dst.t === src.t)) return dst.set(v);
+    case "y": case "D": case "T":
+      if (sk === dk) return dst.set(v);
       break;
     case "l":
       if (sk === "l") return dst.set(v);
@@ -799,7 +811,7 @@ export function ClearData(d) {
     case "g": case "y": case "C": return d.set("");
     case "D": return d.set("00000000");
     case "T": return d.set("000000");
-    case "P": return d.set("0");
+    case "P": return d.set(FmtP("", d.t.dec));
     case "X": return d.set("\u0000".repeat(d.t.len));
     case "l": return d.set(null);
     case "u": case "v": case "h": return Overwrite(d.t, d.get(), d.t.zero());
@@ -899,23 +911,189 @@ export function MoveCorrespondingData(dst, src) {
   }
 }
 
-// packed numbers without decimals (see go/abap/packed.go): decimal digits
-// with a leading minus, 31 digits in the calculation, 2n-1 in a p(n)
-const pOut = (v, digits, op) => {
-  if ((v < 0n ? -v : v).toString().length > digits) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", op);
-  return v.toString();
+// packed numbers, line for line go/abap/packed.go (the rules and their A4H
+// evidence are written there): a p value is its decimal text, a field's
+// with exactly its decimals, an intermediate result exact
+const pParse = (a) => {
+  a = String(a ?? "");
+  if (a === "") return {v: 0n, s: 0};
+  const neg = a[0] === "-";
+  if (neg) a = a.slice(1);
+  const [ip, fp = ""] = a.split(".");
+  if (!/^\d*$/.test(ip + fp) || ip + fp === "") throw new AbapError("NOT_COMPILED", `packed number: the value ${JSON.stringify(a)} is not a packed number`);
+  const v = BigInt(ip + fp);
+  return {v: neg ? -v : v, s: fp.length};
 };
-export const AddP = (a, b) => pOut(BigInt(a) + BigInt(b), 31, "+");
-export const SubP = (a, b) => pOut(BigInt(a) - BigInt(b), 31, "-");
-export const MulP = (a, b) => pOut(BigInt(a) * BigInt(b), 31, "*");
-export const IToP = (i) => String(i);
+const pow10 = (n) => 10n ** BigInt(n);
+const babs = (v) => (v < 0n ? -v : v);
+const roundDiv = (n, m) => {
+  let q = n / m;
+  const r = n % m;
+  if (babs(r) * 2n >= m) q += n < 0n ? -1n : 1n;
+  return q;
+};
+const pScale = (d, dec) => {
+  if (d.s === dec) return d;
+  if (d.s < dec) return {v: d.v * pow10(dec - d.s), s: dec};
+  return {v: roundDiv(d.v, pow10(d.s - dec)), s: dec};
+};
+const pText = (d) => {
+  if (d.s <= 0) return (d.v * pow10(-d.s)).toString();
+  let t = babs(d.v).toString();
+  if (t.length <= d.s) t = "0".repeat(d.s - t.length + 1) + t;
+  const ip = t.slice(0, t.length - d.s);
+  const fp = t.slice(t.length - d.s).replace(/0+$/, "");
+  let out = fp === "" ? ip : `${ip}.${fp}`;
+  if (d.v < 0n && out !== "0") out = `-${out}`;
+  return out;
+};
+const pFixed = (d, dec) => {
+  d = pScale(d, dec);
+  let t = babs(d.v).toString();
+  if (dec > 0) {
+    if (t.length <= dec) t = "0".repeat(dec - t.length + 1) + t;
+    t = `${t.slice(0, t.length - dec)}.${t.slice(t.length - dec)}`;
+  }
+  return d.v < 0n ? `-${t}` : t;
+};
+const intDigits = (d) => {
+  let ip = babs(d.v);
+  if (d.s > 0) ip /= pow10(d.s);
+  else if (d.s < 0) ip *= pow10(-d.s);
+  return ip === 0n ? 0 : ip.toString().length;
+};
+const pCalc = (d, op) => {
+  if (intDigits(d) > 63) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", op);
+  return pText(d);
+};
+const pAlign = (a, b) => (a.s < b.s ? [pScale(a, b.s), b] : b.s < a.s ? [a, pScale(b, a.s)] : [a, b]);
+export const AddP = (a, b) => { const [x, y] = pAlign(pParse(a), pParse(b)); return pCalc({v: x.v + y.v, s: x.s}, "+"); };
+export const SubP = (a, b) => { const [x, y] = pAlign(pParse(a), pParse(b)); return pCalc({v: x.v - y.v, s: x.s}, "-"); };
+export const MulP = (a, b) => { const x = pParse(a); const y = pParse(b); return pCalc({v: x.v * y.v, s: x.s + y.s}, "*"); };
+export const NegP = (a) => { const x = pParse(a); return pText({v: -x.v, s: x.s}); };
+export function DivP(a, b) {
+  const x = pParse(a);
+  const y = pParse(b);
+  if (y.v === 0n) {
+    if (x.v === 0n) return "0";
+    throw new AbapError("CX_SY_ZERODIVIDE", "/");
+  }
+  if (x.v === 0n) return "0";
+  let n = x.v * pow10(y.s);
+  let m = y.v * pow10(x.s);
+  if (m < 0n) { n = -n; m = -m; }
+  const an = babs(n);
+  let e = an.toString().length - m.toString().length;
+  const [lhs, rhs] = e >= 0 ? [an, m * pow10(e)] : [an * pow10(-e), m];
+  if (lhs < rhs) e -= 1;
+  const scale = 30 - e;
+  const q = scale >= 0 ? roundDiv(n * pow10(scale), m) : roundDiv(n, m * pow10(-scale));
+  return pCalc({v: q, s: scale}, "/");
+}
+const pDivMod = (a, b, op) => {
+  const [x, y] = pAlign(pParse(a), pParse(b));
+  if (y.v === 0n) {
+    if (x.v === 0n) return [{v: 0n, s: 0}, {v: 0n, s: 0}];
+    throw new AbapError("CX_SY_ZERODIVIDE", op);
+  }
+  const ay = babs(y.v);
+  let r = x.v % ay;
+  if (r < 0n) r += ay;
+  return [{v: (x.v - r) / y.v, s: 0}, {v: r, s: x.s}];
+};
+export const DivIntP = (a, b) => pCalc(pDivMod(a, b, "DIV")[0], "DIV");
+export const ModP = (a, b) => pCalc(pDivMod(a, b, "MOD")[1], "MOD");
 // CmpP compares two packed values: -1, 0 or 1
-export const CmpP = (a, b) => { const x = BigInt(a), y = BigInt(b); return x < y ? -1 : x > y ? 1 : 0; };
-export const PFit = (a, n, arith) => {
-  const v = BigInt(a);
-  if ((v < 0n ? -v : v).toString().length > 2 * n - 1) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p");
-  return v.toString();
+export const CmpP = (a, b) => { const [x, y] = pAlign(pParse(a), pParse(b)); return x.v < y.v ? -1 : x.v > y.v ? 1 : 0; };
+export const IToP = (i) => String(i);
+export function PFit(a, n, dec, arith) {
+  const d = pScale(pParse(a), dec);
+  if (intDigits(d) > 2 * n - 1 - dec) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p");
+  return pFixed(d, dec);
+}
+export function CToP(v) {
+  let t = String(v).replace(/^ +| +$/g, "");
+  if (t === "") return "0";
+  let neg = false;
+  if (t.endsWith("-")) { neg = true; t = t.slice(0, -1).replace(/ +$/, ""); } else if (t.startsWith("-")) { neg = true; t = t.slice(1).replace(/^ +/, ""); } else if (t.startsWith("+")) t = t.slice(1).replace(/^ +/, "");
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(t);
+  if (!m || (m[1] + (m[2] ?? "")) === "") throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->p");
+  const x = pParse(`${m[1] || "0"}.${m[2] ?? ""}`.replace(/\.$/, ""));
+  return pText(neg ? {v: -x.v, s: x.s} : x);
+}
+const pParseExp = (t) => {
+  const [mant, exp] = String(t).toLowerCase().split("e");
+  const d = pParse(mant);
+  if (exp !== undefined) d.s -= Number(exp);
+  return d.s < 0 ? {v: d.v * pow10(-d.s), s: 0} : d;
 };
+export function FToP(f) {
+  if (!Number.isFinite(f)) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "f->p");
+  return pText(pParseExp(f.toExponential(16)));
+}
+export function PToI(a, arith) {
+  const v = pScale(pParse(a), 0).v;
+  if (v > 2147483647n || v < -2147483648n) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p->i");
+  return Number(v);
+}
+export function PToI8(a, arith) {
+  const v = pScale(pParse(a), 0).v;
+  if (v > 9223372036854775807n || v < -9223372036854775808n) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p->int8");
+  return v;
+}
+export const PToF = (a) => Number(pText(pParse(a)));
+export function PToString(a, dec) {
+  const d = pScale(pParse(a), dec);
+  return d.v < 0n ? `${pFixed({v: -d.v, s: d.s}, dec)}-` : `${pFixed(d, dec)} `;
+}
+export function PToC(a, dec, n) {
+  const d = pScale(pParse(a), dec);
+  const neg = d.v < 0n;
+  const t = pFixed({v: babs(d.v), s: d.s}, dec);
+  let out;
+  if (t.length + 1 <= n) out = " ".repeat(n - t.length - 1) + t + (neg ? "-" : " ");
+  else if (!neg && t.length === n) out = t;
+  else {
+    const keep = Math.max(0, n - 1 - (neg ? 1 : 0));
+    out = `*${keep === 0 ? "" : t.slice(t.length - keep)}${neg ? "-" : ""}`.slice(0, n);
+  }
+  return out.replace(/ +$/, "");
+}
+export function PToN(a, k) {
+  const t = babs(pScale(pParse(a), 0).v).toString();
+  return t.length > k ? t.slice(t.length - k) : t.padStart(k, "0");
+}
+export const FmtP = (a, dec) => pFixed(pScale(pParse(a), dec), dec);
+export const FmtPDec = (a, n) => pFixed(pScale(pParse(a), n), n);
+export const AbsP = (a) => { const x = pParse(a); return pText({v: babs(x.v), s: x.s}); };
+export const SignP = (a) => { const v = pParse(a).v; return v < 0n ? -1 : v > 0n ? 1 : 0; };
+const pInteger = (a, mode) => {
+  const x = pParse(a);
+  if (x.s <= 0) return pText(x);
+  const m = pow10(x.s);
+  let q = x.v / m;
+  if (x.v % m !== 0n) {
+    if (mode > 0 && x.v > 0n) q += 1n;
+    if (mode < 0 && x.v < 0n) q -= 1n;
+  }
+  return q.toString();
+};
+export const CeilP = (a) => pInteger(a, 1);
+export const FloorP = (a) => pInteger(a, -1);
+export const TruncP = (a) => pInteger(a, 0);
+export const FracP = (a) => SubP(a, TruncP(a));
+// a generic elementary value as a packed value (go/abap DataP)
+export function DataP(d) {
+  if (d === null) throw notAssigned("move");
+  const v = d.get();
+  switch (d.t.kind) {
+    case "P": return v;
+    case "I": case "8": return String(v);
+    case "F": return FToP(v);
+    case "C": case "g": case "N": return CToP(v);
+    default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into a p`);
+  }
+}
 export const SysID = "OSG";
 export const UName = "DEVELOPER";
 // sy-dbsys / sy-saprl (go/abap/sysinfo.go)

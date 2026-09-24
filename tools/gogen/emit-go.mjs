@@ -36,10 +36,13 @@ export function goType(t) {
   }
 }
 
+// a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
+const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
+
 // an x field is always its full length: initial is that many 00 bytes
 const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
   : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
-    : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? `"0"` : t.k === "n" ? JSON.stringify("0".repeat(t.len)) : "nil");
+    : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? JSON.stringify(pZero(t)) : t.k === "n" ? JSON.stringify("0".repeat(t.len)) : "nil");
 
 /*
  * ABAP tables are values: an assignment copies them, deep, with the tables
@@ -953,7 +956,7 @@ function stmtLines(st, ctx, d) {
       const rowGo = goType(st.target.type.row);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
+        : `${a.line ? "r" : `r.${ident(a.field)}`} = ${st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : st.cols[i].type.k === "p" ? dbP(`c${i}_${n}`, a.type) : `abap.DBChar(c${i}_${n})`}`)).filter(Boolean);
       return [`${t}${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -970,7 +973,7 @@ function stmtLines(st, ctx, d) {
       // a character field takes the column cut to its length
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
-        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
+        : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(st.cols[i].type.k === "i" ? `abap.DBI(c${i}_${n})` : st.cols[i].type.k === "string" ? `abap.DBStr(c${i}_${n})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(c${i}_${n})` : st.cols[i].type.k === "p" ? dbP(`c${i}_${n}`, a.type) : `abap.DBChar(c${i}_${n})`, a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
@@ -985,7 +988,7 @@ function stmtLines(st, ctx, d) {
       const n = ctx.loop++;
       const tgt = place(st.target, ctx);
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
-      const val = (i) => (st.cols[i].type.k === "i" ? `abap.DBI(q${n}.c${i})` : st.cols[i].type.k === "string" ? `abap.DBStr(q${n}.c${i})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(q${n}.c${i})` : `abap.DBChar(q${n}.c${i})`);
+      const val = (i) => (st.cols[i].type.k === "i" ? `abap.DBI(q${n}.c${i})` : st.cols[i].type.k === "string" ? `abap.DBStr(q${n}.c${i})` : st.cols[i].type.k === "xstring" ? `abap.DBXStr(q${n}.c${i})` : st.cols[i].type.k === "p" ? dbP(`q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type) : `abap.DBChar(q${n}.c${i})`);
       const moves = st.assign.map((a, i) => (a === null ? null : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
       return [`${t}{`,
         `${t}\ttype selrow${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
@@ -1087,9 +1090,12 @@ function stmtLines(st, ctx, d) {
   }
 }
 
+// a DEC column read into a p field, rounded to the field's decimals
+const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
+
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
-const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP"};
+const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
@@ -1122,7 +1128,7 @@ function expr(e, ctx) {
     case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
     case "struct":
       return `${e.type.go}{${e.fields.map((f) => `${ident(f.name)}: ${copied(expr(f.value, ctx), f.value.type, f.value)}`).join(", ")}}`;
-    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
+    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -1182,6 +1188,7 @@ function expr(e, ctx) {
 function unwrapTo(t, d) {
   if (t.k === "i") return `abap.DataI(${d})`;
   if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
+  if (t.k === "p") return `abap.PFit(abap.DataP(${d}), ${t.len}, ${t.dec ?? 0}, false)`;
   return `abap.DataString(${d})`;
 }
 
@@ -1193,13 +1200,13 @@ function templatePart(v, ctx, opts) {
 
 function templateValue(v, ctx, opts) {
   const x = expr(v, ctx);
-  if (opts.decimals !== undefined) return `abap.FmtFDec(${x}, ${opts.decimals})`;
+  if (opts.decimals !== undefined) return v.type.k === "p" ? `abap.FmtPDec(${x}, ${opts.decimals})` : `abap.FmtFDec(${x}, ${opts.decimals})`;
   switch (v.type.k) {
     case "i": return `abap.FmtI(${x})`;
     case "int8": return `abap.FmtI8(${x})`;
     case "f": return `abap.FmtF(${x})`;
-    case "p": return x;
-    case "string": case "c": case "d": case "t": return x;
+    case "p": return `abap.FmtP(${x}, ${opts.pdec ?? v.type.dec ?? 0})`;
+    case "string": case "c": case "d": case "t": case "n": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
     case "data": return `abap.FmtData(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
@@ -1226,8 +1233,19 @@ function conv(e, ctx) {
     case "i2s": return `abap.IToString(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
-    case "i2p": return `abap.PFit(abap.IToP(${x}), ${e.to.len}, ${e.x.e === "bin"})`;
-    case "p2p": return `abap.PFit(${x}, ${e.to.len}, ${e.x.e === "bin"})`;
+    // packed numbers, go/abap packed.go
+    case "i2pc": return `abap.IToP(${x})`;
+    case "c2pc": return `abap.CToP(${x})`;
+    case "i2p": return `abap.PFit(abap.IToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "p2p": return `abap.PFit(${x}, ${e.to.len}, ${e.to.dec ?? 0}, ${!!e.arith})`;
+    case "f2p": return `abap.PFit(abap.FToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "c2p": return `abap.PFit(abap.CToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "p2i": return `abap.PToI(${x}, ${!!e.arith})`;
+    case "p2i8": return `abap.PToI8(${x}, ${!!e.arith})`;
+    case "p2f": return `abap.PToF(${x})`;
+    case "p2s": return `abap.PToString(${x}, ${e.from.dec ?? 0})`;
+    case "p2c": return `abap.PToC(${x}, ${e.from.dec ?? 0}, ${e.to.len})`;
+    case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "d2i": return `abap.DToI(${x})`;
@@ -1244,6 +1262,10 @@ function fn(e, ctx) {
   const args = e.args.map((a) => expr(a, ctx));
   if (FN_F[e.name]) return `${FN_F[e.name]}(${args[0]})`;
   const k = e.type.k;
+  if (e.args[0]?.type.k === "p") {
+    const P_FN = {ABS: "abap.AbsP", SIGN: "abap.SignP", CEIL: "abap.CeilP", FLOOR: "abap.FloorP", TRUNC: "abap.TruncP", FRAC: "abap.FracP"};
+    if (P_FN[e.name]) return `${P_FN[e.name]}(${args[0]})`;
+  }
   switch (e.name) {
     case "NMAX": return k === "i" ? `abap.MaxI(${args.join(", ")})` : `abap.MaxF(${args.join(", ")})`;
     case "NMIN": return k === "i" ? `abap.MinI(${args.join(", ")})` : `abap.MinF(${args.join(", ")})`;

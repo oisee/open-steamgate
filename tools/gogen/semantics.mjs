@@ -310,6 +310,48 @@ const EXPECT = {
   // 2026-09-24, $ZOSG_TMP_0195): sy-subrc 0 / 4, sy-tabix untouched (both
   // emitters set it to n before)
   ZCL_GOGEN_T_MODFROM: "a:0/2 b:0/2 c:4 A1 B20 X30",
+  // packed numbers with decimals (A4H 2026-09-24, $ZOSG_TMP_0270, each
+  // class the same source; go/abap packed.go has the rules). Conversions:
+  // c/string -> p (a sign behind or in front, '- 1', '.5', blanks only 0;
+  // exponent, comma, inner blank NN; commercial rounding; a move that does
+  // not fit CO), f -> p through its seventeen significant digits (2.345 ->
+  // 2.35 but 2.675 -> 2.67), i/int8 -> p, p -> p rounded, p -> i/int8
+  // rounded, p -> f, p -> c right aligned with a sign place and '*' when
+  // short, p -> string with a sign place, p -> n rounded and unsigned
+  ZCL_GOGEN_T_PDCONV: "c:1.24,-1.24,1.23,12.50,-12.50,3.00,0.00,0.50,5.00,0.00,NN,NN,NN,999.99,CO,CO,NN,-1.00,0.00,-0.01 s:1.24,-7.50,0.00,NN,2.50,NN f:2.35,2.36,-2.35,0.13,-0.13,1.00,CO,CO,0.00,0.00,CO,2.67 i:7.00,-7.00,CO,5000000000.00 pp:1.26,-1.26,1.25,3,-3,2,CO,999.99 pi:3,-3,2,CO,-3 pf:0.10000000000000001,-2.6749999999999998 pc:[   1.50][   1.50-][   0.00][*67] ps:[1.50 ][1.50-][42 ][42-] pn:0013",
+  // calculation type p: the target counts (7 / 2 into p is 4, -7 / 2 is
+  // -4), a c or string operand makes it p ('7' / 2 * 2 into i is 7), p
+  // ahead of int8; / keeps 31 significant digits, + - * are exact; DIV/MOD
+  // as for i; an arithmetic result that does not fit is AO, 63 integer
+  // digits in between are allowed; a string compared with an i is an i
+  // ('-0.4' < 0 is false)
+  ZCL_GOGEN_T_PDCALC: "mul:1.56,1.82,-1.95 div:0.33,0.67,-0.67,4,-4,3,2,1.00,3.50 prec:0.33333333333333,0.66666666666667,1.00000000000000,33333333333333333333333333333,66666666666666666666666666667,142857142857142857143,23333333333333333333333333 dm:3.00,1.50,-3.00,1.50,-4.00,0.50,4.00,0.50,0.30,-3,1,648398213,999999901 z:ZD,0.00,ZD,ZD ov:AO,9999999999999999999999999999999,AO,AO,AO,AO ch:7,20000,0,-2,3.75,4,8,ge,eq f:0.30,2.67 i8:15000000000,1666666666.67 neg:-1.25 sum:1.00",
+  // templates (the field's decimals, DECIMALS = rounds, NUMBER = RAW is
+  // plain), comparisons of p with p, i, c, string and f, abs( ) frac( )
+  // keep the type, ceil( ) floor( ) trunc( ) have no decimals, p through
+  // generic data (DESCRIBE FIELD P, move into a string, template, IS
+  // INITIAL, a c and a p written through a field symbol)
+  ZCL_GOGEN_T_PDFMT: "t:0.00,0,0.00000000000000,1.50,-1.50,0.005,-0.05,-42,0.33333333333333 d:1.3,1.250,1,-1.3,3,42.00 n:1.50,[    1.50],-1.50 c:abcdefghij fn:1.50,-1,-2,-1,-0.50,-1,1.5,-0.5 g:P/-1.50/[1.50-],P/0.00/[0.00 ]/ini,P/42/[42 ],3.14,3.140",
+  // p -> c too short, and the precision of intermediate results: 31
+  // significant digits after a division (0.667 at 28 integer digits), exact
+  // products (1e-14 cubed), 63 integer digits and not 64. A4H ran this
+  // class with a last line of p arithmetic in a template, now
+  // ZCL_GOGEN_T_PDTPL / _PDTPLM
+  ZCL_GOGEN_T_PDPREC: "c:[1.50][1.50][1.50-][*50-][*0-][12345.67][12345.67][*7-][*345.67-] d:0.66700000000000,0.66700000000000,0.66666666666667,0.66666666666667,0.00000000000001,0.00000000000001,1234567890.12345678901000,0.33333333333333 g:9999999999999999999999999999999,9999999999999999999999999999999,AO",
+  // a comparison with arithmetic takes the calculation type of both sides
+  // (a string inside arithmetic: p, so i * 86400 * 1000 does not
+  // overflow); a string alone against an i is an i; p -> n; ceil( ) and
+  // floor( ) into p(8,1). A4H refuses `arithmetic > string` itself ("An
+  // arithmetic expression cannot be compared with the non-numeric
+  // operand"), and so does the front end
+  ZCL_GOGEN_T_PDCMP: "a:gt b:ne c:eq d:gt e:eq n:0013,2346 f:-1.0,-2.0",
+  // p arithmetic in a template: + - print the most decimals of their
+  // operands. A4H answered "t:2.25,0.75,-1.25,2.500" for both classes in
+  // one: 1.25 * 2 prints 2.500 and 1.25 * 1.25 printed 1.56250, a rule
+  // not pinned down by two points, so * and / in a template are refused
+  ZCL_GOGEN_T_PDTPL: "t:2.25,0.75,-1.25",
+  ZCL_GOGEN_T_PDTPLM: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_PDTPLM=>RUN (zcl_gogen_t_pdtplm.clas.abap:10): an arithmetic expression of type p with * or / in a string template: its decimals are not measured at zcl_gogen_t_pdtplm.clas.abap:10",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_PDTPLM=>RUN (zcl_gogen_t_pdtplm.clas.abap:10): an arithmetic expression of type p with * or / in a string template: its decimals are not measured"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;

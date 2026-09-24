@@ -46,7 +46,7 @@ function zero(t) {
     case "struct": return `new_${t.go}()`;
     case "ref": case "exc": case "data": case "dref": return "null";
     case "d": return `"00000000"`;
-    case "p": return `"0"`;
+    case "p": return JSON.stringify(t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
     case "t": return `"000000"`;
     case "n": return JSON.stringify("0".repeat(t.len));
     default: throw new Error(`no zero for ${t.k}`);
@@ -616,7 +616,7 @@ const callee = (e, ctx) => {
 };
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
-const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP"};
+const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF", EXP: "Math.exp", LOG: "abap.LogF", LOG10: "Math.log10"};
 
@@ -654,7 +654,7 @@ function expr(e, ctx) {
       const fields = STRUCTS.get(e.type.go).fields;
       return `{${fields.map((f) => `${ident(f.name)}: ${given.has(f.name) ? moved(given.get(f.name), ctx) : zero(f.type)}`).join(", ")}}`;
     }
-    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
+    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -717,6 +717,7 @@ function expr(e, ctx) {
 function unwrapTo(t, d) {
   if (t.k === "i") return `abap.DataI(${d})`;
   if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
+  if (t.k === "p") return `abap.PFit(abap.DataP(${d}), ${t.len}, ${t.dec ?? 0}, false)`;
   return `abap.DataString(${d})`;
 }
 
@@ -728,12 +729,13 @@ function templatePart(v, ctx, opts) {
 
 function templateValue(v, ctx, opts) {
   const x = expr(v, ctx);
-  if (opts.decimals !== undefined) return `abap.FmtFDec(${x}, ${opts.decimals})`;
+  if (opts.decimals !== undefined) return v.type.k === "p" ? `abap.FmtPDec(${x}, ${opts.decimals})` : `abap.FmtFDec(${x}, ${opts.decimals})`;
   switch (v.type.k) {
     case "i": return `abap.FmtI(${x})`;
+    case "int8": return `String(${x})`;
     case "f": return `abap.FmtF(${x})`;
-    case "p": return x;
-    case "string": case "c": case "d": case "t": return x;
+    case "p": return `abap.FmtP(${x}, ${opts.pdec ?? v.type.dec ?? 0})`;
+    case "string": case "c": case "d": case "t": case "n": return x;
     case "x": case "xstring": return `abap.XToHex(${x})`;
     case "data": return `abap.FmtData(${x})`;
     default: throw new Error(`template part ${v.type.k}`);
@@ -755,8 +757,19 @@ function conv(e, ctx) {
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
-    case "i2p": return `abap.PFit(abap.IToP(${x}), ${e.to.len}, ${e.x.e === "bin"})`;
-    case "p2p": return `abap.PFit(${x}, ${e.to.len}, ${e.x.e === "bin"})`;
+    // packed numbers, js/abap.mjs (= go/abap packed.go)
+    case "i2pc": return `abap.IToP(${x})`;
+    case "c2pc": return `abap.CToP(${x})`;
+    case "i2p": return `abap.PFit(abap.IToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "p2p": return `abap.PFit(${x}, ${e.to.len}, ${e.to.dec ?? 0}, ${!!e.arith})`;
+    case "f2p": return `abap.PFit(abap.FToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "c2p": return `abap.PFit(abap.CToP(${x}), ${e.to.len}, ${e.to.dec ?? 0}, false)`;
+    case "p2i": return `abap.PToI(${x}, ${!!e.arith})`;
+    case "p2i8": return `abap.PToI8(${x}, ${!!e.arith})`;
+    case "p2f": return `abap.PToF(${x})`;
+    case "p2s": return `abap.PToString(${x}, ${e.from.dec ?? 0})`;
+    case "p2c": return `abap.PToC(${x}, ${e.from.dec ?? 0}, ${e.to.len})`;
+    case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
     case "x2i": return `abap.XToI(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
@@ -774,6 +787,10 @@ function fn(e, ctx) {
   const args = e.args.map((a) => expr(a, ctx));
   if (FN[e.name]) return `${FN[e.name]}(${args[0]})`;
   const k = e.type.k;
+  if (e.args[0]?.type.k === "p") {
+    const P_FN = {ABS: "abap.AbsP", SIGN: "abap.SignP", CEIL: "abap.CeilP", FLOOR: "abap.FloorP", TRUNC: "abap.TruncP", FRAC: "abap.FracP"};
+    if (P_FN[e.name]) return `${P_FN[e.name]}(${args[0]})`;
+  }
   switch (e.name) {
     case "NMAX": return `Math.max(${args.join(", ")})`;
     case "NMIN": return `Math.min(${args.join(", ")})`;

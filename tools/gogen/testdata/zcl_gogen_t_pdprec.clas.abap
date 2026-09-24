@@ -76,8 +76,5 @@ CLASS zcl_gogen_t_pdprec IMPLEMENTATION.
         rv = rv && `,AO`.
     ENDTRY.
 
-* an arithmetic expression of p in a template
-    lv_p2 = '1.25'.
-    rv = rv && | t:{ lv_p2 * 2 },{ lv_p2 / 4 },{ lv_p2 + 1 },{ lv_p2 * lv_p2 }|.
   ENDMETHOD.
 ENDCLASS.

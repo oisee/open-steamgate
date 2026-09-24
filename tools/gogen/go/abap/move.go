@@ -19,6 +19,35 @@ func MoveData(dst, src Data) {
 		panic(notAssigned("move from a field symbol"))
 	}
 	dk, sk := dst.T.Kind, src.T.Kind
+	// packed numbers either way (A4H PDFMT: <fs> = '3.14159' into p(8,2) is
+	// 3.14, a p(8,2) into a p(8,3) through a reference 3.140)
+	if dk == 'P' && sk != 'u' && sk != 'v' && sk != 'h' {
+		*dst.P.(*string) = PFit(DataP(src), dst.T.Len/100, dst.T.Len%100, false)
+		return
+	}
+	if sk == 'P' {
+		v := *src.P.(*string)
+		switch dk {
+		case 'I':
+			*dst.P.(*int32) = PToI(v, false)
+			return
+		case '8':
+			*dst.P.(*int64) = PToI8(v, false)
+			return
+		case 'F':
+			*dst.P.(*float64) = PToF(v)
+			return
+		case 'g':
+			*dst.P.(*string) = PToString(v, src.T.Len%100)
+			return
+		case 'C':
+			*dst.P.(*string) = PToC(v, src.T.Len%100, dst.T.Len)
+			return
+		case 'N':
+			*dst.P.(*string) = PToN(v, dst.T.Len)
+			return
+		}
+	}
 	switch dk {
 	case 'u', 'v', 'h':
 		if dst.T == src.T && dst.T.Copy != nil {
@@ -76,8 +105,8 @@ func MoveData(dst, src Data) {
 			*dst.P.(*string) = XFit(*src.P.(*string), dst.T.Len)
 			return
 		}
-	case 'y', 'D', 'T', 'P':
-		if sk == dk && (dk != 'P' || dst.T == src.T) {
+	case 'y', 'D', 'T':
+		if sk == dk {
 			*dst.P.(*string) = *src.P.(*string)
 			return
 		}
@@ -109,7 +138,7 @@ func ClearData(d Data) {
 	case 'T':
 		*d.P.(*string) = "000000"
 	case 'P':
-		*d.P.(*string) = "0"
+		*d.P.(*string) = FmtP("", d.T.Len%100)
 	case 'X':
 		b := make([]byte, d.T.Len)
 		*d.P.(*string) = string(b)

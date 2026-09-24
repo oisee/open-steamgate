@@ -139,6 +139,8 @@ func DataString(d Data) string {
 		return *d.P.(*string)
 	case 'I':
 		return IToString(*d.P.(*int32))
+	case 'P':
+		return PToString(*d.P.(*string), d.T.Len%100)
 	}
 	panic(NotCompiled("move", "a generic value of type kind "+string(d.T.Kind)+" into a string"))
 }
@@ -165,8 +167,28 @@ func FmtData(d Data) string {
 		return *d.P.(*string)
 	case 'X', 'y':
 		return XToHex(*d.P.(*string))
+	case 'P':
+		return FmtP(*d.P.(*string), d.T.Len%100)
 	}
 	panic(NotCompiled("string template", "a generic value of type kind "+string(d.T.Kind)))
+}
+
+// DataP is a generic elementary value as a packed value (exact, not yet
+// fitted to a field): the conversions of go/abap packed.go
+func DataP(d Data) string {
+	switch d.T.Kind {
+	case 'P':
+		return *d.P.(*string)
+	case 'I':
+		return IToP(*d.P.(*int32))
+	case '8':
+		return IToP(*d.P.(*int64))
+	case 'F':
+		return FToP(*d.P.(*float64))
+	case 'C', 'g', 'N':
+		return CToP(*d.P.(*string))
+	}
+	panic(NotCompiled("move", "a generic value of type kind "+string(d.T.Kind)+" into a p"))
 }
 
 // IsInitialData is IS INITIAL of a generic value.
@@ -223,8 +245,8 @@ func Condense(s string, noGaps bool) string {
 // TObj is an object reference inside a structure seen generically.
 var TObj = &Type{Kind: 'r'}
 
-// TP is p of a length and number of decimals. A p value is carried as its
-// decimal text ("0" initial) and only copied until packed arithmetic exists.
+// TP is p of a length and number of decimals, Len = n*100 + dec. A p value
+// is carried as its decimal text with its decimals (packed.go).
 func TP(n, dec int) *Type { return sizedType('P', n*100+dec) }
 
 // InitialCh is IS INITIAL of a d, t or n value: "" (a structure field never
